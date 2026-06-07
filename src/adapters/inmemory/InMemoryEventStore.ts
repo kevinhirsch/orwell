@@ -1,11 +1,12 @@
 import type { EventStore, EventQuery } from "../../ports/EventStore";
 import type { GameEvent } from "../../domain/event";
-import { classify } from "../../domain/event";
+import { classify, validateEvent } from "../../domain/event";
 
 export class InMemoryEventStore implements EventStore {
   private readonly events: GameEvent[] = [];
 
   record(event: GameEvent): void {
+    validateEvent(event); // reject any mislabeled (e.g. player-witnessed-but-hidden) event
     this.events.push(event);
   }
 

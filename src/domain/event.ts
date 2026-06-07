@@ -1,4 +1,5 @@
 import type { EntityId } from "./ids";
+import { PLAYER } from "./ids";
 
 export type { EntityId } from "./ids";
 
@@ -36,4 +37,21 @@ export function classify(event: GameEvent, entity: EntityId): Visibility {
 
 export function isVisibleTo(event: GameEvent, entity: EntityId): boolean {
   return classify(event, entity) === "VISIBLE";
+}
+
+/**
+ * Enforces the core visibility invariant: the `hidden` flag is a function of the
+ * witness set relative to the player (the audience). A player-witnessed event is
+ * NEVER hidden (the regression guard for the past mislabeling bug), and an event
+ * the player did not witness is always hidden until surfaced. Stores call this on
+ * write so a mislabeled event cannot be persisted.
+ */
+export function validateEvent(event: GameEvent): void {
+  const playerWitnessed = event.witnessSet.includes(PLAYER);
+  if (playerWitnessed && event.hidden) {
+    throw new Error(`Invariant violation: a player-witnessed event must not be hidden (${event.id})`);
+  }
+  if (!playerWitnessed && !event.hidden) {
+    throw new Error(`Invariant violation: an unwitnessed event must be hidden (${event.id})`);
+  }
 }
