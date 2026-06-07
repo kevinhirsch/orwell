@@ -1,0 +1,51 @@
+# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Build priority #6 — Outcomes by stats + temperature. Distribution-style over many seeds.
+# HARD rule: roles only. Assert PROPERTIES, not specific numbers (temperature math is open).
+
+Feature: Outcomes by stats and temperature — earned results, never story convenience
+
+  Competition outcomes are weighted by the relevant stat versus the competition type, plus a
+  Luck modifier and a per-moment temperature roll across all involved variables. Results are
+  reproducible under a fixed seed. Temperature governs variance but never overrides hard
+  rules or archetype-grounded weighting, and the engine never protects the player.
+
+  Scenario: A moment rolls temperature across its involved variables, reproducibly
+    Given a gameplay moment with multiple involved variables
+    When the moment is resolved with a fixed seed
+    Then a temperature roll is applied across those variables
+    And resolving again with the same seed yields the identical outcome
+
+  Scenario: Hard rules are never overridden by temperature
+    Given any temperature roll
+    Then eligibility rules and the Vault Wall still hold
+
+  Scenario: Outcomes follow archetype and temperature, not narrative need
+    Given an endurance competition and a houseguest whose profile does not support endurance
+    When outcomes are computed across many seeded runs
+    Then that houseguest's win rate reflects stats and temperature, not story convenience
+
+  Scenario: The engine never protects the player
+    Given the player competes in a competition type their stats do not favor
+    When outcomes are computed across many seeded runs
+    Then the player's win rate reflects their stats like any other houseguest
+
+  Scenario: The Luck modifier prevents perfect predictability
+    Given a clear favorite by stats in a competition
+    When outcomes are computed across many seeded runs
+    Then the favorite does not win in every run
+
+  Scenario: Player competition intent is honored and immutable
+    Given the player declares an intent of compete, throw, or play safe before a competition
+    When the outcome is computed
+    Then the declared intent affects the computation
+    And the intent cannot be changed after the result is given
+
+  Scenario Outline: The temperature roll stays within configured bounds
+    Given the game is simulated with seed "<seed>"
+    Then every temperature roll falls within the configured bounds
+
+    Examples:
+      | seed |
+      | 1    |
+      | 2    |
+      | 3    |
