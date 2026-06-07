@@ -9,7 +9,9 @@ Feature: Event visibility & propagation — who knows what, and how they learned
   are the player's knowledge and are NOT secret. Off-screen NPC-to-NPC events are simulated
   and hidden. A hidden fact reaches an entity only through a legitimate in-game pathway
   (told, overheard, caught); until then the entity has no access — it may suspect, but
-  cannot know.
+  cannot know. Hidden facts also diffuse NPC-to-NPC along the social graph (gossip), drifting
+  with each retelling, so what eventually reaches the player may be distorted and is held as a
+  belief with a source and a confidence.
 
   Background:
     Given a running game sandbox with a single event record
@@ -37,6 +39,24 @@ Feature: Event visibility & propagation — who knows what, and how they learned
     When that NPC tells the player about it
     Then that fact enters the player's knowledge state
     And the surfacing is itself recorded as an event with a traceable pathway
+
+  Scenario: Hidden information diffuses NPC-to-NPC through the social graph
+    Given a hidden fact known to one NPC
+    When game time passes
+    Then the fact may spread to other NPCs along their relationship edges
+    And each retelling is recorded as its own event with a traceable source
+    And each recipient holds the fact with a provenance and a confidence
+    And it reaches the player only if a chain of pathways terminates at the player
+
+  Scenario: Each retelling can distort the fact
+    Given a hidden fact that has spread across several hops
+    Then a version far from the source may differ from the original
+    And distortion tends to grow with the number of hops
+
+  Scenario: A second-hand fact is a belief that can be wrong
+    Given the player is told a fact second-hand
+    Then it enters the player's knowledge as a belief carrying its source and confidence
+    And that belief may be inaccurate, so the player acts on imperfect information
 
   Scenario: Without a pathway, the player has no access to a hidden fact
     Given a hidden interaction the player did not witness

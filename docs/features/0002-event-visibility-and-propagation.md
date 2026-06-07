@@ -10,7 +10,11 @@ One interaction record; **visibility is per-event metadata** (a witness set + a 
 events are the player's knowledge and are *not* secret. Off-screen NPC-to-NPC events are
 hidden. Hidden facts reach an entity **only** through a legitimate in-game pathway (told,
 overheard, caught), which is itself a recorded, traceable event. Absent a pathway, the
-entity may *suspect* but cannot *know*.
+entity may *suspect* but cannot *know*. Hidden facts also **diffuse NPC-to-NPC along the social
+graph** (gossip): they flow preferentially along high-trust/affinity edges (the relationship
+model, decision 0002), **drift / exaggerate with each hop**, and land as **beliefs** carrying a
+*provenance* and a *confidence* — so what reaches the player can be distorted, and the player
+may act on it while it is wrong.
 
 This is the area that caused real bugs before (player-witnessed events mislabeled as
 off-screen/secret), so the classification rule and its regression guard are central.
@@ -18,8 +22,9 @@ off-screen/secret), so the classification rule and its regression guard are cent
 ## 2. Scope
 
 **In:** the `EventStore` witness/hidden semantics; the derived `classify()` rule; per-entity
-`KnowledgeState`; the `surfaceInformationTo` pathway and its recorded surfacing event;
-knowledge-vs-suspicion; the player-DR-reaches-no-NPC rule.
+`KnowledgeState` of **beliefs** (content + provenance + confidence); the `surfaceInformationTo`
+pathway and its recorded surfacing event; **transitive gossip diffusion** along relationship
+edges with **per-hop distortion**; knowledge-vs-suspicion; the player-DR-reaches-no-NPC rule.
 
 **Out:** the *richness/volume* of off-screen life and surfacing **rates** (→ #3); the
 narrative *content* of generated scenes (→ #3); Vault-Wall content guarantees (→ #1, which
@@ -35,15 +40,19 @@ EventStore:
     classify(event, entity) -> VISIBLE | HIDDEN     # = (entity ∈ witnessSet) ? VISIBLE : HIDDEN
                                                     # derived; never set to contradict the witness set
 KnowledgeService:
-    knownTo(entity) -> KnowledgeState
-    surfaceInformationTo(entity, fact, pathway)     # records a surfacing event; adds fact to entity knowledge
-    suspicionsOf(entity) -> [Suspicion]             # may exist with no knowledge
+    knownTo(entity) -> KnowledgeState               # beliefs held: each { content, provenance (source chain), confidence }
+    surfaceInformationTo(entity, fact, pathway)     # records a tell/overhear event; adds/updates a belief
+    propagateGossip(rng)                            # NPCs may retell along relationship edges; content drifts per hop
+    suspicionsOf(entity) -> [Suspicion]             # low-confidence beliefs with no direct tell/witness
 ```
 
 **Invariant:** the hidden flag is a **function of** the witness set. `classify(e, player)`
 for an event the player witnessed must **never** be `HIDDEN`. A surfacing only adds to an
 entity's knowledge when called with a valid pathway, and it leaves a queryable event trail
-(who told whom, when).
+(who told whom, when). **Gossip diffusion runs in the hidden layer:** the player's
+`KnowledgeState` changes *only* when a pathway terminates at the player, so the Vault Wall
+holds even as a fact spreads through the house. A belief is **not** ground truth — it may be a
+distorted retelling.
 
 ## 4. Test strategy
 
@@ -52,6 +61,13 @@ entity's knowledge when called with a valid pathway, and it leaves a queryable e
 - **Propagation:** `knownTo(player)` gains a fact **only** after `surfaceInformationTo` with
   a valid pathway, and a corresponding surfacing event exists; without a pathway the fact is
   absent from `knownTo`.
+- **Diffusion:** over seeded game time a fact known to one NPC reaches others via recorded
+  tells along relationship edges; the player's belief appears **only** if a chain terminates
+  at the player.
+- **Distortion grows with hops:** assert a far-hop version can differ from the source, and
+  that expected distortion increases (in distribution) with hop count.
+- **Beliefs carry provenance + confidence:** each surfaced belief is queryable back to its
+  source chain; second-hand beliefs may be factually wrong.
 - **Knowledge ≠ suspicion:** an un-witnessed, un-told fact may appear in `suspicionsOf` but
   never in `knownTo`.
 - **Regression guard:** generate player-witnessed events and assert none are ever classified
@@ -70,8 +86,9 @@ entity's knowledge when called with a valid pathway, and it leaves a queryable e
 ## 6. Dependencies
 
 Builds on the minimal `EventStore` (witness set + hidden flag) and `KnowledgeState` stubbed
-in #1. Provides the substrate #3 (behavioral fidelity) measures and #1 relies on for the
-"legitimately surfaced fact is not blocked" guard.
+in #1. Gossip diffusion flows along the **relationship model** edges and weights belief
+confidence by source trust (`docs/decisions/0002`). Provides the substrate #3 (behavioral
+fidelity) measures and #1 relies on for the "legitimately surfaced fact is not blocked" guard.
 
 ## 7. Traceability
 
