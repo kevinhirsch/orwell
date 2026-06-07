@@ -92,7 +92,10 @@ a witness set + a hidden flag — not a function of which store the data lives i
   tells them, they overhear, etc. — modeled explicitly in `KnowledgeService`. The Vault Wall
   stays intact because surfacing is an explicit, traceable event. A houseguest can only know
   what they witnessed or were told; if there's no pathway, they don't know it (they may
-  *suspect*, but cannot *know*).
+  *suspect*, but cannot *know*). Hidden facts also **diffuse NPC-to-NPC along the social graph**
+  (gossip), drifting with each retelling, so what reaches the player can be a distorted belief
+  held with a source + confidence — diffusion runs in the hidden layer and only updates the
+  player's knowledge when a pathway terminates at the player (ties to `docs/decisions/0002`).
 - **Diary Room / confessionals are events too.** NPC confessionals are Vault-only content
   (off-screen, witness set excludes the player). The player's Diary Room is a *player-level,
   OOC* channel: its content is the **player's own knowledge** but has **no in-game pathway to
