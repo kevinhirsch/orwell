@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.sqlite
+*.sqlite3
+.DS_Store
+.cucumber-cache/
