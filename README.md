@@ -286,9 +286,9 @@ The canonical rules the domain core implements:
   eviction vote → live eviction → next HOH begins immediately.
 - **Veto competition:** **six** players — the HOH, the two nominees, and **three by chip
   draw**. One chip is **"Houseguest's Choice"**: whoever draws it picks the sixth player
-  instead of getting a random name (NPCs choose by soul motivation — e.g. an `ALLY` or
-  `BEST_FRIEND`). The player can't influence which chips are drawn, but may hold Houseguest's
-  Choice if they draw it.
+  instead of getting a random name (NPCs choose by soul motivation — their strongest available
+  bond, an organic read from the relationship model, not a fixed label). The player can't
+  influence which chips are drawn, but may hold Houseguest's Choice if they draw it.
 - **Eligibility / legality (hard rules):** the **outgoing HOH cannot play** in the next HOH
   competition; the **veto winner cannot be named a replacement nominee**; everyone except the
   HOH and the two nominees votes at eviction (the HOH breaks ties).

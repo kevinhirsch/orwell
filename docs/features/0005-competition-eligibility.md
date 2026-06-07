@@ -28,8 +28,8 @@ souls); the *outcome* of competitions (→ #6).
 eligibleForHOH(week) -> Set<Houseguest>            # excludes the outgoing HOH (unless a special comp permits)
 vetoParticipants(week, rng) -> Set<Houseguest>     # { HOH, nominee1, nominee2 } ∪ 3 from the chip draw; size == 6
                                                    #   one chip may be "Houseguest's Choice": its holder selects
-                                                   #   (NPCs pick per soul motivation, e.g. an ALLY); the player
-                                                   #   cannot influence which chips are drawn
+                                                   #   (NPCs pick their strongest bond per the relationship model,
+                                                   #   decision 0002); the player can't influence which are drawn
 selectableReplacements(week) -> Set<Houseguest>    # excludes current nominees AND the veto winner
 evictionVoters(week) -> Set<Houseguest>            # all except HOH and the two nominees
 breaksTie(week) -> Houseguest                      # the HOH
@@ -41,8 +41,8 @@ breaksTie(week) -> Houseguest                      # the HOH
   (roles only).
 - **Seeded draw:** the three drawn veto players come from the eligible pool; over many seeds
   the draw always yields a six-player field including HOH + both nominees. When a "Houseguest's
-  Choice" chip is drawn, its holder selects the slot (an NPC holder picks per soul motivation);
-  the player still cannot influence which chips come out.
+  Choice" chip is drawn, its holder selects the slot (an NPC holder picks their strongest bond
+  per the relationship model, decision 0002); the player still cannot influence which come out.
 - **Invariance:** fuzz the temperature roll and assert eligibility outputs are unchanged.
 - **Special-comp exception:** only when explicitly flagged is the outgoing HOH re-included.
 
