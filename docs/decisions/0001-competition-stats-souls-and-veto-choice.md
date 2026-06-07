@@ -1,7 +1,8 @@
 # 0001 — Competition stats, the Character/Soul split, and veto "Houseguest's Choice"
 
-> **Status:** Accepted — except sub-decision **3 (Character/Soul split)**, which is
-> **Proposed** (drafted from a tentative steer; easy to revise).
+> **Status:** Accepted. The binary `ALLIES` / `BEST_FRIEND` idea in §3 of the first draft is
+> **superseded** by the calculated, organic relationship model in
+> [decision 0002](./0002-relationship-model.md).
 > **Source:** human spec feedback (this session), refining `README.md`.
 
 ## Context
@@ -20,28 +21,37 @@ Competition stats are **Physical, Mental, Social** only. There is no Luck stat o
 
 Competition outcomes apply an **emotional modifier** alongside the per-moment temperature
 roll. Emotional state is **not** a fourth competition stat — it is a **character/soul
-attribute** that *modulates* outcomes (and behavior). A rattled houseguest competes
-differently. Unpredictability that the Luck stat used to provide now comes from
-**temperature + emotional state**, both driven through the seedable `RandomnessSource`.
+attribute** that *modulates* outcomes (and behavior).
 
-### 3. Static `Character` vs dynamic `Soul` — **Proposed**
+**It is a moving value, not a constant.** Each houseguest has a **baseline emotional
+disposition** (a "stasis") set by `Character` temperament and shaded by current `Soul`, plus a
+**volatility trait** (how reactive they are). Current emotional state drifts from baseline in
+response to **surrounding circumstances** (adverse or positive events), the **size of the
+swing scaled by volatility × the temperature roll**, and it **mean-reverts** toward baseline
+when things are calm. A steady archetype barely moves; a volatile one on tilt after a blow-up
+competes very differently. The modifier reads this *current* state.
+
+Unpredictability the Luck stat used to provide now comes from **temperature + emotional
+state**, both driven through the seedable `RandomnessSource`.
+
+### 3. Static `Character` vs dynamic `Soul` — **Accepted**
 
 Split each houseguest's data into two facets behind `SoulProvider` / `CharacterFactory`:
 
-- **`Character` (static):** stable baseline — archetype, **core Physical/Mental/Social
-  aptitudes**, identity, backstory. Set at generation; rarely changes. (Could be a
-  `CHARACTER.md` facet.)
-- **`Soul` (dynamic, md + vector):** evolving state — current **emotional** state,
-  relationships including the persistent `ALLIES` / `BEST_FRIEND` variables (present for
-  everyone **once enough interaction data has accumulated**), accumulated memory, and shifting
-  leanings. Changes throughout the game.
+- **`Character` (static — "facts"):** what is true / what has happened — archetype, **core
+  Physical/Mental/Social aptitudes**, identity, backstory, baseline temperament. Set at
+  generation; rarely changes.
+- **`Soul` (dynamic, md + vector):** evolving state — current **emotional** state, accumulated
+  memory, shifting leanings, and the **relationship beliefs** (decision 0002). Changes
+  throughout the game.
 
 The competition **emotional modifier** (decision 2) and the veto **Houseguest's Choice**
 selection (decision 4) both read the **dynamic `Soul`**.
 
-> This split is **Proposed** because the human flagged genuine uncertainty about it. It is a
-> doc-only decision today (no code depends on it yet), so it is cheap to change — confirm,
-> adjust the boundary, or collapse it back into a single soul.
+> Confirmed by the human: *character is facts / archetypal; soul is dynamic.* The first
+> draft's binary `ALLIES` / `BEST_FRIEND` flags are **dropped** and re-architected as the
+> calculated, **organic** relationship model in
+> **[decision 0002](./0002-relationship-model.md)** (no stored labels).
 
 ### 4. Veto "Houseguest's Choice" — **Accepted**
 
@@ -49,7 +59,9 @@ The veto field is still six (HOH + two nominees + three by chip draw), but — a
 show — one chip in the bag is **"Houseguest's Choice."** Whoever draws it **selects** the slot
 instead of receiving a random name:
 
-- An **NPC** holder chooses by **soul motivation** (e.g. an `ALLY` or `BEST_FRIEND`).
+- An **NPC** holder chooses by **soul motivation** — their strongest, most-trusted *available*
+  bond as scored by the relationship model (decision 0002), with temperature variance (never a
+  stored flag).
 - The **player** has no influence over *which* chips are drawn, but **if the player draws
   Houseguest's Choice they pick** — the single bit of player agency in the draw.
 
@@ -62,12 +74,12 @@ instead of receiving a random name:
   competition aptitudes stable while letting mood, alliances, and memory **deepen over the
   game** — aligned with the non-degradation mandate.
 - Houseguest's Choice adds authentic *BB* texture and a real consequence for the soul's
-  `ALLIES` / `BEST_FRIEND` graph, without handing the player control over the draw.
+  **relationship graph** (decision 0002), without handing the player control over the draw.
 
 ## Consequences (specs updated with this record)
 
 - `docs/features/0004-replayability-and-naming.md` — `SoulProvider` split into
-  `characterOf` (static) / `soulOf` (dynamic); `ALLIES` / `BEST_FRIEND` noted.
+  `characterOf` (static) / `soulOf` (dynamic); relationship beliefs (decision 0002) noted.
 - `docs/features/0005-competition-eligibility.{feature,md}` — veto draw now includes the
   Houseguest's Choice chip and its holder's selection; a new scenario covers it.
 - `docs/features/0006-outcomes-by-stats-and-temperature.{feature,md}` — Luck removed; the
@@ -76,10 +88,10 @@ instead of receiving a random name:
 
 ## Open / to confirm
 
-- Confirm or revise the **`Character` / `Soul` split** (decision 3).
-- The **emotional-modifier weighting** is part of the still-open temperature/0006 tunable
-  config (numbers, not shape).
-- The threshold for "enough interaction data" before `ALLIES` / `BEST_FRIEND` populate.
+- The **emotional-modifier weighting** and the **volatility / mean-reversion** constants are
+  part of the still-open temperature/0006 tunable config (numbers, not shape).
+- The relationship model's signal set and math live in
+  **[decision 0002](./0002-relationship-model.md)**.
 
 ## Traceability
 

@@ -36,7 +36,7 @@ Feature: Competition eligibility & legality — the hard rules of the weekly loo
     And one drawn chip is "Houseguest's Choice"
     When its holder makes a selection
     Then the holder picks the sixth competitor rather than receiving a random name
-    And an NPC holder picks according to their soul motivations (e.g. an ally)
+    And an NPC holder picks their strongest available bond per the relationship model
     And the veto field still totals six players
 
   Scenario: The eviction voting set excludes the HOH and the nominees

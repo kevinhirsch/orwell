@@ -59,7 +59,10 @@ concern, not asserted numerically here).
 
 #2 (event visibility & propagation) for the substrate; #4 (generation/souls) for the deep
 hidden elements that surface; #6 (temperature) for the rolls that gate initiative and
-surfacing. Draft-buildable against stubs, but full green needs these in place.
+surfacing. Alliance churn is the **organic, computed** read-out of the relationship model
+(`docs/decisions/0002`) — "form/fracture" = its graded signals crossing a houseguest's
+threshold, never a stored flag. Draft-buildable against stubs, but full green needs these in
+place.
 
 ## 7. Traceability
 

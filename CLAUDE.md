@@ -108,11 +108,15 @@ a witness set + a hidden flag — not a function of which store the data lives i
   elements surface **rarely** (gated by the temperature roll) and profiles **evolve** as the
   game proceeds. Souls may be md and/or vector-backed.
 - **Static `CHARACTER` vs dynamic `SOUL`.** A houseguest's stable baseline (archetype, core
-  competition aptitudes, identity, backstory) is **static `CHARACTER`** data; evolving state —
-  current **emotional** state, relationships incl. persistent `ALLIES` / `BEST_FRIEND` (filled
-  once enough interaction data exists), accumulated memory and leanings — is the **dynamic
-  `SOUL`** (md + vector). The competition **emotional modifier** and the veto "Houseguest's
-  Choice" both read the dynamic soul. See `docs/decisions/`.
+  competition aptitudes, identity, backstory, baseline temperament) is **static `CHARACTER`**
+  ("facts"); evolving state — current **emotional** state, accumulated memory, leanings, and
+  **relationship beliefs** — is the **dynamic `SOUL`** (md + vector). Relationships are **not**
+  binary ally/enemy flags: they are directed, graded, asymmetric, uncertain beliefs
+  (trust/affinity/threat…) computed from event history, and any "ally / best-friend / enemy"
+  label is **organic and emergent** — read through the holder's own character framing, never
+  stored (`docs/decisions/0002`). The competition **emotional modifier** (a baseline that grows
+  more or less volatile with circumstances + temperature) and the veto "Houseguest's Choice"
+  both read the dynamic soul. See `docs/decisions/`.
 - **Temperature is per-moment, not a global knob.** Each gameplay moment rolls temperature
   across *all* involved variables (outcomes, expression, NPC initiative, which secret
   surfaces, alliance shifts, volatility…). It governs variance/surprise but **never** overrides
@@ -128,8 +132,9 @@ a witness set + a hidden flag — not a function of which store the data lives i
 - **A "week" = one HOH reign** (HOH comp → eviction), not seven calendar days.
 - **Veto competition:** **six** players — the HOH, the two nominees, and **three by chip
   draw**. One chip is **"Houseguest's Choice"**: whoever draws it picks the sixth player
-  instead of a random name (NPCs choose by soul motivation — e.g. an `ALLY` or `BEST_FRIEND`).
-  The player can't influence which chips are drawn, but may hold Houseguest's Choice if drawn.
+  instead of a random name (NPCs choose by soul motivation — their strongest available bond
+  per the relationship model, `docs/decisions/0002`). The player can't influence which chips
+  are drawn, but may hold Houseguest's Choice if drawn.
 - **Eligibility/legality (hard rules):** the **outgoing HOH cannot play** for the next HOH;
   the **veto winner cannot be named replacement nominee**; all houseguests except the HOH and
   the two nominees vote at eviction (HOH breaks ties).

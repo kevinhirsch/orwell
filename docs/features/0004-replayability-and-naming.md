@@ -27,17 +27,19 @@ CharacterFactory:
     runPlayerOOBE(input) -> PlayerCharacter             # the only human-authored profile
 SoulProvider:
     characterOf(houseguest) -> Character                # STATIC baseline: archetype, core P/M/S aptitudes, identity
-    soulOf(houseguest) -> Soul                          # DYNAMIC + evolving (md + vector): emotional state,
-                                                        #   relationships incl. persistent ALLIES / BEST_FRIEND
-                                                        #   (filled once enough interaction data exists), memory
+    soulOf(houseguest) -> Soul                          # DYNAMIC + evolving (md + vector): emotional state, memory,
+                                                        #   and relationship beliefs — directed, graded, computed
+                                                        #   from event history (NOT binary ally/bff flags; labels
+                                                        #   are organic/emergent — see docs/decisions/0002)
 ```
 
 **Invariants:** exactly 16 houseguests (1 player + 15 NPCs); display names unique within a
 house and never drawn from a hard-coded/sample list; different seeds ⇒ disjoint identities.
 Each houseguest splits into **static `Character`** (baseline: archetype, core P/M/S aptitudes,
-identity) and **dynamic `Soul`** (evolving: emotional state, persistent `ALLIES` /
-`BEST_FRIEND`, accumulated memory) — see
-`docs/decisions/0001-competition-stats-souls-and-veto-choice.md`.
+identity) and **dynamic `Soul`** (evolving: emotional state, accumulated memory, and
+**relationship beliefs** — graded and computed, not binary ally/bff flags) — see
+`docs/decisions/0001-competition-stats-souls-and-veto-choice.md` and
+`docs/decisions/0002-relationship-model.md`.
 
 ## 4. Test strategy
 
