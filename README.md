@@ -284,15 +284,20 @@ The canonical rules the domain core implements:
   days.
 - **Weekly loop:** HOH competition → two nominations → veto competition → veto ceremony →
   eviction vote → live eviction → next HOH begins immediately.
-- **Veto competition:** **six** players — the HOH, the two nominees, and **three drawn at
-  random**. The player has no agency over the random draw.
+- **Veto competition:** **six** players — the HOH, the two nominees, and **three by chip
+  draw**. One chip is **"Houseguest's Choice"**: whoever draws it picks the sixth player
+  instead of getting a random name (NPCs choose by soul motivation — e.g. an `ALLY` or
+  `BEST_FRIEND`). The player can't influence which chips are drawn, but may hold Houseguest's
+  Choice if they draw it.
 - **Eligibility / legality (hard rules):** the **outgoing HOH cannot play** in the next HOH
   competition; the **veto winner cannot be named a replacement nominee**; everyone except the
   HOH and the two nominees votes at eviction (the HOH breaks ties).
-- **Competition stats:** Physical, Mental, Social, plus a small **Luck** modifier. Outcomes
-  weight the relevant stat against the competition type and apply temperature — **never**
-  story convenience. The player may declare intent (compete / throw / play safe) beforehand
-  and cannot change it after the result.
+- **Competition stats:** **Physical, Mental, Social** (no Luck stat). Outcomes weight the
+  relevant stat against the competition type and apply **temperature** plus an **emotional
+  modifier** sourced from the houseguest's soul (a rattled houseguest competes differently) —
+  **never** story convenience. Emotional state is a *character/soul* attribute, not a fourth
+  competition stat. The player may declare intent (compete / throw / play safe) beforehand and
+  cannot change it after the result.
 - **Daily-event invariant:** every in-game day contains at least one meaningful event
   (a competition, a nomination or veto ceremony, a vote or eviction, or a significant house
   event).
