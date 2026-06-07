@@ -107,6 +107,12 @@ a witness set + a hidden flag — not a function of which store the data lives i
   character; public persona may match or wildly diverge from hidden attributes; hidden
   elements surface **rarely** (gated by the temperature roll) and profiles **evolve** as the
   game proceeds. Souls may be md and/or vector-backed.
+- **Static `CHARACTER` vs dynamic `SOUL`.** A houseguest's stable baseline (archetype, core
+  competition aptitudes, identity, backstory) is **static `CHARACTER`** data; evolving state —
+  current **emotional** state, relationships incl. persistent `ALLIES` / `BEST_FRIEND` (filled
+  once enough interaction data exists), accumulated memory and leanings — is the **dynamic
+  `SOUL`** (md + vector). The competition **emotional modifier** and the veto "Houseguest's
+  Choice" both read the dynamic soul. See `docs/decisions/`.
 - **Temperature is per-moment, not a global knob.** Each gameplay moment rolls temperature
   across *all* involved variables (outcomes, expression, NPC initiative, which secret
   surfaces, alliance shifts, volatility…). It governs variance/surprise but **never** overrides
@@ -120,15 +126,19 @@ a witness set + a hidden flag — not a function of which store the data lives i
 - **Cast:** 16 houseguests (player + 15 NPCs). **Jury of 9. Final 2.** Classic format, no
   core-structure twists (one or two production twists may be held in reserve).
 - **A "week" = one HOH reign** (HOH comp → eviction), not seven calendar days.
-- **Veto competition:** **six** players — the HOH, the two nominees, and **three drawn at
-  random**. The player has no agency over the random draw.
+- **Veto competition:** **six** players — the HOH, the two nominees, and **three by chip
+  draw**. One chip is **"Houseguest's Choice"**: whoever draws it picks the sixth player
+  instead of a random name (NPCs choose by soul motivation — e.g. an `ALLY` or `BEST_FRIEND`).
+  The player can't influence which chips are drawn, but may hold Houseguest's Choice if drawn.
 - **Eligibility/legality (hard rules):** the **outgoing HOH cannot play** for the next HOH;
   the **veto winner cannot be named replacement nominee**; all houseguests except the HOH and
   the two nominees vote at eviction (HOH breaks ties).
-- **Competition stats:** Physical, Mental, Social, plus a small **Luck** randomness modifier.
-  Outcomes are weighted by relevant stat vs. competition type + temperature — **never** story
-  convenience; the engine never protects the player. The player may declare intent (compete /
-  throw / play safe) before a comp and cannot change it retroactively.
+- **Competition stats:** **Physical, Mental, Social** (no Luck stat). Outcomes are weighted by
+  relevant stat vs. competition type + **temperature** plus an **emotional modifier** sourced
+  from the houseguest's soul — **never** story convenience; the engine never protects the
+  player. Emotional state is a *character/soul* attribute, not a fourth competition stat. The
+  player may declare intent (compete / throw / play safe) before a comp and cannot change it
+  retroactively.
 - **Daily-event invariant:** every in-game day contains ≥1 meaningful event
   (comp, nomination/veto ceremony, vote/eviction, or significant house event).
 - **Standard weekly cadence:** Day 1 HOH comp → Day 2 nominations → Day 3 veto comp →

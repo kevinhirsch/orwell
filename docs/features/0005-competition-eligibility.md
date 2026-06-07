@@ -7,14 +7,16 @@
 
 The hard, non-negotiable rules of the weekly loop: the **outgoing HOH cannot play** the next
 HOH; the **veto winner cannot be a replacement nominee**; the **veto field is exactly six**
-(HOH + two nominees + three drawn at random, no player agency over the draw); at eviction
+(HOH + two nominees + three by chip draw incl. a "Houseguest's Choice" chip the holder uses to
+pick — the player cannot influence which chips are drawn); at eviction
 **everyone except the HOH and the two nominees votes**, and the **HOH breaks ties**. These
 are pure-core rules that **temperature never overrides**.
 
 ## 2. Scope
 
 **In:** the eligibility predicates and selectable-set computations; the six-player veto draw
-(seeded); the eviction voter set and HOH tie-break; the rare explicit special-competition
+(seeded, incl. the "Houseguest's Choice" chip and its holder's selection); the eviction voter
+set and HOH tie-break; the rare explicit special-competition
 exception; the invariance of these rules under any temperature roll.
 
 **Out:** *who* the HOH actually nominates or how houseguests vote (strategy/behavior — #3,
@@ -24,7 +26,10 @@ souls); the *outcome* of competitions (→ #6).
 
 ```
 eligibleForHOH(week) -> Set<Houseguest>            # excludes the outgoing HOH (unless a special comp permits)
-vetoParticipants(week, rng) -> Set<Houseguest>     # { HOH, nominee1, nominee2 } ∪ 3 drawn via rng; size == 6
+vetoParticipants(week, rng) -> Set<Houseguest>     # { HOH, nominee1, nominee2 } ∪ 3 from the chip draw; size == 6
+                                                   #   one chip may be "Houseguest's Choice": its holder selects
+                                                   #   (NPCs pick per soul motivation, e.g. an ALLY); the player
+                                                   #   cannot influence which chips are drawn
 selectableReplacements(week) -> Set<Houseguest>    # excludes current nominees AND the veto winner
 evictionVoters(week) -> Set<Houseguest>            # all except HOH and the two nominees
 breaksTie(week) -> Houseguest                      # the HOH
@@ -34,8 +39,10 @@ breaksTie(week) -> Houseguest                      # the HOH
 
 - **Pure unit tests**, no I/O. Assert each predicate directly over constructed week states
   (roles only).
-- **Seeded draw:** the three random veto players come from the eligible pool; over many seeds
-  the draw is uniform-ish and always yields a six-player field including HOH + both nominees.
+- **Seeded draw:** the three drawn veto players come from the eligible pool; over many seeds
+  the draw always yields a six-player field including HOH + both nominees. When a "Houseguest's
+  Choice" chip is drawn, its holder selects the slot (an NPC holder picks per soul motivation);
+  the player still cannot influence which chips come out.
 - **Invariance:** fuzz the temperature roll and assert eligibility outputs are unchanged.
 - **Special-comp exception:** only when explicitly flagged is the outgoing HOH re-included.
 

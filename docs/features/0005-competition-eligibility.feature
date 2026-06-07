@@ -6,8 +6,9 @@ Feature: Competition eligibility & legality — the hard rules of the weekly loo
 
   Eligibility and legality are hard rules the engine enforces and temperature never
   overrides: the outgoing HOH cannot defend the crown; the veto winner cannot be named a
-  replacement nominee; the veto field is six (HOH, both nominees, and three drawn at random
-  with no player agency); at eviction everyone except the HOH and the two nominees votes, and
+  replacement nominee; the veto field is six (HOH, both nominees, and three by chip draw — one
+  chip is "Houseguest's Choice", letting its holder pick rather than receive a random name); at
+  eviction everyone except the HOH and the two nominees votes, and
   the HOH breaks ties.
 
   Scenario: The outgoing Head of Household cannot defend the crown
@@ -26,8 +27,17 @@ Feature: Competition eligibility & legality — the hard rules of the weekly loo
     When the veto participants are drawn
     Then the participant set contains exactly six houseguests
     And it includes the HOH and both nominees
-    And the remaining three are drawn at random from the eligible pool
-    And the player has no agency over the random draw
+    And the remaining three come from the chip draw of the eligible pool
+    And one chip may be "Houseguest's Choice"
+    And the player cannot influence which chips are drawn
+
+  Scenario: A drawn "Houseguest's Choice" lets its holder pick the sixth player
+    Given the veto chips are drawn for the current week
+    And one drawn chip is "Houseguest's Choice"
+    When its holder makes a selection
+    Then the holder picks the sixth competitor rather than receiving a random name
+    And an NPC holder picks according to their soul motivations (e.g. an ally)
+    And the veto field still totals six players
 
   Scenario: The eviction voting set excludes the HOH and the nominees
     Given an HOH and two nominees for the current week
