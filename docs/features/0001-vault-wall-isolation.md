@@ -148,9 +148,10 @@ The stack is **chosen** — this feature is no longer gated. Build against these
   behind an `EmbeddingProvider` port with a **deterministic fake** for offline / seeded tests
   and a real provider wired at runtime. The vector index holds Vault-side soul data, so it is
   **engine-only — no outward channel may depend on it**, exactly like `VaultStore`.
-- **Sentinel mechanism:** test-fixture **canaries** are the baseline guarantee (`§5`); a
-  runtime provenance tag on Vault records is optional defense-in-depth. Enforcement is
-  primarily **structural**.
+- **Sentinel mechanism (resolved):** enforcement is **structural** (composition roots +
+  dependency-cruiser) plus **test-fixture canaries** (`§5`) — **no runtime provenance
+  tagging**. The boundary is physical, so outward code cannot carry Vault data by construction;
+  a runtime taint would only guard a path that, by that same construction, never holds any.
 - **Boundary enforcement:** outward channels (player surface, admin / God-Mode port, and the
   player / admin MCP tools) are wired in **composition roots that never import `VaultStore`
   or the vector index**; run the player / admin MCP server with no Vault handle. Verified by
