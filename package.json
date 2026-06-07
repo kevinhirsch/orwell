@@ -1,0 +1,27 @@
+{
+  "name": "bbai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Big Brother: The Simulation — hexagonal TypeScript engine.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs src",
+    "test:unit": "vitest run",
+    "test:bdd": "NODE_OPTIONS='--import tsx' cucumber-js",
+    "test": "npm run typecheck && npm run depcruise && npm run test:unit && npm run test:bdd"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^11.2.0",
+    "@types/node": "^22.10.7",
+    "dependency-cruiser": "^16.9.0",
+    "fast-check": "^3.23.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

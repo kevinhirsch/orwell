@@ -10,10 +10,11 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: greenfield.** At time of writing the repo contains only this file, `LICENSE`,
-`README.md`, and the design docs under `docs/`. No application code, stack, or build
-tooling exists yet — see [Current status & open decisions](#current-status--open-decisions).
-The first engineering work is to confirm the open decisions, then proceed BDD/TDD-first.
+**Status: scaffolded, pre-implementation.** The stack is chosen (TypeScript / Node,
+hexagonal) and a failing-first Vault-Wall test is wired — see
+[Building & testing](#building--testing). Priority-ordered feature specs live in
+`docs/features/`. The next engineering work is to turn feature 0001 from red to green, then
+proceed down the priority order BDD/TDD-first.
 
 ## Source of truth — read these first
 
@@ -171,21 +172,46 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 - Don't mislabel player-witnessed events as off-screen/secret.
 - Don't let persisted detail degrade over time.
 
-## Current status & open decisions
+## Building & testing
 
-No build/lint/test commands exist yet — **the stack is unchosen** (Node/TS vs. Python; DB;
-whether to adopt a vector store), so there is currently **nothing to build, run, or test**.
-Update this section with the real commands once the stack lands. The first slice should stand
-up the chosen stack + test runner and a *failing* Vault-isolation `.feature` (top of the
-priority order above), then implement to green. Before writing domain code, confirm these open
-items with the human (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md` §15 and
-`docs/bb-sim-spec.md` §16):
+**Stack (resolved):** TypeScript / Node 22, hexagonal. Test lanes: **Cucumber.js** (BDD
+`.feature` files), **Vitest** (unit), **fast-check** (property / distribution), and
+**dependency-cruiser** (the Vault-Wall architecture test). Datastore: **SQLite now**
+(`better-sqlite3`) **→ Postgres-ready**, behind ports, with in-memory adapters for tests.
+Vectors are adopted from day one (**sqlite-vec → pgvector**) behind an **engine-only**
+`VectorIndex`.
 
-1. **Tech stack** — Node/TS vs. Python; DB choice (SQLite → Postgres; graph for relationships?).
-2. **Soul/profile storage** — md / vector / hybrid; schema for deep hidden attributes + how
-   evolution is persisted.
-3. **Temperature model** — distributions, per-variable weighting, bounds, hidden-element
-   surfacing rate.
-4. **Vector approach** (if adopted) — embedding/store and what it indexes.
-5. **Veto-draw specifics, jury procedure, twists/specials.**
-6. **Non-degradation test strategy** — how to operationalize "detail must accumulate."
+```bash
+npm install
+npm run typecheck     # tsc --noEmit
+npm run depcruise     # Vault Wall: no outward module may import VaultStore / VectorIndex
+npm run test:unit     # vitest
+npm run test:bdd      # cucumber-js — currently the FAILING 0001 Vault-Wall scenario
+npm test              # all of the above, in sequence
+```
+
+**A single failing test is wired by design:** `npm run test:bdd` runs the first scenario of
+feature 0001 and is **red** until the player surface renders from the visible projection;
+typecheck, depcruise, and unit are green. Turning it green is the first implementation task.
+
+**Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`
+and `VectorIndex` are **engine-only**) · `src/adapters` (in-memory now; SQLite/vector later) ·
+`src/surfaces` (player + admin — no Vault handle by construction) · `src/app` (composition
+roots — only the engine root wires the Vault). BDD steps in `test/bdd`, unit tests in
+`test/unit`. The `.feature` files remain the source of truth in `docs/features/`.
+
+## Open decisions (remaining)
+
+**Resolved:** tech stack, datastore, and vector adoption (above); soul storage = markdown +
+vector behind `SoulProvider`; non-degradation strategy = superset + monotonic-count + lossless
+round-trip (`docs/features/0007-persistence-non-degradation.md`). **Still to confirm — none
+block the Vault-Wall slice:**
+
+1. **Temperature constants** — distributions, per-variable weighting, bounds, and the
+   hidden-element surfacing rate. The *shape* is fixed in `docs/features/0006-…`; the numbers
+   are tunable config still to be set.
+2. **Jury choreography & twists/specials** — jury-of-9 sequester and the tie-breaks are
+   settled; the precise jury-vote staging and any reserve twists remain to design (low
+   priority; twists stay Vault-held).
+3. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
+   fake covers seeded tests); finalize at wiring time.
