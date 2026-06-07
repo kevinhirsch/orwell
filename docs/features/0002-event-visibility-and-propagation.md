@@ -1,0 +1,79 @@
+# 0002 — Event visibility & propagation
+
+> **Status:** Draft. **Build priority:** #2.
+> **Executable spec:** [`0002-event-visibility-and-propagation.feature`](./0002-event-visibility-and-propagation.feature)
+
+## 1. Summary
+
+One interaction record; **visibility is per-event metadata** (a witness set + a hidden flag)
+**derived from the witness set, never from which store the event lives in**. Player-witnessed
+events are the player's knowledge and are *not* secret. Off-screen NPC-to-NPC events are
+hidden. Hidden facts reach an entity **only** through a legitimate in-game pathway (told,
+overheard, caught), which is itself a recorded, traceable event. Absent a pathway, the
+entity may *suspect* but cannot *know*.
+
+This is the area that caused real bugs before (player-witnessed events mislabeled as
+off-screen/secret), so the classification rule and its regression guard are central.
+
+## 2. Scope
+
+**In:** the `EventStore` witness/hidden semantics; the derived `classify()` rule; per-entity
+`KnowledgeState`; the `surfaceInformationTo` pathway and its recorded surfacing event;
+knowledge-vs-suspicion; the player-DR-reaches-no-NPC rule.
+
+**Out:** the *richness/volume* of off-screen life and surfacing **rates** (→ #3); the
+narrative *content* of generated scenes (→ #3); Vault-Wall content guarantees (→ #1, which
+this complements — #1 forbids Vault content on outward surfaces, #2 governs how facts move
+between knowledge states).
+
+## 3. Contracts (stack-agnostic)
+
+```
+EventStore:
+    record(event{ initiator, witnessSet, hidden, content, ts })
+    query(filter) -> [Event]
+    classify(event, entity) -> VISIBLE | HIDDEN     # = (entity ∈ witnessSet) ? VISIBLE : HIDDEN
+                                                    # derived; never set to contradict the witness set
+KnowledgeService:
+    knownTo(entity) -> KnowledgeState
+    surfaceInformationTo(entity, fact, pathway)     # records a surfacing event; adds fact to entity knowledge
+    suspicionsOf(entity) -> [Suspicion]             # may exist with no knowledge
+```
+
+**Invariant:** the hidden flag is a **function of** the witness set. `classify(e, player)`
+for an event the player witnessed must **never** be `HIDDEN`. A surfacing only adds to an
+entity's knowledge when called with a valid pathway, and it leaves a queryable event trail
+(who told whom, when).
+
+## 4. Test strategy
+
+- **Seeded** runs; classification asserted directly from witness sets (both player and NPC
+  perspectives).
+- **Propagation:** `knownTo(player)` gains a fact **only** after `surfaceInformationTo` with
+  a valid pathway, and a corresponding surfacing event exists; without a pathway the fact is
+  absent from `knownTo`.
+- **Knowledge ≠ suspicion:** an un-witnessed, un-told fact may appear in `suspicionsOf` but
+  never in `knownTo`.
+- **Regression guard:** generate player-witnessed events and assert none are ever classified
+  hidden/off-screen.
+- **DR isolation:** player DR content is in the player's knowledge but creates **no** NPC
+  pathway.
+
+## 5. Definition of Done
+
+- [ ] All scenarios pass, name-agnostic.
+- [ ] Visibility derivation correct for player **and** NPC perspectives.
+- [ ] No player-witnessed event can be classified secret (regression guard green).
+- [ ] Every surfaced fact has a traceable pathway event; un-surfaced facts are inaccessible.
+- [ ] Seeded unit tests for the domain logic.
+
+## 6. Dependencies
+
+Builds on the minimal `EventStore` (witness set + hidden flag) and `KnowledgeState` stubbed
+in #1. Provides the substrate #3 (behavioral fidelity) measures and #1 relies on for the
+"legitimately surfaced fact is not blocked" guard.
+
+## 7. Traceability
+
+`bb-sim-spec.md` §6.2–6.4, §12 (Event visibility); `CLAUDE.md` event/visibility model
+(incl. Diary Room); `CLAUDE_CODE_INSTRUCTIONS.md` §4, §13 (do-nots: mislabeling, prompt-Wall).
