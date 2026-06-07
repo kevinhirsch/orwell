@@ -6,9 +6,10 @@
 ## 1. Summary
 
 The simulation must reproduce the **full social texture** of a *Big Brother* house — alliances
-forming and fracturing, gossip, scheming, showmance, betrayal, private strategy — with a
-**meaningful portion off-screen** relative to the player, and with deep hidden character
-elements surfacing **rarely**, never dumped. Tests assert **richness**, not just mechanics.
+forming and fracturing, gossip, scheming, showmance, betrayal, private strategy — with **most
+of it off-screen** relative to the player (the player witnesses only a slice and pieces the
+rest together via gossip and social reads), and with deep hidden character elements surfacing
+**rarely**, never dumped. Tests assert **richness**, not just mechanics.
 
 This is the hardest thing to test, so the feature's job is to **operationalize "rich"** into
 measurable, seed-reproducible thresholds.
@@ -20,7 +21,7 @@ exact surfacing rate is an open decision, `bb-sim-spec.md` §16.2):
 
 | Metric | Assertion |
 |---|---|
-| **Off-screen share** | fraction of NPC interactions whose witness set excludes the player ≥ `MIN_OFFSCREEN_SHARE` |
+| **Off-screen share** | fraction of NPC interactions whose witness set excludes the player ≥ `MIN_OFFSCREEN_SHARE` — **a strong majority**: most social life is off-screen (default target ≈ 0.6–0.7, tunable) |
 | **Interaction-type diversity** | distinct interaction types present (alliance, gossip, conflict, bonding, strategy, showmance…) ≥ `MIN_TYPE_DIVERSITY` |
 | **Alliance churn** | ≥1 alliance formed **and** ≥1 shifted/fractured; relationship-edge strengths change over time |
 | **Surfacing rarity** | share of moments revealing a hidden element ≤ `MAX_SURFACING_RATE`, and > 0 over a long game |
@@ -49,7 +50,8 @@ concern, not asserted numerically here).
 ## 5. Definition of Done
 
 - [ ] All scenarios pass across the seed set, name-agnostic.
-- [ ] Off-screen life **provably exists** (off-screen share ≥ minimum) — and witnessed events
+- [ ] Off-screen life is **most** of the house's social life (off-screen share ≥ the configured
+      majority minimum) — and witnessed events
       are not secret (cross-checks #2).
 - [ ] Surfacing is provably **rare and bounded** (≤ max rate, ≤ max per moment, > 0 long-run).
 - [ ] Alliance/relationship evolution demonstrated.
