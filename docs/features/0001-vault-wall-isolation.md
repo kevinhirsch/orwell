@@ -3,6 +3,8 @@
 > **Status:** Draft (authored by the feature-maker; awaiting an implementer).
 > **Build priority:** #1 — the top of the order (`CLAUDE_CODE_INSTRUCTIONS.md` §9) and the
 > #2 non-negotiable in the mandate (`CLAUDE.md`).
+> **Stack (resolved):** TypeScript / Node 22 · SQLite-now / Postgres-ready · vector store from
+> day one · Cucumber.js + Vitest + fast-check + dependency-cruiser. Details in §8.
 > **Executable spec:** [`0001-vault-wall-isolation.feature`](./0001-vault-wall-isolation.feature)
 
 ## 1. Summary
@@ -130,22 +132,35 @@ Mirrors `CLAUDE_CODE_INSTRUCTIONS.md` §11:
   sourced from the player's `KnowledgeState`. The boundary is **provenance**, not content —
   otherwise the Wall becomes a blanket gag and the game can't deliver gossip.
 
-## 8. Implementer handoff — decisions & open questions
+## 8. Implementer handoff — resolved stack & decisions
 
-- **Stack & test runner are unchosen** (open decision; `CLAUDE_CODE_INSTRUCTIONS.md` §15).
-  This gates which BDD runner executes the `.feature`. Confirm before starting.
-- **Sentinel mechanism:** recommend test-fixture canaries as the baseline guarantee; an
-  optional runtime provenance/taint tag on Vault records is reasonable defense-in-depth — is
-  that wanted, or keep enforcement purely structural + fixture-based?
-- **Where the boundary is enforced** in the chosen stack: DI wiring, package/layer
-  boundaries, or running the player/admin MCP server as a separate process with no Vault
-  handle. Recommend the strongest the stack allows (separate composition root for outward
-  channels).
-- **Tool registry:** confirm player/admin MCP tools are a fixed allowlist and decide where
-  that registry lives, so the capability test has a single source of truth.
-- **Sequencing:** depends on a minimal `EventStore` (witness set + hidden flag) and a stub
-  `KnowledgeState`. If feature #2 isn't started, implement just enough of both to satisfy
-  these scenarios; #2 will deepen them.
+The stack is **chosen** — this feature is no longer gated. Build against these:
+
+- **Language / runtime:** **TypeScript / Node 22.** The domain core stays pure TS (no I/O).
+- **Test runners:** **Cucumber.js** executes the `.feature` files (BDD); **Vitest** for unit
+  tests; **fast-check** for the property / distribution checks; **dependency-cruiser** for the
+  architecture test that proves no outward module imports `VaultStore`.
+- **Datastore:** **SQLite now** (`better-sqlite3`) behind `GameStateRepository` / `EventStore`,
+  **Postgres-ready** (swap the adapter later, no domain-core change). Tests use **in-memory**
+  adapters.
+- **Vectors (adopted now):** **sqlite-vec** for the vector index now → **pgvector** on Postgres
+  later, behind a `VectorIndex` port reached **only** through `SoulProvider`. Embeddings sit
+  behind an `EmbeddingProvider` port with a **deterministic fake** for offline / seeded tests
+  and a real provider wired at runtime. The vector index holds Vault-side soul data, so it is
+  **engine-only — no outward channel may depend on it**, exactly like `VaultStore`.
+- **Sentinel mechanism:** test-fixture **canaries** are the baseline guarantee (`§5`); a
+  runtime provenance tag on Vault records is optional defense-in-depth. Enforcement is
+  primarily **structural**.
+- **Boundary enforcement:** outward channels (player surface, admin / God-Mode port, and the
+  player / admin MCP tools) are wired in **composition roots that never import `VaultStore`
+  or the vector index**; run the player / admin MCP server with no Vault handle. Verified by
+  **dependency-cruiser** (forbidden-edge rule) plus the capability test.
+- **Tool registry:** player / admin MCP tools are a **fixed allowlist** containing no Vault
+  reader; that registry is the single source of truth for the capability test.
+- **Sequencing:** needs a minimal `EventStore` (witness set + hidden flag) and a stub
+  `KnowledgeState`; implement just enough of both for these scenarios (#2 deepens them).
+- **First step:** stand up the in-memory `EventStore` + `VaultStore`, then implement
+  `VisibleStateService` and the player / admin surfaces so the `0001` scenarios go red → green.
 
 ## 9. Traceability
 

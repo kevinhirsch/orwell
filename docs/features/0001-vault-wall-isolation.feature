@@ -1,5 +1,6 @@
 # DRAFT executable spec — author: feature-maker; implementer makes it pass.
-# Stack-agnostic Gherkin. Build priority #1 (Vault isolation, incl. God Mode).
+# Build priority #1 (Vault isolation, incl. God Mode). Resolved stack: TypeScript / Node —
+# run via Cucumber.js + Vitest + fast-check + dependency-cruiser (see 0001-...md §8).
 # HARD rule: roles only, never houseguest or player names. Fixtures are generated,
 # never sample-save content. "Sentinel" = a unique marker injected into each Vault
 # datum by the test fixture, not derivable from any public/visible state.
