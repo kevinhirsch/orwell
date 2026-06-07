@@ -10,10 +10,10 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: greenfield.** At time of writing the repo contains only this file, `LICENSE`,
-`README.md`, and the design docs under `docs/`. No application code, stack, or build
-tooling exists yet — see [Current status & open decisions](#current-status--open-decisions).
-The first engineering work is to confirm the open decisions, then proceed BDD/TDD-first.
+**Status: under active implementation (BDD/TDD-first).** The stack is chosen (TypeScript /
+Node, hexagonal) and features **0001 (Vault Wall) and 0002 (event visibility) are green** —
+see [Building & testing](#building--testing). Priority-ordered feature specs live in
+`docs/features/`; work proceeds down that order. Next: 0003 (behavioral fidelity).
 
 ## Source of truth — read these first
 
@@ -25,6 +25,8 @@ are authoritative and reference each other as companions.
 |---|---|
 | `docs/CLAUDE_CODE_INSTRUCTIONS.md` | **Build brief & decision log** — start here. Architecture directives, workflow, hard "do-nots", milestones, open decisions (§15). |
 | `docs/bb-sim-spec.md` | **v3 domain spec** — concept, persistence model, Vault Wall, behavioral-fidelity mandate, the BDD invariants (§12), open decisions (§16). |
+| `docs/decisions/` | **Decision records (ADRs)** — accepted refinements to the canonical mechanics (drop Luck → emotional modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"). |
+| `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. |
 
 ## The non-negotiable mandate
@@ -106,6 +108,16 @@ a witness set + a hidden flag — not a function of which store the data lives i
   character; public persona may match or wildly diverge from hidden attributes; hidden
   elements surface **rarely** (gated by the temperature roll) and profiles **evolve** as the
   game proceeds. Souls may be md and/or vector-backed.
+- **Static `CHARACTER` vs dynamic `SOUL`.** A houseguest's stable baseline (archetype, core
+  competition aptitudes, identity, backstory, baseline temperament) is **static `CHARACTER`**
+  ("facts"); evolving state — current **emotional** state, accumulated memory, leanings, and
+  **relationship beliefs** — is the **dynamic `SOUL`** (md + vector). Relationships are **not**
+  binary ally/enemy flags: they are directed, graded, asymmetric, uncertain beliefs
+  (trust/affinity/threat…) computed from event history, and any "ally / best-friend / enemy"
+  label is **organic and emergent** — read through the holder's own character framing, never
+  stored (`docs/decisions/0002`). The competition **emotional modifier** (a baseline that grows
+  more or less volatile with circumstances + temperature) and the veto "Houseguest's Choice"
+  both read the dynamic soul. See `docs/decisions/`.
 - **Temperature is per-moment, not a global knob.** Each gameplay moment rolls temperature
   across *all* involved variables (outcomes, expression, NPC initiative, which secret
   surfaces, alliance shifts, volatility…). It governs variance/surprise but **never** overrides
@@ -119,15 +131,20 @@ a witness set + a hidden flag — not a function of which store the data lives i
 - **Cast:** 16 houseguests (player + 15 NPCs). **Jury of 9. Final 2.** Classic format, no
   core-structure twists (one or two production twists may be held in reserve).
 - **A "week" = one HOH reign** (HOH comp → eviction), not seven calendar days.
-- **Veto competition:** **six** players — the HOH, the two nominees, and **three drawn at
-  random**. The player has no agency over the random draw.
+- **Veto competition:** **six** players — the HOH, the two nominees, and **three by chip
+  draw**. One chip is **"Houseguest's Choice"**: whoever draws it picks the sixth player
+  instead of a random name (NPCs choose by soul motivation — their strongest available bond
+  per the relationship model, `docs/decisions/0002`). The player can't influence which chips
+  are drawn, but may hold Houseguest's Choice if drawn.
 - **Eligibility/legality (hard rules):** the **outgoing HOH cannot play** for the next HOH;
   the **veto winner cannot be named replacement nominee**; all houseguests except the HOH and
   the two nominees vote at eviction (HOH breaks ties).
-- **Competition stats:** Physical, Mental, Social, plus a small **Luck** randomness modifier.
-  Outcomes are weighted by relevant stat vs. competition type + temperature — **never** story
-  convenience; the engine never protects the player. The player may declare intent (compete /
-  throw / play safe) before a comp and cannot change it retroactively.
+- **Competition stats:** **Physical, Mental, Social** (no Luck stat). Outcomes are weighted by
+  relevant stat vs. competition type + **temperature** plus an **emotional modifier** sourced
+  from the houseguest's soul — **never** story convenience; the engine never protects the
+  player. Emotional state is a *character/soul* attribute, not a fourth competition stat. The
+  player may declare intent (compete / throw / play safe) before a comp and cannot change it
+  retroactively.
 - **Daily-event invariant:** every in-game day contains ≥1 meaningful event
   (comp, nomination/veto ceremony, vote/eviction, or significant house event).
 - **Standard weekly cadence:** Day 1 HOH comp → Day 2 nominations → Day 3 veto comp →
@@ -171,14 +188,14 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 - Don't mislabel player-witnessed events as off-screen/secret.
 - Don't let persisted detail degrade over time.
 
-## Build & test commands
+## Building & testing
 
-Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test stack: **Vitest**
+Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test lanes: **Vitest**
 (unit/property), **Cucumber.js** (the executable `.feature` specs), **fast-check** (property /
-distribution), **dependency-cruiser** (the *structural* Vault-Wall boundary test — proves no
-outward module imports `VaultStore`/`VectorIndex`, type-only imports included). Persistence is
-**in-memory** today; SQLite (`better-sqlite3`) → Postgres and sqlite-vec → pgvector land behind
-their ports with the persistence/soul features.
+distribution), and **dependency-cruiser** (the *structural* Vault-Wall test — proves no outward
+module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastore is
+**in-memory** today; **SQLite (`better-sqlite3`) → Postgres** and **sqlite-vec → pgvector**
+(the latter engine-only) land behind their ports with the persistence/soul features.
 
 | Command | What it does |
 |---|---|
@@ -192,22 +209,43 @@ their ports with the persistence/soul features.
 
 - Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
 - Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
-- `cucumber.cjs` `paths` lists only **implemented** features; add the next `.feature` there as each is built to green (priority order). Drafts for 0002–0008 stay untouched until implemented.
+- `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order).
 
-## Current status & open decisions
+**Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`
+and `VectorIndex` are **engine-only**) · `src/services` (visible-state / summary — outward-safe)
+· `src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) ·
+`src/adapters` (`inmemory/`, `narrative/`, `random/`; SQLite/vector later) · `src/engine`
+(off-screen simulation) · `src/composition` (`engineRoot` wires the Vault; `outwardRoot` never
+does). BDD steps + support in `features/`; unit/property/architecture tests in `tests/`. The
+`.feature` files in `docs/features/` remain the source of truth.
 
-**Stack resolved** (logged in `docs/features/0001-vault-wall-isolation.md` §8): TypeScript /
-Node 22; SQLite→Postgres; vectors via sqlite-vec→pgvector behind engine-only ports. Feature
-**0001 (Vault Wall isolation) is implemented and green** on player and admin surfaces, with the
-boundary proven structurally. Next in priority order: **0002 event visibility & propagation**.
+## Current status
 
-Confirm the rest as later features need them (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md`
-§15 and `docs/bb-sim-spec.md` §16):
+Built BDD/TDD-first, in priority order:
 
-1. ~~**Tech stack**~~ — resolved (above).
-2. **Soul/profile storage** — schema for deep hidden attributes + how evolution is persisted.
-3. **Temperature model** — distributions, per-variable weighting, bounds, hidden-element
-   surfacing rate.
-4. **Vector approach** — what the index holds (personalities, behavioral memory, recall).
-5. **Veto-draw specifics, jury procedure, twists/specials.**
-6. **Non-degradation test strategy** — how to operationalize "detail must accumulate."
+- **0001 — Vault Wall isolation:** ✅ green (player + admin surfaces; boundary proven by
+  dependency-cruiser; sentinel + property tests; fixed tool allowlist).
+- **0002 — Event visibility & propagation:** ✅ green (witness-derived visibility with a
+  store-enforced invariant against mislabeling; pathway-only propagation; knowledge vs
+  suspicion; Diary-Room isolation).
+
+`npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
+priority order: **0003 — behavioral fidelity**.
+
+## Open decisions (remaining)
+
+**Resolved:** tech stack, datastore, and vector adoption (above); soul storage = markdown +
+vector behind `SoulProvider`; non-degradation strategy = superset + monotonic-count + lossless
+round-trip (`docs/features/0007-persistence-non-degradation.md`); drop Luck → emotional
+modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"
+(`docs/decisions/`). **Still to confirm — none block current work:**
+
+1. **Temperature & emotional-modifier constants** — distributions, per-variable weighting,
+   bounds, hidden-element surfacing rate, volatility / mean-reversion. The *shape* is fixed in
+   `docs/features/0006-…` and `docs/decisions/0001`; the numbers are tunable config.
+2. **Relationship-model math** — signal set, update rule, recency/decay, betrayal-shock,
+   thresholds (`docs/decisions/0002`, Proposed).
+3. **Jury choreography & twists/specials** — sequester and tie-breaks are settled; precise
+   jury-vote staging and any reserve twists remain (low priority; twists stay Vault-held).
+4. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
+   fake covers seeded tests).

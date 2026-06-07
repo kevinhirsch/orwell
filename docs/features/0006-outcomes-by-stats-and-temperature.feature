@@ -4,8 +4,9 @@
 
 Feature: Outcomes by stats and temperature — earned results, never story convenience
 
-  Competition outcomes are weighted by the relevant stat versus the competition type, plus a
-  Luck modifier and a per-moment temperature roll across all involved variables. Results are
+  Competition outcomes are weighted by the relevant stat versus the competition type, a
+  per-moment temperature roll across all involved variables, and an emotional modifier sourced
+  from the houseguest's soul (no Luck stat). Results are
   reproducible under a fixed seed. Temperature governs variance but never overrides hard
   rules or archetype-grounded weighting, and the engine never protects the player.
 
@@ -29,10 +30,11 @@ Feature: Outcomes by stats and temperature — earned results, never story conve
     When outcomes are computed across many seeded runs
     Then the player's win rate reflects their stats like any other houseguest
 
-  Scenario: The Luck modifier prevents perfect predictability
+  Scenario: Variance prevents perfect predictability
     Given a clear favorite by stats in a competition
     When outcomes are computed across many seeded runs
     Then the favorite does not win in every run
+    # Variance comes from temperature and the soul-sourced emotional modifier — there is no Luck stat.
 
   Scenario: Player competition intent is honored and immutable
     Given the player declares an intent of compete, throw, or play safe before a competition
