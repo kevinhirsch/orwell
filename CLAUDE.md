@@ -92,6 +92,11 @@ a witness set + a hidden flag — not a function of which store the data lives i
   stays intact because surfacing is an explicit, traceable event. A houseguest can only know
   what they witnessed or were told; if there's no pathway, they don't know it (they may
   *suspect*, but cannot *know*).
+- **Diary Room / confessionals are events too.** NPC confessionals are Vault-only content
+  (off-screen, witness set excludes the player). The player's Diary Room is a *player-level,
+  OOC* channel: its content is the **player's own knowledge** but has **no in-game pathway to
+  any NPC** — it may inform the engine's read of player strategy, **never** NPC behavior. (DR
+  mechanics are concrete in the legacy Bible §6–§7; the provisional domain model is spec §11.)
 
 ## Characters, souls & per-moment temperature
 
@@ -125,6 +130,13 @@ a witness set + a hidden flag — not a function of which store the data lives i
   throw / play safe) before a comp and cannot change it retroactively.
 - **Daily-event invariant:** every in-game day contains ≥1 meaningful event
   (comp, nomination/veto ceremony, vote/eviction, or significant house event).
+- **Standard weekly cadence:** Day 1 HOH comp → Day 2 nominations → Day 3 veto comp →
+  Day 4 veto ceremony → Day 5 eviction, with the next HOH beginning immediately. A genuine
+  rest day is a rare producer judgment call, **not** the default.
+- **Jury & endgame:** the final **9 evictees** form the jury; how the player treats houseguests
+  on the way out genuinely influences their later vote (jury management is a real mechanic). At
+  Final 2 each finalist gives a statement and takes one question per juror. **Ties:** the HOH
+  breaks an eviction-vote tie; the **last-evicted juror** breaks a tied jury vote.
 
 ## Workflow (BDD/TDD — follow strictly)
 
@@ -162,9 +174,12 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 ## Current status & open decisions
 
 No build/lint/test commands exist yet — **the stack is unchosen** (Node/TS vs. Python; DB;
-whether to adopt a vector store). Update this section with the real commands once the stack
-lands. Before writing domain code, confirm these open items with the human (full lists in
-`docs/CLAUDE_CODE_INSTRUCTIONS.md` §15 and `docs/bb-sim-spec.md` §16):
+whether to adopt a vector store), so there is currently **nothing to build, run, or test**.
+Update this section with the real commands once the stack lands. The first slice should stand
+up the chosen stack + test runner and a *failing* Vault-isolation `.feature` (top of the
+priority order above), then implement to green. Before writing domain code, confirm these open
+items with the human (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md` §15 and
+`docs/bb-sim-spec.md` §16):
 
 1. **Tech stack** — Node/TS vs. Python; DB choice (SQLite → Postgres; graph for relationships?).
 2. **Soul/profile storage** — md / vector / hybrid; schema for deep hidden attributes + how
