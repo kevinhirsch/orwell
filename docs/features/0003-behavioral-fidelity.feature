@@ -6,7 +6,7 @@ Feature: Behavioral fidelity — a house with real social life beyond the player
 
   A mechanically-correct but behaviorally-thin game is a failure state. Over a season the
   house must generate alliances forming and fracturing, gossip, scheming, showmance,
-  betrayal, and private strategy talk — a meaningful portion of it off-screen relative to
+  betrayal, and private strategy talk — with most of it off-screen relative to
   the player. Deep hidden character elements surface only rarely, never dumped.
 
   Background:
@@ -15,7 +15,7 @@ Feature: Behavioral fidelity — a house with real social life beyond the player
   Scenario: The house has rich social life beyond the player
     When the simulated stretch completes
     Then alliances, gossip, scheming, and private conversations have occurred among NPCs
-    And a meaningful portion of them occurred off-screen relative to the player
+    And most of them occurred off-screen relative to the player
 
   Scenario: NPCs initiate among themselves without the player
     When the simulated stretch completes
@@ -34,7 +34,7 @@ Feature: Behavioral fidelity — a house with real social life beyond the player
 
   Scenario Outline: Richness thresholds hold across seeds
     Given the game is simulated with seed "<seed>"
-    Then the off-screen interaction share is at least the configured minimum
+    Then most NPC interactions occurred off-screen (share ≥ the configured majority minimum)
     And the diversity of NPC interaction types meets the configured minimum
     And the hidden-element surfacing rate stays within the configured bounds
 
