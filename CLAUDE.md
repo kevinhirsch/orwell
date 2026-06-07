@@ -171,21 +171,43 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 - Don't mislabel player-witnessed events as off-screen/secret.
 - Don't let persisted detail degrade over time.
 
+## Build & test commands
+
+Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test stack: **Vitest**
+(unit/property), **Cucumber.js** (the executable `.feature` specs), **fast-check** (property /
+distribution), **dependency-cruiser** (the *structural* Vault-Wall boundary test — proves no
+outward module imports `VaultStore`/`VectorIndex`, type-only imports included). Persistence is
+**in-memory** today; SQLite (`better-sqlite3`) → Postgres and sqlite-vec → pgvector land behind
+their ports with the persistence/soul features.
+
+| Command | What it does |
+|---|---|
+| `npm install` | Install dev dependencies. |
+| `npm test` | Full gate: `typecheck` → `test:unit` → `test:bdd`. |
+| `npm run typecheck` | `tsc --noEmit`. |
+| `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
+| `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
+| `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
+| `npm run test:watch` | Vitest watch mode. |
+
+- Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
+- Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
+- `cucumber.cjs` `paths` lists only **implemented** features; add the next `.feature` there as each is built to green (priority order). Drafts for 0002–0008 stay untouched until implemented.
+
 ## Current status & open decisions
 
-No build/lint/test commands exist yet — **the stack is unchosen** (Node/TS vs. Python; DB;
-whether to adopt a vector store), so there is currently **nothing to build, run, or test**.
-Update this section with the real commands once the stack lands. The first slice should stand
-up the chosen stack + test runner and a *failing* Vault-isolation `.feature` (top of the
-priority order above), then implement to green. Before writing domain code, confirm these open
-items with the human (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md` §15 and
-`docs/bb-sim-spec.md` §16):
+**Stack resolved** (logged in `docs/features/0001-vault-wall-isolation.md` §8): TypeScript /
+Node 22; SQLite→Postgres; vectors via sqlite-vec→pgvector behind engine-only ports. Feature
+**0001 (Vault Wall isolation) is implemented and green** on player and admin surfaces, with the
+boundary proven structurally. Next in priority order: **0002 event visibility & propagation**.
 
-1. **Tech stack** — Node/TS vs. Python; DB choice (SQLite → Postgres; graph for relationships?).
-2. **Soul/profile storage** — md / vector / hybrid; schema for deep hidden attributes + how
-   evolution is persisted.
+Confirm the rest as later features need them (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md`
+§15 and `docs/bb-sim-spec.md` §16):
+
+1. ~~**Tech stack**~~ — resolved (above).
+2. **Soul/profile storage** — schema for deep hidden attributes + how evolution is persisted.
 3. **Temperature model** — distributions, per-variable weighting, bounds, hidden-element
    surfacing rate.
-4. **Vector approach** (if adopted) — embedding/store and what it indexes.
+4. **Vector approach** — what the index holds (personalities, behavioral memory, recall).
 5. **Veto-draw specifics, jury procedure, twists/specials.**
 6. **Non-degradation test strategy** — how to operationalize "detail must accumulate."

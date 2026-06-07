@@ -1,0 +1,29 @@
+export type OutwardChannel = "player" | "admin/God Mode";
+
+/**
+ * A tool exposed to an outward channel. `readsVault` is the literal `false`: the
+ * type itself forbids registering a Vault-reading tool in these registries, so
+ * the capability allowlist cannot grow a Vault reader without a compile error.
+ */
+export interface ToolDescriptor {
+  name: string;
+  channel: OutwardChannel;
+  readsVault: false;
+  description: string;
+}
+
+export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
+  { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
+  { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
+  { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
+  { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
+];
+
+export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
+  { name: "inspectNonVaultState", channel: "admin/God Mode", readsVault: false, description: "Inspect non-Vault game state." },
+  { name: "overrideMechanic", channel: "admin/God Mode", readsVault: false, description: "Override a non-Vault mechanic in the sandbox." },
+];
+
+export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
+  return channel === "player" ? PLAYER_TOOLS : ADMIN_TOOLS;
+}
