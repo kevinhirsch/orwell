@@ -11,14 +11,16 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: under active implementation (BDD/TDD-first).** The eight priority invariants
-(**0001–0008**), the MCP seam (**0009**), the one-liner deploy (**0010**), and the gameplay loop
-(**0011–0014**) are **green**. The game is now **folded into the main chat**: the player-facing
-tier is the vendored **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP
-(see [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (now through **0023**). **Current focus: feature 0023 — the living, persisted
-consequence loop** (act → hidden impact → persist → recall), the MVP-1 backbone that wires the
-already-built pieces into the *live* game (today the live session logs events but changes no
-opinions and persists nothing). See [Current status](#current-status).
+(**0001–0008**), the MCP seam (**0009**), the one-liner deploy (**0010**), the gameplay loop
+(**0011–0014**), and the MVP-1 features through **0031** are **green** — including the
+**living, persisted consequence loop (0023)** that was the long-standing critical gap (act →
+hidden impact → persist → recall is now wired into the live game). The game is **folded into the
+main chat**: the player-facing tier is the vendored **Orwell** front-end (`frontend/`, Python)
+talking to the TS engine over MCP (see [Architecture](#architecture-hexagonal)). Priority-ordered
+feature specs live in `docs/features/` (now through **0031**). **Current focus: hardening the live
+game** — soul/semantic recall (0024), the real LLM `NarrativePort` (0027), durable persistence
+across engine restart (0030), and the per-sandbox game orchestrator & integrity watcher (0031).
+See [Current status](#current-status).
 
 ## Source of truth — read these first
 
@@ -127,11 +129,12 @@ happening → recorded event (witness set + hidden flag)
 
 The opinion change lives in the **hidden layer** (Soul/Vault) — the player **never sees the
 numbers**, only the later behavior. That is the Vault Wall working: the change is real, recorded,
-and invisible. **This is the point of the game**, and it is the current biggest gap — the pieces
-(events 0002, relationships 0017, persistence 0007) exist and are tested in isolation, but the
-**live** game (`GameSessionAdapter` / the MCP `recordInteraction`) does **not** yet wire them:
-it logs events, changes no opinions, persists nothing. Feature **0023** is that wiring. Do not
-ship an action that is narrated but never recorded — it has no consequence and no memory.
+and invisible. **This is the point of the game.** It is now **green** (feature 0023): the live
+game wires events (0002), relationships (0017/0026), and persistence (0007/0030) together —
+`recordInteraction` records the event, `src/engine/consequence.ts` folds its hidden impact into
+the relationship/soul layer, and the orchestrator (`src/composition/orchestrator.ts`) persists it
+with a fail-closed integrity checkpoint (0031). Hold the line that made it work: **never ship an
+action that is narrated but never recorded** — it has no consequence and no memory.
 
 ## Characters, souls & per-moment temperature
 
@@ -246,20 +249,28 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
+| `npm run test:cov` | Vitest with v8 coverage (excludes `src/ports/**` and `src/main.ts`). |
 | `npm run test:watch` | Vitest watch mode. |
 
 - Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
 - Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
-- `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order).
+- `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order). It is the canonical list of what is wired into the BDD gate.
+- **Deploy** (`deploy/`): `orwell-install.sh` / `orwell-update.sh` (host-aware, legacy-aware) provision the engine + front-end as systemd units (`deploy/systemd/`); `deploy/smoke.sh` is the post-deploy check. Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
-**Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`
-and `VectorIndex` are **engine-only**) · `src/services` (visible-state / summary — outward-safe)
-· `src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) ·
-`src/adapters` (`inmemory/`, `engine/` (the live `GameSessionAdapter` / `EngineCommandsAdapter`),
-`mcp/` (`McpServer` / `HttpMcpServer`), `narrative/`, `random/`; SQLite/vector later) · `src/engine`
-(the season loop `season.ts`, `conversation.ts`, `relationships.ts`, `momentPrompts.ts`, and the
-off-screen simulation) · `src/composition` (`engineRoot` wires the Vault; `outwardRoot`/`appRoot`
-never do). BDD steps + support in `features/`; unit/property/architecture tests in `tests/`. The
+**Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`,
+`VectorIndex`, `EmbeddingProvider`, `SoulProvider` are **engine-only**; outward ports include
+`EngineCommands`, `GameSession`, `NarrativePort`/`StreamingNarrativePort`, `SaveStore`/
+`UserSaveStore`) · `src/services` (`VisibleStateService` / `SummaryService` — outward-safe) ·
+`src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) · `src/adapters`
+(`inmemory/`, `engine/` (the live `GameSessionAdapter` / `EngineCommandsAdapter`, `FileSaveStore`,
+`SoulStore`), `mcp/` (`McpServer` / `HttpMcpServer`), `narrative/` (`LlmNarrativePort`,
+`DeterministicNarrator`, `Echo…`), `embedding/`, `random/`, `time/`) · `src/engine` (the season
+loop `season.ts`, plus `conversation.ts`, `relationships.ts`, `consequence.ts` (the hidden-impact
+fold), `gossip.ts`, `offscreen.ts`, `momentPrompts.ts`, and tunable constants) · `src/composition`
+(`engineRoot` wires the Vault; `outwardRoot`/`appRoot` never do; `orchestrator.ts` is the single
+per-sandbox game-advance path with a fail-closed integrity checkpoint, driven by `gameWatcher.ts`
+over a `registry` of per-user sandboxes). BDD steps + support in `features/`; unit/property/
+architecture/integration tests in `tests/`. The
 `.feature` files in `docs/features/` remain the source of truth. The **player-facing tier** is the
 vendored **Orwell** front-end in `frontend/` (Python/FastAPI) — its own app, quarantined from the
 TS tooling (see `frontend/INTEGRATION.md`).
@@ -307,27 +318,29 @@ all BDD scenarios.
 pure, seed-deterministic season — HOH → noms → veto → ceremony → eviction down to Final 2 + a
 jury vote (last-9 jury, last-juror tie-break); NPC decisions are relationship-driven (threat/
 trust), player decision points are surfaced and validated. **0012–0014** (conversation & scene
-system, Diary Room, jury & endgame) are ✅ green too — so the built set is **0001–0014 + 0009 +
-0010**.
+system, Diary Room, jury & endgame) are ✅ green too.
 
 **Renamed & folded:** the project is now **Orwell** (repo `kevinhirsch/orwell`); the game is
 **folded into the main chat** — the vendored Orwell front-end (`frontend/`) drives play through
 the engine's MCP tools, and the engine supplies a **tight, per-moment game-master system prompt**
 (0018) with a **lever manifest** (the model knows how to access and pull every engine lever).
 
-**Drafted — next batch (0015–0023, not yet built):** 0015 OOBE · 0016 God Mode · 0017 relationship
-model · 0018 moment orchestration · 0019 agent play loop · 0020 player experience MVP-1 · 0021
-per-user sandboxes · 0022 player experience MVP-2 (deferred) · **0023 consequence & memory**.
+**MVP-1 batch (0015–0031) — green** (the canonical list is `cucumber.cjs` `paths`): 0015 OOBE ·
+0016 God Mode · 0017 relationship model · 0018 moment orchestration · 0019 agent play loop · 0020
+player experience MVP-1 · 0021 per-user sandboxes · **0023 consequence & memory** (the former
+critical gap — now wired into the live game) · 0024 soul storage & semantic recall (md + vector) ·
+0025 reserve twists (Vault-sealed) · 0026 relationship math · 0027 the real LLM `NarrativePort` ·
+0028 temperature/emotional constants · 0030 durable persistence (survive engine restart) · 0031
+per-sandbox game orchestrator & integrity watcher. **0022** (player experience MVP-2) is **deferred**.
 
-**The critical gap (top priority).** The live game (`src/adapters/engine/GameSessionAdapter`) is a
-thin shell — it starts a game, shows the house, resolves a competition, and serves the prompt, but
-it does **not** update relationships on player actions or persist anything (the `RelationshipModel`
-only runs in the off-screen sim; `recordInteraction` only logs). Wiring the **consequence & memory
-loop** (0023) into the live game is the next, highest-priority work (queue item **B13**).
+**Verifying current state.** Because the status prose drifts, trust the code over this section:
+`cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
+`NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-Remaining beyond that: 0010's container smoke test on a real Proxmox host; the deferred real
-adapters (SQLite/Postgres, sqlite-vec/pgvector); the async LLM `NarrativePort` + full MCP/JSON-RPC
-over the current HTTP transport; and the front-end's full lever exposure + player surfaces.
+**Remaining work:** 0010's container smoke test on a real Proxmox host; the deferred real
+relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run in-memory + file
+today); full MCP/JSON-RPC over the current HTTP transport; and the front-end's full lever exposure
++ player surfaces.
 
 ## Open decisions (remaining)
 
