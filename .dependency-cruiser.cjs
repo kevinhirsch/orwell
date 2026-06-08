@@ -9,7 +9,8 @@
  * `tsPreCompilationDeps: true` makes the check catch even type-only imports, so
  * an outward module cannot so much as *name* the Vault types.
  */
-const OUTWARD = "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$";
+const OUTWARD =
+  "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$|^src/adapters/mcp/";
 const VAULT =
   "^src/ports/(VaultStore|VectorIndex)\\.ts$" +
   "|^src/adapters/inmemory/InMemoryVaultStore\\.ts$" +

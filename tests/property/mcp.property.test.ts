@@ -1,0 +1,49 @@
+import { describe, it, expect } from "vitest";
+import { buildSandbox } from "../support/sandbox";
+import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
+import { McpServer } from "../../src/adapters/mcp/McpServer";
+import { toolsFor } from "../../src/surfaces/tools/registry";
+import type { OutwardChannel } from "../../src/surfaces/tools/registry";
+import { PLAYER, npc } from "../../src/domain/ids";
+
+function sampleArgs(name: string): Record<string, unknown> {
+  switch (name) {
+    case "getVisibleStateFor": return { entity: PLAYER };
+    case "renderScene": return { mode: "scene" };
+    case "askProducers": return { question: "is it true?" };
+    case "recordInteraction": return { initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "chat" };
+    case "resolveCompetition": return { type: "endurance", participants: [{ id: PLAYER, stats: { physical: 0.5, mental: 0.5, social: 0.5 } }, { id: npc(1), stats: { physical: 0.6, mental: 0.5, social: 0.5 } }], intents: [], seed: 1 };
+    case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
+    case "inspectNonVaultState": return { query: "all" };
+    case "overrideMechanic": return { mechanic: "pace", value: 1 };
+    default: return {};
+  }
+}
+
+describe("MCP tool boundary — every tool is Vault-free across seeds", () => {
+  it("no player or admin tool ever returns a Vault sentinel", async () => {
+    for (let seed = 1; seed <= 25; seed++) {
+      const sb = buildSandbox(seed);
+      const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
+      const deps = { player: sb.player, admin: sb.admin, summary: sb.summary, commands };
+
+      for (const channel of ["player", "admin/God Mode"] as OutwardChannel[]) {
+        const server = new McpServer(channel, deps);
+        expect(server.listTools()).toEqual(toolsFor(channel));
+        for (const t of server.listTools()) {
+          const blob = JSON.stringify(await server.callTool(t.name, sampleArgs(t.name)));
+          for (const s of sb.sentinels) {
+            expect(blob.includes(s), `seed ${seed} tool ${t.name} leaked ${s}`).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("channels are isolated — a player server cannot call an admin tool", async () => {
+    const sb = buildSandbox(1);
+    const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
+    const player = new McpServer("player", { player: sb.player, admin: sb.admin, summary: sb.summary, commands });
+    await expect(player.callTool("inspectNonVaultState", { query: "all" })).rejects.toThrow();
+  });
+});

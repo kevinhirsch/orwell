@@ -14,6 +14,7 @@ import type { GameState } from "../../src/domain/saveState";
 import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
 import type { RandomnessSource } from "../../src/ports/RandomnessSource";
 import type { Day } from "../../src/engine/schedule";
+import type { McpServer } from "../../src/adapters/mcp/McpServer";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -75,6 +76,13 @@ export class BbWorld extends World {
   day?: Day;
   weekDays?: Day[];
   scheduleDays?: Day[];
+
+  // MCP tool boundary (0009) scratch state.
+  mcpPlayer?: McpServer;
+  mcpAdmin?: McpServer;
+  server?: McpServer;
+  toolResult?: unknown;
+  ack?: { eventId: string };
 
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
