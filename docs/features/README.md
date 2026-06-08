@@ -67,6 +67,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | Gameplay | Draft |
 | 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Draft |
 | 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Draft |
+| 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | Foundational | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
@@ -76,7 +77,9 @@ from the Vault even for the admin); 0017 promotes [decision 0002](../decisions/0
 (the organic relationship model) into an executable spec. 0018–0019 make **Orwell *is* the game**
 playable in the main chat: 0018 is the engine-owned per-moment narrator framing (the model speaks
 as the house, never a generic assistant); 0019 is the agent turn-loop that drives play by calling
-engine tools while the engine decides every outcome.
+engine tools while the engine decides every outcome. 0021 makes it **multi-tenant**: one active
+game per physical-world user, a sandbox per user, unlimited concurrent games across users — adding
+**cross-user isolation** as a new guarantee alongside the Vault Wall.
 
 ## Amendments to shipped specs (implementer: pick these up)
 
