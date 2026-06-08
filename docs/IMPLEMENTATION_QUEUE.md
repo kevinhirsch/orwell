@@ -557,13 +557,78 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > Make `0031` green (add to `cucumber.cjs`); keep all gates green. Read `docs/features/0003`, `0007`,
 > `0008`, `0021`, `0030`, and `0016` first. Open a PR.
 
+### B21 — complete the 0018 lever manifest (drift-guarded)  ·  Claude Code  ·  **small; finishes C6's engine half**
+
+> In `kevinhirsch/orwell` (TS engine), complete the **0018 lever-manifest refinement** that was specced
+> but never built. `src/engine/momentPrompts.ts` still names only the original **4** levers
+> (`getGameState`, `runCompetition`, `recordInteraction`, `surfaceInformationTo`), while the player tool
+> registry (`src/surfaces/tools/registry.ts`) now exposes many more — incl. the live-loop levers
+> **`advanceGame`** and **`submitDecision`** (0034) plus `gameStatus`, `getVisibleStateFor`, `socialRead`,
+> `renderScene`, `askProducers`. The model discovers them via schemas, but the in-character base prompt
+> should **name** them.
+> 1. Update the base prompt's **YOUR LEVERS** manifest to name **every agent-driving player lever** the
+>    registry exposes (exclude pure infra — `getMomentPrompt`, `endOfSessionSummary`), keeping the
+>    engine-decides-outcomes framing.
+> 2. **Activate 0018's parked scenarios** — uncomment the block in
+>    `docs/features/0018-narrative-moment-orchestration.feature` ("names every player-channel lever",
+>    "no lever in the player tool registry is missing from it", "each moment names the lever its beat
+>    calls for") and make them green.
+> 3. Add a **manifest↔registry drift test** (unit) that fails if any registry agent-lever is missing
+>    from the base prompt — optionally via an `agentLever: true` marker on the game-driving entries.
+> Manifest is **persona/framing only** — never the Vault Wall; the prompt stays **sentinel-clean** under
+> a populated Vault (the 0001 canary on `getMomentPrompt` stays green). Make `0018` green; gates green.
+> Open a PR.
+
+### B22 — 0033 engine: `playerTagline` (Vault-free, snarky, state-aware)  ·  Claude Code
+
+> In `kevinhirsch/orwell` (TS engine), implement the **engine** side of feature **0033**
+> (`docs/features/0033-dynamic-player-tagline.{md,feature}`): a Vault-free player-channel tool
+> **`playerTagline()` → { text }** — a single snarky _Big Brother_ welcome line for the caller's current
+> moment, **generated via `NarrativePort`** (0027) from the **Vault-free public projection only**
+> (`gameStatus`: week/phase/public standing — **never** hidden votes/targeting/souls/off-screen). One
+> line, bounded length; **cache per `(user, week, phase, standing)`** (regenerate when the moment
+> advances, not per load); a **pre-game** default line; **fail-open** to a static themed line on
+> narrator error/timeout. `readsVault: false`; extend the 0001 canary to `playerTagline`;
+> dependency-cruiser green. **Anti-sycophancy:** with a seeded deterministic fake narrator over a
+> weak-standing state, the line must **not** flatter. Make the engine-side `0033` scenarios green (add to
+> `cucumber.cjs`); gates green. Read `docs/features/0027`, `0020`, `0001` first. Open a PR.
+
+### C9 — 0033 front-end: render the dynamic hero line  ·  OpenHands  ·  **depends on B22**
+
+> In `kevinhirsch/orwell` `frontend/`, implement the **front-end** side of feature **0033**: replace the
+> static hero subtitle at `static/js/models.js:571` (`#welcome-sub` ← "Yours for the voyage.") with the
+> engine's **`playerTagline`** (B22). Fetch it Vault-free — fold a `tagline` field into the existing
+> `GET /api/orwell/state` response (`routes/orwell_routes.py` + `src/orwell_engine.py`), or add a tiny
+> `GET /api/orwell/tagline`. **Fail-open:** engine down / field absent ⇒ keep the static line; the
+> homepage must **never** block on the tagline. Refresh on the SSE/session-sync tick that already drives
+> play. Part of the **0032** game build. `pytest` green; `py_compile` clean; engine gate unaffected.
+> Depends on **B22**. Open a PR.
+
+### B23 — 0034 codify the live progression & decision seam (as-built)  ·  Claude Code  ·  **mostly codification**
+
+> In `kevinhirsch/orwell` (TS engine), implement feature **0034**
+> (`docs/features/0034-live-weekly-progression-and-decision-seam.{md,feature}`). The capability is
+> **already built** (`src/engine/liveSeason.ts`, `GameSessionAdapter.advanceGame()/submitDecision()`, the
+> `GameSession` port, the `advanceGame`/`submitDecision` tools + MCP client + agent tools + status panel,
+> with unit + integration tests) — but it shipped **without a name-agnostic `.feature`**. Add that spec
+> (to `cucumber.cjs`) and **assert the cross-cutting guarantees** so the live loop can't regress: NPC
+> beats auto-resolve; the loop **stops** for the player's binding decision and returns the **legal**
+> option set; a binding choice changes state **only** via the validated `submitDecision`, **never** from
+> prose; **illegal** choices are rejected (0005); each beat **persists** and **survives a restart**
+> (0030); the live path is **Vault-free** — and where the explicit Vault sentinel on `advanceGame`/
+> `submitDecision`/`gameStatus` output isn't already covered, **add it** (extend the 0001 canary);
+> seed-deterministic. Most steps map to the **existing** code — this is codification + targeted
+> hardening, not a rebuild. Pairs with **B21** (the manifest must name `advanceGame`/`submitDecision`).
+> Make `0034` green; gates green. Read `docs/features/0011`, `0019`, `0005`, `0030`, `0001` first. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0031 are built** (0001–0031 Done; 0022 deferred; 0004 amended and built).
-**0032 (front-end surface reduction / "game build")** is the newest draft — queued as **C8**.
-**Nothing is blocking the implementer queue.** Engine: the core is **complete** (0031 closed the
-runtime-orchestration gap) — only maintenance + future specs remain. Front-end: **C8 (0032 prune)** is
-the next item, then any remaining player-UX polish. Candidate future spec work: MVP-2 (0022) un-parks
-after MVP-1 is solid; jury-vote choreography; any new product calls.
+**0001–0032 are built** (0022 deferred). The implementer also shipped the **live weekly loop + full tool
+wiring ahead of spec** (`liveSeason.ts`, `GameSessionAdapter.advanceGame`/`submitDecision`) — closing the
+once-"unwired decision seam" gap. **Live drafts:** **0033** (dynamic player tagline → **B22** engine +
+**C9** front-end), **0034** (codify the as-built live progression + decision seam → **B23**), and **B21**
+(complete the 0018 lever manifest + drift test — now also needs to name `advanceGame`/`submitDecision`).
+**Nothing is blocking the implementer queue.** Candidate future spec work: MVP-2 (0022) un-parks after
+MVP-1 is solid; jury-vote choreography; any new product calls.
