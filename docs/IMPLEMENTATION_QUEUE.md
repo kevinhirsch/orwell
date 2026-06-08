@@ -353,14 +353,28 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > (0023 §8) are yours to pick — the tests are agnostic to both. Read `CLAUDE.md` (non-degradation
 > mandate) and `docs/features/0002/0007/0017` first. Open a PR.
 
+### B14 — 0024 soul storage & memory recall (md + vector)  ·  Claude Code  ·  **pairs with B13**
+
+> In `kevinhirsch/orwell`, implement feature **0024**
+> (`docs/features/0024-soul-storage-and-memory-recall.{md,feature}`): the dynamic `Soul` as a
+> **markdown narrative** + an **engine-only vector index**, behind `SoulProvider`, with
+> **semantic recall**. `recall(hg, context, k)` returns the *k* semantically-most-relevant past
+> memories (use an **`EmbeddingProvider` with a deterministic fake** so recall is testable + seed-
+> deterministic — a query about "the veto betrayal" recalls *that* memory, not the most recent
+> chat). Recall feeds **both**: it **weights the relationship read** (0017) by relevant history, and
+> it **gives the narrator** a specific recalled memory. **Boundary:** the `VectorIndex`/full soul are
+> **engine-only** — extend the dependency-cruiser rule so no outward module imports them (exactly
+> like `VaultStore`); player-facing recall output is **sentinel-clean** and pathway-filtered (0002).
+> The soul **deepens monotonically** (0007); `Character` stays byte-stable. Make `0024` green; gates
+> green. **Pairs with B13** (0023 records to the soul + calls recall) — do them together. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0021** are drafted (0015–0021 added this session; **0004 amended** —
-see the amendments table in `docs/features/README.md`). Nothing is blocking the implementer queue.
-Future spec work, if it comes up: **MVP-2** (the rich game UI — house view, houseguest cards,
-browsable journal, competition visuals) and a **game-session ↔ save lifecycle** spec; any
-**reserve-twist** specifics (stay Vault-held, 0005); and a dedicated **temperature/relationship
-constants** tuning note once the implementers want concrete numbers (the *shape* is fixed in
-0006 / 0017).
+All planned specs through **0024** are drafted (**0001–0020 built**; 0021/0023/0024 drafted, 0022
+deferred; **0004 amended**). Nothing is blocking the implementer queue. Candidate future spec work:
+**reserve twists** (Vault-held, even the admin doesn't know — 0005); the **relationship-math
+firming** (promote decision 0002's signal set / update-rule / betrayal-shock / decay numbers into a
+spec, to ground 0023's `apply`); a **temperature/emotional-modifier constants** tuning note; and the
+async **LLM `NarrativePort`** adapter spec. MVP-2 (0022) un-parks after MVP-1 is solid.
