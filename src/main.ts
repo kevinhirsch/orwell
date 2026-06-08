@@ -1,4 +1,4 @@
-import { buildMcpServers } from "./composition/appRoot";
+import { GameSessionRegistry } from "./composition/registry";
 import { startHttpMcp } from "./adapters/mcp/HttpMcpServer";
 
 /**
@@ -20,6 +20,9 @@ const port = parsePort(
   process.env["ORWELL_PORT"] ?? process.env["BBAI_PORT"],
   8765,
 );
-startHttpMcp(buildMcpServers(), port);
+// One long-lived registry: each authenticated user (asserted by the front-end over the
+// x-orwell-user header) gets an isolated sandbox; calls route there (per-user model, 0021).
+const registry = new GameSessionRegistry();
+startHttpMcp({ resolve: registry.resolver() }, port);
 // eslint-disable-next-line no-console
 console.log(`Orwell engine MCP server listening on http://0.0.0.0:${port}`);
