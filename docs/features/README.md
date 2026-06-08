@@ -55,5 +55,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | 6 | Done |
 | 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Draft |
+| 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Draft |
 
-Each row is shipped as its own auto-merged PR, in priority order.
+Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
+the M5 integration seam — the engine's outward tool API for the front-end / agent.
