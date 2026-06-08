@@ -157,7 +157,13 @@ ensure_template() {
 ensure_template
 
 # ── Create + start the container ───────────────────────────────────────────────────────────────
-if [[ "$NET" == "dhcp" ]]; then
+# NET0 may be passed as a raw pct net0 string (e.g. "name=eth0,bridge=vmbr0,ip=dhcp") to
+# bypass the helpers; otherwise it's constructed from NET ("dhcp" or CIDR), BRIDGE, GATEWAY.
+if [[ -n "${NET0:-}" ]]; then
+  : # raw passthrough — use as-is
+elif [[ "${NET:-dhcp}" =~ ^name= ]] || [[ "${NET:-dhcp}" =~ bridge= ]]; then
+  NET0="${NET}"  # caller already supplied a full net0 option string via NET=
+elif [[ "${NET:-dhcp}" == "dhcp" ]]; then
   NET0="name=eth0,bridge=${BRIDGE},ip=dhcp"
 else
   NET0="name=eth0,bridge=${BRIDGE},ip=${NET}${GATEWAY:+,gw=${GATEWAY}}"
@@ -186,10 +192,16 @@ done
 [[ -n "$IP" ]] || IP="<container-ip>"
 
 # ── In-container install (LLM config, if any, is passed through and lands in data/.env) ─────────
+# The fresh container has no curl yet, so download bbai-install.sh on the host (which always
+# has curl) and push it in via pct — no chicken-and-egg bootstrap problem.
 msg "running in-container install"
+TMP_INSTALL="$(mktemp /tmp/bbai-install-XXXXXX.sh)"
+curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/bbai/${BRANCH}/deploy/bbai-install.sh" -o "$TMP_INSTALL"
+pct push "$CTID" "$TMP_INSTALL" /tmp/bbai-install.sh
+rm -f "$TMP_INSTALL"
 pct exec "$CTID" -- bash -c \
   "export REPO='${REPO}' BRANCH='${BRANCH}' BBAI_PORT='${BBAI_PORT}' \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
-   bash <(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/${BRANCH}/deploy/bbai-install.sh)"
+   bash /tmp/bbai-install.sh"
 
 msg "done. bbai UI: http://${IP}:${BBAI_PORT}"
