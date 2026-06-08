@@ -102,6 +102,12 @@ export class BbWorld extends World {
   pendingBefore?: unknown;
   sceneEventId?: string;
 
+  // Diary Room (0013) scratch state.
+  beat?: string;
+  publicStmt?: string;
+  drStmt?: string;
+  npcActedOn?: string[];
+
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;

@@ -59,7 +59,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Draft |
 | 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Done |
 | 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
-| 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Draft |
+| 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
 | 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is

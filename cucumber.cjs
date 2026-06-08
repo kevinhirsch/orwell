@@ -19,6 +19,7 @@ module.exports = {
       "docs/features/0009-mcp-tool-boundary.feature",
       "docs/features/0011-weekly-loop-orchestration.feature",
       "docs/features/0012-conversation-and-scene-system.feature",
+      "docs/features/0013-diary-room.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
