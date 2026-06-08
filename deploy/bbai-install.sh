@@ -15,7 +15,17 @@ BBAI_ENGINE_PORT="${BBAI_ENGINE_PORT:-8765}"
 echo "==> apt deps"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates python3 python3-venv python3-pip
+apt-get install -y -qq curl git build-essential ca-certificates python3 python3-venv python3-pip qemu-guest-agent
+
+# Proxmox guest tools (qemu-guest-agent). It's a VM-only transport (virtio-serial), absent in an
+# LXC — so install it always, but ENABLE it only when that transport exists (a real VM). On an LXC
+# the host manages the guest directly, so the agent stays installed-but-dormant (no failed unit).
+if [[ -e /dev/virtio-ports/org.qemu.guest_agent.0 ]]; then
+  echo "==> enabling qemu-guest-agent (VM transport detected)"
+  systemctl enable --now qemu-guest-agent 2>/dev/null || true
+else
+  echo "==> qemu-guest-agent installed (LXC: dormant — host manages the guest directly)"
+fi
 
 echo "==> Node 22"
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" -lt 22 ]]; then
