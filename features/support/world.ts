@@ -10,6 +10,9 @@ import type { GameHouse, Houseguest } from "../../src/engine/characterFactory";
 import type { WeekState, VetoDraw } from "../../src/domain/eligibility";
 import type { RelationshipModel } from "../../src/engine/relationships";
 import type { Competitor, CompetitionType, CompetitionIntents, CompetitionResult } from "../../src/domain/competitionOutcome";
+import type { GameState } from "../../src/domain/saveState";
+import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
+import type { RandomnessSource } from "../../src/ports/RandomnessSource";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -55,6 +58,17 @@ export class BbWorld extends World {
   winRates?: Record<string, number>;
   intents?: CompetitionIntents;
   result?: CompetitionResult;
+
+  // Persistence non-degradation (0007) scratch state.
+  gameState?: GameState;
+  store?: SaveStore;
+  rng?: RandomnessSource;
+  loaded?: GameState;
+  early?: GameState;
+  late?: GameState;
+  snapshots?: GameState[];
+  saveRef?: SaveRef;
+  saveRef2?: SaveRef;
 
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
