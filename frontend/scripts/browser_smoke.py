@@ -89,6 +89,20 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # The theme picker must stay reachable under the game build. Its sidebar
+            # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
+            # Click the launcher programmatically (panel visibility is irrelevant) and
+            # assert the theme modal opens — guards against the entry point regressing.
+            theme_opened = page.evaluate(
+                "() => { const b = document.getElementById('appearance-theme-btn');"
+                " if (!b) return 'no-button';"
+                " b.click();"
+                " const m = document.getElementById('theme-modal');"
+                " if (!m) return 'no-modal';"
+                " return m.classList.contains('hidden') ? 'still-hidden' : 'open'; }"
+            )
+            check(theme_opened == "open", f"Settings -> Appearance opens the theme picker ({theme_opened})")
+
             browser.close()
     finally:
         proc.terminate()
