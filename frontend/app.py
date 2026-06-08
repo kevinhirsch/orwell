@@ -795,11 +795,6 @@ async def serve_backgrounds(request: Request):
     """Sandbox page for prototyping background effects. No auth required."""
     return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
 
-@app.get("/orwell")
-async def serve_orwell(request: Request):
-    """Big Brother game: character creation (OOBE) + in-character play."""
-    return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/orwell.html"))
-
 @app.get("/login")
 async def serve_login(request: Request):
     if not AUTH_ENABLED:

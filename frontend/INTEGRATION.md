@@ -45,34 +45,39 @@ integration linchpin — it's what drives the game.
 4. Build the BB-specific surfaces (narrated scene view, Diary Room, house/houseguest panels)
    on top of the chat shell.
 
-## Wired now: the onboarding + per-moment narration bridge
+## Wired now: the game IS the main chat
 
-A first vertical slice connecting Orwell to the engine lives at **`/orwell`**:
+The Big Brother game is folded into the **main chat** — there is no separate game page. The
+standalone `/orwell` slice has been retired; onboarding and in-character play happen in the real
+app, so they inherit its session, streaming, SSE sync, and provider plumbing for free.
 
 - **`src/orwell_engine.py`** — thin async client to the engine's HTTP MCP player channel
   (`ORWELL_ENGINE_MCP_URL`, default `http://127.0.0.1:8765`): `createCharacter`, `getGameState`,
   `getMomentPrompt`. Consumes only Vault-free results.
-- **`routes/orwell_routes.py`** — `GET /api/orwell/{health,state}`, `POST /api/orwell/new-game`
-  (runs OOBE), `POST /api/orwell/chat`. The chat route fetches the engine's **managed per-moment
-  system prompt**, injects it as the system message, resolves the user's default model via
-  Orwell's own `resolve_endpoint("default")`, and calls `llm_call_async`. This is what stops
-  the model from answering as a generic assistant — it now speaks **as the game master**.
-- **`static/orwell.html` + `static/js/orwell.js` + `static/css/orwell.css`** — character creation
-  (the step that was missing past account creation), the house roster, and an in-character chat
-  with a **moment selector** (the visible "manage system-prompt injection per moment" control).
-- **`app.py`** — serves `/orwell` and mounts the router. Auth-gated by the existing middleware.
+- **`routes/orwell_routes.py`** — the onboarding + state seam: `GET /api/orwell/{health,state,moment}`
+  and `POST /api/orwell/new-game` (runs OOBE). **No bespoke chat route** — chat is the main chat.
+- **In-character main chat** — `routes/chat_helpers.py:build_chat_context` prepends the engine's
+  **managed per-moment game-master system prompt** (`getMomentPrompt`) to the main chat's system
+  message whenever a game is in progress. This is what makes every turn speak as the game master,
+  across both the streaming and non-streaming paths (they share `build_chat_context`). Best-effort
+  and Vault-free; if the engine is down the chat simply isn't framed (no disruption).
+- **First-class onboarding** — `static/js/orwellOnboarding.js` overlays character creation in the
+  main app when `GET /api/orwell/state` reports no active game; on submit it `POST`s
+  `/api/orwell/new-game` and dissolves into the chat. It **fails open** (engine down → never blocks
+  the chat).
+- **Cross-device sync comes free** — because play is the main chat, the existing session +
+  SSE sync (`session_events` / `sessionSync`) already covers a game session across devices.
 
 ### Try it
 
 1. Run the **engine**: from the repo root, `npm run build && ORWELL_ENGINE_PORT=8765 npm start`.
-2. Run **Orwell** (this app) and log in; ensure a **default chat model** is set in settings
-   (the in-character chat uses it).
-3. Open **`/orwell`** → create your houseguest → meet the house → play. The header shows engine
-   status; if the engine is down the page says so instead of failing silently.
+2. Run **Orwell** (this app) and log in; ensure a **default chat model** is set in settings.
+3. You'll be asked to **create your houseguest** before the chat; then just chat — every turn is
+   in-character. Open the same account on a second device to see the session sync.
 
 **Still managed by the engine, not here:** game state lives in the engine process (in-memory
 today; persistence is feature 0007). The deep loop (competitions, nominations, votes driving the
-phase/moment) is the engine's weekly-loop work (feature 0011) — this bridge will pick up those
+phase/moment) is the engine's weekly-loop work (feature 0011) — the main chat picks up those
 moments automatically as the engine advances them.
 
 ## What was trimmed (footprint only — no application code removed)
