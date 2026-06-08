@@ -22,6 +22,12 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
+The update one-liner works **either** on the Proxmox host **or** inside the container: the app and
+its git checkout live in the LXC (the host has no `git` / no `/opt/orwell`), so when run on the host
+the script locates the orwell container (by hostname `orwell`) and re-runs itself inside it via
+`pct` — the same bridge the installer uses. Override the target with `CTID=<id>` (or
+`CT_HOSTNAME=<name>`) if you renamed the container or run more than one.
+
 ## Config UX (community-scripts style)
 
 On a TTY the installer shows a **whiptail menu** with every field pre-populated:
@@ -65,7 +71,7 @@ CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
 |---|---|
 | `orwell.sh` | Host-side: create the Proxmox LXC, then run the in-container install. |
 | `orwell-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
-| `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). |
+| `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) and updates there; inside the container it runs directly. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
 
