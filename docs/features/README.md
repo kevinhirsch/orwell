@@ -68,6 +68,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Draft |
 | 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Draft |
 | 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | Foundational | Draft |
+| 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | Player UX | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

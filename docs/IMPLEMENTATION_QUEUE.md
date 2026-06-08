@@ -283,11 +283,36 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > Vault-free; **"your own standing" stays in narration, not the HUD**. MVP-2 (rich game UI) is
 > later. Depends on **B11** + **C3**. Open a PR.
 
+### B12 — 0021 engine: per-user sandbox registry  ·  Claude Code
+
+> In `kevinhirsch/orwell`, implement the **engine** side of feature **0021**
+> (`docs/features/0021-game-session-and-save-lifecycle.{md,feature}`): turn the single in-memory
+> game into a **per-user sandbox registry** — `sandboxFor(user) -> GameSession` (created on first
+> use) — and route **every** player/admin MCP tool call to the asserting user's sandbox (the MCP
+> layer resolves the user identity the front-end asserts). **One active game per user**
+> (`createCharacter` replaces that user's own game); **unlimited users concurrently**, each fully
+> isolated. **Cross-user isolation is the crux:** no call on behalf of user A may return any of
+> user B's state — add a **cross-user sentinel test** (mirror the 0001 Vault canary on the user
+> axis: seed A's game with sentinels, assert none appear in any of B's tool outputs, and vice-
+> versa). The Vault Wall (0001) must still hold inside each sandbox; `npm run test:arch` stays
+> green. Make the `0021` engine scenarios green; gates green. **Do this early** — it reshapes the
+> sandbox seam, cheaper before more engine work piles on. Read `CLAUDE.md` (sandbox model) first.
+> Open a PR.
+
+### C5 — 0021 front-end: assert the authenticated user  ·  OpenHands
+
+> In `kevinhirsch/orwell` `frontend/`, make the front-end **assert the authenticated user identity**
+> to the engine on every engine MCP call (the engine binds loopback and keys a sandbox per user —
+> B12). Use the already-authenticated account (`request.state.current_user`) as the sandbox key;
+> never let one account act as another. Each user sees only **their** game — the chat is their
+> window. Done when two logged-in users each get their own isolated game and neither can see the
+> other's. Depends on **B12**. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0020** are drafted (0015–0020 added this session; **0004 amended** —
+All planned specs through **0021** are drafted (0015–0021 added this session; **0004 amended** —
 see the amendments table in `docs/features/README.md`). Nothing is blocking the implementer queue.
 Future spec work, if it comes up: **MVP-2** (the rich game UI — house view, houseguest cards,
 browsable journal, competition visuals) and a **game-session ↔ save lifecycle** spec; any
