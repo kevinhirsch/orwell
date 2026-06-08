@@ -30,11 +30,12 @@ Feature: Outcomes by stats and temperature — earned results, never story conve
     When outcomes are computed across many seeded runs
     Then the player's win rate reflects their stats like any other houseguest
 
-  Scenario: Variance prevents perfect predictability
+  Scenario: Stats usually win — upsets are real but uncommon
     Given a clear favorite by stats in a competition
     When outcomes are computed across many seeded runs
-    Then the favorite does not win in every run
-    # Variance comes from temperature and the soul-sourced emotional modifier — there is no Luck stat.
+    Then the favorite wins the clear majority of runs
+    And the favorite still loses a real minority of runs
+    # Earned outcomes with marginal drama: variance from temperature + the soul emotional modifier (no Luck stat).
 
   Scenario: Player competition intent is honored and immutable
     Given the player declares an intent of compete, throw, or play safe before a competition
