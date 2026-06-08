@@ -27,6 +27,7 @@ independently testable.
 - [Architecture](#architecture)
 - [Design decisions](#design-decisions)
 - [Game mechanics](#game-mechanics)
+- [Install & update](#install--update)
 - [Testing philosophy](#testing-philosophy)
 - [Repository layout](#repository-layout)
 - [Roadmap](#roadmap)
@@ -304,6 +305,30 @@ The canonical rules the domain core implements:
 - **Jury & endgame:** the last nine evicted houseguests form the jury; jury management
   (how the player treats people on the way out) affects their votes; the Final 2 face a jury
   vote, ties broken by the final juror.
+
+---
+
+## Install & update
+
+bbai runs as **two co-located services in one container** — the TypeScript **engine** (MCP
+server) and the **odysseus** front-end (Python) — wired over local MCP. On a Proxmox host, two
+one-liners install and update it:
+
+```bash
+# install (run on the Proxmox host shell)
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
+# update
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
+```
+
+The install creates a Debian LXC, installs Node 22 + Python, builds the engine (`npm run build`),
+sets up the front-end, and starts both as systemd services. The save (SQLite + souls) lives at
+`/opt/bbai/data` and is **preserved across updates**. The LLM provider (Ollama or an API key) and
+ports are set in `/opt/bbai/data/.env`.
+
+**Full guide** — install, configuration, manual / non-Proxmox install, updates, services, backups,
+and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals + the engine
+contract in [`deploy/README.md`](deploy/README.md)).
 
 ---
 
