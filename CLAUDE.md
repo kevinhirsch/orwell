@@ -203,8 +203,10 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 | Command | What it does |
 |---|---|
 | `npm install` | Install dev dependencies. |
-| `npm test` | Full gate: `typecheck` → `test:unit` → `test:bdd`. |
+| `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
+| `npm run build` | Bundle the engine entrypoint to `dist/main.js` (esbuild). |
+| `npm start` | Run the built engine — the HTTP MCP server (`BBAI_PORT`, default 8848). |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
@@ -256,9 +258,14 @@ Built BDD/TDD-first, in priority order:
   rule extended to cover it; every tool output proven sentinel-free; channels isolated).
 
 **All eight priority invariants (0001–0008) plus the M5 MCP seam (0009) are implemented and
-green.** `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios.
-Remaining drafted work: **0010 — one-liner deploy** and the deferred real adapters
-(SQLite/Postgres, sqlite-vec/pgvector, the async LLM `NarrativePort`).
+green.** The engine is also **runnable**: `npm run build` → `npm start` serves the HTTP MCP
+API the front-end calls (`src/main.ts` → `src/adapters/mcp/HttpMcpServer.ts`), with a static
+"no secrets committed" guard. `npm test` runs clean: typecheck → build → unit/property/arch →
+all BDD scenarios.
+
+Remaining work: **0010's container smoke test** (Proxmox/LXC `deploy/` — validated outside this
+harness) and the deferred real adapters (SQLite/Postgres, sqlite-vec/pgvector, the async LLM
+`NarrativePort` + the full MCP/JSON-RPC protocol wrapper over the current HTTP transport).
 
 ## Open decisions (remaining)
 
