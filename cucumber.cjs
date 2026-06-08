@@ -37,6 +37,7 @@ module.exports = {
       "docs/features/0030-durable-game-persistence-survive-restart.feature",
       "docs/features/0031-game-orchestrator-and-integrity-watcher.feature",
       "docs/features/0034-live-weekly-progression-and-decision-seam.feature",
+      "docs/features/0037-live-jury-vote-choreography.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

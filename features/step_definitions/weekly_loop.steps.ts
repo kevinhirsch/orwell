@@ -125,6 +125,11 @@ When("the jury votes", function (this: BbWorld) {
 });
 
 Then("the finalist with the most votes wins", function (this: BbWorld) {
+  // 0037 reuses this phrase for the LIVE finale tally; assert the live winner when present.
+  if (this.lastAdvance) {
+    assert.ok(this.lastAdvance.finished && this.lastAdvance.winner, "the live jury tallied a winner");
+    return;
+  }
   assert.ok(this.outcome!.finalTwo.includes(this.outcome!.winner));
   const a = npc(10);
   const b = npc(11);

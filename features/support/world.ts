@@ -197,6 +197,8 @@ export class BbWorld extends World {
 
   // Live weekly progression & decision seam (0034) scratch state.
   livePlayer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  /** The user key the current live scenario operates on (shared restart step). */
+  liveUser?: string;
   lastAdvance?: import("../../src/ports/GameSession").AdvanceView;
   beatsBeforeStop?: number;
   liveRefused?: boolean;
@@ -204,6 +206,18 @@ export class BbWorld extends World {
   liveWeekB?: number;
   livePhaseA?: string;
   livePhaseB?: string;
+
+  // Live jury-vote choreography (0037) scratch state.
+  finaleViews?: import("../../src/ports/GameSession").AdvanceView[];
+  finaleViewsA?: import("../../src/ports/GameSession").AdvanceView[];
+  finaleViewsB?: import("../../src/ports/GameSession").AdvanceView[];
+  livePlayerB?: import("../../src/adapters/mcp/McpServer").McpServer;
+  juryFinalists?: [Eid, Eid];
+  juryRunMode?: "manner" | "dominance";
+  mannerShareRespected?: number;
+  mannerShareBetrayed?: number;
+  domWinRate?: number;
+  finaleSentinels?: string[];
 
   // Durable game persistence (0030) scratch state.
   saveDir?: string;

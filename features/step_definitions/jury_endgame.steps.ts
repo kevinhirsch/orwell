@@ -59,9 +59,16 @@ Then("that juror's probability of voting for that finalist is reduced", function
 
 Given("a finalist with strong accumulated jury relationships", function (this: BbWorld) {
   this.juryRel = { trust: 0.85, affinity: 0.85, threat: 0.1 };
+  // 0037 reuses this phrase to drive the LIVE finale; mark the run mode for its live When.
+  this.juryRunMode = "dominance";
 });
 
 Then("that finalist wins the clear majority of runs", function (this: BbWorld) {
+  // 0037 (live seam) records the live win rate; assert on it when present.
+  if (this.domWinRate !== undefined) {
+    assert.ok(this.domWinRate > 0.85, `live well-managed finalist win rate ${this.domWinRate} should exceed 0.85`);
+    return;
+  }
   const leanA = juryLean(this.juryRel!, { respected: true });
   const leanB = juryLean({ trust: 0.35, affinity: 0.35, threat: 0.4 }, {});
   assert.ok(voteRateForA(leanA, leanB) > 0.85, "well-managed finalist wins a strong majority");
@@ -104,7 +111,13 @@ When("the jury vote is tallied", function (this: BbWorld) {
   this.outcome = playSeason({ seed: 6, houseguests: build16(6) });
 });
 
-Then("a tie is broken by the last-evicted juror", function () {
+Then("a tie is broken by the last-evicted juror", function (this: BbWorld) {
+  // 0037 (live seam) drives a real 1–1 finale where the last-evicted juror leans the second
+  // finalist; assert the LIVE winner when present.
+  if (this.lastAdvance) {
+    assert.equal(this.lastAdvance.winner!.id, this.juryFinalists![1], "the last-evicted juror broke the live tie");
+    return;
+  }
   const w = { relationship: 1, manner: 1, finale: 0 };
   // Two jurors split 1-1; the last-evicted (npc(2)) leans B → B wins the tie-break.
   const leanTie = (j: string, f: string): number => (j === npc(1) ? (f === A ? 1 : 0) : (f === B ? 1 : 0));
