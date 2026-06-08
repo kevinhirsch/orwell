@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { buildSandbox } from "../../tests/support/sandbox";
 import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { McpServer } from "../../src/adapters/mcp/McpServer";
 import { toolsFor } from "../../src/surfaces/tools/registry";
 import type { OutwardChannel } from "../../src/surfaces/tools/registry";
@@ -13,6 +14,9 @@ import { SummaryService } from "../../src/services/SummaryService";
 
 function sampleArgs(name: string): Record<string, unknown> {
   switch (name) {
+    case "createCharacter": return { playerName: "The Player", seed: 7 };
+    case "getGameState": return {};
+    case "getMomentPrompt": return { moment: "nominations" };
     case "getVisibleStateFor": return { entity: PLAYER };
     case "renderScene": return { mode: "scene" };
     case "askProducers": return { question: "is the rumored secret true?" };
@@ -51,7 +55,8 @@ Given("every Vault datum carries a unique sentinel value", function (this: BbWor
 
 Given("the engine is served as an MCP server", function (this: BbWorld) {
   const commands = new EngineCommandsAdapter(this.sandbox!.engine.events, this.sandbox!.engine.knowledge);
-  const deps = { player: this.sandbox!.player, admin: this.sandbox!.admin, summary: this.sandbox!.summary, commands };
+  const session = new GameSessionAdapter();
+  const deps = { player: this.sandbox!.player, admin: this.sandbox!.admin, summary: this.sandbox!.summary, commands, session };
   this.mcpPlayer = new McpServer("player", deps);
   this.mcpAdmin = new McpServer("admin/God Mode", deps);
 });

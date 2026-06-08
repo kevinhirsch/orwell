@@ -45,6 +45,36 @@ integration linchpin — it's what drives the game.
 4. Build the BB-specific surfaces (narrated scene view, Diary Room, house/houseguest panels)
    on top of the chat shell.
 
+## Wired now: the onboarding + per-moment narration bridge
+
+A first vertical slice connecting orwell to the engine lives at **`/bbai`**:
+
+- **`src/bbai_engine.py`** — thin async client to the engine's HTTP MCP player channel
+  (`BBAI_ENGINE_MCP_URL`, default `http://127.0.0.1:8765`): `createCharacter`, `getGameState`,
+  `getMomentPrompt`. Consumes only Vault-free results.
+- **`routes/bbai_routes.py`** — `GET /api/bbai/{health,state}`, `POST /api/bbai/new-game`
+  (runs OOBE), `POST /api/bbai/chat`. The chat route fetches the engine's **managed per-moment
+  system prompt**, injects it as the system message, resolves the user's default model via
+  orwell's own `resolve_endpoint("default")`, and calls `llm_call_async`. This is what stops
+  the model from answering as a generic assistant — it now speaks **as the game master**.
+- **`static/bbai.html` + `static/js/bbai.js` + `static/css/bbai.css`** — character creation
+  (the step that was missing past account creation), the house roster, and an in-character chat
+  with a **moment selector** (the visible "manage system-prompt injection per moment" control).
+- **`app.py`** — serves `/bbai` and mounts the router. Auth-gated by the existing middleware.
+
+### Try it
+
+1. Run the **engine**: from the repo root, `npm run build && BBAI_ENGINE_PORT=8765 npm start`.
+2. Run **orwell** (this app) and log in; ensure a **default chat model** is set in settings
+   (the in-character chat uses it).
+3. Open **`/bbai`** → create your houseguest → meet the house → play. The header shows engine
+   status; if the engine is down the page says so instead of failing silently.
+
+**Still managed by the engine, not here:** game state lives in the engine process (in-memory
+today; persistence is feature 0007). The deep loop (competitions, nominations, votes driving the
+phase/moment) is the engine's weekly-loop work (feature 0011) — this bridge will pick up those
+moments automatically as the engine advances them.
+
 ## What was trimmed (footprint only — no application code removed)
 
 Removed to keep the repo lean; none of it affects chat/agent:

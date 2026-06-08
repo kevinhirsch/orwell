@@ -61,7 +61,13 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
 | 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
 | 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Done |
+| 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Draft |
+| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Draft |
+| 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
-MVP-1 one-liner deploy/update, and 0011+ are the gameplay loop & player experience.
+MVP-1 one-liner deploy/update, and 0011+ are the gameplay loop & player experience. 0015 is the
+single human-authored profile (the player); 0016 is the second walled surface (God Mode, walled
+from the Vault even for the admin); 0017 promotes [decision 0002](../decisions/0002-relationship-model.md)
+(the organic relationship model) into an executable spec.

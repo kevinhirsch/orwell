@@ -2,6 +2,7 @@ import { buildEngineCore } from "./engineRoot";
 import { buildOutwardChannels } from "./outwardRoot";
 import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameStateRepository";
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
+import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
 
@@ -23,6 +24,7 @@ export function buildMcpServers(): McpServers {
     player: PLAYER, events: engine.events, knowledge: engine.knowledge, adminState,
   });
   const commands = new EngineCommandsAdapter(engine.events, engine.knowledge);
-  const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands };
+  const session = new GameSessionAdapter();
+  const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
   return { player: new McpServer("player", deps), admin: new McpServer("admin/God Mode", deps) };
 }

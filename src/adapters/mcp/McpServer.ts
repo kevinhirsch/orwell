@@ -5,6 +5,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
+import type { GameSession, CreateCharacterReq, MomentPromptReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -20,6 +21,7 @@ export interface McpDeps {
   admin: AdminPort;
   summary: SummaryService;
   commands: EngineCommands;
+  session: GameSession;
 }
 
 export class McpServer {
@@ -38,6 +40,12 @@ export class McpServer {
       throw new Error(`tool "${name}" is not available on channel "${this.channel}"`);
     }
     switch (name) {
+      case "createCharacter":
+        return this.deps.session.createCharacter(args as unknown as CreateCharacterReq);
+      case "getGameState":
+        return this.deps.session.getGameState();
+      case "getMomentPrompt":
+        return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
       case "getVisibleStateFor":
         return this.deps.player.getVisibleState();
       case "renderScene":
