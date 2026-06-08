@@ -43,6 +43,12 @@ choreography (**0014**); the Vault Wall (**0001** — reused).
   never inferred from prose. "I guess I'd vote out the nominee" in chat does **not** cast a vote;
   the player must make the binding choice through the validated path.
 
+> **Every turn feeds the consequence loop (0023).** The agent must **record** what happens — each
+> social scene, each binding decision — so the engine folds its **hidden impact** into the
+> relationship/soul layer and **persists** it. An action the agent narrates but never records has
+> **no consequence and no memory** — a silent leak of the game's point. The agent **calls the
+> levers** (0018 manifest); it does not just describe.
+
 ## 4. The engine supplies the legal option set
 
 When a decision is pending, the agent does not invent the choices — it **asks the engine** for

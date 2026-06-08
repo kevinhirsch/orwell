@@ -40,7 +40,9 @@ per user).
 - **The chat is the window.** The user's chat session(s) view and drive *their* sandbox; the
   per-moment narration (0018) and decisions (0019) operate on that user's game.
 - **Persist & resume.** A user's game survives across reconnects/restarts and resumes where they
-  left off (in-memory per-user today; SQLite-per-sandbox later, **0007**).
+  left off (in-memory per-user today; SQLite-per-sandbox later, **0007**). The **consequence &
+  memory loop** (act → hidden impact → persist → recall, **0023**) runs **per sandbox** — each
+  user's accumulated history and the house's memory of *them* is theirs alone.
 
 ## 4. Cross-user isolation (the new guarantee)
 

@@ -72,6 +72,10 @@ The spec fixes the **direction** of each force; the magnitudes are config (0006-
 
 ## 6. Consumers
 
+- **The consequence loop** (**0023** — the live wiring): every recorded player↔NPC happening folds
+  its impact into these edges and **persists**, so the **player's own actions change how
+  houseguests feel about them** — on the live path, not only the off-screen sim. 0017 is the
+  *model*; 0023 is where it **updates on live play and is saved/recalled**.
 - **Veto "Houseguest's Choice"** (0005): an NPC holder picks their **strongest available bond** as
   scored here — with temperature variance, not a fixed flag.
 - **Confiding / scheming:** gated by `trust`. **Nominations / targeting:** driven by `threat`.
@@ -79,6 +83,13 @@ The spec fixes the **direction** of each force; the magnitudes are config (0006-
   "fractures" when it falls back — the existing richness metric measures exactly this.
 - **Jury management** (0014): the edge trajectory **at eviction** (blindsided vs. respected) feeds
   the juror's later lean.
+
+> **Human-driven player reads (the boundary).** The engine tracks both `NPC→player` and
+> `player→NPC` edges from history — the `NPC→player` edges drive NPC behavior; the `player→NPC`
+> edges only ever inform the engine's read of player strategy. **Neither is ever shown to the
+> player as a value.** The player's *own conscious* read of the house is the **human's** — they
+> infer trust and threat from behavior and narration; the engine never hands them a number (0020,
+> 0023). The model is computed and hidden; the *feeling* is theirs.
 
 ## 7. Contracts (stack-agnostic)
 
