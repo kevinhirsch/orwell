@@ -6,10 +6,13 @@
 // no stats, souls, or hidden state ever reach it (the Vault Wall holds on the
 // engine side). It FAILS OPEN: if the engine is unreachable or no game is running,
 // the panel simply hides and never disturbs the normal chat.
+import { makeWindowDraggable } from "./windowDrag.js";
+
 (function () {
   "use strict";
 
   const POLL_MS = 20000;
+  const POS_KEY = "orwell-status-pos";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -42,6 +45,7 @@
         #orwell-status .os-hdr {
           display: flex; align-items: baseline; justify-content: space-between;
           margin-bottom: .4rem; font-weight: 600; letter-spacing: .03em;
+          cursor: move; user-select: none;
         }
         #orwell-status .os-hdr .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
@@ -49,7 +53,7 @@
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
       </style>
-      <div class="os-hdr"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></div>
+      <div class="os-hdr" title="Drag to move"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></div>
       <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
       <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
       <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>`;
