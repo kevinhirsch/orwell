@@ -4515,7 +4515,9 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     if not text:
         return {"error": "content is required (what happened in the scene)", "exit_code": 1}
     try:
-        res = await orwell_engine.record_interaction(text, with_ids=args.get("withIds"), user=owner)
+        res = await orwell_engine.record_interaction(
+            text, with_ids=args.get("withIds"), kind=args.get("kind"), user=owner,
+        )
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4536,3 +4538,72 @@ async def do_surface_information(content: str, owner: Optional[str] = None) -> D
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_game_status(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.game_status(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_get_visible_state(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.get_visible_state(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_social_read(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    try:
+        res = await orwell_engine.social_read(args.get("target"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_ask_producers(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    question = (args.get("question") or args.get("content") or "").strip()
+    if not question:
+        return {"error": "question is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.ask_producers(question, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_render_scene(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    try:
+        res = await orwell_engine.render_scene(args.get("mode"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.end_of_session_summary(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}

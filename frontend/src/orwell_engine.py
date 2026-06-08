@@ -93,6 +93,45 @@ async def surface_information(information: str, pathway: str, user: str | None =
     return await _call("surfaceInformationTo", {"entity": "player", "fact": {"content": information}, "pathway": pathway}, user=user)
 
 
+async def game_status(user: str | None = None) -> dict:
+    """Vault-free public ceremony status for the status panel: week/phase/HOH/nominees/veto."""
+    return await _call("gameStatus", {}, user=user)
+
+
+async def get_visible_state(user: str | None = None) -> dict:
+    """The player's own visible projection: witnessed events + things they know for certain."""
+    return await _call("getVisibleStateFor", {}, user=user)
+
+
+async def render_scene(mode: str | None = None, user: str | None = None) -> dict:
+    """Ask the engine to narrate the current moment from the VISIBLE projection only
+    (`mode="dialogue"` for NPC dialogue, otherwise scene narration). Vault-free."""
+    args: dict = {}
+    if mode:
+        args["mode"] = mode
+    return await _call("renderScene", args, user=user)
+
+
+async def social_read(target: str | None = None, user: str | None = None) -> dict:
+    """An honest, Vault-free read of the room (or a single houseguest by id). May hint at
+    tension the player could plausibly perceive; never names off-screen events."""
+    args: dict = {}
+    if target:
+        args["target"] = target
+    return await _call("socialRead", args, user=user)
+
+
+async def ask_producers(question: str, user: str | None = None) -> dict:
+    """Player-level interrogation of the producers. Answers from visible state only — never
+    confirms or denies Vault content (the Vault Wall holds even here)."""
+    return await _call("askProducers", {"question": question}, user=user)
+
+
+async def end_of_session_summary(user: str | None = None) -> dict:
+    """Confirm only that an updated save exists for this user (no Vault content)."""
+    return await _call("endOfSessionSummary", {}, user=user)
+
+
 async def engine_health() -> bool:
     """True if the engine HTTP MCP server answers /health."""
     try:

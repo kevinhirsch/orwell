@@ -1205,12 +1205,17 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "recordInteraction",
-            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it.",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` whenever the scene shifts a relationship — that is what makes the engine fold the HIDDEN consequence into how the houseguests feel about the player (you never see the magnitude; the engine decides it).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "A concise description of what happened in the scene."},
                     "withIds": {"type": "array", "items": {"type": "string"}, "description": "Optional ids of houseguests present besides the player."},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"],
+                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude).",
+                    },
                 },
                 "required": ["content"],
             },
@@ -1229,6 +1234,70 @@ FUNCTION_TOOL_SCHEMAS = [
                 },
                 "required": ["information", "pathway"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "getVisibleStateFor",
+            "description": "Get the PLAYER's own visible projection: the moments they've witnessed and the things they know for certain. Vault-free — never includes hidden/off-screen content. Use to ground what the player actually knows before narrating.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gameStatus",
+            "description": "Get the public ceremony status (week, phase, current HOH, nominees, veto holder/used). Vault-free, ceremony-level facts only — use to ground narration in the live game state.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "socialRead",
+            "description": "Get an honest, Vault-free read of the room — or one houseguest — as the player could plausibly perceive it. May HINT at tension; never reveals off-screen events or hidden stats. Use to gauge the social temperature before narrating.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Optional houseguest id to read; omit to read the whole room."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "askProducers",
+            "description": "Player-level (out-of-character) interrogation of the producers. Answers come from the player's visible knowledge only and NEVER confirm or deny hidden/Vault content. Use for the Diary Room and direct strategy questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The player's question."},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "renderScene",
+            "description": "Ask the engine to narrate the current moment from the VISIBLE projection only. Use 'dialogue' for in-character NPC speech, otherwise scene narration. Vault-free grounding for what to say next.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["scene", "dialogue"], "description": "Narration mode (default scene)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "endOfSessionSummary",
+            "description": "Wrap up the play session: confirms only that an updated save exists for the player (no Vault content). Use when the player stops for now.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]

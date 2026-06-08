@@ -1156,6 +1156,8 @@ async def execute_tool_block(
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_get_game_state, do_run_competition, do_record_interaction, do_surface_information,
+        do_game_status, do_get_visible_state, do_social_read, do_ask_producers,
+        do_render_scene, do_end_of_session_summary,
         do_app_api,
     )
 
@@ -1476,6 +1478,24 @@ async def execute_tool_block(
     elif tool == "surfaceInformationTo":
         desc = "surfaceInformationTo"
         result = await do_surface_information(content, owner=owner)
+    elif tool == "gameStatus":
+        desc = "gameStatus"
+        result = await do_game_status(content, owner=owner)
+    elif tool == "getVisibleStateFor":
+        desc = "getVisibleStateFor"
+        result = await do_get_visible_state(content, owner=owner)
+    elif tool == "socialRead":
+        desc = "socialRead"
+        result = await do_social_read(content, owner=owner)
+    elif tool == "askProducers":
+        desc = "askProducers"
+        result = await do_ask_producers(content, owner=owner)
+    elif tool == "renderScene":
+        desc = "renderScene"
+        result = await do_render_scene(content, owner=owner)
+    elif tool == "endOfSessionSummary":
+        desc = "endOfSessionSummary"
+        result = await do_end_of_session_summary(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

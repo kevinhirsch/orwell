@@ -115,6 +115,8 @@
           throw new Error(d.error || ("HTTP " + r.status));
         }
         el.remove(); // dissolve into the chat — the main chat is now in-character
+        // Nudge the status HUD to pick up the freshly-started game immediately.
+        window.dispatchEvent(new Event("orwell:gamechanged"));
       } catch (e2) {
         err.textContent = "Couldn't start the game: " + e2.message;
         btn.disabled = false;

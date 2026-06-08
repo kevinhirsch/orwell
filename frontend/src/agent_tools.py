@@ -60,6 +60,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # Big Brother game engine (Vault-free): the model drives the game by
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
+             "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
+             "renderScene", "endOfSessionSummary",
              # Generic loopback to any UI-button endpoint (cookbook,
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.
