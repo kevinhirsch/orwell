@@ -23,7 +23,7 @@ export function buildMcpServers(): McpServers {
   const outward = buildOutwardChannels({
     player: PLAYER, events: engine.events, knowledge: engine.knowledge, adminState,
   });
-  const commands = new EngineCommandsAdapter(engine.events, engine.knowledge);
+  const commands = new EngineCommandsAdapter(engine.events, engine.knowledge, engine.relationships);
   const session = new GameSessionAdapter();
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
   return { player: new McpServer("player", deps), admin: new McpServer("admin/God Mode", deps) };

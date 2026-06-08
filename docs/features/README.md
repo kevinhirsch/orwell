@@ -69,7 +69,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Done |
 | 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | Foundational | Draft |
 | 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | Player UX | **Deferred** |
-| 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Draft |
+| 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Done |
 | 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | Foundational | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
