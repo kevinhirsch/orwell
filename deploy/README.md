@@ -22,6 +22,43 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/de
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
 ```
 
+## Config UX (community-scripts style)
+
+On a TTY the installer shows a **whiptail menu** with every field pre-populated:
+
+- **Use Defaults** — accept the detected/sensible values and go.
+- **Advanced** — step through CTID, hostname, cores/RAM/disk, **rootfs & template storage**
+  (auto-listed from `pvesm`), bridge, IP (`dhcp` or a static CIDR + gateway), UI port, branch,
+  **OS template** (auto-listed from `pveam available`, newest highlighted), and the **LLM
+  provider** (Anthropic key or Ollama host — written only into the container's `data/.env`).
+
+**The OS template is resolved and downloaded automatically** (`pveam update` → newest
+`debian-12-standard` → `pveam download`, with an offline fallback to one already on disk). This
+is the fix for the common `volume 'local:vztmpl/debian-12-standard_…' does not exist` error —
+templates are no longer hard-pinned or assumed pre-downloaded.
+
+Non-interactive (piped, or `--default` / `USE_DEFAULTS=1` / `BBAI_NONINTERACTIVE=1`) uses
+defaults. **Every setting is also an env override**, so the same run is fully scriptable:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CTID` | next free id | container id |
+| `CT_HOSTNAME` | `bbai` | hostname |
+| `CORES` / `RAM_MB` / `DISK_GB` | `2` / `2048` / `8` | resources |
+| `STORAGE` | first `rootdir` storage → `local-lvm` | CT rootfs |
+| `TEMPLATE_STORAGE` | first `vztmpl` storage → `local` | where the template is stored |
+| `TEMPLATE_NAME` / `TEMPLATE` | newest `debian-12-standard` | pin a specific template |
+| `BRIDGE` / `NET` / `GATEWAY` | `vmbr0` / `dhcp` / — | network (`NET` = `dhcp` or a CIDR) |
+| `BBAI_PORT` | `8080` | front-end UI port |
+| `BRANCH` / `REPO` | `main` / this repo | source to install |
+| `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
+
+```bash
+# fully non-interactive example
+CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp BBAI_PORT=8080 \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)" --default
+```
+
 ## Layout
 
 | File | Role |

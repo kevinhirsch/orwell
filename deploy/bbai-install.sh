@@ -59,8 +59,17 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     echo "BBAI_PORT=${BBAI_PORT}                                    # front-end UI port"
     echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}                      # engine MCP server (loopback)"
     echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}  # front-end -> engine MCP"
-    echo "# LLM (pick one): OLLAMA_HOST=http://127.0.0.1:11434  OR  ANTHROPIC_API_KEY=..."
+    # LLM provider: written through from the host installer's prompt when supplied; otherwise a
+    # commented hint. Secrets only ever live here, in the container — never in the repo.
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+      echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
+    elif [[ -n "${OLLAMA_HOST:-}" ]]; then
+      echo "OLLAMA_HOST=${OLLAMA_HOST}"
+    else
+      echo "# LLM (pick one): OLLAMA_HOST=http://127.0.0.1:11434  OR  ANTHROPIC_API_KEY=..."
+    fi
   } >> "${DATA_DIR}/.env"
+  chmod 600 "${DATA_DIR}/.env"
 fi
 
 echo "==> systemd services"
