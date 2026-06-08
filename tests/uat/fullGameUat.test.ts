@@ -220,9 +220,18 @@ async function runFullGame(
   // Start the game.
   await call<unknown>("createCharacter", { playerName: "UAT Player", seed });
 
+  let consecutiveSubmitFailures = 0;
+
   for (let i = 0; i < MAX_ITERATIONS && !finished; i++) {
     const adv = await call<AdvanceResult>("advanceGame", {});
-    if (!adv) break;
+    if (!adv) break; // HTTP error or body.error — already pushed as http-error anomaly
+
+    // createCharacter failed silently: game never started → infinite started=false loop without this guard
+    if (!adv.started) {
+      anomalies.push({ seed, strategy, week: 0, beat: "advanceGame", kind: "stale-loop",
+        detail: "advanceGame returned started=false — createCharacter may have failed" });
+      break;
+    }
 
     weeksPlayed = adv.status.week;
     finished = adv.finished;
@@ -237,9 +246,19 @@ async function runFullGame(
       if (p.options.length >= (minOpts[p.kind] ?? 0)) {
         const subAdv = await call<AdvanceResult>("submitDecision", autoResolve(p, strategy));
         if (subAdv) {
+          consecutiveSubmitFailures = 0;
           finished = subAdv.finished;
           winner = subAdv.winner;
           checkAdvanceResult(subAdv, { seed, strategy }, anomalies);
+        } else {
+          // submitDecision errored → decision not applied → next advanceGame returns same pending.
+          // Break after 3 consecutive failures to avoid burning all iterations in a stuck loop.
+          consecutiveSubmitFailures++;
+          if (consecutiveSubmitFailures >= 3) {
+            anomalies.push({ seed, strategy, week: weeksPlayed, beat: p.kind, kind: "stale-loop",
+              detail: `submitDecision failed ${consecutiveSubmitFailures}x in a row for '${p.kind}' — stuck loop` });
+            break;
+          }
         }
       }
     }
@@ -296,12 +315,23 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
     "plays 12 seeds to completion (never-use-veto) — no anomalies detected",
     async () => {
       const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-      const runs = await Promise.all(seeds.map((s) => runFullGame(base, s, "never-use-veto")));
+      // Sequential: avoids CI concurrency issues (12 parallel HTTP games can overwhelm the server).
+      // Each game takes ~70 steps at <2ms each = well under the 120s timeout.
+      const runs: RunResult[] = [];
+      for (const s of seeds) runs.push(await runFullGame(base, s, "never-use-veto"));
       const allAnomalies = runs.flatMap((r) => r.anomalies);
 
-      // All games must finish with a winner.
-      const unfinished = runs.filter((r) => !r.finished).map((r) => `seed ${r.seed}`);
-      expect(unfinished, "games that did not finish").toEqual([]);
+      // All games must finish. Include anomalies in the failure message so CI logs show the root cause.
+      const unfinished = runs.filter((r) => !r.finished);
+      if (unfinished.length > 0) {
+        const detail = unfinished
+          .map((r) => {
+            const ants = r.anomalies.map((a) => `    [${a.kind}] w${a.week} ${a.beat}: ${a.detail}`).join("\n");
+            return `  seed ${r.seed}: ${ants || "(no anomalies recorded)"}`;
+          })
+          .join("\n");
+        expect.fail(`\nGames that did not finish (never-use-veto):\n${detail}\n`);
+      }
 
       const noWinner = runs.filter((r) => r.finished && !r.winner).map((r) => `seed ${r.seed}`);
       expect(noWinner, "finished games without a winner").toEqual([]);
@@ -311,7 +341,6 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
         const report = allAnomalies
           .map((a) => `  [${a.kind}] seed=${a.seed} week=${a.week} beat=${a.beat}: ${a.detail}`)
           .join("\n");
-        // Fail with full detail so the root cause is visible in the test output.
         expect.fail(`\nAnomalies detected (never-use-veto):\n${report}\n`);
       }
 
@@ -331,11 +360,20 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
     "plays 5 seeds with always-use-veto — covers veto-save, replacement, and final-4 revert",
     async () => {
       const seeds = [1, 2, 3, 4, 5];
-      const runs = await Promise.all(seeds.map((s) => runFullGame(base, s, "always-use-veto")));
+      const runs: RunResult[] = [];
+      for (const s of seeds) runs.push(await runFullGame(base, s, "always-use-veto"));
       const allAnomalies = runs.flatMap((r) => r.anomalies);
 
-      const unfinished = runs.filter((r) => !r.finished).map((r) => `seed ${r.seed}`);
-      expect(unfinished, "games that did not finish (always-use-veto)").toEqual([]);
+      const unfinished = runs.filter((r) => !r.finished);
+      if (unfinished.length > 0) {
+        const detail = unfinished
+          .map((r) => {
+            const ants = r.anomalies.map((a) => `    [${a.kind}] w${a.week} ${a.beat}: ${a.detail}`).join("\n");
+            return `  seed ${r.seed}: ${ants || "(no anomalies recorded)"}`;
+          })
+          .join("\n");
+        expect.fail(`\nGames that did not finish (always-use-veto):\n${detail}\n`);
+      }
 
       const noWinner = runs.filter((r) => r.finished && !r.winner).map((r) => `seed ${r.seed}`);
       expect(noWinner, "finished games without a winner (always-use-veto)").toEqual([]);
@@ -357,9 +395,8 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
     async () => {
       // Re-run a representative subset (seeds 1-5) to verify coverage without
       // re-running the full 12-seed suite (which already ran above).
-      const runs = await Promise.all(
-        [1, 2, 3, 4, 5].map((s) => runFullGame(base, s, "never-use-veto")),
-      );
+      const runs: RunResult[] = [];
+      for (const s of [1, 2, 3, 4, 5]) runs.push(await runFullGame(base, s, "never-use-veto"));
       const merged: Partial<Record<PendingDecision["kind"], number>> = {};
       for (const r of runs) {
         for (const [k, v] of Object.entries(r.decisionCounts) as [PendingDecision["kind"], number][]) {
