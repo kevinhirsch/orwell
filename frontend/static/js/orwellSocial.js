@@ -8,22 +8,65 @@
 //   • POST /api/orwell/diary-room   → the player's private, OOC confessional
 //
 // Vault-free by construction (the engine withholds all hidden state); fail-open everywhere.
+//
+// Like the settings panel it is a real moveable window: drag it by its header, minimize it,
+// and it remembers both across reloads. Only ONE houseguest pulls you aside at a time (more
+// realistic than a crowd), and an approach you act on or dismiss STAYS gone across a refresh
+// (until a new game), so the surface never nags about something you already handled.
+import { makeWindowDraggable } from "./windowDrag.js";
+
 (function () {
   "use strict";
 
   const POLL_MS = 20000;
+  const MAX_APPROACHES = 1;            // one person pulls you aside at a time — not a crowd
+  const POS_KEY = "orwell-social-pos";
+  const MIN_KEY = "orwell-social-min";
+  const DISMISS_KEY = "orwell-social-dismissed";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
       : fn();
 
   let timer = null;
-  const dismissed = new Set(); // approach ids the player waved off this session
+
+  // Approaches the player has acted on or waved off. Persisted so a refresh (or a sent
+  // scene) doesn't resurrect a handled approach; cleared when a new game begins.
+  function loadDismissed() {
+    try { return new Set(JSON.parse(localStorage.getItem(DISMISS_KEY) || "[]")); } catch (_) { return new Set(); }
+  }
+  let dismissed = loadDismissed();
+  function dismiss(id) {
+    dismissed.add(id);
+    try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissed])); } catch (_) {}
+  }
+  function clearDismissed() {
+    dismissed = new Set();
+    try { localStorage.removeItem(DISMISS_KEY); } catch (_) {}
+  }
 
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
+  }
+
+  function restorePosition(el) {
+    try {
+      const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+        el.style.left = pos.left + "px";
+        el.style.top = pos.top + "px";
+        el.style.right = "auto";
+      }
+    } catch (_) {}
+  }
+
+  function setMinimized(el, on) {
+    el.classList.toggle("osoc-collapsed", on);
+    const btn = el.querySelector(".osoc-min");
+    if (btn) { btn.textContent = on ? "+" : "–"; btn.title = on ? "Expand" : "Minimize"; }
+    try { localStorage.setItem(MIN_KEY, on ? "1" : "0"); } catch (_) {}
   }
 
   function ensureUI() {
@@ -41,6 +84,18 @@
           padding: .6rem .7rem; box-shadow: 0 10px 30px rgba(0,0,0,.35);
           font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem; line-height: 1.45;
         }
+        #orwell-social .osoc-hdr {
+          display: flex; align-items: baseline; gap: .4rem; margin-bottom: .5rem;
+          font-weight: 600; letter-spacing: .03em; cursor: move; user-select: none;
+        }
+        #orwell-social .osoc-ttl { flex: 1; min-width: 0; opacity: .8; }
+        #orwell-social .osoc-min {
+          cursor: pointer; border: none; background: none; color: inherit;
+          opacity: .55; font-size: 1rem; line-height: 1; padding: 0 .15rem; font-family: inherit;
+        }
+        #orwell-social .osoc-min:hover { opacity: .9; }
+        #orwell-social.osoc-collapsed .osoc-body { display: none; }
+        #orwell-social.osoc-collapsed .osoc-hdr { margin-bottom: 0; }
         #orwell-social .osoc-dr {
           width: 100%; cursor: pointer; border-radius: 8px; padding: .35rem .5rem;
           background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600;
@@ -67,6 +122,7 @@
           border: 1px solid var(--border, #355a66); border-radius: 12px; padding: 1rem;
           font-family: 'Fira Code', ui-monospace, monospace;
         }
+        #orwell-dr-modal .osoc-drhdr { cursor: move; user-select: none; }
         #orwell-dr-modal h3 { margin: 0 0 .3rem; font-size: .95rem; }
         #orwell-dr-modal .osoc-note { opacity: .65; font-size: .72rem; margin-bottom: .6rem; }
         #orwell-dr-modal textarea {
@@ -79,16 +135,22 @@
         #orwell-dr-modal .osoc-cancel { background: transparent; color: inherit; border: 1px solid var(--border, #355a66); }
         #orwell-dr-modal .osoc-send { background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600; }
       </style>
-      <button class="osoc-dr" id="osoc-dr-open">📔 Diary Room</button>
-      <div class="osoc-hd" id="osoc-appr-hd" style="display:none">Wants a word</div>
-      <div id="osoc-appr"></div>`;
+      <div class="osoc-hdr" title="Drag to move">
+        <span class="osoc-ttl">The House</span>
+        <button type="button" class="osoc-min" title="Minimize" aria-label="Minimize">–</button>
+      </div>
+      <div class="osoc-body">
+        <button class="osoc-dr" id="osoc-dr-open">📔 Diary Room</button>
+        <div class="osoc-hd" id="osoc-appr-hd" style="display:none">Wants a word</div>
+        <div id="osoc-appr"></div>
+      </div>`;
     document.body.appendChild(el);
 
     const modal = document.createElement("div");
     modal.id = "orwell-dr-modal";
     modal.innerHTML = `
       <div class="osoc-box" role="dialog" aria-modal="true" aria-label="Diary Room">
-        <h3>Diary Room</h3>
+        <div class="osoc-drhdr" title="Drag to move"><h3>Diary Room</h3></div>
         <div class="osoc-note">Private &amp; out-of-character — the house never hears this.</div>
         <textarea id="osoc-dr-text" placeholder="Tell the producers what you're really thinking…"></textarea>
         <div class="osoc-row">
@@ -102,6 +164,27 @@
     modal.querySelector("#osoc-dr-cancel").addEventListener("click", closeDR);
     modal.addEventListener("click", (e) => { if (e.target === modal) closeDR(); });
     modal.querySelector("#osoc-dr-send").addEventListener("click", submitDR);
+
+    // Restore where the player left the panel + whether it was minimized.
+    restorePosition(el);
+    try { if (localStorage.getItem(MIN_KEY) === "1") setMinimized(el, true); } catch (_) {}
+    el.querySelector(".osoc-min").addEventListener("click", () =>
+      setMinimized(el, !el.classList.contains("osoc-collapsed")));
+
+    // Moveable window: drag the panel by its header (no dock/fullscreen/resize — it is a
+    // small HUD); the Diary-Room dialog drags by its title bar. Buttons are skipped by the
+    // default skipSelector, so the minimize click never starts a drag.
+    makeWindowDraggable(el, {
+      content: el, header: el.querySelector(".osoc-hdr"),
+      enableDock: false, enableFullscreen: false, enableResize: false, mobileSkip: 0,
+      onDragEnd: ({ rect }) => {
+        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
+      },
+    });
+    makeWindowDraggable(modal, {
+      content: modal.querySelector(".osoc-box"), header: modal.querySelector(".osoc-drhdr"),
+      enableDock: false, enableFullscreen: false, enableResize: false, mobileSkip: 0,
+    });
     return el;
   }
 
@@ -113,6 +196,9 @@
     if (!m) return;
     t.value = "";
     document.getElementById("osoc-dr-send").disabled = false;
+    // Re-center the dialog each open (a prior drag may have left it elsewhere).
+    const box = m.querySelector(".osoc-box");
+    if (box) { box.style.left = ""; box.style.top = ""; box.style.position = ""; box.style.transform = ""; box.style.margin = ""; }
     m.style.display = "flex";
     t.focus();
   }
@@ -159,12 +245,13 @@
     const wrap = document.getElementById("osoc-appr");
     const hd = document.getElementById("osoc-appr-hd");
     if (!wrap) return;
-    const items = (Array.isArray(list) ? list : []).filter(
-      (it) => it && it.houseguest && it.houseguest.id && !dismissed.has(it.houseguest.id),
-    );
+    const items = (Array.isArray(list) ? list : [])
+      .filter((it) => it && it.houseguest && it.houseguest.id && !dismissed.has(it.houseguest.id))
+      .slice(0, MAX_APPROACHES); // only one houseguest pulls you aside at a time
     wrap.innerHTML = "";
     hd.style.display = items.length ? "block" : "none";
     for (const it of items) {
+      const id = it.houseguest.id;
       const name = it.houseguest.name || "A houseguest";
       const pretext = it.pretext || "wants a word with you";
       const chip = document.createElement("div");
@@ -175,10 +262,10 @@
       go.innerHTML = `<b></b> <span class="osoc-pre"></span>`;
       go.querySelector("b").textContent = name;
       go.querySelector(".osoc-pre").textContent = pretext;
-      go.addEventListener("click", () => { startScene(name); dismissed.add(it.houseguest.id); renderApproaches(list); });
+      go.addEventListener("click", () => { startScene(name); dismiss(id); renderApproaches(list); });
       const x = document.createElement("button");
       x.className = "osoc-x"; x.title = "Dismiss"; x.textContent = "×";
-      x.addEventListener("click", () => { dismissed.add(it.houseguest.id); renderApproaches(list); });
+      x.addEventListener("click", () => { dismiss(id); renderApproaches(list); });
       chip.appendChild(go); chip.appendChild(x);
       wrap.appendChild(chip);
     }
@@ -216,6 +303,7 @@
   }
 
   window.orwellRefreshSocial = refresh;
-  window.addEventListener("orwell:gamechanged", refresh);
+  // A new game starts a clean slate — forget who we waved off in the last one.
+  window.addEventListener("orwell:gamechanged", () => { clearDismissed(); refresh(); });
   ready(start);
 })();
