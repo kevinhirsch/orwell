@@ -493,6 +493,8 @@ _ADMIN_SCHEMA_NAMES = frozenset([
     "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
     "create_session", "list_sessions", "send_to_session", "pipeline",
     "ask_teacher", "list_models", "search_chats",
+    # God Mode (0016): keep these out of non-admin schema lists entirely.
+    "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
 ])
 _TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
 
@@ -1465,6 +1467,7 @@ async def stream_agent_loop(
     disabled_tools: Optional[Set[str]] = None,
     owner: Optional[str] = None,
     relevant_tools: Optional[Set[str]] = None,
+    pinned_tools: Optional[Set[str]] = None,
     fallbacks: Optional[List[tuple]] = None,
     workspace: Optional[str] = None,
     plan_mode: bool = False,
@@ -1578,6 +1581,13 @@ async def stream_agent_loop(
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+
+    # Pin caller-required tools (e.g. the Big Brother game tools while a game is
+    # in progress) so RAG/keyword selection can never drop them — without them the
+    # model can narrate but cannot ACT on the game (record scenes, run comps). Only
+    # matters when a filtered set is in play; None means "send all" already.
+    if _relevant_tools is not None and pinned_tools:
+        _relevant_tools.update(pinned_tools)
 
     prep_timings["tool_selection"] = time.time() - _t1
 

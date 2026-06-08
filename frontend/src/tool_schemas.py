@@ -1205,12 +1205,17 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "recordInteraction",
-            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it.",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` whenever the scene shifts a relationship — that is what makes the engine fold the HIDDEN consequence into how the houseguests feel about the player (you never see the magnitude; the engine decides it).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "A concise description of what happened in the scene."},
                     "withIds": {"type": "array", "items": {"type": "string"}, "description": "Optional ids of houseguests present besides the player."},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"],
+                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude).",
+                    },
                 },
                 "required": ["content"],
             },
@@ -1231,7 +1236,191 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "getVisibleStateFor",
+            "description": "Get the PLAYER's own visible projection: the moments they've witnessed and the things they know for certain. Vault-free — never includes hidden/off-screen content. Use to ground what the player actually knows before narrating.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gameStatus",
+            "description": "Get the public ceremony status (week, phase, current HOH, nominees, veto holder/used). Vault-free, ceremony-level facts only — use to ground narration in the live game state.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "socialRead",
+            "description": "Get an honest, Vault-free read of the room — or one houseguest — as the player could plausibly perceive it. May HINT at tension; never reveals off-screen events or hidden stats. Use to gauge the social temperature before narrating.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Optional houseguest id to read; omit to read the whole room."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "askProducers",
+            "description": "Player-level (out-of-character) interrogation of the producers. Answers come from the player's visible knowledge only and NEVER confirm or deny hidden/Vault content. Use for the Diary Room and direct strategy questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The player's question."},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "renderScene",
+            "description": "Ask the engine to narrate the current moment from the VISIBLE projection only. Use 'dialogue' for in-character NPC speech, otherwise scene narration. Vault-free grounding for what to say next.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["scene", "dialogue"], "description": "Narration mode (default scene)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "endOfSessionSummary",
+            "description": "Wrap up the play session: confirms only that an updated save exists for the player (no Vault content). Use when the player stops for now.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "advanceGame",
+            "description": "Advance the Big Brother game by one beat: HOH competition → nominations → veto competition → veto ceremony → eviction → finale. NPC beats resolve automatically (the engine decides). When it's the PLAYER's turn, the result's `pending` describes the decision they must make. Call this to move the week forward, then narrate the returned beat. Returns the beat event, any pending decision (with named options), and the public status.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submitDecision",
+            "description": "Resolve the player's pending game decision and continue. Use the `kind` from the pending decision and the houseguest ids from its `options`. The engine validates the choice (legality is enforced server-side).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["nominations", "veto-decision", "replacement", "eviction-vote"], "description": "The pending decision's kind."},
+                    "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids to nominate."},
+                    "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
+                    "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
+                    "replacement": {"type": "string", "description": "replacement: the houseguest id the HOH names as the replacement nominee."},
+                    "vote": {"type": "string", "description": "eviction-vote: the nominee id the player votes to evict."},
+                },
+                "required": ["kind"],
+            },
+        },
+    },
+    # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
+    {
+        "type": "function",
+        "function": {
+            "name": "inspectNonVaultState",
+            "description": "GOD MODE (admin only): inspect the non-Vault game state of the current sandbox. Never returns Vault/secret content — the hidden layer stays walled even from the admin (spoilers ruin the game).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "overrideMechanic",
+            "description": "GOD MODE (admin only): override a non-Vault game mechanic in the sandbox. Returns the updated non-Vault state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mechanic": {"type": "string", "description": "The mechanic to override."},
+                    "value": {"description": "The new value (any JSON type)."},
+                },
+                "required": ["mechanic", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configureGame",
+            "description": "GOD MODE (admin only): set non-Vault tunables for the sandbox — temperature/relationship config and the reserve-twist COUNT. Never sets twist CONTENT (Vault-sealed).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "settings": {"type": "object", "description": "Key/value tunables to apply (non-Vault only)."},
+                },
+                "required": ["settings"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manageSandbox",
+            "description": "GOD MODE (admin only): sandbox lifecycle for THIS user's game only — create, reset, save, or load.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["create", "reset", "save", "load"], "description": "The lifecycle operation."},
+                },
+                "required": ["op"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "createCharacter",
+            "description": (
+                "Run the OOBE (first-run character creation) and start a new Big Brother game. "
+                "Call this ONCE when no game is in progress to create the player's persona and "
+                "populate the house. Returns the Vault-free game state. "
+                "Required: playerName. Optional: archetype (one of: mastermind, social-butterfly, "
+                "competitor, under-the-radar, chaos-agent), strategyStyle (a short phrase like "
+                "'competition beast' or 'social floater'), seed (integer for reproducibility)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playerName": {"type": "string", "description": "The houseguest's display name."},
+                    "archetype": {
+                        "type": "string",
+                        "enum": ["mastermind", "social-butterfly", "competitor", "under-the-radar", "chaos-agent"],
+                        "description": "Optional player archetype.",
+                    },
+                    "strategyStyle": {"type": "string", "description": "Optional short strategy descriptor."},
+                    "seed": {"type": "integer", "description": "Optional RNG seed for reproducibility."},
+                },
+                "required": ["playerName"],
+            },
+        },
+    },
 ]
+
+
+# The Big Brother game tools (Vault-free). These are PINNED whenever the engine is
+# reachable so RAG/keyword selection can never drop them — the model must always be
+# able to call createCharacter (OOBE), getGameState (state check), and the full
+# weekly-loop surface (advanceGame/submitDecision). Keep in sync with the engine's
+# player-channel registry (src/surfaces/tools/registry.ts).
+ORWELL_GAME_TOOLS = frozenset({
+    "createCharacter",
+    "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
+    "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
+    "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
+})
 
 
 # ---------------------------------------------------------------------------

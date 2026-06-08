@@ -93,6 +93,100 @@ async def surface_information(information: str, pathway: str, user: str | None =
     return await _call("surfaceInformationTo", {"entity": "player", "fact": {"content": information}, "pathway": pathway}, user=user)
 
 
+async def game_status(user: str | None = None) -> dict:
+    """Vault-free public ceremony status for the status panel: week/phase/HOH/nominees/veto."""
+    return await _call("gameStatus", {}, user=user)
+
+
+async def get_visible_state(user: str | None = None) -> dict:
+    """The player's own visible projection: witnessed events + things they know for certain."""
+    return await _call("getVisibleStateFor", {}, user=user)
+
+
+async def render_scene(mode: str | None = None, user: str | None = None) -> dict:
+    """Ask the engine to narrate the current moment from the VISIBLE projection only
+    (`mode="dialogue"` for NPC dialogue, otherwise scene narration). Vault-free."""
+    args: dict = {}
+    if mode:
+        args["mode"] = mode
+    return await _call("renderScene", args, user=user)
+
+
+async def social_read(target: str | None = None, user: str | None = None) -> dict:
+    """An honest, Vault-free read of the room (or a single houseguest by id). May hint at
+    tension the player could plausibly perceive; never names off-screen events."""
+    args: dict = {}
+    if target:
+        args["target"] = target
+    return await _call("socialRead", args, user=user)
+
+
+async def ask_producers(question: str, user: str | None = None) -> dict:
+    """Player-level interrogation of the producers. Answers from visible state only — never
+    confirms or denies Vault content (the Vault Wall holds even here)."""
+    return await _call("askProducers", {"question": question}, user=user)
+
+
+async def end_of_session_summary(user: str | None = None) -> dict:
+    """Confirm only that an updated save exists for this user (no Vault content)."""
+    return await _call("endOfSessionSummary", {}, user=user)
+
+
+async def advance_game(user: str | None = None) -> dict:
+    """Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale).
+    NPC beats resolve automatically; returns the beat event, any pending player decision,
+    and the public status. Vault-free."""
+    return await _call("advanceGame", {}, user=user)
+
+
+async def submit_decision(decision: dict, user: str | None = None) -> dict:
+    """Resolve the player's pending decision (nominations / use veto / replacement /
+    eviction vote) and continue the loop. `decision` is the validated payload."""
+    return await _call("submitDecision", decision or {}, user=user)
+
+
+# --- God Mode / admin channel (0016) --------------------------------------------------
+# These cross the engine's ADMIN channel (/admin/call), not the player channel. The
+# admin channel is STILL Vault-free by construction (the human can never read the Vault,
+# even in God Mode — the spoiler wall). Callers MUST be gated to admins on the front-end
+# side (the agent tools below are in _ADMIN_TOOLS); the engine isolates per user (0021).
+
+async def _admin_call(name: str, args: dict | None = None, user: str | None = None) -> dict:
+    """Invoke an admin/God-Mode tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
+    url = ENGINE_URL.rstrip("/") + "/admin/call"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
+        r.raise_for_status()
+        data = r.json()
+    if "result" not in data:
+        raise RuntimeError(data.get("error", "engine call failed"))
+    return data["result"]
+
+
+async def inspect_non_vault_state(user: str | None = None) -> dict:
+    """God Mode: inspect non-Vault game state (never the Vault — walled even for admin)."""
+    return await _admin_call("inspectNonVaultState", {}, user=user)
+
+
+async def override_mechanic(mechanic: str, value, user: str | None = None) -> dict:
+    """God Mode: override a non-Vault mechanic in the sandbox; returns updated non-Vault state."""
+    return await _admin_call("overrideMechanic", {"mechanic": mechanic, "value": value}, user=user)
+
+
+async def configure_game(settings: dict, user: str | None = None) -> dict:
+    """God Mode: set non-Vault tunables (temperature/relationship config, reserve-twist COUNT —
+    never twist CONTENT, which stays Vault-sealed)."""
+    return await _admin_call("configure", settings or {}, user=user)
+
+
+async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict:
+    """God Mode: sandbox lifecycle for THIS user's sandbox only (create | reset | save | load)."""
+    args: dict = {}
+    if op:
+        args["op"] = op
+    return await _admin_call("manageSandbox", args, user=user)
+
+
 async def engine_health() -> bool:
     """True if the engine HTTP MCP server answers /health."""
     try:

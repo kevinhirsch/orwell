@@ -64,6 +64,12 @@ class ChatContext:
     # The chat route emits a doc_update SSE event for each before streaming
     # begins, so the editor pane switches to the new doc immediately.
     auto_opened_docs: list = field(default_factory=list)
+    # True when the Orwell engine is reachable for this user. Triggers game-tool
+    # pinning so the model can always call createCharacter / getGameState etc.
+    engine_available: bool = False
+    # True when a Big Brother game is in progress (started=True). The agent route
+    # uses it to inject the per-moment system prompt and auto-escalate to agent mode.
+    game_active: bool = False
 
 
 # ── Helpers ────────────────────────────────────────────────────────────── #
@@ -536,23 +542,30 @@ async def build_chat_context(
         _preface_kwargs["use_rag"] = use_rag_val
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
-    # Big Brother game framing: when a game is in progress, prepend the engine's MANAGED
-    # per-moment game-master system prompt so every main-chat turn speaks in-character (this
-    # is what stops the generic-assistant replies). Best-effort and Vault-free — the engine
-    # only ever returns Vault-free projections; any failure leaves the normal chat untouched.
+    # Big Brother game framing. Best-effort and Vault-free — any failure leaves normal
+    # chat untouched. Two flags come out:
+    #   engine_available — engine answered get_game_state (game or no game); triggers
+    #     game-tool pinning so the model can always call createCharacter / getGameState.
+    #   game_active — a game is actually started; triggers the per-moment system-prompt
+    #     injection and agent auto-escalation so every turn speaks in-character.
+    engine_available = False
+    game_active = False
     if not incognito:
         try:
             from src import orwell_engine
             game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
-            if isinstance(game_state, dict) and game_state.get("started"):
-                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
-                gm_prompt = (mp or {}).get("systemPrompt")
-                if gm_prompt:
-                    if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
-                        preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
-                    else:
-                        preface.insert(0, {"role": "system", "content": gm_prompt})
-        except Exception as e:  # engine down / no game → plain chat, no disruption
+            if isinstance(game_state, dict):
+                engine_available = True  # engine is up; pin game tools regardless of game state
+                if game_state.get("started"):
+                    game_active = True
+                    mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
+                    gm_prompt = (mp or {}).get("systemPrompt")
+                    if gm_prompt:
+                        if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
+                            preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
+                        else:
+                            preface.insert(0, {"role": "system", "content": gm_prompt})
+        except Exception as e:  # engine down → plain chat, no disruption
             logger.debug("[orwell] game framing skipped: %s", e)
 
     # Capture used memories immediately
@@ -594,6 +607,8 @@ async def build_chat_context(
         preset=preset,
         preprocessed=preprocessed,
         auto_opened_docs=auto_opened_docs,
+        engine_available=engine_available,
+        game_active=game_active,
     )
 
 

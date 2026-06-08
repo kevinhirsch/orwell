@@ -495,6 +495,11 @@ _ADMIN_TOOLS = {
     "serve_preset",
     "stop_served_model",
     "cancel_download",
+    # God Mode (0016): non-Vault admin levers over the game sandbox.
+    "inspectNonVaultState",
+    "overrideMechanic",
+    "configureGame",
+    "manageSandbox",
 }
 
 
@@ -1156,6 +1161,11 @@ async def execute_tool_block(
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_get_game_state, do_run_competition, do_record_interaction, do_surface_information,
+        do_game_status, do_get_visible_state, do_social_read, do_ask_producers,
+        do_render_scene, do_end_of_session_summary,
+        do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
+        do_manage_sandbox,
+        do_create_character, do_advance_game, do_submit_decision,
         do_app_api,
     )
 
@@ -1476,6 +1486,45 @@ async def execute_tool_block(
     elif tool == "surfaceInformationTo":
         desc = "surfaceInformationTo"
         result = await do_surface_information(content, owner=owner)
+    elif tool == "gameStatus":
+        desc = "gameStatus"
+        result = await do_game_status(content, owner=owner)
+    elif tool == "getVisibleStateFor":
+        desc = "getVisibleStateFor"
+        result = await do_get_visible_state(content, owner=owner)
+    elif tool == "socialRead":
+        desc = "socialRead"
+        result = await do_social_read(content, owner=owner)
+    elif tool == "askProducers":
+        desc = "askProducers"
+        result = await do_ask_producers(content, owner=owner)
+    elif tool == "renderScene":
+        desc = "renderScene"
+        result = await do_render_scene(content, owner=owner)
+    elif tool == "endOfSessionSummary":
+        desc = "endOfSessionSummary"
+        result = await do_end_of_session_summary(content, owner=owner)
+    elif tool == "inspectNonVaultState":
+        desc = "inspectNonVaultState"
+        result = await do_inspect_non_vault_state(content, owner=owner)
+    elif tool == "overrideMechanic":
+        desc = "overrideMechanic"
+        result = await do_override_mechanic(content, owner=owner)
+    elif tool == "configureGame":
+        desc = "configureGame"
+        result = await do_configure_game(content, owner=owner)
+    elif tool == "manageSandbox":
+        desc = "manageSandbox"
+        result = await do_manage_sandbox(content, owner=owner)
+    elif tool == "createCharacter":
+        desc = "createCharacter"
+        result = await do_create_character(content, owner=owner)
+    elif tool == "advanceGame":
+        desc = "advanceGame"
+        result = await do_advance_game(content, owner=owner)
+    elif tool == "submitDecision":
+        desc = "submitDecision"
+        result = await do_submit_decision(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

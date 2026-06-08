@@ -4484,7 +4484,7 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
 async def do_get_game_state(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
-        st = await orwell_engine.get_game_state()
+        st = await orwell_engine.get_game_state(user=owner)
         return {"output": json.dumps(st, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
@@ -4497,7 +4497,7 @@ async def do_run_competition(content: str, owner: Optional[str] = None) -> Dict:
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
     try:
-        res = await orwell_engine.run_competition(args.get("type"), args.get("participantIds"))
+        res = await orwell_engine.run_competition(args.get("type"), args.get("participantIds"), user=owner)
         if not res.get("started"):
             return {"error": "No game in progress — create a character first.", "exit_code": 1}
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
@@ -4515,7 +4515,9 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     if not text:
         return {"error": "content is required (what happened in the scene)", "exit_code": 1}
     try:
-        res = await orwell_engine.record_interaction(text, with_ids=args.get("withIds"))
+        res = await orwell_engine.record_interaction(
+            text, with_ids=args.get("withIds"), kind=args.get("kind"), user=owner,
+        )
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4532,7 +4534,186 @@ async def do_surface_information(content: str, owner: Optional[str] = None) -> D
     if not info or not pathway:
         return {"error": "information and pathway are both required", "exit_code": 1}
     try:
-        res = await orwell_engine.surface_information(info, pathway)
+        res = await orwell_engine.surface_information(info, pathway, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_game_status(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.game_status(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_get_visible_state(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.get_visible_state(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_social_read(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    try:
+        res = await orwell_engine.social_read(args.get("target"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_ask_producers(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    question = (args.get("question") or args.get("content") or "").strip()
+    if not question:
+        return {"error": "question is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.ask_producers(question, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_render_scene(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    try:
+        res = await orwell_engine.render_scene(args.get("mode"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.end_of_session_summary(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_create_character(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    player_name = (args.get("playerName") or "").strip()
+    if not player_name:
+        return {"error": "playerName is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.create_character(
+            player_name,
+            archetype=args.get("archetype"),
+            strategy_style=args.get("strategyStyle"),
+            seed=args.get("seed"),
+            user=owner,
+        )
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.advance_game(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    kind = (args.get("kind") or "").strip()
+    if kind not in {"nominations", "veto-decision", "replacement", "eviction-vote"}:
+        return {"error": "kind must be one of: nominations, veto-decision, replacement, eviction-vote", "exit_code": 1}
+    decision: dict = {"kind": kind}
+    for k in ("choice", "use", "save", "replacement", "vote"):
+        if args.get(k) is not None:
+            decision[k] = args[k]
+    try:
+        res = await orwell_engine.submit_decision(decision, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+# --- God Mode / admin (0016) — execution is gated to admins by _ADMIN_TOOLS in tool_execution ---
+
+async def do_inspect_non_vault_state(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.inspect_non_vault_state(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_override_mechanic(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    mechanic = (args.get("mechanic") or "").strip()
+    if not mechanic or "value" not in args:
+        return {"error": "mechanic and value are both required", "exit_code": 1}
+    try:
+        res = await orwell_engine.override_mechanic(mechanic, args.get("value"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_configure_game(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    settings = args.get("settings")
+    if not isinstance(settings, dict) or not settings:
+        return {"error": "settings (a non-empty object of non-Vault tunables) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.configure_game(settings, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    op = (args.get("op") or "").strip()
+    if op not in {"create", "reset", "save", "load"}:
+        return {"error": "op must be one of: create, reset, save, load", "exit_code": 1}
+    try:
+        res = await orwell_engine.manage_sandbox(op, user=owner)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

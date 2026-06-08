@@ -16,6 +16,7 @@ from core.models import ChatMessage
 from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
 from src.agent_loop import stream_agent_loop
+from src.tool_schemas import ORWELL_GAME_TOOLS
 from src import agent_runs
 from src import session_events
 from src.model_context import estimate_tokens
@@ -543,6 +544,21 @@ def setup_chat_routes(
             agent_mode=(chat_mode == "agent"),
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
+
+        # The game IS the main chat: when the Orwell engine is reachable, always run
+        # the agent loop so the model can call createCharacter (OOBE), getGameState,
+        # and the full weekly-loop surface (advanceGame/submitDecision) instead of
+        # falling back to bash/curl exploration. This covers both pre-game OOBE and
+        # in-progress play. The game tools are pinned (see pinned_tools below) and
+        # the heavy shell/code/file tools stay withheld by the auto_escalated block.
+        # (A later privilege gate still downgrades users who can't use agent mode.)
+        if chat_mode == "chat" and (ctx.engine_available or ctx.game_active):
+            chat_mode = "agent"
+            auto_escalated = True
+            logger.info(
+                "chat→agent auto-escalation: engine_available=%s game_active=%s",
+                ctx.engine_available, ctx.game_active,
+            )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
@@ -1094,6 +1110,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         tool_policy=tool_policy,
                         owner=_user,
+                        pinned_tools=(ORWELL_GAME_TOOLS if ctx.engine_available else None),
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
                         plan_mode=plan_mode,

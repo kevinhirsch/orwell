@@ -61,6 +61,15 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] moment failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
+    @router.get("/status")
+    async def orwell_status(request: Request):
+        """Vault-free public ceremony status for the status panel (week/phase/HOH/nominees/veto)."""
+        try:
+            return await orwell_engine.game_status(user=_current_user(request))
+        except Exception as e:
+            logger.warning(f"[orwell] status failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest, request: Request):
         if not body.playerName.strip():

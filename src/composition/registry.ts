@@ -40,7 +40,18 @@ function buildUserSandbox(): UserSandbox {
     player: PLAYER, events: engine.events, knowledge: engine.knowledge, adminState,
   });
   const commands = new EngineCommandsAdapter(engine.events, engine.knowledge, engine.relationships);
-  const session = new GameSessionAdapter();
+  const session = new GameSessionAdapter(engine.relationships);
+  // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
+  // player's knowledge and the durable snapshot (never hidden — the player lived them).
+  session.setOnEvent((ev) => engine.events.record({
+    id: `season:${engine.events.query().length}`,
+    ts: engine.events.query().length,
+    type: "house-event",
+    initiator: ev.participants[0] ?? PLAYER,
+    witnessSet: [PLAYER, ...ev.participants.filter((p) => p !== PLAYER)],
+    hidden: false,
+    content: ev.content,
+  }));
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
   return {
     engine,
