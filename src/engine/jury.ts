@@ -59,6 +59,56 @@ export function finalePerformance(parts: ReadonlyArray<{ quality: number }>): nu
 }
 
 /**
+ * The structured appeal a finalist makes when answering a juror (feature 0037). This is the
+ * ANTI-SYCOPHANCY crux: the finale sway comes from a finalist's CHOICE of appeal scored by the
+ * engine against THAT juror's state — never from the LLM grading the eloquence of prose. The LLM
+ * voices the exchange; the number below is the engine's.
+ */
+export type FinaleAppeal = "own-game" | "mend" | "connect" | "discredit-rival";
+
+export const FINALE_APPEALS: readonly FinaleAppeal[] = ["own-game", "mend", "connect", "discredit-rival"];
+
+const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+
+/**
+ * Engine-scored quality in [0,1] of `appeal` made to a juror with this read/manner of the finalist:
+ *  - `mend`            lands only where there is a grievance (blindside/betrayal/disrespect) to address.
+ *  - `connect`         scales with the juror's affinity for the finalist.
+ *  - `own-game`        lands with jurors who respect a threatening, fair game; backfires on the betrayed.
+ *  - `discredit-rival` a small generic lift that backfires with a juror loyal (high-affinity) to the rival.
+ * The overall sway stays bounded by `JURY_WEIGHTS.finale` (well below relationship+manner), so a strong
+ * finale tips CLOSE jurors and never overturns a clear lead.
+ */
+export function appealEffect(appeal: FinaleAppeal, rel: JuryRel, manner: EvictionManner = {}): number {
+  const grievance = !!(manner.blindsided || manner.betrayed || manner.disrespected);
+  switch (appeal) {
+    case "mend":
+      return grievance ? 0.85 : 0.35;
+    case "connect":
+      return clamp01(0.4 + 0.4 * rel.affinity);
+    case "own-game":
+      return manner.betrayed ? 0.3 : clamp01(0.55 + 0.2 * rel.threat);
+    case "discredit-rival":
+      return rel.affinity > 0.6 ? 0.35 : 0.55;
+  }
+}
+
+/**
+ * The strongest appeal a finalist can make to a given juror — used to let an NPC finalist play the
+ * finale optimally (deterministic argmax over `FINALE_APPEALS`, ties broken by declaration order), so
+ * the player's own appeals have to be at least as good to gain ground.
+ */
+export function bestAppeal(rel: JuryRel, manner: EvictionManner = {}): FinaleAppeal {
+  let best: FinaleAppeal = FINALE_APPEALS[0]!;
+  let bestScore = -Infinity;
+  for (const a of FINALE_APPEALS) {
+    const s = appealEffect(a, rel, manner);
+    if (s > bestScore) { bestScore = s; best = a; }
+  }
+  return best;
+}
+
+/**
  * One juror's engine-decided vote between the two finalists. The dominant term is
  * the accumulated lean; the finale adds a small swing (performance + a momentary
  * seeded sway) that can tip a close juror but not a clear lead.
