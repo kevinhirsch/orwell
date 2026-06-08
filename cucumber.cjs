@@ -22,6 +22,7 @@ module.exports = {
       "docs/features/0013-diary-room.feature",
       "docs/features/0014-jury-and-endgame.feature",
       "docs/features/0015-character-creation-oobe.feature",
+      "docs/features/0016-god-mode-admin.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

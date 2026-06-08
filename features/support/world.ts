@@ -125,6 +125,11 @@ export class BbWorld extends World {
   privateFact?: string;
   oobeKnowledge?: import("../../src/ports/KnowledgeService").KnowledgeService;
 
+  // God Mode / admin (0016) scratch state.
+  sandbox2?: Sandbox;
+  twist?: VaultDatum;
+  revealRejected?: boolean;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
