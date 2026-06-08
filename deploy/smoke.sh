@@ -70,6 +70,9 @@ state="$(pcall '{"name":"getGameState","args":{}}')"
 check  "getGameState -> started"        "$state" '"started":true'
 refute "house roster carries no soul"   "$state" '"soul"'
 check  "getMomentPrompt -> systemPrompt" "$(pcall '{"name":"getMomentPrompt","args":{}}')" '"systemPrompt"'
+runcomp="$(pcall '{"name":"runCompetition","args":{"type":"endurance"}}')"
+check  "runCompetition -> winner (live house)" "$runcomp" '"winner"'
+refute "runCompetition hides stats/scores"     "$runcomp" '"physical"'
 comp='{"name":"resolveCompetition","args":{"type":"endurance","participants":[{"id":"player","stats":{"physical":0.5,"mental":0.5,"social":0.5}},{"id":"npc:1","stats":{"physical":0.6,"mental":0.5,"social":0.5}}],"intents":[],"seed":1}}'
 check  "resolveCompetition -> winner"   "$(pcall "$comp")" '"winner"'
 refute "competition result hides scores" "$(pcall "$comp")" '"score'

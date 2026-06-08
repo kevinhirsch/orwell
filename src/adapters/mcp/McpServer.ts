@@ -5,7 +5,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, MomentPromptReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, MomentPromptReq, RunCompetitionReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -46,6 +46,8 @@ export class McpServer {
         return this.deps.session.getGameState();
       case "getMomentPrompt":
         return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
+      case "runCompetition":
+        return this.deps.session.runCompetition(args as unknown as RunCompetitionReq);
       case "getVisibleStateFor":
         return this.deps.player.getVisibleState();
       case "renderScene":

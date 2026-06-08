@@ -75,6 +75,22 @@ app, so they inherit its session, streaming, SSE sync, and provider plumbing for
 3. You'll be asked to **create your houseguest** before the chat; then just chat — every turn is
    in-character. Open the same account on a second device to see the session sync.
 
+### Driving the game (agent action tools)
+
+In **agent mode**, the model can also *act* on the game, not just narrate it — the engine's
+Vault-free player tools are exposed as function-calling tools (`src/tool_schemas.py` +
+`src/tool_implementations.py` + `src/tool_execution.py`, relayed via `src/orwell_engine.py`):
+
+- **`getGameState`** — week/phase, the player card, the house roster (names only).
+- **`runCompetition`** — the **engine** resolves a competition over the live house from its OWN
+  hidden stats and returns only the winner's name (no stats/scores ever cross the wall). The model
+  requests it, the engine decides — anti-sycophancy holds.
+- **`recordInteraction`** — record a player-present scene as a game event (player knowledge).
+- **`surfaceInformationTo`** — move a fact into the player's knowledge via a named in-game pathway.
+
+The engine enforces the Vault Wall on every result, so the model can drive the game without ever
+seeing secret state.
+
 **Still managed by the engine, not here:** game state lives in the engine process (in-memory
 today; persistence is feature 0007). The deep loop (competitions, nominations, votes driving the
 phase/moment) is the engine's weekly-loop work (feature 0011) — the main chat picks up those

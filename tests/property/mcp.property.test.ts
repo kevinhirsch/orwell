@@ -17,6 +17,7 @@ function sampleArgs(name: string): Record<string, unknown> {
     case "askProducers": return { question: "is it true?" };
     case "recordInteraction": return { initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "chat" };
     case "resolveCompetition": return { type: "endurance", participants: [{ id: PLAYER, stats: { physical: 0.5, mental: 0.5, social: 0.5 } }, { id: npc(1), stats: { physical: 0.6, mental: 0.5, social: 0.5 } }], intents: [], seed: 1 };
+    case "runCompetition": return { type: "endurance" };
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
     case "inspectNonVaultState": return { query: "all" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
