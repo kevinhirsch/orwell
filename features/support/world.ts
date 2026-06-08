@@ -141,6 +141,14 @@ export class BbWorld extends World {
   gsView?: import("../../src/ports/GameSession").GameStateView;
   gsMoment?: string;
 
+  // Agent-driven play loop (0019) scratch state.
+  decisionCtx?: import("../../src/engine/decisions").DecisionContext;
+  pending?: import("../../src/engine/decisions").PendingResult;
+  decisionResult?: import("../../src/engine/decisions").DecisionResult;
+  decisionRejected?: boolean;
+  compResult?: { winner: { id: string; name: string } | null };
+  bondBaseline?: number;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
