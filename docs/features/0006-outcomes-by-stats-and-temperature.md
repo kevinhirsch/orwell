@@ -19,7 +19,10 @@ The exact temperature math — distributions, per-variable weights, bounds, surf
 an **open decision** (`bb-sim-spec.md` §16.2). This spec therefore asserts **properties**
 (reproducibility, bounds, stat-correlated win rates, variance from temperature + emotion, no
 player protection), **not specific numbers**. Keep weights/bounds in a tunable config. The
-emotional-modifier weighting lives in that same config and reads the dynamic soul.
+emotional-modifier weighting lives in that same config and reads the dynamic soul. **Variance
+is calibrated so a clear stat favorite wins a strong majority of runs but loses a real
+minority** — earned outcomes with uncommon upsets (target ≈ 65–80% favorite win rate, tunable);
+temperature and the emotional modifier supply that minority.
 
 ## 3. Contracts (stack-agnostic)
 
@@ -36,6 +39,9 @@ TemperatureRoll:
 - **Reproducibility:** same seed ⇒ identical outcome; different seeds ⇒ varied outcomes.
 - **Stat correlation:** over many seeded runs, win rate increases with the relevant-stat
   advantage for the competition type (monotonic trend), without being deterministic.
+- **Calibrated variance:** a clear favorite wins a **strong majority** across seeds but loses
+  a **real minority** (the configured upset band — target ≈ 65–80% favorite win rate, tunable)
+  — neither near-deterministic nor coin-flippy.
 - **No player protection:** the player's win rate in an unfavorable type is statistically
   indistinguishable from an NPC of equivalent stats.
 - **Variance non-determinism:** temperature + the emotional modifier mean a clear favorite
@@ -49,6 +55,8 @@ TemperatureRoll:
 - [ ] All scenarios pass across the seed set, name-agnostic.
 - [ ] Outcomes reproducible by seed; distributions reflect stats + temperature, not story.
 - [ ] Player provably unprotected; temperature + emotional modifier provably break perfect predictability.
+- [ ] A clear favorite's win rate lands in the configured "earned but upsettable" band (strong
+      majority, real-minority upsets).
 - [ ] Temperature bounded; hard rules invariant under temperature.
 - [ ] Intent honored pre-comp and immutable post-result; weights/bounds in tunable config.
 
