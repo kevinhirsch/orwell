@@ -2134,25 +2134,45 @@ def setup_model_routes(model_discovery):
 
     @router.get("/tools")
     def list_tools():
-        """List all available tools with their enabled/disabled status."""
-        from src.agent_tools import TOOL_TAGS
+        """List all available tools with their enabled/disabled status.
+
+        Under the game build (feature 0032) only the game keep-set + optional
+        ("power") tools are listed; dropped/dead verticals are omitted entirely.
+        Each entry carries an `optional` flag — optional tools are off by default
+        (opt-in via `game_tools_enabled`) for security."""
+        from src.agent_tools import TOOL_TAGS, GAME_TOOL_KEEP, GAME_TOOL_OPTIONAL
+        from src.settings import game_build_enabled
         settings = _load_settings()
         disabled = set(settings.get("disabled_tools", []))
         tools = []
-        for tag in sorted(TOOL_TAGS):
-            tools.append({"id": tag, "enabled": tag not in disabled})
+        if game_build_enabled():
+            enabled_opt = set(settings.get("game_tools_enabled", []))
+            listed = (GAME_TOOL_KEEP | GAME_TOOL_OPTIONAL) & TOOL_TAGS
+            for tag in sorted(listed):
+                is_optional = tag in GAME_TOOL_OPTIONAL
+                if is_optional:
+                    enabled = tag in enabled_opt and tag not in disabled
+                else:
+                    enabled = tag not in disabled
+                tools.append({"id": tag, "enabled": enabled, "optional": is_optional})
+        else:
+            for tag in sorted(TOOL_TAGS):
+                tools.append({"id": tag, "enabled": tag not in disabled, "optional": False})
         return {"tools": tools}
 
     class ToolsUpdate(BaseModel):
         disabled: list = []
+        enabled_optional: list = []
 
     @router.post("/tools")
     def update_tools(body: ToolsUpdate, request: Request):
-        """Update which tools are disabled."""
+        """Update which tools are disabled (and, under the game build, which
+        optional 'power' tools the user has opted into)."""
         require_admin(request)
         settings = _load_settings()
         settings["disabled_tools"] = body.disabled
+        settings["game_tools_enabled"] = body.enabled_optional
         _save_settings(settings)
-        return {"ok": True, "disabled": body.disabled}
+        return {"ok": True, "disabled": body.disabled, "enabled_optional": body.enabled_optional}
 
     return router

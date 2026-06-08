@@ -8,11 +8,8 @@ const _defaultKeybinds = {
   search: 'ctrl+k', toggle_sidebar: 'ctrl+alt+b', new_session: 'ctrl+alt+n',
   fav_session: 'ctrl+alt+f', delete_session: 'ctrl+alt+d',
   cancel: 'escape', tts: 'alt+shift+t',
-  incognito: 'ctrl+alt+i', settings: 'ctrl+,', focus_input: 'ctrl+/',
-  // Open-tool shortcuts (Calendar bound by default; rest unbound).
-  open_calendar: 'ctrl+alt+c', open_compare: '', open_cookbook: '',
-  open_research: '', open_gallery: '', open_library: '', open_memory: '',
-  open_notes: '', open_tasks: '', open_theme: '',
+  settings: 'ctrl+,', focus_input: 'ctrl+/',
+  open_theme: '',
 };
 
 export function _matchesCombo(e, combo, isMac = IS_MAC) {
@@ -98,16 +95,6 @@ export function initKeyboardShortcuts(modules) {
   const _WINDOW_TRIGGERS = {
     'settings-modal':         'user-bar-settings',
     'theme-modal':            'tool-theme-btn',
-    'tasks-modal':            'tool-tasks-btn',
-    'notes-panel':            'tool-notes-btn',
-    'memory-modal':           'tool-memory-btn',
-    'doclib-modal':           'tool-library-btn',
-    'gallery-modal':          'tool-gallery-btn',
-    'research-overlay':       'tool-research-btn',
-    'cookbook-modal':         'tool-cookbook-btn',
-    'compare-model-overlay':  'tool-compare-btn',
-    'calendar-modal':         'tool-calendar-btn',
-    'email-lib-modal':        'email-section-title',
   };
   let _lastWindow = 'settings-modal';
 
@@ -246,15 +233,6 @@ export function initKeyboardShortcuts(modules) {
     if (_matchesCombo(e, kb.cancel)) {
       if (chatModule) chatModule.abortCurrentRequest();
     }
-    if (_matchesCombo(e, kb.incognito)) {
-      e.preventDefault();
-      // Drive the visible button so the real toggle logic runs (visual
-      // state, welcome-screen guard, checkbox sync) — flipping the hidden
-      // checkbox alone did nothing.
-      const btn = el('incognito-btn');
-      if (btn) btn.click();
-      return;
-    }
     if (_matchesCombo(e, kb.settings)) {
       e.preventDefault();
       _toggleActiveWindow();
@@ -263,15 +241,6 @@ export function initKeyboardShortcuts(modules) {
     // Open-tool shortcuts — click the sidebar tool button so each tool's
     // own open/toggle logic runs. Unbound (empty) combos never match.
     const _toolBtns = {
-      open_calendar: 'tool-calendar-btn',
-      open_compare:  'tool-compare-btn',
-      open_cookbook: 'tool-cookbook-btn',
-      open_research: 'tool-research-btn',
-      open_gallery:  'tool-gallery-btn',
-      open_library:  'tool-library-btn',
-      open_memory:   'tool-memory-btn',
-      open_notes:    'tool-notes-btn',
-      open_tasks:    'tool-tasks-btn',
       open_theme:    'tool-theme-btn',
     };
     for (const action in _toolBtns) {

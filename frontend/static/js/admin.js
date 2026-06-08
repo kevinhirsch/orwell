@@ -1376,8 +1376,37 @@ const TOOL_META = {
   manage_endpoints:  { name: 'Endpoints',        desc: 'Add/remove model endpoints',      cat: 'System',     ctx: '~100' },
   manage_mcp:        { name: 'MCP Servers',      desc: 'Manage MCP connections',          cat: 'System',     ctx: '~100' },
   manage_webhooks:   { name: 'Webhooks',         desc: 'Configure webhook events',        cat: 'System',     ctx: '~100' },
-  manage_tokens:     { name: 'API Tokens',       desc: 'Manage API access tokens',        cat: 'System',     ctx: '~100' },
-  manage_settings:   { name: 'Settings',         desc: 'Change app settings',             cat: 'System',     ctx: '~100' },
+  manage_tokens:     { name: 'API Tokens',       desc: 'Manage API access tokens',        cat: 'Core',       ctx: '~100' },
+  manage_settings:   { name: 'Settings',         desc: 'Change app settings',             cat: 'Core',       ctx: '~100' },
+  manage_endpoints:  { name: 'Endpoints',        desc: 'Add/remove model endpoints',      cat: 'Core',       ctx: '~100' },
+  manage_mcp:        { name: 'MCP Servers',      desc: 'Manage MCP connections',          cat: 'Core',       ctx: '~100' },
+  // ── Big Brother game engine + God Mode (always available under the game build) ──
+  getGameState:        { name: 'Get Game State',     desc: 'Read the visible game state',      cat: 'Game', ctx: '~200' },
+  runCompetition:      { name: 'Run Competition',    desc: 'Resolve a comp by stats + temperature', cat: 'Game', ctx: '~150' },
+  recordInteraction:   { name: 'Record Interaction', desc: 'Log an event + its hidden impact', cat: 'Game', ctx: '~150' },
+  surfaceInformationTo:{ name: 'Surface Information', desc: 'Reveal a fact via an in-game pathway', cat: 'Game', ctx: '~150' },
+  gameStatus:          { name: 'Game Status',        desc: 'Current week / phase summary',     cat: 'Game', ctx: '~100' },
+  getVisibleStateFor:  { name: 'Visible State For',  desc: 'What an entity can see',           cat: 'Game', ctx: '~150' },
+  socialRead:          { name: 'Social Read',        desc: 'Observable houseguest behavior',   cat: 'Game', ctx: '~150' },
+  askProducers:        { name: 'Ask Producers',      desc: 'Out-of-character producer query',  cat: 'Game', ctx: '~100' },
+  renderScene:         { name: 'Render Scene',       desc: 'Narrate an in-game scene',         cat: 'Game', ctx: '~200' },
+  endOfSessionSummary: { name: 'Session Summary',    desc: 'Wrap up a play session',          cat: 'Game', ctx: '~150' },
+  createCharacter:     { name: 'Create Character',   desc: 'Generate / author a houseguest',   cat: 'Game', ctx: '~200' },
+  advanceGame:         { name: 'Advance Game',       desc: 'Advance the weekly loop a beat',   cat: 'Game', ctx: '~150' },
+  submitDecision:      { name: 'Submit Decision',    desc: 'Resolve a player decision point',  cat: 'Game', ctx: '~100' },
+  inspectNonVaultState:{ name: 'Inspect State',      desc: 'God Mode: read non-Vault state',   cat: 'Game', ctx: '~200' },
+  overrideMechanic:    { name: 'Override Mechanic',  desc: 'God Mode: override a mechanic',    cat: 'Game', ctx: '~150' },
+  configureGame:       { name: 'Configure Game',     desc: 'God Mode: configure the sandbox',  cat: 'Game', ctx: '~150' },
+  manageSandbox:       { name: 'Manage Sandbox',     desc: 'God Mode: manage the game sandbox', cat: 'Game', ctx: '~150' },
+  // ── Core UI / account tools (kept) ──
+  ask_user:          { name: 'Ask User',          desc: 'Ask the player a question',       cat: 'Core',   ctx: '~100' },
+  update_plan:       { name: 'Update Plan',       desc: 'Maintain a running plan',         cat: 'Core',   ctx: '~150' },
+  // ── System (opt-in) — general "power" tools, off by default for security ──
+  edit_file:         { name: 'Edit File',         desc: 'Find & replace in a file',        cat: 'System (opt-in)', ctx: '~150' },
+  grep:              { name: 'Grep',              desc: 'Search file contents',            cat: 'System (opt-in)', ctx: '~100' },
+  glob:              { name: 'Glob',              desc: 'Match files by pattern',          cat: 'System (opt-in)', ctx: '~100' },
+  ls:                { name: 'List Dir',          desc: 'List directory contents',         cat: 'System (opt-in)', ctx: '~100' },
+  app_api:           { name: 'App API',           desc: 'Call a UI-button endpoint',       cat: 'System (opt-in)', ctx: '~200' },
 };
 
 async function loadBuiltinTools() {
@@ -1398,8 +1427,10 @@ async function loadBuiltinTools() {
       groups[cat].push({ ...t, ...meta });
     }
 
-    // Category order
-    const catOrder = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
+    // Category order ('Game' + 'Core' lead under the game build; 'System (opt-in)'
+    // groups the off-by-default power tools; legacy categories trail for the
+    // full-workspace (game-build-off) listing).
+    const catOrder = ['Game', 'Core', 'System (opt-in)', 'Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
     let html = '';
     for (const cat of catOrder) {
       const items = groups[cat];
@@ -1422,15 +1453,19 @@ async function loadBuiltinTools() {
         </div>
         <div class="admin-tool-cat-body hidden" id="${catId}">`;
       for (const t of items) {
+        const optHint = t.optional
+          ? '<span class="admin-tool-desc" style="opacity:0.6;font-style:italic;">off by default · security</span>'
+          : '';
         html += `
         <div class="admin-tool-row">
           <div class="admin-tool-info">
             <span class="admin-tool-name">${esc(t.name)}</span>
             <span class="admin-tool-desc">${esc(t.desc)}</span>
+            ${optHint}
           </div>
           <span class="admin-tool-ctx" title="Approximate context tokens used">${esc(t.ctx)}</span>
           <label class="admin-switch" style="flex-shrink:0;">
-            <input type="checkbox" data-tool-id="${esc(t.id)}" ${t.enabled ? 'checked' : ''}>
+            <input type="checkbox" data-tool-id="${esc(t.id)}" data-tool-optional="${t.optional ? '1' : '0'}" ${t.enabled ? 'checked' : ''}>
             <span class="admin-slider"></span>
           </label>
         </div>`;
@@ -1459,15 +1494,28 @@ async function loadBuiltinTools() {
       });
     });
 
-    // Helper: save disabled tools + update counters
+    // Helper: save tool state + update counters.
+    //   disabled         = KEEP / non-optional tools that are unchecked.
+    //   enabled_optional = optional ("power") tools that are checked.
+    // When the GET response carried no `optional` field (game build off), every
+    // row is data-tool-optional="0", so all unchecked tools fall into `disabled`
+    // and enabled_optional stays empty — today's behavior, unchanged.
     async function _saveToolState() {
       const allChecks = list.querySelectorAll('input[data-tool-id]');
       const disabled = [];
-      allChecks.forEach(c => { if (!c.checked) disabled.push(c.dataset.toolId); });
+      const enabledOptional = [];
+      allChecks.forEach(c => {
+        const isOptional = c.dataset.toolOptional === '1';
+        if (isOptional) {
+          if (c.checked) enabledOptional.push(c.dataset.toolId);
+        } else if (!c.checked) {
+          disabled.push(c.dataset.toolId);
+        }
+      });
       await fetch('/api/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disabled }),
+        body: JSON.stringify({ disabled, enabled_optional: enabledOptional }),
         credentials: 'same-origin',
       });
     }
