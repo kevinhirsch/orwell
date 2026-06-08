@@ -58,6 +58,26 @@ export interface MomentPromptView {
   systemPrompt: string;
 }
 
+export interface RunCompetitionReq {
+  /** Competition type; an unknown/missing value falls back to a sensible default. */
+  type?: string;
+  /** Optional subset of houseguest ids to compete; defaults to the whole house. */
+  participantIds?: EntityId[];
+}
+
+/**
+ * Vault-free competition outcome: the engine-decided winner (name only). The
+ * engine resolves it from the live house's OWN stats — the caller (LLM/front-end)
+ * supplies no stats and receives no scores or rankings (anti-sycophancy + Vault Wall).
+ */
+export interface CompetitionResultView {
+  started: boolean;
+  type: string;
+  week: number;
+  phase: string;
+  winner: { id: EntityId; name: string } | null;
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
@@ -65,4 +85,10 @@ export interface GameSession {
   getGameState(): GameStateView;
   /** The managed system prompt to inject for the current (or requested) moment. */
   getMomentPrompt(req: MomentPromptReq): MomentPromptView;
+  /**
+   * Resolve a competition over the live house using the engine's OWN stats +
+   * seeded temperature. Returns only the winner (name) — no stats/scores cross
+   * the wall. The LLM may request this to drive the game; the ENGINE decides.
+   */
+  runCompetition(req: RunCompetitionReq): CompetitionResultView;
 }

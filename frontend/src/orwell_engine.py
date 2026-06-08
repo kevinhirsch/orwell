@@ -58,6 +58,32 @@ async def get_moment_prompt(moment: str | None = None) -> dict:
     return await _call("getMomentPrompt", args)
 
 
+async def run_competition(comp_type: str | None = None, participant_ids: list | None = None) -> dict:
+    """Ask the engine to resolve a competition over the LIVE house. Engine-owned
+    stats decide it; we receive only the winner (name) — no stats/scores."""
+    args: dict = {}
+    if comp_type:
+        args["type"] = comp_type
+    if participant_ids:
+        args["participantIds"] = participant_ids
+    return await _call("runCompetition", args)
+
+
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player") -> dict:
+    """Record a player-present scene as an engine event (player-witnessed → the
+    player's knowledge, never the Vault)."""
+    witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
+    if "player" not in witness:
+        witness.append("player")
+    return await _call("recordInteraction", {"initiator": initiator, "witnessSet": witness, "content": content})
+
+
+async def surface_information(information: str, pathway: str) -> dict:
+    """Surface a fact into the player's knowledge via a named in-game pathway
+    (e.g. "overheard", "told-by:npc:2")."""
+    return await _call("surfaceInformationTo", {"entity": "player", "fact": {"content": information}, "pathway": pathway})
+
+
 async def engine_health() -> bool:
     """True if the engine HTTP MCP server answers /health."""
     try:

@@ -1155,6 +1155,7 @@ async def execute_tool_block(
         do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
+        do_get_game_state, do_run_competition, do_record_interaction, do_surface_information,
         do_app_api,
     )
 
@@ -1463,6 +1464,18 @@ async def execute_tool_block(
     elif tool == "vault_unlock":
         desc = "vault_unlock"
         result = await do_vault_unlock(content, owner=owner)
+    elif tool == "getGameState":
+        desc = "getGameState"
+        result = await do_get_game_state(content, owner=owner)
+    elif tool == "runCompetition":
+        desc = "runCompetition"
+        result = await do_run_competition(content, owner=owner)
+    elif tool == "recordInteraction":
+        desc = "recordInteraction"
+        result = await do_record_interaction(content, owner=owner)
+    elif tool == "surfaceInformationTo":
+        desc = "surfaceInformationTo"
+        result = await do_surface_information(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

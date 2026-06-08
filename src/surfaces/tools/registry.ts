@@ -25,6 +25,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   // Action tools (0009): request in, Vault-free result out (engine performs them).
   { name: "recordInteraction", channel: "player", readsVault: false, description: "Record a player-witnessed interaction; returns its id." },
   { name: "resolveCompetition", channel: "player", readsVault: false, description: "Engine-decided outcome only — no stats, rankings, or Vault reasoning." },
+  { name: "runCompetition", channel: "player", readsVault: false, description: "Resolve a competition over the LIVE house using the engine's own stats; returns the winner (name) only." },
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
 ];
 
