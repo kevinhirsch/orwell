@@ -64,10 +64,19 @@ CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp BBAI_PORT=8080 \
 | File | Role |
 |---|---|
 | `bbai.sh` | Host-side: create the Proxmox LXC, then run the in-container install. |
-| `bbai-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. |
+| `bbai-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
 | `bbai-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). |
 | `systemd/bbai-engine.service` | `npm start` (the MCP server). |
 | `systemd/bbai-frontend.service` | `uvicorn app:app` (orwell), reads `BBAI_ENGINE_MCP_URL`. |
+
+## Proxmox guest tools
+
+`qemu-guest-agent` is installed by `bbai-install.sh`, but it is a **VM-only** transport
+(virtio-serial) that does not exist in an LXC. The installer therefore **enables it only when that
+transport is present** (a real VM); in an LXC it stays installed-but-dormant — the Proxmox host
+already manages the container directly (IP in the UI, `pct shutdown`, vzdump backups all work
+without an agent), and this avoids a perpetually-failing systemd unit. If a VM deploy mode is added
+later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed agent activates.
 
 ## Validation & remaining wiring
 
