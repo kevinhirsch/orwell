@@ -18,7 +18,24 @@ export interface HttpMcpDeps {
   admin: McpServer;
 }
 
-export function createHttpMcpServer(deps: HttpMcpDeps): Server {
+/** Per-user routing: resolve the channel's MCP server for the asserted user (0021). */
+export interface HttpMcpResolver {
+  resolve(channel: "player" | "admin", user: string): McpServer;
+}
+
+/** The front-end (trusted loopback auth tier, 0021) asserts the user via this header. */
+const USER_HEADER = "x-orwell-user";
+
+function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
+  return typeof (d as HttpMcpResolver).resolve === "function";
+}
+
+export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver): Server {
+  // A request's MCP server is resolved per (channel, asserted user). Single-tenant deps ignore the
+  // user; the registry-backed resolver routes each call into that user's isolated sandbox.
+  const pick = (channel: "player" | "admin", user: string): McpServer =>
+    isResolver(deps) ? deps.resolve(channel, user) : (channel === "player" ? deps.player : deps.admin);
+
   return createServer((req, res) => {
     const send = (code: number, body: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -30,7 +47,9 @@ export function createHttpMcpServer(deps: HttpMcpDeps): Server {
 
     const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
     if (!match) return send(404, { error: "not found" });
-    const server = match[1] === "player" ? deps.player : deps.admin;
+    const userHeader = req.headers[USER_HEADER];
+    const user = (Array.isArray(userHeader) ? userHeader[0] : userHeader) || "default";
+    const server = pick(match[1] as "player" | "admin", user);
 
     if (req.method === "GET" && match[2] === "tools") return send(200, { tools: server.listTools() });
 
@@ -53,6 +72,6 @@ export function createHttpMcpServer(deps: HttpMcpDeps): Server {
   });
 }
 
-export function startHttpMcp(deps: HttpMcpDeps, port: number): Server {
+export function startHttpMcp(deps: HttpMcpDeps | HttpMcpResolver, port: number): Server {
   return createHttpMcpServer(deps).listen(port);
 }

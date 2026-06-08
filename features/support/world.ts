@@ -153,6 +153,24 @@ export class BbWorld extends World {
   portraitHg?: Houseguest;
   portraitSeed?: number;
 
+  // Consequence & memory (0023) scratch state.
+  consequence?: import("../../src/engine/consequence").ConsequenceEngine;
+  reloaded?: import("../../src/engine/consequence").ConsequenceEngine;
+  relBefore?: import("../../src/engine/relationships").EdgeSignals;
+  threatBefore?: number;
+  snap?: import("../../src/engine/consequence").MemorySnapshot;
+  noms?: Eid[];
+
+  // Per-user sandboxes (0021) scratch state.
+  registry?: import("../../src/composition/registry").GameSessionRegistry;
+  userASnapshot?: string;
+
+  // Soul storage & recall (0024) scratch state.
+  soul?: import("../../src/adapters/engine/SoulStore").SoulStore;
+  recalled?: import("../../src/ports/SoulProvider").Memory[];
+  archViolations?: unknown[];
+  hiddenMemory?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

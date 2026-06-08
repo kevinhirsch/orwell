@@ -536,9 +536,9 @@ async def build_chat_context(
     if not incognito:
         try:
             from src import orwell_engine
-            game_state = await orwell_engine.get_game_state()
+            game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
             if isinstance(game_state, dict) and game_state.get("started"):
-                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"))
+                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
                 gm_prompt = (mp or {}).get("systemPrompt")
                 if gm_prompt:
                     if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":

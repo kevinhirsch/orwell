@@ -148,6 +148,16 @@ export class RelationshipModel {
     return { edges };
   }
 
+  /** Replace all edges from a serialized snapshot — recall after leaving/restart (0023/0007). */
+  load(edges: ReadonlyArray<{ from: EntityId; to: EntityId } & EdgeSignals>): void {
+    this.edges.clear();
+    for (const e of edges) {
+      this.edges.set(this.key(e.from, e.to), {
+        trust: e.trust, affinity: e.affinity, threat: e.threat, alignment: e.alignment, confidence: e.confidence,
+      });
+    }
+  }
+
   /**
    * Houseguest's Choice / NPC motivation: pick the strongest available bond
    * (trust+affinity) with BOUNDED temperature variance — a clear bond is not

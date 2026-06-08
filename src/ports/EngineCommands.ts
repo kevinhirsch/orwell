@@ -11,6 +11,14 @@ export interface RecordInteractionReq {
   initiator: EntityId;
   witnessSet: EntityId[];
   content: string;
+  /**
+   * Optional interaction nature (caller/LLM-PROPOSED): "bonding" | "betrayal" | "conflict" |
+   * "strategy" | "alliance" | "gossip" | "showmance". When present, the engine folds the HIDDEN
+   * relationship impact into the layer (0017/0023) — the magnitude is the engine's (anti-sycophancy).
+   */
+  kind?: string;
+  /** Whose hidden opinion of the initiator moves (default: the other witnesses). */
+  toward?: EntityId[];
 }
 
 export interface ResolveCompetitionReq {
