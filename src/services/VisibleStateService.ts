@@ -2,7 +2,7 @@ import type { EventStore } from "../ports/EventStore";
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { EntityId } from "../domain/ids";
 import type { GameEvent } from "../domain/event";
-import type { KnowledgeFact } from "../domain/knowledge";
+import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
 
 export interface VisibleState {
   forEntity: EntityId;
@@ -28,5 +28,14 @@ export class VisibleStateService {
       visibleEvents: this.events.query({ witnessedBy: entity }),
       knowledge: this.knowledge.knownTo(entity),
     };
+  }
+
+  /**
+   * The entity's pathway-free hunches. Non-Vault: a suspicion is, by definition,
+   * a belief with no in-game pathway — it carries no Vault content. A social read
+   * (0012) may hint at these without naming any off-screen event.
+   */
+  suspicionsFor(entity: EntityId): Suspicion[] {
+    return this.knowledge.suspicionsOf(entity);
   }
 }

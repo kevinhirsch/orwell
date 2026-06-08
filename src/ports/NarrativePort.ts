@@ -4,6 +4,9 @@ import type { KnowledgeFact } from "../domain/knowledge";
 
 export type NarrationMode = "scene" | "dialogue";
 
+/** Player-directed scene fidelity (0012): a compressed beat vs a full scene. */
+export type SceneFidelity = "compressed" | "full";
+
 /**
  * The ONLY thing the narrative layer (the LLM) ever receives. Assembled by an
  * outward surface from the visible projection — it contains no Vault data, so
@@ -14,6 +17,8 @@ export interface NarrationContext {
   mode: NarrationMode;
   visibleEvents: GameEvent[];
   knowledge: KnowledgeFact[];
+  /** Player-directed rendering fidelity; affects narration only, never ground truth. */
+  fidelity?: SceneFidelity;
 }
 
 export interface NarrativePort {

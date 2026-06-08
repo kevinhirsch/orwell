@@ -93,6 +93,15 @@ export class BbWorld extends World {
   chosenReplacement?: Eid;
   playerState?: { active: Eid[]; hoh: Eid };
 
+  // Conversation & scene system (0012) scratch state.
+  approaches?: Eid[];
+  expression?: { mode: string; content?: string };
+  compressed?: string;
+  full?: string;
+  groundTruthBefore?: string;
+  pendingBefore?: unknown;
+  sceneEventId?: string;
+
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;
