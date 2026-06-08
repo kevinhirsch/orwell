@@ -568,7 +568,15 @@ export async function refreshModels(force = false) {
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.textContent = 'Yours for the voyage.';
+      // Set the static line first (fail-open: the hero never blocks on the engine), then replace it
+      // with the engine's snarky, state-aware Big Brother tagline (0033) when it answers.
+      if (welcomeSub) {
+        welcomeSub.textContent = 'Yours for the voyage.';
+        fetch('/api/orwell/tagline')
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => { if (d && typeof d.text === 'string' && d.text.trim()) welcomeSub.textContent = d.text.trim(); })
+          .catch(() => {});
+      }
       const welcomeTip = document.getElementById('welcome-tip');
       if (welcomeTip) {
         const tips = window.innerWidth <= 768
