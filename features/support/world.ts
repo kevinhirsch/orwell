@@ -108,6 +108,12 @@ export class BbWorld extends World {
   drStmt?: string;
   npcActedOn?: string[];
 
+  // Jury & endgame (0014) scratch state.
+  juryRel?: { trust: number; affinity: number; threat: number };
+  juryWinner?: Eid;
+  juryWinner2?: Eid;
+  finaleScript?: { statements: Eid[]; questions: Array<{ juror: Eid; finalist: Eid }>; revealOrder: Eid[] };
+
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;
