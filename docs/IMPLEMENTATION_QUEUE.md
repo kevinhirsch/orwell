@@ -504,11 +504,40 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > per-user game sandbox (0021). Make `0029` green; `py_compile` clean; smoke on two accounts (an
 > admin + a regular user). Open a PR.
 
+### B20 — 0031 game orchestrator & integrity watcher  ·  Claude Code  ·  **next engine feature**
+
+> In `kevinhirsch/orwell`, implement feature **0031**
+> (`docs/features/0031-game-orchestrator-and-integrity-watcher.{md,feature}`). The engine is
+> **pull-only** today: nothing advances a game between tool calls, the **off-screen sim never ticks
+> on the live path**, and **no runtime process verifies integrity**. Build the hybrid:
+> 1. **Turn-driven spine** — one `Orchestrator.advance(sandbox, trigger)` that runs the off-screen
+>    tick (reuse `simulation.ts`/`offscreen.ts`/`gossip.ts`, 0003), advances to the next meaningful
+>    day/phase (0008/0011), folds consequences (0023), persists (0030), then runs the **integrity
+>    checkpoint**. Pure-logic, **seed-deterministic** (every advance goes through this one path).
+> 2. **`Clock`/`Scheduler` port** (finally) — a real-timer adapter for prod + a **fake-clock**
+>    adapter for tests (no real timers anywhere in tests).
+> 3. **Background watcher** — behind the scheduler, on a tick: trigger **bounded** off-screen
+>    advances on **idle** sandboxes (rate-limited so a long absence can't fast-forward the season),
+>    and run the integrity **audit** across all sandboxes, updating a per-sandbox **health record**.
+>    The watcher holds **no game logic** — it only *triggers* `advance()` and *reads* health; cadence
+>    `0` disables it (pure turn-driven fallback).
+> 4. **Integrity checkpoint (fail-closed)** — verify the LIVE state vs the last snapshot:
+>    non-degradation (`isSuperset`/`countsNonDecreasing`, 0007), daily-event (0008), eligibility
+>    (0005), Vault-Wall sentinel-clean on player **and** admin (0001), cross-user isolation (0021).
+>    On failure: **refuse the commit, keep the prior save, record a fault** — never persist a
+>    degraded/leaky state.
+> 5. **God Mode health surface** — add `sandboxHealth()` to the admin port: **metadata only**
+>    (phase, counts, last advance/trigger, integrity status, faults), Vault-free + sentinel-clean;
+>    dependency-cruiser stays green (no Vault import); player has no access.
+> Make `0031` green (add to `cucumber.cjs`); keep all gates green. Read `docs/features/0003`, `0007`,
+> `0008`, `0021`, `0030`, and `0016` first. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0030** are drafted (**0001–0025 + 0027 built**; 0026/0028/0029/0030
-drafted; 0022 deferred; 0004 amended and already built). **Nothing is blocking the implementer queue
-— both agents can start immediately.** Candidate future spec work: MVP-2 (0022) un-parks after MVP-1
-is solid; jury-vote choreography; any new product calls.
+All planned specs through **0031** are drafted (**0001–0028 + 0030 built**; 0029 + 0031 drafted; 0022
+deferred; 0004 amended and already built). **Nothing is blocking the implementer queue.** Engine: the
+core is essentially complete — **B20 (0031 orchestrator/watcher)** is the next engine feature. Front-end:
+**C7 (0029 app admin)** + the player-UX items. Candidate future spec work: MVP-2 (0022) un-parks after
+MVP-1 is solid; jury-vote choreography; any new product calls.
