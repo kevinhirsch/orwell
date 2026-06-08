@@ -91,17 +91,44 @@ def main() -> int:
 
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
-            # Click the launcher programmatically (panel visibility is irrelevant) and
-            # assert the theme modal opens — guards against the entry point regressing.
-            theme_opened = page.evaluate(
-                "() => { const b = document.getElementById('appearance-theme-btn');"
-                " if (!b) return 'no-button';"
-                " b.click();"
-                " const m = document.getElementById('theme-modal');"
-                " if (!m) return 'no-modal';"
-                " return m.classList.contains('hidden') ? 'still-hidden' : 'open'; }"
+            # Drive the REAL user flow (open Settings via the gear, switch to the
+            # Appearance tab) rather than clicking the launcher in isolation — the
+            # appearance panel reorders its cards with flex `order:`, so a launcher that
+            # exists but is shoved below the fold would pass a blind click() yet be
+            # invisible to a player. We assert it is actually the topmost, in-viewport
+            # card, then that it opens a populated theme grid.
+            theme = page.evaluate(
+                """() => {
+                  const gear = document.getElementById('user-bar-settings');
+                  if (!gear) return { step: 'no-gear' };
+                  gear.click();
+                  const tab = document.querySelector('[data-settings-tab="appearance"]');
+                  if (!tab) return { step: 'no-appearance-tab' };
+                  tab.click();
+                  const btn = document.getElementById('appearance-theme-btn');
+                  if (!btn) return { step: 'no-button' };
+                  const br = btn.getBoundingClientRect();
+                  const inView = br.top >= 0 && br.top < window.innerHeight && br.width > 0;
+                  // The Theme card must render above every other appearance card.
+                  const cards = [...document.querySelectorAll(
+                    '.settings-appearance-panel > .admin-card')];
+                  const themeCard = btn.closest('.admin-card');
+                  const isTopmost = cards.every(
+                    c => c === themeCard ||
+                         themeCard.getBoundingClientRect().top <= c.getBoundingClientRect().top);
+                  btn.click();
+                  const m = document.getElementById('theme-modal');
+                  const grid = document.getElementById('themeGrid');
+                  return { step: 'ok', inView, isTopmost,
+                           opened: m ? !m.classList.contains('hidden') : false,
+                           themes: grid ? grid.children.length : 0 };
+                }"""
             )
-            check(theme_opened == "open", f"Settings -> Appearance opens the theme picker ({theme_opened})")
+            check(theme.get("step") == "ok", f"Settings → Appearance reachable ({theme})")
+            check(bool(theme.get("inView")) and bool(theme.get("isTopmost")),
+                  f"theme picker launcher is the topmost, in-view appearance card ({theme})")
+            check(bool(theme.get("opened")) and theme.get("themes", 0) > 0,
+                  f"launcher opens a populated theme grid ({theme})")
 
             browser.close()
     finally:
