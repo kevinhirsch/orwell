@@ -240,9 +240,12 @@ Built BDD/TDD-first, in priority order:
 - **0005 — Competition eligibility:** ✅ green (pure-core hard rules: outgoing-HOH exclusion,
   veto-winner-can't-be-replacement, six-player veto draw with the "Houseguest's Choice" chip,
   eviction voters + HOH tiebreak; invariant under temperature and reserve twists).
+- **0006 — Outcomes by stats + temperature:** ✅ green (stat-vs-type + bounded per-moment
+  temperature roll + soul emotional modifier, no Luck; reproducible by seed; favorite wins a
+  calibrated strong majority (~72%) but loses real upsets; player unprotected; intent immutable).
 
 `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0006 — outcomes by stats + temperature**.
+priority order: **0007 — persistence non-degradation**.
 
 ## Open decisions (remaining)
 

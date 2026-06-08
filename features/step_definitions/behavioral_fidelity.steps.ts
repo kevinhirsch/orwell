@@ -8,6 +8,7 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { PLAYER } from "../../src/domain/ids";
 
 function simulate(world: BbWorld, seed: number): void {
+  world.seed = seed;
   world.season = simulateSeason({ rng: new SeededRandom(seed) });
   world.metrics = richnessMetrics(world.season);
 }
