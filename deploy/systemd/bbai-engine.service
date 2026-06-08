@@ -1,0 +1,18 @@
+[Unit]
+Description=bbai engine (TypeScript hexagonal core + MCP server)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bbai
+EnvironmentFile=/opt/bbai/data/.env
+# TODO(0009): replace with the real engine MCP-server start command once 0009 provides a
+# build + entrypoint, e.g.:
+#   ExecStart=/usr/bin/node dist/server.js          # after `npm run build`
+# Placeholder (non-functional until 0009 lands) so the unit installs cleanly:
+ExecStart=/usr/bin/env bash -c 'echo "bbai-engine: start entrypoint pending feature 0009"; exec sleep infinity'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

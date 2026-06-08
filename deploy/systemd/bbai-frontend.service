@@ -1,0 +1,17 @@
+[Unit]
+Description=bbai front-end (odysseus — Python/FastAPI/uvicorn)
+After=network.target bbai-engine.service
+Wants=bbai-engine.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bbai/frontend
+EnvironmentFile=/opt/bbai/data/.env
+# TODO: confirm the odysseus ASGI entrypoint (`app:app`) and that it reads BBAI_ENGINE_MCP to
+# reach the engine's MCP server (frontend/INTEGRATION.md). Port comes from the EnvironmentFile.
+ExecStart=/opt/bbai/frontend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port ${BBAI_PORT}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
