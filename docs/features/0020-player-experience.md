@@ -52,12 +52,26 @@ through the **validated** path (`executeDecision`), and the engine re-validates.
 **never be offered, or pick, an illegal move**. Free-text social play continues in the chat
 (the hybrid model, 0019); only the buttons make a binding choice.
 
-## 5. Houseguest portraits (public identity, generated)
+## 5. Houseguest portraits (from the generated Character, public facets only)
 
-Each generated houseguest (0004) gets a **photo-style portrait** from Orwell's existing
-image-generation pipeline, derived from the houseguest's **public** `Character` identity
-(appearance/vibe/archetype-as-public-persona) — **never** from hidden soul/attributes (a portrait
-can't leak a secret). The player's own portrait comes from their authored profile (0015).
+Each generated houseguest (0004) gets a **photo-style portrait** rendered by Orwell's existing
+image-generation pipeline, and the likeness is **driven by the houseguest's own generated data** —
+the `CharacterFactory` output / **`character.md`** (the static `Character`) and related identity
+fields — so a houseguest *looks like who they are*, not a random face. The player's own portrait
+comes from their authored profile (0015).
+
+**The Vault-Wall reconciliation (important).** `character.md` is static *facts*, but not all of it
+is public: it also holds the core **P/M/S aptitudes** (which never surface, 0001) and sits
+alongside hidden attributes/elements (Vault). So the engine assembles a **Vault-free portrait
+descriptor** from only the **publicly-presentable** facets — appearance, age, presentation/style,
+public persona, archetype-as-vibe — and **excludes** competition aptitudes, hidden attributes, and
+all `Soul`/Vault secrets. The frontend image-gen consumes **that descriptor**, never the full
+`Character`. A portrait therefore *cannot* leak a secret, by construction.
+
+> **Implication for 0004:** `CharacterFactory` generates the **public appearance/identity** fields
+> the descriptor needs (appearance, age, presentation/style) as part of `character.md` — today it
+> emits archetype/style/aptitudes/background; the portrait wants the *visual* public facets too.
+
 Portraits are **persisted** with the save (0007) so the cast looks consistent across sessions, and
 are seed-stable where the pipeline allows. A deterministic placeholder backs offline/seeded tests.
 
@@ -67,13 +81,16 @@ are seed-stable where the pipeline allows. A deterministic placeholder backs off
 gameStatus() -> { week, phase, hoh, nominees[], veto: { holder, used } }   # Vault-free (visible projection)
 pendingDecision() -> { kind, options[] } | none                            # engine LEGAL set (0019/0011/0005)
 executeDecision(kind, choice) -> result                                    # validated; rejects illegal (0005)
-portraitFor(houseguest) -> imageRef                                        # from PUBLIC identity (0004/0015); persisted (0007)
+portraitDescriptorFor(houseguest) -> publicDescriptor                      # built from character.md PUBLIC facets (0004/0015);
+                                                                           #   Vault-free — NO aptitudes, hidden elements, or Soul/Vault
+portraitFor(houseguest) -> imageRef                                        # frontend image-gen renders the descriptor; persisted (0007)
 ```
 
 **Invariants:** the status panel is **sentinel-free** under any Vault and equals the engine's
 public state; it surfaces no hidden info; inline options equal the engine's legal set and execute
-only via the validated path; a portrait prompt/result carries no hidden attribute; portraits
-persist and are consistent per save.
+only via the validated path; the **portrait descriptor** is built from `character.md`'s public
+facets and is sentinel-free (no aptitudes, hidden elements, or `Soul`/Vault); portraits persist
+and are consistent per save.
 
 ## 7. Open decisions (flagged; drafted to your answers)
 
@@ -99,16 +116,18 @@ Vault-free guarantee (cards/journal show only the player's knowledge).
       (sentinel-clean) and equal to the engine's public state.
 - [ ] Inline decision buttons equal the engine's legal set; tapping executes via the validated
       path; illegal options can't be presented (cross-checks 0019/0005).
-- [ ] Each houseguest has a portrait derived from **public** identity only; portraits persist
-      with the save (0007) and never leak a hidden attribute.
+- [ ] Each houseguest's portrait is built from a **Vault-free descriptor** over `character.md`'s
+      **public** facets (no aptitudes / hidden elements / `Soul`); portraits persist with the save
+      (0007) and never leak a secret.
 - [ ] Free-text social play still flows without making a binding decision (0019).
 
 ## 10. Dependencies
 
 **0018** (narration), **0019** (pending decision / validated execution / hybrid input), **0011**
-(phases + the legal decision set), **0005** (legality), **0009** (Vault-free read tools), **0004/
-0015** (the generated cast + the authored player whose portraits these are), **0007** (portraits
-persist), **0001** (everything shown is Vault-free), plus **Orwell's image-generation pipeline**.
+(phases + the legal decision set), **0005** (legality), **0009** (Vault-free read tools), **0004**
+(`CharacterFactory` — generates the public appearance/identity in `character.md` the portrait
+descriptor reads) / **0015** (the authored player), **0007** (portraits persist), **0001**
+(everything shown is Vault-free), plus **Orwell's image-generation pipeline**.
 
 ## 11. Traceability
 

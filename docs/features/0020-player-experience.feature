@@ -39,11 +39,12 @@ Feature: Player experience (MVP-1) — a chat-forward game with a light status p
     Then no option outside that set is offered
     And an attempt to choose outside the set is rejected
 
-  Scenario: A houseguest portrait is generated from public identity only
-    Given a generated houseguest
-    When that houseguest's portrait is produced
-    Then the portrait derives only from public identity
-    And it contains no hidden attribute
+  Scenario: A houseguest portrait is built from the generated Character, public facets only
+    Given a generated houseguest with a static Character
+    When that houseguest's portrait descriptor is produced
+    Then the descriptor draws on the Character's public identity facets
+    And it excludes competition aptitudes, hidden attributes, and Soul secrets
+    And no Vault sentinel value appears in it
     And the same save yields a consistent portrait for that houseguest
 
   Scenario: Free-text social play does not make a binding decision
