@@ -4484,7 +4484,7 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
 async def do_get_game_state(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
-        st = await orwell_engine.get_game_state()
+        st = await orwell_engine.get_game_state(user=owner)
         return {"output": json.dumps(st, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
@@ -4497,7 +4497,7 @@ async def do_run_competition(content: str, owner: Optional[str] = None) -> Dict:
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
     try:
-        res = await orwell_engine.run_competition(args.get("type"), args.get("participantIds"))
+        res = await orwell_engine.run_competition(args.get("type"), args.get("participantIds"), user=owner)
         if not res.get("started"):
             return {"error": "No game in progress — create a character first.", "exit_code": 1}
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
@@ -4515,7 +4515,7 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     if not text:
         return {"error": "content is required (what happened in the scene)", "exit_code": 1}
     try:
-        res = await orwell_engine.record_interaction(text, with_ids=args.get("withIds"))
+        res = await orwell_engine.record_interaction(text, with_ids=args.get("withIds"), user=owner)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4532,7 +4532,7 @@ async def do_surface_information(content: str, owner: Optional[str] = None) -> D
     if not info or not pathway:
         return {"error": "information and pathway are both required", "exit_code": 1}
     try:
-        res = await orwell_engine.surface_information(info, pathway)
+        res = await orwell_engine.surface_information(info, pathway, user=owner)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
