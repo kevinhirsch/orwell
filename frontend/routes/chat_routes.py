@@ -545,6 +545,18 @@ def setup_chat_routes(
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
 
+        # The game IS the main chat: when a Big Brother game is in progress, always
+        # run the agent loop so the model can ACT on it (record scenes, run comps,
+        # surface info) instead of only narrating. Without this a player in plain
+        # chat never triggers the consequence/memory loop (0023). Treated as a light
+        # auto-escalation — the game tools are pinned (see pinned_tools below) and
+        # the heavy shell/code/file tools stay withheld by the auto_escalated block.
+        # (A later privilege gate still downgrades users who can't use agent mode.)
+        if chat_mode == "chat" and ctx.game_active:
+            chat_mode = "agent"
+            auto_escalated = True
+            logger.info("chat→agent auto-escalation: active Big Brother game")
+
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
         # Query active document — prefer explicit ID from frontend, fall back to session lookup
