@@ -368,6 +368,19 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > The soul **deepens monotonically** (0007); `Character` stays byte-stable. Make `0024` green; gates
 > green. **Pairs with B13** (0023 records to the soul + calls recall) — do them together. Open a PR.
 
+### B15 — 0025 reserve twists (Vault-sealed)  ·  Claude Code
+
+> In `kevinhirsch/orwell`, implement feature **0025**
+> (`docs/features/0025-reserve-twists.{md,feature}`): a small curated pool of classic
+> **non-structural** twists (secret power, double eviction, returning-juror battle-back) held in
+> **reserve**. The engine, **seeded**, decides if/when one fires at a dramatic beat — **rare**, at
+> most the admin-enabled count (0016). The chosen twist + timing are **Vault content**, sealed from
+> **both** the player **and** the admin until it fires (extend the 0001 sentinel canary to *both*
+> surfaces; cross-check 0016 §5 — enabling reveals neither content nor timing). On fire: record a
+> **witnessed reveal event** (0002) + apply the mechanic. **Format-preserving:** the 0005
+> eligibility invariants and the 16 → jury-9 → final-2 arc must hold **under** any twist. Make
+> `0025` green; gates green. Read `docs/features/0001`, `0005`, `0016` first. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
