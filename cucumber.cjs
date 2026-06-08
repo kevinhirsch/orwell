@@ -17,6 +17,7 @@ module.exports = {
       "docs/features/0007-persistence-non-degradation.feature",
       "docs/features/0008-daily-event-invariant.feature",
       "docs/features/0009-mcp-tool-boundary.feature",
+      "docs/features/0011-weekly-loop-orchestration.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

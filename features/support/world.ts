@@ -15,6 +15,8 @@ import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
 import type { RandomnessSource } from "../../src/ports/RandomnessSource";
 import type { Day } from "../../src/engine/schedule";
 import type { McpServer } from "../../src/adapters/mcp/McpServer";
+import type { SeasonOutcome, SeasonHouseguest } from "../../src/engine/season";
+import type { EntityId as Eid } from "../../src/domain/ids";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -83,6 +85,13 @@ export class BbWorld extends World {
   server?: McpServer;
   toolResult?: unknown;
   ack?: { eventId: string };
+
+  // Weekly loop orchestration (0011) scratch state.
+  roster?: SeasonHouseguest[];
+  outcome?: SeasonOutcome;
+  outcome2?: SeasonOutcome;
+  chosenReplacement?: Eid;
+  playerState?: { active: Eid[]; hoh: Eid };
 
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;

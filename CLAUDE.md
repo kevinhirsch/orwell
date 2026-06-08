@@ -263,6 +263,12 @@ API the front-end calls (`src/main.ts` → `src/adapters/mcp/HttpMcpServer.ts`),
 "no secrets committed" guard. `npm test` runs clean: typecheck → build → unit/property/arch →
 all BDD scenarios.
 
+**Gameplay loop:** **0011 — weekly loop orchestration** is ✅ green (`src/engine/season.ts`): a
+pure, seed-deterministic season — HOH → noms → veto → ceremony → eviction down to Final 2 + a
+jury vote (last-9 jury, last-juror tie-break); NPC decisions are relationship-driven (threat/
+trust), player decision points are surfaced and validated. Next drafted gameplay features:
+0012 (conversation & scene system), 0013 (Diary Room), 0014 (jury & endgame).
+
 Remaining work: **0010's container smoke test** (Proxmox/LXC `deploy/` — validated outside this
 harness) and the deferred real adapters (SQLite/Postgres, sqlite-vec/pgvector, the async LLM
 `NarrativePort` + the full MCP/JSON-RPC protocol wrapper over the current HTTP transport).
