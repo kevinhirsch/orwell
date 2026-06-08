@@ -50,6 +50,29 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     expect(Object.keys(result).sort()).toEqual(["type", "winner"]);
   });
 
+  it("onboards over HTTP: createCharacter -> getGameState -> getMomentPrompt (the front-end path)", async () => {
+    const call = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const res = await fetch(`${base}/player/call`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, args }),
+      });
+      const { result } = (await res.json()) as { result: Record<string, unknown> };
+      return result;
+    };
+
+    const started = await call("createCharacter", { playerName: "The Player", seed: 7 });
+    expect(started["started"]).toBe(true);
+    expect((started["house"] as unknown[]).length).toBe(15);
+
+    const state = await call("getGameState", {});
+    expect((state["player"] as { name: string }).name).toBe("The Player");
+
+    const prompt = await call("getMomentPrompt", { moment: "premiere" });
+    expect(typeof prompt["systemPrompt"]).toBe("string");
+    expect(prompt["systemPrompt"] as string).toContain("Big Brother");
+  });
+
   it("rejects an admin tool on the player channel", async () => {
     const res = await fetch(`${base}/player/call`, {
       method: "POST",

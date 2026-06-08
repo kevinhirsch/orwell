@@ -175,10 +175,16 @@ export function runPlayerOOBE(input: { name: string; archetype?: Archetype; stra
   };
 }
 
-export function startNewGame(opts: { seed: number; playerName: string }): GameHouse {
+export function startNewGame(
+  opts: { seed: number; playerName: string; archetype?: Archetype; strategyStyle?: StrategyStyle },
+): GameHouse {
   const rng = new SeededRandom(opts.seed);
   const npcs = generateHouse(rng).npcs;
-  const player = runPlayerOOBE({ name: opts.playerName });
+  const player = runPlayerOOBE({
+    name: opts.playerName,
+    ...(opts.archetype ? { archetype: opts.archetype } : {}),
+    ...(opts.strategyStyle ? { strategyStyle: opts.strategyStyle } : {}),
+  });
   return { player, npcs };
 }
 

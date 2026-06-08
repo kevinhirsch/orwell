@@ -13,6 +13,10 @@ export interface ToolDescriptor {
 }
 
 export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
+  // Onboarding + per-moment narration framing (Vault-free game-session port).
+  { name: "createCharacter", channel: "player", readsVault: false, description: "Run OOBE and start a new game; returns the Vault-free game state." },
+  { name: "getGameState", channel: "player", readsVault: false, description: "Current Vault-free game state: phase, the player's card, and the house roster (names)." },
+  { name: "getMomentPrompt", channel: "player", readsVault: false, description: "The managed system prompt to inject for the current moment (persona + framing; Vault-free)." },
   { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
