@@ -55,3 +55,10 @@ Feature: Competition eligibility & legality — the hard rules of the weekly loo
     Given any temperature roll for the moment
     When eligibility is computed
     Then the outgoing-HOH rule and the veto-winner-replacement rule still hold
+
+  Scenario: A reserve twist or special never overrides a hard rule or the Vault Wall
+    Given a production twist held in reserve in the Vault
+    When it is deployed
+    Then it does not override any eligibility hard rule
+    And it does not surface Vault content to the player
+    And it stays undisclosed until it actually occurs in-game

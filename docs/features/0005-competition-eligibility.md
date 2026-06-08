@@ -10,14 +10,19 @@ HOH; the **veto winner cannot be a replacement nominee**; the **veto field is ex
 (HOH + two nominees + three by chip draw incl. a "Houseguest's Choice" chip the holder uses to
 pick — the player cannot influence which chips are drawn); at eviction
 **everyone except the HOH and the two nominees votes**, and the **HOH breaks ties**. These
-are pure-core rules that **temperature never overrides**.
+are pure-core rules that **temperature never overrides**. The format permits **one or two
+Vault-held reserve twists/specials** per season (rare, producer's judgment, never
+game-breaking); a special competition is their eligibility hook, and a twist **never** overrides
+these hard rules or the Vault Wall and stays secret until it occurs (decision 0001 §4; Vault
+Wall #0001).
 
 ## 2. Scope
 
 **In:** the eligibility predicates and selectable-set computations; the six-player veto draw
 (seeded, incl. the "Houseguest's Choice" chip and its holder's selection); the eviction voter
-set and HOH tie-break; the rare explicit special-competition
-exception; the invariance of these rules under any temperature roll.
+set and HOH tie-break; the rare explicit special-competition exception (the eligibility hook
+for a reserve twist); the invariance of these rules under any temperature roll, and over any
+deployed twist.
 
 **Out:** *who* the HOH actually nominates or how houseguests vote (strategy/behavior — #3,
 souls); the *outcome* of competitions (→ #6).
