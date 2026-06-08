@@ -1,24 +1,26 @@
-"""Big Brother game routes — onboarding + in-character chat.
+"""Big Brother game routes — onboarding + game state for the MAIN chat.
 
-Bridges the orwell UI to the orwell engine: the engine runs OOBE, owns game
-state, and supplies the managed per-moment system prompt; orwell supplies the
+Bridges the Orwell UI to the Orwell engine: the engine runs OOBE, owns game
+state, and supplies the managed per-moment system prompt; Orwell supplies the
 configured LLM. The front-end never receives Vault data (engine-enforced).
 
-This is the seam that fixes both reported gaps:
-  * no onboarding past account creation -> POST /api/orwell/new-game runs OOBE;
-  * the model answers as a generic assistant -> /api/orwell/chat injects the
-    engine's managed game-master system prompt for the current moment.
+In-character play now happens in the MAIN chat (the chat path injects the
+engine's per-moment game-master prompt — see routes/chat_helpers.py), so there is
+no bespoke game chat route here. These endpoints are the onboarding + state seam:
+
+  * onboarding past account creation -> POST /api/orwell/new-game runs OOBE;
+  * GET  /api/orwell/state   -> the Vault-free game state (started? player, house);
+  * GET  /api/orwell/moment  -> the managed game-master prompt for the moment;
+  * GET  /api/orwell/health  -> engine reachability.
 """
 import logging
-from typing import List, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src import orwell_engine
-from src.endpoint_resolver import resolve_endpoint
-from src.llm_core import llm_call_async
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +30,6 @@ class NewGameRequest(BaseModel):
     archetype: Optional[str] = None
     strategyStyle: Optional[str] = None
     seed: Optional[int] = None
-
-
-class ChatTurn(BaseModel):
-    role: str
-    content: str
-
-
-class BbChatRequest(BaseModel):
-    message: str
-    moment: Optional[str] = None
-    history: List[ChatTurn] = []
-
-
-def _current_user(request: Request) -> Optional[str]:
-    return getattr(getattr(request, "state", None), "current_user", None)
 
 
 def setup_orwell_routes() -> APIRouter:
@@ -61,6 +48,14 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] state failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
+    @router.get("/moment")
+    async def orwell_moment(moment: Optional[str] = None):
+        try:
+            return await orwell_engine.get_moment_prompt(moment)
+        except Exception as e:
+            logger.warning(f"[orwell] moment failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest):
         if not body.playerName.strip():
@@ -75,39 +70,5 @@ def setup_orwell_routes() -> APIRouter:
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
-
-    @router.post("/chat")
-    async def orwell_chat(body: BbChatRequest, request: Request):
-        # 1) The managed, Vault-free system prompt for this moment (engine-owned).
-        try:
-            mp = await orwell_engine.get_moment_prompt(body.moment)
-            system_prompt = mp["systemPrompt"]
-            moment = mp.get("moment")
-        except Exception as e:
-            logger.warning(f"[orwell] moment prompt failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
-
-        # 2) Resolve the user's configured default chat model (same as orwell chat).
-        owner = _current_user(request)
-        url, model, headers = resolve_endpoint("default", owner=owner)
-        if not url or not model:
-            return JSONResponse(status_code=400, content={
-                "error": "No default chat model is configured. Pick one in orwell settings, then retry.",
-            })
-
-        # 3) Inject the system prompt at the head of the conversation and call the LLM.
-        messages: List[dict] = [{"role": "system", "content": system_prompt}]
-        for turn in body.history[-20:]:
-            if turn.role in ("user", "assistant"):
-                messages.append({"role": turn.role, "content": turn.content})
-        messages.append({"role": "user", "content": body.message})
-
-        try:
-            reply = await llm_call_async(url, model, messages, headers=headers)
-        except Exception as e:
-            logger.warning(f"[orwell] llm call failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"LLM call failed: {e}"})
-
-        return {"reply": reply, "moment": moment, "model": model}
 
     return router
