@@ -1,6 +1,6 @@
 # Feature specs
 
-Drafted, stack-agnostic feature definitions for the `bbai` build. Each feature is authored
+Drafted, stack-agnostic feature definitions for the `orwell` build. Each feature is authored
 here **before** implementation and handed to an implementer (a separate Claude Code
 instance). The author drafts; the implementer builds to green and refactors.
 

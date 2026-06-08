@@ -1,5 +1,5 @@
-// Big Brother front-end. Talks to the bbai engine via the orwell bridge routes
-// (/api/bbai/*). The engine owns game state and the managed per-moment system
+// Big Brother front-end. Talks to the orwell engine via the orwell bridge routes
+// (/api/orwell/*). The engine owns game state and the managed per-moment system
 // prompt; orwell supplies the LLM. No Vault data ever reaches this page.
 
 const MOMENTS = [
@@ -21,9 +21,9 @@ async function api(path, opts) {
 async function refreshHealth() {
   const s = el("engine-status");
   try {
-    const h = await api("/api/bbai/health");
+    const h = await api("/api/orwell/health");
     if (h.engine) { s.textContent = "engine online"; s.className = "bb-status ok"; }
-    else { s.textContent = "engine offline — start bbai-engine"; s.className = "bb-status bad"; }
+    else { s.textContent = "engine offline — start orwell-engine"; s.className = "bb-status bad"; }
     return h.engine;
   } catch {
     s.textContent = "engine unreachable"; s.className = "bb-status bad";
@@ -81,7 +81,7 @@ async function startGame(e) {
   };
   el("enter-house").disabled = true;
   try {
-    const gs = await api("/api/bbai/new-game", { method: "POST", body: JSON.stringify(body) });
+    const gs = await api("/api/orwell/new-game", { method: "POST", body: JSON.stringify(body) });
     state.history = [];
     el("transcript").innerHTML = "";
     renderGame(gs);
@@ -105,7 +105,7 @@ async function sendChat(e) {
   const pending = addMsg("Big Brother", "…", "host");
   el("send").disabled = true;
   try {
-    const data = await api("/api/bbai/chat", {
+    const data = await api("/api/orwell/chat", {
       method: "POST",
       body: JSON.stringify({ message: msg, moment: el("moment").value, history: state.history.slice(0, -1) }),
     });
@@ -126,7 +126,7 @@ async function init() {
 
   await refreshHealth();
   try {
-    const gs = await api("/api/bbai/state");
+    const gs = await api("/api/orwell/state");
     if (gs && gs.started) renderGame(gs);
     else show("onboarding");
   } catch {

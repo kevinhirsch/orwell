@@ -1,13 +1,13 @@
 [Unit]
-Description=bbai engine (TypeScript hexagonal core + MCP server)
+Description=orwell engine (TypeScript hexagonal core + MCP server)
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/bbai
-EnvironmentFile=/opt/bbai/data/.env
+WorkingDirectory=/opt/orwell
+EnvironmentFile=/opt/orwell/data/.env
 # Standard engine contract: `npm start` runs the built MCP server, listening on
-# BBAI_ENGINE_PORT (loopback) for the front-end to call. (A direct `node dist/<entry>.js` is
+# ORWELL_ENGINE_PORT (loopback) for the front-end to call. (A direct `node dist/<entry>.js` is
 # equivalent once the implementer's build output path is fixed.)
 ExecStart=/usr/bin/npm start
 Restart=on-failure

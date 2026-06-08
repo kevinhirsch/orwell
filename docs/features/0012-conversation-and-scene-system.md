@@ -104,7 +104,7 @@ submitDecision(choice) -> ok | rejected(reason)                    # validated v
 ## 11. Dependencies
 
 0001 (Vault Wall), 0002 (knowledge/visibility/gossip), 0009 (MCP tools — **built**), 0011
-(decision points), decision 0002 (relationship reads). **Feeds** the orwell front-end/agent
+(decision points), decision 0002 (relationship reads). **Feeds** the Orwell front-end/agent
 (the chat surface) and is the heart of the player MVP.
 
 ## 12. Traceability

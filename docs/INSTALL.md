@@ -1,9 +1,9 @@
-# Installing & updating bbai
+# Installing & updating Orwell
 
-bbai runs as **two co-located services in one container**:
+Orwell runs as **two co-located services in one container**:
 
 - **engine** — TypeScript, the MCP server: game rules, the Vault, the permissioned tool API.
-- **front-end** — orwell (Python/FastAPI): the chat UI + LLM connection + agent.
+- **front-end** — Orwell (Python/FastAPI): the chat UI + LLM connection + agent.
 
 They talk over **local MCP**. The Vault Wall holds: the front-end only ever receives visible
 projections, never Vault data.
@@ -23,43 +23,43 @@ projections, never Vault data.
 Run on the **Proxmox host shell**:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)"
 ```
 
 This creates a Debian LXC and installs everything. Override defaults via env before the command:
-`CTID`, `CORES`, `RAM_MB`, `DISK_GB`, `BRIDGE`, `STORAGE`, `BBAI_PORT`. When it finishes it prints
+`CTID`, `CORES`, `RAM_MB`, `DISK_GB`, `BRIDGE`, `STORAGE`, `ORWELL_PORT`. When it finishes it prints
 the UI URL.
 
 ---
 
-## Configuration — `/opt/bbai/data/.env`
+## Configuration — `/opt/orwell/data/.env`
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `BBAI_PORT` | front-end UI port | `8080` |
-| `BBAI_ENGINE_PORT` | engine MCP server (loopback) | `8765` |
-| `BBAI_ENGINE_MCP_URL` | front-end → engine | `http://127.0.0.1:8765` |
+| `ORWELL_PORT` | front-end UI port | `8080` |
+| `ORWELL_ENGINE_PORT` | engine MCP server (loopback) | `8765` |
+| `ORWELL_ENGINE_MCP_URL` | front-end → engine | `http://127.0.0.1:8765` |
 | `OLLAMA_HOST` **or** `ANTHROPIC_API_KEY` | the LLM (set one) | — |
 
-After editing: `systemctl restart bbai-engine bbai-frontend`.
+After editing: `systemctl restart orwell-engine orwell-frontend`.
 
 ---
 
 ## Update
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell-update.sh)"
 ```
 
 Pulls latest, rebuilds the engine (`npm run build`), and restarts both services. **Your save
-(`/opt/bbai/data`) is never touched.**
+(`/opt/orwell/data`) is never touched.**
 
 ---
 
 ## Manual / non-Proxmox install
 
 ```bash
-git clone https://github.com/kevinhirsch/bbai.git /opt/bbai && cd /opt/bbai
+git clone https://github.com/kevinhirsch/bbai.git /opt/orwell && cd /opt/orwell
 npm ci && npm run build                                  # engine
 ( cd frontend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt )
 mkdir -p data && cp frontend/.env.example data/.env      # then edit data/.env (LLM + ports)
@@ -70,23 +70,23 @@ npm start                                                # engine — MCP server
 ```
 
 Persistent setup: install the units from `deploy/systemd/` and `systemctl enable --now
-bbai-engine bbai-frontend`.
+orwell-engine orwell-frontend`.
 
 ---
 
 ## Services & logs
 
 ```bash
-systemctl status bbai-engine bbai-frontend
-journalctl -u bbai-engine -f
-journalctl -u bbai-frontend -f
+systemctl status orwell-engine orwell-frontend
+journalctl -u orwell-engine -f
+journalctl -u orwell-frontend -f
 ```
 
 ---
 
 ## Data & backups
 
-Everything stateful is under **`/opt/bbai/data`** — the `.env`, the SQLite save, and the souls.
+Everything stateful is under **`/opt/orwell/data`** — the `.env`, the SQLite save, and the souls.
 Back it up by copying that directory; restore by putting it back before starting. Updates never
 touch it (non-degradation, feature 0007).
 
@@ -94,7 +94,7 @@ touch it (non-degradation, feature 0007).
 
 ## Security
 
-- Secrets (LLM keys) live **only** in `/opt/bbai/data/.env` — never committed.
+- Secrets (LLM keys) live **only** in `/opt/orwell/data/.env` — never committed.
 - The engine MCP server binds **loopback**; only the front-end UI port is exposed.
 - Each container is its own **sandbox** (one game namespace). The **Vault Wall** keeps secret game
   state off every player-facing surface — enforced structurally, not by prompt.
@@ -106,8 +106,8 @@ touch it (non-degradation, feature 0007).
 | Symptom | Fix |
 |---|---|
 | `engine 'build'/'start' scripts not found` | the engine entrypoint hasn't landed on your branch — update and retry |
-| UI not reachable | `systemctl status bbai-frontend`; check the firewall on `BBAI_PORT` |
-| Engine won't start | `journalctl -u bbai-engine -e`; confirm `npm run build` succeeded |
+| UI not reachable | `systemctl status orwell-frontend`; check the firewall on `ORWELL_PORT` |
+| Engine won't start | `journalctl -u orwell-engine -e`; confirm `npm run build` succeeded |
 | LLM errors | confirm `OLLAMA_HOST` is reachable or `ANTHROPIC_API_KEY` is set in `.env` |
 
 ---

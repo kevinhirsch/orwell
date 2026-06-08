@@ -53,7 +53,7 @@ inside **Settings**. Only edit `.env` for deployment-level overrides like
 
 On first setup, Orwell creates an admin account (`admin` unless
 `ORWELL_ADMIN_USER` is set) and prints a temporary password in the terminal.
-For Docker installs, the same line is in `docker compose logs orwell`.
+For Docker installs, the same line is in `docker compose logs Orwell`.
 Use that for the first login, then change it in **Settings**.
 
 Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, and
@@ -62,7 +62,7 @@ pull request guidelines.
 ### Docker (recommended)
 ```bash
 git clone https://github.com/kevinhirsch/bbai.git
-cd orwell
+cd Orwell
 cp .env.example .env       # optional, but recommended for explicit defaults
 docker compose up -d --build
 ```
@@ -76,7 +76,7 @@ only when you intentionally want LAN/reverse-proxy access.
 ### Native Linux / macOS
 ```bash
 git clone https://github.com/kevinhirsch/bbai.git
-cd orwell
+cd Orwell
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -94,7 +94,7 @@ M-series Mac, run Orwell natively:
 
 ```bash
 git clone https://github.com/kevinhirsch/bbai.git
-cd orwell
+cd Orwell
 ./start-macos.sh
 ```
 
@@ -209,8 +209,8 @@ source of truth; the standalone files mirror them for single-file deployments.
 Verify after enabling either overlay:
 
 ```bash
-docker compose exec orwell nvidia-smi -L   # NVIDIA
-docker compose exec orwell sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'  # AMD
+docker compose exec Orwell nvidia-smi -L   # NVIDIA
+docker compose exec Orwell sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'  # AMD
 ```
 
 > **GPU passthrough ≠ llama.cpp CUDA.** `nvidia-smi` passing inside the
@@ -250,8 +250,8 @@ install usually only need to add the endpoint in Settings.
 
 ```bash
 docker compose ps
-docker compose logs --tail=120 orwell
-docker compose logs orwell | grep -E 'ChromaDB|MemoryVectorStore|DEGRADED'
+docker compose logs --tail=120 Orwell
+docker compose logs Orwell | grep -E 'ChromaDB|MemoryVectorStore|DEGRADED'
 ```
 
 **macOS details.** `start-macos.sh` installs Homebrew deps, creates the venv,
@@ -268,7 +268,7 @@ server; safe to re-run):
 
 ```powershell
 git clone https://github.com/kevinhirsch/bbai.git
-cd orwell
+cd Orwell
 powershell -ExecutionPolicy Bypass -File .\launch-windows.ps1
 ```
 
@@ -276,7 +276,7 @@ Or do it by hand:
 
 ```powershell
 git clone https://github.com/kevinhirsch/bbai.git
-cd orwell
+cd Orwell
 py -3.11 -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt

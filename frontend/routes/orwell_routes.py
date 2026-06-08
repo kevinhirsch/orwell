@@ -1,12 +1,12 @@
 """Big Brother game routes — onboarding + in-character chat.
 
-Bridges the orwell UI to the bbai engine: the engine runs OOBE, owns game
+Bridges the orwell UI to the orwell engine: the engine runs OOBE, owns game
 state, and supplies the managed per-moment system prompt; orwell supplies the
 configured LLM. The front-end never receives Vault data (engine-enforced).
 
 This is the seam that fixes both reported gaps:
-  * no onboarding past account creation -> POST /api/bbai/new-game runs OOBE;
-  * the model answers as a generic assistant -> /api/bbai/chat injects the
+  * no onboarding past account creation -> POST /api/orwell/new-game runs OOBE;
+  * the model answers as a generic assistant -> /api/orwell/chat injects the
     engine's managed game-master system prompt for the current moment.
 """
 import logging
@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from src import bbai_engine
+from src import orwell_engine
 from src.endpoint_resolver import resolve_endpoint
 from src.llm_core import llm_call_async
 
@@ -45,46 +45,46 @@ def _current_user(request: Request) -> Optional[str]:
     return getattr(getattr(request, "state", None), "current_user", None)
 
 
-def setup_bbai_routes() -> APIRouter:
-    router = APIRouter(prefix="/api/bbai", tags=["bbai"])
+def setup_orwell_routes() -> APIRouter:
+    router = APIRouter(prefix="/api/orwell", tags=["orwell"])
 
     @router.get("/health")
-    async def bbai_health():
-        ok = await bbai_engine.engine_health()
-        return {"engine": ok, "engineUrl": bbai_engine.ENGINE_URL}
+    async def orwell_health():
+        ok = await orwell_engine.engine_health()
+        return {"engine": ok, "engineUrl": orwell_engine.ENGINE_URL}
 
     @router.get("/state")
-    async def bbai_state():
+    async def orwell_state():
         try:
-            return await bbai_engine.get_game_state()
+            return await orwell_engine.get_game_state()
         except Exception as e:
-            logger.warning(f"[bbai] state failed: {e}")
+            logger.warning(f"[orwell] state failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/new-game")
-    async def bbai_new_game(body: NewGameRequest):
+    async def orwell_new_game(body: NewGameRequest):
         if not body.playerName.strip():
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         try:
-            return await bbai_engine.create_character(
+            return await orwell_engine.create_character(
                 body.playerName.strip(),
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
                 seed=body.seed,
             )
         except Exception as e:
-            logger.warning(f"[bbai] new-game failed: {e}")
+            logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/chat")
-    async def bbai_chat(body: BbChatRequest, request: Request):
+    async def orwell_chat(body: BbChatRequest, request: Request):
         # 1) The managed, Vault-free system prompt for this moment (engine-owned).
         try:
-            mp = await bbai_engine.get_moment_prompt(body.moment)
+            mp = await orwell_engine.get_moment_prompt(body.moment)
             system_prompt = mp["systemPrompt"]
             moment = mp.get("moment")
         except Exception as e:
-            logger.warning(f"[bbai] moment prompt failed: {e}")
+            logger.warning(f"[orwell] moment prompt failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
         # 2) Resolve the user's configured default chat model (same as orwell chat).
@@ -105,7 +105,7 @@ def setup_bbai_routes() -> APIRouter:
         try:
             reply = await llm_call_async(url, model, messages, headers=headers)
         except Exception as e:
-            logger.warning(f"[bbai] llm call failed: {e}")
+            logger.warning(f"[orwell] llm call failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"LLM call failed: {e}"})
 
         return {"reply": reply, "moment": moment, "model": model}
