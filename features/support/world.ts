@@ -177,6 +177,16 @@ export class BbWorld extends World {
   visibleBefore?: number;
   twistEventId?: string;
 
+  // NarrativePort LLM adapter (0027) scratch state.
+  narrator?: import("../../src/ports/StreamingNarrativePort").StreamingNarrativePort;
+  narrationCtx?: import("../../src/ports/NarrativePort").NarrationContext;
+  narrationFull?: string;
+  narrationChunks?: string[];
+  narrationOut?: string;
+  engineWinnerBefore?: string;
+  narratorEnv?: Record<string, string | undefined>;
+  narratorCfg?: import("../../src/adapters/narrative/narratorConfig").NarratorConfig;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

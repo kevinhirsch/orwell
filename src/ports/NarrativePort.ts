@@ -19,6 +19,11 @@ export interface NarrationContext {
   knowledge: KnowledgeFact[];
   /** Player-directed rendering fidelity; affects narration only, never ground truth. */
   fidelity?: SceneFidelity;
+  /**
+   * The managed, Vault-free moment system prompt (0018), when narrating a live
+   * moment. Persona/framing only — proven sentinel-free; never Vault data.
+   */
+  systemPrompt?: string;
 }
 
 export interface NarrativePort {
