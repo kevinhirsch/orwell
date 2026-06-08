@@ -37,6 +37,13 @@ DEFAULT_PRIVILEGES = {
 ADMIN_PRIVILEGES = {k: (True if isinstance(v, bool) else (0 if isinstance(v, int) else [])) for k, v in DEFAULT_PRIVILEGES.items()}
 ADMIN_PRIVILEGES["allowed_models_restricted"] = False
 
+# App-administrator entitlements (feature 0029) — named permissions the `admin`
+# role carries. Distinct from the game's God Mode (0016, a per-sandbox channel).
+# Gated on the NAMED entitlement (not a bare is_admin) so finer per-permission
+# grants are a later config change, not a rewrite. For now admin grants exactly
+# these two; a regular user holds none.
+ADMIN_ENTITLEMENTS = frozenset({"manage_llm_settings", "manage_users"})
+
 DEFAULT_AUTH_PATH = os.path.join(
     Path(__file__).parent.parent, "data", "auth.json"
 )
@@ -236,6 +243,11 @@ class AuthManager:
                 return False
             if not self.users.get(requesting_user, {}).get("is_admin"):
                 return False
+            # Last-admin guard (0029): never delete the final administrator — that
+            # would lock the app out of all admin functions with no way back.
+            if self.users[username].get("is_admin") and self._count_admins_locked() <= 1:
+                logger.warning("Refused to delete the last administrator '%s'", username)
+                return False
             del self._config["users"][username]
             self._save()
         # Purge all sessions belonging to this user. validate_token doesn't
@@ -345,6 +357,78 @@ class AuthManager:
         with self._config_lock:
             self._config["users"][username]["password_hash"] = _hash_password(new_password)
             self._save()
+        return True
+
+    # ------------------------------------------------------------------
+    # App-administrator role & entitlements (feature 0029)
+    # ------------------------------------------------------------------
+
+    def _count_admins_locked(self) -> int:
+        """Number of administrators. Call while holding `self._config_lock`."""
+        return sum(1 for u in self.users.values() if u.get("is_admin"))
+
+    def has_entitlement(self, username: Optional[str], name: str) -> bool:
+        """Whether the user holds the named app-admin entitlement (0029).
+
+        Gates UI *and* endpoints on the named entitlement rather than a bare
+        `is_admin`, so finer grants become a config change later. Today the
+        `admin` role carries every `ADMIN_ENTITLEMENTS`; a regular user carries
+        none.
+        """
+        if name not in ADMIN_ENTITLEMENTS:
+            return False
+        return self.is_admin((username or "").strip().lower())
+
+    def set_admin(self, username: str, is_admin: bool, requesting_user: str) -> bool:
+        """Promote/demote a user (admin-only), with the last-admin guard (0029).
+
+        Only an administrator may change roles. A demotion is refused when it
+        would remove the final administrator (including an admin demoting
+        themselves while last) — no lockout. Privileges are reset to match the
+        new role.
+        """
+        username = (username or "").strip().lower()
+        requesting_user = (requesting_user or "").strip().lower()
+        is_admin = bool(is_admin)
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            if not self.users.get(requesting_user, {}).get("is_admin"):
+                return False  # only admins can change roles
+            currently_admin = bool(self.users[username].get("is_admin"))
+            if currently_admin and not is_admin and self._count_admins_locked() <= 1:
+                logger.warning("Refused to demote the last administrator '%s'", username)
+                return False
+            self._config["users"][username]["is_admin"] = is_admin
+            # Reset the stored privilege set to match the new role (admins get the
+            # full set; a demoted user falls back to defaults).
+            self._config["users"][username]["privileges"] = dict(
+                ADMIN_PRIVILEGES if is_admin else DEFAULT_PRIVILEGES
+            )
+            self._save()
+        logger.info("Set admin=%s for '%s' (by %s)", is_admin, username, requesting_user)
+        return True
+
+    def admin_reset_password(self, username: str, new_password: str, requesting_admin: str) -> bool:
+        """Admin resets another user's password WITHOUT the current one (0029).
+
+        Admin-only. On reset, revoke that user's active sessions so a stale or
+        compromised session can't linger (mirrors `delete_user`).
+        """
+        username = (username or "").strip().lower()
+        requesting_admin = (requesting_admin or "").strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            if not self.users.get(requesting_admin, {}).get("is_admin"):
+                return False
+            self._config["users"][username]["password_hash"] = _hash_password(new_password)
+            self._save()
+        revoked = self.revoke_user_sessions(username)
+        logger.info(
+            "Admin '%s' reset password for '%s'; revoked %d active session(s)",
+            requesting_admin, username, revoked,
+        )
         return True
 
     # ------------------------------------------------------------------
@@ -544,4 +628,10 @@ class AuthManager:
         }
         if authenticated:
             result["privileges"] = self.get_privileges(username)
+            # Named app-admin entitlements (0029) so the UI can gate the Users
+            # manager + global LLM-settings writes. The server re-checks every
+            # endpoint regardless — the hidden UI is never trusted.
+            result["entitlements"] = {
+                name: self.has_entitlement(username, name) for name in sorted(ADMIN_ENTITLEMENTS)
+            }
         return result

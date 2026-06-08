@@ -348,6 +348,36 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             invalidator()
         return {"ok": True, "username": new_username, "renamed_self": old_username == user}
 
+    @router.post("/users/{username}/role")
+    async def set_user_role(username: str, request: Request):
+        """Promote/demote a user (admin only, last-admin guarded). Feature 0029."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        body = await request.json()
+        is_admin = bool(body.get("is_admin"))
+        ok = await asyncio.to_thread(auth_manager.set_admin, username, is_admin, user)
+        if not ok:
+            # Most common cause: refusing to demote the last administrator.
+            raise HTTPException(400, "Cannot change role (user not found, or last admin)")
+        return {"ok": True, "username": (username or "").strip().lower(), "is_admin": is_admin}
+
+    @router.post("/users/{username}/password")
+    async def admin_reset_user_password(username: str, request: Request):
+        """Admin resets another user's password without the current one; revokes
+        that user's sessions. Self-service change stays at /change-password. (0029)"""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        body = await request.json()
+        new_password = body.get("new_password") or ""
+        if len(new_password) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters")
+        ok = await asyncio.to_thread(auth_manager.admin_reset_password, username, new_password, user)
+        if not ok:
+            raise HTTPException(404, "User not found")
+        return {"ok": True}
+
     @router.post("/signup-toggle", deprecated=True)
     async def toggle_signup(request: Request):
         """
