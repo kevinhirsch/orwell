@@ -35,7 +35,9 @@ jobs:
       - name: engine deploy smoke
         run: bash deploy/smoke.sh
 
-  # Front-end (vendored Python app) is outside the TS tooling — compile-check it.
+  # Front-end (vendored Python app) is outside the TS tooling. Compile-check it, run its
+  # pytest suite (app-admin 0029, game build 0032), and boot-smoke the real app to prove
+  # the game-build surface reduction holds server-side (feature 0032 running-instance DoD).
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -43,12 +45,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - name: py_compile the front-end (incl. extensionless CLI scripts)
         run: |
           python3 -m py_compile $(git ls-files 'frontend/**/*.py')
           for s in $(git ls-files 'frontend/scripts/*' 'frontend/integrations/**'); do
             head -1 "$s" | grep -q python && python3 -m py_compile "$s" || true
           done
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      - name: pytest (app-admin 0029, game build 0032)
+        run: cd frontend && python3 -m pytest tests/ -q
+      - name: boot smoke — real app, game-build gating (feature 0032)
+        run: cd frontend && python3 scripts/boot_smoke.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
