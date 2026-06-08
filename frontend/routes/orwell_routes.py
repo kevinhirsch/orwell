@@ -16,13 +16,18 @@ no bespoke game chat route here. These endpoints are the onboarding + state seam
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src import orwell_engine
 
 logger = logging.getLogger(__name__)
+
+
+def _current_user(request: Request) -> Optional[str]:
+    """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021)."""
+    return getattr(getattr(request, "state", None), "current_user", None)
 
 
 class NewGameRequest(BaseModel):
@@ -41,23 +46,23 @@ def setup_orwell_routes() -> APIRouter:
         return {"engine": ok, "engineUrl": orwell_engine.ENGINE_URL}
 
     @router.get("/state")
-    async def orwell_state():
+    async def orwell_state(request: Request):
         try:
-            return await orwell_engine.get_game_state()
+            return await orwell_engine.get_game_state(user=_current_user(request))
         except Exception as e:
             logger.warning(f"[orwell] state failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.get("/moment")
-    async def orwell_moment(moment: Optional[str] = None):
+    async def orwell_moment(request: Request, moment: Optional[str] = None):
         try:
-            return await orwell_engine.get_moment_prompt(moment)
+            return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
             logger.warning(f"[orwell] moment failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/new-game")
-    async def orwell_new_game(body: NewGameRequest):
+    async def orwell_new_game(body: NewGameRequest, request: Request):
         if not body.playerName.strip():
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         try:
@@ -66,6 +71,7 @@ def setup_orwell_routes() -> APIRouter:
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
                 seed=body.seed,
+                user=_current_user(request),
             )
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")

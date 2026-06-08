@@ -161,6 +161,10 @@ export class BbWorld extends World {
   snap?: import("../../src/engine/consequence").MemorySnapshot;
   noms?: Eid[];
 
+  // Per-user sandboxes (0021) scratch state.
+  registry?: import("../../src/composition/registry").GameSessionRegistry;
+  userASnapshot?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
