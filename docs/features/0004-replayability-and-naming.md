@@ -7,14 +7,18 @@
 
 Every new game is a new save: a player authored at first-run OOBE plus a brand-new house of
 **15 generated, randomly-named NPCs** within plausible *Big Brother* archetype bounds, for a
-cast of **16**. **No identity carries over** between games. **Only the player's profile is
-human-authored**; all NPC profiles are generated and internally consistent.
+cast of **16**. The cast is a **curated ensemble** — like real BB casting, `CharacterFactory`
+deliberately balances archetypes, strategy styles, and backgrounds so every house has built-in
+friction and variety (never a clump of near-identical types). **No identity carries over**
+between games. **Only the player's profile is human-authored**; all NPC profiles are generated
+and internally consistent.
 
 ## 2. Scope
 
 **In:** `CharacterFactory` house generation (seeded); the OOBE handoff that produces the
-player; cast-size and authorship invariants; name uniqueness and the no-fixed-list rule; the
-no-carryover guarantee across seeds; archetype-plausibility constraints.
+player; cast-size and authorship invariants; **ensemble composition** (a deliberately varied,
+balanced cast); name uniqueness and the no-fixed-list rule; the no-carryover guarantee across
+seeds; archetype-plausibility constraints.
 
 **Out:** the *depth* and *evolution* of hidden attributes/souls over a game (exercised by #3
 richness and #7 non-degradation); the narrative voice (narrative layer).
@@ -23,7 +27,8 @@ richness and #7 non-degradation); the narrative voice (narrative layer).
 
 ```
 CharacterFactory:
-    generateHouse(seed) -> { npcs: [Houseguest x15] }   # randomly named, archetype-bounded, internally consistent
+    generateHouse(seed) -> { npcs: [Houseguest x15] }   # randomly named, archetype-bounded, internally consistent;
+                                                        #   a curated ensemble — balanced archetype/style spread, no clumping
     runPlayerOOBE(input) -> PlayerCharacter             # the only human-authored profile
 SoulProvider:
     characterOf(houseguest) -> Character                # STATIC baseline: archetype, core P/M/S aptitudes, identity
@@ -50,6 +55,9 @@ identity) and **dynamic `Soul`** (evolving: emotional state, accumulated memory,
   list, and tests reference roles only (this feature is itself a guard against name hard-coding).
 - **Archetype plausibility:** assert each NPC satisfies the internal-consistency / plausible-
   archetype constraints (a schema/ruleset the factory must honor).
+- **Ensemble variety:** across seeds, assert the house spans a spread of distinct archetypes /
+  strategy styles and that no single type over-dominates beyond a configured balance (so casts
+  don't clump).
 
 ## 5. Definition of Done
 
@@ -58,6 +66,7 @@ identity) and **dynamic `Soul`** (evolving: emotional state, accumulated memory,
 - [ ] Names unique and provably not from any fixed/sample list.
 - [ ] No identity carryover across seeds; same-seed reproducible.
 - [ ] Generation is seeded via `RandomnessSource`.
+- [ ] Each cast is a varied ensemble — archetype/style spread, no over-clumping.
 
 ## 6. Dependencies
 
