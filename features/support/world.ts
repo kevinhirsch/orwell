@@ -9,6 +9,7 @@ import type { RichnessMetrics } from "../../src/engine/richness";
 import type { GameHouse, Houseguest } from "../../src/engine/characterFactory";
 import type { WeekState, VetoDraw } from "../../src/domain/eligibility";
 import type { RelationshipModel } from "../../src/engine/relationships";
+import type { Competitor, CompetitionType, CompetitionIntents, CompetitionResult } from "../../src/domain/competitionOutcome";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -41,6 +42,19 @@ export class BbWorld extends World {
   // Behavioral-fidelity (0003) scratch state.
   season?: SeasonResult;
   metrics?: RichnessMetrics;
+  seed?: number;
+
+  // Outcomes by stats + temperature (0006) scratch state.
+  variables?: string[];
+  rollA?: Record<string, number>;
+  rollB?: Record<string, number>;
+  field?: Competitor[];
+  type?: CompetitionType;
+  target?: string;
+  equivId?: string;
+  winRates?: Record<string, number>;
+  intents?: CompetitionIntents;
+  result?: CompetitionResult;
 
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
