@@ -1,6 +1,7 @@
 import type { EntityId } from "./ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
-import { rollFor } from "./temperature";
+import { TEMPERATURE_CONSTANTS } from "./temperatureConstants";
+import type { TemperatureConstants } from "./temperatureConstants";
 
 /**
  * Competition resolution: outcomes are earned, never story convenience. A score
@@ -25,14 +26,12 @@ const RELEVANT: Record<CompetitionType, "physical" | "mental" | "social"> = {
   social: "social",
 };
 
-/** Calibrated so a clear stat favorite wins a strong majority but loses a real minority. */
-export const OUTCOME_WEIGHTS = {
-  stat: 1.0,
-  temperature: 0.36,
-  emotion: 0.2,
-  throwPenalty: 1.5,
-  playSafePenalty: 0.2,
-} as const;
+/**
+ * Calibrated so a clear stat favorite wins a strong majority but loses a real
+ * minority. The numbers now live in the single tunable module (0028); this is a
+ * re-export so existing importers keep working.
+ */
+export const OUTCOME_WEIGHTS = TEMPERATURE_CONSTANTS.outcome;
 
 export interface CompetitionResult {
   winner: EntityId;
@@ -64,19 +63,26 @@ export function resolveCompetition(
   type: CompetitionType,
   intents: CompetitionIntents,
   rng: RandomnessSource,
+  /** Tunable temperature/outcome constants (0028); defaults to the single module. */
+  constants: TemperatureConstants = TEMPERATURE_CONSTANTS,
 ): CompetitionResult {
   const stat = RELEVANT[type];
-  const temperature = rollFor(competitors.map((c) => c.id), rng);
+  const w = constants.outcome;
+  const span = constants.bound.max - constants.bound.min;
+
+  // One bounded temperature draw per competitor, in array order (seed-reproducible).
+  const temperature: Record<EntityId, number> = {};
+  for (const c of competitors) temperature[c.id] = constants.bound.min + rng.next() * span;
 
   const scores: Record<EntityId, number> = {};
   for (const c of competitors) {
-    const base = c.stats[stat] * OUTCOME_WEIGHTS.stat;
-    const temp = temperature[c.id]! * OUTCOME_WEIGHTS.temperature;
-    const emo = ((c.emotionalState ?? 0.5) - 0.5) * 2 * OUTCOME_WEIGHTS.emotion;
+    const base = c.stats[stat] * w.stat;
+    const temp = temperature[c.id]! * w.temperature;
+    const emo = ((c.emotionalState ?? 0.5) - 0.5) * 2 * w.emotion;
     const intent = intents.intentOf(c.id);
     const intentAdj =
-      intent === "throw" ? -OUTCOME_WEIGHTS.throwPenalty
-      : intent === "play-safe" ? -OUTCOME_WEIGHTS.playSafePenalty
+      intent === "throw" ? -w.throwPenalty
+      : intent === "play-safe" ? -w.playSafePenalty
       : 0;
     scores[c.id] = base + temp + emo + intentAdj;
   }
