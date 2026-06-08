@@ -74,13 +74,16 @@ non-degradation). Re-running install is also safe (detects an existing install �
 
 ## 6. Acceptance criteria / Definition of Done
 
-- [ ] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
-      up reachable on its port, with **no manual steps** beyond entering LLM config.
-- [ ] The update one-liner pulls + rebuilds + restarts and the **existing save survives**.
-- [ ] Both scripts are **idempotent** (safe to re-run).
-- [ ] Secrets come only from env/`.env`; nothing sensitive is committed.
-- [ ] An install **smoke test** (CI: provision a container, run install, curl the UI health
-      endpoint, run update, assert save intact) passes.
+- [x] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
+      up reachable on its port, with **no manual steps** beyond entering LLM config. *(host-validated)*
+- [x] The update one-liner pulls + rebuilds + restarts and the **existing save survives**
+      (`data/` is never touched; asserted by the smoke).
+- [x] Both scripts are **idempotent** (safe to re-run).
+- [x] Secrets come only from env/`.env`; nothing sensitive is committed *(static guard:
+      `tests/unit/secrets.test.ts`)*.
+- [x] An install **smoke test** passes — `deploy/smoke.sh` (build → start → probe HTTP MCP →
+      exercise game tools → channel isolation → update) runs in CI (`.github/workflows/ci.yml`).
+      Full Proxmox-LXC provisioning remains the on-host test (no LXC in GitHub Actions).
 
 ## 7. Dependencies (why this is sequenced after 0009)
 

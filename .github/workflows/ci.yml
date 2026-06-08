@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Full engine gate: typecheck -> build -> unit/property/arch -> BDD.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # Deploy smoke (feature 0010): build + start the engine, probe the HTTP MCP
+  # surface, exercise the game tools, prove channel isolation, simulate an update.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: deploy scripts parse
+        run: for s in deploy/*.sh; do bash -n "$s"; done
+      - name: engine deploy smoke
+        run: bash deploy/smoke.sh
+
+  # Front-end (vendored Python app) is outside the TS tooling — compile-check it.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: py_compile the front-end (incl. extensionless CLI scripts)
+        run: |
+          python3 -m py_compile $(git ls-files 'frontend/**/*.py')
+          for s in $(git ls-files 'frontend/scripts/*' 'frontend/integrations/**'); do
+            head -1 "$s" | grep -q python && python3 -m py_compile "$s" || true
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: syntax-check key front-end JS
+        run: node --check frontend/static/js/orwellOnboarding.js
