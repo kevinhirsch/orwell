@@ -13,6 +13,13 @@ imports `VaultStore`/`VectorIndex`, and `npm run test:arch` (dependency-cruiser)
 **BDD/TDD-first** — the `.feature` files are the source of truth, make them green; **name-agnostic
 tests** (roles only); keep `npm test` green; commit on a feature branch and **open a PR**.
 
+> ⚠️ **Adjustments to already-built specs — pick these up.** See the
+> [Amendments table in `docs/features/README.md`](features/README.md#amendments-to-shipped-specs-implementer-pick-these-up).
+> Current: **0004 (Done)** — `CharacterFactory` must also generate **public appearance/identity**
+> fields (appearance, age, presentation/style) into `character.md`, seed-stable and free of any
+> aptitude/hidden data, to feed the Vault-free **portrait descriptor** (0020 §5, 0004 §8). Small,
+> additive; fold it into the built cast generation.
+
 ## Order & assignment
 
 | # | Item | Agent | Depends on |

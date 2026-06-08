@@ -50,7 +50,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0001 | [Vault Wall isolation](./0001-vault-wall-isolation.md) | 1 | Done |
 | 0002 | [Event visibility & propagation](./0002-event-visibility-and-propagation.md) | 2 | Done |
 | 0003 | [Behavioral fidelity](./0003-behavioral-fidelity.md) | 3 | Done |
-| 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | 4 | Done |
+| 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | 4 | Done · **amended** |
 | 0005 | [Competition eligibility](./0005-competition-eligibility.md) | 5 | Done |
 | 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | 6 | Done |
 | 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
@@ -77,3 +77,18 @@ from the Vault even for the admin); 0017 promotes [decision 0002](../decisions/0
 playable in the main chat: 0018 is the engine-owned per-moment narrator framing (the model speaks
 as the house, never a generic assistant); 0019 is the agent turn-loop that drives play by calling
 engine tools while the engine decides every outcome.
+
+## Amendments to shipped specs (implementer: pick these up)
+
+Changes made to **already-built** features after they shipped. They are small, additive, and keep
+every existing guarantee — but the implementer must fold them into the built code.
+
+| Spec | Amendment | Why |
+|---|---|---|
+| **0004** (Done) | `CharacterFactory` also generates **public appearance/identity** fields (appearance, age, presentation/style) into the static `Character` (`character.md`); seed-stable, no aptitude/hidden data. See [0004 §8](./0004-replayability-and-naming.md#8-amendment--public-appearance-fields-for-0020-portraits). | Feeds the **Vault-free portrait descriptor** so houseguests look like who they are ([0020](./0020-player-experience.md) §5). |
+
+New cross-cutting expectations introduced by drafts (not yet built, listed so the implementer
+plans for them): **0020** adds `gameStatus` (a Vault-free public-state projection for the status
+panel) and `portraitDescriptorFor` (a Vault-free descriptor over 0004's public appearance facets);
+**0018/0019** formalize `getMomentPrompt` + the `pendingDecision`/`executeDecision` decision seam
+(the engine surfaces the legal option set; binding choices execute only through validation).
