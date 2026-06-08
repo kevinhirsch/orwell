@@ -9,6 +9,7 @@ heavy `__init__` never runs.
 
 import os
 import sys
+import tempfile
 import types
 
 FRONTEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +17,17 @@ CORE_DIR = os.path.join(FRONTEND_DIR, "core")
 
 if FRONTEND_DIR not in sys.path:
     sys.path.insert(0, FRONTEND_DIR)
+
+# Any test that imports a `core.database`-backed router (e.g. routes.model_routes for
+# the agent-tools gating tests) transitively triggers core/database.py's module-load
+# init_db(), which opens the app's DB. The default URL is the RELATIVE ./data/app.db,
+# and CI's fresh checkout has no frontend/data/ dir → "unable to open database file".
+# Point the ORM at a throwaway temp DB before that first import (conftest loads ahead of
+# the test modules). setdefault so an explicit DATABASE_URL still wins.
+os.environ.setdefault(
+    "DATABASE_URL",
+    "sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-test-db-"), "app.db"),
+)
 
 # Replace `core` with a lightweight package stub pointing at the real core/ dir, so
 # `import core.auth` / `import core.middleware` load those files WITHOUT executing
