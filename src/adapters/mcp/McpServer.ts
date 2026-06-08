@@ -67,7 +67,11 @@ export class McpServer {
       case "inspectNonVaultState":
         return this.deps.admin.inspect();
       case "overrideMechanic":
-        return { ok: true };
+        return this.deps.admin.overrideMechanic(args as unknown as { mechanic: string; value: unknown });
+      case "configure":
+        return this.deps.admin.configure(args as Record<string, unknown>);
+      case "manageSandbox":
+        return this.deps.admin.manageSandbox(args["op"] as "create" | "reset" | "save" | "load" | undefined);
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

@@ -62,7 +62,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
 | 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Done |
 | 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Done |
-| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Draft |
+| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Done |
 | 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Draft |
 | 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | Gameplay | Draft |
 | 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Draft |
