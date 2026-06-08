@@ -1379,14 +1379,44 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "createCharacter",
+            "description": (
+                "Run the OOBE (first-run character creation) and start a new Big Brother game. "
+                "Call this ONCE when no game is in progress to create the player's persona and "
+                "populate the house. Returns the Vault-free game state. "
+                "Required: playerName. Optional: archetype (one of: mastermind, social-butterfly, "
+                "competitor, under-the-radar, chaos-agent), strategyStyle (a short phrase like "
+                "'competition beast' or 'social floater'), seed (integer for reproducibility)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playerName": {"type": "string", "description": "The houseguest's display name."},
+                    "archetype": {
+                        "type": "string",
+                        "enum": ["mastermind", "social-butterfly", "competitor", "under-the-radar", "chaos-agent"],
+                        "description": "Optional player archetype.",
+                    },
+                    "strategyStyle": {"type": "string", "description": "Optional short strategy descriptor."},
+                    "seed": {"type": "integer", "description": "Optional RNG seed for reproducibility."},
+                },
+                "required": ["playerName"],
+            },
+        },
+    },
 ]
 
 
-# The Big Brother game tools (Vault-free). While a game is in progress these are
-# PINNED into the agent's tool set so RAG/keyword selection can never drop them —
-# otherwise the model can narrate the game but not act on it. Keep in sync with the
-# game-tool schemas above and the engine's player registry (src/surfaces/tools/registry.ts).
+# The Big Brother game tools (Vault-free). These are PINNED whenever the engine is
+# reachable so RAG/keyword selection can never drop them — the model must always be
+# able to call createCharacter (OOBE), getGameState (state check), and the full
+# weekly-loop surface (advanceGame/submitDecision). Keep in sync with the engine's
+# player-channel registry (src/surfaces/tools/registry.ts).
 ORWELL_GAME_TOOLS = frozenset({
+    "createCharacter",
     "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
     "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
     "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",

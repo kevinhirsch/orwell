@@ -4609,6 +4609,28 @@ async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
 
 
+async def do_create_character(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    player_name = (args.get("playerName") or "").strip()
+    if not player_name:
+        return {"error": "playerName is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.create_character(
+            player_name,
+            archetype=args.get("archetype"),
+            strategy_style=args.get("strategyStyle"),
+            seed=args.get("seed"),
+            user=owner,
+        )
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

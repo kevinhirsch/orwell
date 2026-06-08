@@ -545,17 +545,20 @@ def setup_chat_routes(
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
 
-        # The game IS the main chat: when a Big Brother game is in progress, always
-        # run the agent loop so the model can ACT on it (record scenes, run comps,
-        # surface info) instead of only narrating. Without this a player in plain
-        # chat never triggers the consequence/memory loop (0023). Treated as a light
-        # auto-escalation — the game tools are pinned (see pinned_tools below) and
+        # The game IS the main chat: when the Orwell engine is reachable, always run
+        # the agent loop so the model can call createCharacter (OOBE), getGameState,
+        # and the full weekly-loop surface (advanceGame/submitDecision) instead of
+        # falling back to bash/curl exploration. This covers both pre-game OOBE and
+        # in-progress play. The game tools are pinned (see pinned_tools below) and
         # the heavy shell/code/file tools stay withheld by the auto_escalated block.
         # (A later privilege gate still downgrades users who can't use agent mode.)
-        if chat_mode == "chat" and ctx.game_active:
+        if chat_mode == "chat" and (ctx.engine_available or ctx.game_active):
             chat_mode = "agent"
             auto_escalated = True
-            logger.info("chat→agent auto-escalation: active Big Brother game")
+            logger.info(
+                "chat→agent auto-escalation: engine_available=%s game_active=%s",
+                ctx.engine_available, ctx.game_active,
+            )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
@@ -1107,7 +1110,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         tool_policy=tool_policy,
                         owner=_user,
-                        pinned_tools=(ORWELL_GAME_TOOLS if ctx.game_active else None),
+                        pinned_tools=(ORWELL_GAME_TOOLS if ctx.engine_available else None),
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
                         plan_mode=plan_mode,
