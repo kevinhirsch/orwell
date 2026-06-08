@@ -5,7 +5,7 @@
 # On the Proxmox host shell:
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
 #
-# Creates a Debian LXC and installs bbai — the TypeScript engine (MCP server) and the odysseus
+# Creates a Debian LXC and installs bbai — the TypeScript engine (MCP server) and the orwell
 # front-end — as systemd services (engine contract: `npm run build` / `npm start`).
 #
 # UX: a community-scripts-style config menu (Use Defaults vs Advanced) with every field

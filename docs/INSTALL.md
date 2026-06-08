@@ -3,7 +3,7 @@
 bbai runs as **two co-located services in one container**:
 
 - **engine** — TypeScript, the MCP server: game rules, the Vault, the permissioned tool API.
-- **front-end** — odysseus (Python/FastAPI): the chat UI + LLM connection + agent.
+- **front-end** — orwell (Python/FastAPI): the chat UI + LLM connection + agent.
 
 They talk over **local MCP**. The Vault Wall holds: the front-end only ever receives visible
 projections, never Vault data.

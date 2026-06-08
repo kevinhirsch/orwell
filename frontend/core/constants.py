@@ -41,11 +41,11 @@ DEFAULT_MAX_TOKENS = 0
 
 
 def internal_api_base() -> str:
-    """Base URL for in-process loopback calls to Odysseus's own API.
+    """Base URL for in-process loopback calls to Orwell's own API.
 
     Agent tools and background jobs reach admin-gated routes by calling the
     running server over HTTP. Resolution order:
-      1. ODYSSEUS_INTERNAL_BASE  - explicit override (e.g. behind a TLS proxy).
+      1. ORWELL_INTERNAL_BASE  - explicit override (e.g. behind a TLS proxy).
       2. APP_PORT                - http://127.0.0.1:$APP_PORT (docker-compose).
       3. Fallback http://127.0.0.1:7000 - legacy default.
 
@@ -53,7 +53,7 @@ def internal_api_base() -> str:
     call. Without this, loopback tools fail with "All connection attempts
     failed" whenever the server is not on port 7000.
     """
-    override = os.environ.get("ODYSSEUS_INTERNAL_BASE")
+    override = os.environ.get("ORWELL_INTERNAL_BASE")
     if override:
         return override.rstrip("/")
     return f"http://127.0.0.1:{os.environ.get('APP_PORT', '7000')}"

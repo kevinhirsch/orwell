@@ -16,14 +16,14 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/de
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
 ```
 
-The install creates a **container** and brings up bbai (the TS engine **and** the odysseus
+The install creates a **container** and brings up bbai (the TS engine **and** the orwell
 front-end, wired over local MCP per feature 0009); the update pulls, rebuilds, and restarts
 **without losing the save**. Easy to deploy, easy to update.
 
 The scripts live in [`deploy/`](../../deploy/) (`bbai.sh`, `bbai-install.sh`, `bbai-update.sh`,
 `systemd/`). They target the engine's `npm run build` / `npm start` contract and **verify it
 before building**. What remains for an end-to-end game is the engine's HTTP MCP transport and the
-odysseus → engine MCP-client wiring; validation is an **install smoke test on a real Proxmox host**
+orwell → engine MCP-client wiring; validation is an **install smoke test on a real Proxmox host**
 (not the dev sandbox; not BDD).
 
 ## 2. Approach (containerization)
@@ -35,7 +35,7 @@ cleanest UX). One LXC runs both tiers as **systemd services**, wired over local 
 ```
  Proxmox host ──one-liner──► LXC (Debian)
                                ├─ bbai-engine.service     (Node: MCP server, feature 0009)
-                               └─ bbai-frontend.service   (Python: uvicorn app:app — odysseus)
+                               └─ bbai-frontend.service   (Python: uvicorn app:app — orwell)
                                data: /opt/bbai/data  (SQLite save + souls; persists across updates)
 ```
 
@@ -87,7 +87,7 @@ non-degradation). Re-running install is also safe (detects an existing install �
 The scripts are **designed now**; they go **functional** once the app is runnable end-to-end:
 - **0009** built — the engine exposes a **`bbai-engine` MCP-server entrypoint** + `npm run build`
   / start scripts (the engine currently runs via `tsx` with no `build`/`start` — that lands with 0009).
-- The **odysseus front-end wired** to the engine (per `frontend/INTEGRATION.md`) with a known
+- The **orwell front-end wired** to the engine (per `frontend/INTEGRATION.md`) with a known
   run command (`uvicorn app:app`) and the MCP endpoint configured.
 - **#7** persistence: a stable `data/` save path.
 

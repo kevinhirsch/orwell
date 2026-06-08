@@ -1,10 +1,10 @@
-# Vendored: Odysseus — bbai's player front-end + LLM/agent tier
+# Vendored: Orwell — bbai's player front-end + LLM/agent tier
 
 ## What this is
 
-A vendored copy of **Odysseus** (https://github.com/pewdiepie-archdaemon/odysseus, MIT —
+A vendored copy of **Orwell** (https://github.com/kevinhirsch/bbai, MIT —
 see [`LICENSE`](./LICENSE) and [`ACKNOWLEDGMENTS.md`](./ACKNOWLEDGMENTS.md), retained intact).
-Odysseus is a self-hosted AI workspace: **Python (FastAPI) backend + vanilla-JS PWA**, with a
+Orwell is a self-hosted AI workspace: **Python (FastAPI) backend + vanilla-JS PWA**, with a
 multi-provider LLM connection (Ollama, OpenAI, OpenRouter, Anthropic, llama.cpp, vLLM) and an
 **agent** built on opencode / MCP.
 
@@ -38,7 +38,7 @@ integration linchpin — it's what drives the game.
 1. The bbai engine exposes the game as a permissioned **MCP server**: `getVisibleStateFor`,
    `recordInteraction`, `resolveCompetition`, `surfaceInformationTo` (the tools in
    `CLAUDE.md` / the spec). These return **only visible-projection data**.
-2. Point odysseus's agent (`routes/mcp_routes.py`, `mcp_servers/`) at that MCP server as a
+2. Point orwell's agent (`routes/mcp_routes.py`, `mcp_servers/`) at that MCP server as a
    tool backend; the LLM narrates *Big Brother* by calling the engine tools.
 3. **The Vault Wall holds by construction:** `frontend/` never imports `VaultStore` and only
    receives visible projections over the boundary — the model can't leak what it never gets.
@@ -50,7 +50,7 @@ integration linchpin — it's what drives the game.
 Removed to keep the repo lean; none of it affects chat/agent:
 - demo media (`docs/*.gif|*.webm`), marketing docs (`docs/`, `ROADMAP`/`SECURITY`/`THREAT_MODEL`/`CONTRIBUTING`),
 - deployment scaffolding (`docker/`, `docker-compose*`, `Dockerfile`, build/start/launch/install scripts, `*.service`, `.github/`),
-- odysseus's own `tests/`,
+- orwell's own `tests/`,
 - heavy document-export libs (`static/lib/{xlsx,docx,mammoth,html2pdf}*`).
 
 The Python app and front-end JS are intact and coherent.
@@ -64,7 +64,7 @@ youtube, webhooks, search, shell, and memory/skills verticals (their `routes/` +
 the 1,111-line `app.py` and the front-end shell, it must be **verified against a running
 instance** (Python deps installed, config set), not done blind.
 
-## Running odysseus standalone (reference)
+## Running orwell standalone (reference)
 
 See [`README.md`](./README.md) and `requirements.txt` (FastAPI + uvicorn); `.env.example`
 documents config. During the refactor we'll run it as the bbai front-end service.

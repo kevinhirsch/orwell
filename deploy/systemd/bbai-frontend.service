@@ -1,5 +1,5 @@
 [Unit]
-Description=bbai front-end (odysseus — Python/FastAPI/uvicorn)
+Description=bbai front-end (orwell — Python/FastAPI/uvicorn)
 After=network.target bbai-engine.service
 Wants=bbai-engine.service
 
@@ -7,7 +7,7 @@ Wants=bbai-engine.service
 Type=simple
 WorkingDirectory=/opt/bbai/frontend
 EnvironmentFile=/opt/bbai/data/.env
-# The odysseus app reads BBAI_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
+# The orwell app reads BBAI_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
 # MCP server (frontend/INTEGRATION.md). The UI port comes from BBAI_PORT.
 ExecStart=/opt/bbai/frontend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port ${BBAI_PORT}
 Restart=on-failure

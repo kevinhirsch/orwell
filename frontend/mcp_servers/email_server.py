@@ -1088,7 +1088,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_email_accounts",
             description=(
-                "List the email accounts configured in Odysseus. Returns each account's "
+                "List the email accounts configured in Orwell. Returns each account's "
                 "name, email address, and whether it's the default. Use this first when "
                 "the user asks about a specific inbox by name (e.g. 'check work')."
             ),
