@@ -234,9 +234,12 @@ Built BDD/TDD-first, in priority order:
 - **0003 — Behavioral fidelity:** ✅ green (seeded multi-day simulation; off-screen-heavy
   social life, alliance churn over a computed relationship model, rare/bounded hidden-element
   surfacing — richness asserted as property thresholds in `src/engine/richnessConfig.ts`).
+- **0004 — Replayability & naming:** ✅ green (`CharacterFactory`: a 16-cast — one OOBE-authored
+  player + 15 procedurally-named NPCs; curated/balanced ensemble; Character/Soul split; no
+  hard-coded name list; no cross-seed identity carryover; same-seed reproducible).
 
 `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0004 — replayability & naming**.
+priority order: **0005 — competition eligibility**.
 
 ## Open decisions (remaining)
 
