@@ -149,6 +149,10 @@ export class BbWorld extends World {
   compResult?: { winner: { id: string; name: string } | null };
   bondBaseline?: number;
 
+  // Player experience (0020) scratch state.
+  portraitHg?: Houseguest;
+  portraitSeed?: number;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

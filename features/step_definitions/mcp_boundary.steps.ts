@@ -16,6 +16,7 @@ function sampleArgs(name: string): Record<string, unknown> {
   switch (name) {
     case "createCharacter": return { playerName: "The Player", seed: 7 };
     case "getGameState": return {};
+    case "gameStatus": return {};
     case "getMomentPrompt": return { moment: "nominations" };
     case "getVisibleStateFor": return { entity: PLAYER };
     case "renderScene": return { mode: "scene" };

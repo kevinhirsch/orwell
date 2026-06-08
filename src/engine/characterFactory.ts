@@ -58,6 +58,11 @@ export interface Character {
   strategyStyle: StrategyStyle;
   stats: { physical: number; mental: number; social: number };
   background: string;
+  // --- Public appearance/identity facets (0004 amendment, for 0020 portraits) ---
+  // Seed-stable, Vault-free: NOT aptitudes, NOT hidden attributes, NOT Soul content.
+  appearance: string;
+  age: number;
+  presentation: string;
 }
 
 export interface Soul {
@@ -145,21 +150,46 @@ function jittered(bias: { physical: number; mental: number; social: number }, rn
 
 const OCCUPATIONS = ["nurse", "bartender", "teacher", "athlete", "marketer", "chef", "engineer", "stylist", "realtor", "musician", "firefighter", "student", "barista", "trainer"];
 
+// --- Public appearance generation (0004 amendment): seed-stable, Vault-free facets ---
+const BUILDS = ["athletic", "lanky", "stocky", "willowy", "broad-shouldered", "petite", "average-build"];
+const HAIR = ["close-cropped hair", "long dark hair", "curly hair", "a buzzcut", "shoulder-length hair", "tied-back hair", "wavy hair"];
+const LOOKS = ["a warm smile", "a sharp gaze", "an easy grin", "a guarded expression", "bright eyes", "a confident stance"];
+const PRESENTATION = ["casual and laid-back", "polished and camera-ready", "sporty and energetic", "bohemian", "sharp and put-together", "approachable"];
+
+function generateAppearance(rng: RandomnessSource): { appearance: string; age: number; presentation: string } {
+  return {
+    age: 21 + rng.int(20), // 21–40, a plausible contestant range
+    presentation: rng.pick(PRESENTATION),
+    appearance: `${rng.pick(BUILDS)}, ${rng.pick(HAIR)}, ${rng.pick(LOOKS)}`,
+  };
+}
+
 export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
   const specs = curatedArchetypes(rng, NPC_COUNT);
   const used = new Set<string>();
-  const npcs: Houseguest[] = specs.map((spec, i) => ({
-    id: npc(i + 1),
-    name: uniqueName(rng, used),
-    authored: "generated" as const,
-    character: {
-      archetype: spec.archetype,
-      strategyStyle: rng.pick(spec.styles),
-      stats: jittered(spec.bias, rng),
-      background: `a ${rng.pick(OCCUPATIONS)} who plays as a ${spec.archetype}`,
-    },
-    soul: { emotionalBaseline: 0.5, volatility: rng.next(), emotionalState: 0.5, memory: [] },
-  }));
+  // Draw order on the MAIN stream (name, style, stats, background, volatility) is preserved exactly;
+  // appearance is generated off a SIDE rng (hashed off the name) so the cosmetic 0004 amendment
+  // never perturbs competition-relevant generation (keeps seeded house composition byte-stable).
+  const npcs: Houseguest[] = specs.map((spec, i) => {
+    const name = uniqueName(rng, used);
+    const strategyStyle = rng.pick(spec.styles);
+    const stats = jittered(spec.bias, rng);
+    const background = `a ${rng.pick(OCCUPATIONS)} who plays as a ${spec.archetype}`;
+    const volatility = rng.next();
+    return {
+      id: npc(i + 1),
+      name,
+      authored: "generated" as const,
+      character: {
+        archetype: spec.archetype,
+        strategyStyle,
+        stats,
+        background,
+        ...generateAppearance(new SeededRandom(hashSeed(`${name}:${i}`))),
+      },
+      soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, memory: [] },
+    };
+  });
   return { npcs };
 }
 
@@ -186,6 +216,8 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
   const spec = (input.archetype && SPEC_OF.get(input.archetype)) || ARCHETYPES[0]!;
   const strategyStyle = input.strategyStyle && spec.styles.includes(input.strategyStyle)
     ? input.strategyStyle : spec.styles[0]!;
+  // The player's public appearance is seed-stable per authored name (the player has no NPC rng).
+  const appearanceRng = new SeededRandom(hashSeed(input.name.trim()));
   return {
     id: PLAYER,
     name: input.name.trim(),
@@ -197,6 +229,7 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       // NOT free allocation — so the player can never min-max past the NPC bounds.
       stats: { ...spec.bias },
       background: input.backstory?.trim() || "human-authored at first-run character creation (OOBE)",
+      ...generateAppearance(appearanceRng),
     },
     soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, memory: [] },
     ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
@@ -246,6 +279,32 @@ export const NPC_STAT_RANGE: { min: number; max: number } = (() => {
 export function playerAptitudesWithinNpcBounds(p: PlayerCharacter): boolean {
   const { physical, mental, social } = p.character.stats;
   return [physical, mental, social].every((v) => v >= NPC_STAT_RANGE.min && v <= NPC_STAT_RANGE.max);
+}
+
+/** A Vault-free portrait descriptor (0020): PUBLIC facets only — never aptitudes, hidden, or Soul. */
+export interface PortraitDescriptor {
+  name: string;
+  age: number;
+  appearance: string;
+  presentation: string;
+  /** Archetype-as-vibe (public persona), never the numeric aptitudes behind it. */
+  vibe: string;
+}
+
+/**
+ * Build the portrait descriptor the front-end image-gen consumes. It draws ONLY on the
+ * Character's public identity facets; it deliberately omits P/M/S aptitudes, hidden
+ * attributes, and all Soul content — so a portrait can never leak secret state (0001/0020).
+ */
+export function portraitDescriptorFor(hg: { name: string; character: Character }): PortraitDescriptor {
+  const c = hg.character;
+  return {
+    name: hg.name,
+    age: c.age,
+    appearance: c.appearance,
+    presentation: c.presentation,
+    vibe: `${c.archetype} energy, a ${c.strategyStyle} presence`,
+  };
 }
 
 /** Internal-consistency / plausible-archetype ruleset the factory must honor. */
