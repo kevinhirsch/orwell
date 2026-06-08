@@ -15,6 +15,7 @@ module.exports = {
       "docs/features/0005-competition-eligibility.feature",
       "docs/features/0006-outcomes-by-stats-and-temperature.feature",
       "docs/features/0007-persistence-non-degradation.feature",
+      "docs/features/0008-daily-event-invariant.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

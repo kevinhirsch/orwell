@@ -54,7 +54,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0005 | [Competition eligibility](./0005-competition-eligibility.md) | 5 | Done |
 | 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | 6 | Done |
 | 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
-| 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Draft |
+| 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
 | 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is

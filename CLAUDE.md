@@ -246,9 +246,14 @@ Built BDD/TDD-first, in priority order:
 - **0007 — Persistence non-degradation:** ✅ green (serializable `GameState`; lossless
   round-trip; co-versioned `SaveStore` (Vault+Journal bump together); cross-save superset +
   monotonic counts; the dynamic soul deepens materially while the static character is byte-stable).
+- **0008 — Daily-event invariant:** ✅ green (ceremony-driven scheduler; every in-game day
+  carries a meaningful event; a week = one HOH reign, HOH comp → eviction; at most one optional
+  social day per week (often none), and even it carries a significant house event).
 
-`npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0008 — daily-event invariant** (last).
+**All eight priority invariants (0001–0008) are implemented and green.** `npm test` runs clean:
+typecheck + unit/property/architecture + all BDD scenarios. Remaining drafted work: **0009 —
+MCP tool boundary** (the M5 integration seam) and the deferred adapters (SQLite/Postgres,
+sqlite-vec/pgvector, the real LLM `NarrativePort`).
 
 ## Open decisions (remaining)
 
