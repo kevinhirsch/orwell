@@ -137,6 +137,10 @@ export class BbWorld extends World {
   labelParanoid?: string;
   labelTrusting?: string;
 
+  // Narrative & moment orchestration (0018) scratch state.
+  gsView?: import("../../src/ports/GameSession").GameStateView;
+  gsMoment?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
