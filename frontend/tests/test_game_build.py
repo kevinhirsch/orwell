@@ -206,3 +206,46 @@ def test_no_parallel_front_end_memory_to_rival_engine_vault(monkeypatch):
     assert not any(src.values())  # no front-end store feeds chat context
     for vert in ("memory", "rag", "skills"):
         assert settings.is_feature_enabled(vert) is False, vert
+
+
+# ── Tier 2: stop shipping the dropped verticals' JS ──────────────────────────
+
+_SAMPLE_HTML = (
+    '<script type="module" src="/static/js/chat.js"></script>\n'
+    '<script type="module" src="/static/js/memory.js"></script>\n'
+    '<script type="module" src="/static/js/document.js"></script>\n'
+    '<script type="module" src="/static/js/gallery.js"></script>\n'
+    '<script type="module" src="/static/js/compare/index.js"></script>\n'
+    '<script type="module" src="/static/js/search.js"></script>\n'
+    '<script type="module" src="/static/js/search-chat.js"></script>\n'
+    '<script type="module" src="/static/js/orwellOnboarding.js"></script>\n'
+)
+
+
+def test_tier2_strips_dropped_scripts_under_game_build(monkeypatch):
+    _set_game_build(monkeypatch, True)
+    out = settings.strip_dropped_scripts(_SAMPLE_HTML, features={})
+    # Dropped verticals' JS is gone …
+    for js in ("/memory.js", "/document.js", "/gallery.js", "/compare/index.js"):
+        assert js not in out, js
+    # web search dropped, but conversation search-chat kept (distinct file) …
+    assert '/static/js/search.js"' not in out
+    assert "/static/js/search-chat.js" in out
+    # … and the keep-set JS still ships.
+    assert "/static/js/chat.js" in out
+    assert "orwellOnboarding.js" in out
+
+
+def test_tier2_ships_everything_with_game_build_off(monkeypatch):
+    _set_game_build(monkeypatch, False)
+    # Game build off + voice enabled → nothing is stripped (full workspace).
+    out = settings.strip_dropped_scripts(_SAMPLE_HTML, features={"voice": True})
+    assert out == _SAMPLE_HTML
+
+
+def test_tier2_voice_js_follows_the_voice_flag(monkeypatch):
+    _set_game_build(monkeypatch, True)
+    voice_html = '<script type="module" src="/static/js/tts-ai.js"></script>\n'
+    # Off by default → stripped; flag on → shipped (even under the game build).
+    assert settings.strip_dropped_scripts(voice_html, features={}) == ""
+    assert settings.strip_dropped_scripts(voice_html, features={"voice": True}) == voice_html
