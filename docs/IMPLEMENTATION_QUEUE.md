@@ -332,6 +332,27 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > takes binding decisions **through the engine** — and never invents an outcome. Read
 > `docs/features/0018-narrative-moment-orchestration.md` first. Open a PR.
 
+### B13 — 0023 consequence & memory (the live loop)  ·  Claude Code  ·  **TOP MVP-1 PRIORITY**
+
+> In `kevinhirsch/orwell`, implement feature **0023**
+> (`docs/features/0023-consequence-and-memory.{md,feature}`) — the MVP-1 backbone, currently the
+> biggest gap. **Wire the live game** so player actions have consequences and the house remembers.
+> Today `GameSessionAdapter` holds only house+week+phase and `recordInteraction` just logs — change
+> that:
+> 1. **Apply.** The live game holds a persistent **relationship/soul** state (use
+>    `src/engine/relationships.ts`); `recordInteraction` and competition results / votes **fold
+>    their hidden impact into it** (a betrayal drops trust + raises threat, etc.). The player's
+>    actions change how NPCs feel about them — on the **live** path, not just `simulation.ts`.
+> 2. **Hide.** The shift lives in the Soul/Vault and **never** surfaces — extend the 0001 sentinel
+>    canary: no opinion number or "their opinion changed" text on any player surface.
+> 3. **Persist all event details + derived state to LONG-TERM memory** — wire the real store
+>    (`SaveStore`/SQLite per 0007) to the live session; lossless + monotonic (no thinning); survives
+>    a process restart.
+> 4. **Recall** the full history + hidden state on load — a **superset**, never a reset.
+> Make the `0023` `.feature` green (add it to `cucumber.cjs`); keep all gates green. Two impl forks
+> (0023 §8) are yours to pick — the tests are agnostic to both. Read `CLAUDE.md` (non-degradation
+> mandate) and `docs/features/0002/0007/0017` first. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
