@@ -281,7 +281,8 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > and **photo-style portraits** per houseguest, rendered by orwell's existing image-gen pipeline
 > from the engine's **`portraitDescriptorFor`** (B11) — public facets only. Everything shown is
 > Vault-free; **"your own standing" stays in narration, not the HUD**. MVP-2 (rich game UI) is
-> later. Depends on **B11** + **C3**. Open a PR.
+> later. Depends on **B11** + **C3** (and MVP-2 is gated on **C6** — tight, lever-complete
+> prompts). Open a PR.
 
 ### B12 — 0021 engine: per-user sandbox registry  ·  Claude Code
 
@@ -307,6 +308,26 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > never let one account act as another. Each user sees only **their** game — the chat is their
 > window. Done when two logged-in users each get their own isolated game and neither can see the
 > other's. Depends on **B12**. Open a PR.
+
+### C6 — Tight, lever-complete system prompts  ·  OpenHands (+ Claude Code)  ·  **gates MVP-2 (C4)**
+
+> In `kevinhirsch/orwell`, make the game agent able to **access and pull every engine lever** — the
+> prerequisite for MVP-2. The engine's game-master prompt (`src/engine/momentPrompts.ts`, 0018) is
+> already a **tight operating manual** that names the levers and says the engine decides outcomes;
+> this closes the gaps around it:
+> 1. **Front-end — expose the full lever set as agent tools.** `frontend/src/agent_tools.py`
+>    (`TOOL_TAGS`) + `frontend/src/tool_schemas.py` currently expose only `getGameState`,
+>    `runCompetition`, `recordInteraction`, `surfaceInformationTo`. Add the rest the agent should
+>    drive — `getVisibleStateFor`, `socialRead`, and (as they land) `pendingDecision` /
+>    `executeDecision` (0019) and `gameStatus` (0020) — each as a clean function schema so the
+>    model knows **how to access** every lever.
+> 2. **Front-end — inject the lever-aware prompt.** Confirm `frontend/routes/chat_helpers.py`
+>    injects the engine's `getMomentPrompt` (0018) as the system message on every game turn.
+> 3. **Engine — keep the manifest honest.** Add a test that **fails if any player lever in
+>    `registry.ts` is missing from the base prompt's manifest**, so the two never drift.
+> Done when the model reliably reads state, resolves comps, records scenes, surfaces info, and
+> takes binding decisions **through the engine** — and never invents an outcome. Read
+> `docs/features/0018-narrative-moment-orchestration.md` first. Open a PR.
 
 ---
 
