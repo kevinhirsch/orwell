@@ -22,33 +22,37 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 
 ## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
 
-**State:** **0001–0020 built** (+ deploy 0010). Remaining: engine **B12–B18** (features 0021, 0023–
-0028) and front-end **C4–C6**. Two lanes, minimal contention — **Claude Code = engine (`src/`)**,
-**OpenHands = front-end (`frontend/`)** — so they run **concurrently**. The one engine hot-spot is
-`GameSessionAdapter` (B12/B13/B14 all touch it): those are **sequential on Claude Code**, never
-parallel.
+**State:** **0001–0024 built** — including the **consequence loop (0023), soul recall (0024), and
+per-user sandboxes (0021)**. The **MVP-1 engine backbone is DONE**: actions change hidden opinions,
+persist, recall; games are per-user. Remaining: engine **B15–B18** (0025 twists, 0026 relationship
+math, 0027 NarrativePort, 0028 temperature) and front-end **C4–C6**. Two lanes — **Claude Code =
+engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — concurrent, no contention.
+
+With the engine core built, the make-or-break now is **what the player SEES and how it's VOICED.**
 
 | Wave | Claude Code (engine) | OpenHands (front-end) |
 |---|---|---|
-| **1 — now** | **B16** (0026 relationship math) — one constants module; grounds B13; quick, independent (no adapter change) | **C6** (lever ready-part: expose `getVisibleStateFor`/`socialRead` + drift test) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — its engine tools are built) |
-| **2 — the backbone** (after B16) | **B14 + B13 together** (0024 soul recall + 0023 consequence loop) — the **MVP-1 headline**: action → hidden opinion change → persist → recall, using B16's constants | continue **C4** (big task; runs concurrently) |
-| **3 — multi-tenant** (after B13/B14) | **B12** (0021 per-user sandbox) — wrap the now-living game in per-user sandboxes (cross-user isolation) | **C5** (0021: assert the authenticated user) — **needs B12** |
-| **4 — narrator + flavor** (as CC frees up; any order) | **B17** (0027 NarrativePort) · **B18** (0028 temperature) · **B15** (0025 twists) | polish; MVP-2 (0022) un-parks later |
+| **1 — now** | **B17** (0027 NarrativePort) — replace the echo stub with the real streaming narrator (engine contract + adapter; the front-end `llm_core` is the deployed realization) | **C6** (lever ready-part) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — **all engine tools are built**). The visible MVP-1. |
+| **2** | **B16** (0026 relationship math) — firm the built `apply()`'s constants for **per-game feel** + tunability (refines 0023, not blocking) | **C5** (0021: assert the authenticated user — finish the per-user front-end over the built engine) |
+| **3 — polish** | **B18** (0028 temperature constants) · **B15** (0025 twists) | MVP-2 (0022) un-parks once MVP-1 feels solid |
 
-**The headline is B13** (the live consequence loop). B16 grounds it, B14 pairs with it, B12 then
-makes it multi-tenant. **B13 + B14 are make-or-break for "the game feels real."**
+**The engine backbone (0021/0023/0024) is done.** So the priorities flip to the **player-facing
+experience (C4)** and the **real narrator (B17)** — the player needs to *see* the living game and
+hear it *in character*. B16/B18/B15 refine the feel on top; nothing is on a blocking critical path
+anymore.
 
 **Coordination rules**
 - **Stay in lanes** (engine vs front-end); don't cross-edit the other's files.
-- **`GameSessionAdapter` is sequential:** B14/B13 then B12 — never two of those at once.
-- **Front-end deps:** **C5 waits on B12**; **C4** needs the 0020 engine tools (already built); **C6**
-  can start now.
+- **Front-end is fully unblocked:** **C4** needs the 0020 tools (built), **C5** the 0021 sandbox
+  (built), **C6** starts now — OpenHands can run **C6 → C4 → C5** straight through.
+- **Engine has no hard ordering left:** B15–B18 are independent; do **B17** first (biggest
+  experience lift), then B16, then B18/B15.
 - **Every item:** keep `npm test` + `npm run test:arch` green, the Vault Wall (dependency-cruiser)
   green, add the new `.feature` to `cucumber.cjs` when it goes green, and open a PR.
-- **First moves:** Claude Code → **B16**; OpenHands → **C6** → **C4**. Then Claude Code → **B14+B13**.
+- **First moves:** Claude Code → **B17**; OpenHands → **C6 → C4**.
 
 *(The full per-item prompts are below; the table above is the current sequencing — it supersedes the
-historical "Order & assignment" list, which predates 0011–0020 being built.)*
+historical "Order & assignment" list, which predates 0011–0024 being built.)*
 
 ## Order & assignment
 
