@@ -17,6 +17,38 @@ actual contents are designed/migrated separately under access control.
 
 ---
 
+## Refinements since v3 (this build — Orwell)
+
+The v3 spec below remains the domain baseline; these accepted refinements (in `docs/decisions/`
+and `docs/features/`) supersede or extend it where they conflict:
+
+- **Name & shape.** The project is now **Orwell** (repo `kevinhirsch/orwell`), and the game is
+  **folded into the main chat** — a vendored Orwell front-end (`frontend/`, Python) drives play
+  through the engine's permissioned MCP tools. The engine is game-master; the chat is the window.
+- **Mechanics refinements** (`docs/decisions/0001`, `0002`): drop Luck → soul **emotional
+  modifier**; **Character/Soul** split; **organic relationship model** (directed, graded,
+  computed — no binary ally/enemy flags); veto **"Houseguest's Choice"** chip.
+- **The consequence & memory loop (0023)** — the MVP-1 backbone: every happening is recorded,
+  **folds its hidden impact into the relationship/soul layer** (the player's actions change how
+  houseguests feel about them, invisibly), and **persists to long-term memory**, recalled in full
+  on return. The current biggest gap (the live game does not yet wire it).
+- **Human-driven player reads (0017/0020):** the engine computes relationship edges but **never
+  shows the player a number** or asserts their feelings — surfaces show facts + observable
+  behavior; the player **infers** trust/threat. Paranoia is the human's to form.
+- **Per-user sandboxes (0021):** one active game per **physical-world user**, unlimited users
+  concurrently, fully isolated — **cross-user isolation** is a first-class guarantee alongside the
+  Vault Wall.
+- **Tight per-moment narration (0018):** the narrator gets a managed, engine-owned per-moment
+  system prompt — a tight operating manual + **lever manifest** (it knows how to access and pull
+  every engine tool); the engine decides outcomes, the narrator voices them.
+- **Feature set:** priority specs **0001–0023** in `docs/features/` (0001–0014 built); the index
+  and `docs/IMPLEMENTATION_QUEUE.md` track status + implementer prompts.
+
+The §12 BDD invariants and §16 open decisions below still hold except where a `docs/decisions/`
+record or a `docs/features/NNNN` spec refines them.
+
+---
+
 ## 1. High-level concept
 
 An immersive, serialized single-player *Big Brother* simulation. The system is **game
