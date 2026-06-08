@@ -19,6 +19,11 @@ may act on it while it is wrong.
 This is the area that caused real bugs before (player-witnessed events mislabeled as
 off-screen/secret), so the classification rule and its regression guard are central.
 
+> **Live integration → 0023.** This feature is the *record + visibility* model. Wiring it into the
+> **live** game so each recorded happening also **updates the hidden relationship/soul layer and
+> persists** (act → consequence → memory) is feature **0023** (consequence & memory) — today the
+> live `recordInteraction` only logs.
+
 ## 2. Scope
 
 **In:** the `EventStore` witness/hidden semantics; the derived `classify()` rule; per-entity

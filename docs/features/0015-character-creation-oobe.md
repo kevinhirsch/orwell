@@ -43,8 +43,10 @@ learn the player only through witnessed events and gossip (0002).
 
 ## 4. Character / Soul for the player (mirrors decision 0001)
 
-- **Static `Character`** — identity, backstory, archetype, **baseline temperament**, and the
-  **core P/M/S aptitudes** (Physical / Mental / Social — no Luck). Byte-stable for the save
+- **Static `Character`** — identity, backstory, archetype, **baseline temperament**, the
+  **core P/M/S aptitudes** (Physical / Mental / Social — no Luck), and the player's **public
+  appearance/identity** (appearance, presentation/style) — the authored counterpart to the NPC
+  appearance fields (0004 §8) that feeds the player's **portrait** (0020). Byte-stable for the save
   (non-degradation, 0007): who the player *is* doesn't drift.
 - **Initial `Soul`** — emotional baseline + **volatility** (the emotional-modifier seed, decision
   0001), an empty memory, and **no relationship beliefs** yet (those compute from play, 0017).

@@ -36,26 +36,44 @@ The current moment is a pure function of game state (phase + schedule), not the 
 choice. The narrator cannot move the game from "nominations" to "eviction"; only the engine
 (0011) advances phase, and the moment follows. Same state ⇒ same moment (seed-reproducible).
 
-## 4. The managed per-moment prompt (persona + framing — NOT the Vault Wall)
+## 4. The managed per-moment prompt (a TIGHT operating manual — NOT the Vault Wall)
 
 One registry maps **moment → system-prompt fragment**, composed at call time as:
 
 ```
-BASE_GAME_MASTER_PERSONA  +  moment fragment  +  Vault-free GAME CONTEXT
+BASE_GAME_MASTER_PROMPT  +  moment fragment  +  Vault-free GAME CONTEXT
 ```
 
-- **Base persona:** "you are the host/narrator/voice of every houseguest… never say you are an
-  AI or break character… you know ONLY the context given." This is what stops generic-assistant
-  replies.
-- **Moment fragment:** the tone/intent for this beat (build comp tension; play the nomination
-  dread; the Diary Room is a warm OOC aside; …).
+The base prompt is a **tight operating manual** (always injected), in three parts:
+
+- **Voice / persona:** "you are Big Brother — host, narrator, the voice of every houseguest…
+  never say you are an AI, never break character." This is what stops generic-assistant replies.
+- **Authority:** the **engine decides every outcome**; the model makes things happen by *calling
+  tools* and then *voicing* what they return — it never invents or changes an outcome, and it
+  knows **only** what the context/tools give it (the knowledge rule).
+- **The lever manifest (the crux of this refinement):** the **full set of engine levers the agent
+  can call to run the game**, each with *when to pull it* — `getGameState`, `runCompetition`,
+  `recordInteraction`, `surfaceInformationTo`, and the binding-decision path (nominations / veto /
+  eviction votes over the engine's **legal** options), plus each lever added later. The manifest
+  is **kept in sync with the player tool registry** (`src/surfaces/tools/registry.ts`): every
+  callable lever appears here so the model knows **how to access *and* when to pull every lever**.
+
+Then:
+
+- **Moment fragment:** the beat's tone/intent **and the lever it calls for** (HOH comp →
+  `runCompetition`; social → `recordInteraction` / `surfaceInformationTo`; eviction → the engine's
+  vote; …).
 - **Context:** the player's own card + the house roster (names) + phase/week — **Vault-free by
   construction** (no stats, souls, archetypes, hidden attributes).
 
-**Crucially (mandate #2):** prompts are **persona/framing only**. They are **not** the Vault
-Wall — secrecy is structural (the context is Vault-free), so there is nothing secret in the
-prompt to leak. The registry is editable and version-controlled; that is the single place to
-"manage system-prompt injections for every moment."
+**Crucially (mandate #2):** the prompt is **persona / framing / orchestration only** — never the
+Vault Wall. Secrecy is structural (the context is Vault-free and every lever returns Vault-free
+results), so there is nothing secret in the prompt to leak. The registry is the single managed
+place to "manage system-prompt injections for every moment."
+
+> **Tightness bar.** The manual must be **tight**: precise, no filler, unambiguous about who
+> decides (the engine) and which lever serves each beat. A vague prompt that leaves the model
+> guessing which lever to pull — or unaware a lever exists — is a failure of this feature.
 
 ## 5. The narrator constraint
 
@@ -84,6 +102,12 @@ character output; the woven context contains no Vault data; same state ⇒ same 
 - **Engine-owned moment:** the moment tracks the engine phase; a narration call cannot change
   the phase/moment.
 - **Persona present:** the base prompt asserts the in-character framing (never "I am an AI").
+- **Lever manifest covers the registry:** the base prompt **names every player-channel lever** the
+  agent can call; assert the manifest stays in sync with `registry.ts` (a registry lever missing
+  from the prompt fails). It also states **who decides** (the engine) and that the model **voices**
+  results.
+- **Per-moment lever guidance:** each moment fragment names the lever(s) its beat calls for
+  (e.g. an HOH-comp prompt references `runCompetition`).
 - **Vault-free context:** the context block carries names/phase/player-card only — no stats,
   souls, archetypes, or hidden attributes.
 - **Determinism:** same seed/state ⇒ same moment + prompt.
@@ -101,6 +125,9 @@ character output; the woven context contains no Vault data; same state ⇒ same 
 - [ ] The moment is engine-owned and deterministic; the narrator cannot advance it.
 - [ ] `getMomentPrompt` is **provably sentinel-free** under any Vault (canary + property tests).
 - [ ] The base persona enforces in-character narration (no generic-assistant output).
+- [ ] The base prompt is a **tight operating manual** whose **lever manifest names every
+      player-channel lever** (in sync with `registry.ts`), says the **engine decides** outcomes,
+      and ties each moment to the lever its beat calls for. *(Gates MVP-2.)*
 - [ ] The injected context is Vault-free (names/phase/player-card only).
 
 ## 10. Dependencies

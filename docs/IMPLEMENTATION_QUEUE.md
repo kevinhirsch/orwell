@@ -280,14 +280,84 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > **legal** option set (`pendingDecision`) and executed via the validated path (never typed prose);
 > and **photo-style portraits** per houseguest, rendered by orwell's existing image-gen pipeline
 > from the engine's **`portraitDescriptorFor`** (B11) — public facets only. Everything shown is
-> Vault-free; **"your own standing" stays in narration, not the HUD**. MVP-2 (rich game UI) is
-> later. Depends on **B11** + **C3**. Open a PR.
+> Vault-free; **"your own standing" stays in narration, not the HUD**. Depends on **B11** + **C3**.
+> Open a PR. *(MVP-2 — the rich game UI, feature 0022 — is **deferred**; MVP-1 is being refined.)*
+
+### B12 — 0021 engine: per-user sandbox registry  ·  Claude Code
+
+> In `kevinhirsch/orwell`, implement the **engine** side of feature **0021**
+> (`docs/features/0021-game-session-and-save-lifecycle.{md,feature}`): turn the single in-memory
+> game into a **per-user sandbox registry** — `sandboxFor(user) -> GameSession` (created on first
+> use) — and route **every** player/admin MCP tool call to the asserting user's sandbox (the MCP
+> layer resolves the user identity the front-end asserts). **One active game per user**
+> (`createCharacter` replaces that user's own game); **unlimited users concurrently**, each fully
+> isolated. **Cross-user isolation is the crux:** no call on behalf of user A may return any of
+> user B's state — add a **cross-user sentinel test** (mirror the 0001 Vault canary on the user
+> axis: seed A's game with sentinels, assert none appear in any of B's tool outputs, and vice-
+> versa). The Vault Wall (0001) must still hold inside each sandbox; `npm run test:arch` stays
+> green. Make the `0021` engine scenarios green; gates green. **Do this early** — it reshapes the
+> sandbox seam, cheaper before more engine work piles on. Read `CLAUDE.md` (sandbox model) first.
+> Open a PR.
+
+### C5 — 0021 front-end: assert the authenticated user  ·  OpenHands
+
+> In `kevinhirsch/orwell` `frontend/`, make the front-end **assert the authenticated user identity**
+> to the engine on every engine MCP call (the engine binds loopback and keys a sandbox per user —
+> B12). Use the already-authenticated account (`request.state.current_user`) as the sandbox key;
+> never let one account act as another. Each user sees only **their** game — the chat is their
+> window. Done when two logged-in users each get their own isolated game and neither can see the
+> other's. Depends on **B12**. Open a PR.
+
+### C6 — Tight, lever-complete system prompts  ·  OpenHands (+ Claude Code)  ·  **START NOW (ready part)**
+
+> In `kevinhirsch/orwell`, make the game agent able to **access and pull every engine lever**. The
+> engine's game-master prompt (`src/engine/momentPrompts.ts`, 0018) is already a **tight operating
+> manual** that names the levers and says the engine decides outcomes; this closes the gaps around
+> it. **Ready part — do now:** the drift test (3) and exposing the two levers that already exist —
+> `getVisibleStateFor`, `socialRead` — in (1). The decision levers (0019) and `gameStatus` (0020)
+> get exposed as they land (the drift test forces it). Steps:
+> 1. **Front-end — expose the full lever set as agent tools.** `frontend/src/agent_tools.py`
+>    (`TOOL_TAGS`) + `frontend/src/tool_schemas.py` currently expose only `getGameState`,
+>    `runCompetition`, `recordInteraction`, `surfaceInformationTo`. Add the rest the agent should
+>    drive — `getVisibleStateFor`, `socialRead`, and (as they land) `pendingDecision` /
+>    `executeDecision` (0019) and `gameStatus` (0020) — each as a clean function schema so the
+>    model knows **how to access** every lever.
+> 2. **Front-end — inject the lever-aware prompt.** Confirm `frontend/routes/chat_helpers.py`
+>    injects the engine's `getMomentPrompt` (0018) as the system message on every game turn.
+> 3. **Engine — keep the manifest honest.** Mark which `registry.ts` entries are **agent levers**
+>    (e.g. an `agentLever: true` field on the game-driving read/action tools — not infra like
+>    `getMomentPrompt`/`endOfSessionSummary`), then add a test that **fails if any agent-lever tool
+>    is missing from the base prompt's manifest**, so the prompt and the registry never drift.
+> Done when the model reliably reads state, resolves comps, records scenes, surfaces info, and
+> takes binding decisions **through the engine** — and never invents an outcome. Read
+> `docs/features/0018-narrative-moment-orchestration.md` first. Open a PR.
+
+### B13 — 0023 consequence & memory (the live loop)  ·  Claude Code  ·  **TOP MVP-1 PRIORITY**
+
+> In `kevinhirsch/orwell`, implement feature **0023**
+> (`docs/features/0023-consequence-and-memory.{md,feature}`) — the MVP-1 backbone, currently the
+> biggest gap. **Wire the live game** so player actions have consequences and the house remembers.
+> Today `GameSessionAdapter` holds only house+week+phase and `recordInteraction` just logs — change
+> that:
+> 1. **Apply.** The live game holds a persistent **relationship/soul** state (use
+>    `src/engine/relationships.ts`); `recordInteraction` and competition results / votes **fold
+>    their hidden impact into it** (a betrayal drops trust + raises threat, etc.). The player's
+>    actions change how NPCs feel about them — on the **live** path, not just `simulation.ts`.
+> 2. **Hide.** The shift lives in the Soul/Vault and **never** surfaces — extend the 0001 sentinel
+>    canary: no opinion number or "their opinion changed" text on any player surface.
+> 3. **Persist all event details + derived state to LONG-TERM memory** — wire the real store
+>    (`SaveStore`/SQLite per 0007) to the live session; lossless + monotonic (no thinning); survives
+>    a process restart.
+> 4. **Recall** the full history + hidden state on load — a **superset**, never a reset.
+> Make the `0023` `.feature` green (add it to `cucumber.cjs`); keep all gates green. Two impl forks
+> (0023 §8) are yours to pick — the tests are agnostic to both. Read `CLAUDE.md` (non-degradation
+> mandate) and `docs/features/0002/0007/0017` first. Open a PR.
 
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0020** are drafted (0015–0020 added this session; **0004 amended** —
+All planned specs through **0021** are drafted (0015–0021 added this session; **0004 amended** —
 see the amendments table in `docs/features/README.md`). Nothing is blocking the implementer queue.
 Future spec work, if it comes up: **MVP-2** (the rich game UI — house view, houseguest cards,
 browsable journal, competition visuals) and a **game-session ↔ save lifecycle** spec; any

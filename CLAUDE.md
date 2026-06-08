@@ -10,10 +10,15 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: under active implementation (BDD/TDD-first).** The stack is chosen (TypeScript /
-Node, hexagonal) and features **0001 (Vault Wall) and 0002 (event visibility) are green** —
-see [Building & testing](#building--testing). Priority-ordered feature specs live in
-`docs/features/`; work proceeds down that order. Next: 0003 (behavioral fidelity).
+**Status: under active implementation (BDD/TDD-first).** The eight priority invariants
+(**0001–0008**), the MCP seam (**0009**), the one-liner deploy (**0010**), and the gameplay loop
+(**0011–0014**) are **green**. The game is now **folded into the main chat**: the player-facing
+tier is the vendored **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP
+(see [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
+`docs/features/` (now through **0023**). **Current focus: feature 0023 — the living, persisted
+consequence loop** (act → hidden impact → persist → recall), the MVP-1 backbone that wires the
+already-built pieces into the *live* game (today the live session logs events but changes no
+opinions and persists nothing). See [Current status](#current-status).
 
 ## Source of truth — read these first
 
@@ -76,7 +81,10 @@ returns no Vault data.
 - **Player-level** — out-of-character strategy/directives within the player's agency.
 - **In-character** — narrative interactions.
 
-Each running game is its own isolated sandbox (own state namespace/instance).
+Each running game is its own isolated sandbox — keyed to the **physical-world user**: **one
+active game per user**, **unlimited users concurrently**, each fully isolated. **Cross-user
+isolation** is a first-class guarantee *alongside* the Vault Wall (no call for user A may return
+user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.)
 
 ## The event / visibility model (build this carefully — it caused real bugs before)
 
@@ -103,6 +111,28 @@ a witness set + a hidden flag — not a function of which store the data lives i
   any NPC** — it may inform the engine's read of player strategy, **never** NPC behavior. (DR
   mechanics are concrete in the legacy Bible §6–§7; the provisional domain model is spec §11.)
 
+## The consequence & memory loop (the MVP-1 backbone — feature 0023)
+
+Recording an event is only half the loop. Every happening — a conversation, a competition win, a
+vote, a scheme — must also **fold its hidden impact into the relationship/soul layer** and
+**persist**:
+
+```
+happening → recorded event (witness set + hidden flag)
+          → engine applies its HIDDEN impact to the relationship/soul layer
+            (trust/affinity/threat move — the player's action changes how they feel about them)
+          → persisted to long-term memory: every event detail + the derived hidden state
+          → recalled in full on return / restart — the house still remembers.
+```
+
+The opinion change lives in the **hidden layer** (Soul/Vault) — the player **never sees the
+numbers**, only the later behavior. That is the Vault Wall working: the change is real, recorded,
+and invisible. **This is the point of the game**, and it is the current biggest gap — the pieces
+(events 0002, relationships 0017, persistence 0007) exist and are tested in isolation, but the
+**live** game (`GameSessionAdapter` / the MCP `recordInteraction`) does **not** yet wire them:
+it logs events, changes no opinions, persists nothing. Feature **0023** is that wiring. Do not
+ship an action that is narrated but never recorded — it has no consequence and no memory.
+
 ## Characters, souls & per-moment temperature
 
 - **Only the player's profile is human-authored** (first-run OOBE). **All NPC profiles are
@@ -121,6 +151,12 @@ a witness set + a hidden flag — not a function of which store the data lives i
   stored (`docs/decisions/0002`). The competition **emotional modifier** (a baseline that grows
   more or less volatile with circumstances + temperature) and the veto "Houseguest's Choice"
   both read the dynamic soul. See `docs/decisions/`.
+- **The player forms their own reads (human-driven).** The engine computes both `NPC→player` and
+  `player→NPC` relationship edges from history — but **never shows the player a number** and never
+  asserts how they feel ("you trust them"). Player-facing surfaces show **facts the player knows +
+  observable houseguest behavior**; the player **infers** trust and threat themselves. Paranoia and
+  loyalty are the human's to form (features 0017/0020/0023). The model is computed and hidden; the
+  *feeling* is theirs.
 - **Temperature is per-moment, not a global knob.** Each gameplay moment rolls temperature
   across *all* involved variables (outcomes, expression, NPC initiative, which secret
   surfaces, alliance shifts, volatility…). It governs variance/surprise but **never** overrides
@@ -219,10 +255,14 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`
 and `VectorIndex` are **engine-only**) · `src/services` (visible-state / summary — outward-safe)
 · `src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) ·
-`src/adapters` (`inmemory/`, `narrative/`, `random/`; SQLite/vector later) · `src/engine`
-(off-screen simulation) · `src/composition` (`engineRoot` wires the Vault; `outwardRoot` never
-does). BDD steps + support in `features/`; unit/property/architecture tests in `tests/`. The
-`.feature` files in `docs/features/` remain the source of truth.
+`src/adapters` (`inmemory/`, `engine/` (the live `GameSessionAdapter` / `EngineCommandsAdapter`),
+`mcp/` (`McpServer` / `HttpMcpServer`), `narrative/`, `random/`; SQLite/vector later) · `src/engine`
+(the season loop `season.ts`, `conversation.ts`, `relationships.ts`, `momentPrompts.ts`, and the
+off-screen simulation) · `src/composition` (`engineRoot` wires the Vault; `outwardRoot`/`appRoot`
+never do). BDD steps + support in `features/`; unit/property/architecture tests in `tests/`. The
+`.feature` files in `docs/features/` remain the source of truth. The **player-facing tier** is the
+vendored **Orwell** front-end in `frontend/` (Python/FastAPI) — its own app, quarantined from the
+TS tooling (see `frontend/INTEGRATION.md`).
 
 ## Current status
 
@@ -266,12 +306,28 @@ all BDD scenarios.
 **Gameplay loop:** **0011 — weekly loop orchestration** is ✅ green (`src/engine/season.ts`): a
 pure, seed-deterministic season — HOH → noms → veto → ceremony → eviction down to Final 2 + a
 jury vote (last-9 jury, last-juror tie-break); NPC decisions are relationship-driven (threat/
-trust), player decision points are surfaced and validated. Next drafted gameplay features:
-0012 (conversation & scene system), 0013 (Diary Room), 0014 (jury & endgame).
+trust), player decision points are surfaced and validated. **0012–0014** (conversation & scene
+system, Diary Room, jury & endgame) are ✅ green too — so the built set is **0001–0014 + 0009 +
+0010**.
 
-Remaining work: **0010's container smoke test** (Proxmox/LXC `deploy/` — validated outside this
-harness) and the deferred real adapters (SQLite/Postgres, sqlite-vec/pgvector, the async LLM
-`NarrativePort` + the full MCP/JSON-RPC protocol wrapper over the current HTTP transport).
+**Renamed & folded:** the project is now **Orwell** (repo `kevinhirsch/orwell`); the game is
+**folded into the main chat** — the vendored Orwell front-end (`frontend/`) drives play through
+the engine's MCP tools, and the engine supplies a **tight, per-moment game-master system prompt**
+(0018) with a **lever manifest** (the model knows how to access and pull every engine lever).
+
+**Drafted — next batch (0015–0023, not yet built):** 0015 OOBE · 0016 God Mode · 0017 relationship
+model · 0018 moment orchestration · 0019 agent play loop · 0020 player experience MVP-1 · 0021
+per-user sandboxes · 0022 player experience MVP-2 (deferred) · **0023 consequence & memory**.
+
+**The critical gap (top priority).** The live game (`src/adapters/engine/GameSessionAdapter`) is a
+thin shell — it starts a game, shows the house, resolves a competition, and serves the prompt, but
+it does **not** update relationships on player actions or persist anything (the `RelationshipModel`
+only runs in the off-screen sim; `recordInteraction` only logs). Wiring the **consequence & memory
+loop** (0023) into the live game is the next, highest-priority work (queue item **B13**).
+
+Remaining beyond that: 0010's container smoke test on a real Proxmox host; the deferred real
+adapters (SQLite/Postgres, sqlite-vec/pgvector); the async LLM `NarrativePort` + full MCP/JSON-RPC
+over the current HTTP transport; and the front-end's full lever exposure + player surfaces.
 
 ## Open decisions (remaining)
 

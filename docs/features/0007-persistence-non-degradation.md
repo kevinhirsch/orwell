@@ -13,6 +13,11 @@ and Journal are versioned together**. "Deepen" is **active**, not just "don't lo
 over a game while the **static `Character`** baseline holds — a late-game houseguest is far
 deeper than at premiere (decision 0001 §3).
 
+> **Live integration → 0023.** This feature is the *store* (lossless, accumulating, versioned).
+> Wiring it into the **live** game — every event detail + the derived hidden state actually saved
+> on play and recalled on return — is feature **0023** (consequence & memory). Today the live
+> session persists nothing; 0023 closes that.
+
 ## 2. Operationalizing "detail must accumulate" (answers open decision §16.5)
 
 The spec leaves "how to operationalize non-degradation" open (`bb-sim-spec.md` §16.5). This
