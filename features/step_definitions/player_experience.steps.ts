@@ -1,0 +1,132 @@
+import { Given, When, Then } from "@cucumber/cucumber";
+import assert from "node:assert/strict";
+import type { BbWorld } from "../support/world";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import { pendingDecision, executeDecision } from "../../src/engine/decisions";
+import { selectableReplacements } from "../../src/domain/eligibility";
+import { generateHouse, portraitDescriptorFor } from "../../src/engine/characterFactory";
+import { SeededRandom } from "../../src/adapters/random/SeededRandom";
+import { assertNoSentinels, assertNoneAppear } from "../../tests/support/assertions";
+import { npc } from "../../src/domain/ids";
+
+// Reuses (0019): "a pending replacement-nominee decision", "a pending decision with a known legal
+// option set", "no decision is pending", "no binding decision is made".
+// Reuses (0018): "no Vault sentinel value appears in it" (checks this.lastOutput).
+
+// --- Status panel -------------------------------------------------------------
+
+When("the status panel is rendered", function (this: BbWorld) {
+  const game = new GameSessionAdapter();
+  game.createCharacter({ playerName: "Player One", seed: 1 });
+  game.updateCeremony({ hoh: npc(1), nominees: [npc(2), npc(3)], vetoHolder: npc(4), vetoUsed: true });
+  this.lastView = game.gameStatus();
+  this.lastOutput = JSON.stringify(this.lastView); // so the reused 0018 sentinel step applies
+});
+
+Then("it shows the current week and phase", function (this: BbWorld) {
+  const s = this.lastView as { week: number; phase: string };
+  assert.equal(typeof s.week, "number");
+  assert.equal(typeof s.phase, "string");
+});
+
+Then("it shows the Head of Household and the nominees", function (this: BbWorld) {
+  const s = this.lastView as { hoh: { name: string } | null; nominees: unknown[] };
+  assert.ok(s.hoh && typeof s.hoh.name === "string");
+  assert.equal(s.nominees.length, 2);
+});
+
+Then("it shows the veto holder and whether the veto has been used", function (this: BbWorld) {
+  const s = this.lastView as { veto: { holder: { name: string } | null; used: boolean } };
+  assert.ok(s.veto.holder && typeof s.veto.holder.name === "string");
+  assert.equal(s.veto.used, true);
+});
+
+Then("it shows no hidden vote or off-screen targeting", function (this: BbWorld) {
+  assertNoneAppear(this.lastOutput, this.sandbox!.hiddenContents);
+  assert.ok(!/vote|secret|offscreen|hidden/i.test(this.lastOutput));
+});
+
+// --- Inline decisions over the legal set --------------------------------------
+
+When("the decision buttons are rendered", function (this: BbWorld) {
+  this.pending = pendingDecision(this.decisionCtx!);
+});
+
+Then("the buttons are exactly the engine's legal option set", function (this: BbWorld) {
+  const pd = this.pending as { options: string[] };
+  assert.deepEqual([...pd.options].sort(), [...selectableReplacements(this.decisionCtx!.week!)].sort());
+});
+
+Then("the veto winner is not offered", function (this: BbWorld) {
+  const pd = this.pending as { options: string[] };
+  assert.ok(!pd.options.includes(npc(4)));
+});
+
+Given("a pending decision with rendered option buttons", function (this: BbWorld) {
+  this.decisionCtx = { kind: "replacement", week: { houseguests: [npc(1), npc(2), npc(3), npc(4), npc(5), npc(6)], player: npc(6), hoh: npc(1), nominees: [npc(2), npc(3)], vetoWinner: npc(4) } };
+  this.pending = pendingDecision(this.decisionCtx);
+});
+
+When("the player taps a legal option", function (this: BbWorld) {
+  const pd = this.pending as { options: string[] };
+  this.decisionResult = executeDecision(this.decisionCtx!, [pd.options[0]!]);
+});
+
+Then("the choice is executed through the validated decision path", function (this: BbWorld) {
+  assert.ok(this.decisionResult?.recorded);
+});
+
+Then("the engine re-validates it", function (this: BbWorld) {
+  // A tap outside the legal set is rejected by the same validated path (defense in depth).
+  assert.throws(() => executeDecision(this.decisionCtx!, [npc(4)])); // the veto winner
+});
+
+// --- Illegal can never be presented or chosen ---------------------------------
+
+Then("no option outside that set is offered", function (this: BbWorld) {
+  const pd = pendingDecision(this.decisionCtx!) as { options: string[] };
+  assert.ok(!pd.options.includes(this.decisionCtx!.hoh!)); // the HOH is never a nominee option
+});
+
+Then("an attempt to choose outside the set is rejected", function (this: BbWorld) {
+  assert.throws(() => executeDecision(this.decisionCtx!, [this.decisionCtx!.hoh!]));
+});
+
+// --- Portraits from the generated Character, public facets only ---------------
+
+Given("a generated houseguest with a static Character", function (this: BbWorld) {
+  this.portraitSeed = 11;
+  this.portraitHg = generateHouse(new SeededRandom(this.portraitSeed)).npcs[0]!;
+});
+
+When("that houseguest's portrait descriptor is produced", function (this: BbWorld) {
+  this.lastView = portraitDescriptorFor(this.portraitHg!);
+  this.lastOutput = JSON.stringify(this.lastView);
+});
+
+Then("the descriptor draws on the Character's public identity facets", function (this: BbWorld) {
+  const d = this.lastView as { appearance: string; age: number; presentation: string; vibe: string };
+  assert.ok(d.appearance.length > 0 && d.presentation.length > 0 && d.vibe.length > 0);
+  assert.equal(typeof d.age, "number");
+});
+
+Then("it excludes competition aptitudes, hidden attributes, and Soul secrets", function (this: BbWorld) {
+  for (const banned of ["physical", "mental", "stats", "soul", "volatility", "emotionalBaseline", "emotionalState"]) {
+    assert.ok(!this.lastOutput.includes(banned), `leaked: ${banned}`);
+  }
+});
+
+Then("the same save yields a consistent portrait for that houseguest", function (this: BbWorld) {
+  const again = generateHouse(new SeededRandom(this.portraitSeed!)).npcs[0]!;
+  assert.deepEqual(portraitDescriptorFor(again), this.lastView);
+});
+
+// --- Free-text social play is not a binding decision --------------------------
+
+When("the player chats socially in free text", function (this: BbWorld) {
+  // A social chat is recorded as a scene; it executes no decision.
+  this.sandbox!.engine.events.record({
+    id: "evt:0020:social", ts: 1, type: "conversation",
+    initiator: "player", witnessSet: ["player", npc(1)], hidden: false, content: "Just vibing in the kitchen.",
+  });
+});

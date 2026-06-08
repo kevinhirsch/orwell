@@ -44,6 +44,8 @@ export class McpServer {
         return this.deps.session.createCharacter(args as unknown as CreateCharacterReq);
       case "getGameState":
         return this.deps.session.getGameState();
+      case "gameStatus":
+        return this.deps.session.gameStatus();
       case "getMomentPrompt":
         return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
       case "runCompetition":

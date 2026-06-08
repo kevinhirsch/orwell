@@ -26,6 +26,7 @@ module.exports = {
       "docs/features/0017-relationship-model.feature",
       "docs/features/0018-narrative-moment-orchestration.feature",
       "docs/features/0019-agent-driven-play-loop.feature",
+      "docs/features/0020-player-experience.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -1,6 +1,6 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
-  RunCompetitionReq, CompetitionResultView,
+  RunCompetitionReq, CompetitionResultView, PublicGameStatus,
 } from "../../ports/GameSession";
 import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle } from "../../engine/characterFactory";
@@ -8,6 +8,7 @@ import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import type { CompetitionType, Competitor } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
+import type { EntityId } from "../../domain/ids";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
@@ -26,6 +27,35 @@ export class GameSessionAdapter implements GameSession {
   private house: GameHouse | null = null;
   private week = 0;
   private phase = "setup";
+  // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
+  private ceremony: { hoh?: EntityId; nominees: EntityId[]; vetoHolder?: EntityId; vetoUsed: boolean } = {
+    nominees: [], vetoUsed: false,
+  };
+
+  /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
+  updateCeremony(partial: Partial<{ hoh: EntityId; nominees: EntityId[]; vetoHolder: EntityId; vetoUsed: boolean }>): void {
+    this.ceremony = { ...this.ceremony, ...partial };
+  }
+
+  private nameOf(id: EntityId): string {
+    if (!this.house) return id;
+    if (this.house.player.id === id) return this.house.player.name;
+    return this.house.npcs.find((n) => n.id === id)?.name ?? id;
+  }
+
+  private card(id?: EntityId): { id: EntityId; name: string } | null {
+    return id ? { id, name: this.nameOf(id) } : null;
+  }
+
+  gameStatus(): PublicGameStatus {
+    return {
+      week: this.week,
+      phase: this.phase,
+      hoh: this.card(this.ceremony.hoh),
+      nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+      veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+    };
+  }
 
   createCharacter(req: CreateCharacterReq): GameStateView {
     const seed = req.seed ?? hashSeed(req.playerName);
