@@ -195,9 +195,102 @@ not just narrate), surfacing `/bbai` from the main nav/landing, and the weekly-l
 
 ---
 
+## Batch 2 — features 0015–0020, in build sequence
+
+0011–0014 + A1 are **built**; the **rename** (BBAI→Orwell) and the **"Orwell IS the game" fold**
+are in flight (their own prompts, given separately). This batch finishes the gameplay + player
+experience. Build in this order — two agents in parallel where deps allow:
+
+| Step | Item | Agent | Depends on |
+|---|---|---|---|
+| 1 | **B5** — 0017 relationship model | Claude Code | — (foundational; 0014/0019 read it) |
+| 2 | **B8** — 0018 moment orchestration | Claude Code | 0011/0008/0009 (done) |
+| 3 | **B6** — 0015 OOBE  +  **B9** — 0004 appearance amendment | Claude Code | 0004; pair B6+B9 (same factory) |
+| 4 | **B7** — 0016 God Mode | Claude Code | 0001 (done) — slot anytime |
+| 5 | **B10** — 0019 engine decision seam | Claude Code | B5, B8, 0011/0005 |
+| 6 | **C3** — 0019 agent play loop | OpenHands | B10 + the fold + 0012 |
+| 7 | **B11** — 0020 engine (status + portrait descriptor) | Claude Code | B9 |
+| 8 | **C4** — 0020 player UX (panel + decisions + portraits) | OpenHands | B11, C3 |
+
+Claude Code runs the engine track (B5 → B8 → B6/B9 → B7 → B10 → B11); OpenHands picks up C3 once
+B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B8–B11, C3–C4):**
+
+### B8 — 0018 narrative & moment orchestration  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement feature **0018** (`docs/features/0018-narrative-moment-orchestration.{md,feature}`)
+> in the engine, promoting the existing `src/engine/momentPrompts.ts` + the `getMomentPrompt` tool
+> into a tested spec. The **engine owns the moment** — derive it deterministically from the
+> phase/schedule (0011/0008); the narrator can't change it. The managed `MOMENT_PROMPTS` registry
+> is the single place for per-moment fragments; the composed prompt = base game-master persona +
+> moment fragment + **Vault-free** context (player card + house names + phase). Persona/framing
+> ONLY — never the Vault Wall. Make `0018` green: every moment's prompt is **sentinel-free** under a
+> fully populated Vault (extend the 0001 canary to `getMomentPrompt`); the moment tracks the engine
+> phase; the base persona forbids generic-assistant output; the context carries no stats/souls/
+> archetypes/hidden. Keep all gates green. Open a PR.
+
+### B9 — 0004 appearance amendment  ·  Claude Code
+
+> In `kevinhirsch/bbai`, fold the **0004 amendment** into the built `CharacterFactory`
+> (`src/engine/characterFactory.ts`): generate **public appearance/identity** fields (appearance,
+> approximate age, presentation/style) into the static `Character`, seeded, internally consistent
+> with the archetype, **seed-stable** (part of the byte-stable baseline, 0007), and carrying **no**
+> P/M/S aptitude or hidden data. These are the Vault-free facets the portrait descriptor (0020)
+> reads. Make the new `0004` appearance scenario green (see `docs/features/0004-replayability-and-naming.md`
+> §8); keep all gates green. Best paired with **B6** (0015 OOBE) since both touch the factory. Open a PR.
+
+### B10 — 0019 engine decision seam  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement the **engine** side of feature **0019**
+> (`docs/features/0019-agent-driven-play-loop.{md,feature}`): a Vault-free decision seam the agent
+> drives — `pendingDecision(state) -> { kind, options[] } | none` returning the engine's **legal**
+> option set (per 0011/0005), and `executeDecision(kind, choice)` that **validates** and applies a
+> binding choice (rejecting illegal/ineligible per 0005), exposed as player-channel tools
+> (`readsVault: false`). Binding state changes happen **only** through this path — never parsed
+> from prose; the engine decides outcomes (0006/0011/0014), the agent only voices. Much of
+> `pendingDecision`/advance likely already exists in the 0011 weekly loop — reuse it. Make the
+> engine-side `0019` scenarios green; gates green. Open a PR.
+
+### B11 — 0020 engine: status + portrait descriptor  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement the **engine** bits of feature **0020**
+> (`docs/features/0020-player-experience.{md,feature}`): a Vault-free **`gameStatus()`** projection
+> for the status panel — `{ week, phase, hoh, nominees[], veto: { holder, used } }`, public
+> ceremony-level facts only (no hidden votes/targeting), as a player-channel tool
+> (`readsVault: false`); and **`portraitDescriptorFor(houseguest)`** — a Vault-free descriptor
+> built from `character.md`'s **public appearance facets** (the B9 amendment), excluding aptitudes,
+> hidden elements, and `Soul`/Vault. Both **sentinel-clean** under a populated Vault (extend the
+> 0001 canary). Make the engine-side `0020` scenarios green; gates green. Depends on **B9**. Open a PR.
+
+### C3 — 0019 agent play loop  ·  OpenHands
+
+> In `kevinhirsch/bbai` `frontend/`, implement the **agent turn-loop** of feature **0019** in
+> orwell: the agent drives each turn by calling the engine's Vault-free tools — read visible state,
+> narrate the moment (inject `getMomentPrompt`, 0018), and when `pendingDecision` returns options,
+> present them and execute the player's binding choice via the validated `executeDecision` (B10).
+> **Hybrid input:** free-text social play flows in the chat (recorded as witnessed events, 0012)
+> and never makes a binding decision; only the validated path does. The agent **never** invents
+> outcomes — it voices what the engine returns. Consume only Vault-free tool data. This runs inside
+> the "Orwell IS the game" fold (the game is the main chat). Open a PR.
+
+### C4 — 0020 player experience (MVP-1)  ·  OpenHands
+
+> In `kevinhirsch/bbai` `frontend/`, build **player experience MVP-1** (feature 0020) in orwell: a
+> light always-visible **status panel** fed by `gameStatus` (week/phase, HOH & nominees, veto
+> status — public only); **inline quick-buttons** for binding decisions rendered from the engine's
+> **legal** option set (`pendingDecision`) and executed via the validated path (never typed prose);
+> and **photo-style portraits** per houseguest, rendered by orwell's existing image-gen pipeline
+> from the engine's **`portraitDescriptorFor`** (B11) — public facets only. Everything shown is
+> Vault-free; **"your own standing" stays in narration, not the HUD**. MVP-2 (rich game UI) is
+> later. Depends on **B11** + **C3**. Open a PR.
+
+---
+
 ## Still on the feature-maker (me)
 
-All currently-planned specs are drafted (0001–0017). Nothing is blocking the implementer queue.
-Future spec work, if it comes up: any **reserve-twist** specifics (stay Vault-held, 0005); a
-dedicated **temperature/relationship constants** tuning note once the implementers want concrete
-numbers (the *shape* is already fixed in 0006 / 0017); and whatever new product calls surface.
+All planned specs through **0020** are drafted (0015–0020 added this session; **0004 amended** —
+see the amendments table in `docs/features/README.md`). Nothing is blocking the implementer queue.
+Future spec work, if it comes up: **MVP-2** (the rich game UI — house view, houseguest cards,
+browsable journal, competition visuals) and a **game-session ↔ save lifecycle** spec; any
+**reserve-twist** specifics (stay Vault-held, 0005); and a dedicated **temperature/relationship
+constants** tuning note once the implementers want concrete numbers (the *shape* is fixed in
+0006 / 0017).
