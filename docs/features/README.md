@@ -57,7 +57,8 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
 | 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Done |
 | 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Draft |
+| 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
-the M5 integration seam (the engine's outward tool API for the front-end / agent), and 0010 is
-the MVP-1 one-liner deploy/update.
+the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
+MVP-1 one-liner deploy/update, and 0011+ are the gameplay loop & player experience.
