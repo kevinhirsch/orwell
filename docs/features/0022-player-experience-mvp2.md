@@ -1,6 +1,15 @@
 # 0022 — Player experience MVP-2 (the rich game UI)
 
-> **Status:** Draft. The **rich game UI** — the follow-on to [0020](./0020-player-experience.md)
+> **Status: DEFERRED** — parked while MVP-1 (0020) is refined.
+>
+> ⚠️ **Rework before un-parking: the houseguest-card "player read" (§4, §8) is wrong.** The
+> player's **own** feelings/reads are **human-driven** (decision 0002 — "the player's own reads
+> stay human-driven"); the game must **not** assert "you trust them." Instead a card should show
+> **facts the player knows** + **observable houseguest behavior toward them**, and let the player
+> form their *own* read. Drafted option A was the closest of the three but still not right.
+> Revisit §4/§8 with this correction when MVP-2 resumes.
+>
+> **Status (original):** Draft. The **rich game UI** — the follow-on to [0020](./0020-player-experience.md)
 > MVP-1 (chat + light status panel). Adds a **house view**, **houseguest cards**, a **browsable
 > journal**, and **competition visuals**. Every surface holds the same hard line: it shows only
 > what the player **legitimately knows** — never the Vault.
