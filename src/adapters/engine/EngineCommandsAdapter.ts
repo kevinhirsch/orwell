@@ -3,16 +3,26 @@ import type {
 } from "../../ports/EngineCommands";
 import type { EventStore } from "../../ports/EventStore";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
+import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { EntityId } from "../../domain/ids";
 import { PLAYER } from "../../domain/ids";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
+import type { RelationshipModel, InteractionType } from "../../engine/relationships";
+
+const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
+  "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
+]);
 
 /**
  * Engine-side implementation of the Vault-free command port. It may touch the
  * core to decide (e.g. weigh stats inside `resolveCompetition`) but returns only
  * Vault-free results. This lives on the ENGINE side; the MCP server depends on
  * the `EngineCommands` interface, not on this class.
+ *
+ * With a relationship model wired in (0023), `recordInteraction` is no longer a
+ * no-op log: a happening with a proposed `kind` folds its HIDDEN impact into the
+ * layer (how the others feel about the initiator) — invisible to the player.
  */
 export class EngineCommandsAdapter implements EngineCommands {
   private seq = 0;
@@ -20,6 +30,8 @@ export class EngineCommandsAdapter implements EngineCommands {
   constructor(
     private readonly events: EventStore,
     private readonly knowledge: KnowledgeService,
+    private readonly rel?: RelationshipModel,
+    private readonly rng: RandomnessSource = new SeededRandom(1),
   ) {}
 
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
@@ -29,6 +41,12 @@ export class EngineCommandsAdapter implements EngineCommands {
       initiator: req.initiator, witnessSet: req.witnessSet,
       hidden: !req.witnessSet.includes(PLAYER), content: req.content,
     });
+    // Consequence (0023): the initiator's action moves how the OTHERS feel about them — a real,
+    // recorded, HIDDEN shift (the engine owns the magnitude; the player never sees the numbers).
+    if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
+      const others = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
+      for (const o of others) this.rel.applyDirected(o, req.initiator, req.kind as InteractionType, this.rng);
+    }
     return { eventId };
   }
 

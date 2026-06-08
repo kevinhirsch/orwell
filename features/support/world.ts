@@ -153,6 +153,14 @@ export class BbWorld extends World {
   portraitHg?: Houseguest;
   portraitSeed?: number;
 
+  // Consequence & memory (0023) scratch state.
+  consequence?: import("../../src/engine/consequence").ConsequenceEngine;
+  reloaded?: import("../../src/engine/consequence").ConsequenceEngine;
+  relBefore?: import("../../src/engine/relationships").EdgeSignals;
+  threatBefore?: number;
+  snap?: import("../../src/engine/consequence").MemorySnapshot;
+  noms?: Eid[];
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
