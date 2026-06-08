@@ -12,8 +12,9 @@
 const OUTWARD =
   "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$|^src/adapters/mcp/";
 const VAULT =
-  "^src/ports/(VaultStore|VectorIndex)\\.ts$" +
-  "|^src/adapters/inmemory/InMemoryVaultStore\\.ts$" +
+  "^src/ports/(VaultStore|VectorIndex|SoulProvider)\\.ts$" +
+  "|^src/adapters/inmemory/(InMemoryVaultStore|InMemoryVectorIndex)\\.ts$" +
+  "|^src/adapters/engine/SoulStore\\.ts$" +
   "|^src/composition/engineRoot\\.ts$";
 
 module.exports = {
