@@ -397,13 +397,38 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > these constants) — do it just before/with B13. Read `docs/decisions/0002` + `docs/features/0017`.
 > Open a PR.
 
+### B17 — 0027 NarrativePort LLM adapter  ·  Claude Code (+ OpenHands)
+
+> In `kevinhirsch/orwell`, implement feature **0027**
+> (`docs/features/0027-narrative-port-llm-adapter.{md,feature}`): the real async LLM behind
+> `NarrativePort`, replacing `EchoNarrativePort`. Async `narrate` + `narrateStream` (token stream);
+> **provider-agnostic** (Ollama / Anthropic / OpenAI-compatible) with model/endpoint/key from
+> **env** (no secrets in code); **timeout + bounded retries + safe fallback**. **Vault-free by
+> construction:** it gets **only** the `NarrationContext` (assembled Vault-free, 0001) — extend the
+> context-assembly sentinel test. **Outcomes stay the engine's:** a narration failure or
+> hallucination **changes no game state** (the port returns text, never state). In the fold, the
+> **front-end `llm_core`** is the deployed realization over MCP (0009) — same two guarantees. A
+> **deterministic fake** backs tests. Make `0027` green; gates green. Open a PR.
+
+### B18 — 0028 temperature & emotional-modifier constants  ·  Claude Code
+
+> In `kevinhirsch/orwell`, implement feature **0028**
+> (`docs/features/0028-temperature-and-emotional-constants.{md,feature}`): firm 0006's shape into a
+> **single tunable constants module** (sibling to `richnessConfig.ts` and the 0026 relationship
+> constants) — the temperature **bound/distribution**, the **per-variable weights**, the **emotional
+> modifier** (baseline / volatility scale / mean-reversion rate), and the **hidden-element surfacing
+> rate**. **Defaults match 0006's calibration** (favorite ~72%, real upsets, player unprotected,
+> bounded, never overrides hard rules). The emotional modifier **mean-reverts**; hidden elements
+> surface **rarely**. **No number hard-coded outside the module** (a future God-Mode knob). Keep the
+> 0006 calibration property green; make `0028` green; gates green. Read `docs/features/0006` +
+> `docs/decisions/0001`. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0024** are drafted (**0001–0020 built**; 0021/0023/0024 drafted, 0022
-deferred; **0004 amended**). Nothing is blocking the implementer queue. Candidate future spec work:
-**reserve twists** (Vault-held, even the admin doesn't know — 0005); the **relationship-math
-firming** (promote decision 0002's signal set / update-rule / betrayal-shock / decay numbers into a
-spec, to ground 0023's `apply`); a **temperature/emotional-modifier constants** tuning note; and the
-async **LLM `NarrativePort`** adapter spec. MVP-2 (0022) un-parks after MVP-1 is solid.
+All planned specs through **0028** are drafted (**0001–0020 built**; 0021/0023/0024/0025/0026/0027/
+0028 drafted, 0022 deferred; **0004 amended**). Nothing is blocking the implementer queue. The
+**top implementer priority is B13 (0023 — the live consequence loop)**, grounded by B14 (0024 soul
+recall) + B16 (0026 relationship math). Candidate future spec work: MVP-2 (0022) un-parks after
+MVP-1 is solid; a dedicated **jury-vote choreography** pass; and whatever new product calls surface.
