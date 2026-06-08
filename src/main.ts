@@ -3,7 +3,7 @@ import { startHttpMcp } from "./adapters/mcp/HttpMcpServer";
 
 /**
  * The `bbai-engine` entrypoint (feature 0010's `npm run build` / `npm start`
- * target). Brings up the permissioned MCP server over HTTP; the odysseus
+ * target). Brings up the permissioned MCP server over HTTP; the orwell
  * front-end connects to it. Port comes from the environment (no secrets here).
  */
 // BBAI_ENGINE_PORT is the engine's own listen port (set by deploy; loopback to the frontend).

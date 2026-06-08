@@ -5,7 +5,7 @@
 
 Feature: One-liner deployment & update — easy to deploy, easy to update
 
-  Two host-side one-liners stand up and update bbai (the TS engine + the odysseus front-end,
+  Two host-side one-liners stand up and update bbai (the TS engine + the orwell front-end,
   wired over local MCP) inside a container, without losing the save.
 
   Scenario: A fresh one-liner install brings the app up

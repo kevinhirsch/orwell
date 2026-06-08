@@ -32,8 +32,8 @@ export const THEMES = {
 };
 
 const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const LS_KEY = 'orwell-theme';
+const CUSTOM_THEMES_KEY = 'orwell-custom-themes';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
@@ -183,7 +183,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Orwell Logo',    group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
   { key: 'inputBorder',        css: '--input-border',      label: 'Input Border',     group: 'Chat Input / Prompt Area' },
@@ -290,7 +290,7 @@ export function applyColors(colors) {
 
 // Per-route SVG shape registry — kept in sync with the inline favicon
 // script in index.html so a theme change keeps the route icon, not the
-// default boat. Returns the inner SVG markup colored with `fg`.
+// default eye. Returns the inner SVG markup colored with `fg`.
 const _ROUTE_FAVICON_SHAPES = {
   '/calendar':
     "<rect x='4' y='6' width='24' height='22' rx='2' fill='none' stroke='__C__' stroke-width='2.5'/>" +
@@ -333,7 +333,7 @@ function _updateFavicon(fg) {
   if (routeShape) {
     svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
   } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z' fill='none' stroke='${fg}' stroke-width='2.5' stroke-linejoin='round'/><circle cx='16' cy='16' r='4.5' fill='${fg}'/></svg>`;
   }
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
@@ -1258,7 +1258,7 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'odysseus_' + (obj.name || 'theme') + '.json';
+      a.download = 'orwell_' + (obj.name || 'theme') + '.json';
       a.click();
       URL.revokeObjectURL(url);
       newExp.innerHTML = '&#x2713; Downloaded!';

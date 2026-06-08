@@ -67,7 +67,7 @@ CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp BBAI_PORT=8080 \
 | `bbai-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. |
 | `bbai-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). |
 | `systemd/bbai-engine.service` | `npm start` (the MCP server). |
-| `systemd/bbai-frontend.service` | `uvicorn app:app` (odysseus), reads `BBAI_ENGINE_MCP_URL`. |
+| `systemd/bbai-frontend.service` | `uvicorn app:app` (orwell), reads `BBAI_ENGINE_MCP_URL`. |
 
 ## Validation & remaining wiring
 
@@ -76,7 +76,7 @@ CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp BBAI_PORT=8080 \
   and is **not** part of the BDD/unit suite.
 - Two pieces complete the end-to-end game and are owned outside these scripts:
   1. the engine's **HTTP MCP transport** + `build`/`start` entrypoint (the implementer);
-  2. the **odysseus → engine MCP** client wiring (`frontend/INTEGRATION.md`).
+  2. the **orwell → engine MCP** client wiring (`frontend/INTEGRATION.md`).
   The scripts already provision and run both services and pass the engine endpoint via
   `BBAI_ENGINE_MCP_URL`; once 1 & 2 land, the one-liner yields a playable game.
 

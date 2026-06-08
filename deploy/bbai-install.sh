@@ -2,7 +2,7 @@
 #
 # bbai — in-container install. Runs inside the LXC created by deploy/bbai.sh.
 # Installs deps, clones, builds the engine, sets up the front-end, writes config, and registers
-# systemd services for the engine (MCP server) and the odysseus front-end.
+# systemd services for the engine (MCP server) and the orwell front-end.
 set -euo pipefail
 
 REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
@@ -31,7 +31,7 @@ else
   git clone --depth 1 -b "$BRANCH" "$REPO" "$APP_DIR"
 fi
 mkdir -p "$DATA_DIR"
-mkdir -p "${APP_DIR}/frontend/data"   # odysseus SQLite DB lives here (sqlite:///./data/app.db)
+mkdir -p "${APP_DIR}/frontend/data"   # orwell SQLite DB lives here (sqlite:///./data/app.db)
 
 echo "==> build engine"
 cd "$APP_DIR"
@@ -45,7 +45,7 @@ if ! node -e "const s=require('${APP_DIR}/package.json').scripts||{};process.exi
 fi
 npm run build
 
-echo "==> front-end (odysseus) deps"
+echo "==> front-end (orwell) deps"
 cd "${APP_DIR}/frontend"
 python3 -m venv .venv
 ./.venv/bin/pip install -q --upgrade pip
