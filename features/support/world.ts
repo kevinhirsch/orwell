@@ -171,6 +171,12 @@ export class BbWorld extends World {
   archViolations?: unknown[];
   hiddenMemory?: string;
 
+  // Reserve twists (0025) scratch state.
+  reserve?: import("../../src/engine/reserveTwists").ReserveTwist[];
+  fires?: import("../../src/engine/reserveTwists").TwistEvent[];
+  visibleBefore?: number;
+  twistEventId?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
