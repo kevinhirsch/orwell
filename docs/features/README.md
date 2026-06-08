@@ -75,6 +75,8 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Done |
 | 0027 | [NarrativePort LLM adapter (the real narrator)](./0027-narrative-port-llm-adapter.md) | Integration | Done |
 | 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | Foundational | Draft |
+| 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | App / accounts | Draft |
+| 0030 | [Durable game persistence (survive engine restart)](./0030-durable-game-persistence-survive-restart.md) | **MVP-1 / bugfix** | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
@@ -96,6 +98,7 @@ every existing guarantee — but the implementer must fold them into the built c
 | Spec | Amendment | Why |
 |---|---|---|
 | **0004** (Done) | `CharacterFactory` also generates **public appearance/identity** fields (appearance, age, presentation/style) into the static `Character` (`character.md`); seed-stable, no aptitude/hidden data. See [0004 §8](./0004-replayability-and-naming.md#8-amendment--public-appearance-fields-for-0020-portraits). | Feeds the **Vault-free portrait descriptor** so houseguests look like who they are ([0020](./0020-player-experience.md) §5). |
+| **0023** (Done) | The **persist → recall** half is **not durable** in the live game — `GameSessionAdapter`/`GameSessionRegistry` keep state in memory and the only `SaveStore` is in-memory, so an engine restart wipes every game. [0030](./0030-durable-game-persistence-survive-restart.md) wires a **disk-backed** `SaveStore` + load-on-resume/save-on-mutation into the live registry. | A started game must survive a restart; otherwise the onboarding overlay re-fires every load (user-reported). |
 
 New cross-cutting expectations introduced by drafts (not yet built, listed so the implementer
 plans for them): **0020** adds `gameStatus` (a Vault-free public-state projection for the status

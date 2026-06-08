@@ -22,37 +22,42 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 
 ## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
 
-**State:** **0001–0024 built** — including the **consequence loop (0023), soul recall (0024), and
-per-user sandboxes (0021)**. The **MVP-1 engine backbone is DONE**: actions change hidden opinions,
-persist, recall; games are per-user. Remaining: engine **B15–B18** (0025 twists, 0026 relationship
-math, 0027 NarrativePort, 0028 temperature) and front-end **C4–C6**. Two lanes — **Claude Code =
-engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — concurrent, no contention.
+**True state as of 2026-06-08:**
+- **Engine: 0001–0025 + 0027 are Done.** The consequence loop (0023), soul recall (0024),
+  per-user sandboxes (0021), reserve twists (0025), and the real streaming narrator (0027 — `LlmNarrativePort`)
+  are all green. **Three items remain:** 0030 (durable persistence — bugfix), 0026 (relationship math
+  constants), 0028 (temperature constants).
+- **Front-end: basic game wiring is live** (`orwellOnboarding.js`, `orwellRoutes.py`, `orwellEngine.py`,
+  `X-Orwell-User` assertion already wired). **Three items remain:** C6 (lever-complete agent tools),
+  C4 (0020 player UX — status panel, inline decisions, portraits), C7 (0029 app admin — promote/demote,
+  password reset, user manager UI, LLM-settings gate).
+- **C5 is complete** — `_current_user(request)` → `X-Orwell-User` is already wired end-to-end in
+  `frontend/routes/orwell_routes.py` + `frontend/src/orwell_engine.py`.
+- **0004 appearance amendment is complete** — folded into `CharacterFactory` in #70 alongside 0020.
 
-With the engine core built, the make-or-break now is **what the player SEES and how it's VOICED.**
+Two lanes — **Claude Code = engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — fully concurrent.
 
 | Wave | Claude Code (engine) | OpenHands (front-end) |
 |---|---|---|
-| **1 — now** | **B17** (0027 NarrativePort) — replace the echo stub with the real streaming narrator (engine contract + adapter; the front-end `llm_core` is the deployed realization) | **C6** (lever ready-part) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — **all engine tools are built**). The visible MVP-1. |
-| **2** | **B16** (0026 relationship math) — firm the built `apply()`'s constants for **per-game feel** + tunability (refines 0023, not blocking) | **C5** (0021: assert the authenticated user — finish the per-user front-end over the built engine) |
-| **3 — polish** | **B18** (0028 temperature constants) · **B15** (0025 twists) | MVP-2 (0022) un-parks once MVP-1 feels solid |
-
-**The engine backbone (0021/0023/0024) is done.** So the priorities flip to the **player-facing
-experience (C4)** and the **real narrator (B17)** — the player needs to *see* the living game and
-hear it *in character*. B16/B18/B15 refine the feel on top; nothing is on a blocking critical path
-anymore.
+| **1 — now** | **B19** (0030 durable persistence) — **top priority / regression fix**: disk-backed `FileSaveStore` + `snapshot()/restore()` on `GameSessionAdapter` + load-on-resume/save-on-mutation in `GameSessionRegistry`. Central test: new registry over same store → `getGameState()` returns `started:true` → welcome overlay stops re-firing. | **C6** (lever-complete agent tools) — expose the full engine lever set as agent tool schemas (`agent_tools.py`/`tool_schemas.py`) and verify `getMomentPrompt` is injected on every game turn. Add a drift test that fails if any agent-lever tool is missing from the prompt manifest. |
+| **2** | **B16** (0026 relationship math) — firm the live `apply()` update rule into one tunable constants module; sticky/realistic defaults; measurable per-game feel spread across seeds. Independent of 0030; can run immediately after. | **C4** (0020 player UX) — always-visible status panel (week, phase, HOH, nominees, veto) from `gameStatus`; inline binding-decision buttons from `pendingDecision`/`executeDecision`; per-houseguest portraits from `portraitDescriptorFor` (0004 fields already in `CharacterFactory`). All engine tools are built. |
+| **3 — polish** | **B18** (0028 temperature constants) — firm the 0006 calibration into one tunable constants module. Independent; slot in any free engine slot. | **C7** (0029 app admin) — close the AuthManager gaps: `set_admin` + last-admin guard + `/users/{u}/role`; `admin_reset_password` + session revoke + `/users/{u}/password`; admin-only Users manager in Settings; gate global LLM settings behind `manage_llm_settings`. |
+| **after** | Engine done — maintenance + future specs. | MVP-2 (0022) un-parks once MVP-1 is solid. |
 
 **Coordination rules**
-- **Stay in lanes** (engine vs front-end); don't cross-edit the other's files.
-- **Front-end is fully unblocked:** **C4** needs the 0020 tools (built), **C5** the 0021 sandbox
-  (built), **C6** starts now — OpenHands can run **C6 → C4 → C5** straight through.
-- **Engine has no hard ordering left:** B15–B18 are independent; do **B17** first (biggest
-  experience lift), then B16, then B18/B15.
-- **Every item:** keep `npm test` + `npm run test:arch` green, the Vault Wall (dependency-cruiser)
-  green, add the new `.feature` to `cucumber.cjs` when it goes green, and open a PR.
-- **First moves:** Claude Code → **B17**; OpenHands → **C6 → C4**.
+- **Stay in lanes** (engine `src/` vs front-end `frontend/`); don't cross-edit the other's files.
+- **No hard dependencies between waves:** both lanes are fully unblocked — each agent starts Wave 1
+  immediately and moves to Wave 2 as soon as their Wave 1 item is green. There is no cross-lane dep.
+- **Engine ordering:** B19 → B16 → B18. B19 first (regression); B16 and B18 are independent of each
+  other and can swap, but B16 first (more impactful — it changes live gameplay feel).
+- **Front-end ordering:** C6 → C4 → C7. C6 first (makes the agent properly lever-complete, which
+  makes C4's UX components actually drive the engine correctly); C4 second (the visible player
+  experience, biggest lift); C7 third (admin polish, no player-facing urgency).
+- **Every item:** keep `npm test` + `npm run test:arch` green; Vault Wall (dependency-cruiser) green;
+  add `.feature` to `cucumber.cjs` when it goes green; open a PR per item.
+- **First moves NOW:** Claude Code → **B19**; OpenHands → **C6**.
 
-*(The full per-item prompts are below; the table above is the current sequencing — it supersedes the
-historical "Order & assignment" list, which predates 0011–0024 being built.)*
+*(The full per-item prompts are below.)*
 
 ## Order & assignment
 
@@ -402,6 +407,27 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > The soul **deepens monotonically** (0007); `Character` stays byte-stable. Make `0024` green; gates
 > green. **Pairs with B13** (0023 records to the soul + calls recall) — do them together. Open a PR.
 
+### B19 — 0030 durable game persistence (survive restart)  ·  Claude Code  ·  **TOP PRIORITY (bugfix)**
+
+> In `kevinhirsch/orwell`, implement feature **0030**
+> (`docs/features/0030-durable-game-persistence-survive-restart.{md,feature}`). **Why it's urgent:**
+> the live game holds all state in memory — `GameSessionAdapter` (`house/week/phase/ceremony` fields)
+> and `GameSessionRegistry` (a plain `Map`) — and the only `SaveStore` is in-memory, so **every
+> engine restart wipes all games**, `GET /api/orwell/state` returns `started:false`, and the
+> front-end "Welcome to the house" overlay **re-fires on every load** (user-reported). Fix it by
+> wiring **durable** persistence into the LIVE path, reusing the built **0007** `GameState`/`SaveStore`
+> contract: (1) add a **disk-backed `FileSaveStore`** (engine-only adapter, per-user JSON under
+> `ORWELL_DATA_DIR`) behind the existing `SaveStore` port; (2) add `snapshot(): GameState` /
+> `restore(state)` to `GameSessionAdapter` (lossless live-house round-trip — player, NPCs, souls,
+> ceremony, week/phase) using the same export/import the off-screen sim already uses; (3) give
+> `GameSessionRegistry` a `SaveStore` so `sandboxFor(user)` **loads** a user's latest save into the
+> sandbox and every mutating tool (`createCharacter`, `recordInteraction`, `runCompetition`, ceremony
+> updates, consequence folds) **saves** afterward. Preserve **0007** co-versioning + non-degradation,
+> **0021** per-user isolation **across restart**, and the Vault Wall on the reloaded state
+> (dependency-cruiser stays green; the file store is engine-only). Make `0030` green (central test:
+> a **new registry over the same store** recalls a `started:true` game → onboarding stops firing);
+> gates green. Read `docs/features/0007`, `0021`, `0023` first. Open a PR.
+
 ### B15 — 0025 reserve twists (Vault-sealed)  ·  Claude Code
 
 > In `kevinhirsch/orwell`, implement feature **0025**
@@ -457,12 +483,32 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > 0006 calibration property green; make `0028` green; gates green. Read `docs/features/0006` +
 > `docs/decisions/0001`. Open a PR.
 
+### C7 — 0029 app admin role & user management  ·  OpenHands (+ Claude Code for any engine bit)
+
+> In `kevinhirsch/orwell` `frontend/`, implement feature **0029**
+> (`docs/features/0029-app-admin-and-user-management.{md,feature}`). Most of it exists in
+> `core/auth.py` (`AuthManager`: `setup`→admin, `create_user`/`delete_user`/`rename_user`,
+> `is_admin`, `list_users`, `privileges`, `change_password`) and `routes/auth_routes.py`
+> (`/api/auth/users`, `/change-password`) — **close the gaps**:
+> 1. **Promote/demote:** add `AuthManager.set_admin(username, is_admin, requesting_user)` (admin-only;
+>    **never demote/delete the last admin**) + `POST /api/auth/users/{u}/role`.
+> 2. **Admin password reset for others:** `admin_reset_password(username, new_password, admin)` (no
+>    current pwd; **revoke that user's sessions**) + `POST /api/auth/users/{u}/password`.
+> 3. **Admin-only Users manager in Settings:** surface list/create/promote/demote/reset/rename/delete;
+>    show the section **only** when the caller has `manage_users`; **re-check the entitlement
+>    server-side** on every endpoint (don't trust the hidden UI).
+> 4. **Gate global LLM settings** behind `manage_llm_settings` — a regular user can't change the
+>    global model/endpoint config (their own non-privileged prefs are fine).
+> Gate on the **named entitlement**, not a bare `is_admin`, so finer grants are a later config
+> change. This is the **app/account tier** — distinct from the game's God Mode (0016) and the
+> per-user game sandbox (0021). Make `0029` green; `py_compile` clean; smoke on two accounts (an
+> admin + a regular user). Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0028** are drafted (**0001–0020 built**; 0021/0023/0024/0025/0026/0027/
-0028 drafted, 0022 deferred; **0004 amended**). Nothing is blocking the implementer queue. The
-**top implementer priority is B13 (0023 — the live consequence loop)**, grounded by B14 (0024 soul
-recall) + B16 (0026 relationship math). Candidate future spec work: MVP-2 (0022) un-parks after
-MVP-1 is solid; a dedicated **jury-vote choreography** pass; and whatever new product calls surface.
+All planned specs through **0030** are drafted (**0001–0025 + 0027 built**; 0026/0028/0029/0030
+drafted; 0022 deferred; 0004 amended and already built). **Nothing is blocking the implementer queue
+— both agents can start immediately.** Candidate future spec work: MVP-2 (0022) un-parks after MVP-1
+is solid; jury-vote choreography; any new product calls.
