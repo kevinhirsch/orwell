@@ -457,6 +457,27 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > 0006 calibration property green; make `0028` green; gates green. Read `docs/features/0006` +
 > `docs/decisions/0001`. Open a PR.
 
+### C7 — 0029 app admin role & user management  ·  OpenHands (+ Claude Code for any engine bit)
+
+> In `kevinhirsch/orwell` `frontend/`, implement feature **0029**
+> (`docs/features/0029-app-admin-and-user-management.{md,feature}`). Most of it exists in
+> `core/auth.py` (`AuthManager`: `setup`→admin, `create_user`/`delete_user`/`rename_user`,
+> `is_admin`, `list_users`, `privileges`, `change_password`) and `routes/auth_routes.py`
+> (`/api/auth/users`, `/change-password`) — **close the gaps**:
+> 1. **Promote/demote:** add `AuthManager.set_admin(username, is_admin, requesting_user)` (admin-only;
+>    **never demote/delete the last admin**) + `POST /api/auth/users/{u}/role`.
+> 2. **Admin password reset for others:** `admin_reset_password(username, new_password, admin)` (no
+>    current pwd; **revoke that user's sessions**) + `POST /api/auth/users/{u}/password`.
+> 3. **Admin-only Users manager in Settings:** surface list/create/promote/demote/reset/rename/delete;
+>    show the section **only** when the caller has `manage_users`; **re-check the entitlement
+>    server-side** on every endpoint (don't trust the hidden UI).
+> 4. **Gate global LLM settings** behind `manage_llm_settings` — a regular user can't change the
+>    global model/endpoint config (their own non-privileged prefs are fine).
+> Gate on the **named entitlement**, not a bare `is_admin`, so finer grants are a later config
+> change. This is the **app/account tier** — distinct from the game's God Mode (0016) and the
+> per-user game sandbox (0021). Make `0029` green; `py_compile` clean; smoke on two accounts (an
+> admin + a regular user). Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
