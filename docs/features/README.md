@@ -72,6 +72,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Draft |
 | 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | Foundational | Draft |
 | 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | Gameplay | Draft |
+| 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

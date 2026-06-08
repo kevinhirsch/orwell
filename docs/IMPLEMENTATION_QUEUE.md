@@ -381,6 +381,22 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > eligibility invariants and the 16 → jury-9 → final-2 arc must hold **under** any twist. Make
 > `0025` green; gates green. Read `docs/features/0001`, `0005`, `0016` first. Open a PR.
 
+### B16 — 0026 relationship math (firmed update rule & constants)  ·  Claude Code  ·  **grounds B13**
+
+> In `kevinhirsch/orwell`, implement feature **0026**
+> (`docs/features/0026-relationship-math.{md,feature}`): firm 0017's shape into a concrete update
+> rule + a **single tunable constants module** (sibling to the temperature/richness configs). The
+> `apply` rule moves the signals by the per-type `IMPACT` (extend the existing
+> `src/engine/relationships.ts` table) × **disposition factor** (from `Character`) × bounded
+> **temperature**; **betrayal-shock** is a large single step that **decays slowly** (default
+> **sticky/realistic** — the grudge lingers); decay/mean-reversion is **disposition-scaled**;
+> confidence rises with data. **The feel is per-game, not global:** a paranoid cast trends sticky, a
+> social cast forgiving, temperature varies it — with a **measurable spread across seeds** and
+> reproducible by seed. **No number hard-coded outside the constants module** (retunable later, a
+> future God-Mode knob). Make `0026` green; gates green. This **grounds B13** (0023's `apply()` uses
+> these constants) — do it just before/with B13. Read `docs/decisions/0002` + `docs/features/0017`.
+> Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
