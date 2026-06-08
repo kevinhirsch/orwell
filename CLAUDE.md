@@ -250,10 +250,15 @@ Built BDD/TDD-first, in priority order:
   carries a meaningful event; a week = one HOH reign, HOH comp → eviction; at most one optional
   social day per week (often none), and even it carries a significant house event).
 
-**All eight priority invariants (0001–0008) are implemented and green.** `npm test` runs clean:
-typecheck + unit/property/architecture + all BDD scenarios. Remaining drafted work: **0009 —
-MCP tool boundary** (the M5 integration seam) and the deferred adapters (SQLite/Postgres,
-sqlite-vec/pgvector, the real LLM `NarrativePort`).
+- **0009 — MCP tool boundary (M5):** ✅ green (a permissioned `McpServer` mounts only the
+  channel allowlist; read tools come from the visible projection, action tools cross a Vault-free
+  `EngineCommands` port; the adapter has no Vault/vector/engine-root dependency — dependency-cruiser
+  rule extended to cover it; every tool output proven sentinel-free; channels isolated).
+
+**All eight priority invariants (0001–0008) plus the M5 MCP seam (0009) are implemented and
+green.** `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios.
+Remaining drafted work: **0010 — one-liner deploy** and the deferred real adapters
+(SQLite/Postgres, sqlite-vec/pgvector, the async LLM `NarrativePort`).
 
 ## Open decisions (remaining)
 

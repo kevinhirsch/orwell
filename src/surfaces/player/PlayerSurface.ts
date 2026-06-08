@@ -28,6 +28,11 @@ export class PlayerSurface {
     private readonly summary: SummaryService,
   ) {}
 
+  /** The player's visible projection (witnessed events + their knowledge). */
+  getVisibleState() {
+    return this.visible.getVisibleStateFor(this.player);
+  }
+
   /** The exact context handed to the narrative layer — provably Vault-free. */
   assembleNarrationContext(mode: NarrationMode = "scene"): NarrationContext {
     const vs = this.visible.getVisibleStateFor(this.player);
