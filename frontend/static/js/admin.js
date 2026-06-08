@@ -54,6 +54,8 @@ async function loadUsers() {
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          <button class="admin-btn-sm" data-adm-role-user="${esc(u.username)}" data-adm-is-admin="${u.is_admin ? '1' : '0'}" style="font-size:11px;">${u.is_admin ? 'Revoke admin' : 'Make admin'}</button>
+          <button class="admin-btn-sm" data-adm-resetpw-user="${esc(u.username)}" style="font-size:11px;">Reset password</button>
           <button class="admin-btn-sm" data-adm-rename-user="${esc(u.username)}" style="font-size:11px;">Rename</button>
           ${u.is_admin ? '' : `<button class="admin-btn-delete" data-adm-del-user="${esc(u.username)}" style="font-size:11px;">Remove</button>`}
           ${u.is_admin ? '' : '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>'}
@@ -111,7 +113,7 @@ async function loadUsers() {
         // Toggle panel visibility + rotate chevron + load models
         let _modelsLoaded = false;
         header.addEventListener('click', (e) => {
-          if (e.target.closest('.admin-btn-delete, [data-adm-rename-user]')) return;
+          if (e.target.closest('.admin-btn-delete, [data-adm-rename-user], [data-adm-role-user], [data-adm-resetpw-user]')) return;
           privPanel.classList.toggle('hidden');
           const chevron = header.querySelector('.admin-user-chevron');
           if (chevron) {
@@ -194,6 +196,54 @@ async function loadUsers() {
           const res = await fetch('/api/auth/users', { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
           if (res.ok) loadUsers();
           else uiModule.showError('Failed to delete user');
+        });
+      }
+
+      // Promote / demote (0029). The last-admin guard is enforced server-side.
+      const roleBtn = row.querySelector('[data-adm-role-user]');
+      if (roleBtn) {
+        roleBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const username = roleBtn.dataset.admRoleUser;
+          const makeAdmin = roleBtn.dataset.admIsAdmin !== '1';
+          const verb = makeAdmin ? 'Make' : 'Revoke';
+          if (!await uiModule.styledConfirm(`${verb} admin for "${username}"?`, { confirmText: `${verb} admin`, danger: !makeAdmin })) return;
+          try {
+            const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/role`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_admin: makeAdmin }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { uiModule.showError(data.detail || 'Failed to change role'); return; }
+            loadUsers();
+          } catch (err) { uiModule.showError('Failed to change role'); }
+        });
+      }
+
+      // Admin password reset (0029): set a new password without the current one;
+      // the server revokes that user's sessions on reset.
+      const resetBtn = row.querySelector('[data-adm-resetpw-user]');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const username = resetBtn.dataset.admResetpwUser;
+          const entered = await uiModule.styledPrompt(`Set a new password for "${username}"`, {
+            title: 'Reset password', placeholder: 'New password (min 8 characters)', confirmText: 'Reset',
+          });
+          const newPassword = (entered || '').trim();
+          if (!newPassword) return;
+          if (newPassword.length < 8) { uiModule.showError('Password must be at least 8 characters'); return; }
+          try {
+            const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/password`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ new_password: newPassword }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { uiModule.showError(data.detail || 'Failed to reset password'); return; }
+            uiModule.showToast('Password reset');
+          } catch (err) { uiModule.showError('Failed to reset password'); }
         });
       }
 

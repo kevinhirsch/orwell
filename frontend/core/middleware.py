@@ -54,6 +54,33 @@ def require_admin(request: Request):
         raise HTTPException(403, "Admin only")
 
 
+def require_entitlement(request: Request, entitlement: str):
+    """Raise 403 unless the current user holds the named entitlement (feature 0029).
+
+    The server-side gate for app-admin powers (manage_users, manage_llm_settings):
+    UI hiding is never trusted. Honors the same loopback / AUTH_ENABLED bypasses as
+    `require_admin`. Today every entitlement is admin-carried, so this is a stricter,
+    intent-named superset of `require_admin` that finer grants can later relax.
+    """
+    try:
+        hdr = request.headers.get(INTERNAL_TOOL_HEADER)
+        if hdr and secrets.compare_digest(hdr, INTERNAL_TOOL_TOKEN):
+            return
+        if getattr(request.state, "current_user", None) == "internal-tool":
+            return
+    except Exception:
+        pass
+
+    if os.getenv("AUTH_ENABLED", "true").lower() == "false":
+        return
+    auth_mgr = getattr(request.app.state, "auth_manager", None)
+    if not auth_mgr or not auth_mgr.is_configured:
+        raise HTTPException(403, "Not permitted")
+    user = getattr(request.state, "current_user", None)
+    if not user or not auth_mgr.has_entitlement(user, entitlement):
+        raise HTTPException(403, "Not permitted")
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add standard security headers to all responses."""
 

@@ -75,7 +75,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Done |
 | 0027 | [NarrativePort LLM adapter (the real narrator)](./0027-narrative-port-llm-adapter.md) | Integration | Done |
 | 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | Foundational | Done |
-| 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | App / accounts | Draft |
+| 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | App / accounts | Done |
 | 0030 | [Durable game persistence (survive engine restart)](./0030-durable-game-persistence-survive-restart.md) | **MVP-1 / bugfix** | Done |
 | 0031 | [Game orchestrator & integrity watcher (per-sandbox)](./0031-game-orchestrator-and-integrity-watcher.md) | Foundational | Draft |
 
