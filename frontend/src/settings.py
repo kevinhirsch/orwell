@@ -286,12 +286,12 @@ def mount_optional(app, feature: str, router, **kwargs) -> bool:
     return False
 
 
-# ── Tier 2: stop shipping the dropped verticals' JS ──
-# The dropped verticals' front-end modules are not loaded under the game build — the page
-# never references them (≈5.4 MB of inherited workspace JS, incl. the image editor pulled
-# by document.js, drops to the game keep-set). Reversible: with the game build off the
-# inherited modules ship again; the files themselves are removed later (Tier 3). Voice JS
-# follows the voice flag (off by default), like the voice routes.
+# ── Stop shipping the dropped verticals' JS ──
+# Tier 3 physically deleted these modules and removed their <script> tags + ES imports from
+# the page, so the game build no longer loads any inherited workspace JS. This strip stays as
+# a defense-in-depth guard: should a dropped-vertical <script> tag ever be reintroduced into
+# index.html, it is filtered out under the game build rather than 404-ing a deleted file.
+# Voice JS (kept, opt-in) follows the voice flag (off by default), like the voice routes.
 GAME_DROP_SCRIPTS = (
     "memory.js", "skills.js", "rag.js", "search.js", "document.js", "gallery.js",
     "cookbook.js", "cookbookSchedule.js", "compare/index.js",

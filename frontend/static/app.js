@@ -7,24 +7,15 @@ import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import fileHandlerModule from './js/fileHandler.js';
 import modelsModule from './js/models.js';
-import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
-import searchModule from './js/search.js';
 import chatModule from './js/chat.js';
-import compareModule from './js/compare/index.js';
-import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
-import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
-import galleryModule from './js/gallery.js';
-import tasksModule from './js/tasks.js';
-import calendarModule from './js/calendar.js';
-import notesModule from './js/notes.js';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
@@ -32,19 +23,16 @@ import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
-// IMPORTANT: import cookbook.js with NO ?v= query — the same plain specifier
-// every other importer (cookbook-hwfit.js / cookbook-diagnosis.js) uses. A query
-// mismatch makes the browser load cookbook.js twice as separate modules (two
-// _envState objects), which broke server selection. Keep all cookbook imports
-// unversioned so this can't recur.
-import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
-import * as researchPanelModule from './js/research/panel.js';
 import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+// Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
+const ragModule = null, searchModule = null, compareModule = null, documentModule = null;
+const memoryModule = null, galleryModule = null, tasksModule = null, calendarModule = null;
+const notesModule = null, cookbookModule = null, researchPanelModule = null;
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -830,7 +818,7 @@ function initializeEventListeners() {
   const toolResearchBtn = el('tool-research-btn');
   if (toolResearchBtn) {
     toolResearchBtn.addEventListener('click', () => {
-      researchPanelModule.toggle();
+      if (researchPanelModule) researchPanelModule.toggle();
     });
   }
 
@@ -1519,23 +1507,24 @@ function initializeEventListeners() {
   }
 
   const addMemBtn = el('add-memory-btn');
-  if (addMemBtn) {
+  if (addMemBtn && memoryModule) {
     addMemBtn.addEventListener('click', memoryModule.addNewMemory);
   }
-  
+
   const memorySearchInput = el('memory-search');
   if (memorySearchInput) {
     memorySearchInput.addEventListener('input', () => {
+      if (!memoryModule) return;
       memoryModule.renderMemoryList();
       memoryModule.updateMemoryCount();
     });
   }
-  
+
   const newMemoryInput = el('new-memory-input');
   if (newMemoryInput) {
     newMemoryInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        memoryModule.addNewMemory();
+        if (memoryModule) memoryModule.addNewMemory();
       }
     });
   }
@@ -2982,15 +2971,15 @@ function initializeEventListeners() {
   const addDirBtn = el('add-directory-btn');
   if (addDirBtn) {
     addDirBtn.addEventListener('click', () => {
-      ragModule.addRagDirectory(uiModule.showToast, uiModule.showError);
+      if (ragModule) ragModule.addRagDirectory(uiModule.showToast, uiModule.showError);
     });
   }
-  
+
   const directoryInput = el('rag-directory');
   if (directoryInput) {
     directoryInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        ragModule.addRagDirectory(uiModule.showToast, uiModule.showError);
+        if (ragModule) ragModule.addRagDirectory(uiModule.showToast, uiModule.showError);
       }
     });
 
@@ -3449,17 +3438,16 @@ function startOrwellApp() {
 
   fileHandlerModule.init(API_BASE);
   modelsModule.init(API_BASE);
-  ragModule.init(API_BASE);
   presetsModule.init(API_BASE);
-  searchModule.init(API_BASE);
   chatModule.init(API_BASE);
   chatModule.initListeners();
   groupModule.init(API_BASE);
-  // Initialize compare module
   if (compareModule) {
     compareModule.init(API_BASE);
   }
-  researchPanelModule.init(API_BASE, markdownModule, sessionModule);
+  if (researchPanelModule) {
+    researchPanelModule.init(API_BASE, markdownModule, sessionModule);
+  }
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -4010,14 +3998,9 @@ function startOrwellApp() {
     }
   }).catch(() => {});
   modelsModule.refreshProviders();
-  ragModule.loadPersonalDocs();
-  memoryModule.loadMemories(); // Ensure memories are loaded on page load
-  
-  // Ensure the memory list is rendered after loading
-  setTimeout(async () => {
-    await memoryModule.loadMemories();
-  }, 1000);
-  
+  if (ragModule) ragModule.loadPersonalDocs();
+  if (memoryModule) memoryModule.loadMemories();
+
   // Ensure proper initial state
   voiceRecorderModule.init();
   if (censorModule) censorModule.init();

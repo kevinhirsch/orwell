@@ -17,12 +17,10 @@ import planWindowModule from './planWindow.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
-import searchModule from './search.js';
-import documentModule from './document.js';
-import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
-import createResearchSynapse from './researchSynapse.js';
+// Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
+const searchModule = null, documentModule = null, emailInbox = null, createResearchSynapse = null;
 import { createStreamRenderer } from './streamingRenderer.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -208,8 +206,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
   export function init(apiBase) {
     API_BASE = apiBase;
     initSlashCommands({ apiBase, isStreaming: () => isStreaming });
-    // Initialize email inbox
-    emailInbox.init(documentModule);
+    if (emailInbox) emailInbox.init(documentModule);
     // Wire the slash-command autocomplete popup on the chat composer. The
     // dispatcher already handles the typed command — this just surfaces the
     // registry as a discoverable menu when the user starts a message with /.
@@ -4984,12 +4981,9 @@ import { createStreamRenderer } from './streamingRenderer.js';
     const id = att.id, name = att.name || '', mime = att.mime || '';
     const url = `${API_BASE}/api/upload/${id}`;
 
-    // Images → Gallery editor.
+    // Game build (feature 0032): the Gallery image editor is removed — open
+    // attached images in a new tab instead.
     if (isImage) {
-      try {
-        const gx = await import('./galleryEditor.js');
-        if (gx.openEditor) { gx.openEditor(url, id, null, name); return; }
-      } catch (e) { console.warn('gallery open failed', e); }
       window.open(url, '_blank');
       return;
     }

@@ -1051,7 +1051,10 @@ document.addEventListener('click', function(e) {
   if (!a) return;
   const href = a.getAttribute('href') || '';
   if (!href.startsWith('#')) return;
-  const m = href.match(/^#(session|document|note|image|email|event|task|skill|research)-(.+)$/);
+  // Game build (feature 0032): only session links remain — the workspace
+  // content verticals (document/note/image/email/event/task/skill/research)
+  // are removed, so their anchor routings are gone with them.
+  const m = href.match(/^#(session)-(.+)$/);
   if (!m) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1061,49 +1064,6 @@ document.addEventListener('click', function(e) {
       const fn = mod.selectSession || (mod.default && mod.default.selectSession);
       if (fn) fn(id);
     });
-  } else if (kind === 'document') {
-    import('./document.js').then(mod => {
-      const open = mod.loadDocument
-        || mod.openDocument
-        || (mod.default && (mod.default.loadDocument || mod.default.openDocument));
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'note') {
-    import('./notes.js').then(mod => {
-      const open = mod.openNote || (mod.default && mod.default.openNote);
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'image') {
-    import('./gallery.js').then(mod => {
-      const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'email') {
-    import('./emailLibrary.js').then(mod => {
-      const open = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
-      if (open) open({ uid: id });
-    }).catch(() => {});
-  } else if (kind === 'event') {
-    import('./calendar.js').then(mod => {
-      const open = mod.openCalendarTo || (mod.default && mod.default.openCalendarTo);
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'task') {
-    import('./tasks.js').then(mod => {
-      const open = mod.openTasks || (mod.default && mod.default.openTasks);
-      if (open) open(id);
-      else { const b = document.getElementById('tasks-btn'); if (b) b.click(); }
-    }).catch(() => { const b = document.getElementById('tasks-btn'); if (b) b.click(); });
-  } else if (kind === 'skill') {
-    import('./skills.js').then(mod => {
-      const open = mod.openSkill || (mod.default && mod.default.openSkill);
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'research') {
-    import('./research/panel.js').then(mod => {
-      const open = mod.openPanel || (mod.default && mod.default.openPanel);
-      if (open) open(id);
-    }).catch(() => {});
   }
 });
 
@@ -1189,39 +1149,9 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   });
   actions.appendChild(dlBtn);
 
-  const editBtn = document.createElement('button');
-  editBtn.className = 'footer-copy-btn';
-  editBtn.type = 'button';
-  editBtn.title = 'Edit in image editor';
-  editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
-  editBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    try {
-      const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js'),
-        import('./galleryEditor.js'),
-      ]);
-      // Ensure the Gallery modal is open so the editor has a container
-      // to render into; switch its tabs to the Edit tab.
-      galleryMod.default.openGallery();
-      const modal = document.getElementById('gallery-modal');
-      if (modal) {
-        modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
-        modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
-      }
-      const imagesContainer = document.getElementById('gallery-images-container');
-      const albumsContainer = document.getElementById('gallery-albums-container');
-      if (imagesContainer) imagesContainer.style.display = 'none';
-      if (albumsContainer) albumsContainer.style.display = 'none';
-      const editorContainer = document.getElementById('gallery-editor-container');
-      if (editorContainer) editorContainer.style.display = 'flex';
-      const label = (prompt || '').trim().slice(0, 60) || 'Generated image';
-      editorMod.openEditor(imageUrl, null, null, label);
-    } catch (err) {
-      console.error('[chat] open in editor failed', err);
-    }
-  });
-  actions.appendChild(editBtn);
+  // Game build (feature 0032): the image editor (Gallery) vertical is removed,
+  // so no "edit in image editor" action — generated images remain copyable,
+  // downloadable, and removable inline.
 
   const delBtn = document.createElement('button');
   delBtn.className = 'footer-copy-btn footer-delete-btn';

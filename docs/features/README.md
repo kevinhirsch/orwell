@@ -78,7 +78,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | App / accounts | Done |
 | 0030 | [Durable game persistence (survive engine restart)](./0030-durable-game-persistence-survive-restart.md) | **MVP-1 / bugfix** | Done |
 | 0031 | [Game orchestrator & integrity watcher (per-sandbox)](./0031-game-orchestrator-and-integrity-watcher.md) | Foundational | Done |
-| 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done · **Tier 1** |
+| 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

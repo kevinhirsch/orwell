@@ -2,8 +2,9 @@
 // User-facing preferences: AI models, search, appearance
 
 import uiModule from './ui.js';
-import searchModule from './search.js';
 import { makeWindowDraggable } from './windowDrag.js';
+// Game build (feature 0032): workspace verticals removed.
+const searchModule = null;
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
@@ -2633,18 +2634,13 @@ async function initEmailAccountsSettings() {
     manageBtn.dataset.bound = '1';
     manageBtn.addEventListener('click', () => open('integrations'));
   }
+  // Game build (feature 0032): the Tasks vertical is removed; the "open tasks"
+  // affordance in this inherited email panel no longer routes anywhere.
   const tasksBtn = el('set-email-open-tasks');
   if (tasksBtn && tasksBtn.dataset.bound !== '1') {
     tasksBtn.dataset.bound = '1';
-    tasksBtn.addEventListener('click', async () => {
-      try {
-        const mod = await import('./tasks.js');
-        const openTasks = mod.openTasks || (mod.default && mod.default.openTasks);
-        if (typeof openTasks === 'function') openTasks();
-        else document.getElementById('tool-tasks-btn')?.click();
-      } catch (_) {
-        document.getElementById('tool-tasks-btn')?.click();
-      }
+    tasksBtn.addEventListener('click', () => {
+      document.getElementById('tool-tasks-btn')?.click();
     });
   }
   const listEl = el('set-email-accounts-list');
