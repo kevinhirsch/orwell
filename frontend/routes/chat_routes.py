@@ -17,6 +17,7 @@ from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
 from src.agent_loop import stream_agent_loop
 from src import agent_runs
+from src import session_events
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
@@ -362,6 +363,7 @@ def setup_chat_routes(
         from core.database import update_session_last_accessed
         update_session_last_accessed(session)
         session_manager.save_sessions()
+        session_events.publish(session, "message-added")
 
         # Background tasks (memory, webhook, auto-name)
         run_post_response_tasks(
@@ -1234,7 +1236,25 @@ def setup_chat_routes(
             return StreamingResponse(_safe_stream(), media_type="text/event-stream")
 
         agent_runs.start(session, _safe_stream())
+        # Tell every other device viewing this session that a new run started, so
+        # they reconcile (load the new user message + attach to the live reply).
+        session_events.publish(session, "run-started")
         return StreamingResponse(agent_runs.subscribe(session), media_type="text/event-stream")
+
+    # ------------------------------------------------------------------ #
+    # GET /api/chat/events — persistent per-session SSE for cross-device sync.
+    # Every device viewing a session subscribes here; the server broadcasts
+    # lightweight "session changed" events (run-started, message-added) so other
+    # devices reconcile in real time. Payloads are ids/types only — the client
+    # fetches the authoritative state itself.
+    # ------------------------------------------------------------------ #
+    @router.get("/api/chat/events/{session_id}")
+    async def chat_events(request: Request, session_id: str) -> StreamingResponse:
+        return StreamingResponse(
+            session_events.subscribe(session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/resume — reconnect to a detached run that's still going
@@ -1286,6 +1306,7 @@ def setup_chat_routes(
             msg = untrusted_context_message("injected research context", f"Research Context: {context}")
             sess.add_message(ChatMessage(msg["role"], msg["content"], metadata=msg.get("metadata")))
             session_manager.save_sessions()
+            session_events.publish(session_id, "message-added")
             return {"status": "context_injected"}
         except KeyError:
             raise HTTPException(404, "Session not found")
