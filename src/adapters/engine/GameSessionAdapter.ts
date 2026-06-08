@@ -1,8 +1,9 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
-  AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef,
+  AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative,
 } from "../../ports/GameSession";
+import { npcInitiatedApproaches } from "../../engine/conversation";
 import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle } from "../../engine/characterFactory";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
@@ -109,6 +110,20 @@ export class GameSessionAdapter implements GameSession {
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
       veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
     };
+  }
+
+  socialInitiatives(): SocialInitiative[] {
+    if (!this.house) return [];
+    const player = this.house.player.id;
+    const npcIds = this.house.npcs.map((n) => n.id);
+    // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
+    // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
+    // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
+    const rng = new SeededRandom(hashSeed(`approaches:${this.week}:${this.phase}`));
+    return npcInitiatedApproaches(player, npcIds, this.rel, rng, 3).map((id) => ({
+      houseguest: { id, name: this.nameOf(id) },
+      pretext: "wants a word with you",
+    }));
   }
 
   createCharacter(req: CreateCharacterReq): GameStateView {

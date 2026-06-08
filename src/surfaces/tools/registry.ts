@@ -21,6 +21,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "socialRead", channel: "player", readsVault: false, description: "Honest, Vault-free read of the room or a houseguest; may hint, never names off-screen events." },
+  { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a neutral pretext only — no hidden motive)." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
   // Action tools (0009): request in, Vault-free result out (engine performs them).
@@ -28,6 +29,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "resolveCompetition", channel: "player", readsVault: false, description: "Engine-decided outcome only — no stats, rankings, or Vault reasoning." },
   { name: "runCompetition", channel: "player", readsVault: false, description: "Resolve a competition over the LIVE house using the engine's own stats; returns the winner (name) only." },
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
+  { name: "diaryRoom", channel: "player", readsVault: false, description: "Record a player Diary-Room entry: the player's own OOC knowledge, with no in-game pathway to any houseguest." },
   { name: "advanceGame", channel: "player", readsVault: false, description: "Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale); stops and returns a pending decision when it's the player's turn to choose." },
   { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending decision (nominations / use veto / replacement / eviction vote) and continue the loop." },
 ];
