@@ -17,10 +17,12 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "createCharacter", channel: "player", readsVault: false, description: "Run OOBE and start a new game; returns the Vault-free game state." },
   { name: "getGameState", channel: "player", readsVault: false, description: "Current Vault-free game state: phase, the player's card, and the house roster (names)." },
   { name: "gameStatus", channel: "player", readsVault: false, description: "Vault-free public status for the status panel: week/phase/HOH/nominees/veto (ceremony-level facts only)." },
+  { name: "playerTagline", channel: "player", readsVault: false, description: "A snarky, state-aware one-line Big Brother hero tagline for the player (Vault-free; reflects current standing)." },
   { name: "getMomentPrompt", channel: "player", readsVault: false, description: "The managed system prompt to inject for the current moment (persona + framing; Vault-free)." },
   { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "socialRead", channel: "player", readsVault: false, description: "Honest, Vault-free read of the room or a houseguest; may hint, never names off-screen events." },
+  { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a neutral pretext only — no hidden motive)." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
   // Action tools (0009): request in, Vault-free result out (engine performs them).
@@ -28,6 +30,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "resolveCompetition", channel: "player", readsVault: false, description: "Engine-decided outcome only — no stats, rankings, or Vault reasoning." },
   { name: "runCompetition", channel: "player", readsVault: false, description: "Resolve a competition over the LIVE house using the engine's own stats; returns the winner (name) only." },
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
+  { name: "diaryRoom", channel: "player", readsVault: false, description: "Record a player Diary-Room entry: the player's own OOC knowledge, with no in-game pathway to any houseguest." },
   { name: "advanceGame", channel: "player", readsVault: false, description: "Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale); stops and returns a pending decision when it's the player's turn to choose." },
   { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending decision (nominations / use veto / replacement / eviction vote) and continue the loop." },
 ];
@@ -42,3 +45,18 @@ export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
 export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
   return channel === "player" ? PLAYER_TOOLS : ADMIN_TOOLS;
 }
+
+/**
+ * Pure infrastructure, NOT game-driving levers — excluded from the agent's lever
+ * manifest in the base game-master prompt (0018): `getMomentPrompt` supplies the
+ * prompt itself, `endOfSessionSummary` just confirms a save exists.
+ */
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline"]);
+
+/**
+ * The game-driving player levers the agent should know how to pull. This is the
+ * single source of truth the base prompt's lever manifest must stay in sync with
+ * (0018) — the manifest↔registry drift test fails if any of these is unnamed.
+ */
+export const PLAYER_AGENT_LEVERS: readonly string[] =
+  PLAYER_TOOLS.filter((t) => !INFRA_LEVERS.has(t.name)).map((t) => t.name);

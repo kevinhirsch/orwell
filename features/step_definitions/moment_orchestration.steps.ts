@@ -6,6 +6,7 @@ import {
   BASE_GAME_MASTER_PROMPT, MOMENT_PROMPTS,
 } from "../../src/engine/momentPrompts";
 import type { GameStateView } from "../../src/ports/GameSession";
+import { PLAYER_AGENT_LEVERS } from "../../src/surfaces/tools/registry";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { PLAYER, npc } from "../../src/domain/ids";
 import { assertNoSentinels, assertNoneAppear } from "../../tests/support/assertions";
@@ -82,6 +83,38 @@ Then("it frames the model as the host and the voice of the house", function (thi
 
 Then("it forbids the model from breaking character as a generic assistant", function (this: BbWorld) {
   assert.match(this.lastOutput, /not a generic ai assistant/i);
+});
+
+// --- Lever manifest (0018 / B21): the base prompt names every game-driving lever ----
+
+When("the base system prompt is built", function (this: BbWorld) {
+  this.lastOutput = BASE_GAME_MASTER_PROMPT;
+});
+
+Then("it names every player-channel lever the agent can call", function (this: BbWorld) {
+  const missing = PLAYER_AGENT_LEVERS.filter((name) => !this.lastOutput.includes(name));
+  assert.deepEqual(missing, [], `levers missing from the manifest: ${missing.join(", ")}`);
+});
+
+Then("it states that the engine decides outcomes and the model only voices them", function (this: BbWorld) {
+  assert.match(this.lastOutput, /engine\s+decides/i);
+  assert.match(this.lastOutput, /never invent/i);
+});
+
+Then("no lever in the player tool registry is missing from it", function (this: BbWorld) {
+  for (const name of PLAYER_AGENT_LEVERS) assert.ok(this.lastOutput.includes(name), `manifest names ${name}`);
+});
+
+When("the system prompt for a competition moment is built", function (this: BbWorld) {
+  this.lastOutput = buildSystemPrompt("hoh-competition", startedView("hoh-competition"));
+});
+
+Then("it directs the model to resolve the competition through the engine", function (this: BbWorld) {
+  assert.match(this.lastOutput, /runCompetition/);
+});
+
+Then("it forbids inventing the winner or revealing scores", function (this: BbWorld) {
+  assert.match(this.lastOutput, /never choose the winner|no scores|only the winner/i);
 });
 
 // --- Sentinel-free under any Vault contents -----------------------------------

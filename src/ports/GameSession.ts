@@ -123,6 +123,21 @@ export interface AdvanceView {
   winner: NamedRef | null;
 }
 
+/**
+ * A houseguest who, by their own soul motivation, wants to approach the player now
+ * (0012/0036). Vault-free: the name and a neutral public pretext only — never the
+ * underlying drive (bond vs. threat), which would leak the hidden relationship read.
+ */
+export interface SocialInitiative {
+  houseguest: NamedRef;
+  pretext: string;
+}
+
+/** A snarky, state-aware one-line hero tagline for the player (0033). Vault-free; one line. */
+export interface PlayerTaglineView {
+  text: string;
+}
+
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
@@ -162,4 +177,16 @@ export interface GameSession {
   advanceGame(): AdvanceView;
   /** Resolve the current pending decision and continue the loop (validated; 0011). */
   submitDecision(req: SubmitDecisionReq): AdvanceView;
+  /**
+   * Which houseguests want to approach the player right now (0012/0036) — relationship-driven
+   * (allies scheme, rivals probe), so scenes start from EITHER side, not only player→NPC. Returns
+   * names + a neutral pretext; the hidden drive never crosses the wall. Empty before a game starts.
+   */
+  socialInitiatives(): SocialInitiative[];
+  /**
+   * A snarky, state-aware Big Brother one-liner for the homepage hero (0033) — reflects the
+   * player's CURRENT public standing (HOH / on the block / holding the veto / just a houseguest /
+   * pre-game). Vault-free, anti-sycophantic (a weak spot is ribbed, not flattered), one line.
+   */
+  playerTagline(): PlayerTaglineView;
 }

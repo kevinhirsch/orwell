@@ -3,7 +3,7 @@ import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/regist
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
-import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq } from "../../ports/EngineCommands";
+import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq } from "../../ports/GameSession";
 
@@ -46,6 +46,8 @@ export class McpServer {
         return this.deps.session.getGameState();
       case "gameStatus":
         return this.deps.session.gameStatus();
+      case "playerTagline":
+        return this.deps.session.playerTagline();
       case "getMomentPrompt":
         return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
       case "runCompetition":
@@ -60,6 +62,8 @@ export class McpServer {
         return this.deps.player.produce(args["mode"] === "dialogue" ? "NPC dialogue" : "scene narration");
       case "socialRead":
         return this.deps.player.socialRead(args["target"] as EntityId | undefined);
+      case "socialInitiatives":
+        return this.deps.session.socialInitiatives();
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":
@@ -70,6 +74,8 @@ export class McpServer {
         return this.deps.commands.resolveCompetition(args as unknown as ResolveCompetitionReq);
       case "surfaceInformationTo":
         return this.deps.commands.surfaceInformationTo(args as unknown as SurfaceReq);
+      case "diaryRoom":
+        return this.deps.commands.diaryRoom(args as unknown as DiaryRoomReq);
       case "inspectNonVaultState":
         return this.deps.admin.inspect();
       case "overrideMechanic":

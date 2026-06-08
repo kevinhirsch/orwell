@@ -145,6 +145,24 @@ async def submit_decision(decision: dict, user: str | None = None) -> dict:
     return await _call("submitDecision", decision or {}, user=user)
 
 
+async def player_tagline(user: str | None = None) -> dict:
+    """A snarky, state-aware Big Brother one-liner for the homepage hero (0033). Vault-free;
+    reflects the player's current public standing. Returns ``{"text": "..."}``."""
+    return await _call("playerTagline", {}, user=user)
+
+
+async def social_initiatives(user: str | None = None) -> dict:
+    """Which houseguests want to approach the player now (0036) — names + a neutral pretext only,
+    so scenes start from either side. Vault-free (no hidden motive)."""
+    return await _call("socialInitiatives", {}, user=user)
+
+
+async def diary_room(entry: str, user: str | None = None) -> dict:
+    """Record the player's out-of-character Diary-Room entry (0036). The player's own knowledge,
+    with no in-game pathway to any houseguest — never reaches the house."""
+    return await _call("diaryRoom", {"entry": entry}, user=user)
+
+
 # --- God Mode / admin channel (0016) --------------------------------------------------
 # These cross the engine's ADMIN channel (/admin/call), not the player channel. The
 # admin channel is STILL Vault-free by construction (the human can never read the Vault,

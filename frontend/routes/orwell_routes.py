@@ -70,6 +70,39 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] status failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
+    @router.get("/tagline")
+    async def orwell_tagline(request: Request):
+        """Snarky, state-aware hero one-liner (0033). Fails OPEN: a default line if the engine is
+        down, so the homepage never blocks on it."""
+        try:
+            return await orwell_engine.player_tagline(user=_current_user(request))
+        except Exception as e:
+            logger.warning(f"[orwell] tagline failed: {e}")
+            return {"text": "Yours for the voyage."}
+
+    @router.get("/initiatives")
+    async def orwell_initiatives(request: Request):
+        """Houseguests who want to approach the player now (0036). Vault-free; empty on error."""
+        try:
+            return {"initiatives": await orwell_engine.social_initiatives(user=_current_user(request))}
+        except Exception as e:
+            logger.warning(f"[orwell] initiatives failed: {e}")
+            return {"initiatives": []}
+
+    class DiaryRoomRequest(BaseModel):
+        entry: str
+
+    @router.post("/diary-room")
+    async def orwell_diary_room(body: DiaryRoomRequest, request: Request):
+        """Record the player's OOC Diary-Room entry (0036) — never reaches any houseguest."""
+        if not body.entry.strip():
+            return JSONResponse(status_code=400, content={"error": "entry is required"})
+        try:
+            return await orwell_engine.diary_room(body.entry.strip(), user=_current_user(request))
+        except Exception as e:
+            logger.warning(f"[orwell] diary-room failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest, request: Request):
         if not body.playerName.strip():

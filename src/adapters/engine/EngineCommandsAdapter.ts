@@ -1,5 +1,5 @@
 import type {
-  EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq,
+  EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq, DiaryRoomReq,
 } from "../../ports/EngineCommands";
 import type { EventStore } from "../../ports/EventStore";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
@@ -68,5 +68,14 @@ export class EngineCommandsAdapter implements EngineCommands {
   surfaceInformationTo(req: SurfaceReq): { ok: true } {
     this.knowledge.surfaceInformationTo(req.entity, req.fact, req.pathway);
     return { ok: true };
+  }
+
+  diaryRoom(req: DiaryRoomReq): { recorded: true } {
+    // OOC player knowledge with NO in-game pathway to any NPC (0013): the recorded event's
+    // witness set is the player alone, and deriveNpcKnowledge filters the diary-room pathway —
+    // so the house can never learn it. The player's strategy may inform the engine, never NPCs.
+    this.knowledge.recordDiaryRoom(req.entry);
+    this.onPersist?.(); // durable save (0030): the player's DR is their persisted knowledge
+    return { recorded: true };
   }
 }

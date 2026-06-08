@@ -670,12 +670,18 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 
 ## Still on the feature-maker (me)
 
-**0001–0032 built** + the live weekly loop / decision seam (098c36a). A **functional audit** of the live
-playable path (MCP tools → `GameSessionAdapter` → `liveSeason.ts`) found the **core season arc to a winner,
-the consequence fold (0023), and jury endgame (0014) all work** — but three "built-but-not-wired-live" gaps
-remain. **Functional drafts, priority order:** **0035** (start 0031's off-screen watcher in the runtime —
-**top priority**, behavioral-fidelity mandate → **B24**); **0036** (live NPC approaches + Diary Room → **B25**
-engine + **C10** front-end). Also live: **0033** (tagline → B22/C9), **0034** (codify the live seam → B23),
-**B21** (0018 lever manifest). The live narrator is `EchoNarrativePort` (stub), but the **front-end** narrates
-via `getMomentPrompt` (by design — INTEGRATION.md), so it's **not** a gap unless we want engine-side narration.
-**Nothing is blocking the implementer queue.** After the functional batch: MVP-2 (0022); jury choreography.
+**0001–0036 are built** (0022 deferred). The "continue all wiring" batch shipped the engine + API wiring:
+**B24/0035** (SystemClock + `composeRuntime` start the off-screen watcher in `main.ts` — the house now lives
+between turns), **B25/0036** (`socialInitiatives` + `diaryRoom` live tools), **B21/0018** (full lever manifest
++ drift guard), **B22/0033** (`playerTagline`), **B23/0034** (live-seam BDD), and front-end **C9/0033** (the
+hero line now shows the engine's snarky tagline, fail-open) + the **0036 front-end API** (`/api/orwell/tagline`,
+`/initiatives`, `/diary-room` + engine-client methods). Full engine gate green: **214 unit + 213 BDD**.
+
+**Remaining wiring — front-end UI only (OpenHands, verify on a running instance per INTEGRATION.md):**
+**C10** — render the in-chat surfaces for 0036 (an "X pulls you aside…" approach prompt from
+`/api/orwell/initiatives`, and a Diary-Room entry point posting to `/api/orwell/diary-room`). The agent can
+already drive both via the engine tools; this is the player-facing UI. The live narrator is still
+`EchoNarrativePort` (stub) on the engine; the front-end narrates via `getMomentPrompt` (by design), and the
+`playerTagline` narrator seam (`setNarrator`) is ready when a real narrator is wired.
+
+After this: MVP-2 (0022); jury-vote choreography.

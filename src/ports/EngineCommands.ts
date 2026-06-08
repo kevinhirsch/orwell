@@ -34,9 +34,20 @@ export interface SurfaceReq {
   pathway: string;
 }
 
+export interface DiaryRoomReq {
+  /** The player's out-of-character confessional entry. */
+  entry: string;
+}
+
 export interface EngineCommands {
   recordInteraction(req: RecordInteractionReq): { eventId: string };
   /** Outcome only — no stat scores, rankings, or Vault-derived reasoning. */
   resolveCompetition(req: ResolveCompetitionReq): { winner: EntityId; type: string };
   surfaceInformationTo(req: SurfaceReq): { ok: true };
+  /**
+   * Record a player Diary-Room entry (0013): the player's OWN out-of-character knowledge,
+   * tagged with NO in-game pathway to any NPC. It may inform the engine's read of player
+   * strategy but NEVER reaches NPC behavior — no houseguest can ever learn it.
+   */
+  diaryRoom(req: DiaryRoomReq): { recorded: true };
 }
