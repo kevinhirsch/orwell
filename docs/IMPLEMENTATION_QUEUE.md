@@ -687,11 +687,11 @@ between turns), **B25/0036** (`socialInitiatives` + `diaryRoom` live tools), **B
 hero line now shows the engine's snarky tagline, fail-open) + the **0036 front-end API** (`/api/orwell/tagline`,
 `/initiatives`, `/diary-room` + engine-client methods). Full engine gate green: **214 unit + 213 BDD**.
 
-**Remaining wiring — front-end UI only (OpenHands, verify on a running instance per INTEGRATION.md):**
-**C10** — render the in-chat surfaces for 0036 (an "X pulls you aside…" approach prompt from
-`/api/orwell/initiatives`, and a Diary-Room entry point posting to `/api/orwell/diary-room`). The agent can
-already drive both via the engine tools; this is the player-facing UI. The live narrator is still
-`EchoNarrativePort` (stub) on the engine; the front-end narrates via `getMomentPrompt` (by design), and the
-`playerTagline` narrator seam (`setNarrator`) is ready when a real narrator is wired.
+**Remaining wiring — none.** **C10** is now built: `frontend/static/js/orwellSocial.js` (a self-contained,
+fail-open, game-gated panel) renders the NPC approach chips (prefill the composer to start a scene) and a
+Diary-Room modal posting to `/api/orwell/diary-room`, over the live Vault-free routes; `tests/test_orwell_social.py`
+covers the routes (pass-through + fail-open). The live narrator is still `EchoNarrativePort` (stub) on the
+engine; the front-end narrates via `getMomentPrompt` (by design), and the `playerTagline` narrator seam
+(`setNarrator`) is ready when a real narrator is wired.
 
 After this: MVP-2 (0022); jury-vote choreography.
