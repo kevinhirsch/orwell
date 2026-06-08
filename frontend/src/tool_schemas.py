@@ -1300,7 +1300,70 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
+    {
+        "type": "function",
+        "function": {
+            "name": "inspectNonVaultState",
+            "description": "GOD MODE (admin only): inspect the non-Vault game state of the current sandbox. Never returns Vault/secret content — the hidden layer stays walled even from the admin (spoilers ruin the game).",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "overrideMechanic",
+            "description": "GOD MODE (admin only): override a non-Vault game mechanic in the sandbox. Returns the updated non-Vault state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mechanic": {"type": "string", "description": "The mechanic to override."},
+                    "value": {"description": "The new value (any JSON type)."},
+                },
+                "required": ["mechanic", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "configureGame",
+            "description": "GOD MODE (admin only): set non-Vault tunables for the sandbox — temperature/relationship config and the reserve-twist COUNT. Never sets twist CONTENT (Vault-sealed).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "settings": {"type": "object", "description": "Key/value tunables to apply (non-Vault only)."},
+                },
+                "required": ["settings"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manageSandbox",
+            "description": "GOD MODE (admin only): sandbox lifecycle for THIS user's game only — create, reset, save, or load.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string", "enum": ["create", "reset", "save", "load"], "description": "The lifecycle operation."},
+                },
+                "required": ["op"],
+            },
+        },
+    },
 ]
+
+
+# The Big Brother game tools (Vault-free). While a game is in progress these are
+# PINNED into the agent's tool set so RAG/keyword selection can never drop them —
+# otherwise the model can narrate the game but not act on it. Keep in sync with the
+# game-tool schemas above and the engine's player registry (src/surfaces/tools/registry.ts).
+ORWELL_GAME_TOOLS = frozenset({
+    "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
+    "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
+    "renderScene", "endOfSessionSummary",
+})
 
 
 # ---------------------------------------------------------------------------

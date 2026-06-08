@@ -63,6 +63,9 @@ class ChatContext:
     # The chat route emits a doc_update SSE event for each before streaming
     # begins, so the editor pane switches to the new doc immediately.
     auto_opened_docs: list = field(default_factory=list)
+    # True when a Big Brother game is in progress for this user. The agent route
+    # uses it to PIN the game tools so the model can always act on the game.
+    game_active: bool = False
 
 
 # ── Helpers ────────────────────────────────────────────────────────────── #
@@ -533,11 +536,13 @@ async def build_chat_context(
     # per-moment game-master system prompt so every main-chat turn speaks in-character (this
     # is what stops the generic-assistant replies). Best-effort and Vault-free — the engine
     # only ever returns Vault-free projections; any failure leaves the normal chat untouched.
+    game_active = False
     if not incognito:
         try:
             from src import orwell_engine
             game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
             if isinstance(game_state, dict) and game_state.get("started"):
+                game_active = True
                 mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
                 gm_prompt = (mp or {}).get("systemPrompt")
                 if gm_prompt:
@@ -587,6 +592,7 @@ async def build_chat_context(
         preset=preset,
         preprocessed=preprocessed,
         auto_opened_docs=auto_opened_docs,
+        game_active=game_active,
     )
 
 

@@ -4607,3 +4607,62 @@ async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+# --- God Mode / admin (0016) — execution is gated to admins by _ADMIN_TOOLS in tool_execution ---
+
+async def do_inspect_non_vault_state(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.inspect_non_vault_state(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
+async def do_override_mechanic(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    mechanic = (args.get("mechanic") or "").strip()
+    if not mechanic or "value" not in args:
+        return {"error": "mechanic and value are both required", "exit_code": 1}
+    try:
+        res = await orwell_engine.override_mechanic(mechanic, args.get("value"), user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_configure_game(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    settings = args.get("settings")
+    if not isinstance(settings, dict) or not settings:
+        return {"error": "settings (a non-empty object of non-Vault tunables) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.configure_game(settings, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    op = (args.get("op") or "").strip()
+    if op not in {"create", "reset", "save", "load"}:
+        return {"error": "op must be one of: create, reset, save, load", "exit_code": 1}
+    try:
+        res = await orwell_engine.manage_sandbox(op, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}

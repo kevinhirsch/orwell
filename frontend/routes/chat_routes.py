@@ -16,6 +16,7 @@ from core.models import ChatMessage
 from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
 from src.agent_loop import stream_agent_loop
+from src.tool_schemas import ORWELL_GAME_TOOLS
 from src import agent_runs
 from src import session_events
 from src.model_context import estimate_tokens
@@ -1094,6 +1095,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         tool_policy=tool_policy,
                         owner=_user,
+                        pinned_tools=(ORWELL_GAME_TOOLS if ctx.game_active else None),
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
                         plan_mode=plan_mode,

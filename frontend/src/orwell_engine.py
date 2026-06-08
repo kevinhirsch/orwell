@@ -132,6 +132,48 @@ async def end_of_session_summary(user: str | None = None) -> dict:
     return await _call("endOfSessionSummary", {}, user=user)
 
 
+# --- God Mode / admin channel (0016) --------------------------------------------------
+# These cross the engine's ADMIN channel (/admin/call), not the player channel. The
+# admin channel is STILL Vault-free by construction (the human can never read the Vault,
+# even in God Mode — the spoiler wall). Callers MUST be gated to admins on the front-end
+# side (the agent tools below are in _ADMIN_TOOLS); the engine isolates per user (0021).
+
+async def _admin_call(name: str, args: dict | None = None, user: str | None = None) -> dict:
+    """Invoke an admin/God-Mode tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
+    url = ENGINE_URL.rstrip("/") + "/admin/call"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
+        r.raise_for_status()
+        data = r.json()
+    if "result" not in data:
+        raise RuntimeError(data.get("error", "engine call failed"))
+    return data["result"]
+
+
+async def inspect_non_vault_state(user: str | None = None) -> dict:
+    """God Mode: inspect non-Vault game state (never the Vault — walled even for admin)."""
+    return await _admin_call("inspectNonVaultState", {}, user=user)
+
+
+async def override_mechanic(mechanic: str, value, user: str | None = None) -> dict:
+    """God Mode: override a non-Vault mechanic in the sandbox; returns updated non-Vault state."""
+    return await _admin_call("overrideMechanic", {"mechanic": mechanic, "value": value}, user=user)
+
+
+async def configure_game(settings: dict, user: str | None = None) -> dict:
+    """God Mode: set non-Vault tunables (temperature/relationship config, reserve-twist COUNT —
+    never twist CONTENT, which stays Vault-sealed)."""
+    return await _admin_call("configure", settings or {}, user=user)
+
+
+async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict:
+    """God Mode: sandbox lifecycle for THIS user's sandbox only (create | reset | save | load)."""
+    args: dict = {}
+    if op:
+        args["op"] = op
+    return await _admin_call("manageSandbox", args, user=user)
+
+
 async def engine_health() -> bool:
     """True if the engine HTTP MCP server answers /health."""
     try:

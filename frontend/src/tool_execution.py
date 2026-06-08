@@ -495,6 +495,11 @@ _ADMIN_TOOLS = {
     "serve_preset",
     "stop_served_model",
     "cancel_download",
+    # God Mode (0016): non-Vault admin levers over the game sandbox.
+    "inspectNonVaultState",
+    "overrideMechanic",
+    "configureGame",
+    "manageSandbox",
 }
 
 
@@ -1158,6 +1163,8 @@ async def execute_tool_block(
         do_get_game_state, do_run_competition, do_record_interaction, do_surface_information,
         do_game_status, do_get_visible_state, do_social_read, do_ask_producers,
         do_render_scene, do_end_of_session_summary,
+        do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
+        do_manage_sandbox,
         do_app_api,
     )
 
@@ -1496,6 +1503,18 @@ async def execute_tool_block(
     elif tool == "endOfSessionSummary":
         desc = "endOfSessionSummary"
         result = await do_end_of_session_summary(content, owner=owner)
+    elif tool == "inspectNonVaultState":
+        desc = "inspectNonVaultState"
+        result = await do_inspect_non_vault_state(content, owner=owner)
+    elif tool == "overrideMechanic":
+        desc = "overrideMechanic"
+        result = await do_override_mechanic(content, owner=owner)
+    elif tool == "configureGame":
+        desc = "configureGame"
+        result = await do_configure_game(content, owner=owner)
+    elif tool == "manageSandbox":
+        desc = "manageSandbox"
+        result = await do_manage_sandbox(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()
