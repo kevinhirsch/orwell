@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 #
-# bbai — one-liner Proxmox LXC installer.
+# orwell — one-liner Proxmox LXC installer.
 #
 # On the Proxmox host shell:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)"
 #
-# Creates a Debian LXC and installs bbai — the TypeScript engine (MCP server) and the orwell
+# Creates a Debian LXC and installs orwell — the TypeScript engine (MCP server) and the orwell
 # front-end — as systemd services (engine contract: `npm run build` / `npm start`).
 #
 # UX: a community-scripts-style config menu (Use Defaults vs Advanced) with every field
 # pre-populated, shown when run on a TTY; otherwise it runs non-interactively with defaults.
 # Every setting can also be supplied / overridden via env, e.g.:
 #   CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 STORAGE=local-lvm BRANCH=main \
-#     bash -c "$(curl -fsSL .../deploy/bbai.sh)"
-# Pass --default (or set USE_DEFAULTS=1 / BBAI_NONINTERACTIVE=1) to skip the menu.
+#     bash -c "$(curl -fsSL .../deploy/orwell.sh)"
+# Pass --default (or set USE_DEFAULTS=1 / ORWELL_NONINTERACTIVE=1) to skip the menu.
 set -euo pipefail
 
-TITLE="bbai installer"
+TITLE="orwell installer"
 msg()  { echo -e "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
@@ -44,7 +44,7 @@ available_debian12() {
 
 interactive() {
   [[ -t 0 && -t 1 ]] && command -v whiptail >/dev/null 2>&1 \
-    && [[ -z "${BBAI_NONINTERACTIVE:-}" && -z "${USE_DEFAULTS:-}" ]]
+    && [[ -z "${ORWELL_NONINTERACTIVE:-}" && -z "${USE_DEFAULTS:-}" ]]
 }
 
 wt_input() {  # var "prompt" default
@@ -89,7 +89,7 @@ wt_pick_llm() {  # writes the LLM provider into the container's data/.env (never
 
 # ── Defaults (env overrides everything; auto-detected where it matters) ────────────────────────
 CTID="${CTID:-$(pvesh get /cluster/nextid 2>/dev/null || echo 900)}"
-CT_HOSTNAME="${CT_HOSTNAME:-bbai}"
+CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 CORES="${CORES:-2}"
 RAM_MB="${RAM_MB:-2048}"
 DISK_GB="${DISK_GB:-8}"
@@ -100,7 +100,7 @@ STORAGE="${STORAGE:-$(storage_for rootdir)}";          STORAGE="${STORAGE:-local
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-$(storage_for vztmpl)}"; TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
 BRANCH="${BRANCH:-main}"
-BBAI_PORT="${BBAI_PORT:-8080}"
+ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"   # ORWELL_* primary; BBAI_* deprecated fallback
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OLLAMA_HOST="${OLLAMA_HOST:-}"
 
@@ -115,7 +115,7 @@ fi
 # ── Config menu (community-scripts style: Defaults vs Advanced, fields pre-populated) ───────────
 if interactive; then
   if whiptail --title "$TITLE" --yes-button "Use Defaults" --no-button "Advanced" --yesno \
-      "Create a Debian LXC and install bbai.\n\nDefaults:\n  CTID ${CTID}  ·  ${CORES} cores  ·  ${RAM_MB} MB  ·  ${DISK_GB} GB\n  rootfs storage ${STORAGE}  ·  bridge ${BRIDGE}  ·  net ${NET}\n  UI port ${BBAI_PORT}  ·  branch ${BRANCH}\n\nUse these defaults, or configure advanced settings?" 20 72; then
+      "Create a Debian LXC and install orwell.\n\nDefaults:\n  CTID ${CTID}  ·  ${CORES} cores  ·  ${RAM_MB} MB  ·  ${DISK_GB} GB\n  rootfs storage ${STORAGE}  ·  bridge ${BRIDGE}  ·  net ${NET}\n  UI port ${ORWELL_PORT}  ·  branch ${BRANCH}\n\nUse these defaults, or configure advanced settings?" 20 72; then
     : # keep defaults
   else
     wt_input CTID        "Container ID (CTID)"                        "$CTID"
@@ -128,7 +128,7 @@ if interactive; then
     wt_input BRIDGE      "Network bridge"                             "$BRIDGE"
     wt_input NET         "IP — 'dhcp' or CIDR (e.g. 192.168.1.50/24)" "$NET"
     [[ "$NET" != "dhcp" ]] && wt_input GATEWAY "Gateway (for the static IP)" "${GATEWAY:-}"
-    wt_input BBAI_PORT   "bbai UI port"                               "$BBAI_PORT"
+    wt_input ORWELL_PORT   "orwell UI port"                               "$ORWELL_PORT"
     wt_input BRANCH      "Git branch"                                 "$BRANCH"
     wt_pick_template
     wt_pick_llm
@@ -169,7 +169,7 @@ else
   NET0="name=eth0,bridge=${BRIDGE},ip=${NET}${GATEWAY:+,gw=${GATEWAY}}"
 fi
 
-msg "config: CTID=${CTID} CORES=${CORES} RAM_MB=${RAM_MB} DISK_GB=${DISK_GB} STORAGE=${STORAGE} TEMPLATE=${TEMPLATE} NET=${NET0} PORT=${BBAI_PORT} BRANCH=${BRANCH}"
+msg "config: CTID=${CTID} CORES=${CORES} RAM_MB=${RAM_MB} DISK_GB=${DISK_GB} STORAGE=${STORAGE} TEMPLATE=${TEMPLATE} NET=${NET0} PORT=${ORWELL_PORT} BRANCH=${BRANCH}"
 msg "creating LXC ${CTID} (${CT_HOSTNAME})"
 pct create "$CTID" "$TEMPLATE" \
   --hostname "$CT_HOSTNAME" \
@@ -192,16 +192,16 @@ done
 [[ -n "$IP" ]] || IP="<container-ip>"
 
 # ── In-container install (LLM config, if any, is passed through and lands in data/.env) ─────────
-# The fresh container has no curl yet, so download bbai-install.sh on the host (which always
+# The fresh container has no curl yet, so download orwell-install.sh on the host (which always
 # has curl) and push it in via pct — no chicken-and-egg bootstrap problem.
 msg "running in-container install"
-TMP_INSTALL="$(mktemp /tmp/bbai-install-XXXXXX.sh)"
-curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/bbai/${BRANCH}/deploy/bbai-install.sh" -o "$TMP_INSTALL"
-pct push "$CTID" "$TMP_INSTALL" /tmp/bbai-install.sh
+TMP_INSTALL="$(mktemp /tmp/orwell-install-XXXXXX.sh)"
+curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/bbai/${BRANCH}/deploy/orwell-install.sh" -o "$TMP_INSTALL"
+pct push "$CTID" "$TMP_INSTALL" /tmp/orwell-install.sh
 rm -f "$TMP_INSTALL"
 pct exec "$CTID" -- bash -c \
-  "export REPO='${REPO}' BRANCH='${BRANCH}' BBAI_PORT='${BBAI_PORT}' \
+  "export REPO='${REPO}' BRANCH='${BRANCH}' ORWELL_PORT='${ORWELL_PORT}' \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
-   bash /tmp/bbai-install.sh"
+   bash /tmp/orwell-install.sh"
 
-msg "done. bbai UI: http://${IP}:${BBAI_PORT}"
+msg "done. orwell UI: http://${IP}:${ORWELL_PORT}"

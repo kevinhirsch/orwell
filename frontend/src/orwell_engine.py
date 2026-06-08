@@ -1,14 +1,24 @@
-"""Thin async client for the bbai engine's permissioned MCP HTTP API.
+"""Thin async client for the orwell engine's permissioned MCP HTTP API.
 
 The front-end consumes ONLY what these Vault-free player-channel tools return; it
 never reaches the engine's Vault (the Vault Wall is enforced structurally on the
-engine side, not here). Endpoint comes from ``BBAI_ENGINE_MCP_URL``.
+engine side, not here). Endpoint comes from ``ORWELL_ENGINE_MCP_URL``.
 """
 import os
 import httpx
 
-ENGINE_URL = os.environ.get("BBAI_ENGINE_MCP_URL", "http://127.0.0.1:8765")
-_TIMEOUT = float(os.environ.get("BBAI_ENGINE_TIMEOUT", "30"))
+# ORWELL_* are primary; BBAI_* are kept as silent deprecated fallbacks so a pre-rename .env
+# keeps working.
+ENGINE_URL = (
+    os.environ.get("ORWELL_ENGINE_MCP_URL")
+    or os.environ.get("BBAI_ENGINE_MCP_URL")
+    or "http://127.0.0.1:8765"
+)
+_TIMEOUT = float(
+    os.environ.get("ORWELL_ENGINE_TIMEOUT")
+    or os.environ.get("BBAI_ENGINE_TIMEOUT")
+    or "30"
+)
 
 
 async def _call(name: str, args: dict | None = None) -> dict:

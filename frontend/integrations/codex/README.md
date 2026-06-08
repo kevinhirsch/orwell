@@ -31,15 +31,15 @@ data.setdefault("name", "personal")
 data.setdefault("interface", {}).setdefault("displayName", "Personal")
 plugins = data.setdefault("plugins", [])
 entry = {
-    "name": "orwell",
+    "name": "Orwell",
     "source": {"source": "local", "path": "./plugins/orwell"},
     "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
     "category": "Productivity",
 }
-data["plugins"] = [item for item in plugins if item.get("name") != "orwell"] + [entry]
+data["plugins"] = [item for item in plugins if item.get("name") != "Orwell"] + [entry]
 p.write_text(json.dumps(data, indent=2) + "\n")
 PY
-codex plugin add orwell@personal
+codex plugin add Orwell@personal
 ```
 
 6. Verify:

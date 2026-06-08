@@ -1,7 +1,7 @@
 # 0009 — MCP tool boundary (the engine's outward tool API)
 
 > **Status:** Draft. **Milestone:** M5 (integration) — not one of the eight invariants, but the
-> **MVP seam** between the TypeScript engine and the orwell front-end/agent (`frontend/`).
+> **MVP seam** between the TypeScript engine and the Orwell front-end/agent (`frontend/`).
 > **Executable spec:** [`0009-mcp-tool-boundary.feature`](./0009-mcp-tool-boundary.feature)
 
 ## 1. Summary
@@ -17,7 +17,7 @@ state source), `surfaces/player/PlayerSurface.ts`, `surfaces/admin/AdminPort.ts`
 
 ## 2. Why this matters
 
-This is the **integration linchpin** for the MVP. orwell's **agent** (Python MCP client,
+This is the **integration linchpin** for the MVP. Orwell's **agent** (Python MCP client,
 `frontend/`) connects to this server as a tool backend; the LLM narrates *Big Brother* by
 calling these tools. The Vault Wall holds because everything the agent receives is
 visible-projection data — **the model cannot leak what it never receives**.
@@ -27,7 +27,7 @@ visible-projection data — **the model cannot leak what it never receives**.
 Two tiers, one sandbox per game:
 
 ```
- orwell (Python: UI + LLM + agent)  ──MCP──►  bbai engine (TS: MCP server)
+ Orwell (Python: UI + LLM + agent)  ──MCP──►  Orwell engine (TS: MCP server)
    frontend/                                      src/  (engine root wires the Vault;
    MCP client / tool caller                             the MCP server does NOT)
 ```
@@ -141,7 +141,7 @@ Vault-free `NarrationContext` (feature 0001 stays intact).
 
 #1 (Vault Wall — the registry, `VisibleStateService`, the boundary it extends); the domain core
 (`resolveCompetition`), `KnowledgeService` (`surfaceInformationTo`), `EventStore`
-(`recordInteraction`). **Feeds** the orwell agent integration (`frontend/INTEGRATION.md`), the
+(`recordInteraction`). **Feeds** the Orwell agent integration (`frontend/INTEGRATION.md`), the
 MVP, and the Proxmox deploy/update scripts (topology).
 
 ## 12. Traceability
