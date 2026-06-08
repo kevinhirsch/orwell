@@ -20,6 +20,36 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 > aptitude/hidden data, to feed the Vault-free **portrait descriptor** (0020 §5, 0004 §8). Small,
 > additive; fold it into the built cast generation.
 
+## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
+
+**State:** **0001–0020 built** (+ deploy 0010). Remaining: engine **B12–B18** (features 0021, 0023–
+0028) and front-end **C4–C6**. Two lanes, minimal contention — **Claude Code = engine (`src/`)**,
+**OpenHands = front-end (`frontend/`)** — so they run **concurrently**. The one engine hot-spot is
+`GameSessionAdapter` (B12/B13/B14 all touch it): those are **sequential on Claude Code**, never
+parallel.
+
+| Wave | Claude Code (engine) | OpenHands (front-end) |
+|---|---|---|
+| **1 — now** | **B16** (0026 relationship math) — one constants module; grounds B13; quick, independent (no adapter change) | **C6** (lever ready-part: expose `getVisibleStateFor`/`socialRead` + drift test) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — its engine tools are built) |
+| **2 — the backbone** (after B16) | **B14 + B13 together** (0024 soul recall + 0023 consequence loop) — the **MVP-1 headline**: action → hidden opinion change → persist → recall, using B16's constants | continue **C4** (big task; runs concurrently) |
+| **3 — multi-tenant** (after B13/B14) | **B12** (0021 per-user sandbox) — wrap the now-living game in per-user sandboxes (cross-user isolation) | **C5** (0021: assert the authenticated user) — **needs B12** |
+| **4 — narrator + flavor** (as CC frees up; any order) | **B17** (0027 NarrativePort) · **B18** (0028 temperature) · **B15** (0025 twists) | polish; MVP-2 (0022) un-parks later |
+
+**The headline is B13** (the live consequence loop). B16 grounds it, B14 pairs with it, B12 then
+makes it multi-tenant. **B13 + B14 are make-or-break for "the game feels real."**
+
+**Coordination rules**
+- **Stay in lanes** (engine vs front-end); don't cross-edit the other's files.
+- **`GameSessionAdapter` is sequential:** B14/B13 then B12 — never two of those at once.
+- **Front-end deps:** **C5 waits on B12**; **C4** needs the 0020 engine tools (already built); **C6**
+  can start now.
+- **Every item:** keep `npm test` + `npm run test:arch` green, the Vault Wall (dependency-cruiser)
+  green, add the new `.feature` to `cucumber.cjs` when it goes green, and open a PR.
+- **First moves:** Claude Code → **B16**; OpenHands → **C6** → **C4**. Then Claude Code → **B14+B13**.
+
+*(The full per-item prompts are below; the table above is the current sequencing — it supersedes the
+historical "Order & assignment" list, which predates 0011–0020 being built.)*
+
 ## Order & assignment
 
 | # | Item | Agent | Depends on |
