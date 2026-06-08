@@ -1,19 +1,20 @@
 import type { RandomnessSource } from "../ports/RandomnessSource";
+import { TEMPERATURE_CONSTANTS, temperatureRoll, withinTemperatureBounds } from "./temperatureConstants";
 
 /**
  * Per-moment temperature: a roll across ALL involved variables, bounded. Governs
- * variance/surprise but never overrides hard rules. Exact distribution/bounds are
- * a tunable open decision (`bb-sim-spec.md` §16.2) — kept here as config.
+ * variance/surprise but never overrides hard rules. The bound + distribution now
+ * live in the single tunable constants module (`temperatureConstants.ts`, 0028);
+ * this keeps the original helpers as a thin, behavior-preserving facade.
  */
-export const TEMPERATURE_BOUNDS = { min: -1, max: 1 } as const;
+export const TEMPERATURE_BOUNDS = TEMPERATURE_CONSTANTS.bound;
 
 export function rollFor(variables: readonly string[], rng: RandomnessSource): Record<string, number> {
-  const span = TEMPERATURE_BOUNDS.max - TEMPERATURE_BOUNDS.min;
   const out: Record<string, number> = {};
-  for (const v of variables) out[v] = TEMPERATURE_BOUNDS.min + rng.next() * span;
+  for (const v of variables) out[v] = temperatureRoll(rng);
   return out;
 }
 
 export function withinBounds(value: number): boolean {
-  return value >= TEMPERATURE_BOUNDS.min && value <= TEMPERATURE_BOUNDS.max;
+  return withinTemperatureBounds(value);
 }

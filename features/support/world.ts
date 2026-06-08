@@ -177,6 +177,14 @@ export class BbWorld extends World {
   visibleBefore?: number;
   twistEventId?: string;
 
+  // Temperature & emotional constants (0028) scratch state.
+  baseWinRate?: number;
+  spikedMod?: number;
+  settledMod?: number;
+  surfacingRate?: number;
+  tempRolls?: number[];
+  compResultObj?: import("../../src/domain/competitionOutcome").CompetitionResult;
+
   // Durable game persistence (0030) scratch state.
   saveDir?: string;
   registry2?: import("../../src/composition/registry").GameSessionRegistry;
