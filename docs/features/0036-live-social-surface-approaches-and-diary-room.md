@@ -81,3 +81,48 @@ Exposes **0012** (`npcInitiatedApproaches` — bidirectional scenes) and **0013*
 (knowledge pathways), **0001** (Vault Wall), and **0021** (isolation). Pairs with **B21** (the manifest
 must name the new levers). Front-end consumption (approach prompts + a DR affordance) is a small
 follow-up on the **0032** game build.
+
+## 7. Front-end UI (C10) — surfacing it to the player
+
+The engine tools and the front-end **API are already wired** (the bullets below name the live routes).
+What remains is the player-facing UI in the vendored front-end (`frontend/`, the **0032 game build**),
+consuming **only** the Vault-free route payloads. Two surfaces:
+
+### 7.1 NPC approach prompts ("X pulls you aside…")
+- **Source:** `GET /api/orwell/initiatives` → `{ "initiatives": [{ "houseguest": { "id", "name" }, "pretext" }] }`
+  (already routed → `orwell_engine.social_initiatives` → the `socialInitiatives` tool).
+- **UX:** when a game is in progress, surface the approachers **unobtrusively** in the main chat — e.g. a
+  small dismissible chip/affordance near the composer ("**{name}** {pretext}"). Acting on it **starts a
+  scene** the normal way (the player engages that houseguest; the existing chat turn / `recordInteraction`
+  path records it). Approaches are **suggestions**, never forced — the player can ignore them.
+- **Refresh** on the same cadence as the status panel (the SSE/session-sync tick / after each advance),
+  so the list tracks the live game. Show **names + pretext only** — never any motive/number (the engine
+  already withholds the hidden drive).
+
+### 7.2 The Diary Room entry point
+- **Source:** `POST /api/orwell/diary-room` `{ "entry": "…" }` → `{ "recorded": true }` (already routed →
+  `orwell_engine.diary_room` → `diaryRoom`).
+- **UX:** a clearly-labelled **Diary Room** affordance (e.g. a button by the composer or in the game/status
+  panel) that opens a small panel/modal where the player writes a private confessional and submits it.
+  On success, a brief confirmation. The UI must make the **OOC / private** nature explicit ("the house
+  never hears this") so the player understands it mirrors the engine guarantee — DR content **never**
+  reaches any houseguest.
+
+### 7.3 Constraints (carry the engine's guarantees into the UI)
+- **Vault-free by construction:** render **only** the route payloads; never infer or display hidden state.
+- **Fail-open:** if `/initiatives` errors or is empty, show **nothing** (no approach chip) — never block the
+  chat; if `/diary-room` fails, a graceful inline error, never a crash. (The routes already fail-open
+  server-side.)
+- **Game-build keep-set (0032):** these are game surfaces — gated to when a game is in progress, and they
+  must survive the front-end prune (don't reintroduce a dropped vertical).
+
+### 7.4 Definition of Done (C10)
+- [ ] Approachers from `/api/orwell/initiatives` appear in the live game UI (names + pretext only) and can
+      be acted on or dismissed; nothing shows pre-game or on error.
+- [ ] A Diary-Room entry point posts to `/api/orwell/diary-room`, confirms success, and is labelled clearly
+      as private/OOC.
+- [ ] Vault-free + fail-open (no hidden state rendered; the chat never blocks on either surface).
+- [ ] `cd frontend && python3 -m pytest tests/` green (name-agnostic — roles only); the **0032
+      headless-browser gate** (`scripts/browser_smoke.py`) still loads the keep-set with no broken modules;
+      the engine gate is unaffected (front-end is quarantined). Verified against a **running instance**
+      (per `frontend/INTEGRATION.md`).

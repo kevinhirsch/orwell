@@ -658,13 +658,23 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > stay **Vault-only**. Both `readsVault:false` + **sentinel-clean** (extend the 0001 canary). Make `0036`
 > green (add to `cucumber.cjs`); gates green. Read `docs/features/0012`, `0013`, `0002`, `0001` first. Open a PR.
 
-### C10 — 0036 front-end: surface approaches + a Diary-Room entry point  ·  OpenHands  ·  **depends on B25**
+### C10 — 0036 front-end: surface approaches + a Diary-Room entry point  ·  OpenHands  ·  **READY — API wired; UI only**
 
-> In `kevinhirsch/orwell` `frontend/`, surface feature **0036** in the game UI: when `socialInitiatives`
-> returns houseguests who want to approach the player, prompt it in-chat ("X pulls you aside…"); and add a
-> **Diary-Room** entry point that calls the `diaryRoom` tool (the player's private, OOC confessional).
-> Consume **only** the Vault-free tool data. Part of the **0032** game build. `pytest` green; engine gate
-> unaffected. Depends on **B25**. Open a PR.
+> In `kevinhirsch/orwell` `frontend/`, build the **player-facing UI** for feature **0036** per its design
+> note **§7** (`docs/features/0036-…md`). The engine tools **and the front-end API are already wired** — you
+> only build the UI on top of these live, Vault-free routes:
+> - `GET /api/orwell/initiatives` → `{ initiatives: [{ houseguest: { id, name }, pretext }] }` — surface the
+>   approachers **unobtrusively** in the main chat (a small dismissible "**{name}** {pretext}" affordance by
+>   the composer); acting on one starts a normal scene, ignoring is fine. Refresh on the status-panel cadence.
+> - `POST /api/orwell/diary-room` `{ entry }` → `{ recorded: true }` — a clearly-labelled **Diary Room** entry
+>   point (button/panel) for a private confessional; confirm on success; make the **OOC / "the house never
+>   hears this"** nature explicit.
+> **Constraints:** render **only** the route payloads (Vault-free); **fail open** (no approach chip on
+> empty/error, graceful inline error for DR — never block the chat); keep it in the **0032 game-build
+> keep-set** (game-in-progress only; survives the prune). **DoD:** `cd frontend && python3 -m pytest tests/`
+> green (roles only); the **0032 headless-browser gate** (`scripts/browser_smoke.py`) still loads the keep-set
+> with no broken modules; verify on a **running instance** (per `frontend/INTEGRATION.md`). Engine gate
+> unaffected (front-end quarantined). Open a PR.
 
 ---
 
