@@ -9,6 +9,13 @@ import type { GameStateView } from "../../src/ports/GameSession";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { PLAYER, npc } from "../../src/domain/ids";
 import { assertNoSentinels, assertNoneAppear } from "../../tests/support/assertions";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import { Orchestrator } from "../../src/composition/orchestrator";
+import { FakeClock } from "../../src/adapters/time/FakeClock";
+import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Background "a running game sandbox with a fully populated Producer's Vault" → mcp_boundary.steps.
 
@@ -100,10 +107,18 @@ Then("no Vault sentinel value appears in it", function (this: BbWorld) {
 
 // --- Woven context is Vault-free ----------------------------------------------
 
+// Shared (0018 + 0031): a started game in a registry-backed sandbox + an orchestrator.
+// `gsView` (the 0018 projection) is byte-identical to the bare-adapter path; the
+// registry/orchestrator/clock are what 0031's advance scenarios drive.
 Given("a started game", function (this: BbWorld) {
-  const game = new GameSessionAdapter();
-  game.createCharacter({ playerName: "Player One", seed: 4 });
-  this.gsView = game.getGameState();
+  this.saveDir = mkdtempSync(join(tmpdir(), "orwell-started-"));
+  this.registry = new GameSessionRegistry(new FileSaveStore(this.saveDir));
+  this.fakeClock = new FakeClock();
+  this.orchestrator = new Orchestrator(this.registry, this.fakeClock, { seed: 4 });
+  const sb = this.registry.sandboxFor("user-a");
+  sb.session.createCharacter({ playerName: "Player One", seed: 4 });
+  this.orchestrator.touch("user-a");
+  this.gsView = sb.session.getGameState();
 });
 
 When("the system prompt's game context is built", function (this: BbWorld) {
