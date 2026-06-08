@@ -44,3 +44,18 @@ export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
 export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
   return channel === "player" ? PLAYER_TOOLS : ADMIN_TOOLS;
 }
+
+/**
+ * Pure infrastructure, NOT game-driving levers — excluded from the agent's lever
+ * manifest in the base game-master prompt (0018): `getMomentPrompt` supplies the
+ * prompt itself, `endOfSessionSummary` just confirms a save exists.
+ */
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary"]);
+
+/**
+ * The game-driving player levers the agent should know how to pull. This is the
+ * single source of truth the base prompt's lever manifest must stay in sync with
+ * (0018) — the manifest↔registry drift test fails if any of these is unnamed.
+ */
+export const PLAYER_AGENT_LEVERS: readonly string[] =
+  PLAYER_TOOLS.filter((t) => !INFRA_LEVERS.has(t.name)).map((t) => t.name);
