@@ -2,6 +2,7 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
+  FinaleView,
 } from "../../ports/GameSession";
 import { npcInitiatedApproaches } from "../../engine/conversation";
 import type { NarrativePort } from "../../ports/NarrativePort";
@@ -46,7 +47,9 @@ import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, type LiveSeasonState,
   type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+  type FinaleProgress,
 } from "../../engine/liveSeason";
+import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
 import { cloneSession } from "../../engine/sessionSnapshot";
 
@@ -248,11 +251,14 @@ export class GameSessionAdapter implements GameSession {
 
   advanceGame(): AdvanceView {
     if (!this.house || !this.live) return this.advanceView(null);
+    let ev: BeatEvent | null = null;
     if (!this.live.pending && !this.live.finished) {
-      const ev = advanceBeat(this.live, this.ctx(), this.beatRng());
+      ev = advanceBeat(this.live, this.ctx(), this.beatRng());
       this.commit(ev);
     }
-    return this.advanceView(null);
+    // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
+    // and every ceremony beat are visible in the view, not only recorded to the event store.
+    return this.advanceView(ev);
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
@@ -300,6 +306,18 @@ export class GameSessionAdapter implements GameSession {
       case "eviction-vote":
         if (!req.vote) throw new Error("an eviction vote is required");
         return { kind: "eviction-vote", vote: req.vote };
+      // --- finale (0037) ---
+      case "finale-statement":
+        return { kind: "finale-statement", statement: req.statement ?? "" };
+      case "finale-answer": {
+        if (!req.appeal || !(FINALE_APPEALS as readonly string[]).includes(req.appeal)) {
+          throw new Error("a legal finale appeal is required");
+        }
+        return { kind: "finale-answer", appeal: req.appeal as FinaleAppeal };
+      }
+      case "juror-vote":
+        if (!req.vote) throw new Error("a juror vote is required");
+        return { kind: "juror-vote", vote: req.vote };
     }
   }
 
@@ -321,6 +339,17 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: `You used the veto on ${this.nameOf((p as { saved: EntityId }).saved)} — name a replacement nominee.`, options: refs(p.options), pick: 1 };
       case "eviction-vote":
         return { kind: p.kind, by, prompt: "Cast your vote to evict one of the two nominees.", options: refs(p.nominees), pick: 1 };
+      // --- finale (0037) ---
+      case "finale-statement":
+        return { kind: p.kind, by, prompt: "You are a finalist — give your opening statement to the jury.", options: [], pick: 0 };
+      case "finale-answer":
+        return {
+          kind: p.kind, by,
+          prompt: `${this.nameOf(p.juror)} asks you a question — choose how you make your case.`,
+          options: [], appeals: [...p.appeals], juror: this.named(p.juror)!, pick: 1,
+        };
+      case "juror-vote":
+        return { kind: p.kind, by, prompt: "You sit on the jury — cast your vote for the winner.", options: refs(p.finalists), pick: 1 };
     }
   }
 
@@ -333,6 +362,28 @@ export class GameSessionAdapter implements GameSession {
       status: this.gameStatus(),
       finished: !!s?.finished,
       winner: this.named(s?.winner),
+      finale: this.finaleView(),
+    };
+  }
+
+  /**
+   * Vault-free projection of an in-progress finale (0037): names, the current stage, the
+   * juror asking, and the votes REVEALED SO FAR (`revealIx`) only. No lean, no tally, no
+   * manner, and no pre-reveal winner ever crosses — a juror's vote appears only after it is
+   * revealed in order. Null unless the finale is actively staging.
+   */
+  private finaleView(): FinaleView | null {
+    const f: FinaleProgress | undefined = this.live?.finale;
+    if (!f || this.live?.finished) return null;
+    const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
+    const q = f.script.questions[f.questionIx];
+    return {
+      stage: f.stage,
+      finalists: f.finalists.map(ref),
+      asking: f.stage === "questions" && q ? ref(q.juror) : null,
+      reveals: f.script.revealOrder.slice(0, f.revealIx).map((juror) => ({
+        juror: ref(juror), votedFor: ref(f.votes![juror]!),
+      })),
     };
   }
 

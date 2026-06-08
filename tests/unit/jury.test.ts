@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { juryLean, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS } from "../../src/engine/jury";
+import { juryLean, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS, appealEffect, bestAppeal, finalePerformance, FINALE_APPEALS } from "../../src/engine/jury";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { npc } from "../../src/domain/ids";
 
@@ -102,5 +102,69 @@ describe("0014 — Final 2 choreography", () => {
     expect(script.questions).toHaveLength(jury.length);
     for (const q of script.questions) expect([A, B]).toContain(q.finalist);
     expect(script.revealOrder).toEqual(jury);
+  });
+});
+
+describe("0037 — engine-legible finale appeals (anti-sycophancy)", () => {
+  it("every appeal scores within [0,1] for any juror state", () => {
+    for (const a of FINALE_APPEALS) {
+      for (const manner of [{}, { betrayed: true }, { blindsided: true }, { respected: true }]) {
+        for (const affinity of [0, 0.5, 1]) {
+          const e = appealEffect(a, { trust: 0.5, affinity, threat: 0.3 }, manner);
+          expect(e).toBeGreaterThanOrEqual(0);
+          expect(e).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+  });
+
+  it("mend lands on a grievance and is wasted without one", () => {
+    expect(appealEffect("mend", neutral, { betrayed: true })).toBeGreaterThan(appealEffect("mend", neutral, {}));
+    expect(appealEffect("mend", neutral, { blindsided: true })).toBeGreaterThan(0.6);
+  });
+
+  it("connect scales with affinity; own-game backfires on the betrayed", () => {
+    expect(appealEffect("connect", { trust: 0.5, affinity: 0.9, threat: 0.2 }, {}))
+      .toBeGreaterThan(appealEffect("connect", { trust: 0.5, affinity: 0.1, threat: 0.2 }, {}));
+    expect(appealEffect("own-game", neutral, { betrayed: true })).toBeLessThan(appealEffect("own-game", neutral, {}));
+  });
+
+  it("bestAppeal is a deterministic argmax that picks mend for a grievance juror", () => {
+    expect(bestAppeal(neutral, { betrayed: true })).toBe("mend");
+    // Stable across calls (pure).
+    expect(bestAppeal({ trust: 0.5, affinity: 0.95, threat: 0.1 }, {}))
+      .toBe(bestAppeal({ trust: 0.5, affinity: 0.95, threat: 0.1 }, {}));
+  });
+
+  it("the finale sway is BOUNDED: a perfect finale cannot overturn a clear relationship lead", () => {
+    // B holds a clear accumulated lead; A plays a perfect finale, B a weak one.
+    const leanA = juryLean(neutral, {});
+    const leanB = juryLean(neutral, {}) + 1.0; // clear lead for B
+    const perfA = 1.0, perfB = 0.0;
+    let aWins = 0;
+    for (let s = 1; s <= 400; s++) {
+      const v = castJuryVote([A, B], (f) => (f === A ? leanA : leanB), (f) => (f === A ? perfA : perfB), new SeededRandom(s));
+      if (v === A) aWins++;
+    }
+    // finale weight (0.3) is far below a 1.0 lead → A's perfect finale never flips it.
+    expect(aWins).toBe(0);
+  });
+
+  it("the finale DOES sway a close juror", () => {
+    const lean = juryLean(neutral, {});
+    let aWins = 0;
+    for (let s = 1; s <= 400; s++) {
+      const v = castJuryVote([A, B], () => lean, (f) => (f === A ? 1.0 : 0.0), new SeededRandom(s));
+      if (v === A) aWins++;
+    }
+    // Even split on relationship + A's strong finale → A wins clearly more than half.
+    expect(aWins).toBeGreaterThan(260);
+  });
+
+  it("finalePerformance averages appeal qualities", () => {
+    const parts = FINALE_APPEALS.map((a) => ({ quality: appealEffect(a, neutral, { betrayed: true }) }));
+    const p = finalePerformance(parts);
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThanOrEqual(1);
   });
 });

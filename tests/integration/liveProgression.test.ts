@@ -27,7 +27,7 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
       const adv = (await player.callTool("advanceGame", {})) as {
         finished: boolean;
         winner: { id: string; name: string } | null;
-        pending: { kind: string; options: { id: string }[] } | null;
+        pending: { kind: string; options: { id: string }[]; appeals?: string[] } | null;
         status: { hoh: unknown; nominees: unknown[] };
       };
       if (adv.status.hoh) sawHoh = true;
@@ -42,6 +42,12 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
           await player.callTool("submitDecision", { kind: "veto-decision", use: false });
         } else if (p.kind === "replacement") {
           await player.callTool("submitDecision", { kind: "replacement", replacement: p.options[0]!.id });
+        } else if (p.kind === "finale-statement") {
+          await player.callTool("submitDecision", { kind: "finale-statement", statement: "I played the best game." });
+        } else if (p.kind === "finale-answer") {
+          await player.callTool("submitDecision", { kind: "finale-answer", appeal: p.appeals![0]! });
+        } else if (p.kind === "juror-vote") {
+          await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
         } else {
           await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
         }

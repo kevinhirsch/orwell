@@ -99,16 +99,43 @@ export interface BeatEventView {
   content: string;
 }
 
-/** A decision the live loop is blocked on until the player resolves it (0011). */
+/** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote"
+    | "finale-statement" | "finale-answer" | "juror-vote";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
-  /** The legal choices (the houseguests the player may pick among). */
+  /**
+   * The legal choices (the houseguests the player may pick among). For `finale-statement`
+   * this is empty (the statement is free text); for `juror-vote` it is the two finalists.
+   */
   options: NamedRef[];
-  /** How many to pick (nominations = 2; others = 1). */
+  /**
+   * The legal finale APPEALS for a `finale-answer` (Vault-free, name-agnostic enum values);
+   * absent for every other decision kind. The engine scores the chosen appeal — never the prose.
+   */
+  appeals?: string[];
+  /** The juror asking, for a `finale-answer` (Vault-free name only); absent otherwise. */
+  juror?: NamedRef;
+  /** How many to pick (nominations = 2; others = 1; finale-statement = 0). */
   pick: number;
+}
+
+/**
+ * The Vault-free projection of an in-progress finale (0037). Names + the current stage +
+ * the reveals SO FAR only — NEVER a lean, a vote tally, an eviction manner, or the
+ * pre-reveal winner. A juror's vote appears here only once it has been revealed in order.
+ */
+export interface FinaleView {
+  /** Which stage the finale is in: statements | questions | vote | reveal. */
+  stage: string;
+  /** The two finalists by name. */
+  finalists: NamedRef[];
+  /** The juror currently asking a question, if any (name only). */
+  asking: NamedRef | null;
+  /** The votes revealed so far, in reveal order — each a (juror → finalist) pair by name. */
+  reveals: Array<{ juror: NamedRef; votedFor: NamedRef }>;
 }
 
 /** The Vault-free result of advancing the game or resolving a decision. */
@@ -121,6 +148,8 @@ export interface AdvanceView {
   status: PublicGameStatus;
   finished: boolean;
   winner: NamedRef | null;
+  /** The in-progress finale projection (0037); present only while the finale is staging. */
+  finale?: FinaleView | null;
 }
 
 /**
@@ -140,7 +169,8 @@ export interface PlayerTaglineView {
 
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote"
+    | "finale-statement" | "finale-answer" | "juror-vote";
   /** nominations: exactly two houseguest ids. */
   choice?: EntityId[];
   /** veto-decision: whether to use the veto. */
@@ -149,8 +179,12 @@ export interface SubmitDecisionReq {
   save?: EntityId;
   /** replacement: the replacement nominee the HOH names. */
   replacement?: EntityId;
-  /** eviction-vote: the final nominee the player votes to evict. */
+  /** eviction-vote / juror-vote: the finalist/nominee the player votes for. */
   vote?: EntityId;
+  /** finale-statement: the player's free-text opening statement (flavor; carries no score). */
+  statement?: string;
+  /** finale-answer: the structured appeal the player makes (engine-scored; never the prose). */
+  appeal?: string;
 }
 
 export interface GameSession {

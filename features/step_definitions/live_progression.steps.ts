@@ -142,7 +142,7 @@ Then("the same pending decision still stands", async function (this: BbWorld) {
 
 Given("a live game advanced several beats", async function (this: BbWorld) {
   const { reg, player } = newLive("u2", 9);
-  this.registry = reg; this.livePlayer = player;
+  this.registry = reg; this.livePlayer = player; this.liveUser = "u2";
   await player.callTool("createCharacter", { playerName: "Player", seed: 9 });
   for (let i = 0; i < 3; i++) {
     const v = await adv(player);
@@ -152,11 +152,16 @@ Given("a live game advanced several beats", async function (this: BbWorld) {
   this.liveWeekA = st.week; this.livePhaseA = st.phase;
 });
 
+// Shared restart step (0034 + 0037): restore the current scenario's user into a fresh registry
+// from the durable snapshot, capturing both the public status and the full resumed snapshot so
+// each scenario's Then can assert what it cares about (week/phase, or the in-progress finale).
 When("the engine restarts and resumes from the durable save", async function (this: BbWorld) {
-  const snap = this.registry!.snapshot("u2");
+  const user = this.liveUser ?? "u2";
+  const snap = this.savedSnap ?? this.registry!.snapshot(user);
   this.registry2 = new GameSessionRegistry();
-  this.registry2.restore("u2", snap);
-  const st = (await this.registry2.resolver()("player", "u2").callTool("gameStatus", {})) as { week: number; phase: string };
+  this.registry2.restore(user, snap);
+  this.resumedSnap = this.registry2.snapshot(user) as typeof this.resumedSnap;
+  const st = (await this.registry2.resolver()("player", user).callTool("gameStatus", {})) as { week: number; phase: string };
   this.liveWeekB = st.week; this.livePhaseB = st.phase;
 });
 
