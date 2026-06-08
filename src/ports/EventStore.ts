@@ -1,12 +1,14 @@
-import type { GameEvent } from '../domain/types';
+import type { GameEvent, EntityId } from "../domain/event";
 
-/**
- * The single interaction record. Outward-facing code reads only through visibility-filtered
- * views (e.g. `visibleTo`) — never the raw Vault.
- */
+export interface EventQuery {
+  /** Only events whose witness set includes this entity (i.e. VISIBLE to them). */
+  witnessedBy?: EntityId;
+  hidden?: boolean;
+  type?: string;
+}
+
+/** The single interaction record. Not the Vault — outward code may read this. */
 export interface EventStore {
   record(event: GameEvent): void;
-  all(): readonly GameEvent[];
-  /** Events whose witness set includes the entity — the only events visible to them. */
-  visibleTo(entity: string): readonly GameEvent[];
+  query(filter?: EventQuery): GameEvent[];
 }

@@ -47,8 +47,8 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 
 | # | Feature | Priority | Status |
 |---|---|---|---|
-| 0001 | [Vault Wall isolation](./0001-vault-wall-isolation.md) | 1 | Draft |
-| 0002 | [Event visibility & propagation](./0002-event-visibility-and-propagation.md) | 2 | Draft |
+| 0001 | [Vault Wall isolation](./0001-vault-wall-isolation.md) | 1 | Done |
+| 0002 | [Event visibility & propagation](./0002-event-visibility-and-propagation.md) | 2 | Done |
 | 0003 | [Behavioral fidelity](./0003-behavioral-fidelity.md) | 3 | Draft |
 | 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | 4 | Draft |
 | 0005 | [Competition eligibility](./0005-competition-eligibility.md) | 5 | Draft |

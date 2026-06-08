@@ -10,11 +10,10 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: scaffolded, pre-implementation.** The stack is chosen (TypeScript / Node,
-hexagonal) and a failing-first Vault-Wall test is wired — see
-[Building & testing](#building--testing). Priority-ordered feature specs live in
-`docs/features/`. The next engineering work is to turn feature 0001 from red to green, then
-proceed down the priority order BDD/TDD-first.
+**Status: under active implementation (BDD/TDD-first).** The stack is chosen (TypeScript /
+Node, hexagonal) and features **0001 (Vault Wall) and 0002 (event visibility) are green** —
+see [Building & testing](#building--testing). Priority-ordered feature specs live in
+`docs/features/`; work proceeds down that order. Next: 0003 (behavioral fidelity).
 
 ## Source of truth — read these first
 
@@ -26,6 +25,8 @@ are authoritative and reference each other as companions.
 |---|---|
 | `docs/CLAUDE_CODE_INSTRUCTIONS.md` | **Build brief & decision log** — start here. Architecture directives, workflow, hard "do-nots", milestones, open decisions (§15). |
 | `docs/bb-sim-spec.md` | **v3 domain spec** — concept, persistence model, Vault Wall, behavioral-fidelity mandate, the BDD invariants (§12), open decisions (§16). |
+| `docs/decisions/` | **Decision records (ADRs)** — accepted refinements to the canonical mechanics (drop Luck → emotional modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"). |
+| `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. |
 
 ## The non-negotiable mandate
@@ -192,44 +193,62 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 
 ## Building & testing
 
-**Stack (resolved):** TypeScript / Node 22, hexagonal. Test lanes: **Cucumber.js** (BDD
-`.feature` files), **Vitest** (unit), **fast-check** (property / distribution), and
-**dependency-cruiser** (the Vault-Wall architecture test). Datastore: **SQLite now**
-(`better-sqlite3`) **→ Postgres-ready**, behind ports, with in-memory adapters for tests.
-Vectors are adopted from day one (**sqlite-vec → pgvector**) behind an **engine-only**
-`VectorIndex`.
+Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test lanes: **Vitest**
+(unit/property), **Cucumber.js** (the executable `.feature` specs), **fast-check** (property /
+distribution), and **dependency-cruiser** (the *structural* Vault-Wall test — proves no outward
+module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastore is
+**in-memory** today; **SQLite (`better-sqlite3`) → Postgres** and **sqlite-vec → pgvector**
+(the latter engine-only) land behind their ports with the persistence/soul features.
 
-```bash
-npm install
-npm run typecheck     # tsc --noEmit
-npm run depcruise     # Vault Wall: no outward module may import VaultStore / VectorIndex
-npm run test:unit     # vitest
-npm run test:bdd      # cucumber-js — currently the FAILING 0001 Vault-Wall scenario
-npm test              # all of the above, in sequence
-```
+| Command | What it does |
+|---|---|
+| `npm install` | Install dev dependencies. |
+| `npm test` | Full gate: `typecheck` → `test:unit` → `test:bdd`. |
+| `npm run typecheck` | `tsc --noEmit`. |
+| `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
+| `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
+| `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
+| `npm run test:watch` | Vitest watch mode. |
 
-**A single failing test is wired by design:** `npm run test:bdd` runs the first scenario of
-feature 0001 and is **red** until the player surface renders from the visible projection;
-typecheck, depcruise, and unit are green. Turning it green is the first implementation task.
+- Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
+- Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
+- `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order).
 
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`
-and `VectorIndex` are **engine-only**) · `src/adapters` (in-memory now; SQLite/vector later) ·
-`src/surfaces` (player + admin — no Vault handle by construction) · `src/app` (composition
-roots — only the engine root wires the Vault). BDD steps in `test/bdd`, unit tests in
-`test/unit`. The `.feature` files remain the source of truth in `docs/features/`.
+and `VectorIndex` are **engine-only**) · `src/services` (visible-state / summary — outward-safe)
+· `src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) ·
+`src/adapters` (`inmemory/`, `narrative/`, `random/`; SQLite/vector later) · `src/engine`
+(off-screen simulation) · `src/composition` (`engineRoot` wires the Vault; `outwardRoot` never
+does). BDD steps + support in `features/`; unit/property/architecture tests in `tests/`. The
+`.feature` files in `docs/features/` remain the source of truth.
+
+## Current status
+
+Built BDD/TDD-first, in priority order:
+
+- **0001 — Vault Wall isolation:** ✅ green (player + admin surfaces; boundary proven by
+  dependency-cruiser; sentinel + property tests; fixed tool allowlist).
+- **0002 — Event visibility & propagation:** ✅ green (witness-derived visibility with a
+  store-enforced invariant against mislabeling; pathway-only propagation; knowledge vs
+  suspicion; Diary-Room isolation).
+
+`npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
+priority order: **0003 — behavioral fidelity**.
 
 ## Open decisions (remaining)
 
 **Resolved:** tech stack, datastore, and vector adoption (above); soul storage = markdown +
 vector behind `SoulProvider`; non-degradation strategy = superset + monotonic-count + lossless
-round-trip (`docs/features/0007-persistence-non-degradation.md`). **Still to confirm — none
-block the Vault-Wall slice:**
+round-trip (`docs/features/0007-persistence-non-degradation.md`); drop Luck → emotional
+modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"
+(`docs/decisions/`). **Still to confirm — none block current work:**
 
-1. **Temperature constants** — distributions, per-variable weighting, bounds, and the
-   hidden-element surfacing rate. The *shape* is fixed in `docs/features/0006-…`; the numbers
-   are tunable config still to be set.
-2. **Jury choreography & twists/specials** — jury-of-9 sequester and the tie-breaks are
-   settled; the precise jury-vote staging and any reserve twists remain to design (low
-   priority; twists stay Vault-held).
-3. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
-   fake covers seeded tests); finalize at wiring time.
+1. **Temperature & emotional-modifier constants** — distributions, per-variable weighting,
+   bounds, hidden-element surfacing rate, volatility / mean-reversion. The *shape* is fixed in
+   `docs/features/0006-…` and `docs/decisions/0001`; the numbers are tunable config.
+2. **Relationship-model math** — signal set, update rule, recency/decay, betrayal-shock,
+   thresholds (`docs/decisions/0002`, Proposed).
+3. **Jury choreography & twists/specials** — sequester and tie-breaks are settled; precise
+   jury-vote staging and any reserve twists remain (low priority; twists stay Vault-held).
+4. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
+   fake covers seeded tests).

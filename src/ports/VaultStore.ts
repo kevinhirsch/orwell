@@ -1,23 +1,26 @@
-// ENGINE-ONLY PORT.
-//
-// No player-facing or admin/God-Mode-facing module may import or depend on this port.
-// The boundary is enforced structurally (composition roots) and verified by
-// dependency-cruiser (.dependency-cruiser.cjs) — feature 0001.
+/**
+ * ENGINE-ONLY PORT — the Producer's Vault.
+ *
+ * No player-facing OR admin/God-Mode-facing module may import this file. The
+ * boundary is enforced structurally by dependency-cruiser (rule
+ * `no-vault-on-outward`) with `tsPreCompilationDeps` on, so an outward module
+ * cannot even name these types. The narrator cannot leak what it never receives.
+ */
+export type HiddenKind =
+  | "hidden-attribute"
+  | "confessional"
+  | "hidden-thread"
+  | "offscreen-event"
+  | "reserved-twist";
 
-export type VaultRecordKind =
-  | 'hidden-attribute'
-  | 'confessional'
-  | 'hidden-thread'
-  | 'offscreen-event'
-  | 'reserved-twist';
-
-export interface VaultRecord {
-  readonly id: string;
-  readonly kind: VaultRecordKind;
-  readonly content: string;
+export interface HiddenRecord {
+  id: string;
+  kind: HiddenKind;
+  subject?: string;
+  content: string;
 }
 
 export interface VaultStore {
-  put(record: VaultRecord): void;
-  all(): readonly VaultRecord[];
+  readHidden(query?: { kind?: HiddenKind; subject?: string }): HiddenRecord[];
+  writeHidden(record: HiddenRecord): void;
 }

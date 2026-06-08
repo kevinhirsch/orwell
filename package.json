@@ -3,25 +3,25 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Big Brother: The Simulation — hexagonal TypeScript engine.",
-  "license": "MIT",
+  "description": "Immersive single-player Big Brother simulation — hexagonal engine with a structural Vault Wall.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "depcruise": "depcruise --config .dependency-cruiser.cjs src",
+    "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "test:watch": "vitest",
     "test:bdd": "NODE_OPTIONS='--import tsx' cucumber-js",
-    "test": "npm run typecheck && npm run depcruise && npm run test:unit && npm run test:bdd"
+    "test:arch": "depcruise src --config .dependency-cruiser.cjs",
+    "test": "npm run typecheck && npm run test:unit && npm run test:bdd"
   },
   "devDependencies": {
-    "@cucumber/cucumber": "^11.2.0",
-    "@types/node": "^22.10.7",
-    "dependency-cruiser": "^16.9.0",
-    "fast-check": "^3.23.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "@cucumber/cucumber": "^11.3.0",
+    "@types/node": "^22.10.0",
+    "dependency-cruiser": "^16.10.0",
+    "fast-check": "^3.23.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
   }
 }

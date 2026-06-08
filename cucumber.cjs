@@ -1,0 +1,16 @@
+// Cucumber.js configuration (CommonJS so it loads regardless of "type": "module").
+// TypeScript step definitions are loaded through the tsx ESM loader, wired via
+// NODE_OPTIONS="--import tsx" in the `test:bdd` npm script.
+//
+// `paths` intentionally lists only the features that have been IMPLEMENTED. The
+// drafts for later priorities (0002–0008) stay untouched and are added here as
+// each one is built to green, in priority order.
+module.exports = {
+  default: {
+    paths: [
+      "docs/features/0001-vault-wall-isolation.feature",
+      "docs/features/0002-event-visibility-and-propagation.feature",
+    ],
+    import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
+  },
+};

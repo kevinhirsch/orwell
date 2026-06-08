@@ -1,24 +1,44 @@
-// Architecture boundary for the Vault Wall (feature 0001).
-//
-// Outward-facing code — the player/admin surfaces and their composition roots —
-// must NEVER depend on the engine-only Vault or the engine-only vector index.
-// dependency-cruiser fails the build on any forbidden edge, so the boundary is a
-// machine-checked structural guarantee, not a convention.
+/**
+ * dependency-cruiser configuration — the STRUCTURAL proof of the Vault Wall.
+ *
+ * The crux of feature 0001: no outward-facing module (player surface, admin /
+ * God-Mode port, the visible-state services they consume, or the outward
+ * composition root) may depend on the engine-only `VaultStore` / `VectorIndex`
+ * ports, their adapters, or the engine composition root that wires them.
+ *
+ * `tsPreCompilationDeps: true` makes the check catch even type-only imports, so
+ * an outward module cannot so much as *name* the Vault types.
+ */
+const OUTWARD = "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$";
+const VAULT =
+  "^src/ports/(VaultStore|VectorIndex)\\.ts$" +
+  "|^src/adapters/inmemory/InMemoryVaultStore\\.ts$" +
+  "|^src/composition/engineRoot\\.ts$";
+
 module.exports = {
   forbidden: [
     {
-      name: 'no-outward-vault-access',
-      severity: 'error',
+      name: "no-vault-on-outward",
+      severity: "error",
       comment:
-        'Player-/admin-facing surfaces and their composition roots must not import the ' +
-        'VaultStore or the (engine-only) VectorIndex — the model cannot leak what it never receives.',
-      from: { path: '^src/(surfaces/|app/(player|admin)Context)' },
-      to: { path: '^src/(ports/VaultStore|ports/VectorIndex|adapters/.*[Vv]ault)' },
+        "Outward-facing code must be structurally incapable of reading the Vault. " +
+        "The narrator cannot leak what it never receives.",
+      from: { path: OUTWARD },
+      to: { path: VAULT },
+    },
+    {
+      name: "no-circular",
+      severity: "error",
+      comment: "Circular dependencies muddy the port boundaries; keep the graph acyclic.",
+      from: {},
+      to: { circular: true },
     },
   ],
   options: {
-    doNotFollow: { path: 'node_modules' },
-    tsConfig: { fileName: 'tsconfig.json' },
-    enhancedResolveOptions: { extensions: ['.ts', '.js'] },
+    tsPreCompilationDeps: true,
+    tsConfig: { fileName: "tsconfig.json" },
+    enhancedResolveOptions: { extensions: [".ts", ".js"] },
+    doNotFollow: { path: "node_modules" },
+    exclude: { path: "node_modules" },
   },
 };
