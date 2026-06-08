@@ -130,6 +130,13 @@ export class BbWorld extends World {
   twist?: VaultDatum;
   revealRejected?: boolean;
 
+  // Relationship model (0017) scratch state.
+  relTrustBefore?: number;
+  relBondBefore?: number;
+  relConfBefore?: number;
+  labelParanoid?: string;
+  labelTrusting?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;
