@@ -80,9 +80,14 @@ later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed age
 
 ## Validation & remaining wiring
 
-- **Validation is an install smoke test on a real Proxmox host / CI** (provision → install →
-  curl the UI → update → assert the save survived). It is **not** runnable in the dev sandbox
-  and is **not** part of the BDD/unit suite.
+- **Automated smoke:** [`deploy/smoke.sh`](./smoke.sh) builds + starts the engine, probes the HTTP
+  MCP surface, exercises the player game tools (`createCharacter` → `getGameState` →
+  `getMomentPrompt` → `resolveCompetition`), proves channel isolation, and simulates an update
+  (rebuild + restart). It runs offline, locally and in CI (`.github/workflows/ci.yml`), and
+  asserts the update script never deletes the save.
+- **On-host validation** remains the full Proxmox-LXC provisioning (provision → one-liner install →
+  curl the UI → update → assert the save survived) — that part can't run in GitHub Actions (no LXC)
+  and is the on-box test.
 - Two pieces complete the end-to-end game and are owned outside these scripts:
   1. the engine's **HTTP MCP transport** + `build`/`start` entrypoint (the implementer);
   2. the **Orwell → engine MCP** client wiring (`frontend/INTEGRATION.md`).
