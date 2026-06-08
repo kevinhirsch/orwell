@@ -1,9 +1,38 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
-  AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative,
+  AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
 } from "../../ports/GameSession";
 import { npcInitiatedApproaches } from "../../engine/conversation";
+import type { NarrativePort } from "../../ports/NarrativePort";
+
+/** Player public standing — the only axis the snarky hero tagline (0033) keys on. Vault-free. */
+type Standing = "pre-game" | "hoh" | "nominee" | "veto-holder" | "houseguest";
+
+/**
+ * Curated, state-aware snarky Big Brother taglines (0033). Anti-sycophantic: a weak standing is
+ * ribbed, not flattered. These are also the FAIL-OPEN fallback when no real narrator is wired (the
+ * live narrator is a stub today) — so the hero line is always good, never a JSON dump, never blank.
+ */
+const SNARKY_TAGLINES: Record<Standing, string> = {
+  "pre-game": "Sixteen strangers, one house, zero privacy — ready to lie to everyone you haven't met yet?",
+  hoh: "Head of Household: for one week the whole house adores you and means none of it.",
+  nominee: "On the block and on camera. Smile — someone you trusted put you here.",
+  "veto-holder": "You're holding the veto, so suddenly everybody remembers your name.",
+  houseguest: "Another day in the house. Trust no one — especially the ones being nice.",
+};
+
+const TAGLINE_INSTRUCTION =
+  "Write ONE biting Big Brother welcome line for the player at this moment. One sentence, no spoilers, no quotes.";
+
+/** First line, trimmed, length-capped — a hero line is one short line. */
+function oneLine(s: string): string {
+  return (s.split("\n")[0] ?? "").trim().slice(0, 120);
+}
+/** Reject empty/over-long output and the Echo stub's context dump (so we fall open to the template). */
+function isUsableTagline(s: string): boolean {
+  return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
+}
 import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle } from "../../engine/characterFactory";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
@@ -46,6 +75,10 @@ export class GameSessionAdapter implements GameSession {
   private onPersist?: () => void;
   /** Beat-event sink (wired by the registry to record player-witnessed events into the EventStore). */
   private onEvent?: (ev: BeatEvent) => void;
+  /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
+  private narrator?: NarrativePort;
+  /** Per-moment tagline cache (regenerate when week/phase/standing changes, not per page load). */
+  private readonly taglineCache = new Map<string, string>();
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -63,6 +96,11 @@ export class GameSessionAdapter implements GameSession {
   /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
   setOnEvent(fn: (ev: BeatEvent) => void): void {
     this.onEvent = fn;
+  }
+
+  /** Wire a narrator for the snarky tagline (0033). Without one, the curated fallback is used. */
+  setNarrator(narrator: NarrativePort): void {
+    this.narrator = narrator;
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -124,6 +162,42 @@ export class GameSessionAdapter implements GameSession {
       houseguest: { id, name: this.nameOf(id) },
       pretext: "wants a word with you",
     }));
+  }
+
+  /** The player's current public standing — Vault-free (ceremony facts only). */
+  private standing(): Standing {
+    if (!this.house) return "pre-game";
+    const me = this.house.player.id;
+    if (this.ceremony.hoh === me) return "hoh";
+    if (this.ceremony.nominees.includes(me)) return "nominee";
+    if (this.ceremony.vetoHolder === me) return "veto-holder";
+    return "houseguest";
+  }
+
+  playerTagline(): PlayerTaglineView {
+    const standing = this.standing();
+    const key = `${this.week}|${this.phase}|${standing}`;
+    const cached = this.taglineCache.get(key);
+    if (cached !== undefined) return { text: cached };
+
+    // The curated, state-aware line is both the default and the fail-open fallback.
+    let text = SNARKY_TAGLINES[standing];
+    if (this.narrator) {
+      try {
+        const line = oneLine(this.narrator.narrate({
+          forEntity: this.house?.player.id ?? PLAYER,
+          mode: "scene",
+          visibleEvents: [],
+          knowledge: [],
+          systemPrompt: `${TAGLINE_INSTRUCTION} Standing: ${standing}. Week ${this.week}, phase ${this.phase}.`,
+        }));
+        if (isUsableTagline(line)) text = line; // else fail open to the curated line
+      } catch {
+        /* narrator error/timeout ⇒ keep the curated themed line (never blank, never blocking) */
+      }
+    }
+    this.taglineCache.set(key, text);
+    return { text };
   }
 
   createCharacter(req: CreateCharacterReq): GameStateView {

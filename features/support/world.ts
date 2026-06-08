@@ -195,6 +195,16 @@ export class BbWorld extends World {
   stateA?: string;
   stateB?: string;
 
+  // Live weekly progression & decision seam (0034) scratch state.
+  livePlayer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  lastAdvance?: import("../../src/ports/GameSession").AdvanceView;
+  beatsBeforeStop?: number;
+  liveRefused?: boolean;
+  liveWeekA?: number;
+  liveWeekB?: number;
+  livePhaseA?: string;
+  livePhaseB?: string;
+
   // Durable game persistence (0030) scratch state.
   saveDir?: string;
   registry2?: import("../../src/composition/registry").GameSessionRegistry;

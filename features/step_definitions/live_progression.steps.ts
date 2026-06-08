@@ -1,0 +1,219 @@
+import { Given, When, Then } from "@cucumber/cucumber";
+import assert from "node:assert/strict";
+import type { BbWorld } from "../support/world";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import type { AdvanceView } from "../../src/ports/GameSession";
+import { assertNoSentinels } from "../../tests/support/assertions";
+import { npc } from "../../src/domain/ids";
+
+// Feature 0034 — codifies the live weekly loop + decision seam, driven only through the MCP player
+// channel (createCharacter → advanceGame/submitDecision). Seed 2: the player survives deep and faces
+// the full range of decisions (a thorough wiring proof, mirroring tests/integration/liveProgression).
+
+type Player = import("../../src/adapters/mcp/McpServer").McpServer;
+
+const adv = async (p: Player): Promise<AdvanceView> => (await p.callTool("advanceGame", {})) as AdvanceView;
+
+async function resolveLegally(p: Player, d: NonNullable<AdvanceView["pending"]>): Promise<void> {
+  if (d.kind === "nominations") await p.callTool("submitDecision", { kind: "nominations", choice: [d.options[0]!.id, d.options[1]!.id] });
+  else if (d.kind === "veto-decision") await p.callTool("submitDecision", { kind: "veto-decision", use: false });
+  else if (d.kind === "replacement") await p.callTool("submitDecision", { kind: "replacement", replacement: d.options[0]!.id });
+  else await p.callTool("submitDecision", { kind: "eviction-vote", vote: d.options[0]!.id });
+}
+
+/** Advance until the first pending decision, counting beats that resolved automatically. */
+async function driveToPending(p: Player): Promise<{ view: AdvanceView; beats: number }> {
+  let beats = 0;
+  for (let i = 0; i < 3000; i++) {
+    const view = await adv(p);
+    if (view.pending || view.finished) return { view, beats };
+    beats++;
+  }
+  throw new Error("no pending decision within bound");
+}
+
+/** Advance to a pending decision of a specific kind, resolving any others legally on the way. */
+async function driveToKind(p: Player, kind: string): Promise<AdvanceView> {
+  for (let i = 0; i < 3000; i++) {
+    const view = await adv(p);
+    if (view.finished) throw new Error(`finished before reaching ${kind}`);
+    if (view.pending) {
+      if (view.pending.kind === kind) return view;
+      await resolveLegally(p, view.pending);
+    }
+  }
+  throw new Error(`never reached ${kind}`);
+}
+
+const newLive = (user: string, seed: number): { reg: GameSessionRegistry; player: Player } => {
+  const reg = new GameSessionRegistry();
+  const player = reg.resolver()("player", user) as Player;
+  return { reg, player };
+};
+
+// --- S1: auto-resolve + stop ---------------------------------------------------
+
+Given("a live game started for the player", async function (this: BbWorld) {
+  const { reg, player } = newLive("u1", 2);
+  this.registry = reg; this.livePlayer = player;
+  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+});
+
+When("the game is advanced to the player's first binding decision", async function (this: BbWorld) {
+  const { view, beats } = await driveToPending(this.livePlayer!);
+  this.lastAdvance = view; this.beatsBeforeStop = beats;
+});
+
+Then("at least one beat resolved automatically before it stopped", function (this: BbWorld) {
+  assert.ok((this.beatsBeforeStop ?? 0) >= 1, "NPC beats resolved automatically before the player's turn");
+});
+
+Then("the pending decision offers a legal set of options", function (this: BbWorld) {
+  const p = this.lastAdvance!.pending;
+  assert.ok(p, "a decision is pending");
+  assert.ok(p!.options.length >= p!.pick, "enough legal options to satisfy the pick");
+});
+
+Then("advancing again does not skip the pending decision", async function (this: BbWorld) {
+  const before = this.lastAdvance!.pending!;
+  const again = await adv(this.livePlayer!);
+  assert.ok(again.pending, "still pending (idempotent while a decision is owed)");
+  assert.equal(again.pending!.kind, before.kind);
+  assert.deepEqual(again.pending!.options.map((o) => o.id), before.options.map((o) => o.id));
+});
+
+// --- S2: validated apply -------------------------------------------------------
+
+Given("a live game advanced to the player's first binding decision", async function (this: BbWorld) {
+  const { reg, player } = newLive("u1", 2);
+  this.registry = reg; this.livePlayer = player;
+  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  this.lastAdvance = (await driveToPending(player)).view;
+});
+
+When("the player submits a legal choice through the seam", async function (this: BbWorld) {
+  this.beatsBeforeStop = this.registry!.sandboxFor("u1").engine.events.query().length;
+  await resolveLegally(this.livePlayer!, this.lastAdvance!.pending!);
+  this.lastAdvance = await adv(this.livePlayer!);
+});
+
+Then("the choice is applied and the loop continues", function (this: BbWorld) {
+  const now = this.registry!.sandboxFor("u1").engine.events.query().length;
+  assert.ok(now > (this.beatsBeforeStop ?? 0), "the resolved beat advanced the loop (new events)");
+});
+
+Then("the beats are recorded as player-witnessed events", function (this: BbWorld) {
+  const events = this.registry!.sandboxFor("u1").engine.events.query();
+  assert.ok(events.length > 0);
+  assert.ok(events.every((e) => !e.hidden), "the player lived these beats — never hidden");
+});
+
+// --- S3: illegal refused -------------------------------------------------------
+
+Given("a live game advanced to a nomination decision", async function (this: BbWorld) {
+  const { reg, player } = newLive("u1", 2);
+  this.registry = reg; this.livePlayer = player;
+  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  this.lastAdvance = await driveToKind(player, "nominations");
+});
+
+When("the player submits an illegal nomination", async function (this: BbWorld) {
+  const p = this.lastAdvance!.pending!;
+  // Naming the same houseguest twice is illegal (0005 legality enforced in liveSeason.applyDecision).
+  try {
+    await this.livePlayer!.callTool("submitDecision", { kind: "nominations", choice: [p.options[0]!.id, p.options[0]!.id] });
+    this.liveRefused = false;
+  } catch {
+    this.liveRefused = true;
+  }
+});
+
+Then("the seam refuses it", function (this: BbWorld) {
+  assert.equal(this.liveRefused, true, "the illegal choice was rejected");
+});
+
+Then("the same pending decision still stands", async function (this: BbWorld) {
+  const again = await adv(this.livePlayer!);
+  assert.ok(again.pending, "still pending after the refusal");
+  assert.equal(again.pending!.kind, "nominations");
+});
+
+// --- S4: restart ---------------------------------------------------------------
+
+Given("a live game advanced several beats", async function (this: BbWorld) {
+  const { reg, player } = newLive("u2", 9);
+  this.registry = reg; this.livePlayer = player;
+  await player.callTool("createCharacter", { playerName: "Player", seed: 9 });
+  for (let i = 0; i < 3; i++) {
+    const v = await adv(player);
+    if (v.pending) await resolveLegally(player, v.pending);
+  }
+  const st = (await player.callTool("gameStatus", {})) as { week: number; phase: string };
+  this.liveWeekA = st.week; this.livePhaseA = st.phase;
+});
+
+When("the engine restarts and resumes from the durable save", async function (this: BbWorld) {
+  const snap = this.registry!.snapshot("u2");
+  this.registry2 = new GameSessionRegistry();
+  this.registry2.restore("u2", snap);
+  const st = (await this.registry2.resolver()("player", "u2").callTool("gameStatus", {})) as { week: number; phase: string };
+  this.liveWeekB = st.week; this.livePhaseB = st.phase;
+});
+
+Then("the resumed week and phase match exactly", function (this: BbWorld) {
+  assert.equal(this.liveWeekB, this.liveWeekA);
+  assert.equal(this.livePhaseB, this.livePhaseA);
+});
+
+// --- S5: Vault-free ------------------------------------------------------------
+
+Given("a live game whose Vault holds hidden content", async function (this: BbWorld) {
+  const { reg, player } = newLive("u3", 2);
+  this.registry = reg; this.livePlayer = player;
+  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  this.durableSentinel = "SENTINEL-VAULT-0034-secret-scheme";
+  // An off-screen scene the player does NOT witness (hidden) — must never reach the live outputs.
+  reg.sandboxFor("u3").engine.events.record({
+    id: "hidden:0034", ts: 999_999, type: "conversation",
+    initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: this.durableSentinel,
+  });
+});
+
+When("the game is advanced and the status is read", async function (this: BbWorld) {
+  const a = await adv(this.livePlayer!);
+  const s = await this.livePlayer!.callTool("gameStatus", {});
+  this.lastOutput = `${JSON.stringify(a)}\n${JSON.stringify(s)}`;
+});
+
+Then("no advance or status output carries a Vault sentinel value", function (this: BbWorld) {
+  assertNoSentinels(this.lastOutput, [this.durableSentinel!]);
+});
+
+// --- S6: deterministic ---------------------------------------------------------
+
+Given("two live games started from the same seed", async function (this: BbWorld) {
+  const a = newLive("a", 2); const b = newLive("b", 2);
+  this.registry = a.reg; this.registry2 = b.reg; this.livePlayer = a.player;
+  await a.player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  await b.player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+});
+
+When("the same advances and decisions are applied to each", async function (this: BbWorld) {
+  const drive = async (p: Player) => {
+    for (let i = 0; i < 60; i++) {
+      const v = await adv(p);
+      if (v.finished) break;
+      if (v.pending) await resolveLegally(p, v.pending);
+    }
+    return (await p.callTool("gameStatus", {})) as { week: number; phase: string };
+  };
+  const a = await drive(this.livePlayer!);
+  const b = await drive(this.registry2!.resolver()("player", "b") as Player);
+  this.liveWeekA = a.week; this.livePhaseA = a.phase;
+  this.liveWeekB = b.week; this.livePhaseB = b.phase;
+});
+
+Then("their resulting week and phase are identical", function (this: BbWorld) {
+  assert.equal(this.liveWeekB, this.liveWeekA);
+  assert.equal(this.livePhaseB, this.livePhaseA);
+});
