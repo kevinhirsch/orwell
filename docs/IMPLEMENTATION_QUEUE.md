@@ -35,6 +35,23 @@ A1 + B5 start immediately in parallel (one per agent). A2 unblocks the whole fro
 independent of the gameplay chain (their deps are already green) and can slot into any free
 Claude Code slot.
 
+## Progress (this session — onboarding vertical slice)
+
+A first end-to-end slice fixing "no onboarding past account creation" and "the model answers as
+a generic assistant" is **landed** (engine tested green; front-end bridge wired):
+
+- **A1 — HTTP MCP transport:** ✅ confirmed present (`HttpMcpServer.ts`); engine port aligned to
+  `BBAI_ENGINE_PORT` (8765) to match the deploy/front-end contract.
+- **B6 — engine OOBE:** ✅ exposed as Vault-free player tools `createCharacter` / `getGameState`,
+  plus `getMomentPrompt` (managed per-moment system prompt). Tested (unit + HTTP + sentinel/arch).
+- **A2 / C2 — front-end:** ✅ first slice — `/bbai` page (character creation → house → in-character
+  chat) + `routes/bbai_routes.py` + `src/bbai_engine.py`; chat injects the engine's moment prompt
+  via odysseus's own `resolve_endpoint`/`llm_call_async`. See `frontend/INTEGRATION.md` → "Try it".
+
+Remaining on these: deeper agent/tool-calling integration (let the LLM *call* engine action tools,
+not just narrate), surfacing `/bbai` from the main nav/landing, and the weekly-loop moments
+(feature 0011) that will advance phase/moment automatically.
+
 ---
 
 ## Prompts
