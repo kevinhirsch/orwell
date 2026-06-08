@@ -132,7 +132,11 @@ export function buildSandbox(seed = 1): Sandbox {
   const allPlayerOutputs = (): string =>
     ALL_PLAYER_SURFACES.map((s) => player.produce(s)).join("\n---\n") +
     "\n---\n" + JSON.stringify(player.assembleNarrationContext("scene")) +
-    "\n---\n" + JSON.stringify(player.assembleNarrationContext("dialogue"));
+    "\n---\n" + JSON.stringify(player.assembleNarrationContext("dialogue")) +
+    "\n---\n" + player.renderScene("compressed") +
+    "\n---\n" + player.renderScene("full") +
+    "\n---\n" + player.socialRead() +
+    "\n---\n" + player.socialRead(npc(1));
 
   const adminOutput = (): string => JSON.stringify(admin.inspect());
 
