@@ -9,16 +9,19 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/main.js",
+    "start": "node dist/main.js",
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:bdd": "NODE_OPTIONS='--import tsx' cucumber-js",
     "test:arch": "depcruise src --config .dependency-cruiser.cjs",
-    "test": "npm run typecheck && npm run test:unit && npm run test:bdd"
+    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:bdd"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^11.3.0",
     "@types/node": "^22.10.0",
     "dependency-cruiser": "^16.10.0",
+    "esbuild": "^0.24.2",
     "fast-check": "^3.23.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
