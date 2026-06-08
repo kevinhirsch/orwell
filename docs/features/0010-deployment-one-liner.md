@@ -20,6 +20,10 @@ The install creates a **container** and brings up bbai (the TS engine **and** th
 front-end, wired over local MCP per feature 0009); the update pulls, rebuilds, and restarts
 **without losing the save**. Easy to deploy, easy to update.
 
+The script **scaffolds live in [`deploy/`](../../deploy/)** (`bbai.sh`, `bbai-install.sh`,
+`bbai-update.sh`, `systemd/`) — DRAFT, guarded against running until the app is runnable; the
+`TODO(0009)` markers fill in with the engine build/start entrypoint and the front-end wiring.
+
 ## 2. Approach (containerization)
 
 **Primary: Proxmox LXC** (community-scripts idiom — matches the referenced one-liner, lightest,
