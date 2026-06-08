@@ -4609,6 +4609,35 @@ async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
 
 
+async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.advance_game(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    kind = (args.get("kind") or "").strip()
+    if kind not in {"nominations", "veto-decision", "replacement", "eviction-vote"}:
+        return {"error": "kind must be one of: nominations, veto-decision, replacement, eviction-vote", "exit_code": 1}
+    decision: dict = {"kind": kind}
+    for k in ("choice", "use", "save", "replacement", "vote"):
+        if args.get(k) is not None:
+            decision[k] = args[k]
+    try:
+        res = await orwell_engine.submit_decision(decision, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 # --- God Mode / admin (0016) — execution is gated to admins by _ADMIN_TOOLS in tool_execution ---
 
 async def do_inspect_non_vault_state(content: str, owner: Optional[str] = None) -> Dict:

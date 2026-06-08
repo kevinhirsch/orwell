@@ -1165,6 +1165,7 @@ async def execute_tool_block(
         do_render_scene, do_end_of_session_summary,
         do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
         do_manage_sandbox,
+        do_advance_game, do_submit_decision,
         do_app_api,
     )
 
@@ -1515,6 +1516,12 @@ async def execute_tool_block(
     elif tool == "manageSandbox":
         desc = "manageSandbox"
         result = await do_manage_sandbox(content, owner=owner)
+    elif tool == "advanceGame":
+        desc = "advanceGame"
+        result = await do_advance_game(content, owner=owner)
+    elif tool == "submitDecision":
+        desc = "submitDecision"
+        result = await do_submit_decision(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

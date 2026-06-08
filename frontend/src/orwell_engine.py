@@ -132,6 +132,19 @@ async def end_of_session_summary(user: str | None = None) -> dict:
     return await _call("endOfSessionSummary", {}, user=user)
 
 
+async def advance_game(user: str | None = None) -> dict:
+    """Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale).
+    NPC beats resolve automatically; returns the beat event, any pending player decision,
+    and the public status. Vault-free."""
+    return await _call("advanceGame", {}, user=user)
+
+
+async def submit_decision(decision: dict, user: str | None = None) -> dict:
+    """Resolve the player's pending decision (nominations / use veto / replacement /
+    eviction vote) and continue the loop. `decision` is the validated payload."""
+    return await _call("submitDecision", decision or {}, user=user)
+
+
 # --- God Mode / admin channel (0016) --------------------------------------------------
 # These cross the engine's ADMIN channel (/admin/call), not the player channel. The
 # admin channel is STILL Vault-free by construction (the human can never read the Vault,

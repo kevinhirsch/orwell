@@ -64,6 +64,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
              "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
+             # Weekly loop (0011): advance beats and resolve player decisions.
+             "advanceGame", "submitDecision",
              # Generic loopback to any UI-button endpoint (cookbook,
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.

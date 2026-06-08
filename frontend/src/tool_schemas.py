@@ -1300,6 +1300,33 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "advanceGame",
+            "description": "Advance the Big Brother game by one beat: HOH competition → nominations → veto competition → veto ceremony → eviction → finale. NPC beats resolve automatically (the engine decides). When it's the PLAYER's turn, the result's `pending` describes the decision they must make. Call this to move the week forward, then narrate the returned beat. Returns the beat event, any pending decision (with named options), and the public status.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submitDecision",
+            "description": "Resolve the player's pending game decision and continue. Use the `kind` from the pending decision and the houseguest ids from its `options`. The engine validates the choice (legality is enforced server-side).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["nominations", "veto-decision", "replacement", "eviction-vote"], "description": "The pending decision's kind."},
+                    "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids to nominate."},
+                    "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
+                    "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
+                    "replacement": {"type": "string", "description": "replacement: the houseguest id the HOH names as the replacement nominee."},
+                    "vote": {"type": "string", "description": "eviction-vote: the nominee id the player votes to evict."},
+                },
+                "required": ["kind"],
+            },
+        },
+    },
     # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
     {
         "type": "function",
@@ -1362,7 +1389,7 @@ FUNCTION_TOOL_SCHEMAS = [
 ORWELL_GAME_TOOLS = frozenset({
     "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
     "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
-    "renderScene", "endOfSessionSummary",
+    "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
 })
 
 
