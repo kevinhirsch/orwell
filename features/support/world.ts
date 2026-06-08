@@ -118,6 +118,13 @@ export class BbWorld extends World {
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;
 
+  // Character creation / OOBE (0015) scratch state.
+  player?: import("../../src/engine/characterFactory").PlayerCharacter;
+  house2?: GameHouse;
+  oobeRejected?: boolean;
+  privateFact?: string;
+  oobeKnowledge?: import("../../src/ports/KnowledgeService").KnowledgeService;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

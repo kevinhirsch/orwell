@@ -28,7 +28,7 @@ interface ArchetypeSpec {
   bias: { physical: number; mental: number; social: number };
 }
 
-const ARCHETYPES: readonly ArchetypeSpec[] = [
+export const ARCHETYPES: readonly ArchetypeSpec[] = [
   { archetype: "comp-beast",       styles: ["aggressive", "strategic"],      disposition: "clash",   bias: { physical: 0.85, mental: 0.45, social: 0.45 } },
   { archetype: "mastermind",       styles: ["strategic", "under-the-radar"], disposition: "neutral", bias: { physical: 0.4,  mental: 0.85, social: 0.55 } },
   { archetype: "social-butterfly", styles: ["social", "emotional"],          disposition: "bond",    bias: { physical: 0.45, mental: 0.5,  social: 0.85 } },
@@ -80,6 +80,10 @@ export interface PlayerCharacter {
   name: string;
   authored: "oobe";
   character: Character;
+  /** The player has a dynamic Soul like any houseguest (initial: no relationship beliefs yet). */
+  soul: Soul;
+  /** Authored private material (secret strategy/targets) — DR-tagged NO_NPC_PATHWAY at game start. */
+  privateStrategy?: string;
 }
 
 export interface GameHouse {
@@ -159,19 +163,43 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
   return { npcs };
 }
 
+/** The OOBE intake — the only human-authored profile. `name` is required; the rest deepen it. */
+export interface OobeInput {
+  name: string;
+  archetype?: Archetype;
+  strategyStyle?: StrategyStyle;
+  /** Optional authored backstory; deepens the static Character. */
+  backstory?: string;
+  /** Optional authored private strategy; becomes player-only knowledge (DR rule, 0013). */
+  privateStrategy?: string;
+}
+
+/** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
+const VOL_OF: Record<Disposition, number> = { clash: 0.7, bond: 0.3, neutral: 0.5 };
+
 /** The ONLY human-authored profile, produced at first-run character creation. */
-export function runPlayerOOBE(input: { name: string; archetype?: Archetype; strategyStyle?: StrategyStyle }): PlayerCharacter {
+export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
+  // Validation: a profile can't be half-authored. `name` is the required field.
+  if (!input || typeof input.name !== "string" || input.name.trim().length === 0) {
+    throw new Error("character creation requires a name");
+  }
   const spec = (input.archetype && SPEC_OF.get(input.archetype)) || ARCHETYPES[0]!;
+  const strategyStyle = input.strategyStyle && spec.styles.includes(input.strategyStyle)
+    ? input.strategyStyle : spec.styles[0]!;
   return {
     id: PLAYER,
-    name: input.name,
+    name: input.name.trim(),
     authored: "oobe",
     character: {
       archetype: spec.archetype,
-      strategyStyle: input.strategyStyle ?? spec.styles[0]!,
+      strategyStyle,
+      // Derived & balanced (anti-sycophancy, 0006): aptitudes come from the authored archetype,
+      // NOT free allocation — so the player can never min-max past the NPC bounds.
       stats: { ...spec.bias },
-      background: "human-authored at first-run character creation (OOBE)",
+      background: input.backstory?.trim() || "human-authored at first-run character creation (OOBE)",
     },
+    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, memory: [] },
+    ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
   };
 }
 
@@ -205,6 +233,20 @@ export function dispositionOf(a: Archetype): Disposition {
 }
 
 const inUnit = (v: number): boolean => v >= 0 && v <= 1;
+
+const JITTER = 0.05; // generateHouse's jittered() spread (±0.05), clamped to [0,1]
+
+/** The aptitude range any generated houseguest can occupy (archetype bias ± jitter, clamped). */
+export const NPC_STAT_RANGE: { min: number; max: number } = (() => {
+  const all = ARCHETYPES.flatMap((s) => [s.bias.physical, s.bias.mental, s.bias.social]);
+  return { min: Math.max(0, Math.min(...all) - JITTER), max: Math.min(1, Math.max(...all) + JITTER) };
+})();
+
+/** True iff the player's authored aptitudes sit within the cast's balanced bounds (no self-min-maxing). */
+export function playerAptitudesWithinNpcBounds(p: PlayerCharacter): boolean {
+  const { physical, mental, social } = p.character.stats;
+  return [physical, mental, social].every((v) => v >= NPC_STAT_RANGE.min && v <= NPC_STAT_RANGE.max);
+}
 
 /** Internal-consistency / plausible-archetype ruleset the factory must honor. */
 export function isPlausibleHouseguest(hg: Houseguest): boolean {
