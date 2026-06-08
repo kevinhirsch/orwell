@@ -97,6 +97,7 @@ Given("an established edge between two houseguests", function (this: BbWorld) {
   const rng = new SeededRandom(5);
   for (let i = 0; i < 6; i++) this.rel.apply(A, B, "bonding", rng);
   this.relBondBefore = this.rel.bondStrength(A, B);
+  this.relTrustBefore = this.rel.edge(A, B).trust; // shared with 0026's sharp-step scenario
 });
 
 When("they do not interact for a long stretch", function (this: BbWorld) {
