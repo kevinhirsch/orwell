@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # browser. Entries expire with the GitHub device code.
 #
 # NOTE: this is per-process state. The device flow assumes a single worker
-# (Odysseus' default): with multiple uvicorn workers, the poll request can land
+# (Orwell' default): with multiple uvicorn workers, the poll request can land
 # on a worker that never saw the start, returning "Unknown or expired login
 # session". Move this to a shared store (DB/Redis) if running multi-worker.
 _PENDING: Dict[str, Dict] = {}

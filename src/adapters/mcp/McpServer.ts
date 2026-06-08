@@ -4,6 +4,7 @@ import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq } from "../../ports/EngineCommands";
+import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, MomentPromptReq } from "../../ports/GameSession";
 
 /**
@@ -49,6 +50,8 @@ export class McpServer {
         return this.deps.player.getVisibleState();
       case "renderScene":
         return this.deps.player.produce(args["mode"] === "dialogue" ? "NPC dialogue" : "scene narration");
+      case "socialRead":
+        return this.deps.player.socialRead(args["target"] as EntityId | undefined);
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":

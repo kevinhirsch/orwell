@@ -1,10 +1,10 @@
-# Vendored: Odysseus — bbai's player front-end + LLM/agent tier
+# Vendored: Orwell — bbai's player front-end + LLM/agent tier
 
 ## What this is
 
-A vendored copy of **Odysseus** (https://github.com/pewdiepie-archdaemon/odysseus, MIT —
+A vendored copy of **Orwell** (https://github.com/kevinhirsch/bbai, MIT —
 see [`LICENSE`](./LICENSE) and [`ACKNOWLEDGMENTS.md`](./ACKNOWLEDGMENTS.md), retained intact).
-Odysseus is a self-hosted AI workspace: **Python (FastAPI) backend + vanilla-JS PWA**, with a
+Orwell is a self-hosted AI workspace: **Python (FastAPI) backend + vanilla-JS PWA**, with a
 multi-provider LLM connection (Ollama, OpenAI, OpenRouter, Anthropic, llama.cpp, vLLM) and an
 **agent** built on opencode / MCP.
 
@@ -38,7 +38,7 @@ integration linchpin — it's what drives the game.
 1. The bbai engine exposes the game as a permissioned **MCP server**: `getVisibleStateFor`,
    `recordInteraction`, `resolveCompetition`, `surfaceInformationTo` (the tools in
    `CLAUDE.md` / the spec). These return **only visible-projection data**.
-2. Point odysseus's agent (`routes/mcp_routes.py`, `mcp_servers/`) at that MCP server as a
+2. Point orwell's agent (`routes/mcp_routes.py`, `mcp_servers/`) at that MCP server as a
    tool backend; the LLM narrates *Big Brother* by calling the engine tools.
 3. **The Vault Wall holds by construction:** `frontend/` never imports `VaultStore` and only
    receives visible projections over the boundary — the model can't leak what it never gets.
@@ -47,7 +47,7 @@ integration linchpin — it's what drives the game.
 
 ## Wired now: the onboarding + per-moment narration bridge
 
-A first vertical slice connecting odysseus to the engine lives at **`/bbai`**:
+A first vertical slice connecting orwell to the engine lives at **`/bbai`**:
 
 - **`src/bbai_engine.py`** — thin async client to the engine's HTTP MCP player channel
   (`BBAI_ENGINE_MCP_URL`, default `http://127.0.0.1:8765`): `createCharacter`, `getGameState`,
@@ -55,7 +55,7 @@ A first vertical slice connecting odysseus to the engine lives at **`/bbai`**:
 - **`routes/bbai_routes.py`** — `GET /api/bbai/{health,state}`, `POST /api/bbai/new-game`
   (runs OOBE), `POST /api/bbai/chat`. The chat route fetches the engine's **managed per-moment
   system prompt**, injects it as the system message, resolves the user's default model via
-  odysseus's own `resolve_endpoint("default")`, and calls `llm_call_async`. This is what stops
+  orwell's own `resolve_endpoint("default")`, and calls `llm_call_async`. This is what stops
   the model from answering as a generic assistant — it now speaks **as the game master**.
 - **`static/bbai.html` + `static/js/bbai.js` + `static/css/bbai.css`** — character creation
   (the step that was missing past account creation), the house roster, and an in-character chat
@@ -65,7 +65,7 @@ A first vertical slice connecting odysseus to the engine lives at **`/bbai`**:
 ### Try it
 
 1. Run the **engine**: from the repo root, `npm run build && BBAI_ENGINE_PORT=8765 npm start`.
-2. Run **odysseus** (this app) and log in; ensure a **default chat model** is set in settings
+2. Run **orwell** (this app) and log in; ensure a **default chat model** is set in settings
    (the in-character chat uses it).
 3. Open **`/bbai`** → create your houseguest → meet the house → play. The header shows engine
    status; if the engine is down the page says so instead of failing silently.
@@ -80,7 +80,7 @@ moments automatically as the engine advances them.
 Removed to keep the repo lean; none of it affects chat/agent:
 - demo media (`docs/*.gif|*.webm`), marketing docs (`docs/`, `ROADMAP`/`SECURITY`/`THREAT_MODEL`/`CONTRIBUTING`),
 - deployment scaffolding (`docker/`, `docker-compose*`, `Dockerfile`, build/start/launch/install scripts, `*.service`, `.github/`),
-- odysseus's own `tests/`,
+- orwell's own `tests/`,
 - heavy document-export libs (`static/lib/{xlsx,docx,mammoth,html2pdf}*`).
 
 The Python app and front-end JS are intact and coherent.
@@ -94,7 +94,7 @@ youtube, webhooks, search, shell, and memory/skills verticals (their `routes/` +
 the 1,111-line `app.py` and the front-end shell, it must be **verified against a running
 instance** (Python deps installed, config set), not done blind.
 
-## Running odysseus standalone (reference)
+## Running orwell standalone (reference)
 
 See [`README.md`](./README.md) and `requirements.txt` (FastAPI + uvicorn); `.env.example`
 documents config. During the refactor we'll run it as the bbai front-end service.

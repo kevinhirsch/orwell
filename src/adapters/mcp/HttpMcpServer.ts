@@ -4,7 +4,7 @@ import type { McpServer } from "./McpServer";
 
 /**
  * A minimal HTTP transport over the permissioned `McpServer` routers — the
- * networked seam the odysseus front-end calls (feature 0009 allows MCP over
+ * networked seam the orwell front-end calls (feature 0009 allows MCP over
  * stdio or HTTP). It is outward-facing: it depends only on `McpServer`, never on
  * the Vault. The full MCP/JSON-RPC protocol wrapper can layer on top later; this
  * is the runnable entrypoint the deploy scripts (0010) build and start.

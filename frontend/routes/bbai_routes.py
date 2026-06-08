@@ -1,7 +1,7 @@
 """Big Brother game routes — onboarding + in-character chat.
 
-Bridges the odysseus UI to the bbai engine: the engine runs OOBE, owns game
-state, and supplies the managed per-moment system prompt; odysseus supplies the
+Bridges the orwell UI to the bbai engine: the engine runs OOBE, owns game
+state, and supplies the managed per-moment system prompt; orwell supplies the
 configured LLM. The front-end never receives Vault data (engine-enforced).
 
 This is the seam that fixes both reported gaps:
@@ -87,12 +87,12 @@ def setup_bbai_routes() -> APIRouter:
             logger.warning(f"[bbai] moment prompt failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
-        # 2) Resolve the user's configured default chat model (same as odysseus chat).
+        # 2) Resolve the user's configured default chat model (same as orwell chat).
         owner = _current_user(request)
         url, model, headers = resolve_endpoint("default", owner=owner)
         if not url or not model:
             return JSONResponse(status_code=400, content={
-                "error": "No default chat model is configured. Pick one in odysseus settings, then retry.",
+                "error": "No default chat model is configured. Pick one in orwell settings, then retry.",
             })
 
         # 3) Inject the system prompt at the head of the conversation and call the LLM.

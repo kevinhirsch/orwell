@@ -311,7 +311,7 @@ The canonical rules the domain core implements:
 ## Install & update
 
 bbai runs as **two co-located services in one container** — the TypeScript **engine** (MCP
-server) and the **odysseus** front-end (Python) — wired over local MCP. On a Proxmox host, two
+server) and the **orwell** front-end (Python) — wired over local MCP. On a Proxmox host, two
 one-liners install and update it:
 
 ```bash

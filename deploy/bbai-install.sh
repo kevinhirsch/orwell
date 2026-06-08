@@ -2,7 +2,7 @@
 #
 # bbai — in-container install. Runs inside the LXC created by deploy/bbai.sh.
 # Installs deps, clones, builds the engine, sets up the front-end, writes config, and registers
-# systemd services for the engine (MCP server) and the odysseus front-end.
+# systemd services for the engine (MCP server) and the orwell front-end.
 set -euo pipefail
 
 REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
@@ -15,7 +15,17 @@ BBAI_ENGINE_PORT="${BBAI_ENGINE_PORT:-8765}"
 echo "==> apt deps"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates python3 python3-venv python3-pip
+apt-get install -y -qq curl git build-essential ca-certificates python3 python3-venv python3-pip qemu-guest-agent
+
+# Proxmox guest tools (qemu-guest-agent). It's a VM-only transport (virtio-serial), absent in an
+# LXC — so install it always, but ENABLE it only when that transport exists (a real VM). On an LXC
+# the host manages the guest directly, so the agent stays installed-but-dormant (no failed unit).
+if [[ -e /dev/virtio-ports/org.qemu.guest_agent.0 ]]; then
+  echo "==> enabling qemu-guest-agent (VM transport detected)"
+  systemctl enable --now qemu-guest-agent 2>/dev/null || true
+else
+  echo "==> qemu-guest-agent installed (LXC: dormant — host manages the guest directly)"
+fi
 
 echo "==> Node 22"
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" -lt 22 ]]; then
@@ -31,6 +41,7 @@ else
   git clone --depth 1 -b "$BRANCH" "$REPO" "$APP_DIR"
 fi
 mkdir -p "$DATA_DIR"
+mkdir -p "${APP_DIR}/frontend/data"   # orwell SQLite DB lives here (sqlite:///./data/app.db)
 
 echo "==> build engine"
 cd "$APP_DIR"
@@ -44,7 +55,7 @@ if ! node -e "const s=require('${APP_DIR}/package.json').scripts||{};process.exi
 fi
 npm run build
 
-echo "==> front-end (odysseus) deps"
+echo "==> front-end (orwell) deps"
 cd "${APP_DIR}/frontend"
 python3 -m venv .venv
 ./.venv/bin/pip install -q --upgrade pip
@@ -56,11 +67,23 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
   {
     echo ""
     echo "# --- bbai ---"
-    echo "BBAI_PORT=${BBAI_PORT}                                    # front-end UI port"
-    echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}                      # engine MCP server (loopback)"
-    echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}  # front-end -> engine MCP"
-    echo "# LLM (pick one): OLLAMA_HOST=http://127.0.0.1:11434  OR  ANTHROPIC_API_KEY=..."
+    echo "# front-end UI port"
+    echo "BBAI_PORT=${BBAI_PORT}"
+    echo "# engine MCP server port (loopback)"
+    echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}"
+    echo "# front-end -> engine MCP endpoint"
+    echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}"
+    # LLM provider: written through from the host installer's prompt when supplied; otherwise a
+    # commented hint. Secrets only ever live here, in the container — never in the repo.
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+      echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
+    elif [[ -n "${OLLAMA_HOST:-}" ]]; then
+      echo "OLLAMA_HOST=${OLLAMA_HOST}"
+    else
+      echo "# LLM (pick one): OLLAMA_HOST=http://127.0.0.1:11434  OR  ANTHROPIC_API_KEY=..."
+    fi
   } >> "${DATA_DIR}/.env"
+  chmod 600 "${DATA_DIR}/.env"
 fi
 
 echo "==> systemd services"

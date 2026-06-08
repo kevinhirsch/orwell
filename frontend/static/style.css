@@ -1,5 +1,5 @@
 /* ============================================ */
-/* Odysseus UI — Consolidated Stylesheet        */
+/* Orwell UI — Consolidated Stylesheet        */
 /* ============================================ */
 
 
@@ -1862,7 +1862,7 @@ body.bg-pattern-sparkles {
       letter-spacing:0.03em;
       margin-bottom:10px;
     }
-    .welcome-boat {
+    .welcome-eye {
       width: 1.8rem;
       height: 1.8rem;
       margin-right: 0.4rem;
@@ -5667,7 +5667,7 @@ body.bg-pattern-sparkles {
     /* (legacy toolbar-toggle styles removed — now using .vis-* classes) */
 
     /* Demo highlight pulse */
-    .odysseus-highlight {
+    .orwell-highlight {
       outline: 2px solid var(--accent, var(--red)) !important;
       outline-offset: 1px;
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
@@ -5795,7 +5795,7 @@ body.bg-pattern-sparkles {
     @media (prefers-reduced-motion: reduce) {
       .th-cursor, .th-modal-group, .th-zone { animation: none !important; }
     }
-    .odysseus-hl-label {
+    .orwell-hl-label {
       position: absolute;
       top: -22px;
       left: 8px;
@@ -21604,7 +21604,7 @@ body.gallery-selecting .gallery-dl-btn,
 
 /* Welcome name — left-to-right wipe with a touch of horizontal stretch.
    Fires on initial render via the .welcome-name rule; restarts on Nobody⇄
-   Odysseus toggle via JS reflow trick. */
+   Orwell toggle via JS reflow trick. */
 .welcome-name {
   transform-origin: left center;
   animation: welcome-name-reveal 0.55s cubic-bezier(0.34, 1.32, 0.55, 1) both;

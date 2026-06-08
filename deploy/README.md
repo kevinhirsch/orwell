@@ -22,15 +22,61 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/de
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
 ```
 
+## Config UX (community-scripts style)
+
+On a TTY the installer shows a **whiptail menu** with every field pre-populated:
+
+- **Use Defaults** — accept the detected/sensible values and go.
+- **Advanced** — step through CTID, hostname, cores/RAM/disk, **rootfs & template storage**
+  (auto-listed from `pvesm`), bridge, IP (`dhcp` or a static CIDR + gateway), UI port, branch,
+  **OS template** (auto-listed from `pveam available`, newest highlighted), and the **LLM
+  provider** (Anthropic key or Ollama host — written only into the container's `data/.env`).
+
+**The OS template is resolved and downloaded automatically** (`pveam update` → newest
+`debian-12-standard` → `pveam download`, with an offline fallback to one already on disk). This
+is the fix for the common `volume 'local:vztmpl/debian-12-standard_…' does not exist` error —
+templates are no longer hard-pinned or assumed pre-downloaded.
+
+Non-interactive (piped, or `--default` / `USE_DEFAULTS=1` / `BBAI_NONINTERACTIVE=1`) uses
+defaults. **Every setting is also an env override**, so the same run is fully scriptable:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CTID` | next free id | container id |
+| `CT_HOSTNAME` | `bbai` | hostname |
+| `CORES` / `RAM_MB` / `DISK_GB` | `2` / `2048` / `8` | resources |
+| `STORAGE` | first `rootdir` storage → `local-lvm` | CT rootfs |
+| `TEMPLATE_STORAGE` | first `vztmpl` storage → `local` | where the template is stored |
+| `TEMPLATE_NAME` / `TEMPLATE` | newest `debian-12-standard` | pin a specific template |
+| `BRIDGE` / `NET` / `GATEWAY` | `vmbr0` / `dhcp` / — | network (`NET` = `dhcp` or a CIDR) |
+| `BBAI_PORT` | `8080` | front-end UI port |
+| `BRANCH` / `REPO` | `main` / this repo | source to install |
+| `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
+
+```bash
+# fully non-interactive example
+CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp BBAI_PORT=8080 \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)" --default
+```
+
 ## Layout
 
 | File | Role |
 |---|---|
 | `bbai.sh` | Host-side: create the Proxmox LXC, then run the in-container install. |
-| `bbai-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. |
+| `bbai-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
 | `bbai-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). |
 | `systemd/bbai-engine.service` | `npm start` (the MCP server). |
-| `systemd/bbai-frontend.service` | `uvicorn app:app` (odysseus), reads `BBAI_ENGINE_MCP_URL`. |
+| `systemd/bbai-frontend.service` | `uvicorn app:app` (orwell), reads `BBAI_ENGINE_MCP_URL`. |
+
+## Proxmox guest tools
+
+`qemu-guest-agent` is installed by `bbai-install.sh`, but it is a **VM-only** transport
+(virtio-serial) that does not exist in an LXC. The installer therefore **enables it only when that
+transport is present** (a real VM); in an LXC it stays installed-but-dormant — the Proxmox host
+already manages the container directly (IP in the UI, `pct shutdown`, vzdump backups all work
+without an agent), and this avoids a perpetually-failing systemd unit. If a VM deploy mode is added
+later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed agent activates.
 
 ## Validation & remaining wiring
 
@@ -39,7 +85,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/de
   and is **not** part of the BDD/unit suite.
 - Two pieces complete the end-to-end game and are owned outside these scripts:
   1. the engine's **HTTP MCP transport** + `build`/`start` entrypoint (the implementer);
-  2. the **odysseus → engine MCP** client wiring (`frontend/INTEGRATION.md`).
+  2. the **orwell → engine MCP** client wiring (`frontend/INTEGRATION.md`).
   The scripts already provision and run both services and pass the engine endpoint via
   `BBAI_ENGINE_MCP_URL`; once 1 & 2 land, the one-liner yields a playable game.
 

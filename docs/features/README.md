@@ -57,10 +57,10 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
 | 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Done |
 | 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Draft |
-| 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Draft |
-| 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Draft |
-| 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Draft |
-| 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Draft |
+| 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Done |
+| 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
+| 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
+| 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Done |
 | 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Draft |
 | 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Draft |
 | 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Draft |

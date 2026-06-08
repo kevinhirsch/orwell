@@ -1,5 +1,5 @@
 import type { EntityId } from "../../domain/ids";
-import type { NarrativePort, NarrationContext, NarrationMode } from "../../ports/NarrativePort";
+import type { NarrativePort, NarrationContext, NarrationMode, SceneFidelity } from "../../ports/NarrativePort";
 import { VisibleStateService } from "../../services/VisibleStateService";
 import { SummaryService } from "../../services/SummaryService";
 import { toPlayerCompetitionView } from "../../domain/competition";
@@ -34,14 +34,43 @@ export class PlayerSurface {
   }
 
   /** The exact context handed to the narrative layer — provably Vault-free. */
-  assembleNarrationContext(mode: NarrationMode = "scene"): NarrationContext {
+  assembleNarrationContext(mode: NarrationMode = "scene", fidelity?: SceneFidelity): NarrationContext {
     const vs = this.visible.getVisibleStateFor(this.player);
     return {
       forEntity: this.player,
       mode,
       visibleEvents: vs.visibleEvents,
       knowledge: vs.knowledge,
+      ...(fidelity ? { fidelity } : {}),
     };
+  }
+
+  /**
+   * Render a scene at a player-directed fidelity (0012). Fidelity rides along in
+   * the Vault-free narration context and shapes the narration only — it never
+   * touches events or knowledge, so ground truth is identical at any fidelity.
+   */
+  renderScene(fidelity: SceneFidelity): string {
+    return this.narrator.narrate(this.assembleNarrationContext("scene", fidelity));
+  }
+
+  /**
+   * A social read (0012): an honest, character-appropriate sense of the room or a
+   * houseguest, sourced ONLY from the visible projection (witnessed events + the
+   * player's own knowledge) and pathway-free hunches. It may HINT that something
+   * is shifting off-screen (from suspicion presence) but never names an off-screen
+   * event and never carries Vault data — it cannot, as it reads no Vault source.
+   */
+  socialRead(target?: EntityId): string {
+    const vs = this.visible.getVisibleStateFor(this.player);
+    const suspicions = this.visible.suspicionsFor(this.player);
+    const focus = target ? `your read on ${target}` : "the energy in the room";
+    // Hint is derived from suspicion COUNT only — never suspicion content — so no
+    // off-screen event can be named and no sentinel can ride out.
+    const hint = suspicions.length > 0
+      ? " Something feels unsettled — you can't name it, but the house isn't telling you everything."
+      : " Nothing feels out of place right now.";
+    return `Reading ${focus}: you've witnessed ${vs.visibleEvents.length} moment(s) and know ${vs.knowledge.length} thing(s) for certain.${hint}`;
   }
 
   produce(surface: PlayerSurfaceType): string {

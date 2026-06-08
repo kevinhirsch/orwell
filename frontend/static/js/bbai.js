@@ -1,6 +1,6 @@
-// Big Brother front-end. Talks to the bbai engine via the odysseus bridge routes
+// Big Brother front-end. Talks to the bbai engine via the orwell bridge routes
 // (/api/bbai/*). The engine owns game state and the managed per-moment system
-// prompt; odysseus supplies the LLM. No Vault data ever reaches this page.
+// prompt; orwell supplies the LLM. No Vault data ever reaches this page.
 
 const MOMENTS = [
   "character-creation", "premiere", "social", "diary-room",
