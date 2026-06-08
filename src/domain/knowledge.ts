@@ -13,6 +13,20 @@ export interface KnowledgeFact {
   sourceEventId?: string;
   subject?: EntityId;
   ts: number;
+
+  // --- Belief metadata (present on facts that propagated as gossip) -----------
+  /** Lineage id — the SAME underlying fact across every retelling/hop. */
+  factId?: string;
+  /** The immediate teller this entity heard it from. */
+  source?: EntityId;
+  /** 0..1 — certainty; decays with each hop from the origin. */
+  confidence?: number;
+  /** Distance (retellings) from the origin. 0 at the origin. */
+  hops?: number;
+  /** Accumulated drift; grows with hops (a second-hand fact may be wrong). */
+  distortion?: number;
+  /** The undistorted origin content, for comparison. */
+  originalContent?: string;
 }
 
 export type KnowledgeState = readonly KnowledgeFact[];
