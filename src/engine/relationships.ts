@@ -1,49 +1,32 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
+import {
+  RELATIONSHIP_CONSTANTS,
+  clamp01 as clamp,
+  type EdgeSignals,
+  type InteractionType,
+  type RelationshipConstants,
+  type RelationshipDisposition,
+} from "./relationshipConstants";
 
 /**
  * Directed, graded, asymmetric relationship beliefs (decision 0002): no binary
  * ally/enemy flags. An "alliance" is not stored — it's read off the graded
  * signals crossing a threshold, and can form or fracture as the signals move.
- * This is the minimal computed model the behavioral-fidelity feature needs; the
- * full signal set / math is tunable config still to firm up.
+ *
+ * The *shape* lives here (0017); the *numbers* — impacts, betrayal-shock, decay,
+ * confidence, disposition × temperature — live in the single tunable constants
+ * module (`relationshipConstants.ts`, feature 0026), injected so the feel is
+ * retunable without touching this logic.
  */
-export interface EdgeSignals {
-  trust: number;
-  affinity: number;
-  threat: number;
-  alignment: number;
-  confidence: number;
-}
+export type { EdgeSignals, InteractionType, RelationshipDisposition };
 
-export type InteractionType =
-  | "alliance"
-  | "gossip"
-  | "conflict"
-  | "bonding"
-  | "strategy"
-  | "showmance"
-  | "betrayal";
-
-const IMPACT: Record<InteractionType, Partial<EdgeSignals>> = {
-  bonding: { affinity: +0.15, trust: +0.1 },
-  strategy: { trust: +0.12, affinity: +0.06, alignment: +0.12 },
-  alliance: { trust: +0.16, affinity: +0.14, alignment: +0.15 },
-  showmance: { affinity: +0.2, trust: +0.12 },
-  gossip: { trust: +0.05, alignment: +0.04 },
-  conflict: { affinity: -0.16, trust: -0.13, threat: +0.16 },
-  betrayal: { trust: -0.32, affinity: -0.28, threat: +0.32 },
-};
-
-const clamp = (v: number): number => Math.max(0, Math.min(1, v));
-const neutral = (): EdgeSignals => ({ trust: 0.25, affinity: 0.25, threat: 0.1, alignment: 0.2, confidence: 0 });
-export const NEUTRAL_BOND = 0.25;
+const baseline = (c: RelationshipConstants): EdgeSignals => ({ ...c.baseline });
+export const NEUTRAL_BOND =
+  (RELATIONSHIP_CONSTANTS.baseline.trust + RELATIONSHIP_CONSTANTS.baseline.affinity) / 2;
 
 /** A read below this confidence is a SUSPICION (hunch), not knowledge (decision 0002). */
-export const CONFIDENCE_KNOWLEDGE = 0.3;
-
-/** How a holder frames relationships — drives on-the-spot labels (never stored). */
-export type RelationshipDisposition = "clash" | "bond" | "neutral";
+export const CONFIDENCE_KNOWLEDGE = RELATIONSHIP_CONSTANTS.thresholds.knowledge;
 
 export interface RelationshipRead {
   signals: EdgeSignals;
@@ -57,51 +40,86 @@ export interface RelationshipRead {
  * bond to a trusting (bond) one. Derived on the spot; an "ally/enemy" label is NEVER
  * stored (decision 0002).
  */
-export function relationshipLabel(s: EdgeSignals, disposition: RelationshipDisposition): "ally" | "enemy" | "acquaintance" {
+export function relationshipLabel(
+  s: EdgeSignals,
+  disposition: RelationshipDisposition,
+  constants: RelationshipConstants = RELATIONSHIP_CONSTANTS,
+): "ally" | "enemy" | "acquaintance" {
   const bond = (s.trust + s.affinity) / 2;
   const threatW = disposition === "clash" ? 1.5 : disposition === "bond" ? 0.6 : 1.0;
   const bondW = disposition === "bond" ? 1.5 : disposition === "clash" ? 0.6 : 1.0;
   const threatScore = s.threat * threatW;
   const bondScore = bond * bondW;
-  if (threatScore >= bondScore) return threatScore > 0.3 ? "enemy" : "acquaintance";
-  return bondScore > 0.35 ? "ally" : "acquaintance";
+  if (threatScore >= bondScore) return threatScore > constants.thresholds.enemy ? "enemy" : "acquaintance";
+  return bondScore > constants.thresholds.ally ? "ally" : "acquaintance";
 }
 
 export class RelationshipModel {
   private readonly edges = new Map<string, EdgeSignals>();
+  /** Per-holder disposition (from `Character`, 0004/0015) — the per-game-feel input (§7). */
+  private readonly dispositions = new Map<EntityId, RelationshipDisposition>();
 
-  constructor(private readonly allianceThreshold: number) {}
+  constructor(
+    private readonly allianceThreshold: number,
+    private readonly constants: RelationshipConstants = RELATIONSHIP_CONSTANTS,
+  ) {}
 
   private key(a: EntityId, b: EntityId): string {
     return `${a}->${b}`;
   }
 
-  /** The stored (mutable) directed edge A→B, lazily created at neutral. */
+  /** Set how a holder frames relationships (clash=sticky/paranoid, bond=forgiving). */
+  setDisposition(holder: EntityId, disposition: RelationshipDisposition): void {
+    this.dispositions.set(holder, disposition);
+  }
+
+  private dispositionOf(holder: EntityId): RelationshipDisposition {
+    return this.dispositions.get(holder) ?? "neutral";
+  }
+
+  /** The stored (mutable) directed edge A→B, lazily created at baseline. */
   edge(a: EntityId, b: EntityId): EdgeSignals {
     const k = this.key(a, b);
     let e = this.edges.get(k);
     if (!e) {
-      e = neutral();
+      e = baseline(this.constants);
       this.edges.set(k, e);
     }
     return e;
   }
 
-  private applyOneDirection(from: EntityId, to: EntityId, imp: Partial<EdgeSignals>, rng: RandomnessSource): void {
+  /**
+   * The firmed update rule (0026 §4): each signal moves by `impact × dispositionFactor ×
+   * temperatureJitter`, clamped. Adverse moves (trust/affinity down, threat up) scale by the
+   * holder's `adverseScale`; bonding moves by `bondScale`. Four jitter draws are taken in a
+   * fixed order (trust, affinity, threat, alignment) so seeded runs stay reproducible — with a
+   * NEUTRAL holder and default constants this is identical to the pre-0026 behavior.
+   */
+  private applyOneDirection(from: EntityId, to: EntityId, type: InteractionType, rng: RandomnessSource): void {
     const e = this.edge(from, to);
-    const j = (): number => 0.8 + 0.4 * rng.next();
-    e.trust = clamp(e.trust + (imp.trust ?? 0) * j());
-    e.affinity = clamp(e.affinity + (imp.affinity ?? 0) * j());
-    e.threat = clamp(e.threat + (imp.threat ?? 0) * j());
-    e.alignment = clamp(e.alignment + (imp.alignment ?? 0) * j());
-    e.confidence = clamp(e.confidence + 0.05);
+    const C = this.constants;
+    const disp = C.dispositionFactors[this.dispositionOf(from)];
+    const imp = C.IMPACT[type];
+    const jitter = (): number => 1 + (rng.next() - 0.5) * C.TEMPERATURE_JITTER;
+    const jTrust = jitter();
+    const jAffinity = jitter();
+    const jThreat = jitter();
+    const jAlignment = jitter();
+    const dTrust = imp.trust ?? 0;
+    const dAffinity = imp.affinity ?? 0;
+    const dThreat = imp.threat ?? 0;
+    const dAlignment = imp.alignment ?? 0;
+    e.trust = clamp(e.trust + dTrust * (dTrust < 0 ? disp.adverseScale : disp.bondScale) * jTrust);
+    e.affinity = clamp(e.affinity + dAffinity * (dAffinity < 0 ? disp.adverseScale : disp.bondScale) * jAffinity);
+    e.threat = clamp(e.threat + dThreat * (dThreat > 0 ? disp.adverseScale : disp.bondScale) * jThreat);
+    e.alignment = clamp(e.alignment + dAlignment * disp.bondScale * jAlignment);
+    e.confidence = clamp(e.confidence + C.CONFIDENCE_STEP);
   }
 
   /** Apply a mutual interaction to both directed edges, with small per-telling jitter. */
   apply(a: EntityId, b: EntityId, type: InteractionType, rng: RandomnessSource): void {
-    const imp = IMPACT[type];
-    this.applyOneDirection(a, b, imp, rng);
-    this.applyOneDirection(b, a, imp, rng);
+    this.applyOneDirection(a, b, type, rng);
+    this.applyOneDirection(b, a, type, rng);
   }
 
   /**
@@ -109,7 +127,7 @@ export class RelationshipModel {
    * who never reciprocates) makes the edges asymmetric — the heart of decision 0002.
    */
   applyDirected(holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource): void {
-    this.applyOneDirection(holder, other, IMPACT[type], rng);
+    this.applyOneDirection(holder, other, type, rng);
   }
 
   /**
@@ -126,15 +144,23 @@ export class RelationshipModel {
     };
   }
 
-  /** Neglect: mean-revert every edge toward the holder's baseline. `rate` ∈ (0,1]. */
+  /**
+   * Neglect: mean-revert every edge toward baseline. `rate` ∈ (0,1]. Disposition-scaled
+   * (0026 §6): a clash holder barely fades (sticky grudges/bonds), a bond holder fades fast
+   * (forgiving). Threat reverts slower than warmth (`THREAT_DECAY_FACTOR`) so a blindside
+   * outlasts a cold shoulder. A NEUTRAL holder at default constants keeps the prior behavior.
+   */
   decay(rate: number): void {
-    const base = neutral();
-    for (const e of this.edges.values()) {
-      e.trust += (base.trust - e.trust) * rate;
-      e.affinity += (base.affinity - e.affinity) * rate;
-      e.threat += (base.threat - e.threat) * rate;
-      e.alignment += (base.alignment - e.alignment) * rate;
-      e.confidence = clamp(e.confidence - rate * 0.5);
+    const C = this.constants;
+    const base = C.baseline;
+    for (const [k, e] of this.edges) {
+      const holder = k.split("->")[0] as EntityId;
+      const r = clamp(rate * C.dispositionFactors[this.dispositionOf(holder)].decayScale);
+      e.trust += (base.trust - e.trust) * r;
+      e.affinity += (base.affinity - e.affinity) * r;
+      e.threat += (base.threat - e.threat) * r * C.THREAT_DECAY_FACTOR;
+      e.alignment += (base.alignment - e.alignment) * r;
+      e.confidence = clamp(e.confidence - r * 0.5);
     }
   }
 

@@ -72,7 +72,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Done |
 | 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | Foundational | Done |
 | 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | Gameplay | Done |
-| 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Draft |
+| 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Done |
 | 0027 | [NarrativePort LLM adapter (the real narrator)](./0027-narrative-port-llm-adapter.md) | Integration | Done |
 | 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | Foundational | Draft |
 

@@ -177,6 +177,13 @@ export class BbWorld extends World {
   visibleBefore?: number;
   twistEventId?: string;
 
+  // Relationship math (0026) scratch state.
+  relThreatAfterBetrayal?: number;
+  relEdgeBefore?: import("../../src/engine/relationshipConstants").EdgeSignals;
+  relConfLow?: number;
+  feels?: number[];
+  harsherConstants?: import("../../src/engine/relationshipConstants").RelationshipConstants;
+
   // NarrativePort LLM adapter (0027) scratch state.
   narrator?: import("../../src/ports/StreamingNarrativePort").StreamingNarrativePort;
   narrationCtx?: import("../../src/ports/NarrativePort").NarrationContext;
