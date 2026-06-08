@@ -1,6 +1,7 @@
 import type { GameHouse } from "./characterFactory";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
+import type { LiveSeasonState } from "./liveSeason";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 
 /**
@@ -27,6 +28,8 @@ export interface SessionCore {
   phase: string;
   ceremony: CeremonyState;
   house: GameHouse | null;
+  /** The incremental weekly-loop state (0011), so progression survives a restart (0030). */
+  live?: LiveSeasonState | null;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

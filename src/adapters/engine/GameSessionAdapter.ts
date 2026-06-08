@@ -1,6 +1,7 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
+  AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef,
 } from "../../ports/GameSession";
 import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle } from "../../engine/characterFactory";
@@ -8,7 +9,14 @@ import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import type { CompetitionType, Competitor } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
+import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
+import { RelationshipModel } from "../../engine/relationships";
+import type { Stats } from "../../engine/season";
+import {
+  newLiveSeason, advance as advanceBeat, applyDecision, type LiveSeasonState,
+  type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+} from "../../engine/liveSeason";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
 import { cloneSession } from "../../engine/sessionSnapshot";
 
@@ -31,15 +39,32 @@ export class GameSessionAdapter implements GameSession {
   private phase = "setup";
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
   private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
+  // The incremental weekly-loop state (0011); null until a game starts.
+  private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
   private onPersist?: () => void;
+  /** Beat-event sink (wired by the registry to record player-witnessed events into the EventStore). */
+  private onEvent?: (ev: BeatEvent) => void;
+
+  /**
+   * The live relationship model drives NPC decisions (threat/trust). The registry
+   * injects the SAME instance the consequence fold writes to, so the player's actions
+   * shape how the house nominates and votes over time. Standalone (tests/onboarding)
+   * it owns a fresh model — the loop still runs, just without cross-fold history.
+   */
+  constructor(private readonly rel: RelationshipModel = new RelationshipModel(0.5)) {}
 
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
     this.onPersist = fn;
   }
 
-  /** The durable session core (0030): the live house + week/phase/ceremony, losslessly. */
+  /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
+  setOnEvent(fn: (ev: BeatEvent) => void): void {
+    this.onEvent = fn;
+  }
+
+  /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
   snapshot(): SessionCore {
     return {
       started: this.house !== null,
@@ -47,6 +72,7 @@ export class GameSessionAdapter implements GameSession {
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
       house: this.house ? cloneSession(this.house) : null,
+      live: this.live ? cloneSession(this.live) : null,
     };
   }
 
@@ -56,6 +82,7 @@ export class GameSessionAdapter implements GameSession {
     this.week = core.week;
     this.phase = core.phase;
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
+    this.live = core.live ? cloneSession(core.live) : null;
   }
 
   /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
@@ -91,8 +118,144 @@ export class GameSessionAdapter implements GameSession {
     this.house = startNewGame({ seed, playerName: req.playerName, archetype, strategyStyle });
     this.week = 1;
     this.phase = "premiere";
+    // Start the incremental weekly loop over the live house (player + NPCs).
+    this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
+    // Seed first impressions so NPC decisions are differentiated from move-in (without this,
+    // empty relationships make every HOH nominate the same first-in-roster houseguests). These
+    // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
+    this.seedFirstImpressions(seed);
     this.onPersist?.(); // durable save (0030): a started game must survive a restart
     return this.view();
+  }
+
+  /** Give every ordered pair a seeded baseline trust/affinity/threat (deterministic per game). */
+  private seedFirstImpressions(seed: number): void {
+    const all = this.house ? [this.house.player, ...this.house.npcs] : [];
+    const rng = new SeededRandom(hashSeed(`${seed}:relationships`));
+    for (const a of all) for (const b of all) {
+      if (a.id === b.id) continue;
+      const e = this.rel.edge(a.id, b.id);
+      e.trust = rng.next(); e.affinity = rng.next(); e.threat = rng.next(); e.confidence = 0.5;
+    }
+  }
+
+  // --- Live weekly loop (0011) ---------------------------------------------------
+
+  /** Build the Vault-free season context the pure loop reads (stats + live relationships). */
+  private ctx(): SeasonCtx {
+    return { player: PLAYER, statsOf: (id) => this.statsOf(id), rel: this.rel };
+  }
+
+  private statsOf(id: EntityId): Stats {
+    const all = this.house ? [this.house.player, ...this.house.npcs] : [];
+    return all.find((h) => h.id === id)?.character.stats ?? { physical: 0.5, mental: 0.5, social: 0.5 };
+  }
+
+  /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
+  private beatRng(): SeededRandom {
+    const name = this.house?.player.name ?? "season";
+    return new SeededRandom(hashSeed(`${name}:${this.live?.week}:${this.live?.beat}`));
+  }
+
+  advanceGame(): AdvanceView {
+    if (!this.house || !this.live) return this.advanceView(null);
+    if (!this.live.pending && !this.live.finished) {
+      const ev = advanceBeat(this.live, this.ctx(), this.beatRng());
+      this.commit(ev);
+    }
+    return this.advanceView(null);
+  }
+
+  submitDecision(req: SubmitDecisionReq): AdvanceView {
+    // No-op unless there's a matching pending decision to resolve (idempotent + robust
+    // to malformed calls — the boundary must never throw an unhandled error).
+    if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx());
+    this.commit(ev);
+    return this.advanceView(ev);
+  }
+
+  /** Fold a resolved beat into the public projection: record the event, sync ceremony, persist. */
+  private commit(ev: BeatEvent | null): void {
+    if (ev) this.onEvent?.({ ...ev, content: this.humanize(ev.content) });
+    this.syncProjection();
+    this.onPersist?.();
+  }
+
+  /** Project the live-loop state onto the public week/phase/ceremony the status panel reads. */
+  private syncProjection(): void {
+    const s = this.live;
+    if (!s) return;
+    this.week = s.week;
+    this.phase = s.finished ? "finale" : s.beat;
+    this.ceremony = {
+      hoh: s.hoh,
+      nominees: (s.finalNominees ?? s.nominees ?? []).slice(),
+      vetoHolder: s.vetoHolder,
+      vetoUsed: s.vetoUsed,
+    };
+  }
+
+  private toDecisionInput(req: SubmitDecisionReq): DecisionInput {
+    switch (req.kind) {
+      case "nominations": {
+        const c = req.choice ?? [];
+        if (c.length !== 2) throw new Error("nominations require exactly two houseguests");
+        return { kind: "nominations", choice: [c[0]!, c[1]!] };
+      }
+      case "veto-decision":
+        return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
+      case "replacement":
+        if (!req.replacement) throw new Error("a replacement nominee is required");
+        return { kind: "replacement", replacement: req.replacement };
+      case "eviction-vote":
+        if (!req.vote) throw new Error("an eviction vote is required");
+        return { kind: "eviction-vote", vote: req.vote };
+    }
+  }
+
+  private named(id?: EntityId): NamedRef | null {
+    return id ? { id, name: this.nameOf(id) } : null;
+  }
+
+  private pendingView(): PendingDecisionView | null {
+    const p = this.live?.pending;
+    if (!p) return null;
+    const by = this.named(p.by)!;
+    const refs = (ids: EntityId[]): NamedRef[] => ids.map((id) => ({ id, name: this.nameOf(id) }));
+    switch (p.kind) {
+      case "nominations":
+        return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
+      case "veto-decision":
+        return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+      case "replacement":
+        return { kind: p.kind, by, prompt: `You used the veto on ${this.nameOf((p as { saved: EntityId }).saved)} — name a replacement nominee.`, options: refs(p.options), pick: 1 };
+      case "eviction-vote":
+        return { kind: p.kind, by, prompt: "Cast your vote to evict one of the two nominees.", options: refs(p.nominees), pick: 1 };
+    }
+  }
+
+  private advanceView(ev: BeatEvent | null): AdvanceView {
+    const s = this.live;
+    return {
+      started: this.house !== null,
+      event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
+      pending: this.pendingView(),
+      status: this.gameStatus(),
+      finished: !!s?.finished,
+      winner: this.named(s?.winner),
+    };
+  }
+
+  /** Replace raw entity ids in a loop event string with the houseguests' public names. */
+  private humanize(content: string): string {
+    const all = this.house ? [this.house.player, ...this.house.npcs] : [];
+    let out = content;
+    // Longest ids first so "npc:1" never clobbers part of "npc:15".
+    for (const h of [...all].sort((a, b) => b.id.length - a.id.length)) {
+      out = out.split(h.id).join(h.name);
+    }
+    return out;
   }
 
   getGameState(): GameStateView {
@@ -144,7 +307,10 @@ export class GameSessionAdapter implements GameSession {
         archetype: p.character.archetype,
         strategyStyle: p.character.strategyStyle,
       },
-      house: this.house.npcs.map((n) => ({ id: n.id, name: n.name, status: "active" })),
+      house: this.house.npcs.map((n) => ({
+        id: n.id, name: n.name,
+        status: this.live?.evictionOrder.includes(n.id) ? "evicted" : "active",
+      })),
     };
   }
 }

@@ -87,6 +87,57 @@ export interface PublicGameStatus {
   veto: { holder: { id: EntityId; name: string } | null; used: boolean };
 }
 
+/** A named houseguest reference for decisions/options (Vault-free — id + name only). */
+export interface NamedRef {
+  id: EntityId;
+  name: string;
+}
+
+/** A meaningful weekly-loop beat that just resolved (player-witnessed; names, not ids). */
+export interface BeatEventView {
+  beat: string;
+  content: string;
+}
+
+/** A decision the live loop is blocked on until the player resolves it (0011). */
+export interface PendingDecisionView {
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
+  by: NamedRef;
+  /** A human-readable instruction for the moment (what the player must choose). */
+  prompt: string;
+  /** The legal choices (the houseguests the player may pick among). */
+  options: NamedRef[];
+  /** How many to pick (nominations = 2; others = 1). */
+  pick: number;
+}
+
+/** The Vault-free result of advancing the game or resolving a decision. */
+export interface AdvanceView {
+  started: boolean;
+  /** The beat that just resolved (null if blocked on a decision or the game is over). */
+  event: BeatEventView | null;
+  /** Set when the loop now needs a player decision before it can continue. */
+  pending: PendingDecisionView | null;
+  status: PublicGameStatus;
+  finished: boolean;
+  winner: NamedRef | null;
+}
+
+/** A player's answer to the current `PendingDecisionView`. */
+export interface SubmitDecisionReq {
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
+  /** nominations: exactly two houseguest ids. */
+  choice?: EntityId[];
+  /** veto-decision: whether to use the veto. */
+  use?: boolean;
+  /** veto-decision: the nominee saved when `use` is true. */
+  save?: EntityId;
+  /** replacement: the replacement nominee the HOH names. */
+  replacement?: EntityId;
+  /** eviction-vote: the final nominee the player votes to evict. */
+  vote?: EntityId;
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
@@ -102,4 +153,13 @@ export interface GameSession {
    * the wall. The LLM may request this to drive the game; the ENGINE decides.
    */
   runCompetition(req: RunCompetitionReq): CompetitionResultView;
+  /**
+   * Advance the live weekly loop by ONE beat (0011): HOH comp → nominations →
+   * veto comp → veto ceremony → eviction → finale. NPC beats resolve automatically
+   * (relationship-driven); when the next beat is the PLAYER's own decision the loop
+   * stops and returns it as `pending`. Idempotent while a decision is pending.
+   */
+  advanceGame(): AdvanceView;
+  /** Resolve the current pending decision and continue the loop (validated; 0011). */
+  submitDecision(req: SubmitDecisionReq): AdvanceView;
 }
