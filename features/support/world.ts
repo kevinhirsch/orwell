@@ -165,6 +165,12 @@ export class BbWorld extends World {
   registry?: import("../../src/composition/registry").GameSessionRegistry;
   userASnapshot?: string;
 
+  // Soul storage & recall (0024) scratch state.
+  soul?: import("../../src/adapters/engine/SoulStore").SoulStore;
+  recalled?: import("../../src/ports/SoulProvider").Memory[];
+  archViolations?: unknown[];
+  hiddenMemory?: string;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

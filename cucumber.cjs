@@ -29,6 +29,7 @@ module.exports = {
       "docs/features/0020-player-experience.feature",
       "docs/features/0021-game-session-and-save-lifecycle.feature",
       "docs/features/0023-consequence-and-memory.feature",
+      "docs/features/0024-soul-storage-and-memory-recall.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
