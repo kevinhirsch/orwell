@@ -5,6 +5,7 @@ Single source of truth for reading/writing data/settings.json and data/features.
 All modules should import from here instead of accessing files directly.
 """
 
+import os
 import json
 import time
 import logging
@@ -176,7 +177,10 @@ DEFAULT_SETTINGS = {
 
 DEFAULT_FEATURES = {
     # Orwell game build: these inherited workspace capabilities are off by default
-    # (their UI entry points are also hidden — see static/css/game-trim.css).
+    # (their UI entry points are also hidden — see static/css/game-trim.css). Under the
+    # game build (the default) the whole drop-set is forced off regardless of these — see
+    # GAME_DROP_SET / is_feature_enabled below; these values only apply with the game build
+    # disabled (full-workspace/debug mode) and drive the admin Features panel.
     "web_search": False,    # "Web Search" — removed from the game UI
     "web_fetch": True,
     "deep_research": False,  # "Deep Research" — removed from the game UI
@@ -185,7 +189,101 @@ DEFAULT_FEATURES = {
     "rag": True,
     "sensitive_filter": True,
     "gallery": False,        # "Gallery" — removed from the game UI
+    # Voice (TTS/STT): kept in the tree but OFF by default — opt-in immersion, no code
+    # change to enable (feature 0032 §4.5). Not part of the drop-set, so the game build
+    # does not force it off; it simply respects this flag.
+    "voice": False,
 }
+
+
+# ── Game build (feature 0032) ──
+# The player-facing app is the Big Brother game and nothing else. One switch
+# (ORWELL_GAME_BUILD, default ON for this product) forces the inherited workspace
+# verticals OFF and the game keep-set ON. Per-vertical flags still apply when the game
+# build is off (full-workspace/debug mode). is_feature_enabled() is the single seam every
+# route mount and context-assembly check goes through, so a dropped vertical is gone
+# server-side (its router is never mounted → 404), not merely hidden.
+
+# Capabilities the game needs — always enabled, never gated by the game build.
+GAME_KEEP_SET = frozenset({
+    "chat", "history", "onboarding", "llm", "agent", "engine_mcp",
+    "status_panel", "portraits", "image_gen", "accounts", "settings",
+    "theme", "search",  # conversation/session search — NOT web_search
+})
+
+# Inherited workspace verticals the game build removes (forced off; routers not mounted).
+GAME_DROP_SET = frozenset({
+    "email", "calendar", "contacts", "documents", "document_editor", "gallery",
+    "cookbook", "hwfit", "compare", "deep_research", "research", "rag", "memory",
+    "skills", "notes", "tasks", "shell", "web_search", "web_fetch", "youtube",
+    "webhooks", "signature", "companion", "codex", "copilot",
+})
+
+# The kept opt-in exception (default off): see DEFAULT_FEATURES["voice"].
+GAME_VOICE = "voice"
+
+_GAME_BUILD_FALSEY = {"0", "false", "no", "off", ""}
+
+
+def game_build_enabled() -> bool:
+    """The game build is ON by default for this product. ORWELL_GAME_BUILD=0 (or the
+    deprecated BBAI_GAME_BUILD fallback) turns it off to expose the full workspace for
+    debugging. Read from the environment so operators flip it without touching files."""
+    raw = os.getenv("ORWELL_GAME_BUILD")
+    if raw is None:
+        raw = os.getenv("BBAI_GAME_BUILD")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _GAME_BUILD_FALSEY
+
+
+def is_feature_enabled(name: str, *, features: dict | None = None) -> bool:
+    """Single source of truth for 'should this capability be active?' — game-build aware.
+
+    Keep-set is always on; under the game build the drop-set is always off (so its routes
+    never mount and its context never injects); otherwise the saved/default per-vertical
+    flag decides. Voice is the kept opt-in exception (off by default, enable its flag).
+
+    `features` lets callers/tests pass an explicit flag map instead of reading disk.
+    """
+    if name in GAME_KEEP_SET:
+        return True
+    if game_build_enabled() and name in GAME_DROP_SET:
+        return False
+    feats = load_features() if features is None else features
+    # With the game build off, an inherited vertical is reachable unless explicitly
+    # disabled; everything else falls back to its declared default.
+    default = True if name in GAME_DROP_SET else DEFAULT_FEATURES.get(name, False)
+    return bool(feats.get(name, default))
+
+
+def front_end_context_sources(*, incognito: bool = False, features: dict | None = None) -> dict:
+    """Which front-end context sources may be injected into a chat turn's preface.
+
+    Under the game build every inherited source (memory / RAG / skills / web) is off, so the
+    engine's per-moment game-master prompt (0018) is the only injected framing — there is no
+    parallel front-end memory rivaling the engine's soul/Vault (0023/0024). Incognito also
+    suppresses them. Pure and dependency-light so chat assembly and tests share one rule.
+    """
+    def _on(name: str) -> bool:
+        return (not incognito) and is_feature_enabled(name, features=features)
+    return {
+        "memory": _on("memory"),
+        "rag": _on("rag"),
+        "skills": _on("skills"),
+        "web": _on("web_search"),
+    }
+
+
+def mount_optional(app, feature: str, router, **kwargs) -> bool:
+    """include_router only when `feature` is enabled (game-build aware); returns whether it
+    mounted. Gating the *registration* (not just the UI) is what makes a dropped vertical
+    return 404 server-side — including for an authenticated admin, since the path simply
+    does not exist. Duck-typed (app/router passed in) so this module imports no web stack."""
+    if is_feature_enabled(feature):
+        app.include_router(router, **kwargs)
+        return True
+    return False
 
 
 # ── Settings (data/settings.json) ──

@@ -16,6 +16,7 @@ from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
 from src.auth_helpers import get_current_user
 from src.prompt_security import untrusted_context_message
+from src.settings import front_end_context_sources
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
@@ -487,11 +488,16 @@ async def build_chat_context(
     user = get_current_user(request)
     uprefs = load_prefs_for_user(user)
 
+    # Game build (feature 0032): under the game build the front-end's own memory / RAG /
+    # skills / web are off, so the engine's moment prompt is the only injected framing — no
+    # parallel store outside the engine's Vault discipline. `_fe_src` is the single gate.
+    _fe_src = front_end_context_sources(incognito=incognito)
+
     # Memory enabled?
-    mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
+    mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True) and _fe_src["memory"]
     # Skills injection respects its own enable toggle (mirrors memory_enabled).
     # When off, the "Available skills" index is not added to the prompt.
-    skills_enabled = not incognito and uprefs.get("skills_enabled", True)
+    skills_enabled = not incognito and uprefs.get("skills_enabled", True) and _fe_src["skills"]
     if not allow_tool_preprocessing:
         mem_enabled = False
         skills_enabled = False
@@ -500,8 +506,9 @@ async def build_chat_context(
         mem_enabled, user, incognito, no_memory, uprefs.get("memory_enabled", "NOT_SET"),
     )
 
-    # Use RAG?
+    # Use RAG? (off under the game build — the engine soul/Vault is the only memory)
     use_rag_val = (str(use_rag).lower() != "false") if use_rag is not None else True
+    use_rag_val = use_rag_val and _fe_src["rag"]
     if incognito or not allow_tool_preprocessing:
         use_rag_val = False
 
@@ -515,7 +522,7 @@ async def build_chat_context(
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
-        use_web=use_web and not skip_web,
+        use_web=use_web and not skip_web and _fe_src["web"],
         use_memory=mem_enabled,
         time_filter=time_filter,
         preset_system_prompt=preset.system_prompt,

@@ -513,6 +513,10 @@ from src.webhook_manager import WebhookManager
 webhook_manager = WebhookManager(api_key_manager=api_key_manager)
 
 # ========= INCLUDE ROUTERS =========
+# Game build (feature 0032): inherited workspace verticals mount through mount_optional,
+# so a dropped vertical's router is never registered (its endpoints 404 server-side) under
+# the game build; the game keep-set is always mounted.
+from src.settings import mount_optional
 
 # Auth
 auth_router = setup_auth_routes(auth_manager)
@@ -545,12 +549,14 @@ app.include_router(setup_session_routes(session_manager, session_config, webhook
 from routes.admin_wipe_routes import setup_admin_wipe_routes
 app.include_router(setup_admin_wipe_routes(session_manager))
 
-# Memory
+# Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
+# build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
+# routers are still built (codex borrows memory_router below) but not mounted.
 from routes.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
-app.include_router(memory_router)
+mount_optional(app, "memory", memory_router)
 from routes.skills_routes import setup_skills_routes
-app.include_router(setup_skills_routes(skills_manager))
+mount_optional(app, "skills", setup_skills_routes(skills_manager))
 
 # Chat
 from routes.chat_routes import setup_chat_routes
@@ -562,17 +568,17 @@ app.include_router(setup_chat_routes(
     skills_manager=skills_manager,
 ))
 
-# Research (background deep-research tasks)
+# Research (background deep-research tasks) — dropped under the game build.
 from routes.research_routes import setup_research_routes
-app.include_router(setup_research_routes(research_handler, session_manager=session_manager))
+mount_optional(app, "deep_research", setup_research_routes(research_handler, session_manager=session_manager))
 
 # History
 from routes.history_routes import setup_history_routes
 app.include_router(setup_history_routes(session_manager))
 
-# Search
+# Web Search — dropped under the game build (distinct from conversation/session search).
 from routes.search_routes import setup_search_routes
-app.include_router(setup_search_routes(config))
+mount_optional(app, "web_search", setup_search_routes(config))
 
 # Presets
 from routes.preset_routes import setup_preset_routes
@@ -598,37 +604,38 @@ app.include_router(setup_embedding_routes())
 from routes.model_routes import setup_model_routes
 app.include_router(setup_model_routes(model_discovery))
 
-# GitHub Copilot device-flow login
+# GitHub Copilot device-flow login — dropped under the game build.
 from routes.copilot_routes import setup_copilot_routes
-app.include_router(setup_copilot_routes())
+mount_optional(app, "copilot", setup_copilot_routes())
 
-# TTS
+# Voice (TTS/STT) — kept in the tree but gated by the "voice" flag (off by default;
+# feature 0032 §4.5). Enable the flag to restore spoken house / Diary Room immersion.
 from routes.tts_routes import setup_tts_routes
-app.include_router(setup_tts_routes(tts_service))
+mount_optional(app, "voice", setup_tts_routes(tts_service))
 
-# STT
 from services.stt import get_stt_service
 stt_service = get_stt_service()
 from routes.stt_routes import setup_stt_routes
-app.include_router(setup_stt_routes(stt_service))
+mount_optional(app, "voice", setup_stt_routes(stt_service))
 logger.info("STT service initialized (provider managed via settings)")
 
-# Documents (artifacts/canvas)
+# Documents (artifacts/canvas) — dropped under the game build (router still built for
+# codex below). Distinct from the game's portrait image-gen path, which is kept.
 from routes.document_routes import setup_document_routes
 document_router = setup_document_routes(session_manager, upload_handler)
-app.include_router(document_router)
+mount_optional(app, "documents", document_router)
 
-# Signatures (reusable image stamps)
+# Signatures (reusable image stamps) — dropped under the game build.
 from routes.signature_routes import setup_signature_routes
-app.include_router(setup_signature_routes())
+mount_optional(app, "signature", setup_signature_routes())
 
-# Gallery (image library)
+# Gallery (workspace image library) — dropped under the game build.
 from routes.gallery_routes import setup_gallery_routes
-app.include_router(setup_gallery_routes())
+mount_optional(app, "gallery", setup_gallery_routes())
 
-# Persisted image-editor drafts (server-backed projects)
+# Persisted image-editor drafts — dropped under the game build (the image editor goes).
 from routes.editor_draft_routes import setup_editor_draft_routes
-app.include_router(setup_editor_draft_routes())
+mount_optional(app, "document_editor", setup_editor_draft_routes())
 
 # Scheduled tasks + event bus
 from src.task_scheduler import TaskScheduler
@@ -636,31 +643,33 @@ task_scheduler = TaskScheduler(session_manager)
 from src.event_bus import set_task_scheduler
 set_task_scheduler(task_scheduler)
 from routes.task_routes import setup_task_routes
-app.include_router(setup_task_routes(task_scheduler))
+mount_optional(app, "tasks", setup_task_routes(task_scheduler))
 
 from routes.assistant_routes import setup_assistant_routes
 app.include_router(setup_assistant_routes(task_scheduler))
 
-# Calendar (CalDAV)
+# Calendar (CalDAV) — dropped under the game build (router still built for codex below).
 from routes.calendar_routes import setup_calendar_routes
 calendar_router = setup_calendar_routes()
-app.include_router(calendar_router)
+mount_optional(app, "calendar", calendar_router)
 
-# Shell (user-facing command execution)
+# Shell (arbitrary command execution) — DROPPED under the game build. This is the live
+# /api/shell/exec + /api/shell/stream surface; gating registration removes it server-side
+# (404 for everyone, admins included), not just hiding the button (feature 0032 §2).
 from routes.shell_routes import setup_shell_routes
-app.include_router(setup_shell_routes())
+mount_optional(app, "shell", setup_shell_routes())
 
-# Cookbook (model download/serve/cache, cookbook state sync)
+# Cookbook (model download/serve/cache) — dropped under the game build.
 from routes.cookbook_routes import setup_cookbook_routes
-app.include_router(setup_cookbook_routes())
+mount_optional(app, "cookbook", setup_cookbook_routes())
 
-# Hardware model fitting (cookbook "What Fits?" tab)
+# Hardware model fitting (cookbook "What Fits?" tab) — dropped under the game build.
 from routes.hwfit_routes import setup_hwfit_routes
-app.include_router(setup_hwfit_routes())
+mount_optional(app, "hwfit", setup_hwfit_routes())
 
-# Model A/B Comparison
+# Model A/B Comparison — dropped under the game build.
 from routes.compare_routes import setup_compare_routes
-app.include_router(setup_compare_routes(session_manager))
+mount_optional(app, "compare", setup_compare_routes(session_manager))
 
 # User Preferences
 from routes.prefs_routes import setup_prefs_routes
@@ -691,9 +700,9 @@ set_ai_memory_manager(memory_manager, memory_vector)
 set_ai_rag_manager(rag_manager, personal_docs_mgr)
 logger.info("AI interaction tools initialized (session, memory, RAG, UI control)")
 
-# Webhooks
+# Webhooks (+ external /api/v1/chat) — dropped under the game build.
 from routes.webhook_routes import setup_webhook_routes
-app.include_router(setup_webhook_routes(webhook_manager, auth_manager, session_manager, api_key_manager))
+mount_optional(app, "webhooks", setup_webhook_routes(webhook_manager, auth_manager, session_manager, api_key_manager))
 
 # API Tokens
 from routes.api_token_routes import setup_api_token_routes
@@ -701,14 +710,14 @@ app.include_router(setup_api_token_routes())
 
 logger.info("Webhook & API token routes initialized")
 
-# Notes (Google Keep-style notes/todos)
+# Notes (Google Keep-style notes/todos) — dropped under the game build.
 from routes.note_routes import setup_note_routes
-app.include_router(setup_note_routes(task_scheduler))
+mount_optional(app, "notes", setup_note_routes(task_scheduler))
 
-# Email
+# Email — dropped under the game build (router still built for codex below).
 from routes.email_routes import setup_email_routes
 email_router = setup_email_routes()
-app.include_router(email_router)
+mount_optional(app, "email", email_router)
 
 # Codex integration — HTTP surface for the Codex plugin/MCP bridge. Reuses
 # api_token scopes (todos:read|write, email:read|draft|send) so external
@@ -716,23 +725,24 @@ app.include_router(email_router)
 # AFTER email so the codex_routes can borrow the email router for shared
 # search/threading helpers.
 from routes.codex_routes import setup_codex_routes, setup_claude_routes
-app.include_router(setup_codex_routes(
+mount_optional(app, "codex", setup_codex_routes(
     email_router=email_router,
     memory_router=memory_router,
     calendar_router=calendar_router,
     document_router=document_router,
 ))
-app.include_router(setup_claude_routes())
+mount_optional(app, "codex", setup_claude_routes())
 
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
 
-# Contacts (CardDAV)
+# Contacts (CardDAV) — dropped under the game build.
 from routes.contacts_routes import setup_contacts_routes
-app.include_router(setup_contacts_routes())
+mount_optional(app, "contacts", setup_contacts_routes())
 
+# Companion pairing — dropped under the game build.
 from companion import setup_companion_routes
-app.include_router(setup_companion_routes())
+mount_optional(app, "companion", setup_companion_routes())
 
 # ========= ROUTES (kept in app.py) =========
 
