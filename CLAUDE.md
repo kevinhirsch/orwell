@@ -17,9 +17,9 @@ that the deterministic rules, the secret state, and the narration are cleanly se
 hidden impact → persist → recall is now wired into the live game). The game is **folded into the
 main chat**: the player-facing tier is the vendored **Orwell** front-end (`frontend/`, Python)
 talking to the TS engine over MCP (see [Architecture](#architecture-hexagonal)). Priority-ordered
-feature specs live in `docs/features/` (now through **0031**). **Current focus: hardening the live
-game** — soul/semantic recall (0024), the real LLM `NarrativePort` (0027), durable persistence
-across engine restart (0030), and the per-sandbox game orchestrator & integrity watcher (0031).
+feature specs live in `docs/features/` (now through **0036**). **Current focus: live game loop
+running (0034 green)** — next drafts are 0033 (dynamic player tagline), 0035 (live off-screen life
+watcher), 0036 (live social surface), and the frontend-only 0032 (game build, `frontend/tests/`).
 See [Current status](#current-status).
 
 ## Source of truth — read these first
@@ -255,6 +255,7 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 - Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
 - Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
 - `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order). It is the canonical list of what is wired into the BDD gate.
+- **Test setup:** `tests/support/sandbox.ts` is the canonical test-environment factory — use it (not manual wiring) when adding new unit or integration tests. BDD step definitions use `features/support/world.ts`.
 - **Deploy** (`deploy/`): `orwell-install.sh` / `orwell-update.sh` (host-aware, legacy-aware) provision the engine + front-end as systemd units (`deploy/systemd/`); `deploy/smoke.sh` is the post-deploy check. Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`,
@@ -333,14 +334,21 @@ critical gap — now wired into the live game) · 0024 soul storage & semantic r
 0028 temperature/emotional constants · 0030 durable persistence (survive engine restart) · 0031
 per-sandbox game orchestrator & integrity watcher. **0022** (player experience MVP-2) is **deferred**.
 
+**Live loop batch:** **0034 — live weekly progression & decision seam** ✅ green (in `cucumber.cjs`;
+`GameSessionAdapter` progresses through real phases). **0033** (dynamic player tagline), **0035**
+(live off-screen life watcher), and **0036** (live social surface) are drafts in `docs/features/` —
+not yet in the BDD gate. **0032** (front-end surface reduction / game build) is a Python-only
+feature tested in `frontend/tests/` with pytest — not added to `cucumber.cjs`.
+
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work:** 0010's container smoke test on a real Proxmox host; the deferred real
-relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run in-memory + file
-today); full MCP/JSON-RPC over the current HTTP transport; and the front-end's full lever exposure
-+ player surfaces.
+**Remaining work:** next drafts 0033/0035/0036 (tagline, off-screen watcher, social surface) + the
+Python-only 0032 (`frontend/tests/`); 0010's container smoke test on a real Proxmox host; the
+deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
+in-memory + file today); full MCP/JSON-RPC over the current HTTP transport; and the front-end's
+full lever exposure + player surfaces.
 
 ## Open decisions (remaining)
 
