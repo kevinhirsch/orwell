@@ -56,9 +56,12 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
   {
     echo ""
     echo "# --- bbai ---"
-    echo "BBAI_PORT=${BBAI_PORT}                                    # front-end UI port"
-    echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}                      # engine MCP server (loopback)"
-    echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}  # front-end -> engine MCP"
+    echo "# front-end UI port"
+    echo "BBAI_PORT=${BBAI_PORT}"
+    echo "# engine MCP server port (loopback)"
+    echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}"
+    echo "# front-end -> engine MCP endpoint"
+    echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}"
     # LLM provider: written through from the host installer's prompt when supplied; otherwise a
     # commented hint. Secrets only ever live here, in the container — never in the repo.
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
