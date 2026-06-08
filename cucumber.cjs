@@ -10,6 +10,7 @@ module.exports = {
     paths: [
       "docs/features/0001-vault-wall-isolation.feature",
       "docs/features/0002-event-visibility-and-propagation.feature",
+      "docs/features/0003-behavioral-fidelity.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

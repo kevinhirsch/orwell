@@ -4,6 +4,8 @@ import type { Sandbox, VaultDatum } from "../../tests/support/sandbox";
 import type { ToolDescriptor } from "../../src/surfaces/tools/registry";
 import type { GameEvent, Visibility, EntityId } from "../../src/domain/event";
 import type { SocialGraph } from "../../src/engine/gossip";
+import type { SeasonResult } from "../../src/engine/simulation";
+import type { RichnessMetrics } from "../../src/engine/richness";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -32,6 +34,10 @@ export class BbWorld extends World {
   gossipOrigin?: EntityId;
   factId?: string;
   gossipOriginal?: string;
+
+  // Behavioral-fidelity (0003) scratch state.
+  season?: SeasonResult;
+  metrics?: RichnessMetrics;
 
   constructor(options: IWorldOptions) {
     super(options);

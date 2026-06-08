@@ -230,10 +230,13 @@ Built BDD/TDD-first, in priority order:
   dependency-cruiser; sentinel + property tests; fixed tool allowlist).
 - **0002 — Event visibility & propagation:** ✅ green (witness-derived visibility with a
   store-enforced invariant against mislabeling; pathway-only propagation; knowledge vs
-  suspicion; Diary-Room isolation).
+  suspicion; Diary-Room isolation; NPC-to-NPC gossip diffusion with provenance/confidence/drift).
+- **0003 — Behavioral fidelity:** ✅ green (seeded multi-day simulation; off-screen-heavy
+  social life, alliance churn over a computed relationship model, rare/bounded hidden-element
+  surfacing — richness asserted as property thresholds in `src/engine/richnessConfig.ts`).
 
 `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0003 — behavioral fidelity**.
+priority order: **0004 — replayability & naming**.
 
 ## Open decisions (remaining)
 
