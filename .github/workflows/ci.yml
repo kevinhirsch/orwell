@@ -53,4 +53,6 @@ jobs:
         with:
           node-version: 22
       - name: syntax-check key front-end JS
-        run: node --check frontend/static/js/orwellOnboarding.js
+        run: |
+          node --check frontend/static/js/orwellOnboarding.js
+          node --check frontend/static/js/orwellStatusPanel.js
