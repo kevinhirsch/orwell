@@ -929,31 +929,6 @@ export function deactivateCharacter() {
 /**
  * Copy all user memories (non-character) into the character's memory pool.
  */
-async function _mergeUserMemories(charName) {
-  try {
-    const res = await fetch(`${API_BASE}/api/memory`);
-    const data = await res.json();
-    const userMems = (data.memory || []).filter(m => !m.character);
-    if (!userMems.length) return;
-    for (const m of userMems) {
-      await fetch(`${API_BASE}/api/memory/add`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: m.text, category: m.category || 'fact', source: 'user', character: charName }),
-      });
-    }
-  } catch (e) {
-    console.error('Failed to merge memories:', e);
-  }
-}
-
-function _reloadMemoryList() {
-  import('./memory.js').then(m => {
-    if (m.renderMemoryList) m.renderMemoryList();
-    if (m.updateMemoryCount) m.updateMemoryCount();
-  }).catch(() => {});
-}
-
 /**
  * Show/hide the character indicator pill in the chat input bar.
  */

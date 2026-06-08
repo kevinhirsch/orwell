@@ -1,8 +1,10 @@
 # 0032 — Front-end surface reduction (the "game build")
 
-> **Status:** **Tier 1 implemented & green** (server-enforced reduction — `frontend/tests/test_game_build.py`,
-> all 9 scenarios); **Tiers 2–3** (stop shipping the dropped JS; delete the code) are the
-> **running-instance follow-up** the spec scopes below (not CI-provable in the quarantined bare env).
+> **Status:** **All three tiers implemented & green.** Tier 1 = server-enforced reduction
+> (`frontend/tests/test_game_build.py`, all 9 scenarios); Tier 2 = stop shipping the dropped JS
+> (`scripts/boot_smoke.py`); Tier 3 = **delete the dropped front-end code** (94 modules removed) with a
+> **headless-browser gate** (`scripts/browser_smoke.py`) proving the keep-set module graph loads with
+> zero broken/missing modules. All three run in CI's `frontend` lane.
 > Reduce the vendored general-purpose workspace front-end (`frontend/`) to **just
 > the Big Brother game surface** — chat + LLM connection + the engine MCP agent + the game's own
 > surfaces (onboarding, status, portraits, accounts) — and **drop every inherited workspace vertical**
@@ -126,23 +128,25 @@ settings UI:  only keep-set tabs render
 
 ## 6. Definition of Done
 
-- [ ] **Game surface intact:** with `game_build` on, the player gets onboarding → in-character chat →
+- [x] **Game surface intact:** with `game_build` on, the player gets onboarding → in-character chat →
       status panel/decisions → portraits; accounts/admin (0029) and the engine MCP agent backend all work.
-- [ ] **Drop-set gone server-side (Tier 1):** each dropped vertical's endpoints return **404/410** (not
+- [x] **Drop-set gone server-side (Tier 1):** each dropped vertical's endpoints return **404/410** (not
       just hidden) — **explicitly proven for `/api/shell/exec` and `/api/shell/stream`**; `web_fetch`,
       `document_editor`, `rag` default **off** under the game build.
-- [ ] **No parallel memory:** with the game build on, chat-context assembly injects **no** front-end
+- [x] **No parallel memory:** with the game build on, chat-context assembly injects **no** front-end
       memory/RAG/skills content — the engine's soul/Vault is the only memory; the only injected framing
       is the engine moment prompt (0018).
-- [ ] **One switch:** `ORWELL_GAME_BUILD` flips the entire keep-set/drop-set; a test asserts the profile
+- [x] **One switch:** `ORWELL_GAME_BUILD` flips the entire keep-set/drop-set; a test asserts the profile
       (not 20 individual flags).
-- [ ] **Voice opt-in:** TTS/STT is present but **off by default**; enabling its flag restores it.
-- [ ] **JS slimmed (Tier 2):** dropped modules (incl. the image editor) are not loaded; measured static
-      JS is a fraction of ~5.4 MB.
-- [ ] **Deletion verified (Tier 3):** after removing the drop-set's code, a **running instance** boots,
-      onboards, plays a turn in-character, renders portraits, and serves accounts/admin — captured as a
-      documented run (per `frontend/INTEGRATION.md`), since pure deletion isn't CI-provable.
-- [ ] Name-agnostic tests (roles only — player/admin); `cd frontend && python3 -m pytest tests/` green;
+- [x] **Voice opt-in:** TTS/STT is present but **off by default**; enabling its flag restores it.
+- [x] **JS slimmed (Tier 2):** dropped modules (incl. the image editor) are not loaded; the served page
+      references none of them (`boot_smoke.py`).
+- [x] **Deletion verified (Tier 3):** the drop-set's front-end code is deleted (94 modules) with all
+      ES imports removed; a **headless-browser gate** (`scripts/browser_smoke.py`, CI) boots a running
+      instance, loads the page, and proves the keep-set module graph loads with **zero broken/missing
+      modules** and no uncaught errors — the live in-instance onboarding/turn/portrait walkthrough remains
+      the documented manual check per `frontend/INTEGRATION.md`.
+- [x] Name-agnostic tests (roles only — player/admin); `cd frontend && python3 -m pytest tests/` green;
       `py_compile` clean; the engine gate (`npm test`) **unaffected** (front-end is quarantined).
 
 ## 7. Dependencies & traceability

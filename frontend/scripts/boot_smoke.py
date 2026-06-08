@@ -121,14 +121,16 @@ try:
 finally:
     stop(proc)
 
-# ── Game build OFF: the full workspace returns ────────────────────────────────
+# ── Game build OFF: the inherited backend routers return ──────────────────────
+# Server-side gating stays reversible — the dropped verticals' ROUTERS remount when
+# the game build is off, so the backend surface comes back. (Their front-end JS was
+# physically deleted in Tier 3, so the UI itself does not return; only the routes do.)
 print("==> boot (game build OFF)")
 proc, base = boot(0, 8191)
 try:
     paths = mounted_paths(base)
     check(any(p.startswith("/api/shell") for p in paths), "switch off: shell router mounted again")
     check(status(base, "/api/shell/exec", "POST") != 404, "switch off: /api/shell/exec reachable (not 404)")
-    check("/static/js/document.js" in body(base, "/"), "switch off: dropped JS shipped again (document.js)")
 finally:
     stop(proc)
 

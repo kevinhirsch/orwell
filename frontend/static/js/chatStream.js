@@ -125,70 +125,20 @@ export function handleUIControl(uiData) {
       document.querySelectorAll('.orwell-highlight').forEach(function(e) { e.classList.remove('orwell-highlight'); });
       document.querySelectorAll('.orwell-hl-label').forEach(function(e) { e.remove(); });
 
-    } else if (uiEvent === 'research_started' || uiData.ui_event === 'research_started') {
-      // Agent kicked off deep research — adopt the session into the
-      // sidebar immediately so the user sees it without waiting for
-      // the 12s active-poll.
-      var rsid = uiData.research_session_id || uiData.session_id;
-      if (rsid) {
-        import('./research/jobs.js').then(function(mod) {
-          var fn = mod.adoptSession || (mod.default && mod.default.adoptSession);
-          if (fn) fn(rsid);
-        }).catch(function(){});
-        // The clickable "Open in Deep Research" link is now emitted by the
-        // agent loop as a `#research-<id>` markdown anchor in the assistant's
-        // response text — it renders as a regular clickable chat link AND
-        // persists across refresh (saved with the message). No ephemeral
-        // chip injection needed here anymore.
-      }
-
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
+      // Game build (feature 0032): only the kept panels remain — the workspace
+      // verticals (documents/gallery/email/cookbook/notes/memories/skills) are
+      // removed, so their open_panel routings are gone with them.
       var panel = uiData.panel;
-      if (panel === 'documents') {
-        import('./documentLibrary.js').then(function(mod) {
-          var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'gallery') {
-        import('./gallery.js').then(function(mod) {
-          var fn = mod.openGallery || (mod.default && mod.default.openGallery);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'email') {
-        import('./emailLibrary.js').then(function(mod) {
-          var fn = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'sessions') {
+      if (panel === 'sessions') {
         import('./sessions.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
-      } else if (panel === 'cookbook') {
-        import('./cookbook.js').then(function(mod) {
-          var fn = mod.open || (mod.default && mod.default.open);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'notes') {
-        import('./notes.js').then(function(mod) {
-          var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
-        // These live in the sidebar / settings drawer — most just need
-        // an existing button click.
-        var ids = { memories: 'tool-memory-btn', skills: 'skills-btn', settings: 'open-settings-btn' };
-        var btn = document.getElementById(ids[panel]);
+      } else if (panel === 'settings') {
+        var btn = document.getElementById('open-settings-btn');
         if (btn) btn.click();
       }
-
-    } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {
-      import('./emailInbox.js').then(function(mod) {
-        var fn = mod.openReplyDraft || (mod.default && mod.default.openReplyDraft);
-        if (fn) fn(uiData.uid, uiData.folder || 'INBOX', uiData.mode || 'reply');
-      }).catch(function(e) {
-        console.warn('open_email_reply failed:', e);
-      });
     }
   } catch(e) {
     console.warn('ui_control handler error:', e);

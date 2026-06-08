@@ -16,11 +16,10 @@ import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
 import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
-import documentModule from './document.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
-import cookbookModule from './cookbook.js';
-import { EVAL_PROMPTS } from './compare/index.js';
+// Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
+const documentModule = null, cookbookModule = null, EVAL_PROMPTS = {};
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -1298,23 +1297,11 @@ async function _cmdToolPanel(tool, args, ctx) {
   if (target === 'cookbook') {
     const sub = (args[0] || '').toLowerCase();
     if (sub === 'serve') {
-      const query = args.slice(1).join(' ').trim();
-      try {
-        if (cookbookModule && typeof cookbookModule.open === 'function') {
-          await cookbookModule.open({ tab: 'Serve', serveSearch: query });
-          if (query) {
-            try {
-              const mod = await import('./cookbookServe.js');
-              if (mod && typeof mod.openServePanelForRepo === 'function') {
-                setTimeout(() => { mod.openServePanelForRepo(query).catch(() => {}); }, 80);
-              }
-            } catch (_) {}
-          }
-        } else {
-          document.getElementById('tool-cookbook-btn')?.click();
-        }
-      } catch (e) {
-        slashReply(`Could not open Cookbook Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
+      // Game build (feature 0032): the Cookbook vertical is removed.
+      if (cookbookModule && typeof cookbookModule.open === 'function') {
+        await cookbookModule.open({ tab: 'Serve', serveSearch: args.slice(1).join(' ').trim() });
+      } else {
+        document.getElementById('tool-cookbook-btn')?.click();
       }
       return true;
     }
