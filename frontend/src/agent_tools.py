@@ -71,6 +71,58 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # there's no named tool wrapper for the action.
              "app_api"}
 
+# ---------------------------------------------------------------------------
+# Game-build tool tiers (feature 0032). Under the game build the agent's tool
+# surface collapses to three tiers:
+#   KEEP     — always available (the engine/game-master + God Mode levers and a
+#              handful of core UI/account tools whose backends survive the build).
+#   OPTIONAL — general "power" tools that still work but are OFF by default for
+#              security; the user opts them in via Settings -> Tools
+#              (persisted as the `game_tools_enabled` list).
+#   DROP     — everything else in TOOL_TAGS (scrapped/dead verticals: cookbook,
+#              deep-research, gallery-edit, email, dead workspace mutations).
+#              Computed = TOOL_TAGS - KEEP - OPTIONAL so newly inherited tools
+#              default to dropped (fail-closed) rather than leaking in.
+# ---------------------------------------------------------------------------
+GAME_TOOL_KEEP = frozenset({
+    # Big Brother game engine (Vault-free).
+    "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
+    "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
+    "renderScene", "endOfSessionSummary",
+    # Weekly loop (0011).
+    "createCharacter", "advanceGame", "submitDecision",
+    # God Mode (0016): admin-gated non-Vault levers.
+    "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
+    # Core UI / account tools whose backends survive the game build.
+    "ask_user", "update_plan", "ui_control", "generate_image", "search_chats",
+    "manage_settings", "manage_endpoints", "manage_tokens", "manage_mcp", "list_models",
+})
+
+GAME_TOOL_OPTIONAL = frozenset({
+    # General "power" tools — still functional, but off by default for security.
+    "bash", "python", "read_file", "write_file", "edit_file",
+    "grep", "glob", "ls",
+    "chat_with_model", "create_session", "list_sessions", "send_to_session",
+    "pipeline", "manage_session",
+    "api_call", "app_api",
+})
+
+
+def game_build_disabled_additions(game_tools_enabled=None) -> set:
+    """Tool ids to force-OFF under the game build: every TOOL_TAG that is not in
+    the keep-set and is not an opted-in optional tool. KEEP tools are never added
+    here (they stay on unless the user disables them via disabled_tools)."""
+    enabled_opt = set(game_tools_enabled or [])
+    off = set()
+    for tag in TOOL_TAGS:
+        if tag in GAME_TOOL_KEEP:
+            continue
+        if tag in GAME_TOOL_OPTIONAL and tag in enabled_opt:
+            continue
+        off.add(tag)
+    return off
+
+
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
 # ---------------------------------------------------------------------------

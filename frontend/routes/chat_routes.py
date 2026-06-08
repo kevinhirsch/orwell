@@ -674,6 +674,16 @@ def setup_chat_routes(
         if _global_disabled and isinstance(_global_disabled, list):
             disabled_tools.update(_global_disabled)
 
+        # Game build (feature 0032): collapse the agent's tool surface to the
+        # game keep-set + opted-in optional tools. Single chokepoint feeding the
+        # agent loop, so the model never receives a dropped/dead-vertical schema.
+        from src.settings import game_build_enabled
+        if game_build_enabled():
+            from src.agent_tools import game_build_disabled_additions
+            disabled_tools.update(
+                game_build_disabled_additions(get_setting("game_tools_enabled", []))
+            )
+
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
         # the heavy "do things on the computer" tools — otherwise the model
