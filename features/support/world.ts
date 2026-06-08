@@ -185,6 +185,16 @@ export class BbWorld extends World {
   tempRolls?: number[];
   compResultObj?: import("../../src/domain/competitionOutcome").CompetitionResult;
 
+  // Game orchestrator & integrity watcher (0031) scratch state.
+  orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
+  watcher?: import("../../src/composition/gameWatcher").GameWatcher;
+  fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;
+  advanceResult?: import("../../src/composition/orchestrator").AdvanceResult;
+  hiddenBefore?: number;
+  health?: import("../../src/composition/orchestrator").HealthRecord;
+  stateA?: string;
+  stateB?: string;
+
   // Durable game persistence (0030) scratch state.
   saveDir?: string;
   registry2?: import("../../src/composition/registry").GameSessionRegistry;

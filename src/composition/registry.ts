@@ -104,6 +104,33 @@ export class GameSessionRegistry {
     if (sb && this.saveStore) this.saveStore.saveFor(user, exportSnapshot(sb));
   }
 
+  /** The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031. */
+  snapshot(user: string): SessionSnapshot {
+    return exportSnapshot(this.sandboxFor(user));
+  }
+
+  /**
+   * Replace the user's sandbox with a CLEAN one rebuilt from a snapshot — used to
+   * roll back a failed integrity checkpoint (0031) without leaving the aborted
+   * advance's events behind. The durable save is untouched by this call.
+   */
+  restore(user: string, snap: SessionSnapshot): UserSandbox {
+    const sb = buildUserSandbox();
+    importSnapshot(sb, snap);
+    if (this.saveStore) {
+      const persist = (): void => this.saveUser(user);
+      sb.session.setOnPersist(persist);
+      sb.commands.setOnPersist(persist);
+    }
+    this.sandboxes.set(user, sb);
+    return sb;
+  }
+
+  /** The users with a live in-memory sandbox (the watcher iterates these). */
+  usernames(): string[] {
+    return [...this.sandboxes.keys()];
+  }
+
   /** Number of distinct user sandboxes currently held (concurrency visibility). */
   userCount(): number {
     return this.sandboxes.size;
