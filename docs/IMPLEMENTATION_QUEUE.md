@@ -20,6 +20,40 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 > aptitude/hidden data, to feed the Vault-free **portrait descriptor** (0020 §5, 0004 §8). Small,
 > additive; fold it into the built cast generation.
 
+## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
+
+**State:** **0001–0024 built** — including the **consequence loop (0023), soul recall (0024), and
+per-user sandboxes (0021)**. The **MVP-1 engine backbone is DONE**: actions change hidden opinions,
+persist, recall; games are per-user. Remaining: engine **B15–B18** (0025 twists, 0026 relationship
+math, 0027 NarrativePort, 0028 temperature) and front-end **C4–C6**. Two lanes — **Claude Code =
+engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — concurrent, no contention.
+
+With the engine core built, the make-or-break now is **what the player SEES and how it's VOICED.**
+
+| Wave | Claude Code (engine) | OpenHands (front-end) |
+|---|---|---|
+| **1 — now** | **B17** (0027 NarrativePort) — replace the echo stub with the real streaming narrator (engine contract + adapter; the front-end `llm_core` is the deployed realization) | **C6** (lever ready-part) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — **all engine tools are built**). The visible MVP-1. |
+| **2** | **B16** (0026 relationship math) — firm the built `apply()`'s constants for **per-game feel** + tunability (refines 0023, not blocking) | **C5** (0021: assert the authenticated user — finish the per-user front-end over the built engine) |
+| **3 — polish** | **B18** (0028 temperature constants) · **B15** (0025 twists) | MVP-2 (0022) un-parks once MVP-1 feels solid |
+
+**The engine backbone (0021/0023/0024) is done.** So the priorities flip to the **player-facing
+experience (C4)** and the **real narrator (B17)** — the player needs to *see* the living game and
+hear it *in character*. B16/B18/B15 refine the feel on top; nothing is on a blocking critical path
+anymore.
+
+**Coordination rules**
+- **Stay in lanes** (engine vs front-end); don't cross-edit the other's files.
+- **Front-end is fully unblocked:** **C4** needs the 0020 tools (built), **C5** the 0021 sandbox
+  (built), **C6** starts now — OpenHands can run **C6 → C4 → C5** straight through.
+- **Engine has no hard ordering left:** B15–B18 are independent; do **B17** first (biggest
+  experience lift), then B16, then B18/B15.
+- **Every item:** keep `npm test` + `npm run test:arch` green, the Vault Wall (dependency-cruiser)
+  green, add the new `.feature` to `cucumber.cjs` when it goes green, and open a PR.
+- **First moves:** Claude Code → **B17**; OpenHands → **C6 → C4**.
+
+*(The full per-item prompts are below; the table above is the current sequencing — it supersedes the
+historical "Order & assignment" list, which predates 0011–0024 being built.)*
+
 ## Order & assignment
 
 | # | Item | Agent | Depends on |
@@ -381,13 +415,54 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > eligibility invariants and the 16 → jury-9 → final-2 arc must hold **under** any twist. Make
 > `0025` green; gates green. Read `docs/features/0001`, `0005`, `0016` first. Open a PR.
 
+### B16 — 0026 relationship math (firmed update rule & constants)  ·  Claude Code  ·  **grounds B13**
+
+> In `kevinhirsch/orwell`, implement feature **0026**
+> (`docs/features/0026-relationship-math.{md,feature}`): firm 0017's shape into a concrete update
+> rule + a **single tunable constants module** (sibling to the temperature/richness configs). The
+> `apply` rule moves the signals by the per-type `IMPACT` (extend the existing
+> `src/engine/relationships.ts` table) × **disposition factor** (from `Character`) × bounded
+> **temperature**; **betrayal-shock** is a large single step that **decays slowly** (default
+> **sticky/realistic** — the grudge lingers); decay/mean-reversion is **disposition-scaled**;
+> confidence rises with data. **The feel is per-game, not global:** a paranoid cast trends sticky, a
+> social cast forgiving, temperature varies it — with a **measurable spread across seeds** and
+> reproducible by seed. **No number hard-coded outside the constants module** (retunable later, a
+> future God-Mode knob). Make `0026` green; gates green. This **grounds B13** (0023's `apply()` uses
+> these constants) — do it just before/with B13. Read `docs/decisions/0002` + `docs/features/0017`.
+> Open a PR.
+
+### B17 — 0027 NarrativePort LLM adapter  ·  Claude Code (+ OpenHands)
+
+> In `kevinhirsch/orwell`, implement feature **0027**
+> (`docs/features/0027-narrative-port-llm-adapter.{md,feature}`): the real async LLM behind
+> `NarrativePort`, replacing `EchoNarrativePort`. Async `narrate` + `narrateStream` (token stream);
+> **provider-agnostic** (Ollama / Anthropic / OpenAI-compatible) with model/endpoint/key from
+> **env** (no secrets in code); **timeout + bounded retries + safe fallback**. **Vault-free by
+> construction:** it gets **only** the `NarrationContext` (assembled Vault-free, 0001) — extend the
+> context-assembly sentinel test. **Outcomes stay the engine's:** a narration failure or
+> hallucination **changes no game state** (the port returns text, never state). In the fold, the
+> **front-end `llm_core`** is the deployed realization over MCP (0009) — same two guarantees. A
+> **deterministic fake** backs tests. Make `0027` green; gates green. Open a PR.
+
+### B18 — 0028 temperature & emotional-modifier constants  ·  Claude Code
+
+> In `kevinhirsch/orwell`, implement feature **0028**
+> (`docs/features/0028-temperature-and-emotional-constants.{md,feature}`): firm 0006's shape into a
+> **single tunable constants module** (sibling to `richnessConfig.ts` and the 0026 relationship
+> constants) — the temperature **bound/distribution**, the **per-variable weights**, the **emotional
+> modifier** (baseline / volatility scale / mean-reversion rate), and the **hidden-element surfacing
+> rate**. **Defaults match 0006's calibration** (favorite ~72%, real upsets, player unprotected,
+> bounded, never overrides hard rules). The emotional modifier **mean-reverts**; hidden elements
+> surface **rarely**. **No number hard-coded outside the module** (a future God-Mode knob). Keep the
+> 0006 calibration property green; make `0028` green; gates green. Read `docs/features/0006` +
+> `docs/decisions/0001`. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0024** are drafted (**0001–0020 built**; 0021/0023/0024 drafted, 0022
-deferred; **0004 amended**). Nothing is blocking the implementer queue. Candidate future spec work:
-**reserve twists** (Vault-held, even the admin doesn't know — 0005); the **relationship-math
-firming** (promote decision 0002's signal set / update-rule / betrayal-shock / decay numbers into a
-spec, to ground 0023's `apply`); a **temperature/emotional-modifier constants** tuning note; and the
-async **LLM `NarrativePort`** adapter spec. MVP-2 (0022) un-parks after MVP-1 is solid.
+All planned specs through **0028** are drafted (**0001–0020 built**; 0021/0023/0024/0025/0026/0027/
+0028 drafted, 0022 deferred; **0004 amended**). Nothing is blocking the implementer queue. The
+**top implementer priority is B13 (0023 — the live consequence loop)**, grounded by B14 (0024 soul
+recall) + B16 (0026 relationship math). Candidate future spec work: MVP-2 (0022) un-parks after
+MVP-1 is solid; a dedicated **jury-vote choreography** pass; and whatever new product calls surface.
