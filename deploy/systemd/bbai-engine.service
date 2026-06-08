@@ -6,11 +6,10 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/bbai
 EnvironmentFile=/opt/bbai/data/.env
-# TODO(0009): replace with the real engine MCP-server start command once 0009 provides a
-# build + entrypoint, e.g.:
-#   ExecStart=/usr/bin/node dist/server.js          # after `npm run build`
-# Placeholder (non-functional until 0009 lands) so the unit installs cleanly:
-ExecStart=/usr/bin/env bash -c 'echo "bbai-engine: start entrypoint pending feature 0009"; exec sleep infinity'
+# Standard engine contract: `npm start` runs the built MCP server, listening on
+# BBAI_ENGINE_PORT (loopback) for the front-end to call. (A direct `node dist/<entry>.js` is
+# equivalent once the implementer's build output path is fixed.)
+ExecStart=/usr/bin/npm start
 Restart=on-failure
 RestartSec=3
 
