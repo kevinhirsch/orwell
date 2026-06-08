@@ -23,7 +23,7 @@ projections, never Vault data.
 Run on the **Proxmox host shell**:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 ```
 
 This creates a Debian LXC and installs everything. Override defaults via env before the command:
@@ -48,7 +48,7 @@ After editing: `systemctl restart orwell-engine orwell-frontend`.
 ## Update
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell-update.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
 Pulls latest, rebuilds the engine (`npm run build`), and restarts both services. **Your save
@@ -59,7 +59,7 @@ Pulls latest, rebuilds the engine (`npm run build`), and restarts both services.
 ## Manual / non-Proxmox install
 
 ```bash
-git clone https://github.com/kevinhirsch/bbai.git /opt/orwell && cd /opt/orwell
+git clone https://github.com/kevinhirsch/orwell.git /opt/orwell && cd /opt/orwell
 npm ci && npm run build                                  # engine
 ( cd frontend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt )
 mkdir -p data && cp frontend/.env.example data/.env      # then edit data/.env (LLM + ports)

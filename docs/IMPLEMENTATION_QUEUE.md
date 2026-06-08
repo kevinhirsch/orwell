@@ -58,7 +58,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### A1 — Engine HTTP MCP transport  ·  Claude Code
 
-> In `kevinhirsch/bbai` (TypeScript engine), implement an **HTTP MCP transport** that exposes the
+> In `kevinhirsch/orwell` (TypeScript engine), implement an **HTTP MCP transport** that exposes the
 > existing `McpServer` (`src/adapters/mcp/McpServer.ts`) over HTTP per the MCP spec (JSON-RPC, with
 > SSE for streaming). Requirements: listen on **`ORWELL_ENGINE_PORT`** (default 8765, loopback by
 > default); be started by **`npm start`** (build/start already exist); mount **only** the
@@ -70,7 +70,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B1 — Implement 0011 weekly loop  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement feature **0011** (`docs/features/0011-weekly-loop-orchestration.{md,feature}`)
+> In `kevinhirsch/orwell`, implement feature **0011** (`docs/features/0011-weekly-loop-orchestration.{md,feature}`)
 > in the **pure domain core**: the weekly phase state machine (HOH → nominations → veto → veto
 > ceremony → eviction → repeat) and the season → Final 2 → jury vote → winner. NPC decisions are
 > **relationship-driven** (use the existing `src/engine/relationships.ts`); player decision points
@@ -80,7 +80,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### A2 — Orwell → engine MCP client + game driver  ·  OpenHands
 
-> In `kevinhirsch/bbai`, wire the vendored **Orwell** front-end (`frontend/`, Python FastAPI +
+> In `kevinhirsch/orwell`, wire the vendored **Orwell** front-end (`frontend/`, Python FastAPI +
 > agent) to drive a *Big Brother* game through the engine's **MCP server**. Read
 > `frontend/INTEGRATION.md`, `docs/features/0009-mcp-tool-boundary.md`, and
 > `docs/features/0012-conversation-and-scene-system.md`. Tasks: (1) register the engine MCP server
@@ -96,7 +96,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B2 — Implement 0012 conversation (engine side)  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement the engine side of feature **0012**
+> In `kevinhirsch/orwell`, implement the engine side of feature **0012**
 > (`docs/features/0012-conversation-and-scene-system.{md,feature}`): `recordInteraction` (scenes as
 > witnessed events — player-present = player knowledge, per 0002), a **`socialRead`** player tool
 > (joins the registry with `readsVault: false`; honest, Vault-free, may hint but never names
@@ -107,7 +107,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B3 — Implement 0013 Diary Room  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement feature **0013** (`docs/features/0013-diary-room.{md,feature}`):
+> In `kevinhirsch/orwell`, implement feature **0013** (`docs/features/0013-diary-room.{md,feature}`):
 > the player DR is OOC, its content is player knowledge tagged **`NO_NPC_PATHWAY`**, and
 > `deriveNpcKnowledge` must **exclude** it (no NPC ever learns DR content); honor the public/private
 > gap (NPCs act on public speech, never the DR); NPC confessionals are **Vault-only** and never
@@ -115,7 +115,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B4 — Implement 0014 jury & endgame  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement feature **0014** (`docs/features/0014-jury-and-endgame.{md,feature}`):
+> In `kevinhirsch/orwell`, implement feature **0014** (`docs/features/0014-jury-and-endgame.{md,feature}`):
 > jury = last 9 evictees; **jury management** shapes votes (relationship + eviction manner); Final 2
 > choreography (statements, one question per juror); the **engine decides** the vote (LLM only
 > voices), jury-management-dominant with a tunable finale weight; most votes wins, last-juror
@@ -123,7 +123,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### C1 — BB player surfaces in Orwell  ·  OpenHands
 
-> In `kevinhirsch/bbai` `frontend/`, adapt Orwell's chat shell into the *Big Brother* player
+> In `kevinhirsch/orwell` `frontend/`, adapt Orwell's chat shell into the *Big Brother* player
 > experience: a **narrated scene** view, the **hybrid decision prompts** (nominate / veto / vote
 > over the legal option set returned by the engine), a **Diary Room** panel, and a
 > **house / houseguest** view. Consume **only** MCP tool data (visible projection) — never the
@@ -131,14 +131,14 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### A3 — Deploy smoke test  ·  either
 
-> In `kevinhirsch/bbai`, add an **install smoke test** for `deploy/`: provision a container (a real
+> In `kevinhirsch/orwell`, add an **install smoke test** for `deploy/`: provision a container (a real
 > Proxmox LXC, or a Docker/Debian stand-in for CI), run `deploy/orwell-install.sh`, assert the UI
 > responds on `ORWELL_PORT`, run `deploy/orwell-update.sh`, and assert `/opt/orwell/data` survived.
 > Document how to run it on a real Proxmox host. Open a PR.
 
 ### B5 — Implement 0017 relationship model  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement feature **0017** (`docs/features/0017-relationship-model.{md,feature}`),
+> In `kevinhirsch/orwell`, implement feature **0017** (`docs/features/0017-relationship-model.{md,feature}`),
 > promoting `docs/decisions/0002-relationship-model.md` into the pure domain core (build on the
 > existing `src/engine/relationships.ts`). Relationships are **directed, graded, asymmetric edges**
 > (trust / affinity / threat / alignment / reliability / confidence) **computed from event history**
@@ -152,7 +152,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B6 — Implement 0015 OOBE (engine side)  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement the engine side of feature **0015**
+> In `kevinhirsch/orwell`, implement the engine side of feature **0015**
 > (`docs/features/0015-character-creation-oobe.{md,feature}`): `runPlayerOOBE(input)` — validate the
 > input, reject incomplete profiles, and produce the player's **static `Character`** + **initial
 > `Soul`** (emotional baseline + volatility, empty memory, **no** relationship beliefs); then seed
@@ -166,7 +166,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### B7 — Implement 0016 God Mode / admin  ·  Claude Code
 
-> In `kevinhirsch/bbai`, implement feature **0016** (`docs/features/0016-god-mode-admin.{md,feature}`),
+> In `kevinhirsch/orwell`, implement feature **0016** (`docs/features/0016-god-mode-admin.{md,feature}`),
 > extending the existing `src/surfaces/admin/AdminPort.ts` and the `ADMIN_TOOLS` allowlist. Add
 > useful **non-Vault** admin capability — `overrideMechanic`, `configure` (tunable constants +
 > reserve-twist **count**, never content), `manageSandbox` (create/reset/save/load this sandbox) —
@@ -179,7 +179,7 @@ not just narrate), surfacing `/orwell` from the main nav/landing, and the weekly
 
 ### C2 — OOBE authoring UI in Orwell  ·  OpenHands
 
-> In `kevinhirsch/bbai` `frontend/`, add the **character-creation (OOBE) flow** to the Orwell UI:
+> In `kevinhirsch/orwell` `frontend/`, add the **character-creation (OOBE) flow** to the Orwell UI:
 > a first-run, out-of-character intake that collects the player's identity, backstory, public
 > persona, archetype lean, and private strategy, validates required fields, and calls the engine's
 > OOBE entrypoint (via the MCP client from A2) to author the player and start a new save. Consume
