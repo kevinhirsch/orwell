@@ -1,6 +1,9 @@
 # 0032 — Front-end surface reduction (the "game build")
 
-> **Status:** Draft. Reduce the vendored general-purpose workspace front-end (`frontend/`) to **just
+> **Status:** **Tier 1 implemented & green** (server-enforced reduction — `frontend/tests/test_game_build.py`,
+> all 9 scenarios); **Tiers 2–3** (stop shipping the dropped JS; delete the code) are the
+> **running-instance follow-up** the spec scopes below (not CI-provable in the quarantined bare env).
+> Reduce the vendored general-purpose workspace front-end (`frontend/`) to **just
 > the Big Brother game surface** — chat + LLM connection + the engine MCP agent + the game's own
 > surfaces (onboarding, status, portraits, accounts) — and **drop every inherited workspace vertical**
 > that has nothing to do with playing the game. Done as **three escalating tiers**: (1) flag-gate +

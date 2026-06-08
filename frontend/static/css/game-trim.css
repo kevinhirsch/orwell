@@ -40,9 +40,14 @@
 #research-toggle-btn, /* Deep Research */
 #compare-indicator-btn,
 
-/* Settings modal: the Email category tab (Email is removed). The `search` and
- * `tools` tabs are intentionally kept — `search` is conversation search and
- * `tools` configures the agent tool backends the game relies on. */
-[data-settings-tab="email"] {
+/* Settings modal: tabs for dropped verticals. Email, Integrations (OAuth/API for
+ * email/calendar/contacts/etc.), and Reminders (email/ntfy/webhook channels) all
+ * configure inherited workspace tools that are gone under the game build. The
+ * `services`/`ai` (providers/models), `search`, `appearance`, `account`, `users`,
+ * `tools`, and `system` tabs are intentionally kept — they configure the game
+ * keep-set (providers, accounts/admin, the agent tool backend the game relies on). */
+[data-settings-tab="email"],
+[data-settings-tab="integrations"],
+[data-settings-tab="reminders"] {
   display: none !important;
 }
