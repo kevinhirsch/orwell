@@ -13,6 +13,7 @@ import type { Competitor, CompetitionType, CompetitionIntents, CompetitionResult
 import type { GameState } from "../../src/domain/saveState";
 import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
 import type { RandomnessSource } from "../../src/ports/RandomnessSource";
+import type { Day } from "../../src/engine/schedule";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -69,6 +70,11 @@ export class BbWorld extends World {
   snapshots?: GameState[];
   saveRef?: SaveRef;
   saveRef2?: SaveRef;
+
+  // Daily-event invariant (0008) scratch state.
+  day?: Day;
+  weekDays?: Day[];
+  scheduleDays?: Day[];
 
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
