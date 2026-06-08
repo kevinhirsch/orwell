@@ -24,6 +24,7 @@ module.exports = {
       "docs/features/0015-character-creation-oobe.feature",
       "docs/features/0016-god-mode-admin.feature",
       "docs/features/0017-relationship-model.feature",
+      "docs/features/0018-narrative-moment-orchestration.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
