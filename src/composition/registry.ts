@@ -9,6 +9,8 @@ import { PLAYER } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
+import type { UserSaveStore } from "../ports/UserSaveStore";
+import type { SessionSnapshot } from "../engine/sessionSnapshot";
 
 /**
  * Per-user game sandboxes (feature 0021). Each authenticated user gets ONE active
@@ -27,6 +29,7 @@ export interface UserSandbox {
   admin: AdminPort;
   summary: SummaryService;
   session: GameSessionAdapter;
+  commands: EngineCommandsAdapter;
   mcp: { player: McpServer; admin: McpServer };
 }
 
@@ -45,21 +48,60 @@ function buildUserSandbox(): UserSandbox {
     admin: outward.admin,
     summary: outward.summary,
     session,
+    commands,
     mcp: { player: new McpServer("player", deps), admin: new McpServer("admin/God Mode", deps) },
   };
+}
+
+/** Export the user's full durable snapshot: session core + engine detail (events + hidden beliefs). */
+function exportSnapshot(sb: UserSandbox): SessionSnapshot {
+  return {
+    ...sb.session.snapshot(),
+    events: sb.engine.events.query(),
+    relationships: sb.engine.relationships.serialize().edges,
+  };
+}
+
+/** Rebuild a fresh sandbox from a durable snapshot — resume the game, don't reset it. */
+function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
+  sb.session.restore(snap);
+  for (const e of snap.events) sb.engine.events.record(e); // ids/ts/hidden preserved exactly
+  sb.engine.relationships.load(snap.relationships);
 }
 
 export class GameSessionRegistry {
   private readonly sandboxes = new Map<string, UserSandbox>();
 
-  /** The user's isolated sandbox — created on first use, resumed on return. */
+  /**
+   * An optional durable store (0030) makes the live game survive an engine restart:
+   * `sandboxFor` recalls the user's saved game on first build, and every mutation
+   * saves it. With no store, the registry is purely in-memory (the prior behavior).
+   */
+  constructor(private readonly saveStore?: UserSaveStore) {}
+
+  /** The user's isolated sandbox — created on first use, RESUMED from durable storage on return. */
   sandboxFor(user: string): UserSandbox {
     let sb = this.sandboxes.get(user);
     if (!sb) {
       sb = buildUserSandbox();
+      if (this.saveStore?.hasSave(user)) {
+        const snap = this.saveStore.loadLatest(user);
+        if (snap) importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
+      }
+      if (this.saveStore) {
+        const persist = (): void => this.saveUser(user);
+        sb.session.setOnPersist(persist); // save-on-mutation (0030)
+        sb.commands.setOnPersist(persist);
+      }
       this.sandboxes.set(user, sb);
     }
     return sb;
+  }
+
+  /** Persist the user's current sandbox to durable storage (a no-op without a store). */
+  saveUser(user: string): void {
+    const sb = this.sandboxes.get(user);
+    if (sb && this.saveStore) this.saveStore.saveFor(user, exportSnapshot(sb));
   }
 
   /** Number of distinct user sandboxes currently held (concurrency visibility). */
@@ -70,6 +112,11 @@ export class GameSessionRegistry {
   /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
   resetUser(user: string): UserSandbox {
     const sb = buildUserSandbox();
+    if (this.saveStore) {
+      const persist = (): void => this.saveUser(user);
+      sb.session.setOnPersist(persist);
+      sb.commands.setOnPersist(persist);
+    }
     this.sandboxes.set(user, sb);
     return sb;
   }

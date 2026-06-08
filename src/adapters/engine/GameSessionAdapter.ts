@@ -9,6 +9,8 @@ import { resolveCompetition, CompetitionIntents } from "../../domain/competition
 import type { CompetitionType, Competitor } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import type { EntityId } from "../../domain/ids";
+import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
+import { cloneSession } from "../../engine/sessionSnapshot";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
@@ -28,13 +30,38 @@ export class GameSessionAdapter implements GameSession {
   private week = 0;
   private phase = "setup";
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
-  private ceremony: { hoh?: EntityId; nominees: EntityId[]; vetoHolder?: EntityId; vetoUsed: boolean } = {
-    nominees: [], vetoUsed: false,
-  };
+  private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
+  /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
+  private onPersist?: () => void;
+
+  /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
+  setOnPersist(fn: () => void): void {
+    this.onPersist = fn;
+  }
+
+  /** The durable session core (0030): the live house + week/phase/ceremony, losslessly. */
+  snapshot(): SessionCore {
+    return {
+      started: this.house !== null,
+      week: this.week,
+      phase: this.phase,
+      ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
+      house: this.house ? cloneSession(this.house) : null,
+    };
+  }
+
+  /** Rebuild the live session from a durable snapshot (0030) — resume instead of reset. */
+  restore(core: SessionCore): void {
+    this.house = core.house ? cloneSession(core.house) : null;
+    this.week = core.week;
+    this.phase = core.phase;
+    this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
+  }
 
   /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
-  updateCeremony(partial: Partial<{ hoh: EntityId; nominees: EntityId[]; vetoHolder: EntityId; vetoUsed: boolean }>): void {
+  updateCeremony(partial: Partial<CeremonyState>): void {
     this.ceremony = { ...this.ceremony, ...partial };
+    this.onPersist?.();
   }
 
   private nameOf(id: EntityId): string {
@@ -64,6 +91,7 @@ export class GameSessionAdapter implements GameSession {
     this.house = startNewGame({ seed, playerName: req.playerName, archetype, strategyStyle });
     this.week = 1;
     this.phase = "premiere";
+    this.onPersist?.(); // durable save (0030): a started game must survive a restart
     return this.view();
   }
 
