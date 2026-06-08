@@ -1,4 +1,5 @@
 import { GameSessionRegistry } from "./composition/registry";
+import { FileSaveStore } from "./adapters/engine/FileSaveStore";
 import { startHttpMcp } from "./adapters/mcp/HttpMcpServer";
 
 /**
@@ -22,7 +23,10 @@ const port = parsePort(
 );
 // One long-lived registry: each authenticated user (asserted by the front-end over the
 // x-orwell-user header) gets an isolated sandbox; calls route there (per-user model, 0021).
-const registry = new GameSessionRegistry();
+// A disk-backed save store (0030) makes each user's game survive an engine restart — saved on
+// every mutation, recalled on resume — so the onboarding overlay never re-fires for a returning
+// player. Data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
+const registry = new GameSessionRegistry(new FileSaveStore());
 startHttpMcp({ resolve: registry.resolver() }, port);
 // eslint-disable-next-line no-console
 console.log(`Orwell engine MCP server listening on http://0.0.0.0:${port}`);

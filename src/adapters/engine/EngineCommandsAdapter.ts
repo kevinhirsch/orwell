@@ -26,6 +26,8 @@ const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
  */
 export class EngineCommandsAdapter implements EngineCommands {
   private seq = 0;
+  /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
+  private onPersist?: () => void;
 
   constructor(
     private readonly events: EventStore,
@@ -33,6 +35,11 @@ export class EngineCommandsAdapter implements EngineCommands {
     private readonly rel?: RelationshipModel,
     private readonly rng: RandomnessSource = new SeededRandom(1),
   ) {}
+
+  /** Wire a persistence callback invoked after every state-mutating command (0030). */
+  setOnPersist(fn: () => void): void {
+    this.onPersist = fn;
+  }
 
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
     const eventId = `evt:mcp:${++this.seq}`;
@@ -47,6 +54,7 @@ export class EngineCommandsAdapter implements EngineCommands {
       const others = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
       for (const o of others) this.rel.applyDirected(o, req.initiator, req.kind as InteractionType, this.rng);
     }
+    this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };
   }
 

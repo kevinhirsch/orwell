@@ -177,6 +177,16 @@ export class BbWorld extends World {
   visibleBefore?: number;
   twistEventId?: string;
 
+  // Durable game persistence (0030) scratch state.
+  saveDir?: string;
+  registry2?: import("../../src/composition/registry").GameSessionRegistry;
+  viewBefore?: import("../../src/ports/GameSession").GameStateView;
+  viewAfter?: import("../../src/ports/GameSession").GameStateView;
+  viewAfterB?: import("../../src/ports/GameSession").GameStateView;
+  savedSnap?: import("../../src/engine/sessionSnapshot").SessionSnapshot;
+  resumedSnap?: import("../../src/engine/sessionSnapshot").SessionSnapshot;
+  durableSentinel?: string;
+
   // Relationship math (0026) scratch state.
   relThreatAfterBetrayal?: number;
   relEdgeBefore?: import("../../src/engine/relationshipConstants").EdgeSignals;
