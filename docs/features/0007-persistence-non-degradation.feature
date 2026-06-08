@@ -25,6 +25,12 @@ Feature: Persistence non-degradation — detail accumulates and never regresses
     Then the later save is a superset of the earlier
     And the counts of events, knowledge facts, and relationship edges are non-decreasing
 
+  Scenario: The dynamic soul deepens over the game while the character baseline holds
+    Given a long seeded game saved early and again late
+    When the late soul is compared to the early soul
+    Then the soul's relationship beliefs, emotional history, and memory have grown materially
+    And the static character baseline is unchanged
+
   Scenario: The Vault and Journal versions increment together
     Given a save is taken
     When the Vault store version increments
