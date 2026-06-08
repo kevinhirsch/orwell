@@ -1,0 +1,48 @@
+/* Orwell game build — hide non-game tool surfaces from the UI.
+ *
+ * Orwell is the Big Brother game; the inherited workspace tools are not part of
+ * the player experience. This hides their UI entry points only. It is the safe,
+ * reversible first cut: the underlying modals/routes/JS stay dormant (a deeper
+ * code-level prune is a separate pass, to be verified against a running
+ * instance per frontend/INTEGRATION.md). To restore a feature, drop its
+ * selector here (and re-enable its flag in src/settings.py DEFAULT_FEATURES).
+ *
+ * Covered: Tasks, Notes, Library, Gallery, Deep Research, Cookbook, Compare,
+ * Calendar, Brain (memory), Tools, Email, Plan Mode, Shell Access, Web Search.
+ */
+
+/* Icon rail launchers (the keepers — search/new/delete/theme/settings — stay) */
+#rail-calendar,
+#rail-compare,
+#rail-cookbook,
+#rail-research,
+#rail-email,
+#rail-gallery,
+#rail-archive,   /* Library */
+#rail-memory,    /* Brain */
+#rail-notes,
+#rail-tasks,
+
+/* Sidebar "Tools" section in full (Brain / Calendar / Compare / Cookbook /
+ * Deep Research / Gallery / Library / Notes / Tasks / Theme). Theme stays
+ * reachable from the icon rail, so hiding the whole section is safe. */
+#tools-section,
+
+/* Sidebar Email section */
+#email-section,
+
+/* Composer capability toggles */
+#web-toggle-btn,      /* Web Search */
+#bash-toggle-btn,     /* Shell Access */
+#plan-toggle-btn,     /* Plan Mode */
+
+/* Composer active-state indicators for the removed features */
+#research-toggle-btn, /* Deep Research */
+#compare-indicator-btn,
+
+/* Settings modal: the Email category tab (Email is removed). The `search` and
+ * `tools` tabs are intentionally kept — `search` is conversation search and
+ * `tools` configures the agent tool backends the game relies on. */
+[data-settings-tab="email"] {
+  display: none !important;
+}

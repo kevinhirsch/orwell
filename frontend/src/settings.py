@@ -175,14 +175,16 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_FEATURES = {
-    "web_search": True,
+    # Orwell game build: these inherited workspace capabilities are off by default
+    # (their UI entry points are also hidden — see static/css/game-trim.css).
+    "web_search": False,    # "Web Search" — removed from the game UI
     "web_fetch": True,
-    "deep_research": False,
-    "memory": True,
+    "deep_research": False,  # "Deep Research" — removed from the game UI
+    "memory": False,         # "Brain" (memory) — removed from the game UI
     "document_editor": True,
     "rag": True,
     "sensitive_filter": True,
-    "gallery": True,
+    "gallery": False,        # "Gallery" — removed from the game UI
 }
 
 

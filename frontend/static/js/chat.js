@@ -3381,6 +3381,62 @@ import { createStreamRenderer } from './streamingRenderer.js';
   var _insertStreamDoneToast = chatStream.insertStreamDoneToast;
 
   /**
+   * Cross-device sync: re-render the conversation for `sessionId` from saved
+   * history WITHOUT the heavy, draft-clearing selectSession path. Used when
+   * another device adds a message to the session this device is viewing. No-op
+   * if it isn't the open session, or if this device is mid-stream/resume for it
+   * (its own live view is authoritative). Preserves the message input; only
+   * touches #chat-history, and only auto-scrolls if already near the bottom.
+   */
+  export async function softReloadHistory(sessionId) {
+    if (!sessionId) return;
+    const isCurrent = () => !sessionModule || !sessionModule.getCurrentSessionId ||
+      sessionModule.getCurrentSessionId() === sessionId;
+    if (!isCurrent() || hasActiveStream(sessionId)) return;
+
+    let data;
+    try {
+      const res = await fetch(`${API_BASE}/api/history/${sessionId}`);
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (_) { return; }
+    // Re-check after the await: the user may have navigated, or a local stream
+    // may have started, while we were fetching.
+    if (!isCurrent() || hasActiveStream(sessionId)) return;
+
+    const box = document.getElementById('chat-history');
+    if (!box) return;
+    const msgs = data.history || [];
+    const modelName = data.model || null;
+    const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
+    const prevScrollTop = box.scrollTop;
+
+    box.classList.add('no-animate');
+    box.innerHTML = '';
+    for (const msg of msgs) {
+      let content = '';
+      if (typeof msg.content === 'string') content = msg.content;
+      else if (Array.isArray(msg.content)) content = msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
+      if (msg.role === 'user') {
+        const t = content.trim();
+        if (t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
+            t.startsWith('Your previous response was interrupted.') ||
+            t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain')) continue;
+      }
+      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
+      chatRenderer.addMessage(msg.role, markdownModule.renderContent(content), modelName, meta);
+    }
+    box.classList.remove('no-animate');
+    if (nearBottom) {
+      if (uiModule.scrollHistoryInstant) uiModule.scrollHistoryInstant();
+      else if (uiModule.scrollHistory) uiModule.scrollHistory();
+    } else {
+      // Reader was scrolled up — keep their place (new content was appended below).
+      box.scrollTop = prevScrollTop;
+    }
+  }
+
+  /**
    * Live-resume a chat run still streaming detached on the server (#2539).
    *
    * On session re-entry, GET /api/chat/resume/{id} replays the run's buffer then
@@ -5028,6 +5084,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
     continueFrom,
     _appendViewReportLink,
     hasActiveStream,
+    softReloadHistory,
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on

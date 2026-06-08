@@ -47,3 +47,13 @@ Feature: Replayability & naming — a fresh, randomly-named house every game
     Given a house generated with seed "A"
     And a house generated with seed "B"
     Then the two houses share no houseguest identities
+
+  # Amendment (for 0020 portraits) — PENDING IMPLEMENTATION (queue item B9).
+  # When CharacterFactory generates the public appearance fields (see 0004 §8), the
+  # implementer adds this scenario + its step defs and makes it green:
+  #   Scenario: Each houseguest carries public appearance fields for their portrait
+  #     When a new house is generated
+  #     Then each houseguest's Character carries public appearance and presentation fields
+  #     And those fields are internally consistent with the houseguest's archetype
+  #     And those fields contain no competition aptitudes or hidden attributes
+  # Kept out of the live suite until then so this implemented feature stays green.
