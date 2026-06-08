@@ -38,6 +38,11 @@
 
 /* Composer active-state indicators for the removed features */
 #research-toggle-btn, /* Deep Research */
-#compare-indicator-btn {
+#compare-indicator-btn,
+
+/* Settings modal: the Email category tab (Email is removed). The `search` and
+ * `tools` tabs are intentionally kept — `search` is conversation search and
+ * `tools` configures the agent tool backends the game relies on. */
+[data-settings-tab="email"] {
   display: none !important;
 }

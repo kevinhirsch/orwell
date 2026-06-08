@@ -754,41 +754,10 @@ async def serve_index(request: Request):
         return _serve_html_with_nonce(request, root_path)
     raise HTTPException(404, "index.html not found")
 
-@app.get("/notes")
-async def serve_notes(request: Request):
-    return await serve_index(request)
-
-@app.get("/calendar")
-async def serve_calendar(request: Request):
-    return await serve_index(request)
-
-# Per-tool deep-link routes — all serve the same SPA, the JS auto-opens
-# the matching modal based on window.location.pathname. Each route also
-# gets a unique favicon + page title via inline script in index.html so
-# bookmarks render with tool-specific icons.
-@app.get("/cookbook")
-async def serve_cookbook(request: Request):
-    return await serve_index(request)
-
-@app.get("/email")
-async def serve_email(request: Request):
-    return await serve_index(request)
-
-@app.get("/memory")
-async def serve_memory(request: Request):
-    return await serve_index(request)
-
-@app.get("/gallery")
-async def serve_gallery(request: Request):
-    return await serve_index(request)
-
-@app.get("/tasks")
-async def serve_tasks(request: Request):
-    return await serve_index(request)
-
-@app.get("/library")
-async def serve_library(request: Request):
-    return await serve_index(request)
+# Orwell game build: the per-tool deep-link routes (/notes, /calendar, /cookbook,
+# /email, /memory, /gallery, /tasks, /library) were removed — those tools are not
+# part of the game UI, and their entry points are hidden (static/css/game-trim.css).
+# They can be restored by re-adding the routes here.
 
 @app.get("/backgrounds")
 async def serve_backgrounds(request: Request):
