@@ -22,24 +22,27 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 
 ## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
 
-**State:** **0001–0024 built** — including the **consequence loop (0023), soul recall (0024), and
-per-user sandboxes (0021)**. The **MVP-1 engine backbone is DONE**: actions change hidden opinions,
-persist, recall; games are per-user. Remaining: engine **B15–B18** (0025 twists, 0026 relationship
-math, 0027 NarrativePort, 0028 temperature) and front-end **C4–C6**. Two lanes — **Claude Code =
-engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — concurrent, no contention.
+**State:** **0001–0025 built** — including the **consequence loop (0023), soul recall (0024), and
+per-user sandboxes (0021)**. **⚠️ One backbone gap remains:** persistence is **not durable in the
+live game** — `GameSessionAdapter`/`GameSessionRegistry` hold state in memory and the only `SaveStore`
+is in-memory, so an **engine restart wipes every game** (the user-reported "Welcome to the house"
+overlay re-fires every load). **B19 (0030) fixes this and is now the top engine priority.** After it:
+engine **B16–B18** (0026 relationship math, 0027 NarrativePort, 0028 temperature) and front-end
+**C4–C6**. Two lanes — **Claude Code = engine (`src/`)**, **OpenHands = front-end (`frontend/`)** —
+concurrent, no contention.
 
 With the engine core built, the make-or-break now is **what the player SEES and how it's VOICED.**
 
 | Wave | Claude Code (engine) | OpenHands (front-end) |
 |---|---|---|
-| **1 — now** | **B17** (0027 NarrativePort) — replace the echo stub with the real streaming narrator (engine contract + adapter; the front-end `llm_core` is the deployed realization) | **C6** (lever ready-part) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — **all engine tools are built**). The visible MVP-1. |
+| **1 — now** | **B19** (0030 durable persistence) — **fixes the welcome-overlay regression**: disk-backed `SaveStore` + load-on-resume/save-on-mutation in the live registry so a game survives a restart. Then **B17** (0027 NarrativePort) — the real streaming narrator. | **C6** (lever ready-part) → **C4** (0020 player UX: status panel + inline decision buttons + portraits — **all engine tools are built**). The visible MVP-1. |
 | **2** | **B16** (0026 relationship math) — firm the built `apply()`'s constants for **per-game feel** + tunability (refines 0023, not blocking) | **C5** (0021: assert the authenticated user — finish the per-user front-end over the built engine) |
 | **3 — polish** | **B18** (0028 temperature constants) · **B15** (0025 twists) | MVP-2 (0022) un-parks once MVP-1 feels solid |
 
-**The engine backbone (0021/0023/0024) is done.** So the priorities flip to the **player-facing
-experience (C4)** and the **real narrator (B17)** — the player needs to *see* the living game and
-hear it *in character*. B16/B18/B15 refine the feel on top; nothing is on a blocking critical path
-anymore.
+**The engine backbone (0021/0023/0024) is built but not yet DURABLE.** **B19 (0030) is the one
+remaining blocker** — without it, a restart loses the game and onboarding re-fires. After B19, the
+priorities flip to the **player-facing experience (C4)** and the **real narrator (B17)** — the player
+needs to *see* the living game and hear it *in character*. B16/B18/B15 refine the feel on top.
 
 **Coordination rules**
 - **Stay in lanes** (engine vs front-end); don't cross-edit the other's files.
@@ -49,7 +52,7 @@ anymore.
   experience lift), then B16, then B18/B15.
 - **Every item:** keep `npm test` + `npm run test:arch` green, the Vault Wall (dependency-cruiser)
   green, add the new `.feature` to `cucumber.cjs` when it goes green, and open a PR.
-- **First moves:** Claude Code → **B17**; OpenHands → **C6 → C4**.
+- **First moves:** Claude Code → **B19 (0030)** then **B17**; OpenHands → **C6 → C4**.
 
 *(The full per-item prompts are below; the table above is the current sequencing — it supersedes the
 historical "Order & assignment" list, which predates 0011–0024 being built.)*
@@ -401,6 +404,27 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > like `VaultStore`); player-facing recall output is **sentinel-clean** and pathway-filtered (0002).
 > The soul **deepens monotonically** (0007); `Character` stays byte-stable. Make `0024` green; gates
 > green. **Pairs with B13** (0023 records to the soul + calls recall) — do them together. Open a PR.
+
+### B19 — 0030 durable game persistence (survive restart)  ·  Claude Code  ·  **TOP PRIORITY (bugfix)**
+
+> In `kevinhirsch/orwell`, implement feature **0030**
+> (`docs/features/0030-durable-game-persistence-survive-restart.{md,feature}`). **Why it's urgent:**
+> the live game holds all state in memory — `GameSessionAdapter` (`house/week/phase/ceremony` fields)
+> and `GameSessionRegistry` (a plain `Map`) — and the only `SaveStore` is in-memory, so **every
+> engine restart wipes all games**, `GET /api/orwell/state` returns `started:false`, and the
+> front-end "Welcome to the house" overlay **re-fires on every load** (user-reported). Fix it by
+> wiring **durable** persistence into the LIVE path, reusing the built **0007** `GameState`/`SaveStore`
+> contract: (1) add a **disk-backed `FileSaveStore`** (engine-only adapter, per-user JSON under
+> `ORWELL_DATA_DIR`) behind the existing `SaveStore` port; (2) add `snapshot(): GameState` /
+> `restore(state)` to `GameSessionAdapter` (lossless live-house round-trip — player, NPCs, souls,
+> ceremony, week/phase) using the same export/import the off-screen sim already uses; (3) give
+> `GameSessionRegistry` a `SaveStore` so `sandboxFor(user)` **loads** a user's latest save into the
+> sandbox and every mutating tool (`createCharacter`, `recordInteraction`, `runCompetition`, ceremony
+> updates, consequence folds) **saves** afterward. Preserve **0007** co-versioning + non-degradation,
+> **0021** per-user isolation **across restart**, and the Vault Wall on the reloaded state
+> (dependency-cruiser stays green; the file store is engine-only). Make `0030` green (central test:
+> a **new registry over the same store** recalls a `started:true` game → onboarding stops firing);
+> gates green. Read `docs/features/0007`, `0021`, `0023` first. Open a PR.
 
 ### B15 — 0025 reserve twists (Vault-sealed)  ·  Claude Code
 
