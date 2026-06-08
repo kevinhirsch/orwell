@@ -7,6 +7,8 @@ import type { SocialGraph } from "../../src/engine/gossip";
 import type { SeasonResult } from "../../src/engine/simulation";
 import type { RichnessMetrics } from "../../src/engine/richness";
 import type { GameHouse, Houseguest } from "../../src/engine/characterFactory";
+import type { WeekState, VetoDraw } from "../../src/domain/eligibility";
+import type { RelationshipModel } from "../../src/engine/relationships";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -43,6 +45,15 @@ export class BbWorld extends World {
   // Replayability & naming (0004) scratch state.
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;
+
+  // Competition eligibility (0005) scratch state.
+  week?: WeekState;
+  special?: boolean;
+  eligible?: EntityId[];
+  selectable?: EntityId[];
+  voters?: EntityId[];
+  veto?: VetoDraw;
+  rel?: RelationshipModel;
 
   constructor(options: IWorldOptions) {
     super(options);

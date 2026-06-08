@@ -237,9 +237,12 @@ Built BDD/TDD-first, in priority order:
 - **0004 — Replayability & naming:** ✅ green (`CharacterFactory`: a 16-cast — one OOBE-authored
   player + 15 procedurally-named NPCs; curated/balanced ensemble; Character/Soul split; no
   hard-coded name list; no cross-seed identity carryover; same-seed reproducible).
+- **0005 — Competition eligibility:** ✅ green (pure-core hard rules: outgoing-HOH exclusion,
+  veto-winner-can't-be-replacement, six-player veto draw with the "Houseguest's Choice" chip,
+  eviction voters + HOH tiebreak; invariant under temperature and reserve twists).
 
 `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0005 — competition eligibility**.
+priority order: **0006 — outcomes by stats + temperature**.
 
 ## Open decisions (remaining)
 
