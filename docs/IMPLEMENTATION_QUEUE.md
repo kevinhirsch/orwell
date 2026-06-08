@@ -23,39 +23,31 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 ## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
 
 **True state as of 2026-06-08:**
-- **Engine: 0001–0025 + 0027 are Done.** The consequence loop (0023), soul recall (0024),
-  per-user sandboxes (0021), reserve twists (0025), and the real streaming narrator (0027 — `LlmNarrativePort`)
-  are all green. **Three items remain:** 0030 (durable persistence — bugfix), 0026 (relationship math
-  constants), 0028 (temperature constants).
-- **Front-end: basic game wiring is live** (`orwellOnboarding.js`, `orwellRoutes.py`, `orwellEngine.py`,
-  `X-Orwell-User` assertion already wired). **Three items remain:** C6 (lever-complete agent tools),
-  C4 (0020 player UX — status panel, inline decisions, portraits), C7 (0029 app admin — promote/demote,
-  password reset, user manager UI, LLM-settings gate).
-- **C5 is complete** — `_current_user(request)` → `X-Orwell-User` is already wired end-to-end in
-  `frontend/routes/orwell_routes.py` + `frontend/src/orwell_engine.py`.
-- **0004 appearance amendment is complete** — folded into `CharacterFactory` in #70 alongside 0020.
+- **Engine: 0001–0031 are Done.** The consequence loop (0023), soul recall (0024), per-user sandboxes
+  (0021), reserve twists (0025), the streaming narrator (0027), durable persistence (0030), relationship
+  + temperature constants (0026/0028), and now the **runtime orchestrator/integrity watcher (0031)** are
+  all green. **The engine core is complete** — only maintenance + future specs remain.
+- **Front-end: the game wiring + accounts tier are live** — onboarding/`X-Orwell-User`, the agent lever
+  tools (C6), 0020 player UX (C4), and app admin (0029/C7) have all shipped. **One item remains:**
+  **C8 — 0032 surface reduction** (prune the vendored workspace down to the game build).
+- **C5 / 0004 appearance / C6 / C4 / C7 are complete.**
 
-Two lanes — **Claude Code = engine (`src/`)**, **OpenHands = front-end (`frontend/`)** — fully concurrent.
+Two lanes — **Claude Code = engine (`src/`)**, **OpenHands = front-end (`frontend/`)**. The engine lane
+is now drained; the active front-end work is the prune.
 
 | Wave | Claude Code (engine) | OpenHands (front-end) |
 |---|---|---|
-| **1 — now** | **B19** (0030 durable persistence) — **top priority / regression fix**: disk-backed `FileSaveStore` + `snapshot()/restore()` on `GameSessionAdapter` + load-on-resume/save-on-mutation in `GameSessionRegistry`. Central test: new registry over same store → `getGameState()` returns `started:true` → welcome overlay stops re-firing. | **C6** (lever-complete agent tools) — expose the full engine lever set as agent tool schemas (`agent_tools.py`/`tool_schemas.py`) and verify `getMomentPrompt` is injected on every game turn. Add a drift test that fails if any agent-lever tool is missing from the prompt manifest. |
-| **2** | **B16** (0026 relationship math) — firm the live `apply()` update rule into one tunable constants module; sticky/realistic defaults; measurable per-game feel spread across seeds. Independent of 0030; can run immediately after. | **C4** (0020 player UX) — always-visible status panel (week, phase, HOH, nominees, veto) from `gameStatus`; inline binding-decision buttons from `pendingDecision`/`executeDecision`; per-houseguest portraits from `portraitDescriptorFor` (0004 fields already in `CharacterFactory`). All engine tools are built. |
-| **3 — polish** | **B18** (0028 temperature constants) — firm the 0006 calibration into one tunable constants module. Independent; slot in any free engine slot. | **C7** (0029 app admin) — close the AuthManager gaps: `set_admin` + last-admin guard + `/users/{u}/role`; `admin_reset_password` + session revoke + `/users/{u}/password`; admin-only Users manager in Settings; gate global LLM settings behind `manage_llm_settings`. |
-| **after** | Engine done — maintenance + future specs. | MVP-2 (0022) un-parks once MVP-1 is solid. |
+| **1 — now** | *Engine core complete* — no queued feature. Maintenance, future specs, and any review follow-ups. | **C8** (0032 surface reduction) — reduce the front-end to the **game build**: flag-gate + **server-side 404** every dropped vertical (incl. the live **shell** endpoint), drop front-end memory/RAG, prune Settings tabs, behind one **`ORWELL_GAME_BUILD`** switch; then stop shipping the dropped JS; then delete it (deletion tier **verified on a running instance**). Keep **voice** off-by-default. |
+| **after** | Future specs as drafted (jury choreography, MVP-2 engine bits, new product calls). | MVP-2 (0022) un-parks once MVP-1 is solid. |
 
 **Coordination rules**
 - **Stay in lanes** (engine `src/` vs front-end `frontend/`); don't cross-edit the other's files.
-- **No hard dependencies between waves:** both lanes are fully unblocked — each agent starts Wave 1
-  immediately and moves to Wave 2 as soon as their Wave 1 item is green. There is no cross-lane dep.
-- **Engine ordering:** B19 → B16 → B18. B19 first (regression); B16 and B18 are independent of each
-  other and can swap, but B16 first (more impactful — it changes live gameplay feel).
-- **Front-end ordering:** C6 → C4 → C7. C6 first (makes the agent properly lever-complete, which
-  makes C4's UX components actually drive the engine correctly); C4 second (the visible player
-  experience, biggest lift); C7 third (admin polish, no player-facing urgency).
-- **Every item:** keep `npm test` + `npm run test:arch` green; Vault Wall (dependency-cruiser) green;
-  add `.feature` to `cucumber.cjs` when it goes green; open a PR per item.
-- **First moves NOW:** Claude Code → **B19**; OpenHands → **C6**.
+- **0032 is front-end-only** — it must **not** touch `src/` or `cucumber.cjs`; the engine gate
+  (`npm test` / `npm run test:arch`) must stay **unaffected** (the front-end is quarantined).
+- **0032 tier order:** Tier 1 (flag-gate + 404) → Tier 2 (stop shipping JS) → Tier 3 (delete code).
+  Tiers 1–2 go green in CI (`pytest`); Tier 3's DoD is a **documented run on a live instance** (boots,
+  onboards, plays a turn, portraits render, accounts/admin work) per `frontend/INTEGRATION.md`.
+- **First move NOW:** OpenHands → **C8**. (Claude Code engine lane idle — pick up review/maintenance.)
 
 *(The full per-item prompts are below.)*
 
@@ -504,6 +496,39 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > per-user game sandbox (0021). Make `0029` green; `py_compile` clean; smoke on two accounts (an
 > admin + a regular user). Open a PR.
 
+### C8 — 0032 front-end surface reduction (the "game build")  ·  OpenHands  ·  **next front-end feature**
+
+> In `kevinhirsch/orwell` `frontend/` (Python; **no engine change**), implement feature **0032**
+> (`docs/features/0032-frontend-surface-reduction-game-build.{md,feature}`). Reduce the vendored
+> general-purpose workspace to **just the Big Brother game surface** and remove every inherited
+> vertical. A partial prune already exists — `static/css/game-trim.css` (CSS-hide only) and 8 keys in
+> `src/settings.py` `DEFAULT_FEATURES` — but it's **cosmetic and inconsistent**: routes/JS still ship,
+> `web_fetch`/`document_editor`/`rag` are still on, most verticals have **no flag**, and
+> **`/api/shell/exec` + `/api/shell/stream` are LIVE** (admin-gated but only CSS-hidden). Do it in
+> **three escalating tiers**:
+> 1. **Flag-gate + server-side 404 (CI-green).** Extend `DEFAULT_FEATURES` with one flag per dropped
+>    vertical, default **off** under a single **`ORWELL_GAME_BUILD`** profile (default on) that forces
+>    the **drop-set off / keep-set on**. Gate **route registration** (don't mount a disabled vertical's
+>    router) so its endpoints return **404/410**, not just a hidden button — **prove it for the shell
+>    endpoints** and flip `web_fetch`/`document_editor`/`rag` off. Drop the front-end **memory/RAG/
+>    skills** context injection (the engine's soul/Vault is the only memory; the engine moment prompt,
+>    0018, is the only injected framing). Prune the **Settings** tabs to the keep-set.
+> 2. **Stop shipping the JS (CI-green).** Don't load dropped modules — especially the ~80-file
+>    `static/js/editor/` image editor — taking ~5.4 MB → a fraction.
+> 3. **Delete the code (running-instance verified).** Remove the dropped verticals' `routes/` +
+>    `services/` + `src/` + `static/js/` + `app.py` wiring + `index.html` tags. Because this edits the
+>    large `app.py` and the shell, its DoD is a **documented run on a live instance**: boots, onboards,
+>    plays a turn in-character, **renders portraits**, accounts/admin work.
+> **Keep-set (must survive every tier):** main chat + streaming/SSE + session history; onboarding
+> (`orwellOnboarding.js`); the LLM connection (providers/endpoints/`llm_core`, 0027) **and** the agent's
+> **engine MCP tool backend** (`agent_tools.py`/`tool_schemas.py`/`orwell_engine.py` — the linchpin);
+> the 0020 surfaces (status, decisions, **portraits — keep the image-GEN path**, distinct from the image
+> **editor**/gallery that go); accounts/admin (0029); Settings (pruned) + Theme. **Keep voice (TTS/STT)
+> behind a `voice` flag that defaults OFF** (opt-in, not deleted). Make `0032` green via
+> `cd frontend && python3 -m pytest tests/` (name-agnostic — roles only; the front-end is quarantined,
+> so **do not** touch `cucumber.cjs` and keep `npm test` unaffected). Read `frontend/INTEGRATION.md`
+> ("Deferred: the deep code-level prune") first. Open a PR.
+
 ### B20 — 0031 game orchestrator & integrity watcher  ·  Claude Code  ·  **next engine feature**
 
 > In `kevinhirsch/orwell`, implement feature **0031**
@@ -536,8 +561,9 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 
 ## Still on the feature-maker (me)
 
-All planned specs through **0031** are drafted (**0001–0028 + 0030 built**; 0029 + 0031 drafted; 0022
-deferred; 0004 amended and already built). **Nothing is blocking the implementer queue.** Engine: the
-core is essentially complete — **B20 (0031 orchestrator/watcher)** is the next engine feature. Front-end:
-**C7 (0029 app admin)** + the player-UX items. Candidate future spec work: MVP-2 (0022) un-parks after
-MVP-1 is solid; jury-vote choreography; any new product calls.
+All planned specs through **0031 are built** (0001–0031 Done; 0022 deferred; 0004 amended and built).
+**0032 (front-end surface reduction / "game build")** is the newest draft — queued as **C8**.
+**Nothing is blocking the implementer queue.** Engine: the core is **complete** (0031 closed the
+runtime-orchestration gap) — only maintenance + future specs remain. Front-end: **C8 (0032 prune)** is
+the next item, then any remaining player-UX polish. Candidate future spec work: MVP-2 (0022) un-parks
+after MVP-1 is solid; jury-vote choreography; any new product calls.
