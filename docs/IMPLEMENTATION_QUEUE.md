@@ -18,15 +18,39 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 | # | Item | Agent | Depends on |
 |---|---|---|---|
 | A1 | Engine **HTTP MCP transport** | Claude Code | — (McpServer + build/start exist) |
-| B1 | Implement **0011 weekly loop** | Claude Code | — |
+| B5 | Implement **0017 relationship model** | Claude Code | — (`relationships.ts` seam exists) |
+| B1 | Implement **0011 weekly loop** | Claude Code | B5 reads it (seam already exists) |
 | A2 | **orwell → engine MCP** client + game driver | OpenHands | A1 |
 | B2 | Implement **0012 conversation** (engine side) | Claude Code | B1 |
 | B3 | Implement **0013 Diary Room** | Claude Code | B2 |
-| B4 | Implement **0014 jury & endgame** | Claude Code | B1 |
+| B4 | Implement **0014 jury & endgame** | Claude Code | B1, B5 |
+| B6 | Implement **0015 OOBE** (engine side) | Claude Code | — (0004 done) |
+| B7 | Implement **0016 God Mode / admin** | Claude Code | — (0001 done) |
 | C1 | **BB player surfaces** in orwell | OpenHands | A2, B2 |
+| C2 | **OOBE authoring UI** in orwell | OpenHands | A2, B6 |
 | A3 | **Deploy smoke test** | either | A1, A2 |
 
-A1 + B1 start immediately in parallel (one per agent). A2 unblocks the whole front-end track.
+A1 + B5 start immediately in parallel (one per agent). A2 unblocks the whole front-end track.
+**B5 (relationship model) is foundational** — do it early; B1 and B4 read it. B6/B7 are
+independent of the gameplay chain (their deps are already green) and can slot into any free
+Claude Code slot.
+
+## Progress (this session — onboarding vertical slice)
+
+A first end-to-end slice fixing "no onboarding past account creation" and "the model answers as
+a generic assistant" is **landed** (engine tested green; front-end bridge wired):
+
+- **A1 — HTTP MCP transport:** ✅ confirmed present (`HttpMcpServer.ts`); engine port aligned to
+  `BBAI_ENGINE_PORT` (8765) to match the deploy/front-end contract.
+- **B6 — engine OOBE:** ✅ exposed as Vault-free player tools `createCharacter` / `getGameState`,
+  plus `getMomentPrompt` (managed per-moment system prompt). Tested (unit + HTTP + sentinel/arch).
+- **A2 / C2 — front-end:** ✅ first slice — `/bbai` page (character creation → house → in-character
+  chat) + `routes/bbai_routes.py` + `src/bbai_engine.py`; chat injects the engine's moment prompt
+  via orwell's own `resolve_endpoint`/`llm_call_async`. See `frontend/INTEGRATION.md` → "Try it".
+
+Remaining on these: deeper agent/tool-calling integration (let the LLM *call* engine action tools,
+not just narrate), surfacing `/bbai` from the main nav/landing, and the weekly-loop moments
+(feature 0011) that will advance phase/moment automatically.
 
 ---
 
@@ -112,13 +136,61 @@ A1 + B1 start immediately in parallel (one per agent). A2 unblocks the whole fro
 > responds on `BBAI_PORT`, run `deploy/bbai-update.sh`, and assert `/opt/bbai/data` survived.
 > Document how to run it on a real Proxmox host. Open a PR.
 
+### B5 — Implement 0017 relationship model  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement feature **0017** (`docs/features/0017-relationship-model.{md,feature}`),
+> promoting `docs/decisions/0002-relationship-model.md` into the pure domain core (build on the
+> existing `src/engine/relationships.ts`). Relationships are **directed, graded, asymmetric edges**
+> (trust / affinity / threat / alignment / reliability / confidence) **computed from event history**
+> through the holder's `Character` framing — **never** a binary ally/enemy flag, and **no label is
+> ever persisted**. Fix the *shape* per the spec (recency-weighting, **betrayal-shock**, **decay**,
+> rising confidence with data, dispositional labels); the **numbers are tunable config** alongside
+> the temperature constants (0006). Wire the consumers: Houseguest's Choice (0005), targeting via
+> `threat`, jury lean (feeds 0014). Pure + **seed-deterministic**. Make the `0017` `.feature` green;
+> keep all gates green (esp. that the serialized soul holds signals+history but **no label** — ties
+> 0007). Read `CLAUDE.md` first. Open a PR.
+
+### B6 — Implement 0015 OOBE (engine side)  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement the engine side of feature **0015**
+> (`docs/features/0015-character-creation-oobe.{md,feature}`): `runPlayerOOBE(input)` — validate the
+> input, reject incomplete profiles, and produce the player's **static `Character`** + **initial
+> `Soul`** (emotional baseline + volatility, empty memory, **no** relationship beliefs); then seed
+> the house **around** the authored player via `generateHouse(seed, player)` keeping the curated
+> ensemble (0004). **Anti-sycophancy is the crux:** the player's P/M/S aptitudes must fall **within
+> the same bounds as the NPCs** — no self-min-maxing (ship §9 option **A**, derived/balanced, unless
+> told otherwise); the player carries **no** outcome guarantee (0006). The player's authored private
+> strategy is player knowledge tagged **`NO_NPC_PATHWAY`** (0013) — no NPC starts knowing it. OOBE
+> is OOC (no witnessed event). Make the `0015` `.feature` green; gates green. Read `CLAUDE.md` first.
+> Open a PR.
+
+### B7 — Implement 0016 God Mode / admin  ·  Claude Code
+
+> In `kevinhirsch/bbai`, implement feature **0016** (`docs/features/0016-god-mode-admin.{md,feature}`),
+> extending the existing `src/surfaces/admin/AdminPort.ts` and the `ADMIN_TOOLS` allowlist. Add
+> useful **non-Vault** admin capability — `overrideMechanic`, `configure` (tunable constants +
+> reserve-twist **count**, never content), `manageSandbox` (create/reset/save/load this sandbox) —
+> while keeping the **Vault Wall on the admin surface**: no admin module imports `VaultStore`/
+> `VectorIndex` (extend the dependency-cruiser rule to `surfaces/admin`), every `ADMIN_TOOLS` entry
+> stays `readsVault: false`, and admin output is **sentinel-clean** (extend the 0001 canary to the
+> admin surface). Enabling reserve twists must **not** reveal their content/timing to the admin
+> (Vault-sealed, 0005). Make the `0016` `.feature` green; gates green. Read `CLAUDE.md` and
+> `docs/features/0001-vault-wall-isolation.md` first. Open a PR.
+
+### C2 — OOBE authoring UI in orwell  ·  OpenHands
+
+> In `kevinhirsch/bbai` `frontend/`, add the **character-creation (OOBE) flow** to the orwell UI:
+> a first-run, out-of-character intake that collects the player's identity, backstory, public
+> persona, archetype lean, and private strategy, validates required fields, and calls the engine's
+> OOBE entrypoint (via the MCP client from A2) to author the player and start a new save. Consume
+> **only** what the engine returns; the UI never sets the player's stats directly (the engine
+> balances them — anti-sycophancy). Keep the existing chat/LLM/agent plumbing. Open a PR.
+
 ---
 
-## Still on the feature-maker (me) before they can be queued
+## Still on the feature-maker (me)
 
-- **0015 — Character creation / OOBE** (the human-authored player; the only authored profile).
-- **0016 — God Mode / admin port** (admin controls; non-Vault, walled even from the admin).
-- **Relationship-model dedicated feature** (promote decision 0002 into a full spec once its math
-  firms up).
-
-I'll draft these next; each then gets a prompt here.
+All currently-planned specs are drafted (0001–0017). Nothing is blocking the implementer queue.
+Future spec work, if it comes up: any **reserve-twist** specifics (stay Vault-held, 0005); a
+dedicated **temperature/relationship constants** tuning note once the implementers want concrete
+numbers (the *shape* is already fixed in 0006 / 0017); and whatever new product calls surface.

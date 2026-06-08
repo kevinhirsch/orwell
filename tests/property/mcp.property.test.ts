@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSandbox } from "../support/sandbox";
 import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { McpServer } from "../../src/adapters/mcp/McpServer";
 import { toolsFor } from "../../src/surfaces/tools/registry";
 import type { OutwardChannel } from "../../src/surfaces/tools/registry";
@@ -8,6 +9,9 @@ import { PLAYER, npc } from "../../src/domain/ids";
 
 function sampleArgs(name: string): Record<string, unknown> {
   switch (name) {
+    case "createCharacter": return { playerName: "The Player", seed: 7 };
+    case "getGameState": return {};
+    case "getMomentPrompt": return { moment: "nominations" };
     case "getVisibleStateFor": return { entity: PLAYER };
     case "renderScene": return { mode: "scene" };
     case "askProducers": return { question: "is it true?" };
@@ -25,7 +29,8 @@ describe("MCP tool boundary — every tool is Vault-free across seeds", () => {
     for (let seed = 1; seed <= 25; seed++) {
       const sb = buildSandbox(seed);
       const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
-      const deps = { player: sb.player, admin: sb.admin, summary: sb.summary, commands };
+      const session = new GameSessionAdapter();
+      const deps = { player: sb.player, admin: sb.admin, summary: sb.summary, commands, session };
 
       for (const channel of ["player", "admin/God Mode"] as OutwardChannel[]) {
         const server = new McpServer(channel, deps);
@@ -43,7 +48,8 @@ describe("MCP tool boundary — every tool is Vault-free across seeds", () => {
   it("channels are isolated — a player server cannot call an admin tool", async () => {
     const sb = buildSandbox(1);
     const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
-    const player = new McpServer("player", { player: sb.player, admin: sb.admin, summary: sb.summary, commands });
+    const session = new GameSessionAdapter();
+    const player = new McpServer("player", { player: sb.player, admin: sb.admin, summary: sb.summary, commands, session });
     await expect(player.callTool("inspectNonVaultState", { query: "all" })).rejects.toThrow();
   });
 });
