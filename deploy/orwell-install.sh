@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
-# bbai — in-container install. Runs inside the LXC created by deploy/bbai.sh.
+# orwell — in-container install. Runs inside the LXC created by deploy/orwell.sh.
 # Installs deps, clones, builds the engine, sets up the front-end, writes config, and registers
 # systemd services for the engine (MCP server) and the orwell front-end.
 set -euo pipefail
 
-REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
+REPO="${REPO:-https://github.com/kevinhirsch/orwell.git}"
 BRANCH="${BRANCH:-main}"
-APP_DIR="${APP_DIR:-/opt/bbai}"
-DATA_DIR="${DATA_DIR:-/opt/bbai/data}"
-BBAI_PORT="${BBAI_PORT:-8080}"
-BBAI_ENGINE_PORT="${BBAI_ENGINE_PORT:-8765}"
+APP_DIR="${APP_DIR:-/opt/orwell}"
+DATA_DIR="${DATA_DIR:-/opt/orwell/data}"
+# ORWELL_* are primary; BBAI_* are kept as a silent deprecated fallback.
+ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"
+ORWELL_ENGINE_PORT="${ORWELL_ENGINE_PORT:-${BBAI_ENGINE_PORT:-8765}}"
 
 echo "==> apt deps"
 export DEBIAN_FRONTEND=noninteractive
@@ -33,7 +34,7 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" 
   apt-get install -y -qq nodejs
 fi
 
-echo "==> clone bbai -> ${APP_DIR}"
+echo "==> clone orwell -> ${APP_DIR}"
 if [[ -d "${APP_DIR}/.git" ]]; then
   git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
   git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
@@ -66,13 +67,13 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
   cp "${APP_DIR}/frontend/.env.example" "${DATA_DIR}/.env" 2>/dev/null || touch "${DATA_DIR}/.env"
   {
     echo ""
-    echo "# --- bbai ---"
+    echo "# --- orwell ---"
     echo "# front-end UI port"
-    echo "BBAI_PORT=${BBAI_PORT}"
+    echo "ORWELL_PORT=${ORWELL_PORT}"
     echo "# engine MCP server port (loopback)"
-    echo "BBAI_ENGINE_PORT=${BBAI_ENGINE_PORT}"
+    echo "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT}"
     echo "# front-end -> engine MCP endpoint"
-    echo "BBAI_ENGINE_MCP_URL=http://127.0.0.1:${BBAI_ENGINE_PORT}"
+    echo "ORWELL_ENGINE_MCP_URL=http://127.0.0.1:${ORWELL_ENGINE_PORT}"
     # LLM provider: written through from the host installer's prompt when supplied; otherwise a
     # commented hint. Secrets only ever live here, in the container — never in the repo.
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -87,9 +88,9 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
 fi
 
 echo "==> systemd services"
-install -m 644 "${APP_DIR}/deploy/systemd/bbai-engine.service"   /etc/systemd/system/bbai-engine.service
-install -m 644 "${APP_DIR}/deploy/systemd/bbai-frontend.service" /etc/systemd/system/bbai-frontend.service
+install -m 644 "${APP_DIR}/deploy/systemd/orwell-engine.service"   /etc/systemd/system/orwell-engine.service
+install -m 644 "${APP_DIR}/deploy/systemd/orwell-frontend.service" /etc/systemd/system/orwell-frontend.service
 systemctl daemon-reload
-systemctl enable --now bbai-engine bbai-frontend
+systemctl enable --now orwell-engine orwell-frontend
 
-echo "==> bbai installed at ${APP_DIR} (data: ${DATA_DIR}). UI: http://0.0.0.0:${BBAI_PORT}"
+echo "==> orwell installed at ${APP_DIR} (data: ${DATA_DIR}). UI: http://0.0.0.0:${ORWELL_PORT}"

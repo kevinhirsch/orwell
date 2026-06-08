@@ -21,6 +21,7 @@ function sampleArgs(name: string): Record<string, unknown> {
     case "renderScene": return { mode: "scene" };
     case "askProducers": return { question: "is the rumored secret true?" };
     case "endOfSessionSummary": return {};
+    case "runCompetition": return { type: "endurance" };
     case "recordInteraction": return { initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a kitchen chat" };
     case "resolveCompetition": return {
       type: "endurance",

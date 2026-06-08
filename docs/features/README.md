@@ -1,6 +1,6 @@
 # Feature specs
 
-Drafted, stack-agnostic feature definitions for the `bbai` build. Each feature is authored
+Drafted, stack-agnostic feature definitions for the `orwell` build. Each feature is authored
 here **before** implementation and handed to an implementer (a separate Claude Code
 instance). The author drafts; the implementer builds to green and refactors.
 
@@ -56,7 +56,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
 | 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Done |
-| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Draft |
+| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Done |
 | 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Done |
 | 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
 | 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-`bbai` is a rebuild of an immersive, single-player, text-based **_Big Brother_ simulation**
+`orwell` is a rebuild of an immersive, single-player, text-based **_Big Brother_ simulation**
 as a web application. The system is game master, narrator, and the voice of every NPC
 houseguest. A prior version ran entirely inside one LLM chat context; this rebuild moves
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
@@ -206,7 +206,7 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 | `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run build` | Bundle the engine entrypoint to `dist/main.js` (esbuild). |
-| `npm start` | Run the built engine — the HTTP MCP server (`BBAI_PORT`, default 8848). |
+| `npm start` | Run the built engine — the HTTP MCP server (`ORWELL_PORT`, default 8848). |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |

@@ -1,4 +1,4 @@
-# bbai — *Big Brother: The Simulation*
+# Orwell — *Big Brother: The Simulation*
 
 An immersive, serialized, single-player ***Big Brother*** simulation, rebuilt as a web
 application. The system is game master, narrator, and the voice of every NPC houseguest:
@@ -310,21 +310,21 @@ The canonical rules the domain core implements:
 
 ## Install & update
 
-bbai runs as **two co-located services in one container** — the TypeScript **engine** (MCP
-server) and the **orwell** front-end (Python) — wired over local MCP. On a Proxmox host, two
+Orwell runs as **two co-located services in one container** — the TypeScript **engine** (MCP
+server) and the **Orwell** front-end (Python) — wired over local MCP. On a Proxmox host, two
 one-liners install and update it:
 
 ```bash
 # install (run on the Proxmox host shell)
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 # update
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
 The install creates a Debian LXC, installs Node 22 + Python, builds the engine (`npm run build`),
 sets up the front-end, and starts both as systemd services. The save (SQLite + souls) lives at
-`/opt/bbai/data` and is **preserved across updates**. The LLM provider (Ollama or an API key) and
-ports are set in `/opt/bbai/data/.env`.
+`/opt/orwell/data` and is **preserved across updates**. The LLM provider (Ollama or an API key) and
+ports are set in `/opt/orwell/data/.env`.
 
 **Full guide** — install, configuration, manual / non-Proxmox install, updates, services, backups,
 and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals + the engine

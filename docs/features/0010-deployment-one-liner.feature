@@ -5,7 +5,7 @@
 
 Feature: One-liner deployment & update — easy to deploy, easy to update
 
-  Two host-side one-liners stand up and update bbai (the TS engine + the orwell front-end,
+  Two host-side one-liners stand up and update orwell (the TS engine + the orwell front-end,
   wired over local MCP) inside a container, without losing the save.
 
   Scenario: A fresh one-liner install brings the app up
@@ -16,7 +16,7 @@ Feature: One-liner deployment & update — easy to deploy, easy to update
     And the only manual step is entering the LLM provider configuration
 
   Scenario: The update one-liner updates without losing the save
-    Given an installed bbai container with an accumulated save
+    Given an installed orwell container with an accumulated save
     When the update one-liner is run
     Then the code is pulled, rebuilt, and the services restarted
     And the previous save (state and souls) is still present
@@ -31,6 +31,6 @@ Feature: One-liner deployment & update — easy to deploy, easy to update
     And all secrets are read from env or the data-directory .env
 
   Scenario: The container is the game sandbox
-    Given an installed bbai container
+    Given an installed orwell container
     Then the game's state lives under a persistent data directory in that container
     And that directory survives updates

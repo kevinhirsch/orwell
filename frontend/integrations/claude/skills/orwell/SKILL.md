@@ -1,5 +1,5 @@
 ---
-name: orwell
+name: Orwell
 description: Use when the user asks Claude Code to read or write Orwell data (todos, email, calendar, memory, documents) or to launch/monitor/stop a Cookbook model-serve task through the scoped Claude Agent API. Requires ORWELL_URL and ORWELL_API_TOKEN.
 ---
 

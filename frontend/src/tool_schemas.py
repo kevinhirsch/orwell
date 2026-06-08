@@ -1178,6 +1178,59 @@ FUNCTION_TOOL_SCHEMAS = [
             }
         }
     },
+    # --- Big Brother game engine (Vault-free; only available meaningfully when a game is running) ---
+    {
+        "type": "function",
+        "function": {
+            "name": "getGameState",
+            "description": "Get the current Big Brother game state (week, phase, the player's card, and the house roster by name). Vault-free: no stats, souls, or hidden attributes.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "runCompetition",
+            "description": "Ask the engine to RESOLVE a competition over the live house. The ENGINE decides the winner from its own hidden stats — you do not supply or see stats/scores, only the winner's name. Use this to actually run an HOH/veto competition, then narrate the result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["endurance", "physical", "puzzle", "quiz", "memory", "mental", "social"], "description": "Competition type (default endurance)."},
+                    "participantIds": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of houseguest ids; defaults to the whole house."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recordInteraction",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "A concise description of what happened in the scene."},
+                    "withIds": {"type": "array", "items": {"type": "string"}, "description": "Optional ids of houseguests present besides the player."},
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "surfaceInformationTo",
+            "description": "Surface a fact into the PLAYER's knowledge through a named in-game pathway (e.g. 'overheard', 'told-by:npc:2'). Use when the player legitimately learns something in-fiction.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "information": {"type": "string", "description": "The fact the player learns."},
+                    "pathway": {"type": "string", "description": "How they learned it, e.g. 'overheard' or 'told-by:npc:3'."},
+                },
+                "required": ["information", "pathway"],
+            },
+        },
+    },
 ]
 
 

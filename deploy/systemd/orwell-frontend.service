@@ -1,0 +1,17 @@
+[Unit]
+Description=orwell front-end (orwell — Python/FastAPI/uvicorn)
+After=network.target orwell-engine.service
+Wants=orwell-engine.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/orwell/frontend
+EnvironmentFile=/opt/orwell/data/.env
+# The orwell app reads ORWELL_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
+# MCP server (frontend/INTEGRATION.md). The UI port comes from ORWELL_PORT.
+ExecStart=/opt/orwell/frontend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port ${ORWELL_PORT}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

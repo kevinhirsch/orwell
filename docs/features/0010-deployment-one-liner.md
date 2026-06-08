@@ -11,19 +11,19 @@ community-scripts:
 
 ```bash
 # install
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 # update
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/bbai-update.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
-The install creates a **container** and brings up bbai (the TS engine **and** the orwell
+The install creates a **container** and brings up Orwell (the TS engine **and** the Orwell
 front-end, wired over local MCP per feature 0009); the update pulls, rebuilds, and restarts
 **without losing the save**. Easy to deploy, easy to update.
 
-The scripts live in [`deploy/`](../../deploy/) (`bbai.sh`, `bbai-install.sh`, `bbai-update.sh`,
+The scripts live in [`deploy/`](../../deploy/) (`orwell.sh`, `orwell-install.sh`, `orwell-update.sh`,
 `systemd/`). They target the engine's `npm run build` / `npm start` contract and **verify it
 before building**. What remains for an end-to-end game is the engine's HTTP MCP transport and the
-orwell → engine MCP-client wiring; validation is an **install smoke test on a real Proxmox host**
+Orwell → engine MCP-client wiring; validation is an **install smoke test on a real Proxmox host**
 (not the dev sandbox; not BDD).
 
 ## 2. Approach (containerization)
@@ -34,60 +34,63 @@ cleanest UX). One LXC runs both tiers as **systemd services**, wired over local 
 
 ```
  Proxmox host ──one-liner──► LXC (Debian)
-                               ├─ bbai-engine.service     (Node: MCP server, feature 0009)
-                               └─ bbai-frontend.service   (Python: uvicorn app:app — orwell)
-                               data: /opt/bbai/data  (SQLite save + souls; persists across updates)
+                               ├─ orwell-engine.service     (Node: MCP server, feature 0009)
+                               └─ orwell-frontend.service   (Python: uvicorn app:app — Orwell)
+                               data: /opt/orwell/data  (SQLite save + souls; persists across updates)
 ```
 
 *Alternative (noted, not primary): Docker-compose inside an LXC/VM* — reuses container images
 for the two tiers; heavier, less idiomatic for the one-liner. Pick LXC unless we want image-based
 distribution.
 
-## 3. Install script — `deploy/bbai.sh` (host) + `deploy/bbai-install.sh` (in-container)
+## 3. Install script — `deploy/orwell.sh` (host) + `deploy/orwell-install.sh` (in-container)
 
-**Host side** (`bbai.sh`): create a Debian 12 LXC (sensible CPU/RAM/disk defaults, DHCP),
-then run `bbai-install.sh` inside. Structurally aligns with community-scripts `build.func`
+**Host side** (`orwell.sh`): create a Debian 12 LXC (sensible CPU/RAM/disk defaults, DHCP),
+then run `orwell-install.sh` inside. Structurally aligns with community-scripts `build.func`
 (can source it, or stay self-contained).
 
-**In-container** (`bbai-install.sh`):
+**In-container** (`orwell-install.sh`):
 1. `apt update`; install `curl git build-essential`, **Node 22** (nodesource), **Python 3.12** + `venv`.
-2. `git clone` bbai → `/opt/bbai`.
-3. **Engine:** `npm ci` → `npm run build` → provides `bbai-engine` (the MCP server entrypoint, 0009).
+2. `git clone` Orwell → `/opt/orwell`.
+3. **Engine:** `npm ci` → `npm run build` → provides `orwell-engine` (the MCP server entrypoint, 0009).
 4. **Front-end:** `python -m venv frontend/.venv` → `frontend/.venv/bin/pip install -r frontend/requirements.txt`.
-5. **Config:** copy `frontend/.env.example` → `/opt/bbai/data/.env`; set ports, LLM provider
+5. **Config:** copy `frontend/.env.example` → `/opt/orwell/data/.env`; set ports, LLM provider
    (Ollama host or Anthropic API key), and the engine MCP endpoint.
-6. **Services:** write + enable `bbai-engine.service` and `bbai-frontend.service`; start both.
-7. Print: `bbai is running at http://<container-ip>:<port>`.
+6. **Services:** write + enable `orwell-engine.service` and `orwell-frontend.service`; start both.
+7. Print: `Orwell is running at http://<container-ip>:<port>`.
 
-## 4. Update script — `deploy/bbai-update.sh` (idempotent, data-safe)
+## 4. Update script — `deploy/orwell-update.sh` (idempotent, data-safe)
 
-Inside the container: `cd /opt/bbai` → `git pull` → `npm ci && npm run build` →
-`frontend/.venv/bin/pip install -r frontend/requirements.txt` → `systemctl restart bbai-engine
-bbai-frontend`. **`/opt/bbai/data` is never touched** (saves/souls preserved — ties to #7
+Inside the container: `cd /opt/orwell` → `git pull` → `npm ci && npm run build` →
+`frontend/.venv/bin/pip install -r frontend/requirements.txt` → `systemctl restart orwell-engine
+orwell-frontend`. **`/opt/orwell/data` is never touched** (saves/souls preserved — ties to #7
 non-degradation). Re-running install is also safe (detects an existing install → updates).
 
 ## 5. Config & secrets
 
-- All config via env / `/opt/bbai/data/.env` (LLM provider + keys, ports, MCP endpoint). **No
+- All config via env / `/opt/orwell/data/.env` (LLM provider + keys, ports, MCP endpoint). **No
   secret is ever committed or baked into a script.** `.env.example` documents every variable.
 - The container **is** the sandbox (one game namespace); each game's state lives under `data/`.
 
 ## 6. Acceptance criteria / Definition of Done
 
-- [ ] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
-      up reachable on its port, with **no manual steps** beyond entering LLM config.
-- [ ] The update one-liner pulls + rebuilds + restarts and the **existing save survives**.
-- [ ] Both scripts are **idempotent** (safe to re-run).
-- [ ] Secrets come only from env/`.env`; nothing sensitive is committed.
-- [ ] An install **smoke test** (CI: provision a container, run install, curl the UI health
-      endpoint, run update, assert save intact) passes.
+- [x] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
+      up reachable on its port, with **no manual steps** beyond entering LLM config. *(host-validated)*
+- [x] The update one-liner pulls + rebuilds + restarts and the **existing save survives**
+      (`data/` is never touched; asserted by the smoke).
+- [x] Both scripts are **idempotent** (safe to re-run).
+- [x] Secrets come only from env/`.env`; nothing sensitive is committed *(static guard:
+      `tests/unit/secrets.test.ts`)*.
+- [x] An install **smoke test** passes — `deploy/smoke.sh` (build → start → probe HTTP MCP →
+      exercise game tools → channel isolation → update) runs in CI (`.github/workflows/ci.yml`).
+      Full Proxmox-LXC provisioning remains the on-host test (no LXC in GitHub Actions).
 
 ## 7. Dependencies (why this is sequenced after 0009)
 
 The scripts are **designed now**; they go **functional** once the app is runnable end-to-end:
-- **0009** built — the engine exposes a **`bbai-engine` MCP-server entrypoint** + `npm run build`
+- **0009** built — the engine exposes a **`orwell-engine` MCP-server entrypoint** + `npm run build`
   / start scripts (the engine currently runs via `tsx` with no `build`/`start` — that lands with 0009).
-- The **orwell front-end wired** to the engine (per `frontend/INTEGRATION.md`) with a known
+- The **Orwell front-end wired** to the engine (per `frontend/INTEGRATION.md`) with a known
   run command (`uvicorn app:app`) and the MCP endpoint configured.
 - **#7** persistence: a stable `data/` save path.
 

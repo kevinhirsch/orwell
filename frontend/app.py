@@ -532,9 +532,9 @@ app.include_router(setup_emoji_routes())
 from routes.workspace_routes import setup_workspace_routes
 app.include_router(setup_workspace_routes())
 
-# Big Brother game (bbai engine bridge): onboarding + in-character chat.
-from routes.bbai_routes import setup_bbai_routes
-app.include_router(setup_bbai_routes())
+# Big Brother game (orwell engine bridge): onboarding + in-character chat.
+from routes.orwell_routes import setup_orwell_routes
+app.include_router(setup_orwell_routes())
 
 # Sessions
 from routes.session_routes import setup_session_routes
@@ -763,11 +763,6 @@ async def serve_index(request: Request):
 async def serve_backgrounds(request: Request):
     """Sandbox page for prototyping background effects. No auth required."""
     return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
-
-@app.get("/bbai")
-async def serve_bbai(request: Request):
-    """Big Brother game: character creation (OOBE) + in-character play."""
-    return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/bbai.html"))
 
 @app.get("/login")
 async def serve_login(request: Request):
