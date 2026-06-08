@@ -118,6 +118,41 @@ export class BbWorld extends World {
   house?: GameHouse;
   housesBySeed?: Record<string, Houseguest[]>;
 
+  // Character creation / OOBE (0015) scratch state.
+  player?: import("../../src/engine/characterFactory").PlayerCharacter;
+  house2?: GameHouse;
+  oobeRejected?: boolean;
+  privateFact?: string;
+  oobeKnowledge?: import("../../src/ports/KnowledgeService").KnowledgeService;
+
+  // God Mode / admin (0016) scratch state.
+  sandbox2?: Sandbox;
+  twist?: VaultDatum;
+  revealRejected?: boolean;
+
+  // Relationship model (0017) scratch state.
+  relTrustBefore?: number;
+  relBondBefore?: number;
+  relConfBefore?: number;
+  labelParanoid?: string;
+  labelTrusting?: string;
+
+  // Narrative & moment orchestration (0018) scratch state.
+  gsView?: import("../../src/ports/GameSession").GameStateView;
+  gsMoment?: string;
+
+  // Agent-driven play loop (0019) scratch state.
+  decisionCtx?: import("../../src/engine/decisions").DecisionContext;
+  pending?: import("../../src/engine/decisions").PendingResult;
+  decisionResult?: import("../../src/engine/decisions").DecisionResult;
+  decisionRejected?: boolean;
+  compResult?: { winner: { id: string; name: string } | null };
+  bondBaseline?: number;
+
+  // Player experience (0020) scratch state.
+  portraitHg?: Houseguest;
+  portraitSeed?: number;
+
   // Competition eligibility (0005) scratch state.
   week?: WeekState;
   special?: boolean;

@@ -78,9 +78,20 @@ export interface CompetitionResultView {
   winner: { id: EntityId; name: string } | null;
 }
 
+/** Vault-free public status for the status panel (0020): ceremony-level facts only. */
+export interface PublicGameStatus {
+  week: number;
+  phase: string;
+  hoh: { id: EntityId; name: string } | null;
+  nominees: Array<{ id: EntityId; name: string }>;
+  veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
+  /** Vault-free public status (week/phase/HOH/nominees/veto) for the status panel. */
+  gameStatus(): PublicGameStatus;
   /** The current Vault-free game state (phase, the player's card, the house roster). */
   getGameState(): GameStateView;
   /** The managed system prompt to inject for the current (or requested) moment. */

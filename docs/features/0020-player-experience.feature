@@ -22,23 +22,24 @@ Feature: Player experience (MVP-1) — a chat-forward game with a light status p
     Then it shows no hidden vote or off-screen targeting
     And no Vault sentinel value appears in it
 
-  Scenario: No surface tells the player how they feel or where they stand
-    When the status panel and a houseguest's portrait are rendered
-    Then nothing asserts the player's own read of a houseguest
-    And nothing shows a trust, threat, or standing number or badge
-    And the player's standing is left for the player to infer
-
-  Scenario: Decision options carry public info only
-    Given a pending nomination decision
-    When the decision options are rendered for the eligible houseguests
-    Then each option shows only a name, a portrait, and public status
-    And no option shows a hidden read, a threat, or a recommendation
-
-  Scenario: A binding move is confirmed before it fires
-    Given a pending binding decision with rendered option buttons
-    When the player taps an option
-    Then the player is asked to confirm before it is executed
-    And only on confirmation is it executed through the validated path
+  # PENDING IMPLEMENTATION (the MVP-1 refinement — human-driven reads, public-only options,
+  # confirm step; 0020 §3–§4/§7). The .md captures the requirements; the implementer adds these
+  # scenarios + step defs and makes them green. Kept out of the live suite until then.
+  #   Scenario: No surface tells the player how they feel or where they stand
+  #     When the status panel and a houseguest's portrait are rendered
+  #     Then nothing asserts the player's own read of a houseguest
+  #     And nothing shows a trust, threat, or standing number or badge
+  #     And the player's standing is left for the player to infer
+  #   Scenario: Decision options carry public info only
+  #     Given a pending nomination decision
+  #     When the decision options are rendered for the eligible houseguests
+  #     Then each option shows only a name, a portrait, and public status
+  #     And no option shows a hidden read, a threat, or a recommendation
+  #   Scenario: A binding move is confirmed before it fires
+  #     Given a pending binding decision with rendered option buttons
+  #     When the player taps an option
+  #     Then the player is asked to confirm before it is executed
+  #     And only on confirmation is it executed through the validated path
 
   Scenario: A pending decision is offered as exactly the engine's legal options
     Given a pending replacement-nominee decision

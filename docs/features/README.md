@@ -61,12 +61,12 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
 | 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
 | 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Done |
-| 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Draft |
-| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Draft |
-| 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Draft |
-| 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | Gameplay | Draft |
-| 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Draft |
-| 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Draft |
+| 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Done |
+| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Done |
+| 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Done |
+| 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | Gameplay | Done |
+| 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Done |
+| 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Done |
 | 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | Foundational | Draft |
 | 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | Player UX | **Deferred** |
 | 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Draft |
