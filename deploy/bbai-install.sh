@@ -31,6 +31,7 @@ else
   git clone --depth 1 -b "$BRANCH" "$REPO" "$APP_DIR"
 fi
 mkdir -p "$DATA_DIR"
+mkdir -p "${APP_DIR}/frontend/data"   # odysseus SQLite DB lives here (sqlite:///./data/app.db)
 
 echo "==> build engine"
 cd "$APP_DIR"
