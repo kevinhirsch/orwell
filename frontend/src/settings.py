@@ -286,6 +286,44 @@ def mount_optional(app, feature: str, router, **kwargs) -> bool:
     return False
 
 
+# ── Tier 2: stop shipping the dropped verticals' JS ──
+# The dropped verticals' front-end modules are not loaded under the game build — the page
+# never references them (≈5.4 MB of inherited workspace JS, incl. the image editor pulled
+# by document.js, drops to the game keep-set). Reversible: with the game build off the
+# inherited modules ship again; the files themselves are removed later (Tier 3). Voice JS
+# follows the voice flag (off by default), like the voice routes.
+GAME_DROP_SCRIPTS = (
+    "memory.js", "skills.js", "rag.js", "search.js", "document.js", "gallery.js",
+    "cookbook.js", "cookbookSchedule.js", "compare/index.js",
+)
+GAME_VOICE_SCRIPTS = ("tts-ai.js", "voiceRecorder.js")
+
+
+def dropped_script_srcs(*, features: dict | None = None) -> tuple:
+    """JS entry-point filenames that must NOT be shipped given the current build (Tier 2):
+    the inherited verticals under the game build, plus voice unless its flag is on."""
+    drop = list(GAME_DROP_SCRIPTS) if game_build_enabled() else []
+    if not is_feature_enabled("voice", features=features):
+        drop += list(GAME_VOICE_SCRIPTS)
+    return tuple(drop)
+
+
+def strip_dropped_scripts(html: str, *, features: dict | None = None) -> str:
+    """Remove <script> tags whose src is a dropped-vertical entry point, so the game build
+    does not ship them. Line-oriented (each tag is on its own line) and a no-op for HTML
+    that references none of them. Applied where index.html is served."""
+    drops = dropped_script_srcs(features=features)
+    if not drops:
+        return html
+    kept = []
+    for line in html.splitlines(keepends=True):
+        s = line.lstrip()
+        if s.startswith("<script") and any((f"/{d}\"" in line or f"/{d}?" in line) for d in drops):
+            continue  # a dropped vertical's script — not shipped under the game build
+        kept.append(line)
+    return "".join(kept)
+
+
 # ── Settings (data/settings.json) ──
 
 def load_settings() -> dict:

@@ -747,11 +747,14 @@ mount_optional(app, "companion", setup_companion_routes())
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
-    """Read an HTML file and inject the CSP nonce into inline <script> tags."""
+    """Read an HTML file, inject the CSP nonce, and (game build, feature 0032) drop the
+    dropped verticals' <script> tags so their JS is never shipped."""
     with open(file_path, "r", encoding="utf-8") as f:
         html = f.read()
     nonce = getattr(request.state, "csp_nonce", "")
     html = html.replace("{{CSP_NONCE}}", nonce)
+    from src.settings import strip_dropped_scripts
+    html = strip_dropped_scripts(html)
     return HTMLResponse(html)
 
 @app.get("/")

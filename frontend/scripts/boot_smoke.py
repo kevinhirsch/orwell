@@ -81,6 +81,15 @@ def mounted_paths(base: str) -> set[str]:
         return set(json.load(r)["paths"].keys())
 
 
+def body(base: str, path: str) -> str:
+    with urllib.request.urlopen(base + path, timeout=10) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+DROPPED_JS = ("memory.js", "skills.js", "rag.js", "search.js", "document.js",
+              "gallery.js", "cookbook.js", "compare/index.js")
+
+
 def stop(proc) -> None:
     proc.terminate()
     try:
@@ -103,6 +112,12 @@ try:
     check(status(base, "/") == 200, "keep-set: GET / -> 200")
     check(status(base, "/api/shell/exec", "POST") == 404, "drop: /api/shell/exec -> 404 (gone server-side)")
     check(status(base, "/api/shell/stream", "POST") == 404, "drop: /api/shell/stream -> 404")
+    # Tier 2: the dropped verticals' JS is not shipped; the keep-set JS still is.
+    home = body(base, "/")
+    shipped = sorted(j for j in DROPPED_JS if f"/{j}" in home)
+    check(not shipped, f"Tier 2: dropped JS not shipped (still referenced: {shipped})")
+    check("/static/js/chat.js" in home and "orwellOnboarding.js" in home,
+          "Tier 2: keep-set JS still shipped (chat, onboarding)")
 finally:
     stop(proc)
 
@@ -113,6 +128,7 @@ try:
     paths = mounted_paths(base)
     check(any(p.startswith("/api/shell") for p in paths), "switch off: shell router mounted again")
     check(status(base, "/api/shell/exec", "POST") != 404, "switch off: /api/shell/exec reachable (not 404)")
+    check("/static/js/document.js" in body(base, "/"), "switch off: dropped JS shipped again (document.js)")
 finally:
     stop(proc)
 
