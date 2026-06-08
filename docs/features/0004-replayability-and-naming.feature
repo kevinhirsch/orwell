@@ -6,8 +6,9 @@ Feature: Replayability & naming — a fresh, randomly-named house every game
 
   No fixed protagonist. Each new game is a new save: a player created at first-run character
   creation (OOBE) and a brand-new house of newly generated, randomly-named NPCs within
-  plausible Big Brother contestant bounds. No identity carries over between games. Only the
-  player's profile is human-authored.
+  plausible Big Brother contestant bounds. The cast is a curated ensemble — deliberately varied
+  (archetypes, strategy styles, backgrounds) so every house has built-in friction and variety.
+  No identity carries over between games. Only the player's profile is human-authored.
 
   Scenario: Each new game generates a new, randomly-named house
     When a new game is started
@@ -30,6 +31,12 @@ Feature: Replayability & naming — a fresh, randomly-named house every game
     When a new house is generated
     Then each NPC profile is internally consistent
     And each falls within plausible reality-TV contestant archetypes
+
+  Scenario: Each cast is a curated, varied ensemble
+    When a new house is generated
+    Then the cast spans a spread of distinct archetypes and strategy styles
+    And no single archetype dominates the house beyond the configured balance
+    And the mix includes personalities likely to clash and to bond
 
   Scenario: Names are unique within a house and not from a fixed list
     When a new house is generated
