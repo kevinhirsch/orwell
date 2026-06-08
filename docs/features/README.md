@@ -53,7 +53,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | 4 | Done |
 | 0005 | [Competition eligibility](./0005-competition-eligibility.md) | 5 | Done |
 | 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | 6 | Done |
-| 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Draft |
+| 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Draft |
 
 Each row is shipped as its own auto-merged PR, in priority order.

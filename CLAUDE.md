@@ -243,9 +243,12 @@ Built BDD/TDD-first, in priority order:
 - **0006 — Outcomes by stats + temperature:** ✅ green (stat-vs-type + bounded per-moment
   temperature roll + soul emotional modifier, no Luck; reproducible by seed; favorite wins a
   calibrated strong majority (~72%) but loses real upsets; player unprotected; intent immutable).
+- **0007 — Persistence non-degradation:** ✅ green (serializable `GameState`; lossless
+  round-trip; co-versioned `SaveStore` (Vault+Journal bump together); cross-save superset +
+  monotonic counts; the dynamic soul deepens materially while the static character is byte-stable).
 
 `npm test` runs clean: typecheck + unit/property/architecture + all BDD scenarios. Next in
-priority order: **0007 — persistence non-degradation**.
+priority order: **0008 — daily-event invariant** (last).
 
 ## Open decisions (remaining)
 
