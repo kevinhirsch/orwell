@@ -6,6 +6,7 @@ import type { GameEvent, Visibility, EntityId } from "../../src/domain/event";
 import type { SocialGraph } from "../../src/engine/gossip";
 import type { SeasonResult } from "../../src/engine/simulation";
 import type { RichnessMetrics } from "../../src/engine/richness";
+import type { GameHouse, Houseguest } from "../../src/engine/characterFactory";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -38,6 +39,10 @@ export class BbWorld extends World {
   // Behavioral-fidelity (0003) scratch state.
   season?: SeasonResult;
   metrics?: RichnessMetrics;
+
+  // Replayability & naming (0004) scratch state.
+  house?: GameHouse;
+  housesBySeed?: Record<string, Houseguest[]>;
 
   constructor(options: IWorldOptions) {
     super(options);
