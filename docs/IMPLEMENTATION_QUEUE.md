@@ -621,14 +621,61 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > hardening, not a rebuild. Pairs with **B21** (the manifest must name `advanceGame`/`submitDecision`).
 > Make `0034` green; gates green. Read `docs/features/0011`, `0019`, `0005`, `0030`, `0001` first. Open a PR.
 
+### B24 — 0035 start the off-screen watcher in the runtime  ·  Claude Code  ·  **TOP functional priority (mandate #1)**
+
+> In `kevinhirsch/orwell` (TS engine), implement feature **0035**
+> (`docs/features/0035-live-offscreen-life-running-watcher.{md,feature}`). 0031 built the `Orchestrator` +
+> `GameWatcher` + `Clock`/`Scheduler` port (BDD-green with `FakeClock`), but the **live runtime never
+> starts them** and there's **no real-timer Clock adapter** — so the live game has **zero off-screen NPC
+> life** (the house is static between turns; a direct miss against **behavioral-fidelity mandate #1**).
+> 1. Add a **`SystemClock`** real-timer adapter (sibling to `FakeClock`) implementing the 0031
+>    `Clock`+`Scheduler` port (`now` = `Date.now`; `every` = `setInterval(...).unref()`; `cancel` =
+>    `clearInterval`).
+> 2. **Instantiate + `start()`** a `GameWatcher` over the live `GameSessionRegistry` in `src/main.ts`
+>    (or a small runtime root), with graceful **`stop()`** on shutdown.
+> 3. **Env config** for cadence/idle/rate-limit (`ORWELL_WATCHER_TICK_MS`/`IDLE_MS`/`MAX_TICKS`, sane
+>    defaults; **`TICK_MS=0` disables** ⇒ pure turn-driven).
+> Reuse 0031's logic unchanged. **Assert under the running watcher:** idle sandboxes accrue **bounded**
+> off-screen consequences; the player sees **no opinion numbers** (extend the 0001 canary); **per-user
+> isolation** holds (0021); a long absence advances at most `MAX_TICKS` (no season fast-forward). Tests
+> still use **`FakeClock`** (no real timers in tests). Make `0035` green (add to `cucumber.cjs`); gates
+> green. Read `docs/features/0031`, `0003`, `0001`, `0021` first. Open a PR.
+
+### B25 — 0036 live social surface: NPC approaches + Diary Room  ·  Claude Code
+
+> In `kevinhirsch/orwell` (TS engine), implement feature **0036**
+> (`docs/features/0036-live-social-surface-approaches-and-diary-room.{md,feature}`): expose two
+> **built-but-unwired** capabilities as Vault-free live player tools (add to `PLAYER_TOOLS` + the McpServer
+> allowlist + the **B21** lever manifest).
+> 1. **`socialInitiatives()`** — surface houseguests who, by soul motivation, want to **approach the
+>    player now** (source: `src/engine/conversation.ts` `npcInitiatedApproaches()`), with a **public-facing
+>    pretext only** (no hidden motive/numbers) — so scenes are **bidirectional**, not only player→NPC.
+> 2. **`diaryRoom(entry)`** — record a player DR entry as **OOC player knowledge** tagged `NO_NPC_PATHWAY`
+>    via `KnowledgeService.recordDiaryRoom()`; it **may** inform the engine's read of player strategy but
+>    **never** NPC behavior.
+> **The wall is the crux:** extend 0013's exclusion test to the **live tool** — prove **no NPC ever learns
+> DR content** (`deriveNpcKnowledge` excludes it) and NPCs act only on **public** speech; NPC confessionals
+> stay **Vault-only**. Both `readsVault:false` + **sentinel-clean** (extend the 0001 canary). Make `0036`
+> green (add to `cucumber.cjs`); gates green. Read `docs/features/0012`, `0013`, `0002`, `0001` first. Open a PR.
+
+### C10 — 0036 front-end: surface approaches + a Diary-Room entry point  ·  OpenHands  ·  **depends on B25**
+
+> In `kevinhirsch/orwell` `frontend/`, surface feature **0036** in the game UI: when `socialInitiatives`
+> returns houseguests who want to approach the player, prompt it in-chat ("X pulls you aside…"); and add a
+> **Diary-Room** entry point that calls the `diaryRoom` tool (the player's private, OOC confessional).
+> Consume **only** the Vault-free tool data. Part of the **0032** game build. `pytest` green; engine gate
+> unaffected. Depends on **B25**. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
 
-**0001–0032 are built** (0022 deferred). The implementer also shipped the **live weekly loop + full tool
-wiring ahead of spec** (`liveSeason.ts`, `GameSessionAdapter.advanceGame`/`submitDecision`) — closing the
-once-"unwired decision seam" gap. **Live drafts:** **0033** (dynamic player tagline → **B22** engine +
-**C9** front-end), **0034** (codify the as-built live progression + decision seam → **B23**), and **B21**
-(complete the 0018 lever manifest + drift test — now also needs to name `advanceGame`/`submitDecision`).
-**Nothing is blocking the implementer queue.** Candidate future spec work: MVP-2 (0022) un-parks after
-MVP-1 is solid; jury-vote choreography; any new product calls.
+**0001–0032 built** + the live weekly loop / decision seam (098c36a). A **functional audit** of the live
+playable path (MCP tools → `GameSessionAdapter` → `liveSeason.ts`) found the **core season arc to a winner,
+the consequence fold (0023), and jury endgame (0014) all work** — but three "built-but-not-wired-live" gaps
+remain. **Functional drafts, priority order:** **0035** (start 0031's off-screen watcher in the runtime —
+**top priority**, behavioral-fidelity mandate → **B24**); **0036** (live NPC approaches + Diary Room → **B25**
+engine + **C10** front-end). Also live: **0033** (tagline → B22/C9), **0034** (codify the live seam → B23),
+**B21** (0018 lever manifest). The live narrator is `EchoNarrativePort` (stub), but the **front-end** narrates
+via `getMomentPrompt` (by design — INTEGRATION.md), so it's **not** a gap unless we want engine-side narration.
+**Nothing is blocking the implementer queue.** After the functional batch: MVP-2 (0022); jury choreography.

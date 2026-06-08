@@ -81,6 +81,8 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
 | 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Draft |
 | 0034 | [Live weekly progression & binding-decision seam](./0034-live-weekly-progression-and-decision-seam.md) | Gameplay (as-built) | Draft |
+| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | Draft |
+| 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Draft |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
