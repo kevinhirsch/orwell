@@ -17,9 +17,9 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 
 ```bash
 # install — on the Proxmox host shell
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 # update — host or inside the container
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell-update.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
 ## Config UX (community-scripts style)
@@ -56,7 +56,7 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 ```bash
 # fully non-interactive example
 CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)" --default
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
 ```
 
 ## Layout

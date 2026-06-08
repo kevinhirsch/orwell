@@ -3,7 +3,7 @@
 # orwell — one-liner Proxmox LXC installer.
 #
 # On the Proxmox host shell:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/bbai/main/deploy/orwell.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 #
 # Creates a Debian LXC and installs orwell — the TypeScript engine (MCP server) and the orwell
 # front-end — as systemd services (engine contract: `npm run build` / `npm start`).
@@ -98,7 +98,7 @@ NET="${NET:-dhcp}"                 # "dhcp" or a static CIDR, e.g. 192.168.1.50/
 GATEWAY="${GATEWAY:-}"             # required only for a static NET
 STORAGE="${STORAGE:-$(storage_for rootdir)}";          STORAGE="${STORAGE:-local-lvm}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-$(storage_for vztmpl)}"; TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
-REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
+REPO="${REPO:-https://github.com/kevinhirsch/orwell.git}"
 BRANCH="${BRANCH:-main}"
 ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"   # ORWELL_* primary; BBAI_* deprecated fallback
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
@@ -196,7 +196,7 @@ done
 # has curl) and push it in via pct — no chicken-and-egg bootstrap problem.
 msg "running in-container install"
 TMP_INSTALL="$(mktemp /tmp/orwell-install-XXXXXX.sh)"
-curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/bbai/${BRANCH}/deploy/orwell-install.sh" -o "$TMP_INSTALL"
+curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-install.sh" -o "$TMP_INSTALL"
 pct push "$CTID" "$TMP_INSTALL" /tmp/orwell-install.sh
 rm -f "$TMP_INSTALL"
 pct exec "$CTID" -- bash -c \

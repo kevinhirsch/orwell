@@ -5,7 +5,7 @@
 # systemd services for the engine (MCP server) and the orwell front-end.
 set -euo pipefail
 
-REPO="${REPO:-https://github.com/kevinhirsch/bbai.git}"
+REPO="${REPO:-https://github.com/kevinhirsch/orwell.git}"
 BRANCH="${BRANCH:-main}"
 APP_DIR="${APP_DIR:-/opt/orwell}"
 DATA_DIR="${DATA_DIR:-/opt/orwell/data}"
