@@ -5,8 +5,10 @@ import { buildSandbox } from "../../tests/support/sandbox";
 import { classify } from "../../src/domain/event";
 import type { GameEvent } from "../../src/domain/event";
 import { PLAYER, npc } from "../../src/domain/ids";
+import type { KnowledgeFact } from "../../src/domain/knowledge";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { simulateOffscreenStretch } from "../../src/engine/offscreen";
+import { makeSocialGraph, diffuseGossip } from "../../src/engine/gossip";
 
 let evSeq = 0;
 const nextId = (): string => `evt:0002:${++evSeq}`;
@@ -219,3 +221,163 @@ Then("no NPC's knowledge state gains a pathway to it", function (this: BbWorld) 
     .filter((e) => e.content.includes(this.factContent!) && e.witnessSet.some((w) => w !== PLAYER));
   assert.equal(leaked.length, 0, "DR content must not reach any NPC via an event");
 });
+
+// --- Gossip diffusion through the social graph --------------------------------
+
+const beliefsOfFact = (world: BbWorld): KnowledgeFact[] =>
+  (world.gossipNodes ?? [])
+    .map((e) => world.sandbox.engine.knowledge.knownTo(e).find((k) => k.factId === world.factId))
+    .filter((b): b is KnowledgeFact => b !== undefined);
+
+Given("a hidden fact known to one NPC", function (this: BbWorld) {
+  // A small social graph; the player is reachable only via NPC(3).
+  this.graph = makeSocialGraph([
+    [npc(1), npc(2)], [npc(2), npc(3)], [npc(3), npc(4)], [npc(4), npc(5)], [npc(3), PLAYER],
+  ]);
+  this.gossipNodes = [npc(1), npc(2), npc(3), npc(4), npc(5), PLAYER];
+  this.gossipOrigin = npc(1);
+  this.factContent = "the alliance plans to backdoor the Head of Household";
+});
+
+When("game time passes", function (this: BbWorld) {
+  const res = diffuseGossip({
+    knowledge: this.sandbox.engine.knowledge,
+    graph: this.graph!,
+    rng: new SeededRandom(7),
+    origin: this.gossipOrigin!,
+    fact: { content: this.factContent! },
+    rounds: 6,
+    transmitProb: 1,
+  });
+  this.factId = res.factId;
+  this.gossipOriginal = res.original;
+});
+
+Then(
+  "the fact may spread to other NPCs along their relationship edges",
+  function (this: BbWorld) {
+    const others = (this.gossipNodes ?? []).filter(
+      (e) => e !== this.gossipOrigin && e !== PLAYER &&
+        this.sandbox.engine.knowledge.knownTo(e).some((k) => k.factId === this.factId),
+    );
+    assert.ok(others.length >= 1, "the fact should reach at least one other NPC");
+  },
+);
+
+Then(
+  "each retelling is recorded as its own event with a traceable source",
+  function (this: BbWorld) {
+    const gossipEvents = this.sandbox.engine.events.query({ type: "gossip" });
+    assert.ok(gossipEvents.length >= 1, "retellings should be recorded as events");
+    for (const belief of beliefsOfFact(this)) {
+      if (belief.source === this.gossipOrigin && belief.hops === 0) continue; // origin seed
+      assert.ok(belief.sourceEventId, "belief must reference its telling event");
+      const ev = gossipEvents.find((g) => g.id === belief.sourceEventId);
+      assert.ok(ev, "telling event must exist and be queryable");
+      assert.ok(ev!.witnessSet.includes(belief.source!), "event is witnessed by its source (the teller)");
+    }
+  },
+);
+
+Then(
+  "each recipient holds the fact with a provenance and a confidence",
+  function (this: BbWorld) {
+    for (const belief of beliefsOfFact(this)) {
+      if (belief.hops === 0) continue; // origin
+      assert.ok(belief.pathway.startsWith("told-by"), "recipient has a provenance pathway");
+      assert.ok(belief.source, "recipient records who told them");
+      assert.ok(
+        typeof belief.confidence === "number" && belief.confidence! > 0 && belief.confidence! <= 1,
+        "recipient holds a confidence in (0, 1]",
+      );
+    }
+  },
+);
+
+Then(
+  "it reaches the player only if a chain of pathways terminates at the player",
+  function (this: BbWorld) {
+    const playerHas = this.sandbox.engine.knowledge.knownTo(PLAYER).some((k) => k.factId === this.factId);
+    const chainTerminatesAtPlayer = this.sandbox.engine.events
+      .query({ type: "gossip" })
+      .some((g) => g.witnessSet.includes(PLAYER));
+    assert.equal(playerHas, chainTerminatesAtPlayer);
+  },
+);
+
+Given("a hidden fact that has spread across several hops", function (this: BbWorld) {
+  // A path so the fact travels many hops in order.
+  this.graph = makeSocialGraph([
+    [npc(1), npc(2)], [npc(2), npc(3)], [npc(3), npc(4)], [npc(4), npc(5)],
+  ]);
+  this.gossipNodes = [npc(1), npc(2), npc(3), npc(4), npc(5)];
+  this.gossipOrigin = npc(1);
+  const res = diffuseGossip({
+    knowledge: this.sandbox.engine.knowledge,
+    graph: this.graph,
+    rng: new SeededRandom(11),
+    origin: npc(1),
+    fact: { content: "a secret vote-flip is coming" },
+    rounds: 6,
+    transmitProb: 1,
+  });
+  this.factId = res.factId;
+  this.gossipOriginal = res.original;
+});
+
+Then("a version far from the source may differ from the original", function (this: BbWorld) {
+  const far = beliefsOfFact(this).filter((b) => (b.hops ?? 0) >= 2);
+  assert.ok(far.length > 0, "there should be beliefs several hops out");
+  assert.ok(far.some((b) => b.content !== this.gossipOriginal), "a far version should differ from the original");
+});
+
+Then("distortion tends to grow with the number of hops", function (this: BbWorld) {
+  const sorted = beliefsOfFact(this).sort((a, b) => (a.hops ?? 0) - (b.hops ?? 0));
+  for (let i = 1; i < sorted.length; i++) {
+    if ((sorted[i]!.hops ?? 0) > (sorted[i - 1]!.hops ?? 0)) {
+      assert.ok(
+        (sorted[i]!.distortion ?? 0) > (sorted[i - 1]!.distortion ?? 0),
+        "more hops should mean more distortion",
+      );
+    }
+  }
+});
+
+Given("the player is told a fact second-hand", function (this: BbWorld) {
+  // npc(1) -> npc(2) -> player: the player learns it at the second hop.
+  this.graph = makeSocialGraph([[npc(1), npc(2)], [npc(2), PLAYER]]);
+  this.gossipNodes = [npc(1), npc(2), PLAYER];
+  this.gossipOrigin = npc(1);
+  const res = diffuseGossip({
+    knowledge: this.sandbox.engine.knowledge,
+    graph: this.graph,
+    rng: new SeededRandom(5),
+    origin: npc(1),
+    fact: { content: "the Head of Household is targeting you" },
+    rounds: 4,
+    transmitProb: 1,
+  });
+  this.factId = res.factId;
+  this.gossipOriginal = res.original;
+});
+
+Then(
+  "it enters the player's knowledge as a belief carrying its source and confidence",
+  function (this: BbWorld) {
+    const belief = this.sandbox.engine.knowledge.knownTo(PLAYER).find((k) => k.factId === this.factId);
+    assert.ok(belief, "the player should hold the second-hand belief");
+    assert.ok(belief!.source, "belief carries its source");
+    assert.ok(typeof belief!.confidence === "number", "belief carries a confidence");
+    assert.ok((belief!.hops ?? 0) >= 2, "the player heard it second-hand (>= 2 hops)");
+  },
+);
+
+Then(
+  "that belief may be inaccurate, so the player acts on imperfect information",
+  function (this: BbWorld) {
+    const belief = this.sandbox.engine.knowledge.knownTo(PLAYER).find((k) => k.factId === this.factId);
+    assert.ok(belief, "the player should hold the belief");
+    assert.ok(belief!.confidence! < 1, "second-hand confidence is below certainty");
+    assert.ok(belief!.content !== this.gossipOriginal, "the belief has drifted from the original (may be wrong)");
+  },
+);

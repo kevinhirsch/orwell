@@ -3,6 +3,7 @@ import type { IWorldOptions } from "@cucumber/cucumber";
 import type { Sandbox, VaultDatum } from "../../tests/support/sandbox";
 import type { ToolDescriptor } from "../../src/surfaces/tools/registry";
 import type { GameEvent, Visibility, EntityId } from "../../src/domain/event";
+import type { SocialGraph } from "../../src/engine/gossip";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
 setDefaultTimeout(60_000);
@@ -24,6 +25,13 @@ export class BbWorld extends World {
   npc?: EntityId;
   factContent?: string;
   classification?: Visibility;
+
+  // Gossip-diffusion scratch state.
+  graph?: SocialGraph;
+  gossipNodes?: EntityId[];
+  gossipOrigin?: EntityId;
+  factId?: string;
+  gossipOriginal?: string;
 
   constructor(options: IWorldOptions) {
     super(options);

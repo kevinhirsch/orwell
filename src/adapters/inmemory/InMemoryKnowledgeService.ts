@@ -1,4 +1,4 @@
-import type { KnowledgeService } from "../../ports/KnowledgeService";
+import type { KnowledgeService, BeliefInput } from "../../ports/KnowledgeService";
 import type { EventStore } from "../../ports/EventStore";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
@@ -44,7 +44,6 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     const ts = this.clock();
     const sourceEventId = `evt:surface:${++this.seq}`;
     const witnessSet: EntityId[] = [entity];
-    // The surfacing (the telling) is itself a recorded, traceable event.
     this.events.record({
       id: sourceEventId, ts, type: "surfacing",
       initiator: entity, witnessSet, hidden: !witnessSet.includes(PLAYER),
@@ -56,7 +55,6 @@ export class InMemoryKnowledgeService implements KnowledgeService {
   recordDiaryRoom(content: string): KnowledgeFact {
     const ts = this.clock();
     const sourceEventId = `evt:dr:${++this.seq}`;
-    // Player-witnessed, OOC. Witness set is the player alone — no NPC pathway.
     this.events.record({
       id: sourceEventId, ts, type: "diary-room",
       initiator: PLAYER, witnessSet: [PLAYER], hidden: false,
@@ -65,17 +63,44 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     return this.pushKnown(PLAYER, { content, pathway: "diary-room", sourceEventId, ts });
   }
 
+  seedBelief(entity: EntityId, fact: BeliefInput, pathway: string): KnowledgeFact {
+    return this.pushKnown(entity, { ...fact, pathway, ts: this.clock() });
+  }
+
+  transmitGossip(from: EntityId, to: EntityId, fact: BeliefInput, pathway: string): KnowledgeFact {
+    const ts = this.clock();
+    const sourceEventId = `evt:gossip:${++this.seq}`;
+    const witnessSet: EntityId[] = [from, to];
+    // The retelling is its own traceable event; player-witnessed iff the listener is the player.
+    this.events.record({
+      id: sourceEventId, ts, type: "gossip",
+      initiator: from, witnessSet, hidden: !witnessSet.includes(PLAYER),
+      content: `gossip ${pathway}`,
+    });
+    return this.pushKnown(to, { ...fact, pathway, sourceEventId, ts });
+  }
+
   private pushKnown(
     entity: EntityId,
-    f: { content: string; pathway: string; sourceEventId: string; ts: number; subject?: EntityId },
+    f: {
+      content: string; pathway: string; ts: number; sourceEventId?: string; subject?: EntityId;
+      factId?: string; source?: EntityId; confidence?: number; hops?: number;
+      distortion?: number; originalContent?: string;
+    },
   ): KnowledgeFact {
     const k: KnowledgeFact = {
       id: `know:${++this.seq}`,
       content: f.content,
       pathway: f.pathway,
-      sourceEventId: f.sourceEventId,
       ts: f.ts,
+      ...(f.sourceEventId !== undefined ? { sourceEventId: f.sourceEventId } : {}),
       ...(f.subject !== undefined ? { subject: f.subject } : {}),
+      ...(f.factId !== undefined ? { factId: f.factId } : {}),
+      ...(f.source !== undefined ? { source: f.source } : {}),
+      ...(f.confidence !== undefined ? { confidence: f.confidence } : {}),
+      ...(f.hops !== undefined ? { hops: f.hops } : {}),
+      ...(f.distortion !== undefined ? { distortion: f.distortion } : {}),
+      ...(f.originalContent !== undefined ? { originalContent: f.originalContent } : {}),
     };
     const list = this.knowledge.get(entity) ?? [];
     list.push(k);
