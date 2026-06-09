@@ -99,3 +99,46 @@ Wires **0024** (`SoulStore` recall) into the **live** loop, driven by **0023** (
 (off-screen life), modulating **0006/0028** (competition emotional modifier) and the decision leanings
 (0011/0014), under **0001** (Vault Wall) and **0007** (the byte-stable `CHARACTER` vs the drifting `SOUL`),
 persisted by **0030**. Makes "the house changed me / changed them" a real, hidden, recall-able mechanic.
+
+## 8. Live wiring (the linchpin — unblocks deferred 0038 & 0040 pieces)
+
+**Why this is the linchpin:** the live sandbox's engine core (`src/composition/engineRoot.ts`
+`buildEngineCore`) exposes only `{ events, vault, knowledge, relationships }` — **there is no `SoulStore`**.
+That single gap is why **0038's soul-deepening** and **0040's confessional→voice feedback** are both
+deferred. 0041 puts the soul in the sandbox; once it's there, those two light up.
+
+### 8.1 Put the `SoulStore` in the sandbox
+- Add **`soul: SoulProvider`** to `EngineCore` + `buildEngineCore`, constructed as
+  `new SoulStore(embed, makeIndex)`. Inject a **deterministic fake `embed`** (a seeded hash→vector, like
+  0024's tests) so `recordToSoul`/`recall` work live and reproducibly — a *real* embedding model is the one
+  still-open decision (CLAUDE.md), not a blocker here. Default `makeIndex` = `InMemoryVectorIndex`.
+- **Boundary (critical):** `SoulProvider`/`SoulStore`/`VectorIndex` are **engine-only** (CLAUDE.md). Adding
+  `soul` to `EngineCore` must NOT let any outward surface reach it — extend the dependency-cruiser forbidden
+  set so `surfaces/**` and the MCP adapter never import the soul/vector types (exactly as for `VaultStore`).
+  The player/admin projections never expose an emotional number.
+
+### 8.2 Drive the soul live (the call sites)
+- **Consequence fold (0023)** and the **off-screen tick (0038, `Orchestrator.defaultApply`)** call
+  `soul.recordToSoul(npc, moment)` for each consequential event, and update the soul's **`emotionalState`**:
+  `{ distress, confidence, volatility }` (0..1), moved by **bounded deltas** per event kind (blindside ⇒
+  +distress/+volatility; survived vote / comp win ⇒ +confidence; calm stretch ⇒ **mean-revert** toward the
+  `CHARACTER` baseline, reusing the 0028 emotional-constants family). Append-only (0007); persisted (0030).
+- **Behavior reads:** the **competition emotional modifier (0006/0028)** reads the *live evolving*
+  `emotionalState` (today it reads a static soul value); **decision leanings** (0011/0014, and 0044) scale by
+  mood. All bounded — emotion never overrides hard rules (0005) or the Vault Wall.
+- **Recall grounding:** `soul.recall(npc, context)` becomes usable live — this is the hook **0040** needs to
+  ground an NPC's later *voice* in their own confessionals/history.
+
+### 8.3 What this unblocks
+- **0038 soul half:** the off-screen tick can now `recordToSoul` each scene → the house's souls deepen
+  between turns (B27b's sibling).
+- **0040 feedback half:** confessionals can fold into the soul + be `recall`-ed to keep an NPC's voice
+  consistent.
+
+### 8.4 Definition of Done (additions)
+- [ ] `EngineCore`/`buildEngineCore` expose a `SoulStore` (deterministic embed); `npm run test:arch` stays
+      green with the soul/vector types added to the engine-only forbidden set (no outward import).
+- [ ] `recordToSoul`/`recall` are exercised on the **live** path (consequence + off-screen tick), not only
+      in 0024's tests; the soul deepens monotonically and `recall` returns the relevant memory.
+- [ ] `emotionalState` evolves live (bounded, mean-reverting) and modulates a competition + a decision; the
+      player surface shows **no** emotional number (extend the 0001 canary); persisted across restart (0030).

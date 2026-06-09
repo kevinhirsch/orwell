@@ -720,14 +720,16 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > `richOffscreenStretch` — **seven varied interaction types** folded into the relationship layer by their true
 > nature (was a 4-verb stub). Bounded/seeded/Vault-walled/isolated; unit-gated (`offscreenSociety.test.ts`).
 >
-> **B27b (remaining):** (1) **live gossip→player diffusion** — `diffuseGossip` is built but routing it through
-> the 0031 fail-closed checkpoint trips a **false-positive leak** (the generic `"gossip told-by:npc:Y"`
-> provenance string collides between a hidden NPC→NPC retelling and the player's received event). Reconcile the
-> checkpoint's substring leak-heuristic with legitimate pathway propagation (e.g., make the leak check ignore
-> content the player legitimately holds via a knowledge pathway, or give gossip events unique non-colliding
-> content), then wire gossip into the tick (vague paraphrased rumor only — never the verbatim hidden scene).
-> (2) **soul deepening** is **feature 0041** (the live sandbox has no `SoulStore` yet). Then add 0035 + 0038 to
-> `cucumber.cjs`. Gates green. Open a PR.
+> **B27b (remaining) — see `docs/features/0038-…md` §8 for the full design.** (1) **live gossip→player
+> diffusion**: the fix is (a) make the **0031 leak heuristic pathway-aware** — flag a hidden event's content
+> as a leak only if it appears in the player projection AND is **not covered by the player's legitimate
+> `KnowledgeService` facts** (gossip "told-by"/"overheard"/"surfaced" pathways); the **0001 sentinel canary
+> stays** the precise guard; (b) keep the rumor a **vague paraphrase** (never the verbatim hidden scene);
+> (c) wire `diffuseGossip` into the off-screen tick over a house graph with a **low transmit probability**
+> (partial, distorted spread), reaching the player only via a terminating pathway as a belief with
+> source+confidence. **Acceptance:** a rumor reaches the player AND the 0031 checkpoint still commits (no
+> false leak) AND the 0001 canary stays green. (2) **soul deepening** is **feature 0041**. Then add 0035 +
+> 0038 to `cucumber.cjs`. Gates green. Open a PR.
 
 ### B28 — 0039 promise & deal tracking
 
@@ -747,13 +749,20 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > sandbox — **feature 0041**; optionally fire confessionals specifically at nomination/eviction beats (today
 > the trigger is the off-screen tick).
 
-### B30 — 0041 character evolution & season arc
+### B30 — 0041 character evolution & season arc  ·  **LINCHPIN (unblocks 0038 + 0040 soul pieces)**
 
-> Implement `docs/features/0041-character-evolution-and-arc.{md,feature}`. Drive each NPC's soul
-> `emotionalState` from **live** event history (blindside→distress, survival/win→confidence), bounded +
-> mean-reverting (0028 family); **wire `recordToSoul`/`recall` into the live loop**; have the evolving state
-> modulate the competition emotional modifier (0006/0028) **and** decision leanings. Keep `CHARACTER`
-> byte-stable (0007); only the soul drifts. Add to `cucumber.cjs`. Open a PR.
+> Implement `docs/features/0041-character-evolution-and-arc.{md,feature}` — **see §8 for the concrete live
+> wiring.** The crux: the live sandbox's `buildEngineCore` (`engineRoot.ts`) has **no `SoulStore`** — that's
+> why 0038's soul-deepening and 0040's confessional→voice feedback are deferred. (1) Add **`soul: SoulProvider`**
+> to `EngineCore`/`buildEngineCore` as `new SoulStore(embed, makeIndex)` with a **deterministic fake embed**
+> (seeded hash→vector, like 0024's tests); **extend the dependency-cruiser engine-only forbidden set** so no
+> outward surface imports the soul/vector types (like `VaultStore`). (2) Drive `emotionalState`
+> `{distress,confidence,volatility}` from **live** events (blindside→distress, survival/win→confidence),
+> bounded + mean-reverting (0028 family); call `recordToSoul` on the consequence fold (0023) + the off-screen
+> tick (0038). (3) Have the evolving state modulate the **competition emotional modifier** (0006/0028) **and**
+> decision leanings; expose `recall` for 0040's voice grounding. Keep `CHARACTER` **byte-stable** (0007); only
+> the soul drifts; no emotional number on any player surface (extend the 0001 canary). Add to `cucumber.cjs`.
+> Open a PR.
 
 ### B31 — 0042 competition library
 
