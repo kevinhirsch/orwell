@@ -23,10 +23,20 @@
 #rail-notes,
 #rail-tasks,
 
-/* Sidebar "Tools" section in full (Brain / Calendar / Compare / Cookbook /
- * Deep Research / Gallery / Library / Notes / Tasks / Theme). Theme stays
- * reachable from the icon rail, so hiding the whole section is safe. */
-#tools-section,
+/* Sidebar "Tools" section — hide each non-game tool INDIVIDUALLY (Brain / Calendar /
+ * Compare / Cookbook / Deep Research / Gallery / Library / Notes / Tasks) but KEEP the
+ * section and its Theme entry, so the Appearance → Sidebar "Theme" toggle actually
+ * controls a visible sidebar item. (Hiding the whole #tools-section buried Theme even
+ * when its toggle was on.) */
+#tool-memory-btn,    /* Brain */
+#tool-calendar-btn,
+#tool-compare-btn,
+#tool-cookbook-btn,
+#tool-research-btn,  /* Deep Research */
+#tool-gallery-btn,
+#tool-library-btn,
+#tool-notes-btn,
+#tool-tasks-btn,
 
 /* Sidebar Email section */
 #email-section,
