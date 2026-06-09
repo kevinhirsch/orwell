@@ -582,7 +582,7 @@ export async function refreshModels(force = false) {
         const tips = window.innerWidth <= 768
           ? [
               'Tip: Long-press a session for rename, delete, and memory options.',
-              'Tip: Tap the eye icon for Nobody mode - no history saved.',
+              'Tip: Swipe from the edge to open The House panel.',
               'Tip: Switch to Agent mode when you want tools.',
               'Tip: Attach images or files using the + button next to the input.',
             ]

@@ -169,6 +169,10 @@ export function initSidebarLayout(Storage, opts) {
           if (!sidebar.classList.contains('right-side')) {
             sidebar.classList.add('right-side');
             if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+            // Sync hamburger position immediately so it matches the sidebar side
+            // before the sidebar becomes visible — avoids the flash where the
+            // sidebar opens on the right but the hamburger is still on the left.
+            syncRailSide();
           }
           // Opening sidebar — blur keyboard first, then open after layout settles
           if (document.activeElement && document.activeElement !== document.body
