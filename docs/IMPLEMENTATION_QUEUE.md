@@ -1711,6 +1711,8 @@ PR per item).
 | **R-1 — re-point the mandate gates** | B69 live richness + fairness + sentinel · B70 structural test/CI gaps | tests+engine | C2·C3·C6 / C4·C7·C8·C9 |
 | **R-2 — production-grade deploy** | B71 atomic/rollback update + boot-preload + real smoke · B72 root-drop + hardening + backup/DR + hygiene | deploy/systemd (+engine runtime) | A4·A6·A7 / A5·A8·A9·A3·A10 |
 | **R-1 — FE hardening** | C29 secure-cookies + proxy rate-limit + stray verticals + entitlements + deps + isolation test | front-end | secB2·B4·B5·B6·B7 + testC5 |
+| **R-0 — Settings linchpin** | C30 per-user LLM config (+ honest shortcut saves) | front-end | settings S1·S4 |
+| **R-2 — Settings prune** | C31 no dead tabs / no live JS behind hidden ones / live-data wipes only | front-end | settings S2·S3·S5 |
 
 > **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
 > started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
@@ -1882,3 +1884,46 @@ PR per item).
 > **DoD:** the isolation test fails if the route trusts a client `user`; `/api/vault/config` and
 > `/api/mcp/servers` 404 under the game build; `pytest` + the 0032 headless gate green; engine gate
 > unaffected. Open a PR.
+
+### C30 — per-user LLM configuration (the non-admin player can give the game a voice)  ·  Claude Code (front-end)  ·  **R-0 · CRITICAL (multi-user) · settings S1 + S4**
+
+> In `kevinhirsch/orwell` `frontend/`, fix the linchpin gap found by the Settings audit
+> (`docs/audits/2026-06-09-settings-menu-audit.md` S1): **every** part of LLM configuration is
+> admin-gated — the endpoint list/add/test (`/api/model-endpoints*`, `require_admin`,
+> `model_routes.py:1421,1488,1684`) and the default chat/utility/vision/agent saves
+> (`POST /api/auth/settings`, admin-only, `auth_routes.py:461-466`; handlers `settings.js:474,547,695,1475`)
+> — while the backend's per-user seam (`_PER_USER_KEYS` ∋ `default_endpoint_id`/`default_model`,
+> `settings.py:379-388`, served by `/api/prefs`, `prefs_routes.py:82`) is **never called by `settings.js`**.
+> A non-admin signup user (the spec's "unlimited users, each isolated") lands on the default
+> services tab, sees "None", 403s on every action, and has **no path to give the game a model**.
+> (1) Wire the AI-tab model selectors + saves through per-user **`/api/prefs`**; keep endpoint
+> *creation/test* admin-only but make the endpoint **list** readable to any authed user so the
+> dropdowns populate. (2) Hide or OOBE-redirect the `services`/`ai` tabs for users who cannot act on
+> them — never show a tab whose every action 403s. (3) Fix the **shortcuts** lie (S4): `saveKeybinds()`
+> swallows the 403 and toasts "Shortcut saved" while nothing persists (`settings.js:1855-1868`) —
+> persist keybinds via `/api/prefs` (per-user), or surface the failure honestly. (4) Amend **B69**'s
+> readiness check: "playable after install" must hold for a **non-admin** user once this lands.
+> **DoD:** a non-admin signup user selects a working chat model and the game speaks; their keybind
+> change survives reload (or is honestly refused); no settings tab is shown to a user whose every
+> control on it fails; `pytest` green; engine gate unaffected. Open a PR.
+
+### C31 — finish the Settings game-build prune (no dead tabs, no live JS behind hidden ones)  ·  Claude Code (front-end)  ·  **R-2 · MAJOR · settings S2 + S3 + S5**
+
+> In `kevinhirsch/orwell` `frontend/`, close the cosmetic-hide-live-code pattern in the Settings
+> modal (`docs/audits/2026-06-09-settings-menu-audit.md` S2/S3/S5). Today the **`search` tab is fully
+> visible** under the game build while its vertical is dropped server-side — Test fires
+> `POST /api/search/query` into an unmounted router → 404 "✗ Test failed" (`index.html:1580-1640`,
+> `settings.js:1267`, `app.py:581`); `email`/`reminders`/`integrations` are CSS-hidden
+> (`game-trim.css:59-63`) but their `init*` handlers still run on every settings open
+> (`settings.js:2081-2085`) and bind controls to 404'd endpoints; and the admin **System** tab's
+> Danger-Zone wipe list + export/import name dropped verticals (memory/skills/notes/tasks/documents/
+> gallery/calendar — `index.html:2099-2153`). (1) Hide the `search` tab under the game build (add to
+> the trim set) and ideally gate the dropped panels **server-side** (don't ship the `<div>`s) — the
+> serving path already rewrites `index.html` (`strip_dropped_scripts`), extend it to strip dropped
+> panels. (2) Gate the dropped-vertical `init*` calls behind the game-build flag so no request to a
+> 404'd endpoint ever fires from Settings. (3) Trim the System wipe/export list to live game data
+> (chats + the engine save dir; pair with **B71/B72**'s backup work). Theme over-scope is already
+> queued (**C27**/V5). **DoD:** under the game build no dead tab renders, no settings-originated
+> request hits a 404'd endpoint (assert via a network-spy test), System offers only live-data wipes;
+> with `ORWELL_GAME_BUILD=0` the full inherited Settings works unchanged; `pytest` + the 0032
+> headless gate green. Open a PR.
