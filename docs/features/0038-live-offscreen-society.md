@@ -1,14 +1,16 @@
 # 0038 — Live off-screen society (wire the real simulation into the watcher)
 
-> **Status:** Draft. The **off-screen NPC life that runs between turns is a stub.** 0035 wired the
-> `GameWatcher` live, but the tick it runs (`Orchestrator.defaultApply`) only calls
-> `simulateOffscreenStretch` — **four canned verbs** ("schemed/gossiped/bonded/argued") + a single
-> relationship nudge. The *rich* machinery is **built, tested, and unwired from the live path:**
-> `simulation.ts` (`simulateSeason` — 7 interaction types, alliance form/fracture, weekly betrayal,
-> hidden-element surfacing), `gossip.ts` (`diffuseGossip` — NPC→NPC knowledge travel with drift,
-> confidence, provenance, terminating at the player), and `SoulStore` (`recordToSoul`/`recall`). This
-> feature **wires them into the watcher tick** so the house actually schemes, gossips, and evolves
-> between sessions — the **#1-mandate** (behavioral fidelity) gap, closed by reusing existing code.
+> **Status:** **Partially implemented.** ✅ **Varied off-screen society is LIVE** — the watcher tick
+> (`Orchestrator.defaultApply`) now runs `richOffscreenStretch`: **seven real interaction types**
+> (alliance/gossip/conflict/bonding/strategy/showmance/betrayal), each folded into the relationship
+> layer with its **true nature** (not the old 4-verb stub + a single "strategy" nudge). Bounded,
+> seeded, Vault-walled, isolated; unit-gated by `tests/unit/offscreenSociety.test.ts`. **Remaining
+> (B27b):** (a) **live gossip→player diffusion** — `diffuseGossip` is built, but routing it through the
+> 0031 fail-closed checkpoint trips a **false-positive leak** (the generic `"gossip told-by:npc:Y"`
+> provenance string collides between a hidden NPC→NPC retelling and the player's received event); wiring
+> it needs the checkpoint's substring leak-heuristic reconciled with legitimate pathway propagation.
+> (b) **soul deepening** — the live sandbox has **no `SoulStore`** (`engineRoot.ts` exposes only
+> events/knowledge/relationships); wiring `recordToSoul`/`recall` live is **feature 0041**.
 > **Executable spec:** [`0038-live-offscreen-society.feature`](./0038-live-offscreen-society.feature)
 
 ## 1. Summary

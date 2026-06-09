@@ -3,7 +3,7 @@ import type { Clock } from "../ports/Clock";
 import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
-import { simulateOffscreenStretch } from "../engine/offscreen";
+import { richOffscreenStretch } from "../engine/offscreen";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER, npc } from "../domain/ids";
@@ -199,25 +199,17 @@ export class Orchestrator {
   }
 }
 
-/** The default state-mutating step: off-screen NPC life + (player-turn) a meaningful witnessed day. */
+/** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
 function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number): number {
   const core = sandbox.session.snapshot();
   const npcs: EntityId[] = (core.house?.npcs ?? []).map((n) => n.id);
   const ids = npcs.length >= 2 ? npcs : [npc(1), npc(2), npc(3), npc(4)];
+  const before = sandbox.engine.events.query().length;
 
-  // Off-screen scenes the player does not witness (hidden; 0003).
-  const off = simulateOffscreenStretch({
-    events: sandbox.engine.events,
-    rng,
-    npcs: ids,
-    interactions: 2,
-  });
-  // Consequence fold (0023): the witness's hidden opinion of the initiator moves.
-  for (const e of off) {
-    const [a, b] = e.witnessSet;
-    if (a && b) sandbox.engine.relationships.applyDirected(b, a, "strategy", rng);
-  }
-  let produced = off.length;
+  // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
+  // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023).
+  const scenes = richOffscreenStretch({ events: sandbox.engine.events, rng, npcs: ids, interactions: 3 });
+  for (const s of scenes) sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
 
   if (trigger === "player-turn") {
     // A meaningful, player-witnessed day event (daily-event invariant, 0008).
@@ -230,9 +222,9 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       hidden: false,
       content: "A house meeting shifts the week.",
     });
-    produced += 1;
   }
-  return produced;
+  // Every recorded scene (+ the player-turn day) counts toward the advance.
+  return sandbox.engine.events.query().length - before;
 }
 
 function playerSweep(sandbox: UserSandbox): string {

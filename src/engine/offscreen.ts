@@ -1,6 +1,7 @@
 import type { EventStore } from "../ports/EventStore";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { EntityId, GameEvent } from "../domain/event";
+import type { InteractionType } from "./relationships";
 
 /**
  * Minimal off-screen life: records NPC-to-NPC interactions the player is not
@@ -38,4 +39,62 @@ export function simulateOffscreenStretch(deps: {
   }
 
   return produced;
+}
+
+/** A typed off-screen scene — the interaction's real nature, so callers fold the right impact. */
+export interface OffscreenScene {
+  event: GameEvent;
+  type: InteractionType;
+  initiator: EntityId;
+  partner: EntityId;
+}
+
+/** The seven real interaction natures (matches `simulation.ts` / the relationship model). */
+const RICH_VERBS: Record<InteractionType, string> = {
+  alliance: "formed an alliance with",
+  gossip: "gossiped about the house with",
+  conflict: "clashed with",
+  bonding: "bonded with",
+  strategy: "talked strategy with",
+  showmance: "grew close to",
+  betrayal: "quietly turned on",
+};
+const RICH_TYPES = Object.keys(RICH_VERBS) as InteractionType[];
+
+/**
+ * Richer off-screen life (feature 0038): the house lives in MORE than one way —
+ * each scene carries its real interaction *type* (alliance/gossip/conflict/…), so
+ * the caller folds the correct hidden impact and information can travel by kind.
+ * Hidden (witness excludes the player), bounded by `interactions`, seed-deterministic.
+ */
+export function richOffscreenStretch(deps: {
+  events: EventStore;
+  rng: RandomnessSource;
+  npcs: readonly EntityId[];
+  interactions: number;
+}): OffscreenScene[] {
+  const { events, rng, npcs, interactions } = deps;
+  const scenes: OffscreenScene[] = [];
+
+  for (let i = 0; i < interactions; i++) {
+    const a = rng.pick(npcs);
+    let b = rng.pick(npcs);
+    let guard = 0;
+    while (b === a && guard++ < 16) b = rng.pick(npcs);
+    const type = rng.pick(RICH_TYPES);
+
+    const event: GameEvent = {
+      id: `offscreen:${type}:${i}:${rng.int(1_000_000_000)}`,
+      ts: i,
+      type,
+      initiator: a,
+      witnessSet: [a, b],
+      hidden: true,
+      content: `${a} ${RICH_VERBS[type]} ${b}`,
+    };
+    events.record(event);
+    scenes.push({ event, type, initiator: a, partner: b });
+  }
+
+  return scenes;
 }
