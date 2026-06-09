@@ -1029,7 +1029,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > last call; with `tickEveryMs:0`, N player turns ⇒ hidden-event count still grows; health shows `lastTrigger:"player-turn"`
 > after a real HTTP player call. Read `docs/features/0031`, `0035` first. Open a PR.
 
-### B42 — make the sentinel canary bite the live game  ·  Claude Code  ·  **Wave 1 · audit E8 (+ m12)**
+### B42 — make the sentinel canary bite the live game  ·  Claude Code  ·  **Wave 1 · audit E8 (+ m12)** — ✅ DONE
+
+> **DONE.** `tests/property/liveSentinel.property.test.ts` wires the sweep to the **registry resolver's**
+> object graph (not a standalone adapter), plants unique sentinels into every kind of live hidden state
+> (NPC backstory + soul memory via snapshot→restore, the SoulStore, a hidden event, the Vault, another
+> NPC's knowledge), proves they're genuinely planted, then drives a full game to a winner sweeping
+> **every** player + admin tool — including the finale — for a leak. The finale-projection lock is
+> asserted (no pre-reveal winner; no `votes`/`script`/`tally` serialized). Coverage check asserts every
+> `PLAYER_TOOLS`/`ADMIN_TOOLS` name was swept. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the sentinel sweep (`mcp.property.test.ts`) runs against a **standalone** adapter
 > disconnected from the sentinel fixture, so for `advanceGame`/`submitDecision`/`gameStatus`/`playerTagline`/
