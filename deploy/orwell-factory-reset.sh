@@ -8,44 +8,92 @@
 # Install-time CONFIG is PRESERVED: the engine data/.env (ports, engine URL, LLM keys) stays,
 # so the box still boots and can still reach your LLM. Only DATA is removed.
 #
-# Run inside the container as root:
-#   bash /opt/orwell/deploy/orwell-factory-reset.sh             # prompts to confirm
-#   bash /opt/orwell/deploy/orwell-factory-reset.sh --yes       # no prompt (automation)
-#   bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # show what WOULD be removed
-#   bash /opt/orwell/deploy/orwell-factory-reset.sh --no-restart # scrub but leave services down
+# Run on the Proxmox HOST or inside the container as root:
+#   bash /path/to/orwell-factory-reset.sh             # prompts to confirm
+#   bash /path/to/orwell-factory-reset.sh --yes       # no prompt (automation)
+#   bash /path/to/orwell-factory-reset.sh --dry-run   # show what WOULD be removed
+#   bash /path/to/orwell-factory-reset.sh --no-restart # scrub but leave services down
+#
+# On the Proxmox host the script locates the orwell LXC (by hostname "orwell"; override with
+# CTID=<id> or CT_HOSTNAME=<name>) and re-runs itself inside it — same bridge as orwell-update.sh.
 #
 # Paths/services are overridable via env: APP_DIR, ORWELL_DATA_DIR, ORWELL_FE_DATA_DIR,
 # ORWELL_ENGINE_SVC, ORWELL_FRONTEND_SVC (handy for a dev checkout).
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/orwell}"
-DATA_DIR="${ORWELL_DATA_DIR:-${DATA_DIR:-${APP_DIR}/data}}"          # engine saves + .env (config)
-FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"       # SQLite DB + .app_key + app data
-ENGINE_SVC="${ORWELL_ENGINE_SVC:-orwell-engine}"
-FRONTEND_SVC="${ORWELL_FRONTEND_SVC:-orwell-frontend}"
-ENV_KEEP=".env"                                                     # preserved in DATA_DIR
+BRANCH="${BRANCH:-main}"
+CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
+APP_DIR_EXPLICIT="${APP_DIR:-}"
 
 msg()  { echo -e "==> $*"; }
 warn() { echo -e "WARN: $*" >&2; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
-ASSUME_YES=0; DRY_RUN=0; RESTART=1
+# Collect flags so they can be forwarded to the in-container run.
+ASSUME_YES=0; DRY_RUN=0; RESTART=1; EXTRA_FLAGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes)     ASSUME_YES=1 ;;
-    -n|--dry-run) DRY_RUN=1 ;;
-    --no-restart) RESTART=0 ;;
-    -h|--help)    sed -n '3,19p' "${BASH_SOURCE[0]:-/dev/null}" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)            die "unknown option: $1 (try --help)" ;;
+    -y|--yes)        ASSUME_YES=1; EXTRA_FLAGS+=("--yes") ;;
+    -n|--dry-run)    DRY_RUN=1;    EXTRA_FLAGS+=("--dry-run") ;;
+    --no-restart)    RESTART=0;    EXTRA_FLAGS+=("--no-restart") ;;
+    -h|--help)       sed -n '3,22p' "${BASH_SOURCE[0]:-/dev/null}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)               die "unknown option: $1 (try --help)" ;;
   esac
   shift
 done
 
+# First install dir found: an explicit override, then the current path, then the legacy one.
+find_app() {
+  local d
+  for d in "${APP_DIR_EXPLICIT:-}" /opt/orwell /opt/bbai; do
+    [[ -n "$d" && -d "$d/.git" ]] && { printf '%s' "$d"; return 0; }
+  done
+  return 1
+}
+
+# ── Host → container bridge ────────────────────────────────────────────────────────────────────
+# On a Proxmox host (pct present) the app lives inside the LXC — locate the orwell container and
+# re-run this script inside it, forwarding all flags. Same pattern as orwell-update.sh.
+# Inside the container pct does not exist (and the app dir does), so this block is skipped.
+if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
+  CTID="${CTID:-$(pct list 2>/dev/null | awk -v n="$CT_HOSTNAME" 'NR>1 && $NF==n {print $1}' || true)}"
+  [[ -n "$CTID" ]] || die "no orwell LXC found (hostname '${CT_HOSTNAME}'). Set CTID=<id> and retry."
+  [[ "$(printf '%s' "$CTID" | wc -w)" -eq 1 ]] || die "multiple containers named '${CT_HOSTNAME}' (${CTID//$'\n'/ }). Set CTID=<id>."
+  [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || die "LXC ${CTID} is not running — start it first: pct start ${CTID}"
+
+  msg "orwell lives in LXC ${CTID}; running factory reset inside the container"
+  TMP_RESET="$(mktemp /tmp/orwell-factory-reset-XXXXXX.sh)"
+  curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-factory-reset.sh" -o "$TMP_RESET"
+  pct push "$CTID" "$TMP_RESET" /tmp/orwell-factory-reset.sh
+  rm -f "$TMP_RESET"
+  # --yes is forwarded; --dry-run is forwarded; --no-restart is forwarded.
+  pct exec "$CTID" -- bash /tmp/orwell-factory-reset.sh "${EXTRA_FLAGS[@]:-}"
+  exit 0
+fi
+
+# ── In-container (or direct) reset ─────────────────────────────────────────────────────────────
+APP_DIR="$(find_app || true)"; APP_DIR="${APP_DIR:-/opt/orwell}"
+DATA_DIR="${ORWELL_DATA_DIR:-${APP_DIR}/data}"
+FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
+ENV_KEEP=".env"
+
+# Service names follow the install: prefer orwell-*, fall back to legacy bbai-* units.
+unit_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
+if [[ -z "${ORWELL_ENGINE_SVC:-}" ]]; then
+  if unit_exists orwell-engine; then ENGINE_SVC="orwell-engine"; FRONTEND_SVC="orwell-frontend"
+  elif unit_exists bbai-engine;  then ENGINE_SVC="bbai-engine";   FRONTEND_SVC="bbai-frontend"
+  else                                ENGINE_SVC="orwell-engine"; FRONTEND_SVC="orwell-frontend"
+  fi
+else
+  ENGINE_SVC="$ORWELL_ENGINE_SVC"
+  FRONTEND_SVC="${ORWELL_FRONTEND_SVC:-orwell-frontend}"
+fi
+
 # ── Safety: never operate on an empty, root, or too-shallow path ──────────────────────────────
-sanity_path() {  # path label
+sanity_path() {
   local raw="$1" label="$2" p depth
-  [[ -n "$raw" ]]    || die "${label} is empty — refusing to scrub."
-  [[ "$raw" == /* ]] || die "${label} must be absolute (got '${raw}')."
+  [[ -n "$raw" ]]     || die "${label} is empty — refusing to scrub."
+  [[ "$raw" == /* ]]  || die "${label} must be absolute (got '${raw}')."
   [[ "$raw" != "/" ]] || die "${label} is '/' — refusing."
   p="${raw%/}"
   depth="$(awk -F/ '{print NF-1}' <<<"$p")"
@@ -83,7 +131,7 @@ fi
 
 # ── Helpers (dry-run aware) ───────────────────────────────────────────────────────────────────
 do_rm()  { if [[ "$DRY_RUN" -eq 1 ]]; then echo "  would remove: $1"; else rm -rf -- "$1"; fi; }
-do_svc() { # action svc
+do_svc() {
   if [[ "$DRY_RUN" -eq 1 ]]; then echo "  would: systemctl $1 $2"; else systemctl "$1" "$2" || warn "systemctl $1 $2 failed"; fi
 }
 
