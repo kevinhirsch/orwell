@@ -708,6 +708,69 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 
 ---
 
+## Post-audit feature batch (0038–0044) · all Claude Code (engine)
+
+A behavioral-fidelity / anti-sycophancy audit (transcript) found several capabilities **built but unwired**
+and two genuine gaps. These specs close them. Build priority: **0038 first** (biggest "feels flat" risk,
+pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
+
+### B27 — 0038 live off-screen society  ·  **TOP — wires existing code**
+
+> Implement `docs/features/0038-live-offscreen-society.{md,feature}`. Route the orchestrator's live off-screen
+> tick (`Orchestrator.defaultApply`, behind the 0035 watcher) through the **rich, already-built** sim instead
+> of the 4-verb `simulateOffscreenStretch`: varied `simulateSeason`-class interactions, `diffuseGossip`
+> (NPC→NPC belief travel that can terminate at the player as a distorted rumor), and `recordToSoul`. Keep it
+> bounded (0031), seeded, Vault-walled, isolated. **Add 0035 AND 0038 to `cucumber.cjs`.** Gates green. Open a PR.
+
+### B28 — 0039 promise & deal tracking
+
+> Implement `docs/features/0039-promise-and-deal-tracking.{md,feature}`. Add a first-class `Deal` model
+> (parties/terms/condition/status); make player↔NPC deals (recorded knowledge) + NPC↔NPC deals (Vault-held);
+> **reconcile** open deals against binding actions (engine-decided kept/broken, never prose); on break apply
+> the **betrayal-shock** fold (0026) + a jury-management demerit (0014) + a witnessed reveal. Persisted (0030);
+> Vault-walled (NPC↔NPC reach the player only by 0038 rumor). Add to `cucumber.cjs`. Open a PR.
+
+### B29 — 0040 NPC Diary Room confessionals
+
+> Implement `docs/features/0040-npc-confessionals.{md,feature}`. A beat-driven (0008/0034) generator that, for
+> involved NPCs, builds an **engine-grounded** confessional (target by threat, trust reads, plan — from soul +
+> relationships), recorded **Vault-only** (witness `{npc}`, hidden) and folded to the soul. **Walled from the
+> player AND admin/God Mode** (extend the 0001 canary to both). Add to `cucumber.cjs`. Open a PR.
+
+### B30 — 0041 character evolution & season arc
+
+> Implement `docs/features/0041-character-evolution-and-arc.{md,feature}`. Drive each NPC's soul
+> `emotionalState` from **live** event history (blindside→distress, survival/win→confidence), bounded +
+> mean-reverting (0028 family); **wire `recordToSoul`/`recall` into the live loop**; have the evolving state
+> modulate the competition emotional modifier (0006/0028) **and** decision leanings. Keep `CHARACTER`
+> byte-stable (0007); only the soul drifts. Add to `cucumber.cjs`. Open a PR.
+
+### B31 — 0042 competition library
+
+> Implement `docs/features/0042-competition-library.{md,feature}`. A seeded, tunable `COMPETITION_LIBRARY` of
+> `CompetitionDef`s (name, governing/secondary stat, format, Vault-free narrative scaffold) + a deterministic
+> `drawCompetition(phase, week, rng, recent)` (no immediate repeats) replacing the hardcoded `HOH_TYPES`/
+> `VETO_TYPES`. Resolution stays `resolveCompetition` (engine decides — 0006/0028); the Vault-free result
+> carries name+format+narrative (no stats/scores); 0005 eligibility holds. Add to `cucumber.cjs`. Open a PR.
+
+### B32 — 0043 emergent multi-party bloc behavior
+
+> Implement `docs/features/0043-emergent-bloc-behavior.{md,feature}`. A **pure, stateless** `detectBlocs(rel,
+> active)` that clusters mutual bonds at decision time (size ~2–5), each bloc deriving a shared target +
+> cohesion; add a **bloc term** to nomination/vote leanings (vote-with / shield bloc-mates / target the shared
+> enemy); fracture is implicit (recomputed). **Nothing stored** — the serialized soul holds no bloc/label
+> (decision 0002; cross-check 0007). Vault-free. Add to `cucumber.cjs`. Open a PR.
+
+### B33 — 0044 strategic nomination & vote refinements  ·  depends on 0039/0041/0043
+
+> Implement `docs/features/0044-strategic-nomination-and-vote-refinements.{md,feature}`. Enrich the **built**
+> `chooseNominations` (add pawn/backdoor/bloc-protection, archetype-gated, + the week's political temperature)
+> and `npcChoice` (fold bloc 0043 + emotional state 0041 + deal status 0039). Still **engine-decided** + seeded;
+> all magnitudes in **one tunable constants module** (sibling to 0026/0028). The threat/political-temperature
+> parts can ship first; the bloc/mood/deal terms as those land. Add to `cucumber.cjs`. Open a PR.
+
+---
+
 ## Still on the feature-maker (me)
 
 **0001–0036 are built** (0022 deferred). The "continue all wiring" batch shipped the engine + API wiring:
@@ -723,9 +786,15 @@ staged statements → questions → vote reveal, through the 0034 seam) plus gam
 picker). Engine gate green: **230 unit + 222 BDD**.
 
 **Remaining:**
-- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** exposes a Vault-free `finaleView` read,
-  then **C11** renders `orwellFinale.js` (finalists, stage, the vote reveal in order). The engine + decision
-  seam are already green; only the presentation is missing.
+- **Post-audit feature batch 0038–0044** (just drafted → **B27–B33**, all engine). A behavioral-fidelity /
+  anti-sycophancy audit found capabilities **built but unwired** + two genuine gaps: **0038** live off-screen
+  society (wire the real sim/gossip/soul into the watcher — TOP), **0039** promise/deal tracking, **0040** NPC
+  confessionals, **0041** character evolution/arc, **0042** competition library, **0043** emergent bloc
+  behavior (emergent, never stored — honors ADR 0002), **0044** strategic nom/vote refinements. Build 0038 first.
+- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** (Vault-free `finaleView` read) → **C11**
+  (`orwellFinale.js`). Engine + seam green; only the presentation is missing.
 - **0022 — MVP-2 (the rich game UI)** — the one deferred feature.
+- *(Stale-doc note: the audit confirmed the temperature "open decision" is resolved by 0028, and 0035's draft
+  still mislabels `SystemClock`/runtime wiring as "missing" — both corrected in this batch.)*
 - *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
   `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*

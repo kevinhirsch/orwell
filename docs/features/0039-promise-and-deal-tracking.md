@@ -1,0 +1,94 @@
+# 0039 — Promise & deal tracking (first-class deals)
+
+> **Status:** Draft. **Deals are core _Big Brother_ texture** — "I won't put you up," final-2s,
+> votes-for-votes — and today they have **no first-class representation**: a betrayal only registers if a
+> caller happens to tag a `recordInteraction` with `kind:"betrayal"`. This feature adds a **`Deal` domain
+> model** (parties, terms, the condition that would break it, kept/broken status) that the **engine**
+> evaluates against binding actions — so a broken promise **deterministically** moves trust/threat and the
+> jury, recorded and consequential, **never narrated away** (anti-sycophancy). MISSING today.
+> **Executable spec:** [`0039-promise-and-deal-tracking.feature`](./0039-promise-and-deal-tracking.feature)
+
+## 1. Summary
+
+A deal is a commitment between two houseguests with a condition that, if violated by a later binding
+action (a nomination, a vote, a veto), **breaks** it. Today the consequence loop (0023) only reacts to an
+interaction explicitly tagged a betrayal; there is no object that remembers *what was promised, to whom,
+and whether it was kept*. 0039 makes the deal a tracked first-class thing the engine reconciles against
+the live loop (0034) — closing a behavioral-fidelity gap and adding a clean anti-sycophancy lever (the
+engine, not the storyteller, decides a promise was broken and makes it hurt).
+
+## 2. What exists today (the gap this closes)
+
+- **No `Deal`/`Promise` type** anywhere in `src/` (grep: only JS `Promise<T>` + prose "deal" in tool
+  descriptions). Deals are *implicit* in 0023 consequences only.
+- **Betrayal-shock exists but is untethered:** `relationshipConstants`/`0026` model a large, slow-decaying
+  trust drop for `kind:"betrayal"`, but nothing connects it to a *specific tracked promise* being violated.
+- **The jury cares (0014)** about how you treated people, but a broken deal isn't a discrete jury-management
+  signal today.
+
+## 3. Scope
+
+**In:** a Vault-free-projectable **`Deal`** domain model; **making** a deal (player↔NPC via a command;
+NPC↔NPC off-screen → Vault-held); **reconciliation** — when a binding action (nomination/replacement/veto/
+vote, 0034/0005) implicates an open deal, the engine marks it **kept** or **broken**; on **break**, a
+**betrayal-shock** consequence fold (relationships 0026 + a jury-management note 0014) **plus** a recorded
+**witnessed reveal event** when the wronged party witnesses/learns it; player-facing visibility limited to
+deals the player is **party to** (their knowledge) — NPC↔NPC deals reach them only as a **rumor by pathway**
+(0038/0002). Persisted (0030), seed-deterministic.
+
+**Out:** a general contract DSL (model only the concrete BB deal kinds — safety / vote / final-two /
+nominate-someone-else); the relationship math itself (reused from 0026); the narration of the deal (the
+engine tracks/decides; the LLM only voices).
+
+## 4. Design
+
+- **Model.** `Deal { id, parties: [a, b], kind: "safety" | "vote" | "final-two" | "target-other", terms,
+  condition, status: "open" | "kept" | "broken", madeEventId, resolvedEventId? }`. `terms` is a Vault-free
+  human description; `condition` encodes the binding action that violates it (e.g. safety ⇒ "a nominates b").
+- **Making.** A player↔NPC deal is made through a Vault-free command (recorded as a player-witnessed event —
+  player knowledge, 0002). NPC↔NPC deals are made **off-screen** by the society (0038) and held **Vault-only**
+  (hidden), diffusing like any hidden fact.
+- **Reconciliation (the crux).** On every binding action through the 0034 seam, the engine checks **open
+  deals** the action implicates: honoring leaves `kept`; violating sets `broken`. This is **engine-decided**
+  from the action + the deal's condition — never inferred from prose.
+- **Consequence on break.** A broken deal applies the **betrayal-shock** fold (0026: large trust drop +
+  threat rise, slow decay — the grudge lingers) to the wronged party's read of the breaker, **and** records
+  a **jury-management** demerit (0014) weighting that juror's later lean. If the wronged party witnesses or
+  learns the break, a **witnessed reveal event** (0002) enters their knowledge.
+- **Vault Wall.** Player surfaces show only the **fact** of deals the player is party to and **observable**
+  fallout — **never** the trust/threat numbers. NPC↔NPC deals and the magnitude of the shock stay hidden
+  (sentinel-clean); the player may *hear* a betrayal happened (rumor, 0038) but reads the consequence as
+  behavior.
+
+## 5. Contracts (stack-agnostic)
+
+```
+Deal: { id, parties:[a,b], kind, terms, condition, status:"open"|"kept"|"broken", madeEventId, resolvedEventId? }
+makeDeal(a, b, kind, terms): Deal                 // player↔NPC recorded (knowledge); NPC↔NPC off-screen (Vault)
+reconcile(action): for each open deal the action implicates → kept | broken   // engine-decided, not prose
+on broken: rel.applyDirected(wronged, breaker, "betrayal")  (0026)  +  jury demerit (0014)
+           + (if witnessed/learned) a recorded reveal event (0002)
+visibility: player sees deals they are PARTY to + observable fallout; NPC↔NPC only via pathway; never numbers
+```
+
+## 6. Definition of Done
+
+- [ ] **First-class + persisted:** a made deal is a tracked `Deal` object (status `open`), persisted and
+      surviving a restart (0030); making it records an event.
+- [ ] **Engine-decided kept/broken:** when a binding action implicates an open deal, the engine marks it
+      **kept** or **broken** from the action + condition — **never** parsed from narration.
+- [ ] **A broken promise hurts (anti-sycophancy):** it applies a **betrayal-shock** (trust↓/threat↑, sticky,
+      0026) and a **jury-management** demerit (0014), and surfaces a **witnessed reveal** to the wronged
+      party — measurably changing later NPC/jury behavior.
+- [ ] **Vault Wall:** NPC↔NPC deals are Vault-held and reach the player only as a **rumor by pathway** (0038);
+      no player surface shows a trust/threat number (extend the 0001 canary).
+- [ ] Seed-deterministic; name-agnostic (roles only — promisor/promisee/wronged); added to `cucumber.cjs`;
+      `npm test` + `npm run test:arch` green.
+
+## 7. Dependencies & traceability
+
+Builds on **0023** (consequence loop) + **0026** (betrayal-shock math) + **0014** (jury management), through
+the **0034** decision seam, with NPC↔NPC deals living in the **0038** off-screen society and diffusing via
+**0002**; persisted by **0030**, under **0001** (Vault Wall) and **0021** (isolation). Turns the implicit
+"a betrayal moves edges" into an explicit, tracked, engine-adjudicated promise — the deterministic core
+deciding that a broken word costs you, not the narrator.

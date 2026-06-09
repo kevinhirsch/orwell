@@ -356,14 +356,14 @@ full lever exposure + player surfaces.
 vector behind `SoulProvider`; non-degradation strategy = superset + monotonic-count + lossless
 round-trip (`docs/features/0007-persistence-non-degradation.md`); drop Luck → emotional
 modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"
-(`docs/decisions/`). **Still to confirm — none block current work:**
+(`docs/decisions/`). **Mostly resolved — none block current work:**
 
-1. **Temperature & emotional-modifier constants** — distributions, per-variable weighting,
-   bounds, hidden-element surfacing rate, volatility / mean-reversion. The *shape* is fixed in
-   `docs/features/0006-…` and `docs/decisions/0001`; the numbers are tunable config.
-2. **Relationship-model math** — signal set, update rule, recency/decay, betrayal-shock,
-   thresholds (`docs/decisions/0002`, Proposed).
-3. **Jury choreography & twists/specials** — sequester and tie-breaks are settled; precise
-   jury-vote staging and any reserve twists remain (low priority; twists stay Vault-held).
+1. ✅ **Temperature & emotional-modifier constants** — **resolved**: the *shape* is fixed in
+   `docs/features/0006-…` / `docs/decisions/0001`, and the numbers are firmed into the single tunable
+   module `src/domain/temperatureConstants.ts` (**feature 0028**). Only fine-tuning remains.
+2. ✅ **Relationship-model math** — **resolved** by **feature 0026** (`src/engine/relationshipConstants.ts`):
+   signal set, update rule, recency/decay, betrayal-shock, thresholds (promotes `docs/decisions/0002`).
+3. ✅ **Jury choreography** — **resolved** by **feature 0037** (the live interactive finale: statements →
+   per-juror questions → ordered vote reveal). Reserve twists stay Vault-held (0025).
 4. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
-   fake covers seeded tests).
+   fake covers seeded tests). *(The one genuinely-open item.)*
