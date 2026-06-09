@@ -19,9 +19,14 @@ off-screen watcher, social surface, interactive finale — the 0037 finale *UI* 
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0044**). **Current focus: the post-audit batch 0038–0044** (behavioral-fidelity /
-anti-sycophancy wiring — 0038 partially done, 0040 core done, **0041 is the linchpin**). See
-[Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
+(now through **0044**, plus audit-driven specs **0045–0048** to be drafted). **Active work — start
+here:** the **full product-audit batch** at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full
+product-audit batch (B34–B60 / C12–C18)") — the live, wave-ordered dispatch list of bugs/improvements,
+backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation principles"** section
+first). *Pick the next item from the queue, not from this paragraph* (it stays current; this prose
+drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**; OpenHands isn't
+configured). The prior post-audit batch 0038–0044 (behavioral-fidelity / anti-sycophancy wiring —
+0040 core done, **0041 is the linchpin**) folds into that queue. See [Current status](#current-status).
 
 ## Source of truth — read these first
 
