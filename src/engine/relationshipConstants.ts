@@ -90,3 +90,26 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
 };
 
 export const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+/**
+ * The hidden relationship consequence of each ceremony act (feature B38 / audit C1). The weekly
+ * loop's most consequential moves — nominations, veto saves, replacements, evictions, comp wins —
+ * must move trust/affinity/threat, not just be read. Each act maps to an existing `InteractionType`
+ * so the fold runs through the proven update rule (disposition scaling, betrayal-shock, decay,
+ * confidence, temperature jitter) and **every magnitude still comes only from `IMPACT` above** — no
+ * inline numbers. Applied engine-side in the commit path; the player never sees a number (0001).
+ *
+ *   nominated   nominee → HOH      adverse (threat▲ trust▼)        — "you put me up"
+ *   veto-saved  saved   → holder   a real bond                     — "you saved me"
+ *   replaced    replacement → HOH  betrayal-shock if trusted       — "you used the veto to get ME"
+ *   evicted     evictee → HOH+voters adverse (jury-weighted)       — "you sent me out"
+ *   comp-won    everyone → winner  threat▲ (a clear new target)    — "they're dangerous now"
+ */
+export type CeremonyAct = "nominated" | "veto-saved" | "replaced" | "evicted" | "comp-won";
+export const CEREMONY_IMPACTS: Record<CeremonyAct, InteractionType> = {
+  nominated: "conflict",
+  "veto-saved": "alliance",
+  replaced: "betrayal",
+  evicted: "betrayal",
+  "comp-won": "conflict",
+};

@@ -944,7 +944,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `evictionOrder` member in any pool; caller-supplied stats are ignored; the win is in the event store and survives
 > restart. Open a PR.
 
-### B38 — fold hidden consequence into the ceremony beats  ·  Claude Code  ·  **Wave 1 · audit C1 (the consequence-loop hole)**
+### B38 — fold hidden consequence into the ceremony beats  ·  Claude Code  ·  **Wave 1 · audit C1 (the consequence-loop hole)** — ✅ DONE
+
+> **DONE.** A `CEREMONY_IMPACTS` table (`relationshipConstants.ts`) maps each consequential act to an
+> existing `InteractionType`, and `GameSessionAdapter.foldCeremonyConsequence` applies engine-owned
+> directed folds in the commit path: nomination ⇒ nominee→HOH adverse; veto save ⇒ saved→holder bond;
+> replacement ⇒ replacement→HOH betrayal-shock-if-trusted; eviction ⇒ evictee→(HOH+voters) adverse +
+> survivors→outgoing-HOH threat; comp win ⇒ house→winner threat. Magnitudes come only from the
+> constants module; the move persists across restart and never reaches a player surface (0001 canary).
+> `tests/unit/ceremonyConsequence.test.ts` (3). Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the 0023 backbone is bypassed by the weekly loop itself: `liveSeason.ts` only
 > **reads** relationships — nominations, veto saves, replacements, and eviction votes move no trust/affinity/threat

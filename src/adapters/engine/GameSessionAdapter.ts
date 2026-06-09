@@ -43,6 +43,8 @@ import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotional
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
+import { CEREMONY_IMPACTS } from "../../engine/relationshipConstants";
+import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import type { CompetitionType } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
@@ -372,6 +374,52 @@ export class GameSessionAdapter implements GameSession {
     this.inflect(npc, offscreenEmotion(type));
   }
 
+  /**
+   * Fold the hidden relationship consequence of a resolved ceremony beat (B38/audit C1 — the 0023
+   * backbone that the live loop bypassed). Engine-owned, directed, magnitudes from `CEREMONY_IMPACTS`
+   * (constants only). The change lives in the hidden layer — the player feels it later as behavior,
+   * never as a number (0001). Runs on every ceremony (player- AND NPC-driven).
+   */
+  private foldCeremonyConsequence(ev: BeatEvent): void {
+    const s = this.live;
+    if (!s) return;
+    const rng = this.beatRng();
+    const fold = (from: EntityId, to: EntityId, act: CeremonyAct): void => {
+      if (from !== to) this.rel.applyDirected(from, to, CEREMONY_IMPACTS[act], rng);
+    };
+    switch (ev.beat) {
+      case "hoh-competition": {
+        const winner = ev.participants[0]; // the new HOH reads as a threat to the whole house
+        if (winner) for (const h of s.active) fold(h, winner, "comp-won");
+        break;
+      }
+      case "veto-competition": {
+        const winner = s.vetoHolder;
+        if (winner) for (const h of s.active) fold(h, winner, "comp-won");
+        break;
+      }
+      case "nominations": {
+        if (s.hoh && s.nominees) for (const nom of s.nominees) fold(nom, s.hoh, "nominated");
+        break;
+      }
+      case "veto-ceremony": {
+        if (s.saved && s.vetoHolder) fold(s.saved, s.vetoHolder, "veto-saved"); // gratitude bond
+        if (s.replacement && s.hoh) fold(s.replacement, s.hoh, "replaced");     // betrayal-shock if trusted
+        break;
+      }
+      case "eviction": {
+        const evictee = ev.participants[0];
+        if (!evictee) break;
+        // The evictee resents everyone responsible for sending them out (HOH + the voters who voted to
+        // evict) — the SAME set the jury manner read already captured (mannerByEvictee keys). Feeds jury.
+        for (const r of Object.keys(s.mannerByEvictee?.[evictee] ?? {}) as EntityId[]) fold(evictee, r, "evicted");
+        // The survivors read the departing HOH as a proven threat (they just ran a week).
+        if (s.outgoingHoh) for (const h of s.active) fold(h, s.outgoingHoh, "comp-won");
+        break;
+      }
+    }
+  }
+
   /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
   private beatRng(): SeededRandom {
     const name = this.house?.player.name ?? "season";
@@ -471,6 +519,10 @@ export class GameSessionAdapter implements GameSession {
     // 0041: the season changes a houseguest — fold the beat's emotional impact into the involved souls
     // (a comp win emboldens; a blindside rattles), evolving the hidden arc that bends their later play.
     if (ev) this.evolveFromBeat(ev);
+    // B38/0023: the loop's most consequential acts (noms/veto/replacement/eviction/comp wins) move the
+    // HIDDEN relationship layer — the player's action changes how the house feels about them (and each
+    // other). Engine-owned, magnitudes from constants, never surfaced (the Vault Wall, 0001).
+    if (ev) this.foldCeremonyConsequence(ev);
     this.syncProjection();
     this.onPersist?.();
   }
