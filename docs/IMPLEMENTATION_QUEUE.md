@@ -1629,3 +1629,203 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > **DoD:** the presence strip shows only co-present/adjacent public facts; no UI control advances phase
 > or initiates a scene by itself (the augment-not-replace guard, B66); `pytest` + 0032 headless gate
 > green. Depends on **B64** (+ C21). Read ADR 0003 first. Open a PR.
+
+---
+
+## Operations, security & test-integrity batch (B67–B72 / C29) · 2026-06-09 (round 3)
+
+Dispatch prompts for the **operations/security/test-integrity audit**
+(`docs/audits/2026-06-09-operations-security-tests-audit.md`). This batch is **cross-cutting** —
+it touches `deploy/`, `frontend/`, `src/`, and the test suite — so the B/C split is again just a
+**scope** marker (engine/infra vs. front-end Python), not an agent assignment; **Claude Code owns
+all of it**. The through-line the audit found: *the front-end ↔ engine boundary is where the real
+operational risk concentrates, and the green test gate gives false confidence on three of the four
+mandates.* Two findings ship-broken **today** (the engine-token footgun B67; the live knowledge-drop
+B68); three more re-point the mandate gates at the production loop (B69/B70). House rules apply
+(Vault Wall structural; `npm run test:arch` green; BDD/TDD-first; roles-only tests; keep gates green;
+PR per item).
+
+> **Good news the audit confirmed (no work needed):** the front-end's **own** security posture is
+> sound — the authenticated-user → engine-sandbox-key trust path **cannot be spoofed** (the key is
+> server-derived from the session, never client input), dropped dangerous verticals are **truly
+> unmounted server-side** (404 even for admins), and auth/sessions/multi-tenant isolation are
+> well-built. No critical or major app-security bypass. The items below are operations, test-integrity,
+> and minor hardening.
+
+| Wave | Item | Lane (scope) | Audit ref |
+|---|---|---|---|
+| **R-0 — ships broken today** | B67 engine-token end-to-end + multi-user header · B68 live knowledge-drop | deploy+FE+engine / engine | A1·A2·secB3 / C1 (=product C2) |
+| **R-1 — re-point the mandate gates** | B69 live richness + fairness + sentinel · B70 structural test/CI gaps | tests+engine | C2·C3·C6 / C4·C7·C8·C9 |
+| **R-2 — production-grade deploy** | B71 atomic/rollback update + boot-preload + real smoke · B72 root-drop + hardening + backup/DR + hygiene | deploy/systemd (+engine runtime) | A4·A6·A7 / A5·A8·A9·A3·A10 |
+| **R-1 — FE hardening** | C29 secure-cookies + proxy rate-limit + stray verticals + entitlements + deps + isolation test | front-end | secB2·B4·B5·B6·B7 + testC5 |
+
+> **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
+> started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
+> **finale relay** (product B3 / front-end C12) are **STILL OPEN**; **0041's emotional-arc is genuinely
+> live** (real production callers) but its competition modifier is **unverified for fairness** (→ B69).
+> Resume that pass before closing prior items as done.
+
+### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3**
+
+> In `kevinhirsch/orwell`, close the engine-auth footgun. The engine **enforces**
+> `ORWELL_ENGINE_TOKEN` on every route (`src/adapters/mcp/HttpMcpServer.ts:92`), but the front-end has
+> **no code path to send it** (`frontend/src/orwell_engine.py:24-27,172-181` send only the user header)
+> and the installer never sets it — so the documented way to turn auth on (`docs/INSTALL.md:103-104`,
+> "the front-end must then send it") returns **401 on every call and bricks the game**, while the only
+> working config runs the engine **unauthenticated** behind nothing but the loopback bind. (1) **FE:**
+> read `ORWELL_ENGINE_TOKEN` (+ `BBAI_ENGINE_TOKEN` fallback) and attach `Authorization: Bearer <token>`
+> in both `_call` and `_admin_call` when set. (2) **Installer:** auto-generate a token
+> (`openssl rand -hex 32`) into `.env` so engine auth is **on by default** even co-located. (3)
+> **Multi-user (ops A2):** the engine rejects only a *missing* `x-orwell-user`, but the FE defaults it to
+> `"default"` (`orwell_engine.py:27`), so `ORWELL_ENGINE_MULTIUSER=1` silently collapses anonymous
+> sessions into one shared sandbox — make the FE send **no** user header when there's no authenticated
+> owner (engine 400s), or have the engine treat literal `"default"` as unauthenticated under multi-user.
+> *(The authenticated-user path is already sound — don't change how the key is derived from the session.)*
+> **Acceptance:** with the token set in `.env`, the FE completes a full create→advance→decision turn and a
+> tokenless `curl /player/call` 401s; with it unset, behavior is unchanged; under multi-user an anonymous
+> FE call is refused, not routed to `default`. Read `docs/features/0021`, `0009` first. Open a PR.
+
+### B68 — stop dropping the player's knowledge layer on save (live non-degradation)  ·  Claude Code (engine)  ·  **R-0 · CRITICAL · test C1 (= product-audit C2)**
+
+> In `kevinhirsch/orwell` (TS engine), a real **non-degradation regression ships today**: the live
+> durable snapshot hardcodes `knowledge: []` (`src/engine/sessionSnapshot.ts:79`) and `SessionSnapshot`
+> has **no knowledge field** (`:38-41`), so the player's accumulated knowledge (facts surfaced by
+> pathway, suspicions) is **discarded on every save** and not restored on restart — the old version's
+> exact "memory thinning" failure, reproduced. The non-degradation gate passes anyway because it runs a
+> **different** state builder (`gameProgression.ts`) whose `counts()`/`isSuperset` *do* track knowledge
+> (`saveState.ts:75,91`), and the live durable test (`durablePersistence.test.ts`) never asserts
+> knowledge survives. Per remediation principle #6 (the snapshot is the contract): add `knowledge`
+> (and suspicions + the id/ts counters, product-audit C3) to `SessionSnapshot`, serialize it from /
+> load it into `InMemoryKnowledgeService`, populate `toGameState().knowledge` so the 0031 checkpoint
+> guards it. **Add the live-path test that was missing:** surface ≥1 fact to the player via pathway →
+> save + new registry over the same `FileSaveStore` dir → assert the factId and
+> `counts(restored).knowledge >= counts(before).knowledge` survive. **Acceptance:** the new live restart
+> test fails before the snapshot fix and passes after; `isSuperset` over the live path includes
+> knowledge. Read `docs/features/0007`, `0030`, `0002` first. Open a PR.
+
+### B69 — re-point the mandate gates at the production loop (richness · fairness · sentinel)  ·  Claude Code (tests + engine)  ·  **R-1 · MAJOR · test C2 + C3 + C6**
+
+> In `kevinhirsch/orwell` (TS engine), three "green" gates measure the wrong thing — the headline
+> invariants run against fixtures disconnected from `liveSeason.ts`. Per remediation principle #7 (gates
+> on the production path):
+> 1. **Richness (mandate #1, C2):** the property test **and the gated BDD 0003** compute
+>    `richnessMetrics(simulateSeason(...))`; `simulateSeason` (`src/engine/simulation.ts`) is imported by
+>    **nothing in production**, hardcodes `reveals` 0/1 (`:100`) so `maxRevealsPerMoment ≤ 1` is
+>    impossible to violate, and **force-sets a reveal if none occurred** (`:116-118`) so `surfacingRate>0`
+>    is a tautology. Re-point `richnessMetrics` at a real `Orchestrator`/`liveSeason` run's EventStore
+>    over a full season; **delete the `reveals=1` backstop**; quarantine `simulation.ts`.
+> 2. **Anti-sycophancy (mandate #3, C3):** fairness is tested only at the pure `resolveCompetition` unit
+>    with no soul modifier; the **live** loop wires the 0006/0028/0041 emotional modifier and a sign
+>    error there would protect the player unseen. Add a live statistical test — favorite-win band **and**
+>    `winRate(player) == winRate(npc)` at identical stats+soul over N seeds — and tighten the loose
+>    65–80% band toward the documented ~72%.
+> 3. **Sentinel (mandate #2, C6):** the canary injects sentinels into `buildEngineCore` (narrow) and the
+>    UAT leak check is a fixed numeric regex, so a hidden **content string** the live loop generates (a
+>    confessional line) leaking verbatim into `getMomentPrompt` is invisible. Tag live-generated hidden
+>    content with a unique sentinel and assert it never appears on any player-channel response across
+>    seeds.
+> **Acceptance:** mutating the live reveal gate to "never reveal" fails the richness test; injecting a
+> +0.1 player modifier into the live competition path fails the fairness test; echoing a seeded live
+> confessional sentinel on a player surface fails the canary. Read `docs/features/0003`, `0006`, `0001`
+> first. Open a PR.
+
+### B70 — close the structural test & CI gaps (boundary · 0038 · coverage)  ·  Claude Code (tests + CI)  ·  **R-1 · MAJOR · test C4 + C7 + C8 + C9**
+
+> In `kevinhirsch/orwell`, four gaps let mandate-violating regressions through a green gate:
+> 1. **C4 — the narrative adapter is outside the Vault boundary.** `.dependency-cruiser.cjs` OUTWARD
+>    covers `surfaces|services|outwardRoot|adapters/mcp` but **not** `adapters/narrative/` — the literal
+>    pipe to the model; wiring `VaultStore`/`SoulStore` into `LlmNarrativePort` to "enrich" narration
+>    would pass. Add `^src/adapters/narrative/` to OUTWARD. *Acceptance:* a temporary
+>    `import type { VaultStore }` in `LlmNarrativePort.ts` fails `test:arch`.
+> 2. **C7 — feature 0038 is spec'd but un-gated.** `docs/features/0038-live-offscreen-society.feature`
+>    has 6 scenarios and **zero step definitions** (26 undefined steps), absent from `cucumber.cjs` —
+>    implying coverage of Vault-isolation + cross-user + gossip behaviors that doesn't exist. Either gate
+>    it with real steps (pairs with B27b's gossip→player work) or move the `.feature` to `drafts/` so the
+>    repo stops implying coverage.
+> 3. **C8 — CI never runs coverage.** `.github/workflows/ci.yml` runs the functional gate but no
+>    `test:cov`/thresholds, so coverage can silently regress. Add a coverage job with per-directory branch
+>    thresholds (`src/engine`, `src/composition`, `src/adapters/engine` ≥ 90%).
+> 4. **C9 — the 97.6% headline masks the orchestrator rollback path.** `src/composition/orchestrator.ts:
+>    184-200` (the fail-closed integrity checkpoint's rollback — what protects against persisting a
+>    degraded/leaky state) and `GameSessionAdapter` finale-answer rejection (81% branch) are uncovered.
+>    Add tests: force an integrity failure → assert rollback + **no** persist; cover the finale-answer
+>    reject path.
+> **Acceptance:** all four above; dropping a covered branch below threshold fails CI. Open a PR.
+
+### B71 — production-grade deploy: atomic/rollback updates, boot preload, real smoke  ·  Claude Code (deploy + engine runtime)  ·  **R-2 · MAJOR · ops A4 + A6 + A7**
+
+> In `kevinhirsch/orwell` `deploy/` (+ a small `src/` runtime change), make the deploy lifecycle safe:
+> 1. **A4 — atomic, pinned, rollback-able updates.** `orwell-update.sh:66-72` does
+>    `git reset --hard origin/main` **then** `npm ci && build` under `set -e`, so a build failure leaves
+>    the tree on new `main` with the old `dist/`; it always pulls unpinned `main` with no rollback. Build
+>    **before** committing to the swap (restart only on build success; leave the prior checkout on
+>    failure), add `REF`/`TAG` pinning, and keep the prior `dist`/SHA for `--rollback`.
+> 2. **A6 (= product-audit E11) — preload saved users at boot.** The watcher iterates only **in-memory**
+>    `registry.usernames()` (`gameWatcher.ts:52`, `registry.ts:155-157`); at process start the map is
+>    empty, so every restart (incl. every update) **freezes all saved users' off-screen society** until
+>    each next call. At `runtime.start()`, enumerate `saveStore` users and warm their sandboxes.
+> 3. **A7 — a smoke test that proves the system works.** `deploy/smoke.sh` starts only the engine and
+>    stops at `createCharacter` — a green run is compatible with a broken FE or a non-advancing game. Add
+>    a stage that boots the FE on `ORWELL_PORT`, hits a real route, and drives one
+>    create→advance→decision turn through the FE, including one pass with `ORWELL_ENGINE_TOKEN` set
+>    (proving B67).
+> **Acceptance:** a forced build failure leaves services on the previous build with a clear message + a
+> pin/rollback path; after a restart with N saved users and a live watcher, off-screen events accrue with
+> no prior request; smoke fails if the FE can't reach the engine or a turn can't complete. Read
+> `docs/features/0030`, `0035`, `0031` first. Open a PR.
+
+### B72 — deploy hardening & operability: drop root, backup/DR, dir split, hygiene  ·  Claude Code (deploy/systemd + docs)  ·  **R-2 · MAJOR · ops A5 + A8 + A9 + A3 + A10**
+
+> In `kevinhirsch/orwell` `deploy/` + `docs/INSTALL.md`, make the box operable and least-privilege:
+> 1. **A5 — drop root + systemd hardening.** Neither unit sets `User=`; both run as **root** with an
+>    internet-facing FastAPI app (`orwell-frontend.service:12` binds `0.0.0.0`). Create an `orwell` system
+>    user, `chown` app+data, set `User=orwell`, and add `NoNewPrivileges=yes`, `ProtectSystem=strict`,
+>    `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=` scoped to the two data dirs.
+> 2. **A8 — backups, readiness, DR.** "Backups" is prose that **misstates the layout** (the FE SQLite is
+>    `frontend/data/app.db`; engine saves are JSON under `data/` — two dirs, one undocumented). Ship
+>    `orwell-backup.sh`/`orwell-restore.sh` covering **both** dirs, document the layout correctly, and add
+>    a **readiness** check (engine reachable + FE up + **LLM configured**).
+> 3. **A3 — installer writes a key the FE never reads.** Install writes `ANTHROPIC_API_KEY`
+>    (`orwell-install.sh:84-90`) but the live engine narrator is `EchoNarrativePort` and the FE reads
+>    `OPENAI_API_KEY`/`settings.json` (`constants.py:34-36`) — so "configured" is a **false signal** and a
+>    fresh box isn't playable. Map the installer prompt to the names the FE consumes, or change the copy to
+>    "configure the LLM in Settings after install."
+> 4. **A9 — saves + secrets share one dir.** `/opt/orwell/data` holds both saves and `.env`; factory-reset
+>    keeps only a file literally named `.env` (`orwell-factory-reset.sh:172-174`) — fragile once B67 adds a
+>    generated token. Put saves in `data/saves/` distinct from `data/.env`; scrub the subdir wholesale; fix
+>    the script's stale `ORWELL_DATA_DIR` comment.
+> 5. **A10 — hygiene.** Mark `EnvironmentFile=-` optional (manual installs before `.env` fail confusingly);
+>    document the FE-without-engine degraded behavior (`Wants=` not `Requires=`); support `REF=` +
+>    document verifying the piped script (unpinned root `curl|bash`); set a journald `SystemMaxUse=` cap +
+>    `SyslogIdentifier=`; assert a dummy key never appears in captured logs.
+> **Acceptance:** `systemctl show -p User` is non-root and the game still plays; a documented
+> backup→wipe→restore round-trips a game and readiness returns non-OK when the LLM is unconfigured; a
+> fresh install is either playable with zero UI config or the docs say plainly it isn't; reset removes
+> only the saves subdir + FE store. Open a PR.
+
+### C29 — front-end app-security hardening + the sandbox-isolation regression test  ·  Claude Code (front-end)  ·  **R-1 · MINOR (posture) · sec §B2/B4/B5/B6/B7 + test C5**
+
+> In `kevinhirsch/orwell` `frontend/`, the app-security posture is **sound** (no bypass) — these are the
+> minor-but-worth-it hardening items the audit flagged before a multi-user/internet deploy, plus the one
+> missing regression test:
+> 1. **C5 — guard the trust path that's correct today.** Nothing asserts the engine `X-Orwell-User` key
+>    is derived from `request.state.current_user` rather than client input, or that two authed users get
+>    **distinct** sandboxes. Add an FE test that **fails if** a route forwards a client-supplied `user` or
+>    routes an authenticated user to `"default"`.
+> 2. **B2 — two inherited verticals survive the game build.** `vault_routes` (Bitwarden/`bw` CLI,
+>    `app.py:737`) and `mcp_routes` (register external MCP servers incl. `stdio` = arbitrary host binary,
+>    `app.py:693`) are mounted **unconditionally** (admin-only, so not an escalation path, but outside the
+>    "game and nothing else" keep-set). Route both through `mount_optional` under their own keep flags;
+>    assert they 404 under `ORWELL_GAME_BUILD=1`.
+> 3. **B5 — `SECURE_COOKIES` defaults false** (`auth_routes.py:141`) and the installer doesn't set it.
+>    Default it true in the deploy env or auto-set `Secure` on `X-Forwarded-Proto: https`.
+> 4. **B4 — rate-limiting keys on `request.client.host`** (`auth_routes.py:79-81`), which behind the
+>    anticipated reverse proxy is the proxy IP — all users share one bucket. Key on a trusted
+>    `X-Forwarded-For` (left-most, only behind a configured trusted proxy) and/or add per-username lockout.
+> 5. **B6 — wire the dead entitlement layer.** `require_entitlement`/`has_entitlement` exist but **no
+>    route calls them** (all use bare `require_admin`); route LLM-settings + user-management through
+>    `require_entitlement` so a future non-admin grant actually works.
+> 6. **B7 — pin `frontend/requirements.txt`** (only `pydantic>=2.0` is pinned) with a lockfile/hashes.
+> **DoD:** the isolation test fails if the route trusts a client `user`; `/api/vault/config` and
+> `/api/mcp/servers` 404 under the game build; `pytest` + the 0032 headless gate green; engine gate
+> unaffected. Open a PR.
