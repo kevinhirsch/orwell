@@ -1,14 +1,15 @@
 # 0040 — NPC Diary Room confessionals (Vault-only interiority)
 
-> **Status:** **Implemented (core).** `src/engine/confessionals.ts` (`confessionalFor` + `recordConfessional`)
-> generates a houseguest's private read **grounded in their real relationship signals** (top-threat target +
-> strongest bond — not invented), recorded **Vault-only** (hidden, `witnessSet:[npc]`); wired into the live
-> off-screen tick (`Orchestrator.defaultApply`) so an involved NPC confesses as the house schemes. Proven
-> **walled from BOTH the player and the admin** (the admin surface reads no events) and seed-deterministic —
-> `tests/unit/npcConfessionals.test.ts` (5). **Remaining:** the **soul-recall feedback** (confessionals
-> grounding that NPC's later *voice* via `recall`) needs a `SoulStore` in the live sandbox — **feature 0041**;
-> and the trigger is currently the off-screen tick (a refinement could fire them specifically at
-> nomination/eviction beats). Was: only an unused `"confessional"` event-type enum.
+> **Status:** ✅ GREEN (in `cucumber.cjs`). `src/engine/confessionals.ts` (`confessionalFor` +
+> `recordConfessional`) generates a houseguest's private read **grounded in their real relationship signals**
+> (top-threat target + strongest bond — not invented), recorded **Vault-only** (hidden, `witnessSet:[npc]`).
+> Now fired at the **live nomination ceremony** by the directly-involved houseguests (`involvedConfessionals`
+> wired into `GameSessionAdapter.commit`) **and** on the off-screen tick (`Orchestrator.defaultApply`). Proven
+> **walled from BOTH the player and the admin** (the admin surface reads no events) and seed-deterministic.
+> Confessionals **deepen the soul** (`recordConfessionalToSoul` → `SoulStore`): they accumulate without losing
+> earlier ones and a later `recall` surfaces a specific past confessional to keep the NPC's voice consistent.
+> *(Wiring a `SoulStore` into the LIVE sandbox so this feeds live behavior is the 0041 linchpin.)*
+> Was: only an unused `"confessional"` event-type enum.
 > **Executable spec:** [`0040-npc-confessionals.feature`](./0040-npc-confessionals.feature)
 
 ## 1. Summary

@@ -265,6 +265,15 @@ export class BbWorld extends World {
   dealThreatBefore?: number;
   dealVault?: VaultDatum;
 
+  // NPC confessionals (0040) scratch state.
+  confRel?: RelationshipModel;
+  confessor?: EntityId;
+  confessional?: import("../../src/engine/confessionals").Confessional;
+  confSoul?: import("../../src/adapters/engine/SoulStore").SoulStore;
+  confUserSandbox?: import("../../src/composition/registry").UserSandbox;
+  confSandboxA?: import("../../src/composition/registry").UserSandbox;
+  confSandboxB?: import("../../src/composition/registry").UserSandbox;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

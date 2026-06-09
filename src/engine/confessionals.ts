@@ -1,6 +1,8 @@
 import type { EventStore } from "../ports/EventStore";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { EntityId } from "../domain/event";
+import { PLAYER } from "../domain/ids";
+import type { SoulProvider } from "../ports/SoulProvider";
 import type { RelationshipModel } from "./relationships";
 
 /**
@@ -68,4 +70,35 @@ export function recordConfessional(events: EventStore, conf: Confessional, rng: 
     hidden: true,
     content: conf.content,
   });
+}
+
+/**
+ * The directly-involved NPC houseguests at a dramatic beat (e.g. the HOH and the two nominees at a
+ * nomination ceremony) each confess their REAL, engine-grounded read. The player is excluded — they
+ * have their own player Diary Room (0013) and never confess as an NPC. Pure: returns the confessionals;
+ * the caller records them Vault-only.
+ */
+export function involvedConfessionals(
+  confessors: readonly EntityId[],
+  houseguests: readonly EntityId[],
+  rel: RelationshipModel,
+): Confessional[] {
+  const seen = new Set<EntityId>();
+  const out: Confessional[] = [];
+  for (const c of confessors) {
+    if (c === PLAYER || seen.has(c)) continue;
+    seen.add(c);
+    out.push(confessionalFor(c, houseguests, rel));
+  }
+  return out;
+}
+
+/**
+ * Fold a confessional into the confessing NPC's dynamic Soul (0024): append-only, so confessionals
+ * ACCUMULATE across beats without losing earlier ones (0007), and a later `recall` can surface a
+ * specific past confessional to keep the NPC's voice consistent. Vault-stays-Vault: the soul is
+ * engine-only and the player never reads it; this only deepens the hidden interiority.
+ */
+export function recordConfessionalToSoul(soul: SoulProvider, conf: Confessional): void {
+  soul.recordToSoul(conf.npc, conf.content);
 }

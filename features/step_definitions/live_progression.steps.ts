@@ -104,8 +104,11 @@ Then("the choice is applied and the loop continues", function (this: BbWorld) {
 
 Then("the beats are recorded as player-witnessed events", function (this: BbWorld) {
   const events = this.registry!.sandboxFor("u1").engine.events.query();
-  assert.ok(events.length > 0);
-  assert.ok(events.every((e) => !e.hidden), "the player lived these beats — never hidden");
+  // The BEATS (house-events) the player lived are never hidden. NPC confessionals (0040) are recorded
+  // alongside them but are Vault-only interiority — legitimately hidden — so we assert on the beats.
+  const beats = events.filter((e) => e.type === "house-event");
+  assert.ok(beats.length > 0, "the loop recorded player-witnessed beats");
+  assert.ok(beats.every((e) => !e.hidden), "the player lived these beats — never hidden");
 });
 
 // --- S3: illegal refused -------------------------------------------------------
