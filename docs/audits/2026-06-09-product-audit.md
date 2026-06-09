@@ -18,6 +18,50 @@ server-side game-build gating (drop-set routers never mount; shell 404s proven),
 memory/RAG genuinely off under the game build, and the moment prompt injected on both chat
 paths.
 
+## Remediation principles (the preferred "how")
+
+The per-finding *Fix:* lines below are all instances of seven architectural patterns. An
+implementer should reach for these first; a fix that fights one of them is probably the wrong
+fix.
+
+1. **One authority per outcome class.** The live loop (`liveSeason.ts` via `advanceGame`) is
+   the *sole* resolver of competitions, ceremonies, and votes. Every other tool that touches
+   an outcome (`runCompetition`, `resolveCompetition`) becomes a delegate/replay of the loop's
+   already-resolved result — never a second resolver with its own RNG stream. If two code
+   paths can each produce a winner, one of them is a bug.
+2. **Everything binding goes through the pending-decision seam.** All new player agency —
+   tie-break, Houseguest's Choice, competition intent, the F3 final eviction, the finale
+   kinds — is expressed as new `pending` kinds on the existing 0034
+   `advanceGame`/`submitDecision` contract (engine pauses, returns the legal option set,
+   validates the choice, resumes). No new decision mechanisms; no decision ever parsed from
+   prose.
+3. **Engine-validated references in, projections out.** Tool inputs are *ids the engine
+   resolves*, never caller-supplied content: stats come from the live house, surfaced facts
+   must reference a recorded hidden event/fact the claimed teller actually holds, witnesses
+   must be living houseguests. The narrator supplies *which*, the engine supplies *what*.
+4. **Folds live in the commit path; magnitudes live in constants modules.** Hidden
+   consequences are applied where persistence already happens (the session commit /
+   orchestrator apply), driven by named constants (`relationshipConstants.ts`,
+   `temperatureConstants.ts`, a new `juryConstants.ts`) — never inline literals, never in
+   adapters, never at the narrator's discretion.
+5. **The orchestrator becomes the real spine.** Player-mutating tool calls route through (or
+   at minimum `touch`) `Orchestrator.advance`, so the fail-closed integrity checkpoint, idle
+   gating, turn-driven off-screen ticks, and health telemetry all fall out of one routing
+   change rather than four separate features.
+6. **The snapshot is the contract.** Any state the live game holds — knowledge, suspicions,
+   id/ts counters, twist state, emotional state — either round-trips through a *versioned*
+   `SessionSnapshot` and surfaces in `toGameState` (so the checkpoint can guard it), or it
+   effectively doesn't exist. Adding live state without extending the snapshot is the bug
+   class behind C2/C3/I7.
+7. **Gates measure the production path.** Sentinels are embedded at generation time into the
+   registry-built object graph the resolver actually serves; richness is computed from the
+   real EventStore over the live spine; drift tests pin prompt ↔ tool registry ↔ front-end
+   schemas to each other. A test that proves a property about a fixture proves nothing.
+
+Front-end corollary: under the game build, **fail closed for game content, fail open for the
+shell** — an unreachable engine yields a diegetic holding state, never a generic assistant
+continuing the story from context.
+
 ## The six systemic findings
 
 1. **The consequence loop has a hole at its center.** Nominations, veto saves, replacements,
