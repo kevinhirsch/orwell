@@ -8,16 +8,19 @@
 // the panel simply hides and never disturbs the normal chat.
 //
 // Like the settings panel it is a real moveable window: drag it by its header and
-// it remembers where you put it; minimize it to just the week/phase line. Both the
-// position and the minimized state persist across reloads (localStorage).
+// it remembers where you put it. Minimize sends it to the shared chip dock — the
+// same "fly-out" strip every other minimized tool lands in — instead of collapsing
+// in place, and the dock chip restores it.
 import { makeWindowDraggable } from "./windowDrag.js";
+import * as modalManager from "./modalManager.js";
 
 (function () {
   "use strict";
 
   const POLL_MS = 20000;
+  const ID = "orwell-status";
   const POS_KEY = "orwell-status-pos";
-  const MIN_KEY = "orwell-status-min";
+  const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2'/><path d='M3 9h18M9 21V9'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -42,11 +45,10 @@ import { makeWindowDraggable } from "./windowDrag.js";
     } catch (_) {}
   }
 
-  function setMinimized(el, on) {
-    el.classList.toggle("os-collapsed", on);
-    const btn = el.querySelector(".os-min");
-    if (btn) { btn.textContent = on ? "+" : "–"; btn.title = on ? "Expand" : "Minimize"; }
-    try { localStorage.setItem(MIN_KEY, on ? "1" : "0"); } catch (_) {}
+  // True while the dock holds this panel minimized — the poll loop must not force it
+  // back open on the next tick.
+  function isMinimized() {
+    try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
   }
 
   function ensurePanel() {
@@ -78,9 +80,6 @@ import { makeWindowDraggable } from "./windowDrag.js";
           font-family: inherit;
         }
         #orwell-status .os-min:hover { opacity: .9; }
-        #orwell-status.os-collapsed { margin-bottom: 0; }
-        #orwell-status.os-collapsed .os-hdr { margin-bottom: 0; }
-        #orwell-status.os-collapsed .os-row { display: none; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
         #orwell-status .os-row .os-k { opacity: .6; min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
@@ -95,12 +94,26 @@ import { makeWindowDraggable } from "./windowDrag.js";
       <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>`;
     document.body.appendChild(el);
 
-    // Restore where the player last left it + whether it was minimized.
+    // Restore where the player last left it.
     restorePosition(el);
-    try { if (localStorage.getItem(MIN_KEY) === "1") setMinimized(el, true); } catch (_) {}
 
-    el.querySelector(".os-min").addEventListener("click", () =>
-      setMinimized(el, !el.classList.contains("os-collapsed")));
+    // Register with the shared minimized-window dock so the minimize button parks the
+    // panel as a chip in the same fly-out strip as every other tool. restoreFn brings
+    // it back; closeFn hides it entirely (the chip's ×).
+    try {
+      modalManager.register(ID, {
+        label: "Status",
+        icon: ICON,
+        restoreFn: () => { el.style.display = "block"; },
+        closeFn: () => { el.style.display = "none"; },
+      });
+    } catch (_) {}
+    el.querySelector(".os-min").addEventListener("click", () => {
+      try { modalManager.minimize(ID); } catch (_) {}
+      // The HUD isn't a `.modal`, so the dock's `.hidden` class is overridden by its
+      // inline display — hide it explicitly. restoreFn / the poll-loop guard bring it back.
+      el.style.display = "none";
+    });
 
     // A real moveable window: drag by the header, no dock/fullscreen/resize (it is a
     // small fixed-size HUD), and remember the final position. The minimize button is a
@@ -119,11 +132,20 @@ import { makeWindowDraggable } from "./windowDrag.js";
     return el;
   }
 
+  // Fully hide the panel and clear any dock chip — used when no game is running or the
+  // engine is unreachable, so a stale "Status" chip never lingers in the fly-out.
+  function hidePanel() {
+    const el = document.getElementById(ID);
+    if (!el) return;
+    if (isMinimized()) { try { modalManager.restore(ID); } catch (_) {} }
+    el.style.display = "none";
+  }
+
   function render(st) {
     const el = ensurePanel();
     // No active game (engine reports week 0 / setup) → hide and keep polling.
     if (!st || typeof st.week !== "number" || st.week < 1) {
-      el.style.display = "none";
+      hidePanel();
       return;
     }
     const name = (c) => (c && c.name) || "—";
@@ -136,7 +158,8 @@ import { makeWindowDraggable } from "./windowDrag.js";
     el.querySelector("#os-veto").textContent = veto.used
       ? "used" + (veto.holder ? " · " + veto.holder.name : "")
       : (veto.holder ? veto.holder.name : "—");
-    el.style.display = "block";
+    // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
+    if (!isMinimized()) el.style.display = "block";
   }
 
   async function refresh() {
@@ -144,8 +167,7 @@ import { makeWindowDraggable } from "./windowDrag.js";
       render(await fetchStatus());
     } catch (_) {
       // Engine down / no game → hide, fail open.
-      const el = document.getElementById("orwell-status");
-      if (el) el.style.display = "none";
+      hidePanel();
     }
   }
 

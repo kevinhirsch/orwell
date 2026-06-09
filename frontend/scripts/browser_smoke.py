@@ -130,6 +130,59 @@ def main() -> int:
             check(bool(theme.get("opened")) and theme.get("themes", 0) > 0,
                   f"launcher opens a populated theme grid ({theme})")
 
+            # The SIDEBAR "Theme" entry must stay visible under the game build (its
+            # Appearance → Sidebar toggle is on by default), while the other dropped
+            # Tools items stay hidden. Hiding the whole #tools-section buried Theme even
+            # with its toggle on; we now hide the non-Theme items individually.
+            sidebar_theme = page.evaluate(
+                """() => {
+                  const vis = (id) => {
+                    const el = document.getElementById(id);
+                    if (!el) return null;
+                    const cs = getComputedStyle(el);
+                    return cs.display !== 'none' && el.offsetParent !== null;
+                  };
+                  return { theme: vis('tool-theme-btn'),
+                           memory: vis('tool-memory-btn'),
+                           tasks: vis('tool-tasks-btn') };
+                }"""
+            )
+            check(sidebar_theme.get("theme") is True,
+                  f"sidebar Theme entry is visible under the game build ({sidebar_theme})")
+            check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
+                  f"other dropped Tools items stay hidden ({sidebar_theme})")
+
+            # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
+            # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
+            # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
+            mob = browser.new_page(viewport={"width": 390, "height": 844})
+            mob.goto(base + "/", wait_until="load", timeout=30000)
+            mob.wait_for_timeout(2500)
+
+            def ham_vs_sidebar(force_right):
+                return mob.evaluate(
+                    """(forceRight) => {
+                      const sb = document.getElementById('sidebar');
+                      const hb = document.getElementById('hamburger-btn');
+                      if (!sb || !hb) return { ok: false, why: 'missing' };
+                      sb.classList.toggle('right-side', forceRight);
+                      sb.classList.remove('hidden');
+                      if (window.syncRailSide) window.syncRailSide();
+                      const hr = hb.getBoundingClientRect(), sr = sb.getBoundingClientRect();
+                      const sideOf = (r) => (r.left + r.right) / 2 < window.innerWidth / 2 ? 'L' : 'R';
+                      return { ham: sideOf(hr), sidebar: sideOf(sr) };
+                    }""",
+                    force_right,
+                )
+
+            left_state = ham_vs_sidebar(False)
+            right_state = ham_vs_sidebar(True)
+            check(left_state.get("ham") == left_state.get("sidebar") == "L",
+                  f"mobile: hamburger follows a LEFT sidebar ({left_state})")
+            check(right_state.get("ham") == right_state.get("sidebar") == "R",
+                  f"mobile: hamburger follows a RIGHT sidebar ({right_state})")
+            mob.close()
+
             browser.close()
     finally:
         proc.terminate()

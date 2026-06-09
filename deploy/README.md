@@ -34,19 +34,32 @@ untouched.
 ### Factory reset (back to OOBE)
 
 To scrub **all** game + user data and start over as if freshly installed — every sandbox (saves,
-souls, the hidden Vault layer) and the whole front-end store (accounts, settings, uploads) — run
-**inside the container as root**:
+souls, the hidden Vault layer) and the whole front-end store (accounts, settings, uploads) — run it
+either **on the Proxmox host** (it bridges into the LXC, like `orwell-update.sh`) or **inside the
+container as root**:
 
 ```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)" -- --dry-run
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)" -- --yes
+
+# or directly inside the container
 bash /opt/orwell/deploy/orwell-factory-reset.sh             # prompts: type RESET
 bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # preview what would be removed
-bash /opt/orwell/deploy/orwell-factory-reset.sh --yes       # no prompt (automation)
 ```
 
 It stops the services, removes the data, and restarts — the next visit begins at first-run
 onboarding. **Config is preserved** (`data/.env`: ports, engine URL, LLM keys), so the box still
 boots and reaches your LLM. Unlike `orwell-update.sh` (which never touches `data/`), this is the
 one script that deliberately **does**.
+
+> **The engine save dir matters.** The engine writes per-user saves (and the hidden Vault layer)
+> to `ORWELL_DATA_DIR`, **defaulting to `./.orwell-data`** if unset. Fresh installs now pin
+> `ORWELL_DATA_DIR=<app>/data` so the save lives in `data/`; older installs that predate that pin
+> keep their save in `<app>/.orwell-data`. The reset script **resolves the real save dir from
+> `.env` and handles both layouts** — an earlier version only scrubbed `data/` and so left the
+> game intact on default installs.
 
 ## Config UX (community-scripts style)
 

@@ -566,7 +566,7 @@ async def build_chat_context(
                         else:
                             preface.insert(0, {"role": "system", "content": gm_prompt})
         except Exception as e:  # engine down → plain chat, no disruption
-            logger.debug("[orwell] game framing skipped: %s", e)
+            logger.warning("[orwell] game framing skipped (LLM will be out-of-character): %s", e)
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])

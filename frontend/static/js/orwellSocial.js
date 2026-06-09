@@ -14,15 +14,17 @@
 // realistic than a crowd), and an approach you act on or dismiss STAYS gone across a refresh
 // (until a new game), so the surface never nags about something you already handled.
 import { makeWindowDraggable } from "./windowDrag.js";
+import * as modalManager from "./modalManager.js";
 
 (function () {
   "use strict";
 
   const POLL_MS = 20000;
+  const ID = "orwell-social";
   const MAX_APPROACHES = 1;            // one person pulls you aside at a time — not a crowd
   const POS_KEY = "orwell-social-pos";
-  const MIN_KEY = "orwell-social-min";
   const DISMISS_KEY = "orwell-social-dismissed";
+  const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -64,11 +66,17 @@ import { makeWindowDraggable } from "./windowDrag.js";
     } catch (_) {}
   }
 
-  function setMinimized(el, on) {
-    el.classList.toggle("osoc-collapsed", on);
-    const btn = el.querySelector(".osoc-min");
-    if (btn) { btn.textContent = on ? "+" : "–"; btn.title = on ? "Expand" : "Minimize"; }
-    try { localStorage.setItem(MIN_KEY, on ? "1" : "0"); } catch (_) {}
+  // True while the dock holds this panel minimized — the poll loop must not reopen it.
+  function isMinimized() {
+    try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
+  }
+  // Hide the panel and clear any dock chip (no active game / engine down) so no stale
+  // "The House" chip lingers in the fly-out.
+  function hidePanel() {
+    const el = document.getElementById(ID);
+    if (!el) return;
+    if (isMinimized()) { try { modalManager.restore(ID); } catch (_) {} }
+    el.style.display = "none";
   }
 
   function ensureUI() {
@@ -96,8 +104,6 @@ import { makeWindowDraggable } from "./windowDrag.js";
           opacity: .55; font-size: 1rem; line-height: 1; padding: 0 .15rem; font-family: inherit;
         }
         #orwell-social .osoc-min:hover { opacity: .9; }
-        #orwell-social.osoc-collapsed .osoc-body { display: none; }
-        #orwell-social.osoc-collapsed .osoc-hdr { margin-bottom: 0; }
         #orwell-social .osoc-dr {
           width: 100%; cursor: pointer; border-radius: 8px; padding: .35rem .5rem;
           background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600;
@@ -173,11 +179,23 @@ import { makeWindowDraggable } from "./windowDrag.js";
     modal.addEventListener("click", (e) => { if (e.target === modal) closeDR(); });
     modal.querySelector("#osoc-dr-send").addEventListener("click", submitDR);
 
-    // Restore where the player left the panel + whether it was minimized.
+    // Restore where the player left the panel.
     restorePosition(el);
-    try { if (localStorage.getItem(MIN_KEY) === "1") setMinimized(el, true); } catch (_) {}
-    el.querySelector(".osoc-min").addEventListener("click", () =>
-      setMinimized(el, !el.classList.contains("osoc-collapsed")));
+    // Minimize → park as a chip in the shared dock (the fly-out of minimized windows),
+    // alongside every other tool, instead of collapsing in place.
+    try {
+      modalManager.register(ID, {
+        label: "The House",
+        icon: ICON,
+        restoreFn: () => { el.style.display = "block"; },
+        closeFn: () => { el.style.display = "none"; },
+      });
+    } catch (_) {}
+    el.querySelector(".osoc-min").addEventListener("click", () => {
+      try { modalManager.minimize(ID); } catch (_) {}
+      // Not a `.modal`, so hide explicitly (inline display beats the dock's `.hidden`).
+      el.style.display = "none";
+    });
 
     // Moveable window: drag the panel by its header (no dock/fullscreen/resize — it is a
     // small HUD); the Diary-Room dialog drags by its title bar. Buttons are skipped by the
@@ -319,7 +337,6 @@ import { makeWindowDraggable } from "./windowDrag.js";
   // --- Poll loop ----------------------------------------------------------------
 
   async function refresh() {
-    const el = document.getElementById("orwell-social");
     let active = false;
     try {
       const st = await getJSON("/api/orwell/state");
@@ -328,10 +345,12 @@ import { makeWindowDraggable } from "./windowDrag.js";
       active = false; // engine down → fail open (hide)
     }
     if (!active) {
-      if (el) el.style.display = "none";
+      hidePanel();
       return;
     }
-    ensureUI().style.display = "block";
+    const el = ensureUI();
+    // Keep approaches fresh, but if the player parked it in the dock, leave it there.
+    if (!isMinimized()) el.style.display = "block";
     try {
       const data = await getJSON("/api/orwell/initiatives");
       renderApproaches(data && data.initiatives);

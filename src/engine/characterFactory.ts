@@ -87,6 +87,13 @@ export interface PlayerCharacter {
   character: Character;
   /** The player has a dynamic Soul like any houseguest (initial: no relationship beliefs yet). */
   soul: Soul;
+  /**
+   * The player's OWN words for their public persona, as typed at OOBE — narrative/display only.
+   * Free text (not constrained to the canonical archetype enum), so the game master can voice the
+   * player exactly as they described themselves. The hidden `character.archetype`/`strategyStyle`
+   * still drive STATS from a canonical spec (anti-sycophancy, 0006) — these never do.
+   */
+  persona?: { archetype?: string; strategyStyle?: string };
   /** Authored private material (secret strategy/targets) — DR-tagged NO_NPC_PATHWAY at game start. */
   privateStrategy?: string;
 }
@@ -202,6 +209,12 @@ export interface OobeInput {
   backstory?: string;
   /** Optional authored private strategy; becomes player-only knowledge (DR rule, 0013). */
   privateStrategy?: string;
+  /**
+   * The player's OWN words for their persona (free text, as typed) — kept for narrative even when
+   * they don't match a canonical archetype/style. Display only; never feeds stats.
+   */
+  personaArchetype?: string;
+  personaStrategyStyle?: string;
 }
 
 /** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
@@ -232,12 +245,24 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       ...generateAppearance(appearanceRng),
     },
     soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, memory: [] },
+    // The player's self-described persona (their words), kept for the narrative voice even when it
+    // diverges from the canonical archetype/style that drive the hidden stats. Falls back to the
+    // canonical labels so the view always has something to show.
+    persona: {
+      archetype: input.personaArchetype?.trim() || spec.archetype,
+      strategyStyle: input.personaStrategyStyle?.trim() || strategyStyle,
+    },
     ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
   };
 }
 
 export function startNewGame(
-  opts: { seed: number; playerName: string; archetype?: Archetype; strategyStyle?: StrategyStyle },
+  opts: {
+    seed: number; playerName: string;
+    archetype?: Archetype; strategyStyle?: StrategyStyle;
+    /** The player's free-text persona words (display only; preserved even if not canonical). */
+    personaArchetype?: string; personaStrategyStyle?: string;
+  },
 ): GameHouse {
   const rng = new SeededRandom(opts.seed);
   const npcs = generateHouse(rng).npcs;
@@ -245,6 +270,8 @@ export function startNewGame(
     name: opts.playerName,
     ...(opts.archetype ? { archetype: opts.archetype } : {}),
     ...(opts.strategyStyle ? { strategyStyle: opts.strategyStyle } : {}),
+    ...(opts.personaArchetype ? { personaArchetype: opts.personaArchetype } : {}),
+    ...(opts.personaStrategyStyle ? { personaStrategyStyle: opts.personaStrategyStyle } : {}),
   });
   return { player, npcs };
 }

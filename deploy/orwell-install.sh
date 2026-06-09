@@ -74,6 +74,11 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     echo "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT}"
     echo "# front-end -> engine MCP endpoint"
     echo "ORWELL_ENGINE_MCP_URL=http://127.0.0.1:${ORWELL_ENGINE_PORT}"
+    # engine save dir — pin it INSIDE data/ so saves live where docs, update, and the
+    # factory-reset script all expect (the engine default is ./.orwell-data, which hid the
+    # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
+    # gitignored); scrubbed by orwell-factory-reset.sh.
+    echo "ORWELL_DATA_DIR=${DATA_DIR}"
     # LLM provider: written through from the host installer's prompt when supplied; otherwise a
     # commented hint. Secrets only ever live here, in the container — never in the repo.
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
