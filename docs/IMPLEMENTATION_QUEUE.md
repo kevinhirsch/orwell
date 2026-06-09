@@ -828,9 +828,12 @@ mandates), not a failing test. **Read the audit's "Remediation principles (the p
 the seven patterns (single outcome authority · the pending-decision seam · validated references in / projections
 out · folds in the commit path + constants modules · the orchestrator as the real spine · the versioned snapshot
 as the contract · gates on the production path) are the architectural spine of these fixes; a fix that fights one
-of them is probably wrong. Two lanes as always — **Claude Code = engine (`src/`, B-numbered)**, **OpenHands =
-front-end (`frontend/`, C-numbered)**. House rules apply (Vault Wall structural; `npm run test:arch` green;
-BDD/TDD-first; roles-only tests; keep gates green; PR per item).
+of them is probably wrong. **Lane note (current reality): OpenHands is not yet configured, so Claude Code owns
+both lanes** — the engine items (`src/`, B-numbered) **and** the front-end items (`frontend/`, C-numbered). The
+B/C split is kept as a **scope** marker (which tree the change lives in + the quarantine rules), not an agent
+assignment; pick up C-items as readily as B-items. When a C-item touches `frontend/`, keep it quarantined from
+the TS gate (`cd frontend && python3 -m pytest tests/`; never touch `cucumber.cjs`/`npm test`). House rules apply
+(Vault Wall structural; `npm run test:arch` green; BDD/TDD-first; roles-only tests; keep gates green; PR per item).
 
 **Feature-maker note:** four items need a `docs/features/NNNN-*.{md,feature}` spec **drafted first** before the
 engine prompt can run — **0045** (B43), **0046** (B48), **0047** (B49), **0048** (B56). Draft them in the existing
@@ -1139,7 +1142,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ---
 
-### C12 — front-end hotfixes: finale relay + engine-down fail-closed + reset guard  ·  OpenHands  ·  **Wave 0 · audit B3 + F2 + A2 (FE)**
+### C12 — front-end hotfixes: finale relay + engine-down fail-closed + reset guard  ·  Claude Code (front-end lane)  ·  **Wave 0 · audit B3 + F2 + A2 (FE)**
 
 > In `kevinhirsch/orwell` `frontend/`, three Wave-0 fixes. (1) **Finale is unplayable** — the agent relay's
 > `submitDecision` enum allows only `nominations|veto-decision|replacement|eviction-vote` and hard-rejects everything
@@ -1155,7 +1158,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > juror-vote` to a crowned winner; engine-down + game-active history yields a refusal-to-continue framing; a second
 > new-game on a started sandbox is refused. `pytest` green; engine gate unaffected. Open a PR.
 
-### C13 — close the lever drift (`diaryRoom` + `socialInitiatives` agent tools)  ·  OpenHands  ·  **Wave 4 · audit F1**
+### C13 — close the lever drift (`diaryRoom` + `socialInitiatives` agent tools)  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F1**
 
 > In `kevinhirsch/orwell` `frontend/`, the moment prompt advertises levers the agent **cannot pull**:
 > `resolveCompetition`, `socialInitiatives`, `diaryRoom` are named in `momentPrompts.ts` but absent from
@@ -1168,7 +1171,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > every lever named in the base prompt is callable. **DoD:** a "diary room" agent turn produces a **recorded** engine
 > entry; `pytest` green; engine gate unaffected. Open a PR.
 
-### C14 — game turns always act; clean the immersion bleed  ·  OpenHands  ·  **Wave 4 · audit F3 + F6**
+### C14 — game turns always act; clean the immersion bleed  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F3 + F6**
 
 > In `kevinhirsch/orwell` `frontend/`, two play paths **narrate without ever acting** — sync `POST /api/chat` gets the
 > moment prompt but **no tools/no escalation**, and `can_use_agent=False` users are flipped back to plain chat **after**
@@ -1182,7 +1185,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > refusal); a rendered game turn shows no raw tool JSON by default; a prompt-assembly test asserts "You are an AI
 > assistant" never co-occurs with the game-master prompt. `pytest` green. Open a PR.
 
-### C15 — onboarding holding-state + new-season history fence  ·  OpenHands  ·  **Wave 4 · audit F5 + F7**
+### C15 — onboarding holding-state + new-season history fence  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F5 + F7**
 
 > In `kevinhirsch/orwell` `frontend/`, (1) **onboarding fails open to a generic workspace** — engine unreachable ⇒ the
 > overlay never mounts (`orwellOnboarding.js:127-134`) and the player lands on "type /setup to get started" with tips
@@ -1195,7 +1198,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > engine is down (no tip names a dropped vertical); a test asserts the first post-restart turn carries **no** prior-season
 > messages in the LLM payload. `pytest` + the 0032 headless gate green. Open a PR.
 
-### C16 — 0022 first slice: roster, recap, decision cards  ·  OpenHands  ·  **Wave 4 · audit F9 (unparks 0022)**
+### C16 — 0022 first slice: roster, recap, decision cards  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F9 (unparks 0022)**
 
 > In `kevinhirsch/orwell` `frontend/`, ship the highest-value slice of the deferred **0022** rich UI, all from Vault-free
 > projections the engine already returns, in the self-contained/fail-open/game-gated pattern of
@@ -1204,13 +1207,13 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > observable behavior only, **never** a read on where they stand, per 0020); (3) **decision cards** that render the
 > engine's `pending` (prompt + **legal option set** + pick counts from `advanceGame`) and bind **only** via the validated
 > `submitDecision` — fixing audit **F4** (today a model misreading prose can submit a vote the player never made). Add a
-> moment-prompt note (engine side, coordinate or hand to Claude Code): "on `pending`, present via `ask_user` with exactly
+> moment-prompt note (engine side — fold into the same PR or a sibling B-item): "on `pending`, present via `ask_user` with exactly
 > the engine options; `submitDecision` only with an explicit selection." **DoD:** a scripted agent test where a pending
 > turn yields an `ask_user` whose options equal the engine's legal set and **no** `submitDecision` is issued in the same
 > round as the question; roster/recap render Vault-free; `pytest` + 0032 headless gate green. Read `docs/features/0020`,
 > `0022` first. Open a PR.
 
-### C17 — 0048 front-end: season recap & the unsealed story  ·  OpenHands  ·  **Wave 4 · audit G4 · depends on B56**
+### C17 — 0048 front-end: season recap & the unsealed story  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit G4 · depends on B56**
 
 > In `kevinhirsch/orwell` `frontend/`, build the **post-season** presentation for feature **0048** (B56): a recap surface
 > (arc highlights from the engine's Vault-free recap read) and — **only after the winner event** — a player-triggered
@@ -1283,7 +1286,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > a non-validation throw returns 500; two same-named games have distinct comp streams; events sort by a coherent ts. Open
 > a PR.
 
-### C18 — front-end minor cleanup  ·  OpenHands  ·  **continuous · audit F8**
+### C18 — front-end minor cleanup  ·  Claude Code (front-end lane)  ·  **continuous · audit F8**
 
 > In `kevinhirsch/orwell` `frontend/`, the small items from audit F8: gate the `game-trim.css` `<link>` behind the build
 > flag (today unconditional, so `ORWELL_GAME_BUILD=0` debug still hides workspace chrome); offer the five canonical
