@@ -10,17 +10,18 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: under active implementation (BDD/TDD-first).** The eight priority invariants
-(**0001–0008**), the MCP seam (**0009**), the one-liner deploy (**0010**), the gameplay loop
-(**0011–0014**), and the MVP-1 features through **0031** are **green** — including the
-**living, persisted consequence loop (0023)** that was the long-standing critical gap (act →
-hidden impact → persist → recall is now wired into the live game). The game is **folded into the
-main chat**: the player-facing tier is the vendored **Orwell** front-end (`frontend/`, Python)
-talking to the TS engine over MCP (see [Architecture](#architecture-hexagonal)). Priority-ordered
-feature specs live in `docs/features/` (now through **0036**). **Current focus: live game loop
-running (0034 green)** — next drafts are 0033 (dynamic player tagline), 0035 (live off-screen life
-watcher), 0036 (live social surface), and the frontend-only 0032 (game build, `frontend/tests/`).
-See [Current status](#current-status).
+**Status: under active implementation (BDD/TDD-first).** Features **0001–0037 are built**
+(0022 / MVP-2 is the one deferral): the eight priority invariants, the MCP seam, the one-liner
+deploy, the gameplay loop, the MVP-1 batch — including the **living, persisted consequence loop
+(0023)** that was the long-standing critical gap (act → hidden impact → persist → recall is wired
+into the live game) — and the live-loop batch (game build, tagline, live decision seam, running
+off-screen watcher, social surface, interactive finale — the 0037 finale *UI* is still pending).
+The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
+front-end (`frontend/`, Python) talking to the TS engine over MCP (see
+[Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
+(now through **0044**). **Current focus: the post-audit batch 0038–0044** (behavioral-fidelity /
+anti-sycophancy wiring — 0038 partially done, 0040 core done, **0041 is the linchpin**). See
+[Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
 
 ## Source of truth — read these first
 
@@ -33,7 +34,8 @@ are authoritative and reference each other as companions.
 | `docs/CLAUDE_CODE_INSTRUCTIONS.md` | **Build brief & decision log** — start here. Architecture directives, workflow, hard "do-nots", milestones, open decisions (§15). |
 | `docs/bb-sim-spec.md` | **v3 domain spec** — concept, persistence model, Vault Wall, behavioral-fidelity mandate, the BDD invariants (§12), open decisions (§16). |
 | `docs/decisions/` | **Decision records (ADRs)** — accepted refinements to the canonical mechanics (drop Luck → emotional modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"). |
-| `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. |
+| `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
+| `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C-numbered), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. |
 
 ## The non-negotiable mandate
@@ -245,7 +247,7 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 | `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run build` | Bundle the engine entrypoint to `dist/main.js` (esbuild). |
-| `npm start` | Run the built engine — the HTTP MCP server (`ORWELL_PORT`, default 8848). |
+| `npm start` | Run the built engine — the HTTP MCP server (`ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks). |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
@@ -256,7 +258,10 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 - Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
 - `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order). It is the canonical list of what is wired into the BDD gate.
 - **Test setup:** `tests/support/sandbox.ts` is the canonical test-environment factory — use it (not manual wiring) when adding new unit or integration tests. BDD step definitions use `features/support/world.ts`.
-- **Deploy** (`deploy/`): `orwell-install.sh` / `orwell-update.sh` (host-aware, legacy-aware) provision the engine + front-end as systemd units (`deploy/systemd/`); `deploy/smoke.sh` is the post-deploy check. Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
+- **UAT lane:** `tests/uat/fullGameUat.test.ts` plays a full game to completion (bypasses HTTP to avoid CI stale-loop flakes); it runs as part of `vitest run`.
+- **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it); `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` tune the live off-screen watcher (`TICK_MS=0` disables it → pure turn-driven).
+- **Front-end tests:** `cd frontend && python3 -m pytest tests/` (its own pytest gate, quarantined — never touches `cucumber.cjs` / `npm test`); `frontend/scripts/browser_smoke.py` is the headless-browser keep-set gate. The reduced game surface is controlled by `ORWELL_GAME_BUILD` (default **on**; `=0` restores the full inherited workspace).
+- **Deploy** (`deploy/`): `orwell-install.sh` / `orwell-update.sh` (host-aware, legacy-aware) provision the engine + front-end as systemd units (`deploy/systemd/`); `deploy/smoke.sh` is the post-deploy check; `orwell-factory-reset.sh` scrubs all data (incl. the engine's `.orwell-data`) back to OOBE. Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`,
 `VectorIndex`, `EmbeddingProvider`, `SoulProvider` are **engine-only**; outward ports include
@@ -266,11 +271,13 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 (`inmemory/`, `engine/` (the live `GameSessionAdapter` / `EngineCommandsAdapter`, `FileSaveStore`,
 `SoulStore`), `mcp/` (`McpServer` / `HttpMcpServer`), `narrative/` (`LlmNarrativePort`,
 `DeterministicNarrator`, `Echo…`), `embedding/`, `random/`, `time/`) · `src/engine` (the season
-loop `season.ts`, plus `conversation.ts`, `relationships.ts`, `consequence.ts` (the hidden-impact
-fold), `gossip.ts`, `offscreen.ts`, `momentPrompts.ts`, and tunable constants) · `src/composition`
+loop `season.ts` + the live loop `liveSeason.ts`, plus `conversation.ts`, `relationships.ts`,
+`consequence.ts` (the hidden-impact fold), `gossip.ts`, `offscreen.ts`, `confessionals.ts`,
+`momentPrompts.ts`, and tunable constants) · `src/composition`
 (`engineRoot` wires the Vault; `outwardRoot`/`appRoot` never do; `orchestrator.ts` is the single
 per-sandbox game-advance path with a fail-closed integrity checkpoint, driven by `gameWatcher.ts`
-over a `registry` of per-user sandboxes). BDD steps + support in `features/`; unit/property/
+over a `registry` of per-user sandboxes; `runtime.ts` composes + starts the live watcher from
+`src/main.ts`). BDD steps + support in `features/`; unit/property/
 architecture/integration tests in `tests/`. The
 `.feature` files in `docs/features/` remain the source of truth. The **player-facing tier** is the
 vendored **Orwell** front-end in `frontend/` (Python/FastAPI) — its own app, quarantined from the
@@ -334,21 +341,38 @@ critical gap — now wired into the live game) · 0024 soul storage & semantic r
 0028 temperature/emotional constants · 0030 durable persistence (survive engine restart) · 0031
 per-sandbox game orchestrator & integrity watcher. **0022** (player experience MVP-2) is **deferred**.
 
-**Live loop batch:** **0034 — live weekly progression & decision seam** ✅ green (in `cucumber.cjs`;
-`GameSessionAdapter` progresses through real phases). **0033** (dynamic player tagline), **0035**
-(live off-screen life watcher), and **0036** (live social surface) are drafts in `docs/features/` —
-not yet in the BDD gate. **0032** (front-end surface reduction / game build) is a Python-only
-feature tested in `frontend/tests/` with pytest — not added to `cucumber.cjs`.
+**Live loop batch (0032–0037) — built:** **0034** (live weekly progression & decision seam) and
+**0037** (the interactive finale / jury-vote choreography: appeal scorer + staged statements →
+per-juror questions → ordered vote reveal, through the 0034 seam) are BDD-gated in `cucumber.cjs`.
+**0033** (`playerTagline`), **0035** (the off-screen watcher actually started in the runtime —
+`SystemClock` + `composeRuntime`; the house lives between turns), and **0036** (`socialInitiatives`
++ `diaryRoom` live tools) shipped unit-gated. **0032** (front-end surface reduction / the game
+build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`.
+The 0037 **finale UI** is still pending (B26 `finaleView` read tool → C11 `orwellFinale.js`).
+
+**Post-audit batch (0038–0044) — in progress.** A behavioral-fidelity / anti-sycophancy audit
+found capabilities **built but unwired** plus genuine gaps; the per-item prompts are in
+`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0038** live off-screen society: the varied off-screen
+interaction types run live (B27a ✅, unit-gated); the **gossip→player diffusion** + pathway-aware
+leak heuristic (B27b) remain. **0040** NPC confessionals: core ✅ (`src/engine/confessionals.ts` —
+Vault-only, walled from player **and** admin; unit-gated). **0041** character evolution & arc is
+the **linchpin** — the live sandbox's `engineRoot` has no `SoulStore`, which is what defers 0038's
+soul-deepening and 0040's confessional→voice feedback. **0039** (promise/deal tracking), **0042**
+(competition library), **0043** (emergent bloc behavior), and **0044** (strategic nom/vote
+refinements) are drafts.
 
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work:** next drafts 0033/0035/0036 (tagline, off-screen watcher, social surface) + the
-Python-only 0032 (`frontend/tests/`); 0010's container smoke test on a real Proxmox host; the
+**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0039, **0041 (the
+linchpin — do it early)**, 0042–0044; the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
+**0022** MVP-2 (the one deferred feature); 0010's container smoke test on a real Proxmox host; the
 deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
-in-memory + file today); full MCP/JSON-RPC over the current HTTP transport; and the front-end's
-full lever exposure + player surfaces.
+in-memory + file today); and full MCP/JSON-RPC over the current HTTP transport. *(By design, not a
+gap: the live engine-side narrator is `EchoNarrativePort` — narration happens in the front-end via
+`getMomentPrompt`; the `playerTagline` `setNarrator` seam is ready if engine-side narration is ever
+wired.)*
 
 ## Open decisions (remaining)
 
