@@ -804,19 +804,17 @@ shipped **0037 — the interactive finale / jury-vote choreography** (engine bui
 staged statements → questions → vote reveal, through the 0034 seam) plus game-UI fixes (draggable HUDs, theme
 picker). Engine gate green: **230 unit + 222 BDD**.
 
-**Remaining — ALL implementer-ready (each carries a §8 "Definition of Ready": exact touch points, build
-order/deps, test targets, no open decisions):**
-- **0038** live off-screen society — **B27a done**; **B27b** (gossip↔checkpoint reconciliation) ready (0038 §8).
-- **0040** NPC confessionals — **done (core)**; soul-recall feedback rides on 0041.
-- **0041** character evolution/arc — **Ready (§8), the LINCHPIN** (wires `SoulStore` into the live sandbox →
-  unblocks the deferred soul halves of 0038 + 0040). → B30.
-- **0039** promise/deal tracking (§8) → B28 · **0042** competition library (§8) → B31 · **0043** emergent bloc
-  behavior (§8, honors ADR 0002) → B32 · **0044** strategic nom/vote refinements (§8) → B33.
-- **0037 finale UI** — **B26** (Vault-free `finaleView` read) → **C11** (`orwellFinale.js`), per 0037 §8.
-- **0022 — MVP-2 (the rich game UI)** — the one deferred feature (no DoR yet).
-
-**Suggested build order for the implementer agents:** 0041 (linchpin) → 0039 / 0043 → 0044 (consumes 0043 +
-0041) → 0042 → B27b → 0037 UI. Each is independently buildable per its §8; 0044 reads best after 0043/0041.
+**Remaining:**
+- **Post-audit feature batch 0038–0044** (just drafted → **B27–B33**, all engine). A behavioral-fidelity /
+  anti-sycophancy audit found capabilities **built but unwired** + two genuine gaps: **0038** live off-screen
+  society (wire the real sim/gossip/soul into the watcher — TOP), **0039** promise/deal tracking, **0040** NPC
+  confessionals, **0041** character evolution/arc, **0042** competition library, **0043** emergent bloc
+  behavior (emergent, never stored — honors ADR 0002), **0044** strategic nom/vote refinements. Build 0038 first.
+- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** (Vault-free `finaleView` read) → **C11**
+  (`orwellFinale.js`). Engine + seam green; only the presentation is missing.
+- **0022 — MVP-2 (the rich game UI)** — the one deferred feature.
+- *(Stale-doc note: the audit confirmed the temperature "open decision" is resolved by 0028, and 0035's draft
+  still mislabels `SystemClock`/runtime wiring as "missing" — both corrected in this batch.)*
 - *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
   `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 
@@ -1512,3 +1510,85 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > the game build. **DoD:** game-build page weight drops materially (`admin.js`/`presets.js` absent); no jsdelivr
 > request on a game-build load; `ORWELL_GAME_BUILD=0` restores full workspace chrome; no raw enum or dropped-vertical
 > control in the player surface; `pytest` + 0032 headless gate green. Read ADR 0003 first. Open a PR.
+
+---
+
+### Addendum (same-session feedback) — presence, lingering, NPC coherence & testability · B64–B66 / C28
+
+ADR 0003 was refined in-session (principles 4, 7, 8 + the new Testability section): UI may
+**augment** the chat intelligently but never **replace** a game-building interaction; **lingering is
+play** (mill around rooms, learn who's present/adjacent, talk to anyone while NPCs keep playing
+*their* game, and nothing force-marches the week); **people must make sense** (one place at a time,
+knowledge-scoped speech, stable persona); and each principle must be **testable structurally** where
+possible — that section is the contract these items must satisfy. Read ADR 0003 before any of them.
+
+### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · NEEDS SPEC FIRST**
+
+> Draft and implement **feature 0049** (`docs/features/0049-house-presence-and-lingering.{md,feature}`):
+> a **light** spatial model that makes unhurried, information-gathering play real (ADR 0003 §7). Keep it
+> minimal — this is *facts the narrator queries*, not a simulation the player operates. (1) **Rooms +
+> adjacency** — the canonical BB house spaces (kitchen, living room, backyard, bedrooms, HOH room,
+> diary room…) + a static adjacency map, in the pure domain core. (2) **Occupancy** — every active
+> houseguest is in exactly **one** room per tick (the §8 coherence invariant); movement only between
+> adjacent rooms; clustering is **seeded** and driven by the relationship/agenda layer (allies drift
+> together, schemers seek empty rooms), deterministic by seed; evicted houseguests are nowhere (ties
+> D5). (3) A Vault-free **`whereabouts()`** player read: who is in the player's room + who is in
+> **adjacent** rooms — *facts a houseguest could see/hear*, never their motives or hidden state. (4)
+> **Co-presence grounds 0002** — being in a room together is a witness pathway; an NPC in the next room
+> can be *overheard* (a partial/low-confidence pathway), so milling and eavesdropping become real,
+> recorded information-gathering. (5) **Lingering never advances the week** — moving rooms, milling,
+> and talking are zero-beat social turns; only the explicit decision seam (`advanceGame`/`submitDecision`)
+> progresses phase, and the daily-event invariant is satisfied by the day's *scheduled* beat, never by
+> steamrolling a gathering player. **Acceptance (structural, per the ADR):** a property test asserts
+> one-room-per-houseguest and adjacency-only movement across a seeded season; `whereabouts()` is
+> sentinel-clean and contains only co-present/adjacent **public** facts; co-presence produces witness
+> events and adjacency produces lower-confidence overhear pathways (extends 0002 tests); **N consecutive
+> mill/move/talk turns leave week+phase+ceremony unchanged** and the watcher treats milling as activity
+> (no idle fast-forward). Read ADR 0003 (§7 + Testability), `docs/features/0002`, `0008`, `0035` first.
+> Open a PR.
+
+### B65 — NPC coherence: knowledge-scoped narration context (people must make sense)  ·  Claude Code  ·  **FE-0/FE-1 · ADR 0003 §8 · the structural guard**
+
+> In `kevinhirsch/orwell` (TS engine), make "people must make sense" (ADR 0003 §8) **structural**, the
+> Vault way: an NPC can only speak from what it legitimately knows, so enforce it on the *context the
+> narrator receives*, not on the prose. Add a Vault-free **per-NPC voicing projection** — given an NPC
+> id, assemble the context to voice that NPC from **only** their legitimate knowledge: their
+> witnessed/told facts (0002 `KnowledgeService`), their current room/co-presence (B64), their stable
+> public persona facets (B61's cast card), and their relationship-derived *behavior* (never the numbers).
+> It must **exclude** other houseguests' private knowledge, any hidden/Vault content, and souls/edges.
+> This is the seam B61's voice directive needs to be safe: the model is *handed* a knowledge-bounded
+> NPC and cannot voice what that NPC never learned. **Acceptance (structural):** a sentinel planted in
+> facts **outside** an NPC's knowledge set never appears in that NPC's voicing context across a
+> registry-built sandbox (mirrors the 0001 canary on the per-NPC axis); the projection is byte-stable
+> for the persona facets (no drift across turns/context windows); an NPC in one room has no co-presence
+> fact for a scene in another room. Read ADR 0003 (§8 + Testability), `docs/features/0002`, `0001`, and
+> B61 first. Open a PR.
+
+### B66 — the ADR-0003 testability harness (reusable structural assertions)  ·  Claude Code  ·  **FE-2 · ADR 0003 Testability section**
+
+> In `kevinhirsch/orwell`, build the reusable test scaffolding the ADR's Testability section promises,
+> so these principles are enforced, not aspirational, and stay green as the game grows. Add helpers +
+> property tests for: **presence coherence** (one room per HG, adjacency-only movement, seeded
+> occupancy — B64); **knowledge-scoped speech** (the per-NPC sentinel sweep — B65); **persona stability**
+> (the public facets fed to the narrator are byte-identical every turn — B61); **lingering safety** (N
+> social/mill turns ⇒ no phase/week/ceremony change; milling counts as watcher activity — B64); and an
+> **augment-not-replace guard** (no front-end UI control reaches a game-progressing engine action except
+> the validated `submitDecision` behind an explicit confirm — a dependency/registry assertion mirroring
+> the Vault-Wall rule). Where only a transcript-level eval is possible (distinct voices, tone), it may
+> *supplement* but never *replace* a structural test. **Acceptance:** each principle has at least one
+> structural test wired into `npm run test:unit` (and, for the FE guard, the front-end pytest gate);
+> the suite fails if presence/ knowledge-scope/persona-stability/lingering invariants regress. Read ADR
+> 0003 (Testability) first. Open a PR.
+
+### C28 — augment the chat with presence, never replace it (whereabouts surface)  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · ADR 0003 §4/§7 (depends B64)**
+
+> In `kevinhirsch/orwell` `frontend/`, surface presence so milling is legible **without** moving play
+> out of the chat (ADR 0003 §4: augment, never replace). Render `whereabouts()` (B64) as an **ambient**
+> ground for the conversation — who's in the room with the player and who's nearby — as a light,
+> dismissible presence strip / part of the memory wall (C21), *not* a click-to-act room navigator: the
+> player still moves, mills, asks "who's here?", and talks **in prose**, and the engine grounds the
+> narration. Approaches (C24) and any "drift to the backyard" remain conversational intents the model
+> acts on, never UI buttons that progress the game. Vault-free, fail-open (no strip on empty/error).
+> **DoD:** the presence strip shows only co-present/adjacent public facts; no UI control advances phase
+> or initiates a scene by itself (the augment-not-replace guard, B66); `pytest` + 0032 headless gate
+> green. Depends on **B64** (+ C21). Read ADR 0003 first. Open a PR.
