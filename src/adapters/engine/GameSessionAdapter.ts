@@ -207,7 +207,14 @@ export class GameSessionAdapter implements GameSession {
     const seed = req.seed ?? hashSeed(req.playerName);
     const archetype = req.archetype && isPlausibleArchetype(req.archetype) ? req.archetype : undefined;
     const strategyStyle = req.strategyStyle as StrategyStyle | undefined;
-    this.house = startNewGame({ seed, playerName: req.playerName, archetype, strategyStyle });
+    // Keep the player's RAW typed words as their public persona (narrative/display), even when they
+    // don't match a canonical archetype/style — so the game master voices them as they described
+    // themselves. The canonical `archetype`/`strategyStyle` above still drive hidden stats (0006).
+    this.house = startNewGame({
+      seed, playerName: req.playerName, archetype, strategyStyle,
+      ...(req.archetype ? { personaArchetype: req.archetype } : {}),
+      ...(req.strategyStyle ? { personaStrategyStyle: req.strategyStyle } : {}),
+    });
     this.week = 1;
     this.phase = "premiere";
     // Start the incremental weekly loop over the live house (player + NPCs).
@@ -444,8 +451,10 @@ export class GameSessionAdapter implements GameSession {
       player: {
         id: p.id,
         name: p.name,
-        archetype: p.character.archetype,
-        strategyStyle: p.character.strategyStyle,
+        // Surface the player's OWN words (what they typed at OOBE) so the narrative voices them as
+        // described; fall back to the canonical labels. Stats stay hidden behind the Vault either way.
+        archetype: p.persona?.archetype ?? p.character.archetype,
+        strategyStyle: p.persona?.strategyStyle ?? p.character.strategyStyle,
       },
       house: this.house.npcs.map((n) => ({
         id: n.id, name: n.name,
