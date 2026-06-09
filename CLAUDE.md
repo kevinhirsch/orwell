@@ -66,9 +66,14 @@ leak-prone build is a **failure state**, not a partial success.
 the Bible + secrets *is* the game. The engine exists only to fix the four degradations above
 (leaks / sycophancy / memory-thinning / sameness) and otherwise **get out of the model's way**:
 prefer removing context to adding it; hand the model *facts to voice*, never *scripts to recite*;
-UI is for guardrails (confirm-on-binding) and memory (the wall), not for replacing talk;
-replayability is engine-seeded, and long-term memory is the store *recalled*, never the chat
-*remembered*. Don't "improve" the game into a dashboard.
+UI may **augment** the chat intelligently but never **replace** an interaction that builds or
+progresses the game; **lingering is play** (the player can mill around any room, learn who's
+present/adjacent, and talk to anyone — while those NPCs keep playing *their* game, and nothing
+force-marches the week); **people must make sense** (one place at a time; speech scoped to what
+each NPC legitimately knows; stable public persona); replayability is engine-seeded, and
+long-term memory is the store *recalled*, never the chat *remembered*. Each of these is
+**testable structurally** where possible (see the ADR's testability section). Don't "improve"
+the game into a dashboard.
 
 ## Architecture (hexagonal)
 
