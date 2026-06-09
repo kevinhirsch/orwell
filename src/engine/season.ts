@@ -74,6 +74,27 @@ export function chooseNominations(hoh: EntityId, active: EntityId[], rel: Relati
   return [ranked[0]!, ranked[1]!];
 }
 
+/** How hard a rattled HOH's paranoia bends the nomination read toward whoever they least trust. */
+export const NOMINATION_PARANOIA_WEIGHT = 0.5;
+
+/**
+ * Mood-aware nominations (feature 0041): a CALM HOH (emotionalState ≥ baseline 0.5) ranks purely by
+ * threat — byte-identical to `chooseNominations`. A RATTLED HOH (emotionalState < 0.5) adds a
+ * bounded paranoia term that over-weights whoever they least trust, so the season's emotional arc
+ * bends their decisions (they nominate more erratically). The hard rules still hold downstream
+ * (the HOH is excluded; two distinct nominees) — emotion never overrides legality (0005).
+ */
+export function chooseNominationsWithMood(
+  hoh: EntityId, active: EntityId[], rel: RelationshipModel, mood: number,
+): [EntityId, EntityId] {
+  const paranoia = Math.max(0, (0.5 - mood) * 2); // 0 when calm … 1 when fully rattled
+  if (paranoia === 0) return chooseNominations(hoh, active, rel);
+  const score = (t: EntityId): number =>
+    rel.edge(hoh, t).threat + paranoia * NOMINATION_PARANOIA_WEIGHT * (1 - rel.edge(hoh, t).trust);
+  const ranked = active.filter((h) => h !== hoh).sort((a, b) => score(b) - score(a));
+  return [ranked[0]!, ranked[1]!];
+}
+
 function competitorsOf(ids: EntityId[], statsOf: Map<EntityId, Stats>) {
   return ids.map((id) => ({ id, stats: statsOf.get(id)!, emotionalState: 0.5 }));
 }

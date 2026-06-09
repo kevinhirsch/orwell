@@ -41,6 +41,9 @@ function buildUserSandbox(): UserSandbox {
   });
   const commands = new EngineCommandsAdapter(engine.events, engine.knowledge, engine.relationships);
   const session = new GameSessionAdapter(engine.relationships);
+  // Wire the engine-only soul store (0024) into the live session so consequential beats + off-screen
+  // scenes deepen each NPC's arc and ground their later voice (the 0041 linchpin).
+  session.setSoul(engine.soul);
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({

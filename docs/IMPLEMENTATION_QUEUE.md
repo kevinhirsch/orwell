@@ -749,8 +749,17 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > sandbox — **feature 0041**; optionally fire confessionals specifically at nomination/eviction beats (today
 > the trigger is the off-screen tick).
 
-### B30 — 0041 character evolution & season arc  ·  **LINCHPIN (unblocks 0038 + 0040 soul pieces)**
+### B30 — 0041 character evolution & season arc  ·  **LINCHPIN (unblocks 0038 + 0040 soul pieces)** — ✅ DONE
 
+> **DONE.** `SoulStore` is wired into the live `EngineCore`/`buildEngineCore` (deterministic embed),
+> walled engine-only by dependency-cruiser (soul/vector/embedding types in the forbidden set). The live
+> consequence fold (`GameSessionAdapter.commit`) + the off-screen tick (`Orchestrator.defaultApply`) drive
+> `src/engine/emotionalArc.ts` (`evolveEmotion`): bounded, mean-reverting soul `emotionalState`/`volatility`
+> from real events, a persisted `emotionalHistory` arc, and `recordToSoul`/`recall` live. The evolving
+> state modulates the live competition emotional modifier (0006/0028) + a rattled-HOH nomination read
+> (`chooseNominationsWithMood`); `CHARACTER` stays byte-stable (0007); no number on any player surface
+> (canary extended); persisted across restart (0030). Added to `cucumber.cjs`. Original prompt below.
+>
 > Implement `docs/features/0041-character-evolution-and-arc.{md,feature}` — **see §8 for the concrete live
 > wiring.** The crux: the live sandbox's `buildEngineCore` (`engineRoot.ts`) has **no `SoulStore`** — that's
 > why 0038's soul-deepening and 0040's confessional→voice feedback are deferred. (1) Add **`soul: SoulProvider`**
@@ -804,17 +813,26 @@ shipped **0037 — the interactive finale / jury-vote choreography** (engine bui
 staged statements → questions → vote reveal, through the 0034 seam) plus game-UI fixes (draggable HUDs, theme
 picker). Engine gate green: **230 unit + 222 BDD**.
 
-**Remaining:**
-- **Post-audit feature batch 0038–0044** (just drafted → **B27–B33**, all engine). A behavioral-fidelity /
-  anti-sycophancy audit found capabilities **built but unwired** + two genuine gaps: **0038** live off-screen
-  society (wire the real sim/gossip/soul into the watcher — TOP), **0039** promise/deal tracking, **0040** NPC
-  confessionals, **0041** character evolution/arc, **0042** competition library, **0043** emergent bloc
-  behavior (emergent, never stored — honors ADR 0002), **0044** strategic nom/vote refinements. Build 0038 first.
-- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** (Vault-free `finaleView` read) → **C11**
-  (`orwellFinale.js`). Engine + seam green; only the presentation is missing.
-- **0022 — MVP-2 (the rich game UI)** — the one deferred feature.
-- *(Stale-doc note: the audit confirmed the temperature "open decision" is resolved by 0028, and 0035's draft
-  still mislabels `SystemClock`/runtime wiring as "missing" — both corrected in this batch.)*
+**Remaining — ALL implementer-ready (each carries a §8 "Definition of Ready": exact touch points, build
+order/deps, test targets, no open decisions):**
+- **0038** live off-screen society — **B27a done**; the **live soul-deepening half is now wired by 0041**
+  (the off-screen tick `recordToSoul`s each scene); **B27b** (gossip↔checkpoint reconciliation) still ready (0038 §8).
+- **0040** NPC confessionals — **done**; soul-recall feedback is now **live** (0041 put the `SoulStore` in the sandbox).
+- **0041** character evolution/arc — **✅ DONE (B30, the LINCHPIN).** `SoulStore` is wired into the live
+  `EngineCore`; the consequence fold + off-screen tick drive bounded, mean-reverting soul evolution that
+  modulates the live competition modifier + a rattled-HOH nomination read; the arc persists + is recall-able;
+  `CHARACTER` byte-stable; no number on any player surface. Unblocked the deferred soul halves of 0038 + 0040.
+- **0039** promise/deal tracking — **done (B28)** · **0042** competition library (§8) → B31 · **0043** emergent bloc
+  behavior (§8, honors ADR 0002) → B32 · **0044** strategic nom/vote refinements (§8) → B33.
+- **0037 finale UI** — **B26** (Vault-free `finaleView` read) → **C11** (`orwellFinale.js`), per 0037 §8.
+- **0022 — MVP-2 (the rich game UI)** — the one deferred feature (no DoR yet).
+- **The audit batches below** — the **full product-audit batch (B34–B60 / C12–C18)** and the **front-end &
+  experience batch (B61–B66 / C19–C28)**, both wave-ordered, governed by ADR 0003; audit specs
+  **0045–0048 are drafted**, **0049** (B64) still to draft.
+
+**Suggested build order for the implementer agents:** ~~0041 (linchpin)~~ **done** → 0039 (done) / 0043 → 0044
+(consumes 0043 + 0041) → 0042 → B27b → 0037 UI — interleaved with the audit batches' waves (**Wave 0 hotfixes
+B34–B36/C12 first**; B61/C19 are the highest-leverage experience pair). Each is independently buildable per its §8.
 - *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
   `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 

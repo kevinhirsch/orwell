@@ -48,9 +48,10 @@ Then("the player has an initial Soul carrying an emotional baseline", function (
 });
 
 Then("the player's Soul holds no relationship beliefs yet", function (this: BbWorld) {
-  // Relationships are computed from play (0017), never stored on the soul; memory starts empty.
+  // Relationships are computed from play (0017), never stored on the soul; memory + arc start empty.
   assert.deepEqual(this.player!.soul.memory, []);
-  assert.deepEqual(Object.keys(this.player!.soul).sort(), ["emotionalBaseline", "emotionalState", "memory", "volatility"]);
+  assert.deepEqual(this.player!.soul.emotionalHistory, []); // the season arc (0041) starts empty
+  assert.deepEqual(Object.keys(this.player!.soul).sort(), ["emotionalBaseline", "emotionalHistory", "emotionalState", "memory", "volatility"]);
 });
 
 // --- Validation ---------------------------------------------------------------

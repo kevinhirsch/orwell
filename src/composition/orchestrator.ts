@@ -210,7 +210,12 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023).
   const scenes = richOffscreenStretch({ events: sandbox.engine.events, rng, npcs: ids, interactions: 3 });
-  for (const s of scenes) sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+  for (const s of scenes) {
+    sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+    // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
+    // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
+    sandbox.session.recordOffscreenSoul(s.initiator, s.type);
+  }
 
   // NPC interiority (0040): an involved houseguest privately confesses their REAL read — Vault-only
   // (witnessed by them alone), grounded in their actual relationship signals, never invented. It

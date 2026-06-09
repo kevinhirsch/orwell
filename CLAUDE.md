@@ -19,14 +19,17 @@ off-screen watcher, social surface, interactive finale — the 0037 finale *UI* 
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0044**, plus audit-driven specs **0045–0048** to be drafted). **Active work — start
-here:** the **full product-audit batch** at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full
-product-audit batch (B34–B60 / C12–C18)") — the live, wave-ordered dispatch list of bugs/improvements,
-backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation principles"** section
-first). *Pick the next item from the queue, not from this paragraph* (it stays current; this prose
-drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**; OpenHands isn't
-configured). The prior post-audit batch 0038–0044 (behavioral-fidelity / anti-sycophancy wiring —
-0040 core done, **0041 is the linchpin**) folds into that queue. See [Current status](#current-status).
+(now through **0048**, plus **0049** to be drafted). **Active work — start
+here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full product-audit batch
+(B34–B60 / C12–C18)" + the front-end & experience batch B61–B66 / C19–C28) — the live, wave-ordered
+dispatch lists, backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation
+principles"** section first) and `docs/audits/2026-06-09-frontend-experience-audit.md`, governed by
+**ADR `docs/decisions/0003`**. *Pick the next item from the queue, not from this paragraph* (it stays
+current; this prose drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**;
+OpenHands isn't configured). The prior post-audit batch 0038–0044 folds into that queue — **0041, the
+linchpin, is now built** (the `SoulStore` is live in the sandbox; souls evolve and modulate behavior),
+0039 and 0040 done, 0038 partially done (B27b remains), 0042–0044 still to build. See
+[Current status](#current-status).
 
 ## Source of truth — read these first
 
@@ -370,12 +373,15 @@ The 0037 **finale UI** is still pending (B26 `finaleView` read tool → C11 `orw
 
 **Post-audit batch (0038–0044) — in progress.** A behavioral-fidelity / anti-sycophancy audit
 found capabilities **built but unwired** plus genuine gaps; the per-item prompts are in
-`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0038** live off-screen society: the varied off-screen
-interaction types run live (B27a ✅, unit-gated); the **gossip→player diffusion** + pathway-aware
-leak heuristic (B27b) remain. **0040** NPC confessionals: core ✅ (`src/engine/confessionals.ts` —
-Vault-only, walled from player **and** admin; unit-gated). **0041** character evolution & arc is
-the **linchpin** — the live sandbox's `engineRoot` has no `SoulStore`, which is what defers 0038's
-soul-deepening and 0040's confessional→voice feedback. **0039** (promise/deal tracking), **0042**
+`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0041** character evolution & arc — **the linchpin — is
+✅ green** (`src/engine/emotionalArc.ts` + `engineRoot` now wires a `SoulStore` into the live
+sandbox): consequential beats + the off-screen tick drive bounded, mean-reverting soul evolution
+that modulates the live competition modifier (0006/0028) and a rattled-HOH nomination read, the arc
+persists + is recall-able, `CHARACTER` stays byte-stable, and no number crosses to the player.
+**This unblocked the deferred soul halves of 0038 + 0040.** **0038** live off-screen society: varied
+interaction types run live (B27a ✅) **+ live soul-deepening (via 0041)**; the **gossip→player
+diffusion** + pathway-aware leak heuristic (B27b) remain. **0039** (promise/deal tracking, ✅) and
+**0040** (NPC confessionals, ✅ — now with **live** soul-recall feedback) are green. **0042**
 (competition library), **0043** (emergent bloc behavior), and **0044** (strategic nom/vote
 refinements) are drafts.
 
@@ -383,8 +389,8 @@ refinements) are drafts.
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0039, **0041 (the
-linchpin — do it early)**, 0042–0044; the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
+**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0042–0044 (0039,
+0040, **and 0041 the linchpin are done**); the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
 **0022** MVP-2 (the one deferred feature); 0010's container smoke test on a real Proxmox host; the
 deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
 in-memory + file today); and full MCP/JSON-RPC over the current HTTP transport. *(By design, not a

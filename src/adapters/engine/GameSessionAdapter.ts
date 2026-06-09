@@ -38,7 +38,11 @@ function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
 import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
-import type { GameHouse, StrategyStyle } from "../../engine/characterFactory";
+import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
+import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
+import type { EmotionalEvent } from "../../engine/emotionalArc";
+import type { SoulProvider } from "../../ports/SoulProvider";
+import type { InteractionType } from "../../engine/relationships";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import type { CompetitionType, Competitor } from "../../domain/competitionOutcome";
@@ -87,6 +91,13 @@ export class GameSessionAdapter implements GameSession {
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
   private narrator?: NarrativePort;
+  /**
+   * ENGINE-ONLY dynamic soul (0024) wired into the LIVE sandbox (the 0041 linchpin). When present,
+   * consequential beats + off-screen scenes `recordToSoul` so each NPC's arc deepens and their voice
+   * can be grounded by `recall`. Optional — standalone adapters (onboarding/tests) still evolve the
+   * house's emotional state (modulating competitions) without the recall index.
+   */
+  private soul?: SoulProvider;
   /** Per-moment tagline cache (regenerate when week/phase/standing changes, not per page load). */
   private readonly taglineCache = new Map<string, string>();
 
@@ -118,6 +129,11 @@ export class GameSessionAdapter implements GameSession {
     this.narrator = narrator;
   }
 
+  /** Wire the engine-only soul store (0041) so the live loop deepens souls + can recall (0024). */
+  setSoul(soul: SoulProvider): void {
+    this.soul = soul;
+  }
+
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
   snapshot(): SessionCore {
     return {
@@ -139,6 +155,19 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    this.rebuildSoulIndex();
+  }
+
+  /**
+   * Rebuild the (derived) soul recall index from the persisted arc after a restore (0030/0041). The
+   * AUTHORITATIVE arc lives in each houseguest's `soul.memory`/`emotionalHistory` (persisted
+   * losslessly with the house); the vector index is re-derived so `recall` keeps working post-restart.
+   */
+  private rebuildSoulIndex(): void {
+    if (!this.house || !this.soul) return;
+    for (const hg of [this.house.player, ...this.house.npcs]) {
+      for (const note of hg.soul.memory) this.soul.recordToSoul(hg.id, note);
+    }
   }
 
   /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
@@ -254,14 +283,89 @@ export class GameSessionAdapter implements GameSession {
 
   // --- Live weekly loop (0011) ---------------------------------------------------
 
-  /** Build the Vault-free season context the pure loop reads (stats + live relationships). */
+  /** Build the Vault-free season context the pure loop reads (stats + live relationships + mood). */
   private ctx(): SeasonCtx {
-    return { player: PLAYER, statsOf: (id) => this.statsOf(id), rel: this.rel };
+    return {
+      player: PLAYER,
+      statsOf: (id) => this.statsOf(id),
+      rel: this.rel,
+      // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
+      emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
+    };
   }
 
   private statsOf(id: EntityId): Stats {
     const all = this.house ? [this.house.player, ...this.house.npcs] : [];
     return all.find((h) => h.id === id)?.character.stats ?? { physical: 0.5, mental: 0.5, social: 0.5 };
+  }
+
+  /** The houseguest's dynamic soul (player or NPC), or undefined when no game is live. */
+  private soulObj(id: EntityId): Soul | undefined {
+    if (!this.house) return undefined;
+    if (this.house.player.id === id) return this.house.player.soul;
+    return this.house.npcs.find((n) => n.id === id)?.soul;
+  }
+
+  /**
+   * Fold a consequential moment into a houseguest's hidden soul (0041): evolve their emotional state
+   * (bounded, mean-reverting — 0028 family) and deepen the recall-able arc (`recordToSoul`, 0024).
+   * The static CHARACTER is never touched; only the SOUL drifts (0007). Hidden — never surfaced.
+   */
+  private inflect(id: EntityId, event: EmotionalEvent): void {
+    const soul = this.soulObj(id);
+    if (!soul) return;
+    evolveEmotion(soul, event);
+    const note = arcNote(event, this.week);
+    soul.memory.push(note);                 // persisted arc (house snapshot, monotonic — 0007/0030)
+    this.soul?.recordToSoul(id, note);       // vector recall index (0024), when wired into the sandbox
+  }
+
+  /**
+   * Evolve the involved souls from a just-resolved beat (the live consequence fold, 0041): a comp
+   * winner is emboldened; on an eviction the evictee's closest surviving ally is blindsided toward
+   * distress. Drives the live emotional arc that then modulates later competitions + decisions.
+   */
+  private evolveFromBeat(ev: BeatEvent): void {
+    if (!this.house) return;
+    switch (ev.beat) {
+      case "hoh-competition": {
+        const winner = ev.participants[0];
+        if (winner) this.inflect(winner, "comp-win");
+        break;
+      }
+      case "veto-competition": {
+        const holder = this.live?.vetoHolder;
+        if (holder) this.inflect(holder, "comp-win");
+        break;
+      }
+      case "eviction": {
+        const evictee = ev.participants[0];
+        if (evictee) this.blindsideClosestAlly(evictee);
+        break;
+      }
+    }
+  }
+
+  /** Only a genuine ally (trust above this floor) is blindsided by an eviction — else it was expected. */
+  private static readonly ALLY_TRUST_FLOOR = 0.5;
+
+  /** The evictee's most-trusting surviving ally reads the eviction as a blindside (distress ▲, volatility ▲). */
+  private blindsideClosestAlly(evictee: EntityId): void {
+    const s = this.live;
+    if (!s) return;
+    let ally: EntityId | undefined;
+    let best = GameSessionAdapter.ALLY_TRUST_FLOOR;
+    for (const h of s.active) {            // s.active already excludes the just-removed evictee
+      if (h === evictee) continue;
+      const trust = this.rel.edge(h, evictee).trust;
+      if (trust > best) { best = trust; ally = h; }
+    }
+    if (ally) this.inflect(ally, "blindside");
+  }
+
+  /** Deepen a houseguest's soul from an off-screen scene (0038/0041): the house lives between turns. */
+  recordOffscreenSoul(npc: EntityId, type: InteractionType): void {
+    this.inflect(npc, offscreenEmotion(type));
   }
 
   /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
@@ -360,6 +464,9 @@ export class GameSessionAdapter implements GameSession {
     // 0040: at the nomination ceremony the directly-involved houseguests (HOH + nominees) privately
     // confess their REAL engine-grounded read — Vault-only (witnessed by them alone), reaching no one.
     if (ev && ev.beat === "nominations") this.recordCeremonyConfessionals();
+    // 0041: the season changes a houseguest — fold the beat's emotional impact into the involved souls
+    // (a comp win emboldens; a blindside rattles), evolving the hidden arc that bends their later play.
+    if (ev) this.evolveFromBeat(ev);
     this.syncProjection();
     this.onPersist?.();
   }

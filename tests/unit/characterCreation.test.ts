@@ -24,7 +24,8 @@ describe("0015 — character creation (OOBE)", () => {
     expect(p.character.background).toContain("long road");
     expect(p.soul.emotionalBaseline).toBeGreaterThanOrEqual(0);
     expect(p.soul.memory).toEqual([]); // empty memory; relationship beliefs are NOT stored on the soul
-    expect(Object.keys(p.soul).sort()).toEqual(["emotionalBaseline", "emotionalState", "memory", "volatility"]);
+    expect(p.soul.emotionalHistory).toEqual([]); // the season arc (0041) starts empty; it grows live
+    expect(Object.keys(p.soul).sort()).toEqual(["emotionalBaseline", "emotionalHistory", "emotionalState", "memory", "volatility"]);
   });
 
   it("anti-sycophancy: authored aptitudes always fall within the NPC bounds (no min-maxing)", () => {

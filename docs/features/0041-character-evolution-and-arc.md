@@ -1,12 +1,21 @@
 # 0041 — Character evolution & season arc
 
-> **Status:** Draft. PARTIAL today. The pieces of character change exist — relationship edges evolve
-> (0023/0026) and `SoulStore.recordToSoul`/`recall` + a soul `emotionalState` exist (0024) — but the
-> soul's **emotional history doesn't feed back into live behavior**, and there is **no explicit arc**: a
-> houseguest cocky in week 1 plays identically after a week-4 blindside. `recordToSoul`/`recall` are
-> **unwired from the live loop** (module/test-only). This feature **drives emotional state from live event
-> history**, **modulates live behavior** by it, and adds a bounded, persisted **disposition drift** — while
-> the static `CHARACTER` stays byte-stable (0007).
+> **Status:** ✅ GREEN (in `cucumber.cjs`) — **the linchpin landed.** The live sandbox's `EngineCore`
+> (`buildEngineCore`) now wires a `SoulStore` (deterministic embed), walled engine-only by
+> dependency-cruiser like the Vault. The live consequence fold (`GameSessionAdapter.commit`) and the
+> off-screen tick (`Orchestrator.defaultApply`) drive each NPC's soul from real events:
+> `src/engine/emotionalArc.ts` (`evolveEmotion`) moves the soul `emotionalState` + `volatility` by
+> **bounded, mean-reverting** deltas (blindside ⇒ distress/volatility ▲; comp win / survived vote ⇒
+> confidence ▲; calm ⇒ revert toward baseline — the 0028 family), appends to a persisted
+> `emotionalHistory` arc, and `recordToSoul`s a name-free inflection that `recall` can surface live to
+> ground an NPC's voice. The evolving state **modulates behavior**: the live competition emotional
+> modifier (0006/0028) reads it, and a rattled HOH's nominations bend toward whoever they least trust
+> (`chooseNominationsWithMood`) — emotion **never** overrides a hard rule (0005). The static `CHARACTER`
+> stays **byte-stable** (0007); only the soul drifts; the arc **persists across a restart** (0030) and
+> recall is re-derived from it. No emotional number reaches any player surface (the 0001 canary, extended).
+> **This unblocks the deferred soul halves of 0038 and 0040.**
+> Was: relationship edges evolved (0023/0026) and `SoulStore`/`emotionalState` existed (0024), but
+> `recordToSoul`/`recall` were unwired from the live loop and a blindside changed nothing.
 > **Executable spec:** [`0041-character-evolution-and-arc.feature`](./0041-character-evolution-and-arc.feature)
 
 ## 1. Summary
