@@ -4271,15 +4271,18 @@ body.bg-pattern-sparkles {
         display: inline-block !important;
         opacity: 0.6;
       }
-      /* Hamburger — always right on mobile */
+      /* Hamburger follows the sidebar side on mobile so the two always match.
+         The body hamburger-left/right class tracks the sidebar's side
+         (sidebar-layout.js _syncRailSideCore), so deriving the hamburger's side
+         from it keeps them aligned no matter how the sidebar was opened. */
       .hamburger-btn {
         width: 44px;
         height: 44px;
         top: 6px;
-        left: auto !important;
-        right: 4px !important;
         -webkit-tap-highlight-color: transparent;
       }
+      body.hamburger-right .hamburger-btn { left: auto !important; right: 4px !important; }
+      body.hamburger-left  .hamburger-btn { left: 4px !important;  right: auto !important; }
       .hamburger-btn:hover,
       .hamburger-btn:active {
         background: none !important;
@@ -4304,6 +4307,10 @@ body.bg-pattern-sparkles {
         opacity: 0.5;
         padding: 0;
       }
+      /* New-chat sits OPPOSITE the hamburger so the two never overlap when the
+         hamburger flips sides with the sidebar. */
+      body.hamburger-left  .mobile-new-chat-btn { left: auto; right: 8px; }
+      body.hamburger-right .mobile-new-chat-btn { left: 8px; right: auto; }
       /* Modal close button — bigger on mobile */
       .close-btn,
       .modal-close {
