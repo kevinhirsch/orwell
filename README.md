@@ -1,22 +1,30 @@
 # Orwell — *Big Brother: The Simulation*
 
-An immersive, serialized, single-player ***Big Brother*** simulation, rebuilt as a web
-application. The system is game master, narrator, and the voice of every NPC houseguest:
+An immersive, serialized, single-player ***Big Brother*** simulation, played as a
+conversation. The system is game master, narrator, and the voice of every NPC houseguest:
 it runs the weekly competition loop, simulates the full social life of the house —
 including the off-screen scheming the player never witnesses — and renders it as a
-first-person reality-TV experience.
+first-person reality-TV experience inside a chat.
 
 This repository is the rebuild of a prior version that ran entirely inside a single LLM
-chat. That approach worked but had structural failure modes (it leaked secrets, grew
-sycophantic, and lost detail as its context window filled). The rebuild moves game state
-into **external, permissioned stores** behind a **hexagonal architecture**, so the
-deterministic rules, the secret state, and the narration are cleanly separated and
-independently testable.
+chat. That approach proved the concept — **the conversation is the game** — but had four
+structural failure modes: it leaked secrets, grew sycophantic, lost detail as its context
+window filled, and every season felt the same. The rebuild moves game state into
+**external, permissioned stores** behind a **hexagonal architecture** so the deterministic
+rules, the secret state, and the narration are cleanly separated — and otherwise stays
+deliberately out of the model's way (see
+[ADR 0003](docs/decisions/0003-conversation-is-the-game.md)).
 
-> **Status: design-complete, pre-implementation.** The design is fully specified (see
-> [Documentation](#documentation)); no application code or stack exists yet. The next step
-> is confirming the [open decisions](#open-decisions) — chiefly the tech stack — then
-> building BDD/TDD-first. There is nothing to run today.
+> **Status: built and playable.** The engine (TypeScript/Node 22) and the chat front-end
+> (Python/FastAPI) are implemented BDD/TDD-first and run as two services over a
+> permissioned MCP boundary. Features **0001–0041** are green — the eight priority
+> invariants, the full gameplay loop, per-user sandboxes, durable persistence, the live
+> off-screen watcher, the interactive finale, and the character-evolution linchpin
+> (0022, the rich-UI MVP-2, is the one deliberate deferral). Active work is tracked in
+> [`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md) — currently the
+> remaining feature specs (0042–0044) and two full product audits' worth of wave-ordered
+> fixes. The test gate at last green: **280 unit/property/architecture tests + 240 BDD
+> scenarios.**
 
 ---
 
@@ -28,9 +36,10 @@ independently testable.
 - [Design decisions](#design-decisions)
 - [Game mechanics](#game-mechanics)
 - [Install & update](#install--update)
+- [Developing](#developing)
 - [Testing philosophy](#testing-philosophy)
 - [Repository layout](#repository-layout)
-- [Roadmap](#roadmap)
+- [Status & roadmap](#status--roadmap)
 - [Open decisions](#open-decisions)
 - [Documentation](#documentation)
 - [License](#license)
@@ -56,6 +65,12 @@ hard parts, and the reason for nearly every design decision below, are:
 4. **No degradation.** The prior version's secret store *thinned out* every time it was
    updated. Persisted detail must instead **accumulate and deepen** over a game.
 
+And one constraint that shapes how all four are solved: **the fix must not smother the
+game.** The beta was fun *because* it was just a capable model improvising inside the
+rules. The engine exists to repair the four failure modes above — leaks, sycophancy,
+memory, sameness — and to otherwise hand the model the lightest possible context and get
+out of its way.
+
 ---
 
 ## Design goals (the mandate)
@@ -69,21 +84,28 @@ These four priorities are non-negotiable and override convenience:
 | **Anti-sycophancy** | The deterministic core + seeded randomness decide outcomes; the LLM only narrates. Ground truth is queried, never "remembered" to appease. |
 | **Non-degradation** | Persisted detail never regresses across saves and should deepen over time. |
 
+Governing how they're honored: **the conversation is the game**
+([ADR 0003](docs/decisions/0003-conversation-is-the-game.md)) — prefer removing context to
+adding it; hand the model *facts to voice*, never *scripts to recite*; UI may augment the
+chat but never replace an interaction that builds or progresses the game; lingering in a
+room and just talking to people **is** play; people must make sense (one place at a time,
+speech scoped to what each NPC legitimately knows); and each of these holds *testably*.
+
 ---
 
 ## Architecture
 
 The system is **hexagonal (ports & adapters)** with a **pure, dependency-free domain
-core**. Everything with side effects — the database, the soul store, the LLM, the clock,
+core**. Everything with side effects — persistence, the soul store, the LLM, the clock,
 the player and admin surfaces — sits behind a port and is swappable.
 
 ```mermaid
 flowchart TB
-    PLAYER["Player surface"]
+    PLAYER["Player surface<br/>(the chat front-end)"]
     ADMIN["Admin / God Mode"]
     LLM["Narrative LLM"]
 
-    MCP["MCP — permissioned tools<br/>getVisibleStateFor · recordInteraction<br/>resolveCompetition · surfaceInformationTo"]
+    MCP["MCP — permissioned tools<br/>getVisibleStateFor · recordInteraction<br/>runCompetition · advanceGame · submitDecision<br/>surfaceInformationTo · diaryRoom · socialInitiatives"]
 
     CORE["Domain Core · pure, no I/O<br/>weekly loop · eligibility · stat+temperature<br/>outcomes · votes · jury · invariants"]
 
@@ -92,10 +114,10 @@ flowchart TB
     KS["KnowledgeService"]
     NP["NarrativePort"]
     RS["RandomnessSource<br/>(seedable)"]
-    VAULT["VaultStore<br/>ENGINE-ONLY"]
+    VAULT["VaultStore + SoulStore<br/>ENGINE-ONLY"]
 
-    DB[("Relational / graph DB")]
-    SOULS[("Soul store · md / vector")]
+    DB[("Saves · per-user, versioned")]
+    SOULS[("Souls · md + vector")]
 
     PLAYER --> MCP
     ADMIN --> MCP
@@ -118,21 +140,31 @@ flowchart TB
     class VAULT wall;
 ```
 
-**Ports (interfaces), at minimum:** `GameStateRepository`, `VaultStore` (engine-only),
+**Ports (interfaces) include:** `GameStateRepository`, `VaultStore` (engine-only),
 `JournalStore`, `EventStore`, `KnowledgeService`, `NarrativePort` (the LLM),
-`RandomnessSource` (seedable), `Clock`/`Scheduler`, `CharacterFactory`, `SoulProvider`.
+`RandomnessSource` (seedable), `Clock`/`Scheduler`, `CharacterFactory`, `SoulProvider`
+(engine-only), and the outward `GameSession`/`EngineCommands` seam the tools cross.
 
 **The permission boundary is the whole point.** Player-facing and admin-facing adapters and
-tools depend only on the non-Vault ports; **nothing outward-facing imports `VaultStore`**.
-The engine reads the Vault to *simulate* the house, but no outward tool can *return* its
-contents. The Vault is rendered dark-red above to flag it as engine-only.
+tools depend only on the non-Vault ports; **nothing outward-facing imports `VaultStore`** —
+proven structurally by a dependency-cruiser gate (type-only imports included), and proven
+behaviorally by sentinel ("canary") tests on every tool output. The engine reads the Vault
+to *simulate* the house, but no outward tool can *return* its contents. Each running game
+is an isolated **per-user sandbox** (one active game per user, unlimited users, cross-user
+isolation tested like the Vault).
+
+As built: the engine lives in `src/` (domain core in `src/domain`, the live season loop and
+social machinery in `src/engine`, ports/adapters/composition alongside); the player-facing
+tier is the vendored chat front-end in `frontend/` (its own quarantined Python app), wired
+to the engine over HTTP MCP.
 
 ---
 
 ## Design decisions
 
 Each decision records the **context**, the **decision**, and **why** — so the reasoning
-survives even if the people don't.
+survives even if the people don't. (Formal, evolving records live in
+[`docs/decisions/`](docs/decisions/).)
 
 ### 1. Externalize state; the chat window is not the source of truth
 
@@ -141,8 +173,8 @@ survives even if the people don't.
   rules and state and started improvising.
 - **Decision.** Persist every relevant dynamic (social graph, alliances, the full event
   record, per-entity knowledge, votes, competition history, evolving souls) in durable
-  stores. Assemble only the **relevant slice** per agent call via queries (and optional
-  vector retrieval).
+  stores. Assemble only the **relevant slice** per agent call via queries (and vector
+  recall for souls).
 - **Why.** Ground truth must outlive any single prompt and must not degrade under context
   pressure. Selective retrieval keeps each call focused and avoids the overload that
   caused the original failures.
@@ -153,7 +185,7 @@ survives even if the people don't.
   the weekly loop, eligibility/legality, stat-+-temperature competition resolution, votes,
   jury, and win conditions. All I/O lives behind ports.
 - **Why.** A pure core is exhaustively unit-testable with a seeded random source and has no
-  hidden state to leak. It lets us swap databases, soul storage, and even the LLM without
+  hidden state to leak. It lets us swap persistence, soul storage, and even the LLM without
   touching the rules, and it keeps the rules immune to narrative pressure.
 
 ### 3. The Vault Wall is structural — and walls the admin too
@@ -163,14 +195,12 @@ survives even if the people don't.
   houseguests' diary rooms.
 - **Decision.** No Vault content — or any inference uniquely derived from it — may reach the
   player through **any** surface: narration, dialogue, system messages, logs, or
-  end-of-session summaries (summaries may confirm only that an updated save exists).
-  Enforcement is at the port/tool layer, never via prompt wording. **God Mode is walled
-  from the Vault as well** — the administrator inspects non-Vault state only.
+  end-of-session summaries. Enforcement is at the port/tool layer, never via prompt
+  wording. **God Mode is walled from the Vault as well** — the administrator inspects
+  non-Vault state only.
 - **Why.** Prompt-based secrecy is exactly what failed before; a model cannot leak what it
   is never handed. And spoilers ruin the game above all else — the person running the
-  project has never read the Vault and **must not be able to**, even as admin. Dev-time
-  authoring of Vault schemas by an engineer is a separate concern from the running game,
-  which surfaces Vault contents to no one.
+  project has never read the Vault and **must not be able to**, even as admin.
 
 ### 4. Visibility is per-event metadata, not a function of storage
 
@@ -190,6 +220,7 @@ survives even if the people don't.
   they overhear it, they catch someone, etc. Propagation is an explicit, modeled event in
   `KnowledgeService`; until then the player has no access. NPCs likewise know only what they
   witnessed or were told — if there's no pathway, they don't *know* it (they may *suspect*).
+  Hidden facts also diffuse NPC-to-NPC as **gossip**, drifting with each retelling.
 - **Why.** This is how a player "learns the gossip" without breaking the Vault Wall:
   surfacing is a traceable in-game event, not a leak. It also gives the house genuine blind
   spots, which are part of the game.
@@ -209,7 +240,8 @@ survives even if the people don't.
   (competition outcome, expression, whether an NPC takes initiative, which hidden element
   surfaces, alliance shifts, emotional volatility…). Temperature governs variance and
   surprise but **never** overrides hard rules (eligibility, the Vault Wall) or
-  archetype-grounded outcome weighting. It is driven by the seedable `RandomnessSource`.
+  archetype-grounded outcome weighting. It is driven by the seedable `RandomnessSource`,
+  with the numbers in one tunable constants module.
 - **Why.** Per-variable variance is what makes a house feel alive and unpredictable without
   ever becoming arbitrary. Seeding makes that variance reproducible, so distributions can be
   property-tested across many runs.
@@ -218,40 +250,42 @@ survives even if the people don't.
 
 - **Decision.** Only the **player's** profile is human-authored, at a first-run character
   creation (OOBE). **All NPC profiles are generated** by `CharacterFactory`, constrained to
-  plausible *Big Brother* contestant archetypes. Each carries **many hidden elements**
-  (motivations, fears, secrets, leanings); public persona may match or wildly diverge from
-  them; hidden elements surface **rarely** (gated by the temperature roll); profiles
-  **evolve** as the game proceeds.
+  plausible *Big Brother* contestant archetypes. The stable baseline is the static
+  **`CHARACTER`** (byte-stable for a whole game); everything that evolves — emotional state,
+  memory, relationship beliefs — is the dynamic **`SOUL`** (markdown + vector, engine-only).
+  Hidden elements surface **rarely** (gated by the temperature roll); a season genuinely
+  *changes* a houseguest, entirely in the hidden layer.
 - **Why.** Distinct, agenda-driven, deep characters are the engine of behavioral fidelity
   and a second defense against sycophancy. Rare surfacing keeps secrets dramatic instead of
   dumped. There is deliberately **no fixed protagonist** (see #12).
 
-### 9. Hybrid persistence (relational + optional vector)
+### 9. Hybrid persistence (relational + vector souls)
 
-- **Decision.** Use a **queryable database** for relational/graph runtime state (social
-  graph, alliances, votes, per-NPC knowledge, the event record) so context is retrieved as a
-  slice. Store character **souls** as markdown and/or in a **vector** store for semantic
-  personality similarity, behavioral memory, and conversation recall. Datasets have
+- **Decision.** Use queryable, versioned, per-user stores for runtime state (the event
+  record, relationships, knowledge, saves) so context is retrieved as a slice. Store
+  character **souls** as markdown plus an engine-only **vector** index for semantic recall
+  ("the veto betrayal" recalls *that* memory, not the most recent chat). Datasets have
   **distinct, code-enforced permissions**.
-- **Why.** Relational queries make selective retrieval natural; a vector store fits the
-  fuzzy "who is this character and what do they remember" problem. Keeping them separate with
-  explicit permissions is what makes the Vault Wall enforceable per-dataset.
+- **Why.** Queries make selective retrieval natural; vector recall fits the fuzzy "who is
+  this character and what do they remember" problem. Keeping them separate with explicit
+  permissions is what makes the Vault Wall enforceable per-dataset.
 
 ### 10. Detail must deepen, not degrade
 
 - **Decision.** Persistence must never lose behavioral detail across saves/versions;
   generation must keep **enriching** characters, relationships, and history as the game
-  proceeds. The Vault and Journal are versioned **together**. Tests assert non-degradation.
+  proceeds. The Vault and Journal are versioned **together**; saves are supersets with
+  monotonic counts and lossless round-trips. Tests assert non-degradation, and a
+  fail-closed integrity checkpoint refuses to persist a degraded or leaky state.
 - **Why.** This directly reverses the prior version's worst regression, where every update
-  thinned the secret store. It is both an architecture guarantee (durable external state)
-  and a generation directive (deepen, don't thin).
+  thinned the secret store.
 
 ### 11. MCP as the permissioned LLM ↔ engine boundary
 
-- **Decision.** Expose engine capabilities to the narrative LLM through **MCP server(s)** as
-  permissioned tools (e.g. `getVisibleStateFor(entity)`, `recordInteraction`,
-  `resolveCompetition`, `surfaceInformationTo(player, fact, pathway)`). The model only ever
-  receives what a tool returns.
+- **Decision.** Expose engine capabilities to the narrative LLM through an **MCP server** as
+  permissioned, per-channel tools (e.g. `getVisibleStateFor`, `recordInteraction`,
+  `runCompetition`, `advanceGame`/`submitDecision`, `surfaceInformationTo`). The model only
+  ever receives what a tool returns, and binding decisions cross a single validated seam.
 - **Why.** A narrow tool surface is where the Vault Wall and anti-sycophancy rules are
   *physically* enforced: player- and admin-facing tools simply have no method that returns
   Vault data, and outcome tools return engine-decided results.
@@ -259,18 +293,36 @@ survives even if the people don't.
 ### 12. No fixed protagonist — replayable by design
 
 - **Decision.** Every new game is a new save: a freshly created player character and a
-  brand-new house of randomly-named NPCs, with no identity carried over. The legacy doc's
-  named player and houseguests are an **illustrative example only**.
-- **Why.** Replayability is a core product goal, and a hard-coded protagonist would
-  undermine it. (This also keeps the test suite name-agnostic; see below.)
+  brand-new house of generated, procedurally-named NPCs, with no identity carried over.
+  Same seed reproduces the same house; new seed, new season.
+- **Why.** Replayability is a core product goal — **every game should feel drastically
+  different** — and a hard-coded protagonist would undermine it. (This also keeps the test
+  suite name-agnostic; see below.)
 
 ### 13. Bidirectional scenes
 
 - **Decision.** Both the player and the NPCs initiate. NPCs hold goals from their profiles
   that make them seek the player out (for alliances, confrontations, reassurance, strategy),
-  and the player can approach anyone. Neither side drives everything.
+  and the player can approach anyone. Neither side drives everything — and the house keeps
+  living **between** the player's turns via a bounded off-screen watcher.
 - **Why.** If the player were the only engine moving the social game, the house would feel
   inert and the fidelity mandate would fail.
+
+### 14. The conversation is the game ([ADR 0003](docs/decisions/0003-conversation-is-the-game.md))
+
+- **Context.** The beta — the Game Bible + secrets + a small instruction set handed to an
+  LLM — *played correctly*. The fun was already there, in conversation.
+- **Decision.** The engine is a thin set of guardrails and a memory, not a director. Prefer
+  removing context to adding it; hand the model **facts to voice**, never scripts to recite;
+  UI may **augment** the chat (beat framing, a memory wall, a confirm step on binding
+  actions) but never **replace** an interaction that builds or progresses the game.
+  **Lingering is play**: the player can mill around any room, learn who's present and
+  nearby, and talk to anyone — while those NPCs keep playing *their* game. **People must
+  make sense**: one place at a time, speech scoped to what each NPC legitimately knows, a
+  stable public persona. Each principle is enforced **structurally and testably** where
+  possible.
+- **Why.** Over-engineering the experience into mechanics and dashboards would kill the
+  thing that made it work. The model stays creative; the stores stay true.
 
 ---
 
@@ -279,8 +331,8 @@ survives even if the people don't.
 The canonical rules the domain core implements:
 
 - **Cast:** 16 houseguests (the player + 15 NPCs). **Jury of 9. Final 2.** Classic format
-  with no core-structure twists (one or two production twists may be held in reserve and are
-  never game-breaking).
+  with no core-structure twists (one or two production twists may be held in reserve —
+  Vault-sealed from player *and* admin until they fire — and are never game-breaking).
 - **A "week" = one HOH reign** — from an HOH competition to an eviction — not seven calendar
   days.
 - **Weekly loop:** HOH competition → two nominations → veto competition → veto ceremony →
@@ -295,23 +347,23 @@ The canonical rules the domain core implements:
   HOH and the two nominees votes at eviction (the HOH breaks ties).
 - **Competition stats:** **Physical, Mental, Social** (no Luck stat). Outcomes weight the
   relevant stat against the competition type and apply **temperature** plus an **emotional
-  modifier** sourced from the houseguest's soul (a rattled houseguest competes differently) —
-  **never** story convenience. Emotional state is a *character/soul* attribute, not a fourth
-  competition stat. The player may declare intent (compete / throw / play safe) beforehand and
-  cannot change it after the result.
+  modifier** sourced from the houseguest's evolving soul (a rattled houseguest competes
+  differently) — **never** story convenience. The player may declare intent (compete /
+  throw / play safe) beforehand and cannot change it after the result.
 - **Daily-event invariant:** every in-game day contains at least one meaningful event
   (a competition, a nomination or veto ceremony, a vote or eviction, or a significant house
   event).
 - **Jury & endgame:** the last nine evicted houseguests form the jury; jury management
-  (how the player treats people on the way out) affects their votes; the Final 2 face a jury
-  vote, ties broken by the final juror.
+  (how the player treats people on the way out) genuinely affects their votes. The finale is
+  staged live — statements, one question per juror, and an ordered vote reveal — with ties
+  broken by the final juror.
 
 ---
 
 ## Install & update
 
 Orwell runs as **two co-located services in one container** — the TypeScript **engine** (MCP
-server) and the **Orwell** front-end (Python) — wired over local MCP. On a Proxmox host, two
+server) and the chat **front-end** (Python) — wired over local MCP. On a Proxmox host, two
 one-liners install and update it:
 
 ```bash
@@ -321,21 +373,42 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
 ```
 
-The install creates a Debian LXC, installs Node 22 + Python, builds the engine (`npm run build`),
-sets up the front-end, and starts both as systemd services. The save (SQLite + souls) lives at
-`/opt/orwell/data` and is **preserved across updates**. The LLM provider (Ollama or an API key) and
-ports are set in `/opt/orwell/data/.env`.
+The install creates a Debian LXC, installs Node 22 + Python, builds the engine, sets up the
+front-end, and starts both as systemd services. Save data (per-user game saves + souls)
+lives under `/opt/orwell/data` and is **preserved across updates**; a separate
+`orwell-factory-reset.sh` scrubs everything back to first-run. The LLM provider (Ollama or
+an API key) and ports are set in `/opt/orwell/data/.env`.
 
-**Full guide** — install, configuration, manual / non-Proxmox install, updates, services, backups,
-and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals + the engine
-contract in [`deploy/README.md`](deploy/README.md)).
+**Full guide** — install, configuration, manual / non-Proxmox install, updates, services,
+backups, and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals in
+[`deploy/README.md`](deploy/README.md)).
+
+---
+
+## Developing
+
+The engine is TypeScript / Node 22; the front-end is its own quarantined Python app.
+
+| Command | What it does |
+|---|---|
+| `npm install` | Install engine dev dependencies. |
+| `npm test` | The full engine gate: typecheck → build → unit/property/architecture → BDD. |
+| `npm start` | Run the built engine — the HTTP MCP server (`ORWELL_ENGINE_PORT`, default 8765). |
+| `npm run test:unit` | Vitest (unit, property, and the dependency-cruiser Vault-boundary test). |
+| `npm run test:bdd` | Cucumber.js over the implemented `.feature` specs. |
+| `npm run test:arch` | The structural Vault-Wall gate (dependency-cruiser). |
+| `cd frontend && python3 -m pytest tests/` | The front-end's own test gate (never touches the engine gate). |
+
+Working in this repo? **Read [`CLAUDE.md`](CLAUDE.md) first** — it carries the operational
+guidance (mandates, testing rules, hard "do-nots", environment variables, source layout)
+and points at the live work queue.
 
 ---
 
 ## Testing philosophy
 
-Built **BDD/TDD-first**. The spec's invariants (`docs/bb-sim-spec.md` §12) become failing
-`.feature` files first, implemented to green in this priority order:
+Built **BDD/TDD-first**. The spec's invariants became failing `.feature` files first,
+implemented to green in strict priority order:
 
 > Vault isolation (incl. God Mode) → event visibility & propagation → behavioral fidelity →
 > replayability/naming → competition eligibility → outcomes by stats+temperature →
@@ -347,11 +420,13 @@ Hard rules for the test suite:
 - **Sample saves are FORMAT ONLY** — their content is never canonical, seed, or test data
   (this includes the legacy example persona and names).
 - A player-facing **or admin** path isn't "done" until a test proves it returns **no** Vault
-  data.
+  data — structurally (dependency-cruiser) *and* behaviorally (sentinel canaries).
 - Tests must verify that off-screen NPC life **exists** and that witnessed events are **not**
   secret — i.e. behavioral *richness*, not just mechanical correctness.
 - The domain core runs under fast unit tests with a **seeded** random source;
   randomness/temperature distributions and richness thresholds get **property-based** tests.
+- `cucumber.cjs` lists the BDD-gated features and is the canonical record of what's wired
+  into the gate; `docs/features/README.md` is the per-feature status index.
 
 ---
 
@@ -359,63 +434,83 @@ Hard rules for the test suite:
 
 ```
 .
-├── CLAUDE.md                          # Operational guidance for Claude Code sessions
-├── README.md                          # You are here
+├── CLAUDE.md                   # Operational guidance for coding sessions — start here
+├── README.md                   # You are here
+├── cucumber.cjs                # The BDD gate — canonical list of green features
+├── src/                        # The engine (TypeScript, hexagonal)
+│   ├── domain/                 #   pure core: rules, eligibility, outcomes (no I/O)
+│   ├── engine/                 #   season loop, relationships, souls, gossip, prompts
+│   ├── ports/                  #   interfaces (VaultStore & co. are engine-only)
+│   ├── adapters/               #   in-memory, persistence, MCP server, narrative, time
+│   ├── services/ · surfaces/   #   outward-safe projections; player/admin/tools
+│   └── composition/            #   roots, per-user sandbox registry, orchestrator, watcher
+├── frontend/                   # The chat front-end (Python/FastAPI) — quarantined app
+├── features/ · tests/          # BDD steps/support · unit/property/arch/integration/UAT
+├── deploy/                     # One-liner install/update/factory-reset + systemd units
 └── docs/
-    ├── CLAUDE_CODE_INSTRUCTIONS.md    # Build brief & complete decision log (source of truth)
-    ├── bb-sim-spec.md                 # v3 domain spec (concept, persistence, invariants)
-    └── legacy/
-        └── BB_GameBible.md            # Legacy chat-prompt version — migration reference only
+    ├── CLAUDE_CODE_INSTRUCTIONS.md   # Build brief & decision log (source of truth)
+    ├── bb-sim-spec.md                # v3 domain spec (concept, persistence, invariants)
+    ├── IMPLEMENTATION_QUEUE.md       # Live work queue — what's next, with prompts
+    ├── features/                     # Numbered feature specs (design note + Gherkin)
+    ├── decisions/                    # ADRs — incl. 0003 "the conversation is the game"
+    ├── audits/                       # Full product & experience audits (2026-06-09)
+    ├── INSTALL.md                    # Install/operate guide
+    └── legacy/BB_GameBible.md        # Legacy chat-prompt version — reference only
 ```
-
-Application code, a chosen stack, and build/test tooling do not exist yet and will be added
-once the [open decisions](#open-decisions) are confirmed.
 
 ---
 
-## Roadmap
+## Status & roadmap
 
-Milestones (detail in `docs/CLAUDE_CODE_INSTRUCTIONS.md` §12):
+The original milestones **M1–M8** (pure core → ports & isolation → visibility → persistence
+→ the MCP boundary → character generation → off-screen simulation → God Mode & tuning) are
+**all built**, along with the MVP-1 batch, per-user sandboxes, durable saves, the live
+off-screen watcher, the interactive finale, and the character-evolution linchpin (souls now
+evolve in the live game and bend behavior).
 
-| # | Milestone |
-|---|---|
-| M1 | Pure domain core (loop + eligibility + stat/temperature outcomes), unit-tested, no I/O |
-| M2 | Ports + in-memory adapters; Vault **and** God-Mode isolation features green |
-| M3 | `EventStore` + visibility model + `KnowledgeService` propagation; event-visibility green |
-| M4 | Persistence adapters (DB + soul store) + selective retrieval + non-degradation tests |
-| M5 | MCP tool boundary + narrative LLM integration (permissioned) |
-| M6 | `CharacterFactory`: random house generation + player OOBE; replayability green |
-| M7 | Off-screen simulation + bidirectional scheduler + per-moment temperature + evolving souls |
-| M8 | God Mode / admin port + sandboxing; anti-sycophancy & behavioral-richness tuning |
+Live status is deliberately **not** duplicated here (prose drifts):
+
+- **What's green:** `cucumber.cjs` + the status index in
+  [`docs/features/README.md`](docs/features/README.md).
+- **What's next:** the wave-ordered queue in
+  [`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md) — currently the remaining
+  gameplay features (0042–0044), the finale UI, and the fix batches from two full audits
+  ([`docs/audits/`](docs/audits/)) covering ground-truth integrity, the endgame, security
+  hardening, and the player experience.
+- **The one deliberate deferral:** feature **0022** (the rich game UI / MVP-2) — by design,
+  per [ADR 0003](docs/decisions/0003-conversation-is-the-game.md), the chat *is* the UI.
 
 ---
 
 ## Open decisions
 
-To confirm before building (full lists in `docs/CLAUDE_CODE_INSTRUCTIONS.md` §15 and
-`docs/bb-sim-spec.md` §16):
+The original open list (stack, datastore, soul storage, temperature model, veto/jury
+procedure, non-degradation strategy) is **resolved** — see
+[`docs/decisions/`](docs/decisions/) and the constants modules the features firmed up.
+One genuinely open item remains:
 
-1. **Tech stack** — Node/TS vs. Python; DB choice (SQLite → Postgres; a graph model for
-   relationships?). *This gates everything else.*
-2. **Soul/profile storage** — md, vector, or hybrid; the schema for deep hidden attributes
-   and how evolution is persisted.
-3. **Temperature model** — distributions, per-variable weighting, bounds, and the
-   surfacing-rate for hidden elements.
-4. **Vector approach** (if adopted) — embedding/store and what it indexes.
-5. **Exact veto-draw participant rules, jury procedure, twists/specials.**
-6. **Non-degradation test strategy** — how to operationalize "detail must accumulate."
+1. **Embedding provider** — which model backs `EmbeddingProvider` at runtime for semantic
+   soul recall (a deterministic fake covers all seeded tests today).
 
 ---
 
 ## Documentation
 
-- **`docs/CLAUDE_CODE_INSTRUCTIONS.md`** — the build brief and complete decision log; the
-  primary source of truth.
-- **`docs/bb-sim-spec.md`** — the v3 domain specification.
-- **`docs/legacy/BB_GameBible.md`** — the legacy implementation, kept only as a migration
-  reference. Its fixed player persona and houseguest names are illustrative and must never be
-  hard-coded.
-- **`CLAUDE.md`** — condensed operational guidance for Claude Code working in this repo.
+- **[`CLAUDE.md`](CLAUDE.md)** — condensed operational guidance for working in this repo;
+  the best single orientation.
+- **[`docs/CLAUDE_CODE_INSTRUCTIONS.md`](docs/CLAUDE_CODE_INSTRUCTIONS.md)** — the build
+  brief and complete decision log.
+- **[`docs/bb-sim-spec.md`](docs/bb-sim-spec.md)** — the v3 domain specification.
+- **[`docs/features/`](docs/features/)** — the numbered feature specs (design note +
+  executable Gherkin) with the live status index.
+- **[`docs/decisions/`](docs/decisions/)** — ADRs, including
+  [0003 "the conversation is the game"](docs/decisions/0003-conversation-is-the-game.md).
+- **[`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md)** — the live work queue.
+- **[`docs/audits/`](docs/audits/)** — the 2026-06-09 product and experience audits.
+- **[`docs/INSTALL.md`](docs/INSTALL.md)** — install and operations.
+- **[`docs/legacy/BB_GameBible.md`](docs/legacy/BB_GameBible.md)** — the legacy
+  implementation, kept as the canonical-mechanics reference. Its fixed player persona and
+  houseguest names are illustrative and must never be hard-coded.
 
 The populated Producer's Vault, its internal structure, and any live secret save-state are
 **intentionally excluded** from all documentation — preserving the Vault Wall is the point.
