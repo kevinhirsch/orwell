@@ -66,6 +66,13 @@ export interface CreateCharacterReq {
   strategyStyle?: string;
   /** Optional seed for a reproducible house; the front-end may send a random one for variety. */
   seed?: number;
+  /**
+   * Explicit opt-in to REPLACE an already-started game (non-degradation guard, B36/audit A2). Without
+   * it, calling `createCharacter` on a started season is a no-op that returns the current state — so a
+   * stray/hallucinated/network call can never wipe an active game. A real restart sets this (the admin
+   * reset path) — it is NOT part of the player tool's documented schema.
+   */
+  confirmRestart?: boolean;
 }
 
 export interface MomentPromptReq {
