@@ -859,7 +859,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 | Wave | Item(s) | Lane | Audit ref | Depends on |
 |---|---|---|---|---|
-| **0 — hotfixes** | B34 bind+auth · B35 atomic/tolerant saves · B36 createCharacter guard · **C12** finale relay + engine-down fail-closed + reset guard | both | E1·E2·A2 / B3·F2·A2 | — |
+| **0 — hotfixes** | ✅ B34 bind+auth · ✅ B35 atomic/tolerant saves · ✅ B36 createCharacter guard · **C12** finale relay + engine-down fail-closed + reset guard *(FE, remaining)* | both | E1·E2·A2 / B3·F2·A2 | — |
 | **1 — ground truth** | B37 single comp authority · B38 ceremony folds · B39 knowledge integrity · B40 snapshot completeness · B41 orchestrator spine · B42 live sentinel sweep | engine | A1·A3 / C1 / A4 / C2·C3·C4 / E3·D4 / E8 | B36 (B40 reads the snapshot) |
 | **2 — the endgame** | B43 0045 F5→2 · B44 tie-break · B45 Houseguest's Choice · B46 comp intent · B47 jury manner+appeal symmetry · B48 0046 player eviction · B49 0047 eviction night · **B26/C11** finale UI | engine + FE | B1 / B2 / B4 / B5 / A5·A6 / B6 / B7 | B43 first (others extend the F5→2 loop); B26/C11 already queued |
 | **3 — the living house** *(merge with 0038–0044)* | **B30/0041 first** · B50 hidden elements · B51 emotional modifier · B52 evictee filters · B53 twists live · B54 live richness gate · B55 loop unification + relationship realism | engine | D1 / D2 / D5 / D6·B8 / D3 / D12·C5·C6 | 0041; D7 folds into B32/B33 |
@@ -868,7 +868,14 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ---
 
-### B34 — close the engine network boundary (bind + auth + identity)  ·  Claude Code  ·  **Wave 0 hotfix · audit E1**
+### B34 — close the engine network boundary (bind + auth + identity)  ·  Claude Code  ·  **Wave 0 hotfix · audit E1** — ✅ DONE
+
+> **DONE.** `HttpMcpServer` binds `127.0.0.1` by default (`ORWELL_ENGINE_HOST` override); an optional
+> `ORWELL_ENGINE_TOKEN` is required on every tool route (401 on mismatch; `/health` stays open);
+> `ORWELL_ENGINE_MULTIUSER` rejects a missing `x-orwell-user` (400) instead of a shared `"default"`;
+> and a non-`createCharacter` call for an unknown user is refused (404) without minting a sandbox.
+> All default OFF (single-tenant loopback unchanged). `tests/integration/httpBoundary.test.ts`;
+> `docs/INSTALL.md` documents the knobs and agrees with the bind. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), close the cross-user network hole. Today `createHttpMcpServer(...).listen(port)`
 > binds **`0.0.0.0`** (`HttpMcpServer.ts:75-77`; `main.ts:41` even logs it) while the deploy docs claim loopback,
@@ -882,7 +889,13 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > the token; 400 (not `"default"` routing) without the user header in multi-user mode; deploy README and actual bind
 > agree. Read `docs/features/0021` first. Open a PR.
 
-### B35 — make saves crash-safe (atomic write + tolerant load + handler guards)  ·  Claude Code  ·  **Wave 0 hotfix · audit E2**
+### B35 — make saves crash-safe (atomic write + tolerant load + handler guards)  ·  Claude Code  ·  **Wave 0 hotfix · audit E2** — ✅ DONE
+
+> **DONE.** `FileSaveStore.saveFor` writes a `.tmp` then `renameSync` (atomic); `loadLatest`
+> quarantines a corrupt highest version (`.corrupt`) and steps down to the last good one (null only
+> when nothing parses). The HTTP request handler is guarded (→500, splitting a sandbox-resolve
+> failure from a bad tool/args→400) and `GameWatcher.onTick` isolates each user in try/catch.
+> `tests/unit/saveCrashSafety.test.ts` + the 500-isolation case in `httpBoundary.test.ts`. Prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), stop one corrupt save from crash-looping the engine for **all** users. Today
 > `FileSaveStore.saveFor` does a non-atomic `writeFileSync` (truncation on crash), `loadLatest` does an unguarded
@@ -894,7 +907,13 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > truncate the latest version file ⇒ `loadLatest` returns v(N−1) and `sandboxFor` resumes; integration — a corrupt file
 > ⇒ one 500, other users unaffected, process alive; the watcher tick over a corrupt-save user does not throw. Open a PR.
 
-### B36 — guard `createCharacter` against wiping a started season  ·  Claude Code  ·  **Wave 0 hotfix · audit A2 (engine half; FE mirror in C12)**
+### B36 — guard `createCharacter` against wiping a started season  ·  Claude Code  ·  **Wave 0 hotfix · audit A2 (engine half; FE mirror in C12)** — ✅ DONE
+
+> **DONE.** `GameSessionAdapter.createCharacter` refuses to replace a started game unless an explicit
+> `confirmRestart` is set — it returns the current state unchanged and writes no new save version, so
+> a stray/hallucinated/network call can't wipe an active season. A real restart goes through the admin
+> reset path (`registry.resetUser`); `confirmRestart` is not in the player tool's documented schema.
+> `tests/unit/createCharacterGuard.test.ts`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), `GameSessionAdapter.createCharacter` (`:206-228`) unconditionally replaces the
 > house, resets to week 1, and **persists** — wiping an active game (reachable by any GM hallucination or network
