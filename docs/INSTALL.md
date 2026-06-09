@@ -38,7 +38,10 @@ the UI URL.
 |---|---|---|
 | `ORWELL_PORT` | front-end UI port | `8080` |
 | `ORWELL_ENGINE_PORT` | engine MCP server (loopback) | `8765` |
+| `ORWELL_ENGINE_HOST` | engine bind address | `127.0.0.1` |
 | `ORWELL_ENGINE_MCP_URL` | front-end → engine | `http://127.0.0.1:8765` |
+| `ORWELL_ENGINE_TOKEN` | shared secret required on every engine tool call (set if the engine is reachable beyond loopback) | — (off) |
+| `ORWELL_ENGINE_MULTIUSER` | reject a request with no `x-orwell-user` instead of routing to a shared `default` sandbox | — (off) |
 | `OLLAMA_HOST` **or** `ANTHROPIC_API_KEY` | the LLM (set one) | — |
 
 After editing: `systemctl restart orwell-engine orwell-frontend`.
@@ -95,7 +98,11 @@ touch it (non-degradation, feature 0007).
 ## Security
 
 - Secrets (LLM keys) live **only** in `/opt/orwell/data/.env` — never committed.
-- The engine MCP server binds **loopback**; only the front-end UI port is exposed.
+- The engine MCP server binds **loopback** (`ORWELL_ENGINE_HOST=127.0.0.1`); only the front-end UI
+  port is exposed. If you must expose the engine beyond loopback, set `ORWELL_ENGINE_HOST` **and** a
+  shared `ORWELL_ENGINE_TOKEN` (the front-end must then send it) — without a token, requests are
+  refused (401). For a multi-tenant engine also set `ORWELL_ENGINE_MULTIUSER=1` so every request must
+  assert its `x-orwell-user` (no silent shared `default` sandbox).
 - Each container is its own **sandbox** (one game namespace). The **Vault Wall** keeps secret game
   state off every player-facing surface — enforced structurally, not by prompt.
 

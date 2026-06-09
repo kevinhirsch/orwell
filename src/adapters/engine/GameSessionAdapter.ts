@@ -247,6 +247,11 @@ export class GameSessionAdapter implements GameSession {
   }
 
   createCharacter(req: CreateCharacterReq): GameStateView {
+    // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
+    // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
+    // call, a network caller) is a no-op returning the current state — the prior save is left intact. A
+    // real restart goes through the admin reset path (registry.resetUser), not this tool.
+    if (this.house && !req.confirmRestart) return this.view();
     const seed = req.seed ?? hashSeed(req.playerName);
     const archetype = req.archetype && isPlausibleArchetype(req.archetype) ? req.archetype : undefined;
     const strategyStyle = req.strategyStyle as StrategyStyle | undefined;
