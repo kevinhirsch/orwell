@@ -2,8 +2,10 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView,
+  FinaleView, MakeDealReq, DealView,
 } from "../../ports/GameSession";
+import { DealLedger } from "../../engine/deals";
+import type { BindingAction, Deal } from "../../engine/deals";
 import { npcInitiatedApproaches } from "../../engine/conversation";
 import type { NarrativePort } from "../../ports/NarrativePort";
 
@@ -45,7 +47,7 @@ import type { EntityId } from "../../domain/ids";
 import { RelationshipModel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, type LiveSeasonState,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, type LiveSeasonState,
   type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
   type FinaleProgress,
 } from "../../engine/liveSeason";
@@ -78,6 +80,10 @@ export class GameSessionAdapter implements GameSession {
   private onPersist?: () => void;
   /** Beat-event sink (wired by the registry to record player-witnessed events into the EventStore). */
   private onEvent?: (ev: BeatEvent) => void;
+  /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
+  private readonly deals = new DealLedger();
+  /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
+  private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
   private narrator?: NarrativePort;
   /** Per-moment tagline cache (regenerate when week/phase/standing changes, not per page load). */
@@ -101,6 +107,11 @@ export class GameSessionAdapter implements GameSession {
     this.onEvent = fn;
   }
 
+  /** Wire the one-off witnessed-event recorder (deal made/broken reveals, 0039). */
+  setOnPlayerEvent(fn: (content: string, witnessSet: EntityId[], type?: string) => string | undefined): void {
+    this.onPlayerEvent = fn;
+  }
+
   /** Wire a narrator for the snarky tagline (0033). Without one, the curated fallback is used. */
   setNarrator(narrator: NarrativePort): void {
     this.narrator = narrator;
@@ -115,6 +126,7 @@ export class GameSessionAdapter implements GameSession {
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
       house: this.house ? cloneSession(this.house) : null,
       live: this.live ? cloneSession(this.live) : null,
+      deals: this.deals.serialize(),
     };
   }
 
@@ -125,6 +137,7 @@ export class GameSessionAdapter implements GameSession {
     this.phase = core.phase;
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
+    this.deals.load(core.deals ?? []);
   }
 
   /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
@@ -272,16 +285,90 @@ export class GameSessionAdapter implements GameSession {
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error).
     if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    // Reconcile the PLAYER's own eviction vote against open deals BEFORE the tally clears state —
+    // a player who votes out their deal partner breaks it (engine-decided, 0039).
+    if (req.kind === "eviction-vote" && req.vote) {
+      this.reconcileDeals({ actor: PLAYER, kind: "vote-evict", targets: [req.vote] });
+    }
     const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx());
     this.commit(ev);
     return this.advanceView(ev);
   }
 
-  /** Fold a resolved beat into the public projection: record the event, sync ceremony, persist. */
+  /**
+   * The player makes a deal with a houseguest (0039). Recorded as a player-witnessed event (their
+   * knowledge); the engine reconciles it against later binding actions. Player↔NPC only — NPC↔NPC
+   * deals are made off-screen and held in the Vault (never crosses this outward seam).
+   */
+  makeDeal(req: MakeDealReq): DealView | null {
+    if (!this.house || !this.live) return null;
+    const target = req.with;
+    const evicted = new Set(this.live.evictionOrder);
+    const isActiveOther = target !== PLAYER
+      && this.house.npcs.some((n) => n.id === target) && !evicted.has(target);
+    if (!isActiveOther) return null;
+    const terms = (req.terms ?? "").slice(0, 200);
+    const evId = this.onPlayerEvent?.(
+      `${this.nameOf(PLAYER)} and ${this.nameOf(target)} make a ${req.kind} deal: ${terms}`,
+      [PLAYER, target], "deal",
+    );
+    const deal = this.deals.make([PLAYER, target], req.kind, terms, evId);
+    this.onPersist?.();
+    return this.dealView(deal);
+  }
+
+  /** Reconcile a binding action against open player-party deals: kept/broken + the fallout (0039). */
+  private reconcileDeals(action: BindingAction): void {
+    if (!this.live) return;
+    const { broken } = this.deals.reconcile(action, {
+      rel: this.rel,
+      rng: this.beatRng(),
+      // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
+      juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
+      // 0002: the wronged party learns the break as a witnessed event (a public ceremony break).
+      reveal: (wronged, breaker, deal) => this.onPlayerEvent?.(
+        `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+        [wronged, breaker], "betrayal",
+      ),
+    });
+    if (broken.length > 0) this.onPersist?.();
+  }
+
+  /** The binding action a resolved beat represents (for deal reconciliation). */
+  private bindingActionFor(ev: BeatEvent): BindingAction | null {
+    const s = this.live;
+    if (!s) return null;
+    switch (ev.beat) {
+      case "nominations":
+        return s.hoh && s.nominees ? { actor: s.hoh, kind: "nominate", targets: [...s.nominees] } : null;
+      case "veto-ceremony":
+        return s.hoh && s.replacement ? { actor: s.hoh, kind: "replace", targets: [s.replacement] } : null;
+      default:
+        return null;
+    }
+  }
+
+  /** Fold a resolved beat into the public projection: record the event, reconcile deals, sync, persist. */
   private commit(ev: BeatEvent | null): void {
     if (ev) this.onEvent?.({ ...ev, content: this.humanize(ev.content) });
+    // 0039: a binding ceremony beat may honor or break an open deal — let the engine adjudicate.
+    if (ev) {
+      const action = this.bindingActionFor(ev);
+      if (action) this.reconcileDeals(action);
+    }
     this.syncProjection();
     this.onPersist?.();
+  }
+
+  /** Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers. */
+  private dealView(d: Deal): DealView {
+    return {
+      id: d.id,
+      parties: d.parties.map((id) => ({ id, name: this.nameOf(id) })),
+      kind: d.kind,
+      terms: d.terms,
+      status: d.status,
+    };
   }
 
   /** Project the live-loop state onto the public week/phase/ceremony the status panel reads. */
@@ -460,6 +547,8 @@ export class GameSessionAdapter implements GameSession {
         id: n.id, name: n.name,
         status: this.live?.evictionOrder.includes(n.id) ? "evicted" : "active",
       })),
+      // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
+      deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
     };
   }
 }

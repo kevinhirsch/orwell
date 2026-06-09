@@ -211,6 +211,17 @@ function recordEvictionManner(s: LiveSeasonState, evictee: EntityId, responsible
   }
 }
 
+/**
+ * Record a broken-deal demerit (0039): the wronged party will weigh this betrayal against the
+ * breaker in their later jury lean. Stored as `manner.betrayed` in the same map the finale reads
+ * (`mannerFor`), merged so a later eviction-manner read keeps it rather than clobbering it.
+ */
+export function recordDealBetrayal(s: LiveSeasonState, wronged: EntityId, breaker: EntityId): void {
+  const map = (s.mannerByEvictee ??= {});
+  const row = (map[wronged] ??= {});
+  row[breaker] = { ...(row[breaker] ?? {}), betrayed: true };
+}
+
 /** Remove the evictee and roll into the next week (or the finale at Final 3 → 2). */
 function applyEviction(s: LiveSeasonState, evictee: EntityId, ctx: SeasonCtx, responsible: EntityId[]): void {
   recordEvictionManner(s, evictee, responsible, ctx);

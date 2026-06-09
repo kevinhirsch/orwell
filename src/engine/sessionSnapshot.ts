@@ -2,6 +2,7 @@ import type { GameHouse } from "./characterFactory";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
+import type { Deal } from "../domain/deal";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 
 /**
@@ -30,6 +31,8 @@ export interface SessionCore {
   house: GameHouse | null;
   /** The incremental weekly-loop state (0011), so progression survives a restart (0030). */
   live?: LiveSeasonState | null;
+  /** Tracked promises the player is party to (0039), so deals survive a restart (0030). */
+  deals?: Deal[];
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
