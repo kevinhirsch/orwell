@@ -91,6 +91,10 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0042 | [Competition library (variety + narrative formats)](./0042-competition-library.md) | Gameplay | **Ready (DoR §8)** |
 | 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | **Ready (DoR §8)** |
 | 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | Gameplay / anti-sycophancy | **Ready (DoR §8)** |
+| 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | Gameplay / correctness | **Ready (DoR §8)** · B43 |
+| 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | Gameplay / player UX | **Ready (DoR §8)** · B48 |
+| 0047 | [Eviction night live (reveal + goodbyes)](./0047-eviction-night-live.md) | Gameplay | **Ready (DoR §8)** · B49 |
+| 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Ready (DoR §8)** · B56 |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

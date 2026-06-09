@@ -19,10 +19,17 @@ off-screen watcher, social surface, interactive finale — the 0037 finale *UI* 
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0044**). **Current focus: the post-audit batch 0038–0044** (behavioral-fidelity /
-anti-sycophancy wiring — **0041, the linchpin, is now built** (the `SoulStore` is live in the sandbox,
-souls evolve and modulate behavior), 0039 and 0040 done, 0038 partially done; remaining: B27b, 0042–0044).
-See [Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
+(now through **0048**, plus **0049** to be drafted). **Active work — start
+here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full product-audit batch
+(B34–B60 / C12–C18)" + the front-end & experience batch B61–B66 / C19–C28) — the live, wave-ordered
+dispatch lists, backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation
+principles"** section first) and `docs/audits/2026-06-09-frontend-experience-audit.md`, governed by
+**ADR `docs/decisions/0003`**. *Pick the next item from the queue, not from this paragraph* (it stays
+current; this prose drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**;
+OpenHands isn't configured). The prior post-audit batch 0038–0044 folds into that queue — **0041, the
+linchpin, is now built** (the `SoulStore` is live in the sandbox; souls evolve and modulate behavior),
+0039 and 0040 done, 0038 partially done (B27b remains), 0042–0044 still to build. See
+[Current status](#current-status).
 
 ## Source of truth — read these first
 
@@ -57,6 +64,19 @@ leak-prone build is a **failure state**, not a partial success.
 4. **Non-degradation.** Persisted detail must **never** be lost across saves and should
    *accumulate and deepen* over a game. The old version's secret store thinned out over time;
    do the exact opposite.
+
+**The conversation is the game (`docs/decisions/0003`).** The beta proved the loop — a good LLM +
+the Bible + secrets *is* the game. The engine exists only to fix the four degradations above
+(leaks / sycophancy / memory-thinning / sameness) and otherwise **get out of the model's way**:
+prefer removing context to adding it; hand the model *facts to voice*, never *scripts to recite*;
+UI may **augment** the chat intelligently but never **replace** an interaction that builds or
+progresses the game; **lingering is play** (the player can mill around any room, learn who's
+present/adjacent, and talk to anyone — while those NPCs keep playing *their* game, and nothing
+force-marches the week); **people must make sense** (one place at a time; speech scoped to what
+each NPC legitimately knows; stable public persona); replayability is engine-seeded, and
+long-term memory is the store *recalled*, never the chat *remembered*. Each of these is
+**testable structurally** where possible (see the ADR's testability section). Don't "improve"
+the game into a dashboard.
 
 ## Architecture (hexagonal)
 
