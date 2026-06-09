@@ -90,3 +90,31 @@ adding the **0043** bloc, **0041** emotional-state, and **0039** deal signals, a
 **0001** (Vault Wall) and seeded. Honors the user's two highest-priority asks (NPC nomination & vote engines)
 the right way: the systems exist — this gives them the strategic dimensions that keep the game from feeling
 one-note, without ever letting the storyteller decide.
+
+## 8. Implementer-ready (Definition of Ready)
+
+**Touch points (exact):**
+- `src/engine/season.ts` `chooseNominations(hoh, active, rel)` (L72) — generalize into a blended
+  `nominationStrategy(hoh, active, rel, blocs?, week?, constants?)` (keep `chooseNominations` as a
+  threat-only fallback so callers compile before deps land). Call site: `liveSeason.ts` L363.
+- `src/engine/liveSeason.ts` `npcChoice` (eviction vote, ~L169) — extend into
+  `voteChoice(voter, finalNominees, rel, blocs?, mood?, deals?, constants?)`; replacement selection
+  also reads the strategy (`selectableReplacements`, L151).
+- **New** `src/engine/decisionConstants.ts` — the single tunable module (sibling to
+  `relationshipConstants.ts` L47/L68): pawn/backdoor weights, bloc/mood/deal term scales, political-
+  temperature weight. **No magnitude hard-coded outside it.**
+
+**Build order / deps (ship in slices — guard new inputs as optional so it compiles early):**
+1. **Now (no deps):** threat-primary + **political temperature** (house-wide threat spread) + pawn/backdoor,
+   gated by HOH disposition (read `Character` archetype/soul).
+2. **+ 0043:** pass `blocs` → shield bloc-mates / target the shared enemy.
+3. **+ 0041:** pass `mood` (`emotionalState`) → rattled votes self-protectively.
+4. **+ 0039:** pass `deals` → honor/break a vote deal (with the betrayal consequence).
+
+**Test targets:** `tests/unit/strategicDecisions.test.ts` (+ deps' fakes) and
+`docs/features/0044-*.feature` → add to `cucumber.cjs`. Assert each DoD bullet (§6): noms beyond raw
+threat (pawn/backdoor/bloc, disposition-distinct), votes fold bloc/mood/deal, **engine-decided + seeded**,
+one constants module, never overrides 0005, no score on any player surface (extend the 0001 canary).
+
+**No open decisions.** Defaults: threat stays the dominant nomination signal; tactics are disposition-gated;
+all terms bounded. Tunable later via the new module / a future God-Mode knob.

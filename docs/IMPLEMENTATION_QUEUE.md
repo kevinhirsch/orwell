@@ -804,16 +804,18 @@ shipped **0037 — the interactive finale / jury-vote choreography** (engine bui
 staged statements → questions → vote reveal, through the 0034 seam) plus game-UI fixes (draggable HUDs, theme
 picker). Engine gate green: **230 unit + 222 BDD**.
 
-**Remaining:**
-- **Post-audit feature batch 0038–0044** (just drafted → **B27–B33**, all engine). A behavioral-fidelity /
-  anti-sycophancy audit found capabilities **built but unwired** + two genuine gaps: **0038** live off-screen
-  society (wire the real sim/gossip/soul into the watcher — TOP), **0039** promise/deal tracking, **0040** NPC
-  confessionals, **0041** character evolution/arc, **0042** competition library, **0043** emergent bloc
-  behavior (emergent, never stored — honors ADR 0002), **0044** strategic nom/vote refinements. Build 0038 first.
-- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** (Vault-free `finaleView` read) → **C11**
-  (`orwellFinale.js`). Engine + seam green; only the presentation is missing.
-- **0022 — MVP-2 (the rich game UI)** — the one deferred feature.
-- *(Stale-doc note: the audit confirmed the temperature "open decision" is resolved by 0028, and 0035's draft
-  still mislabels `SystemClock`/runtime wiring as "missing" — both corrected in this batch.)*
+**Remaining — ALL implementer-ready (each carries a §8 "Definition of Ready": exact touch points, build
+order/deps, test targets, no open decisions):**
+- **0038** live off-screen society — **B27a done**; **B27b** (gossip↔checkpoint reconciliation) ready (0038 §8).
+- **0040** NPC confessionals — **done (core)**; soul-recall feedback rides on 0041.
+- **0041** character evolution/arc — **Ready (§8), the LINCHPIN** (wires `SoulStore` into the live sandbox →
+  unblocks the deferred soul halves of 0038 + 0040). → B30.
+- **0039** promise/deal tracking (§8) → B28 · **0042** competition library (§8) → B31 · **0043** emergent bloc
+  behavior (§8, honors ADR 0002) → B32 · **0044** strategic nom/vote refinements (§8) → B33.
+- **0037 finale UI** — **B26** (Vault-free `finaleView` read) → **C11** (`orwellFinale.js`), per 0037 §8.
+- **0022 — MVP-2 (the rich game UI)** — the one deferred feature (no DoR yet).
+
+**Suggested build order for the implementer agents:** 0041 (linchpin) → 0039 / 0043 → 0044 (consumes 0043 +
+0041) → 0042 → B27b → 0037 UI. Each is independently buildable per its §8; 0044 reads best after 0043/0041.
 - *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
   `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*

@@ -90,3 +90,29 @@ Sits on top of **0006/0028** (the resolution math + temperature — unchanged), 
 dresses a specific comp), under **0005** (eligibility, orthogonal) and **0001** (the result stays
 stats/score-free). Replaces the hardcoded `HOH_TYPES`/`VETO_TYPES` week-index rotation with a seeded, tunable,
 testable library — variety the player feels, with the engine still the one who decides who wins.
+
+## 8. Implementer-ready (Definition of Ready)
+
+**Touch points (exact):**
+- **New** `src/engine/competitionLibrary.ts` — `CompetitionDef` (id, name, phase: "hoh"|"veto",
+  `governing`/`secondary` stat, `format`, `narrative {premise, beats[], winReads}`), the curated tunable
+  `COMPETITION_LIBRARY`, and `drawCompetition(phase, week, rng, recent[]): CompetitionDef` (deterministic;
+  avoids immediate repeats).
+- `src/engine/liveSeason.ts` — replace the hardcoded `HOH_TYPES`/`VETO_TYPES` (L124–125) + their use at the
+  HOH draw (L354) and the veto draw with `drawCompetition(...)`.
+- `src/domain/competitionOutcome.ts` — `resolveCompetition` (L61) keys off the def's governing stat; the
+  type→stat map already exists (`RELEVANT`, L23/L69). **Resolution math unchanged** (0006/0028 reused).
+- `src/ports/GameSession.ts` `CompetitionResultView` + `GameSessionAdapter.runCompetition` — carry the comp's
+  **name + format + narrative** (Vault-free); **no stats/scores** ever.
+
+**Build order / deps:** none — the resolution math (0006/0028) and eligibility (0005) are reused unchanged.
+
+**Test targets:** `tests/unit/competitionLibrary.test.ts` + `docs/features/0042-*.feature` → add to
+`cucumber.cjs`. Assert §6: a season draws **variety** (no immediate repeat), the **governing stat** decides
+the favorite, the **engine still picks the winner** (favorite ~strong-majority + real upsets, player
+unprotected — reuse the 0006 calibration style), the Vault-free result carries **name+format+narrative and
+NO stats/scores** (extend the 0001 canary to the enriched result), **0005 eligibility holds** under any drawn
+comp (six-player veto draw etc.), seed-deterministic.
+
+**No open decisions.** The library is curated content + a deterministic draw; the winner is still the
+engine's (anti-sycophancy). Narrative scaffolds are Vault-free flavor the narrator (0018) dresses.

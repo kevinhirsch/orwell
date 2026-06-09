@@ -96,3 +96,34 @@ the **0034** decision seam, with NPC↔NPC deals living in the **0038** off-scre
 **0002**; persisted by **0030**, under **0001** (Vault Wall) and **0021** (isolation). Turns the implicit
 "a betrayal moves edges" into an explicit, tracked, engine-adjudicated promise — the deterministic core
 deciding that a broken word costs you, not the narrator.
+
+## 8. Implementer-ready (Definition of Ready)
+
+**Touch points (exact):**
+- **New** `src/engine/deals.ts` — the `Deal` type (`{ id, parties:[a,b], kind:"safety"|"vote"|"final-two"|
+  "target-other", terms, condition, status:"open"|"kept"|"broken", madeEventId, resolvedEventId? }`),
+  `makeDeal(...)`, and `reconcile(deals, action): Deal[]` (engine-decided kept/broken from the action +
+  condition — never prose).
+- **Persistence (0030):** add `deals: Deal[]` to `SessionCore` (`src/engine/sessionSnapshot.ts` L25) so deals
+  round-trip and survive a restart (cloneSession/toGameState already handle plain JSON).
+- **Make a deal:** add `makeDeal` to the `EngineCommands` port + `EngineCommandsAdapter` (sibling to
+  `recordInteraction`/`diaryRoom`) for player↔NPC deals (recorded knowledge); NPC↔NPC deals are made
+  off-screen (0038) and held **Vault-held** (hidden).
+- **Reconcile on binding actions:** hook `reconcile` where the live loop applies a binding choice —
+  `src/engine/liveSeason.ts` `applyDecision` (nominations/replacement/eviction-vote). On **broken**:
+  `rel.applyDirected(wronged, breaker, "betrayal", rng)` (betrayal-shock, `relationshipConstants` 0026) +
+  a jury-management demerit via `jury.ts` `EvictionManner`/`mannerToward` (L24) + a recorded **witnessed
+  reveal** event when the wronged party witnesses/learns it.
+
+**Build order / deps:** 0026 (betrayal-shock — built), 0014/`jury.ts` (manner — built), 0030 (persistence —
+built) are all ready. The **player↔NPC deal object + reconciliation ships now**; **NPC↔NPC rumor diffusion**
+of a broken deal rides on **B27b** (gossip) — guard that path so it no-ops until B27b lands.
+
+**Test targets:** `tests/unit/deals.test.ts` + `docs/features/0039-*.feature` → add to `cucumber.cjs`.
+Assert §6: a first-class **persisted** deal (survives restart, 0030), **engine-decided** kept/broken (never
+prose), broken ⇒ **betrayal fold + jury demerit + reveal** (measurable later behavior change), NPC↔NPC deals
+**Vault-held** (player learns only via pathway), **no number** on any player surface (extend the 0001 canary),
+seed-deterministic.
+
+**No open decisions.** Model only the concrete BB deal kinds (safety / vote / final-two / target-other); the
+engine adjudicates from the action + condition (anti-sycophancy); magnitudes reuse 0026's constants.
