@@ -104,10 +104,32 @@ fail-closed status round-trip, logout — all per-user and correctly routed); th
 tab (localStorage, applies live, admin-guard on the one server-touch hazard); **tools/users/
 system** actions all `require_admin` server-side (UI hiding never trusted).
 
+## Design rulings (2026-06-09, post-audit — these override the recommendations above)
+
+The product owner ruled on the findings; the queue items encode the rulings, not the original
+recommendations:
+
+1. **S1 ruled: LLM config is GLOBAL by design.** The first admin sets up services/ai and those
+   settings are global for all users. Logically-global things are global, unchangeable by, and
+   **hidden from** non-admins; user-based **preferences** persist per-profile only. **The
+   chat-bar model switcher stays for every user** — selecting among the admin-provisioned
+   models is a per-profile preference; what's hidden is the config/management surface. (The
+   audit's "per-user LLM config" recommendation is superseded → **C30**.)
+2. **S2 ruled: search is NOT pruned — it is critical and must be re-wired.** The agent must be
+   able to leverage web search **in-fiction**: a player references something the model doesn't
+   know (a new movie, mid-conversation with a houseguest) → the agent silently searches and
+   synthesizes the reply **in that houseguest's voice**. Amends the 0032 drop-set → **C32**
+   (with the hard guardrail that search informs real-world flavor only, never game truth).
+3. **S6 ruled: keep ALL theme customization tools and make them better** (presets on top, AA
+   contrast clamp, working harmony/fonts) — the prune recommendation is superseded → folded
+   into **C27**.
+4. Everything else stands as recommended.
+
 ## Queue mapping
 
-- **S1 + S4 → new item C30** (per-user LLM config + honest failures).
-- **S2 + S3 + S5 → new item C31** (settings game-build prune done properly).
-- **S6** → already covered by **C27**.
+- **S1 + S4 → C30** (global LLM config per the ruling + per-profile preferences + honest failures).
+- **Search ruling → C32** (re-wire web search as an in-fiction agent capability; amends 0032).
+- **S3 + S5 → C31** (settings prune — S2's search-hide is superseded by C32).
+- **S6** → folded into **C27** per the ruling (keep + improve).
 - S1 also amends the round-3 **B69** acceptance (the "playable after install" readiness check
   must hold for a non-admin user once C30 lands).
