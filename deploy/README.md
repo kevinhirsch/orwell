@@ -31,6 +31,23 @@ if you renamed the container or run more than one. A container provisioned **bef
 — the engine and front-end still honor the deprecated `BBAI_*` env, so its `data/.env` keeps working
 untouched.
 
+### Factory reset (back to OOBE)
+
+To scrub **all** game + user data and start over as if freshly installed — every sandbox (saves,
+souls, the hidden Vault layer) and the whole front-end store (accounts, settings, uploads) — run
+**inside the container as root**:
+
+```bash
+bash /opt/orwell/deploy/orwell-factory-reset.sh             # prompts: type RESET
+bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # preview what would be removed
+bash /opt/orwell/deploy/orwell-factory-reset.sh --yes       # no prompt (automation)
+```
+
+It stops the services, removes the data, and restarts — the next visit begins at first-run
+onboarding. **Config is preserved** (`data/.env`: ports, engine URL, LLM keys), so the box still
+boots and reaches your LLM. Unlike `orwell-update.sh` (which never touches `data/`), this is the
+one script that deliberately **does**.
+
 ## Config UX (community-scripts style)
 
 On a TTY the installer shows a **whiptail menu** with every field pre-populated:
@@ -75,6 +92,7 @@ CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
 | `orwell.sh` | Host-side: create the Proxmox LXC, then run the in-container install. |
 | `orwell-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
 | `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) and updates there; inside the container it runs directly. Auto-detects the app dir (`/opt/orwell`, or legacy `/opt/bbai`) and the matching service names. |
+| `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
 
