@@ -86,3 +86,27 @@ describe("B34 — engine network boundary", () => {
     }
   });
 });
+
+describe("B35 — the request handler is guarded (audit E2)", () => {
+  it("a sandbox-resolution failure for one user is a 500, never a process crash for the rest", async () => {
+    const reg = new GameSessionRegistry();
+    const inner = reg.resolver();
+    // Simulate an unreadable save surfacing during resume for one user only.
+    const resolver = {
+      resolve: (channel: "player" | "admin", user: string) => {
+        if (user === "boom") throw new Error("unreadable save");
+        return inner(channel, user);
+      },
+    };
+    const { base, close } = await listen(createHttpMcpServer(resolver));
+    try {
+      const boom = await post(base, "/player/call", { name: "createCharacter", args: { playerName: "P", seed: 1 } }, { "x-orwell-user": "boom" });
+      expect(boom.status).toBe(500); // contained to this request
+      // The process is alive and other users are unaffected.
+      const ok = await post(base, "/player/call", { name: "createCharacter", args: { playerName: "P", seed: 1 } }, { "x-orwell-user": "ok" });
+      expect(ok.status).toBe(200);
+    } finally {
+      await close();
+    }
+  });
+});

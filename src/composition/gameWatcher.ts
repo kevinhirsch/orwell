@@ -50,19 +50,25 @@ export class GameWatcher {
     const now = this.clock.now();
 
     for (const user of this.registry.usernames()) {
-      if (!this.registry.sandboxFor(user).session.snapshot().started) continue;
-      // The house lives between sessions: bounded off-screen ticks on idle games.
-      if (now - this.orchestrator.idleSince(user) >= this.cfg.idleTickAfterMs) {
-        for (let i = 0; i < this.cfg.maxOffscreenTicksPerWake; i++) {
-          this.orchestrator.advance(user, "offscreen-tick");
+      // A single corrupt/failed sandbox (e.g. an unreadable save surfaced during resume) must not
+      // throw out of the tick and stop every OTHER user from advancing — isolate and skip it (E2).
+      try {
+        if (!this.registry.sandboxFor(user).session.snapshot().started) continue;
+        // The house lives between sessions: bounded off-screen ticks on idle games.
+        if (now - this.orchestrator.idleSince(user) >= this.cfg.idleTickAfterMs) {
+          for (let i = 0; i < this.cfg.maxOffscreenTicksPerWake; i++) {
+            this.orchestrator.advance(user, "offscreen-tick");
+          }
         }
-      }
+      } catch { /* skip this user this tick; the orchestrator records its own integrity faults */ }
     }
 
     // Integrity audit on its own cadence — verify only, no progression.
     if (this.cfg.auditEveryMs > 0 && now - this.lastAuditAt >= this.cfg.auditEveryMs) {
       this.lastAuditAt = now;
-      for (const user of this.registry.usernames()) this.orchestrator.advance(user, "audit");
+      for (const user of this.registry.usernames()) {
+        try { this.orchestrator.advance(user, "audit"); } catch { /* skip a failed sandbox's audit */ }
+      }
     }
   }
 }

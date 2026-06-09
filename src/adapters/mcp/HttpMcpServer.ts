@@ -76,49 +76,69 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    const url = new URL(req.url ?? "/", "http://localhost");
+    // Guard the whole request (audit E2): an unexpected throw — e.g. resolving a sandbox whose save
+    // is unreadable — becomes a 500 for THIS request, never an uncaughtException that exits the
+    // process and crash-loops every user. The async tool-call path adds its own structured catches.
+    try {
+      const url = new URL(req.url ?? "/", "http://localhost");
 
-    // Health is an unauthenticated liveness probe — it carries no game data (deploy smoke / systemd).
-    if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
+      // Health is an unauthenticated liveness probe — it carries no game data (deploy smoke / systemd).
+      if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
 
-    const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
-    if (!match) return send(404, { error: "not found" });
+      const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
+      if (!match) return send(404, { error: "not found" });
 
-    // (2) Shared-secret auth on every tool route, when a token is configured.
-    if (options.token && presentedToken(req.headers) !== options.token) {
-      return send(401, { error: "unauthorized" });
-    }
+      // (2) Shared-secret auth on every tool route, when a token is configured.
+      if (options.token && presentedToken(req.headers) !== options.token) {
+        return send(401, { error: "unauthorized" });
+      }
 
-    // (3) Identity: in multi-user mode a missing/empty user header is refused, never routed to "default".
-    const rawUser = headerValue(req.headers[USER_HEADER]);
-    if (options.requireUser && !rawUser) return send(400, { error: "missing user identity" });
-    const user = rawUser ?? "default";
-    const channel = match[1] as "player" | "admin";
+      // (3) Identity: in multi-user mode a missing/empty user header is refused, never routed to "default".
+      const rawUser = headerValue(req.headers[USER_HEADER]);
+      if (options.requireUser && !rawUser) return send(400, { error: "missing user identity" });
+      const user = rawUser ?? "default";
+      const channel = match[1] as "player" | "admin";
 
-    if (req.method === "GET" && match[2] === "tools") {
-      return send(200, { tools: pick(channel, user).listTools() });
-    }
+      if (req.method === "GET" && match[2] === "tools") {
+        return send(200, { tools: pick(channel, user).listTools() });
+      }
 
-    if (req.method === "POST" && match[2] === "call") {
-      let body = "";
-      req.on("data", (chunk) => (body += chunk));
-      req.on("end", () => {
-        void (async () => {
-          try {
-            const { name, args } = JSON.parse(body || "{}") as { name: string; args?: Record<string, unknown> };
+      if (req.method === "POST" && match[2] === "call") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          void (async () => {
+            let name: string, args: Record<string, unknown> | undefined;
+            try {
+              ({ name, args } = JSON.parse(body || "{}") as { name: string; args?: Record<string, unknown> });
+            } catch {
+              return send(400, { error: "invalid JSON body" });
+            }
             // (4) Don't mint a sandbox for an unknown user unless they are starting a game.
             if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
               return send(404, { error: "no active game for this user" });
             }
-            send(200, { result: await pick(channel, user).callTool(name, args ?? {}) });
-          } catch (e) {
-            send(400, { error: (e as Error).message });
-          }
-        })();
-      });
-      return;
+            // Resolving the sandbox can fail (e.g. an unreadable save) — that's a server error (500),
+            // distinct from a bad tool/args (400). Either way the process stays up.
+            let server: McpServer;
+            try {
+              server = pick(channel, user);
+            } catch {
+              return send(500, { error: "internal error" });
+            }
+            try {
+              send(200, { result: await server.callTool(name, args ?? {}) });
+            } catch (e) {
+              send(400, { error: (e as Error).message });
+            }
+          })();
+        });
+        return;
+      }
+      return send(405, { error: "method not allowed" });
+    } catch {
+      return send(500, { error: "internal error" });
     }
-    return send(405, { error: "method not allowed" });
   });
 }
 
