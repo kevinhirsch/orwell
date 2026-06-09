@@ -99,3 +99,39 @@ The **content** behind **0035**'s watcher: reuses **0003** (off-screen richness)
 (knowledge propagation), **simulation.ts** (varied sim), **0023/0026** (consequence fold), **0024**
 (`SoulStore` recall) — under **0001** (Vault Wall) and **0021** (isolation), bounded by **0031**. Closes the
 gap the 0035 draft itself flags as highest-priority: the house must not just *tick* but *live*.
+
+## 8. B27b — live gossip→player diffusion + the checkpoint reconciliation
+
+**The trap (found while wiring B27a).** Routing `diffuseGossip` through the **0031 fail-closed checkpoint**
+produces a **false-positive leak** that rolls back every advance. The 0031 leak check is a coarse
+substring heuristic — `hidden.some(c => playerView.includes(c))` — and gossip breaks it two ways:
+1. **Provenance collision.** `transmitGossip` records each retelling as an event whose content is the
+   generic `"gossip told-by:npc:Y"`. The *same string* is both a **hidden** NPC→NPC retelling and the
+   **player's received** (non-hidden) event when a rumor reaches them — so a hidden event's content
+   "appears" in the player view, and the heuristic cries leak.
+2. **Superset content.** `distort()` *appends* a hedge to the original, so a verbatim hidden fact is a
+   substring of the rumor the player legitimately hears.
+
+**The principle.** A leak is hidden content reaching the player **without a pathway**. Gossip **is** a
+pathway — recorded transmissions + a `KnowledgeFact` with provenance/confidence. Content the player
+**legitimately holds via a knowledge pathway is not a leak**, even if it overlaps hidden content. The
+0031 substring check conflates "propagated by a traceable pathway" with "leaked."
+
+**The fix (buildable).**
+- **(a) Refine the 0031 leak heuristic to be pathway-aware.** Flag a hidden event's content as a leak
+  only if it appears in the player projection **and is not covered by the player's legitimate knowledge**
+  (their `KnowledgeService` facts / witnessed events). Concretely: exclude, from the leak comparison, any
+  content the player holds as a `KnowledgeFact` with a pathway (gossip "told-by", "overheard",
+  "surfaced"). The 0001 **sentinel canary stays the precise Vault-Wall guard** (seeded secret *values*
+  never appear) — this only stops the runtime heuristic from false-flagging traceable propagation.
+- **(b) Keep the rumor a vague paraphrase** (never the verbatim hidden scene — defense in depth; already
+  the approach in the B27a draft: "word is X and Y have something going on").
+- **(c) Then wire `diffuseGossip` into the off-screen tick** over a house graph with a **low transmit
+  probability** (partial, distorted spread — not everyone hears everything), reaching the player only via
+  a terminating pathway, as a belief with **source + confidence**, never a number.
+- **(d) Add 0035 + 0038 to `cucumber.cjs`.**
+
+**Acceptance (B27b):** a hidden fact diffuses NPC→NPC with drift/decay/provenance; a rumor reaches the
+player as a pathway belief (source + confidence) — and the **0031 checkpoint still commits the advance**
+(no false leak) **while the 0001 sentinel canary stays green** (no real secret value leaks). Bounded,
+seeded, isolated.
