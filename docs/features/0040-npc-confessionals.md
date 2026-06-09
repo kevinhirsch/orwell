@@ -1,11 +1,14 @@
 # 0040 — NPC Diary Room confessionals (Vault-only interiority)
 
-> **Status:** Draft. NPCs get their **own** Diary-Room confessionals — a private, **Vault-only** read of
-> the game that grounds their voice and strategy. Today `"confessional"` is only an **event-type enum**
-> (`domain/event.ts`, `ports/VaultStore.ts`) with **no mechanism** that generates one, gives it content,
-> or feeds it back into behavior. This feature defines **when** confessionals trigger, **what** they
-> contain (engine-grounded from the soul + relationships — not free narration), and **how** they feed the
-> soul — while staying **absolutely walled** from the player *and* the admin. MISSING today.
+> **Status:** **Implemented (core).** `src/engine/confessionals.ts` (`confessionalFor` + `recordConfessional`)
+> generates a houseguest's private read **grounded in their real relationship signals** (top-threat target +
+> strongest bond — not invented), recorded **Vault-only** (hidden, `witnessSet:[npc]`); wired into the live
+> off-screen tick (`Orchestrator.defaultApply`) so an involved NPC confesses as the house schemes. Proven
+> **walled from BOTH the player and the admin** (the admin surface reads no events) and seed-deterministic —
+> `tests/unit/npcConfessionals.test.ts` (5). **Remaining:** the **soul-recall feedback** (confessionals
+> grounding that NPC's later *voice* via `recall`) needs a `SoulStore` in the live sandbox — **feature 0041**;
+> and the trigger is currently the off-screen tick (a refinement could fire them specifically at
+> nomination/eviction beats). Was: only an unused `"confessional"` event-type enum.
 > **Executable spec:** [`0040-npc-confessionals.feature`](./0040-npc-confessionals.feature)
 
 ## 1. Summary

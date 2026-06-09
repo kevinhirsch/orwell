@@ -737,12 +737,15 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > the **betrayal-shock** fold (0026) + a jury-management demerit (0014) + a witnessed reveal. Persisted (0030);
 > Vault-walled (NPC↔NPC reach the player only by 0038 rumor). Add to `cucumber.cjs`. Open a PR.
 
-### B29 — 0040 NPC Diary Room confessionals
+### B29 — 0040 NPC Diary Room confessionals  ·  **DONE (core)**
 
-> Implement `docs/features/0040-npc-confessionals.{md,feature}`. A beat-driven (0008/0034) generator that, for
-> involved NPCs, builds an **engine-grounded** confessional (target by threat, trust reads, plan — from soul +
-> relationships), recorded **Vault-only** (witness `{npc}`, hidden) and folded to the soul. **Walled from the
-> player AND admin/God Mode** (extend the 0001 canary to both). Add to `cucumber.cjs`. Open a PR.
+> ✅ `src/engine/confessionals.ts` (`confessionalFor` + `recordConfessional`): an engine-grounded private read
+> (top-threat target + strongest bond, from the relationship signals — not invented), recorded **Vault-only**
+> (hidden, `witnessSet:[npc]`); wired into the live off-screen tick. Proven **walled from the player AND the
+> admin** (the admin surface reads no events) + seed-deterministic — `tests/unit/npcConfessionals.test.ts` (5).
+> **Remaining:** the **soul-recall feedback** (grounding the NPC's later voice) needs a `SoulStore` in the live
+> sandbox — **feature 0041**; optionally fire confessionals specifically at nomination/eviction beats (today
+> the trigger is the off-screen tick).
 
 ### B30 — 0041 character evolution & season arc
 
