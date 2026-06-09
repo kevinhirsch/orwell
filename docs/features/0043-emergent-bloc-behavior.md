@@ -88,3 +88,27 @@ Honors **0002** (organic, unstored alliances — the crux) by **deriving** blocs
 relationship edges; the bloc read feeds **0011/0014** (nominations/votes) and fractures via **0023/0039**
 (betrayal); under **0001** (Vault Wall) and **0007** (nothing stored), isolated per **0021**. Gives the house
 real bloc politics — coordinated targeting and dramatic collapses — without a single stored label.
+
+## 8. Implementer-ready (Definition of Ready)
+
+**Touch points (exact):**
+- **New** `src/engine/blocs.ts` — `detectBlocs(rel, active): Bloc[]`, PURE + stateless. Build the
+  mutual-bond graph from `RelationshipModel.edge(a,b)` (`relationships.ts` L81; `EdgeSignals
+  {trust,affinity,threat}`) — an undirected edge iff both directions' bond `(trust+affinity)/2` ≥ the
+  `allianceThreshold` (already a model field, L63; reuse it). Greedy-cluster to size ~2–5. Each `Bloc`
+  derives `{ members, sharedTarget (max aggregate threat outside the bloc), cohesion (weakest internal bond) }`.
+- Wire a **bloc term** into the decision reads: `season.ts` `chooseNominations` (L72) and `liveSeason.ts`
+  `npcChoice` (~L169) — shield bloc-mates, target the shared enemy. (0044 enriches further; 0043 lands the
+  basic term so blocs *do something*.)
+
+**Build order / deps:** none to build `detectBlocs` (it reads existing edges). It's the input 0044's
+nomination/vote strategy consumes — land `detectBlocs` + a basic decision term here; 0044 deepens it.
+
+**Test targets:** `tests/unit/blocs.test.ts` + `docs/features/0043-*.feature` → add to `cucumber.cjs`.
+Assert §6: blocs **derived not stored** (serialize `SessionSnapshot` — `sessionSnapshot.ts` — and confirm
+**no bloc/label**, cross-check 0007), a shared target, bloc-mates coordinate > chance, **fracture on
+betrayal** (drop a bond via `applyDirected(...,"betrayal")`, recompute → smaller/split bloc), Vault-free
+(no roster on any player surface — extend the 0001 canary), seed-deterministic.
+
+**No open decisions.** Crux is **ADR 0002**: never store an alliance/ally/enemy label — `detectBlocs` runs
+every read and persists nothing. Bloc-size bound + thresholds live as named constants in `blocs.ts`.

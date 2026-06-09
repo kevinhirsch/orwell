@@ -85,12 +85,12 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done |
 | 0037 | [Live jury-vote choreography (the interactive finale)](./0037-live-jury-vote-choreography.md) | Gameplay | Engine Done · *finale-UI (C11) pending* |
 | 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | Varied society live · *gossip→player + soul (B27b) pending* |
-| 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | Draft |
+| 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | **Ready (DoR §8)** |
 | 0040 | [NPC Diary Room confessionals (Vault-only interiority)](./0040-npc-confessionals.md) | Behavioral fidelity | Done (core) · *soul-recall feedback = 0041* |
-| 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | Draft |
-| 0042 | [Competition library (variety + narrative formats)](./0042-competition-library.md) | Gameplay | Draft |
-| 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | Draft |
-| 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | Gameplay / anti-sycophancy | Draft |
+| 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | **Ready (DoR §8)** · linchpin |
+| 0042 | [Competition library (variety + narrative formats)](./0042-competition-library.md) | Gameplay | **Ready (DoR §8)** |
+| 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | **Ready (DoR §8)** |
+| 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | Gameplay / anti-sycophancy | **Ready (DoR §8)** |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
