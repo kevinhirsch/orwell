@@ -73,9 +73,27 @@ fi
 
 # ── In-container (or direct) reset ─────────────────────────────────────────────────────────────
 APP_DIR="$(find_app || true)"; APP_DIR="${APP_DIR:-/opt/orwell}"
-DATA_DIR="${ORWELL_DATA_DIR:-${APP_DIR}/data}"
-FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
+
+# CONFIG dir: where the engine's EnvironmentFile (.env) lives — we PRESERVE .env here.
+CONFIG_DIR="${ORWELL_CONFIG_DIR:-${APP_DIR}/data}"
+ENV_FILE="${CONFIG_DIR}/.env"
 ENV_KEEP=".env"
+
+# ENGINE SAVE dir: where the game actually persists (saves + the hidden Vault layer).
+# This is the crux of an earlier bug — the engine (src/adapters/engine/FileSaveStore.ts)
+# writes per-user saves to ORWELL_DATA_DIR / BBAI_DATA_DIR, FALLING BACK to ./.orwell-data
+# (relative to its WorkingDirectory = APP_DIR). The install never sets ORWELL_DATA_DIR, so
+# the real save lives at <app>/.orwell-data — NOT <app>/data. Resolve it the same way the
+# engine does: an explicit env override, then the .env, then the ./.orwell-data fallback.
+env_val() { [[ -f "$ENV_FILE" ]] && grep -E "^[[:space:]]*${1}=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'\'']//;s/["'\'']$//;s/\r$//'; }
+ENGINE_SAVE_DIR="${ORWELL_DATA_DIR:-}"
+[[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="$(env_val ORWELL_DATA_DIR || true)"
+[[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="$(env_val BBAI_DATA_DIR || true)"
+[[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="${APP_DIR}/.orwell-data"
+# A relative ORWELL_DATA_DIR (e.g. ./.orwell-data) resolves against the engine CWD = APP_DIR.
+[[ "$ENGINE_SAVE_DIR" == /* ]] || ENGINE_SAVE_DIR="${APP_DIR%/}/${ENGINE_SAVE_DIR#./}"
+
+FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
 
 # Service names follow the install: prefer orwell-*, fall back to legacy bbai-* units.
 unit_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
@@ -99,8 +117,9 @@ sanity_path() {
   depth="$(awk -F/ '{print NF-1}' <<<"$p")"
   [[ "${depth}" -ge 2 ]] || die "${label} '${raw}' is too shallow — refusing (need e.g. /opt/orwell/...)."
 }
-sanity_path "$DATA_DIR"    "engine DATA_DIR"
-sanity_path "$FE_DATA_DIR" "front-end FE_DATA_DIR"
+sanity_path "$CONFIG_DIR"      "engine CONFIG_DIR"
+sanity_path "$ENGINE_SAVE_DIR" "engine SAVE dir"
+sanity_path "$FE_DATA_DIR"     "front-end FE_DATA_DIR"
 
 # ── Environment detection ─────────────────────────────────────────────────────────────────────
 have_systemd=0
@@ -108,21 +127,24 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then ha
 svc_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
 
 if [[ "$DRY_RUN" -eq 0 && "$(id -u)" -ne 0 ]]; then
-  if [[ "$DATA_DIR" == /opt/* || "$FE_DATA_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
-    die "run as root (sudo): needs to stop services and remove ${DATA_DIR} / ${FE_DATA_DIR}."
+  if [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$FE_DATA_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
+    die "run as root (sudo): needs to stop services and remove the game data under ${APP_DIR}."
   fi
 fi
 
-sandbox_count() { [[ -d "$DATA_DIR" ]] && find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ' || echo 0; }
-SANDBOXES="$(sandbox_count)"
+# Count sandboxes across BOTH the config dir (in case ORWELL_DATA_DIR=<app>/data) and the
+# real engine save dir, so the confirmation prompt reflects what will actually be removed.
+count_dirs() { [[ -d "$1" ]] && find "$1" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ' || echo 0; }
+SANDBOXES="$(count_dirs "$ENGINE_SAVE_DIR")"
+[[ "$ENGINE_SAVE_DIR" != "$CONFIG_DIR" ]] && SANDBOXES="$(( SANDBOXES + $(count_dirs "$CONFIG_DIR") ))"
 
 # ── Confirmation (skipped by --yes / --dry-run) ───────────────────────────────────────────────
 if [[ "$DRY_RUN" -eq 0 && "$ASSUME_YES" -eq 0 ]]; then
   cat <<EOF
 This PERMANENTLY DELETES all orwell game + user data:
-  • ${SANDBOXES} game sandbox(es)  under ${DATA_DIR}/<user>/   (saves, souls, hidden Vault layer)
-  • the entire front-end store     ${FE_DATA_DIR}/             (database, settings, uploads, app key)
-Preserved (config only):           ${DATA_DIR}/${ENV_KEEP}
+  • ${SANDBOXES} game sandbox(es)  under ${ENGINE_SAVE_DIR}/<user>/   (saves, souls, hidden Vault layer)
+  • the entire front-end store     ${FE_DATA_DIR}/                    (database, settings, uploads, app key)
+Preserved (config only):           ${CONFIG_DIR}/${ENV_KEEP}
 The next visit will start at first-run onboarding (OOBE).
 EOF
   read -r -p "Type 'RESET' to proceed: " ans
@@ -143,13 +165,25 @@ else
   warn "systemctl not present — skipping service stop (dev mode). Stop the app yourself first."
 fi
 
-# ── 2. Scrub the engine sandboxes (everything in DATA_DIR except the preserved .env) ──────────
-msg "scrubbing engine sandboxes in ${DATA_DIR} (keeping ${ENV_KEEP})"
-if [[ -d "$DATA_DIR" ]]; then
+# ── 2a. Scrub the engine SAVE dir — the real per-user games (saves + hidden Vault layer). ─────
+#       This is the dir the engine actually writes to (./.orwell-data by default); the earlier
+#       version missed it entirely, which is why a "reset" left the game intact.
+msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
+if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-    < <(find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" -print0)
+    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" -print0)
 else
-  warn "engine data dir ${DATA_DIR} absent — nothing to scrub"
+  warn "engine save dir ${ENGINE_SAVE_DIR} absent — nothing to scrub there"
+fi
+
+# ── 2b. Also scrub any sandboxes that landed in the CONFIG dir (covers ORWELL_DATA_DIR=<app>/data),
+#       always KEEPING .env (the preserved config). Skipped when it's the same dir as 2a.
+if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
+  msg "scrubbing config dir ${CONFIG_DIR} (keeping ${ENV_KEEP})"
+  if [[ -d "$CONFIG_DIR" ]]; then
+    while IFS= read -r -d '' entry; do do_rm "$entry"; done \
+      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+  fi
 fi
 
 # ── 3. Scrub the front-end store (DB + key + settings + all data files); recreate empty ──────
