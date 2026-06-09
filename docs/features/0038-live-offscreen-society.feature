@@ -1,7 +1,10 @@
 # DRAFT executable spec — author: feature-maker; implementer makes it pass.
-# Feature 0038 — Live off-screen society: wire the rich sim + gossip diffusion + soul writes into the
-# watcher tick (0035). Tests use a FAKE clock (no real timers). HARD rule: roles only (player, NPC).
-# Add 0035 + 0038 to cucumber.cjs when green.
+# Feature 0038 — Live off-screen society. Tests use a FAKE clock (no real timers). Roles only.
+#
+# STATUS: the "varied off-screen society" half is IMPLEMENTED + unit-gated (tests/unit/offscreenSociety.test.ts)
+# — scenarios 1, 5, 6 below hold today. PARKED (B27b): the gossip→player diffusion scenarios (2, 3) need the
+# 0031 checkpoint's substring leak-heuristic reconciled with legitimate gossip pathway propagation; the soul
+# scenario (4) needs a SoulStore wired into the live sandbox (feature 0041). Not yet in cucumber.cjs.
 
 Feature: Live off-screen society
 

@@ -714,13 +714,20 @@ A behavioral-fidelity / anti-sycophancy audit (transcript) found several capabil
 and two genuine gaps. These specs close them. Build priority: **0038 first** (biggest "feels flat" risk,
 pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 
-### B27 — 0038 live off-screen society  ·  **TOP — wires existing code**
+### B27 — 0038 live off-screen society  ·  **B27a DONE; B27b remaining**
 
-> Implement `docs/features/0038-live-offscreen-society.{md,feature}`. Route the orchestrator's live off-screen
-> tick (`Orchestrator.defaultApply`, behind the 0035 watcher) through the **rich, already-built** sim instead
-> of the 4-verb `simulateOffscreenStretch`: varied `simulateSeason`-class interactions, `diffuseGossip`
-> (NPC→NPC belief travel that can terminate at the player as a distorted rumor), and `recordToSoul`. Keep it
-> bounded (0031), seeded, Vault-walled, isolated. **Add 0035 AND 0038 to `cucumber.cjs`.** Gates green. Open a PR.
+> **B27a (DONE):** the orchestrator's live off-screen tick (`Orchestrator.defaultApply`) now runs
+> `richOffscreenStretch` — **seven varied interaction types** folded into the relationship layer by their true
+> nature (was a 4-verb stub). Bounded/seeded/Vault-walled/isolated; unit-gated (`offscreenSociety.test.ts`).
+>
+> **B27b (remaining):** (1) **live gossip→player diffusion** — `diffuseGossip` is built but routing it through
+> the 0031 fail-closed checkpoint trips a **false-positive leak** (the generic `"gossip told-by:npc:Y"`
+> provenance string collides between a hidden NPC→NPC retelling and the player's received event). Reconcile the
+> checkpoint's substring leak-heuristic with legitimate pathway propagation (e.g., make the leak check ignore
+> content the player legitimately holds via a knowledge pathway, or give gossip events unique non-colliding
+> content), then wire gossip into the tick (vague paraphrased rumor only — never the verbatim hidden scene).
+> (2) **soul deepening** is **feature 0041** (the live sandbox has no `SoulStore` yet). Then add 0035 + 0038 to
+> `cucumber.cjs`. Gates green. Open a PR.
 
 ### B28 — 0039 promise & deal tracking
 
