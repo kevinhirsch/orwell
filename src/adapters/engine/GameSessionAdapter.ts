@@ -44,16 +44,15 @@ import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
-import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
-import type { CompetitionType, Competitor } from "../../domain/competitionOutcome";
+import type { CompetitionType } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
 import { RelationshipModel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, type LiveSeasonState,
-  type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition,
+  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
   type FinaleProgress,
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -630,26 +629,36 @@ export class GameSessionAdapter implements GameSession {
     return { moment, systemPrompt: buildSystemPrompt(moment, view) };
   }
 
+  /**
+   * Report the live loop's competition — it is NOT a second resolver (B37/audit A1+A3). The weekly
+   * loop (`advanceGame` → `liveSeason`) is the SOLE authority on who wins; `runCompetition` only
+   * PREVIEWS the current competition beat's deterministic winner (the loop crowns the same one when
+   * the beat advances — same seed). Per remediation principle #3 it validates references and ignores
+   * foreign input: ids only, unknown/evicted ids refused, caller stats never read.
+   */
   runCompetition(req: RunCompetitionReq): CompetitionResultView {
-    const type = (COMP_TYPES.has(req.type ?? "") ? req.type : "endurance") as CompetitionType;
-    if (!this.house) {
-      return { started: false, type, week: 0, phase: this.phase, winner: null };
+    const fallbackType = (COMP_TYPES.has(req.type ?? "") ? req.type : "endurance") as CompetitionType;
+    if (!this.house) return { started: false, type: fallbackType, week: 0, phase: this.phase, winner: null };
+
+    // Validated references: any caller-supplied id must be a LIVING houseguest (never evicted/unknown).
+    if (req.participantIds?.length) {
+      const known = new Set([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
+      const evicted = new Set(this.live?.evictionOrder ?? []);
+      if (req.participantIds.some((id) => !known.has(id) || evicted.has(id))) {
+        return { started: true, type: fallbackType, week: this.week, phase: this.phase, winner: null };
+      }
     }
-    // The whole house competes by default; the engine reads its OWN stats (never the caller's).
-    const all = [this.house.player, ...this.house.npcs];
-    const ids = req.participantIds?.length ? new Set(req.participantIds) : null;
-    const pool = ids ? all.filter((h) => ids.has(h.id)) : all;
-    const field = pool.length >= 2 ? pool : all;
-    const competitors: Competitor[] = field.map((h) => ({
-      id: h.id,
-      stats: h.character.stats,
-      emotionalState: "soul" in h ? h.soul.emotionalState : 0.5,
-    }));
-    // Deterministic per moment so a given week/phase/type resolves the same way.
-    const rng = new SeededRandom(hashSeed(`${this.week}:${this.phase}:${type}`));
-    const { winner } = resolveCompetition(competitors, type, new CompetitionIntents(), rng);
-    const w = field.find((h) => h.id === winner)!;
-    return { started: true, type, week: this.week, phase: this.phase, winner: { id: w.id, name: w.name } };
+
+    // Single authority: the field + winner come from the loop, computed from the live house's own
+    // stats/souls (caller stats ignored). The evicted are never in an eligibility pool by construction.
+    if (this.live) {
+      const peek = peekCompetition(this.live, this.ctx(), this.beatRng());
+      if (peek) return { started: true, type: peek.type, week: this.week, phase: this.phase, winner: this.named(peek.winner) };
+      // Between competitions: report the most recently crowned comp from public ceremony state — no re-roll.
+      const last = this.ceremony.vetoHolder ?? this.ceremony.hoh;
+      return { started: true, type: fallbackType, week: this.week, phase: this.phase, winner: last ? this.named(last) : null };
+    }
+    return { started: true, type: fallbackType, week: this.week, phase: this.phase, winner: null };
   }
 
   /** The Vault-free projection. Player card = authored persona (no numeric stats); NPCs = name + status only. */
