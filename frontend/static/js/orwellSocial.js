@@ -29,6 +29,7 @@ import { makeWindowDraggable } from "./windowDrag.js";
       : fn();
 
   let timer = null;
+  let pendingApproachId = null;  // approach prefilled but not yet sent
 
   // Approaches the player has acted on or waved off. Persisted so a refresh (or a sent
   // scene) doesn't resurrect a handled approach; cleared when a new game begins.
@@ -42,6 +43,7 @@ import { makeWindowDraggable } from "./windowDrag.js";
   }
   function clearDismissed() {
     dismissed = new Set();
+    pendingApproachId = null;
     try { localStorage.removeItem(DISMISS_KEY); } catch (_) {}
   }
 
@@ -112,6 +114,12 @@ import { makeWindowDraggable } from "./windowDrag.js";
         #orwell-social .osoc-chip .osoc-x {
           cursor: pointer; opacity: .55; border: none; background: none; color: inherit;
           font-size: .9rem; line-height: 1; padding: 0 .2rem;
+        }
+        #orwell-social .osoc-chip.osoc-chip-pending {
+          border-color: var(--accent, #e06c75); opacity: .85;
+        }
+        #orwell-social .osoc-chip.osoc-chip-pending .osoc-go b {
+          color: var(--accent, #e06c75);
         }
         #orwell-dr-modal {
           position: fixed; inset: 0; z-index: 10000; display: none;
@@ -231,7 +239,7 @@ import { makeWindowDraggable } from "./windowDrag.js";
 
   // --- Approaches ---------------------------------------------------------------
 
-  function startScene(name) {
+  function startScene(name, id) {
     // "Acting" on an approach starts a scene the normal way: prefill the composer and focus it,
     // so the player sends it themselves (we never auto-send or fabricate a turn).
     const box = document.getElementById("message");
@@ -239,12 +247,40 @@ import { makeWindowDraggable } from "./windowDrag.js";
     box.value = `I pull ${name} aside for a quiet word.`;
     box.dispatchEvent(new Event("input", { bubbles: true }));
     box.focus();
+    pendingApproachId = id;
   }
+
+  // When the player actually sends a message, dismiss the pending approach so
+  // the chip clears — the scene has been initiated, no need to keep it.
+  function onMessageSend() {
+    if (pendingApproachId !== null) {
+      dismiss(pendingApproachId);
+      pendingApproachId = null;
+      // Re-render using the last fetched list (next poll will update naturally).
+      const wrap = document.getElementById("osoc-appr");
+      const hd = document.getElementById("osoc-appr-hd");
+      if (wrap) { wrap.innerHTML = ""; if (hd) hd.style.display = "none"; }
+    }
+  }
+  // Hook into the send button and Enter-to-submit on the composer.
+  const _wireComposer = () => {
+    const form = document.getElementById("chat-form") || document.querySelector("form");
+    if (form && !form._orwellSocialWired) {
+      form._orwellSocialWired = true;
+      form.addEventListener("submit", onMessageSend);
+    }
+    const btn = document.getElementById("send-btn") || document.querySelector("[id$='-send']");
+    if (btn && !btn._orwellSocialWired) {
+      btn._orwellSocialWired = true;
+      btn.addEventListener("click", onMessageSend);
+    }
+  };
 
   function renderApproaches(list) {
     const wrap = document.getElementById("osoc-appr");
     const hd = document.getElementById("osoc-appr-hd");
     if (!wrap) return;
+    _wireComposer();
     const items = (Array.isArray(list) ? list : [])
       .filter((it) => it && it.houseguest && it.houseguest.id && !dismissed.has(it.houseguest.id))
       .slice(0, MAX_APPROACHES); // only one houseguest pulls you aside at a time
@@ -256,16 +292,25 @@ import { makeWindowDraggable } from "./windowDrag.js";
       const pretext = it.pretext || "wants a word with you";
       const chip = document.createElement("div");
       chip.className = "osoc-chip";
+      if (id === pendingApproachId) chip.classList.add("osoc-chip-pending");
       const go = document.createElement("span");
       go.className = "osoc-go";
-      go.title = "Pull them aside";
+      go.title = "Pull them aside — prefills the composer";
       go.innerHTML = `<b></b> <span class="osoc-pre"></span>`;
       go.querySelector("b").textContent = name;
       go.querySelector(".osoc-pre").textContent = pretext;
-      go.addEventListener("click", () => { startScene(name); dismiss(id); renderApproaches(list); });
+      // Clicking "go" prefills but does NOT dismiss immediately — the chip
+      // stays until the player actually sends the message or hits the X.
+      // This prevents the frustrating cycle where three quick clicks dismiss
+      // all approaches before a single message is written.
+      go.addEventListener("click", () => { startScene(name, id); renderApproaches(list); });
       const x = document.createElement("button");
-      x.className = "osoc-x"; x.title = "Dismiss"; x.textContent = "×";
-      x.addEventListener("click", () => { dismiss(id); renderApproaches(list); });
+      x.className = "osoc-x"; x.title = "Skip (dismiss)"; x.textContent = "×";
+      x.addEventListener("click", () => {
+        if (pendingApproachId === id) pendingApproachId = null;
+        dismiss(id);
+        renderApproaches(list);
+      });
       chip.appendChild(go); chip.appendChild(x);
       wrap.appendChild(chip);
     }

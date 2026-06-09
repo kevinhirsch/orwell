@@ -1557,6 +1557,38 @@ function initAppearance() {
       window.applyUIVis({});
     });
   }
+
+  var resetWinBtn = el('reset-window-positions-btn');
+  if (resetWinBtn) {
+    resetWinBtn.addEventListener('click', function() {
+      // Clear every window position + minimized key stored by the HUDs and
+      // any dragged modal. The panels will revert to their CSS defaults on the
+      // next open / next poll cycle.
+      var KEYS = [
+        'orwell-status-pos', 'orwell-status-min',
+        'orwell-social-pos', 'orwell-social-min',
+      ];
+      // Also sweep any generic winsize/pos keys the drag system may have written.
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (k && (k.startsWith('winpos-') || k.startsWith('winsize-') || k.startsWith('modal-pos-'))) {
+          KEYS.push(k);
+        }
+      }
+      KEYS.forEach(function(k) { try { localStorage.removeItem(k); } catch (_) {} });
+      // Reset inline positions of the currently-visible HUD panels so they
+      // snap back immediately without requiring a page reload.
+      ['orwell-status', 'orwell-social'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.style.left = '';
+          el.style.top = '';
+          el.style.right = '';
+          el.style.transform = '';
+        }
+      });
+    });
+  }
 }
 
 function syncAppearanceCheckboxes() {
