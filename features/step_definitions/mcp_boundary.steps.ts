@@ -155,6 +155,8 @@ Then("it contains no stat scores, rankings, or Vault-derived reasoning", functio
 
 Given("a hidden fact the player does not know", function (this: BbWorld) {
   this.factContent = "a hidden plan surfaced via MCP";
+  // Anchored (A4): the teller (npc:2) legitimately holds the fact; the PLAYER does not yet know it.
+  this.sandbox!.engine.knowledge.seedBelief(npc(2), { content: this.factContent, factId: "mcp-plan" }, "witnessed");
   assert.ok(!this.sandbox!.engine.knowledge.knownTo(PLAYER).some((k) => k.content === this.factContent));
 });
 

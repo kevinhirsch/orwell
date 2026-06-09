@@ -118,9 +118,10 @@ Given("an NPC who witnessed it", function (this: BbWorld) {
 });
 
 When("that NPC tells the player about it", function (this: BbWorld) {
+  // Anchored (A4): the teller WITNESSED the hidden event, so they may legitimately surface it.
   this.surfaced = this.sandbox.engine.knowledge.surfaceInformationTo(
     PLAYER, { content: this.hiddenEvent!.content }, `told-by:${this.npc}`,
-  );
+  ) ?? undefined;
 });
 
 Then("that fact enters the player's knowledge state", function (this: BbWorld) {
