@@ -1,11 +1,14 @@
 # 0039 — Promise & deal tracking (first-class deals)
 
-> **Status:** Draft. **Deals are core _Big Brother_ texture** — "I won't put you up," final-2s,
-> votes-for-votes — and today they have **no first-class representation**: a betrayal only registers if a
-> caller happens to tag a `recordInteraction` with `kind:"betrayal"`. This feature adds a **`Deal` domain
-> model** (parties, terms, the condition that would break it, kept/broken status) that the **engine**
-> evaluates against binding actions — so a broken promise **deterministically** moves trust/threat and the
-> jury, recorded and consequential, **never narrated away** (anti-sycophancy). MISSING today.
+> **Status:** ✅ GREEN (in `cucumber.cjs`). **Deals are core _Big Brother_ texture** — "I won't put you
+> up," final-2s, votes-for-votes — and they are now a **first-class tracked object**: a `Deal` domain model
+> (parties, terms, the condition that would break it, kept/broken status) that the **engine** evaluates
+> against binding actions — so a broken promise **deterministically** moves trust/threat and the jury,
+> recorded and consequential, **never narrated away** (anti-sycophancy). Implemented in `src/domain/deal.ts`
+> (model + condition predicates), `src/engine/deals.ts` (the `DealLedger`: make / reconcile / consequences),
+> wired into the live loop via `GameSessionAdapter` (player↔NPC deals, `makeDeal` tool/lever) with the
+> betrayal-shock fold (0026), a jury demerit (`manner.betrayed`, 0014), a witnessed reveal (0002), and
+> persistence (0030); NPC↔NPC deals are Vault-held (canary-covered).
 > **Executable spec:** [`0039-promise-and-deal-tracking.feature`](./0039-promise-and-deal-tracking.feature)
 
 ## 1. Summary
@@ -73,16 +76,17 @@ visibility: player sees deals they are PARTY to + observable fallout; NPC↔NPC 
 
 ## 6. Definition of Done
 
-- [ ] **First-class + persisted:** a made deal is a tracked `Deal` object (status `open`), persisted and
-      surviving a restart (0030); making it records an event.
-- [ ] **Engine-decided kept/broken:** when a binding action implicates an open deal, the engine marks it
-      **kept** or **broken** from the action + condition — **never** parsed from narration.
-- [ ] **A broken promise hurts (anti-sycophancy):** it applies a **betrayal-shock** (trust↓/threat↑, sticky,
-      0026) and a **jury-management** demerit (0014), and surfaces a **witnessed reveal** to the wronged
-      party — measurably changing later NPC/jury behavior.
-- [ ] **Vault Wall:** NPC↔NPC deals are Vault-held and reach the player only as a **rumor by pathway** (0038);
-      no player surface shows a trust/threat number (extend the 0001 canary).
-- [ ] Seed-deterministic; name-agnostic (roles only — promisor/promisee/wronged); added to `cucumber.cjs`;
+- [x] **First-class + persisted:** a made deal is a tracked `Deal` object (status `open`), persisted in the
+      session snapshot and surviving a restart (0030); making it records a player-witnessed event.
+- [x] **Engine-decided kept/broken:** `DealLedger.reconcile` marks an implicated open deal **kept** or
+      **broken** from the structured action + condition (`actionBreaks`/`actionHonors`) — never from prose.
+- [x] **A broken promise hurts (anti-sycophancy):** it applies the **betrayal-shock** fold (trust↓/threat↑,
+      sticky, 0026), records a **jury demerit** (`manner.betrayed`, 0014), and surfaces a **witnessed reveal**
+      to the wronged party (0002).
+- [x] **Vault Wall:** NPC↔NPC deals are Vault-held (never an outward fact) and reach the player only as a
+      **rumor by pathway**; no player surface shows a trust/threat number (0001 canary extended with an
+      NPC-deal sentinel).
+- [x] Seed-deterministic; name-agnostic (roles only — promisor/promisee/wronged); added to `cucumber.cjs`;
       `npm test` + `npm run test:arch` green.
 
 ## 7. Dependencies & traceability

@@ -52,6 +52,17 @@ function buildUserSandbox(): UserSandbox {
     hidden: false,
     content: ev.content,
   }));
+  // One-off witnessed events (a deal made / a promise broken, 0039). Hidden iff the player is NOT
+  // a witness — so a player-party deal is their knowledge, never the Vault.
+  session.setOnPlayerEvent((content, witnessSet, type = "deal") => {
+    const id = `deal:${engine.events.query().length}`;
+    engine.events.record({
+      id, ts: engine.events.query().length, type,
+      initiator: witnessSet[0] ?? PLAYER, witnessSet: [...witnessSet],
+      hidden: !witnessSet.includes(PLAYER), content,
+    });
+    return id;
+  });
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
   return {
     engine,

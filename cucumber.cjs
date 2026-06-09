@@ -38,6 +38,7 @@ module.exports = {
       "docs/features/0031-game-orchestrator-and-integrity-watcher.feature",
       "docs/features/0034-live-weekly-progression-and-decision-seam.feature",
       "docs/features/0037-live-jury-vote-choreography.feature",
+      "docs/features/0039-promise-and-deal-tracking.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

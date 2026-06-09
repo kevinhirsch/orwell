@@ -40,6 +40,7 @@ export interface Sandbox {
   addOffscreenEvent(): VaultDatum;
   addReservedTwist(): VaultDatum;
   addHiddenAttribute(): VaultDatum;
+  addNpcDeal(): VaultDatum;
   competitionViewForPlayer(): PlayerCompetitionView;
   surfaceHiddenFactToPlayer(): { content: string };
   allPlayerOutputs(): string;
@@ -88,6 +89,21 @@ export function buildSandbox(seed = 1): Sandbox {
     return { id, content, sentinel };
   };
 
+  // An NPC↔NPC deal (0039): a hidden pact the player never witnessed. Vault-held with a sentinel,
+  // so the canary proves a secret deal can never bleed onto a player surface.
+  const recordNpcDeal = (a: EntityId, b: EntityId): VaultDatum => {
+    const sentinel = freshSentinel("npc-deal");
+    const id = `vault:${sc}`;
+    const content = `[npc-deal] ${a} and ${b} struck a hidden final-two pact ${sentinel}`;
+    engine.events.record({
+      id: nextEvId(), ts: sc, type: "conversation",
+      initiator: a, witnessSet: [a, b], hidden: true, content,
+    });
+    engine.vault.writeHidden({ id, kind: "hidden-thread", content });
+    hiddenContents.push(content);
+    return { id, content, sentinel };
+  };
+
   // --- Fully populate the Vault with sentinels ---
   for (let i = 1; i <= 4; i++) addVault("hidden-attribute", npc(i));
   for (let i = 1; i <= 3; i++) {
@@ -99,6 +115,7 @@ export function buildSandbox(seed = 1): Sandbox {
   }
   addVault("hidden-thread");
   addVault("hidden-thread");
+  recordNpcDeal(npc(2), npc(3)); // a hidden NPC↔NPC deal (0039) — Vault-walled like any secret
   for (let i = 1; i <= 3; i++) recordOffscreen(npc(i), npc(i + 1), "schemed with", "offscreen");
   addVault("reserved-twist");
 
@@ -153,6 +170,7 @@ export function buildSandbox(seed = 1): Sandbox {
     addOffscreenEvent: () => recordOffscreen(npc(6), npc(7), "betrayed", "offscreen-extra"),
     addReservedTwist: () => addVault("reserved-twist"),
     addHiddenAttribute: () => addVault("hidden-attribute", npc(8)),
+    addNpcDeal: () => recordNpcDeal(npc(6), npc(7)),
     competitionViewForPlayer: () => {
       // Engine-side stats are Vault/engine-only and carry a sentinel...
       const statSentinel = freshSentinel("stat");

@@ -27,6 +27,18 @@ export interface HouseguestCard {
   status: string;
 }
 
+/**
+ * A Vault-free projection of a deal the PLAYER is party to (0039): the FACT and status only —
+ * parties, kind, terms, kept/open/broken. NEVER a trust/threat number; NPC↔NPC deals never appear.
+ */
+export interface DealView {
+  id: string;
+  parties: NamedRef[];
+  kind: string;
+  terms: string;
+  status: "open" | "kept" | "broken";
+}
+
 /** The Vault-free projection of the running game the front-end may render. */
 export interface GameStateView {
   started: boolean;
@@ -36,6 +48,15 @@ export interface GameStateView {
   moment: string;
   player: PlayerCard | null;
   house: HouseguestCard[];
+  /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
+  deals?: DealView[];
+}
+
+/** The player makes a deal WITH a houseguest (player↔NPC). NPC↔NPC deals are off-screen/Vault-held. */
+export interface MakeDealReq {
+  with: EntityId;
+  kind: "safety" | "vote" | "final-two" | "target-other";
+  terms: string;
 }
 
 export interface CreateCharacterReq {
@@ -211,6 +232,12 @@ export interface GameSession {
   advanceGame(): AdvanceView;
   /** Resolve the current pending decision and continue the loop (validated; 0011). */
   submitDecision(req: SubmitDecisionReq): AdvanceView;
+  /**
+   * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
+   * a player-witnessed event (their knowledge); the engine reconciles it against later binding
+   * actions and makes a broken promise hurt. Returns the new deal's Vault-free projection.
+   */
+  makeDeal(req: MakeDealReq): DealView | null;
   /**
    * Which houseguests want to approach the player right now (0012/0036) — relationship-driven
    * (allies scheme, rivals probe), so scenes start from EITHER side, not only player→NPC. Returns

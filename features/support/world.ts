@@ -255,6 +255,16 @@ export class BbWorld extends World {
   veto?: VetoDraw;
   rel?: RelationshipModel;
 
+  // Promise & deal tracking (0039) scratch state.
+  ledger?: import("../../src/engine/deals").DealLedger;
+  dealRel?: RelationshipModel;
+  madeDeal?: import("../../src/domain/deal").Deal;
+  dealJuryDemerits?: Array<{ wronged: EntityId; breaker: EntityId }>;
+  dealReveals?: Array<{ wronged: EntityId; breaker: EntityId; witnessSet: EntityId[] }>;
+  dealTrustBefore?: number;
+  dealThreatBefore?: number;
+  dealVault?: VaultDatum;
+
   constructor(options: IWorldOptions) {
     super(options);
   }
