@@ -36,10 +36,13 @@ import type { McpServer } from "../../src/adapters/mcp/McpServer";
 interface NamedRef { id: string; name: string; }
 
 interface PendingDecision {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote";
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote"
+      | "finale-statement" | "finale-answer" | "juror-vote";
   by: NamedRef;
   options: NamedRef[];
   pick: number;
+  /** finale-answer: the legal structured appeals (engine enum values). */
+  appeals?: string[];
 }
 
 interface CeremonyStatus {
@@ -106,6 +109,13 @@ function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<str
       return { kind: "replacement", replacement: p.options[0]!.id };
     case "eviction-vote":
       return { kind: "eviction-vote", vote: p.options[0]!.id };
+    // --- 0037 interactive finale ---
+    case "finale-statement":
+      return { kind: "finale-statement", statement: "I played my own game." };
+    case "finale-answer":
+      return { kind: "finale-answer", appeal: p.appeals?.[0] ?? "own-game" };
+    case "juror-vote":
+      return { kind: "juror-vote", vote: p.options[0]!.id };
   }
 }
 
@@ -154,7 +164,10 @@ function checkAdvanceResult(
 
   const p = adv.pending;
   if (p) {
-    const minOptions: Record<string, number> = { nominations: 2, replacement: 1, "eviction-vote": 1, "veto-decision": 0 };
+    const minOptions: Record<string, number> = {
+      nominations: 2, replacement: 1, "eviction-vote": 1, "veto-decision": 0,
+      "finale-statement": 0, "finale-answer": 0, "juror-vote": 1,
+    };
     if (p.options.length < (minOptions[p.kind] ?? 0)) {
       anomalies.push({ ...loc, kind: "empty-pending-options", detail: `${p.kind} has ${p.options.length} options (need ${minOptions[p.kind]})` });
     }
@@ -243,7 +256,7 @@ async function runFullGame(
       const p = adv.pending;
       decisionCounts[p.kind] = (decisionCounts[p.kind] ?? 0) + 1;
       // Only submit if we have enough options (anomaly already recorded if not).
-      const minOpts: Partial<Record<string, number>> = { nominations: 2, replacement: 1, "eviction-vote": 1 };
+      const minOpts: Partial<Record<string, number>> = { nominations: 2, replacement: 1, "eviction-vote": 1, "juror-vote": 1 };
       if (p.options.length >= (minOpts[p.kind] ?? 0)) {
         const subAdv = await call<AdvanceResult>("submitDecision", autoResolve(p, strategy));
         if (subAdv) {
@@ -342,7 +355,7 @@ async function runFullGameDirect(
     if (adv.pending) {
       const p = adv.pending;
       decisionCounts[p.kind] = (decisionCounts[p.kind] ?? 0) + 1;
-      const minOpts: Partial<Record<string, number>> = { nominations: 2, replacement: 1, "eviction-vote": 1 };
+      const minOpts: Partial<Record<string, number>> = { nominations: 2, replacement: 1, "eviction-vote": 1, "juror-vote": 1 };
       if (p.options.length >= (minOpts[p.kind] ?? 0)) {
         const subAdv = await call<AdvanceResult>("submitDecision", autoResolve(p, strategy));
         if (subAdv) {
