@@ -19,9 +19,14 @@ off-screen watcher, social surface, interactive finale — the 0037 finale *UI* 
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0044**). **Current focus: the post-audit batch 0038–0044** (behavioral-fidelity /
-anti-sycophancy wiring — 0038 partially done, 0040 core done, **0041 is the linchpin**). See
-[Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
+(now through **0044**, plus audit-driven specs **0045–0048** to be drafted). **Active work — start
+here:** the **full product-audit batch** at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full
+product-audit batch (B34–B60 / C12–C18)") — the live, wave-ordered dispatch list of bugs/improvements,
+backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation principles"** section
+first). *Pick the next item from the queue, not from this paragraph* (it stays current; this prose
+drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**; OpenHands isn't
+configured). The prior post-audit batch 0038–0044 (behavioral-fidelity / anti-sycophancy wiring —
+0040 core done, **0041 is the linchpin**) folds into that queue. See [Current status](#current-status).
 
 ## Source of truth — read these first
 
@@ -56,6 +61,14 @@ leak-prone build is a **failure state**, not a partial success.
 4. **Non-degradation.** Persisted detail must **never** be lost across saves and should
    *accumulate and deepen* over a game. The old version's secret store thinned out over time;
    do the exact opposite.
+
+**The conversation is the game (`docs/decisions/0003`).** The beta proved the loop — a good LLM +
+the Bible + secrets *is* the game. The engine exists only to fix the four degradations above
+(leaks / sycophancy / memory-thinning / sameness) and otherwise **get out of the model's way**:
+prefer removing context to adding it; hand the model *facts to voice*, never *scripts to recite*;
+UI is for guardrails (confirm-on-binding) and memory (the wall), not for replacing talk;
+replayability is engine-seeded, and long-term memory is the store *recalled*, never the chat
+*remembered*. Don't "improve" the game into a dashboard.
 
 ## Architecture (hexagonal)
 
