@@ -62,6 +62,14 @@ leak-prone build is a **failure state**, not a partial success.
    *accumulate and deepen* over a game. The old version's secret store thinned out over time;
    do the exact opposite.
 
+**The conversation is the game (`docs/decisions/0003`).** The beta proved the loop — a good LLM +
+the Bible + secrets *is* the game. The engine exists only to fix the four degradations above
+(leaks / sycophancy / memory-thinning / sameness) and otherwise **get out of the model's way**:
+prefer removing context to adding it; hand the model *facts to voice*, never *scripts to recite*;
+UI is for guardrails (confirm-on-binding) and memory (the wall), not for replacing talk;
+replayability is engine-seeded, and long-term memory is the store *recalled*, never the chat
+*remembered*. Don't "improve" the game into a dashboard.
+
 ## Architecture (hexagonal)
 
 Keep the **domain core pure and dependency-free** (no I/O) regardless of stack choices.

@@ -1296,3 +1296,217 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > the missing **drift/injection tests** (pin `ORWELL_GAME_TOOLS`/schemas to `registry.ts`; assert `build_chat_context`
 > prepends the moment prompt when `started=true`). The single-user-mode God-Mode exposure (F8g) is mitigated by B36/C12's
 > reset guard — note it. **DoD:** `pytest` + the 0032 headless gate green; engine gate unaffected. Open a PR.
+
+---
+
+## Front-end & experience batch (B61–B63 / C19–C27) · 2026-06-09
+
+Dispatch prompts for the **front-end & experience audit** (`docs/audits/2026-06-09-frontend-experience-audit.md`).
+**Read `docs/decisions/0003-conversation-is-the-game.md` first — it governs the SHAPE of every item here.**
+The beta proved the loop: a good LLM + the Bible + secrets *is* the game; the engine exists only to fix four
+degradations (leaks / sycophancy / memory-thinning / sameness) and otherwise **get out of the model's way**. So
+these prompts are deliberately written *light*: **prefer removing context to adding it; hand the model facts to
+voice, never scripts to recite; UI is for guardrails (confirm-on-binding) and memory (the wall), not for replacing
+talk.** If a fix here would add framing the model doesn't need, script what it should improvise, or move play out
+of conversation into a dashboard — it's the wrong shape (ADR 0003's litmus test). Same lanes/house rules as the
+audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is a scope marker).
+
+**Amendments to the audit batch (C12–C18) — pick these up when you build those items:**
+- **C12** ← also handle the **mid-scene tool-error** path (N5): an outcome-tool error must yield a "feed glitched,
+  try again" beat, never a narrated winner — i.e. the game preamble (C19) must *not* carry the generic "a failed
+  tool is not a stopping condition — improvise" rule. Resume-specific severity: the longer the transcript, the more
+  convincing a fake continuation (F2).
+- **C13** ← the prompt also advertises a **second, non-existent** comp lever `resolveCompetition` (N4) — collapse the
+  manifest to one comp lever (pairs with B37/B61); the unrecorded in-chat Diary Room (U8) needs the same "the house
+  never hears this" banner as the modal, or unify on one DR affordance.
+- **C14** ← **substitute, don't restyle** (N3): on `game_active` turns, assemble a minimal game preamble *instead of*
+  `_AGENT_PREAMBLE`/`_AGENT_RULES`, not in addition to them. Also strip `npc:`/`phase:`/`pick:` from tool results
+  before they reach the model (N6). (Now scoped as **C19**.)
+- **C15** ← exact dropped-vertical strings + happy-path/paint-order flash (J8/R1), game-frame the setup copy (J9),
+  factory-reset must also clear FE game sessions (J12). (Folded into **C23**.)
+- **C16** ← split into the **confirm-on-binding guardrail** (C20, ADR-0003-light — *not* a decision-card builder) and
+  **the memory wall** (C21, roster/jury/self-status/portraits); U1's full `pending` data is the source either way.
+- **C18** ← add Page-Visibility gating + coalesce `/state`+`/initiatives` (P2); pin the `game-trim.css` link to the
+  build flag (P4).
+
+| Wave | Item(s) | Lane | Audit ref |
+|---|---|---|---|
+| **FE-0 — make it a game** (highest leverage, mostly small) | **B61** cast voices + prompt · **C19** minimal game preamble · **C22**§premiere · **C20** confirm-on-binding · **C21** memory wall | engine + FE | N1·N2·N4·N5·N7 / N3·N6 / J1 / U1·U2 / U3·V2 |
+| **FE-1 — make it reliable** | **B62** lifecycle moment fragments · **C22** lifecycle beats + new-season · **C23** onboarding onramp · **C24**§HUD-resilience | engine + FE | J1·J2·J7 / J3·J4 / J5·J6·J8·J9 / U5 |
+| **FE-2 — make it reachable** | **C25** accessibility · **C26** mobile · **C27**§bundle | FE | A1–A6 / M1–M3 / P1·P3·P4 |
+| **FE-3 — make it whole** | **B63** jury/self-status projection · **C24** beat dividers + social texture · **C27** identity + labels | engine + FE | U3 / U4·U6·U7 / V1·V3·R2 |
+
+---
+
+### B61 — cast voices: surface the public persona to the narrator + a light voice directive  ·  Claude Code  ·  **FE-0 · headline · audit N1+N2 (+N4/N5/N7 prompt edits)**
+
+> In `kevinhirsch/orwell` (TS engine). **This is the single biggest immersion win and it's mostly already paid for.**
+> The narrator is fed 15 names + a status word (`renderGameContext`, `momentPrompts.ts:127-140`; `HouseguestCard` =
+> `{id,name,status}`) while the engine already mints **Vault-free public facets** per NPC — archetype, strategyStyle,
+> background, age, appearance, presentation, a `PortraitDescriptor.vibe` (`characterFactory.ts:56-66, 311-335`),
+> already blessed outward-safe by the portrait pipeline. Per **ADR 0003** ("hand the model facts to voice, never
+> scripts to recite" + "anchors, not personalities-in-a-can"): (1) add a Vault-free `cast: CastVoiceCard[]` to
+> `GameStateView` (or a `getCastVoices` read tool) = `{id,name,status,archetype,strategyStyle,background,age,
+> appearance,presentation}` — **exclude** stats/soul/emotionalState/relationship edges/hidden elements; (2)
+> `renderGameContext` emits **one short vibe line per active NPC** ("Bemir Sason — mastermind, plays under-the-radar;
+> a bartender; 34, polished") and drops evicted houseguests; (3) add a tight **VOICE-DISTINCTNESS** block to
+> `BASE_GAME_MASTER_PROMPT` — distinct, archetype-grounded, **consistent week-to-week** voices, and the boundary
+> *"never invent biography beyond the supplied facets + recorded events"* — kept to a few sentences (ADR 0003:
+> minimal context). While in the prompt, also: **cut** the non-existent `resolveCompetition` lever (N4), add a
+> one-line **ground-truth cadence** ("read getGameState/gameStatus; never state week/phase/HOH/noms from memory;
+> progress beats only via advanceGame", N7), and a one-line **error rule** ("if a tool errors, don't narrate an
+> outcome — say the feed glitched, retry", N5). Seed-stable facets ⇒ the voice anchor never drifts; soul *evolution*
+> stays hidden (0041). **Acceptance:** the started-game prompt lists each active NPC's public vibe; two
+> different-archetype NPCs get demonstrably different descriptors; a sentinel-embedded soul/stat string never appears
+> in `cast`/`renderGameContext` output over a **registry-built** sandbox (extends E8/B42); a drift test asserts the
+> prompt names the cast fields + the consistency rule and no longer names `resolveCompetition`. Read ADR 0003,
+> `docs/features/0018`, `0004` first. Open a PR.
+
+### B62 — server-initiated lifecycle moments (premiere / re-entry / terminal), recap from the store  ·  Claude Code  ·  **FE-1 · audit J1+J7+J2 (engine half)**
+
+> In `kevinhirsch/orwell` (TS engine), give the front-end the engine support to open and close a season with
+> narration instead of dead air. Today the moment prompt attaches only on a player keystroke, so the game opens on an
+> empty chat (J1), resume is a frozen transcript (J7), and there's no ending (J2). Per **ADR 0003** ("long-term
+> memory is the store, recalled — never the chat, remembered"): add three **moment kinds** + Vault-free read support
+> the FE can fetch to render a *server-initiated* beat — **premiere** (move-in framing for a just-created game),
+> **re-entry** (a fresh-morning continuation grounded in current phase + recent **witnessed** events from the event
+> store, **never a recap of chat text**), and **terminal** (season-end: result + week, from the record). All
+> synthesized from the stores so a brand-new/limited context window loses nothing (the memory-survival fix). No new
+> dialogue authored — these are *framing facts + a moment fragment* the model voices. **Acceptance:** the engine
+> exposes a premiere/re-entry/terminal moment + the Vault-free facts each needs; a re-entry beat references the
+> correct week/phase and only witnessed events; outputs are sentinel-clean. Pairs with **C22**. Read ADR 0003,
+> `docs/features/0018`, `0030`, `0002` (witness model) first. Open a PR.
+
+### B63 — Vault-free jury-status & player-standing facts for the memory wall  ·  Claude Code  ·  **FE-3 · audit U3 (engine half)**
+
+> In `kevinhirsch/orwell` (TS engine), the roster the FE wants to render (C21) needs two tiny **public-fact**
+> additions: (1) mark evictees who are **jurors** (a `status:"juror"` once jury forms, or expose a public `juryStart`
+> week) so the jury can be tracked; (2) ensure the player's own **ceremony role** is derivable from public facts
+> (the player card vs `hoh`/`nominees`/`veto.holder`) — these are facts a real houseguest sees on the memory wall,
+> **not** a standing read ("safe"/"target"), which stays forbidden (0020). No numbers, no souls. **Acceptance:** the
+> projection distinguishes active / juror / evicted; the player's HOH/nominee/veto role is computable from the
+> Vault-free projection alone; sentinel sweep clean. Read `docs/features/0020`, `0014` first. Open a PR.
+
+### C19 — minimal game preamble (substitute, not append) + diegetic tool results  ·  Claude Code (front-end lane)  ·  **FE-0 · audit N3+N6 (replaces C14's restyle)**
+
+> In `kevinhirsch/orwell` `frontend/`. Per **ADR 0003** ("prefer removing context to adding it"), the biggest
+> reliability+immersion win is *less* prompt, not more. Today `build_chat_context` prepends the GM prompt to
+> `_AGENT_PREAMBLE` ("You are an AI assistant with tool access…") + `_AGENT_RULES` (`agent_loop.py:62-111`) — pages of
+> email/cookbook/calendar/document rules, including *"a failed tool is not a stopping condition — improvise"* (which
+> instructs the model to invent outcomes, N5) and *"don't search for things you already know"* (which invites
+> narrating from stale context, N7). On **`game_active`** turns, assemble a **minimal game preamble instead** of the
+> generic one: a single in-fiction tool-calling paragraph + only the rules that touch game tools; the GM prompt is the
+> sole persona authority. Gate strictly on `game_active` so non-game chat is untouched. Also (N6): give game-tool
+> results a diegetic formatter that **strips `npc:`/`phase:`/`pick:`** and maps ids→names before the result reaches
+> the model. **DoD:** "You are an AI assistant" never co-occurs with the GM prompt; no email/cookbook/calendar rule
+> text in a game-active turn's system messages; no `npc:\d+`/`phase:`/`pick:` token in a game-active tool-result fed
+> to the model; `pytest` green; engine gate unaffected. Read ADR 0003 first. Open a PR.
+
+### C20 — confirm-on-binding (the light decision guardrail)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U1+U2, reframed per ADR 0003**
+
+> In `kevinhirsch/orwell` `frontend/`. The engine returns a full Vault-free `pending` decision view (prompt, legal
+> `options[]`, `pick` count, `appeals[]`) that the FE entirely ignores, so binding choices are prose guesses with no
+> confirmation (U1/U2). **Per ADR 0003, the fix is a guardrail, NOT a decision-card-builder UI** — play stays in
+> conversation; only the *commitment* gets structured. When an `advanceGame`/`submitDecision` response carries a
+> non-null `pending`: present the engine's `prompt` + legal `options` (and `appeals` for finale answers) and require a
+> **single explicit confirm** before `submitDecision` fires, enforcing `pick` exactly. The player can still type their
+> reasoning/speech and have it voiced — the binding value comes only from the confirmed selection, never parsed prose
+> (the F4 invariant). Keep it light: a confirm affordance on the message, not a full modal dashboard. **DoD:** a
+> pending-nominations turn requires selecting exactly 2 and an explicit confirm before any `submitDecision`; a hedge
+> in prose cannot bind; the finale's statement→answer(appeal)→vote flow each require confirm; `pytest` green. Read
+> ADR 0003 first. Open a PR.
+
+### C21 — the memory wall (roster · jury · self-status · portraits)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U3+V2 (depends B63 for jury)**
+
+> In `kevinhirsch/orwell` `frontend/`. The status HUD shows 4 lines of a 16-person game (U3). **Per ADR 0003, UI here
+> serves *memory*, not play** — render the facts a real houseguest sees on the memory wall, all Vault-free and already
+> returned by the engine: the **roster** (`getGameState().house[]` `{name,status}`) grouped Active / Jury / Evicted
+> with eviction-order trail; **attrition** (N/16); the player's own **ceremony role** badge (HOH / ON THE BLOCK / VETO
+> — derived from public facts via B63, **never** a safe/target standing read, 0020); and **portraits** keyed to the
+> houseguest ids (the `portraits`/`image_gen` keep-set capability has no consumer today — wire it to the engine's
+> appearance facets / `portraitDescriptorFor`). No stats, souls, relationship numbers. **DoD:** roster matches
+> `house[]` exactly across the season; jury seats marked once formed; player role shown from public facts; portraits
+> render; a sentinel test proves the surface returns no Vault data; `pytest` + 0032 headless gate green. Read ADR
+> 0003, `docs/features/0020`, `0022` first. Open a PR.
+
+### C22 — render the lifecycle beats + a guarded new-season path  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J1+J7+J2+J3 (depends B62)**
+
+> In `kevinhirsch/orwell` `frontend/`, render the server-initiated beats B62 exposes so the season has a curtain-up,
+> a way back in, and an ending (today: dead air on start, a frozen transcript on resume, no terminal state). On
+> `createCharacter` success push the **premiere** beat as the first assistant message (no user input); on session
+> re-open with `game_active` push the **re-entry** morning beat; on a season ending render a **terminal card**
+> (won / evicted week-N / jury chose X) with a **guarded "New season"** affordance (J3) — confirm + start a fresh chat
+> session (so old-season context can't bleed, F7), routed through the B36 reset guard. **DoD:** chat shows a premiere
+> with no user input; reopening shows one re-entry beat referencing the right week/phase; reaching an ending shows a
+> terminal card; "New season" requires confirm and the first post-restart turn carries no prior-season messages;
+> `pytest` + 0032 headless gate green. Depends on **B62** (+ B36/C12). Open a PR.
+
+### C23 — onboarding onramp: model-gate sequencing, authoring depth, game-framed copy  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J4+J5+J6+J8+J9 (extends C15)**
+
+> In `kevinhirsch/orwell` `frontend/`, fix the first-run path. (J4) Before mounting onboarding, probe model
+> readiness; if no model, show a game-branded "connect a feed source to begin" step linking to setup, *then* author —
+> and never render the raw "No model selected for this chat" error on a game-active/onboarding session (today a fresh
+> install dead-ends there immediately after authoring). (J5/J6, **lightly** per ADR 0003) add an optional
+> backstory + a `NO_NPC_PATHWAY` **private-strategy** field (0015) and one line communicating the balanced-stats
+> stance ("like every houseguest, balanced, never invincible") — a few fields, not an RPG builder. (J8/J9) under the
+> game build, replace the "type /setup" welcome + the dropped-vertical tips ("web search and code execution",
+> "Compare mode") with game-framed copy, and don't let the generic welcome paint when onboarding will mount (also
+> covers C15's R1). **DoD:** fresh install yields one guided path (model → character → premiere); the raw model error
+> never shows on a game session; private strategy round-trips as `NO_NPC_PATHWAY` knowledge; no dropped-vertical
+> string under the game build; `pytest` + 0032 headless gate green. Read ADR 0003, `docs/features/0015` first. Open a PR.
+
+### C24 — HUD resilience · ceremony beat dividers · NPC-initiated social texture  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · audit U4+U5+U6+U7**
+
+> In `kevinhirsch/orwell` `frontend/`, three play-surface fixes. (U5) The HUDs `hidePanel()` on *any* error so they
+> vanish on a transient engine blip — distinguish engine-error (keep last-known values + a subtle offline dot) from
+> no-active-game (hide); share one poller across the two panels. (U4) Give narrated **ceremony beats** visual weight:
+> diegetic labels for game-tool thread nodes ("📺 Production", "🗳 Your move") with raw JSON hidden under the game
+> build, and a full-width **beat divider** ("— Nomination Ceremony · Week 3 —") from `AdvanceView.event.beat` +
+> `status` on ceremony advances. (U6/U7, per ADR 0003 "facts to voice, not scripts") the NPC-approach chip should
+> prefill **NPC-initiated** framing ("⟨Name⟩ catches your eye and drifts over—") rather than the canned, direction-
+> inverted "I pull ⟨name⟩ aside"; allow 2–3 concurrent approaches; move dismissals server-side. (Engine-side pretext
+> variety stays D8/B-lane; here, vary the prefill and stop reciting one line.) **DoD:** an injected 502 leaves the
+> panel visible with stale-state indication; a ceremony turn renders a labelled divider with no raw JSON; approaches
+> render NPC-initiated framing, ≥N concurrent; `pytest` + 0032 headless gate green. Open a PR.
+
+### C25 — accessibility batch (keyboard + screen-reader play)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit A1–A6**
+
+> In `kevinhirsch/orwell` `frontend/`, make the game layer accessible (the base app is; the game HUDs aren't). (A1)
+> Trap focus in the onboarding modal, `inert` the background, restore focus on close (today Tab walks into the dead
+> chat behind it — every new keyboard/SR player). (A2) Make the approach chips and Diary-Room actions real
+> `<button>`s (or role+tabindex+Enter/Space) and trap+Escape the DR dialog (today the core "pull someone aside"
+> interaction is mouse-only). (A3) Keep the status live-region always in the DOM and announce **deltas** only ("New
+> nominee: …"), not a full re-read every 20s. (A4) Replace `opacity` dimming with explicit AA-checked colors and add
+> a contrast clamp to the theme apply path. (A5) Stream narration into an off-live buffer and announce once on
+> completion (today it's a per-token stutter to SR). (A6) `aria-hidden` the decorative loader; mirror interactive
+> `title`s to `aria-label`. **DoD:** axe-core clean on the onboarding/social/status surfaces; the game is fully
+> operable by keyboard and screen reader; HUD text ≥4.5:1 across shipped + a generated light theme; `pytest` + 0032
+> headless gate green. Open a PR.
+
+### C26 — mobile batch (make a full season playable on a phone)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit M1–M3**
+
+> In `kevinhirsch/orwell` `frontend/`, the verdict today is *a season is not playable on a phone* (fixed-position
+> HUDs overlap the composer, draggable panels strand off-screen, modals don't fit short viewports). (M1) Under a
+> mobile breakpoint, dock the two HUDs into the sidebar / a bottom sheet — never free-float over the composer (today
+> two 220px `position:fixed; z-index:9000` panels collide with the composer's own mobile machinery; **zero media
+> queries** in any game file). (M2) Restore the default `mobileSkip` so HUDs aren't touch-draggable on phones (they're
+> docked per M1), and clamp-to-viewport after every drag end. (M3) Give the onboarding/DR cards `max-height:90vh;
+> overflow:auto` and stop touch-dragging the DR. **DoD:** at 390×844 neither HUD overlaps the composer or latest
+> message; HUDs not free-draggable on a phone; onboarding submit reachable at 390×667 landscape; `pytest` + 0032
+> headless gate green; verify on a phone-width viewport. Open a PR.
+
+### C27 — real game bundle, asset diet, visual identity & enum labels  ·  Claude Code (front-end lane)  ·  **FE-2/FE-3 · audit P1+P3+P4 + V1+V3+V5+R2**
+
+> In `kevinhirsch/orwell` `frontend/`. (P1) The script-strip is a **no-op** — it removes files `index.html` never
+> references while the multi-MB inherited bundle (`settings.js` 274KB, `chat.js` 251KB, `slashCommands.js` 268KB,
+> `admin.js` 126KB…) parses on every load. Ship a real game bundle (a tree-shaken entry importing only the game
+> keep-set + chat), or at minimum gate the inherited mega-module `<script>` tags through the same build flag.
+> (P3) Drop the CDN KaTeX/Mermaid under the game build (no math/diagrams in BB). (P4) Gate the `game-trim.css` `<link>`
+> on the build flag (today it's the one game-build asset the flag doesn't control). (V1, per ADR 0003: still light)
+> a game-branded landing/hero (season title, "Enter the house" CTA = onboarding) + BB composer placeholder, instead
+> of the generic "type /setup" workspace. (V3) Map engine phase enums → player labels ("Veto Ceremony", not
+> `veto-ceremony`); no raw enum in any HUD. (V5) Prune the theme picker to a curated set of season themes. (R2) Gate
+> the residual inherited modals/"Save to Documents" export so no dropped-vertical control is keyboard-reachable under
+> the game build. **DoD:** game-build page weight drops materially (`admin.js`/`presets.js` absent); no jsdelivr
+> request on a game-build load; `ORWELL_GAME_BUILD=0` restores full workspace chrome; no raw enum or dropped-vertical
+> control in the player surface; `pytest` + 0032 headless gate green. Read ADR 0003 first. Open a PR.
