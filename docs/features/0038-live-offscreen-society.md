@@ -1,0 +1,99 @@
+# 0038 — Live off-screen society (wire the real simulation into the watcher)
+
+> **Status:** Draft. The **off-screen NPC life that runs between turns is a stub.** 0035 wired the
+> `GameWatcher` live, but the tick it runs (`Orchestrator.defaultApply`) only calls
+> `simulateOffscreenStretch` — **four canned verbs** ("schemed/gossiped/bonded/argued") + a single
+> relationship nudge. The *rich* machinery is **built, tested, and unwired from the live path:**
+> `simulation.ts` (`simulateSeason` — 7 interaction types, alliance form/fracture, weekly betrayal,
+> hidden-element surfacing), `gossip.ts` (`diffuseGossip` — NPC→NPC knowledge travel with drift,
+> confidence, provenance, terminating at the player), and `SoulStore` (`recordToSoul`/`recall`). This
+> feature **wires them into the watcher tick** so the house actually schemes, gossips, and evolves
+> between sessions — the **#1-mandate** (behavioral fidelity) gap, closed by reusing existing code.
+> **Executable spec:** [`0038-live-offscreen-society.feature`](./0038-live-offscreen-society.feature)
+
+## 1. Summary
+
+0035 made the house *tick* between turns; 0038 makes that tick **mean something**. Today an idle
+sandbox accrues monotype loyalty drift and nothing else — no varied scheming, no information spreading,
+no soul deepening. Yet the engine already contains all three behaviors, exercised only by unit tests.
+0038 routes the live off-screen advance through them, under the same bounds, seeding, Vault Wall, and
+isolation the watcher already guarantees (0031/0035).
+
+## 2. What exists today (the gap this closes)
+
+| Capability | Built in | Wired to the LIVE tick? |
+|---|---|---|
+| Off-screen tick on idle games | `composition/orchestrator.ts` `defaultApply` → `engine/offscreen.ts` `simulateOffscreenStretch` | ✅ but **thin** (4 verbs + 1 `applyDirected`) |
+| Varied social sim (7 types, alliance form/fracture, betrayal, surfacing) | `engine/simulation.ts` `simulateSeason` | ❌ **test-only** |
+| Knowledge propagation NPC→NPC (drift/confidence/provenance, ends at player) | `engine/gossip.ts` `diffuseGossip`; `KnowledgeService.transmitGossip` | ❌ **test-only** |
+| Soul evolution from off-screen life | `adapters/engine/SoulStore.ts` `recordToSoul` / `recall` | ❌ **test-only** |
+
+Net: the house's between-turn life is a 4-verb stub; the rich society never runs live.
+
+## 3. Scope
+
+**In:** route the live off-screen advance (`Orchestrator`'s apply step, behind the 0035 watcher) through
+the **rich** interaction sim (varied types + alliance form/fracture + bounded betrayal + rare hidden-element
+surfacing), run **gossip diffusion** over the social graph each stretch (so beliefs travel NPC→NPC and
+drift), and **fold each off-screen scene into the soul** (`recordToSoul`) and relationships
+(`applyDirected`). Keep it **bounded** (`maxOffscreenTicksPerWake`, 0031), **seed-deterministic**,
+**Vault-walled** (all hidden; only a pathway terminating at the player updates player knowledge — as a
+distorted belief with source + confidence, never a number), and **per-user isolated**. Add **0035 + 0038**
+to `cucumber.cjs` (0035 is not BDD-gated today).
+
+**Out:** rebuilding the sim/gossip/soul modules (reused, not rewritten); the watcher cadence/idle/bounds
+(0031/0035); player-initiated surfacing (`surfaceInformationTo`, already live); the weekly *ceremony* loop
+(0034 — this is the **between-beat** society, not the HOH→eviction spine).
+
+## 4. Design
+
+- **Rich apply step.** Replace the orchestrator's thin `defaultApply` content with the `simulateSeason`-class
+  generator: each off-screen stretch yields a *varied* set of NPC-to-NPC scenes (alliance talk, gossip,
+  conflict, bonding, strategy, showmance, betrayal) the player doesn't witness — bounded per wake. Each scene
+  is a hidden event (witness set excludes the player) recorded to the `EventStore` (0002).
+- **Gossip diffusion.** After the stretch, run `diffuseGossip` over the social graph: hidden beliefs travel
+  NPC→NPC, **drifting** (content distortion) with **decaying confidence** and tracked **provenance/hops**.
+  When a diffusion pathway **terminates at the player**, update player knowledge with the (possibly
+  distorted) belief + its source + confidence — so the player later *hears a rumor*, true or not. Diffusion
+  itself stays in the hidden layer (0002).
+- **Soul fold.** Fold each off-screen scene's hidden impact into the actor's/witness's **soul**
+  (`recordToSoul`, append-only — non-degradation, 0024) and the **relationship** edges (`applyDirected`,
+  0023/0026). `recall` becomes usable live (a later narration can surface a *specific* remembered slight).
+- **Bounds & determinism.** All of it runs inside the existing `advance(user, "offscreen-tick")` under
+  `maxOffscreenTicksPerWake`, seeded by the per-user RNG (0031) — identical seed + identical ticks ⇒
+  identical society. **Fail-closed** integrity checkpoint still applies (no degradation/leak).
+- **Vault Wall.** Every off-screen scene + every diffusion hop is **hidden**; the player surface shows **no
+  opinion numbers** — only later behavior and the rumors that reach them by pathway (sentinel-clean).
+
+## 5. Contracts (stack-agnostic)
+
+```
+Orchestrator off-screen apply (per idle tick, bounded):
+   scenes   = richOffscreenStretch(house, rng)        // varied hidden NPC↔NPC events (0003-class)
+   for each scene: events.record(hidden); rel.applyDirected(...); soul.recordToSoul(...)
+   diffuseGossip(graph, rng)                           // NPC→NPC belief travel; drift+confidence+provenance
+       → on a pathway terminating at the player: knowledge.update(player, belief{source,confidence})
+   (all hidden; player projection stays sentinel-clean; bounded by maxOffscreenTicksPerWake; seeded)
+```
+
+## 6. Definition of Done
+
+- [ ] **Varied life:** between turns an idle house produces **multiple interaction types** (not one canned
+      verb) — alliances shift, conflicts and bonding happen off-screen (assert variety, not a single kind).
+- [ ] **Information travels:** a hidden fact **diffuses NPC→NPC** with **drift + decaying confidence +
+      provenance**; a rumor can **reach the player** through a terminating pathway as a belief carrying a
+      **source + confidence** (possibly distorted) — and **never a number**.
+- [ ] **Souls deepen:** off-screen scenes **append to souls** (`recordToSoul`, monotonic — 0024/0007) and
+      become **recall-able** live; relationships move (`applyDirected`).
+- [ ] **Bounded + deterministic:** capped per wake (no season fast-forward); same seed + same ticks ⇒
+      identical society.
+- [ ] **Vault-free + isolated:** the player sees no opinion numbers/hidden scenes (extend the 0001 canary to
+      the live off-screen path); one user's society never bleeds into another's (0021).
+- [ ] **BDD-gated:** add **0035** and **0038** to `cucumber.cjs`; name-agnostic (roles only); `npm test` green.
+
+## 7. Dependencies & traceability
+
+The **content** behind **0035**'s watcher: reuses **0003** (off-screen richness), **gossip.ts/0002**
+(knowledge propagation), **simulation.ts** (varied sim), **0023/0026** (consequence fold), **0024**
+(`SoulStore` recall) — under **0001** (Vault Wall) and **0021** (isolation), bounded by **0031**. Closes the
+gap the 0035 draft itself flags as highest-priority: the house must not just *tick* but *live*.

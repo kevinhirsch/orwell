@@ -1,11 +1,14 @@
 # 0035 — Live off-screen life (start the watcher in the runtime)
 
-> **Status:** Draft — **functional gap; highest priority.** Feature 0031 built the `Orchestrator` +
-> `GameWatcher` + the `Clock`/`Scheduler` port (BDD-green with a **fake** clock), but **the live runtime
-> never starts them** and there is **no real-timer `Clock` adapter** (only `FakeClock`). So the live game
-> has **zero off-screen NPC life** — the house is **static between player turns**. That is a direct miss
-> against the **#1 mandate** (behavioral fidelity: off-screen NPC-to-NPC scheming the player never
-> witnesses). This feature **wires 0031 into the runtime** so the house lives between sessions.
+> **Status:** **Built** (core wired live; not yet BDD-gated). The `SystemClock` real-timer adapter
+> (`src/adapters/time/SystemClock.ts`), `composeRuntime()` (`src/composition/runtime.ts`), and the
+> `main.ts` instantiation + `start()` of the `GameWatcher` all shipped — so the watcher **runs in the live
+> runtime** (cadence via `ORWELL_WATCHER_*`; `TICK_MS=0` disables). **Remaining:** the off-screen *content*
+> the tick runs is thin (a 4-verb stub) — the depth is **0038**; and 0035 is **not yet in `cucumber.cjs`**
+> (added with 0038). The text below is the original gap analysis (now closed by the build).
+> *(Historical:)* Feature 0031 built the `Orchestrator` + `GameWatcher` + the `Clock`/`Scheduler` port
+> (BDD-green with a **fake** clock), but the live runtime never started them and there was **no real-timer
+> `Clock` adapter** — so the live game had zero off-screen NPC life. This feature wired 0031 into the runtime.
 > **Executable spec:** [`0035-live-offscreen-life-running-watcher.feature`](./0035-live-offscreen-life-running-watcher.feature)
 
 ## 1. Summary
