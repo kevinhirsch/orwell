@@ -53,12 +53,16 @@ truth.
    words of *anchor* that keep a houseguest's voice consistent across weeks and context windows.
    They are seed-varied so every season's raw material differs. They are not scripts, scene
    trees, or canned lines.
-4. **UI is for guardrails and memory, not for replacing talk.** Structured surfaces exist only
-   where prose is unsafe or unrememberable: a **confirm step** on binding actions (so a hedge in
-   conversation can't cast a vote), and the **memory wall** (roster, who's left, jury seats,
-   portraits — the facts a real houseguest can see). Play happens in the chat. A binding decision
-   may be *confirmed* through a control, but it is *reached* in conversation; the player can
-   always still type their reasoning and have it voiced.
+4. **UI augments the conversation; it never replaces game-building talk.** *(Refined, same
+   source: "I don't mind the game engine augmenting the chat experience in the UI in intelligent
+   ways, I just absolutely can't have it replacing any sort of chat interaction that builds or
+   progresses the game.")* The engine **may** enrich the chat surface intelligently — beat
+   framing, ambient presence hints, the memory wall (roster, jury seats, portraits), a confirm
+   step on binding actions. The hard line: any interaction that **builds or progresses the
+   game** — social play, scheming, information-gathering, the reasoning that leads to a decision
+   — happens *in conversation*. UI may reflect it, frame it, and structure the final
+   *commitment* of a binding act (so a hedge can't cast a vote); it may never become the way the
+   game is played.
 5. **Replayability is engine-seeded, not prompt-authored.** "Drastically different every game"
    comes from the seeded cast, hidden elements, reserve twists, and per-moment temperature —
    produced engine-side and made *visible* only by surfacing the varied public facets to the
@@ -68,6 +72,48 @@ truth.
    because ground truth lives in the event store / relationship layer / soul and is *queried*.
    Re-entry beats, recaps, and "previously on" framing are **synthesized from the records**, never
    from prior chat text. A new context window should lose nothing that matters.
+7. **Lingering is play.** *(Added, same source: "the capacity for the game player to just linger
+   and collect data in any room, to mill around with different people, to ask and find out who is
+   in the room and/or adjacent rooms, to talk to different people and those people be 'playing
+   the game' as they should be.")* The player can spend unhurried time anywhere in the house —
+   see who is in the room and who is nearby, drift between groups, talk to anyone — and the house
+   keeps playing the game *around* them: NPCs present pursue their own agendas and speak only
+   from what they legitimately know. Observation is itself recorded play (witnessed events,
+   overheard fragments via real co-presence pathways). **Nothing force-marches a lingering
+   player:** progressing the week is always an explicit act, never a side effect of chatting;
+   pacing pressure (the daily-event invariant, the watcher) is satisfied by the day's scheduled
+   beat, never by steamrolling a player who is gathering information. This requires a light
+   **presence model** (who is in which room; what is adjacent) the narrator can query — nuanced
+   and difficult to maintain, and mandatory.
+8. **People must make sense.** *(Added, same source.)* A houseguest is one coherent person: in
+   exactly one place at a time, moving plausibly; speaking **only from what they legitimately
+   know** (witnessed or were told — 0002); behaving from their actual relationship state and
+   agenda; holding a stable public persona (the seed-stable facets) while only the hidden soul
+   evolves. An NPC who teleports, contradicts their own history, cites an event they never
+   witnessed, or flips personality between scenes breaks the game's reality and is a defect, not
+   flavor.
+
+### Testability (these principles must be enforceable, not aspirational)
+
+Wherever possible, each principle carries a *structural* test — the same move that made the
+Vault Wall testable ("the model cannot leak what it never receives") applies here:
+
+- **Presence coherence** is pure-model: one location per houseguest per tick, movement only
+  between adjacent rooms, occupancy deterministic by seed → unit/property tests.
+- **Knowledge-constrained speech** is structural, per-NPC: the context assembled for voicing an
+  NPC contains **only** that NPC's legitimate knowledge (their witnessed/told set), so the test
+  asserts the *input*, not the prose — sentinel facts outside an NPC's knowledge must never
+  appear in that NPC's narration context.
+- **Persona stability** is byte-level: the public facets fed to the narrator are seed-stable and
+  identical every turn (the voice anchor cannot drift even across context windows).
+- **Lingering safety** is a property test: N consecutive social/milling turns ⇒ week, phase, and
+  ceremony state unchanged; milling counts as activity for the watcher's idle gate.
+- **Augment-not-replace** is a review-time rule plus a guard: no UI control may call a
+  game-progressing engine action other than the validated decision seam (`submitDecision` behind
+  an explicit confirm).
+- Prose-level qualities (distinct voices, tone) may additionally get transcript-level evals, but
+  no principle may rely *only* on an eval — there must be a structural test underneath where one
+  is possible.
 
 ### Litmus test for any future change
 
@@ -84,8 +130,14 @@ truth.
 - **Engine work is justified by the four fixes.** The Vault Wall, deterministic outcomes,
   persistence/non-degradation, and seeded variance are *load-bearing*. Mechanics beyond them
   (more ceremonies, more systems) must show they serve conversation, not replace it.
-- **Surfaces stay thin.** New UI is acceptable for the confirm-on-binding guardrail and the
-  memory wall; it is suspect anywhere it would pull strategic play out of the chat.
+- **Surfaces stay thin but may be smart.** UI augmentation is welcome (beat framing, ambient
+  presence, the memory wall, confirm-on-binding); it is forbidden the moment it *replaces* a
+  chat interaction that builds or progresses the game.
+- **A presence/room model becomes load-bearing.** Lingering play (principle 7) and co-presence-
+  grounded witness/overhear pathways need a light spatial model — drafted as feature **0049**.
+- **Per-NPC knowledge scoping becomes load-bearing.** "People must make sense" (principle 8) is
+  enforced the Vault way: scope each NPC's narration context to their legitimate knowledge and
+  test the input structurally.
 - **This refines, it does not contradict, the four mandates.** Behavioral fidelity, the Vault
   Wall, anti-sycophancy, and non-degradation all stand — this record says *how* to honor them:
   by trusting the model with creativity and being miserly with everything except truth and
