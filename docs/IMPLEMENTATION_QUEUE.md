@@ -676,6 +676,36 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > with no broken modules; verify on a **running instance** (per `frontend/INTEGRATION.md`). Engine gate
 > unaffected (front-end quarantined). Open a PR.
 
+### B26 — 0037 engine: expose a Vault-free `finaleView` read  ·  Claude Code  ·  **small; unblocks C11**
+
+> In `kevinhirsch/orwell` (TS engine), promote the existing private `GameSessionAdapter.finaleView()` to a
+> **read tool** `finaleView(): FinaleView | null` on the `GameSession` port + `PLAYER_TOOLS` + `McpServer`
+> dispatch (per `docs/features/0037-…md` §8.1). `readsVault: false`; classify it **infra** (add to
+> `INFRA_LEVERS`, like `gameStatus`/`playerTagline`) so the lever-manifest drift guard doesn't require naming
+> it. It returns the **same Vault-free projection** already proven on `AdvanceView.finale` — names + current
+> stage + the reveals SO FAR only, **never** a lean/tally/eviction-manner/pre-reveal winner. Extend the 0001
+> sentinel canary to `finaleView`; `npm run test:arch` + `npm test` green. Open a PR.
+
+### C11 — 0037 front-end: render the interactive finale  ·  OpenHands  ·  **depends on B26**
+
+> In `kevinhirsch/orwell` `frontend/`, build the finale **presentation UI** for feature **0037** per its design
+> note **§8** — the direct parallel to 0036's C10, in the same self-contained, fail-open, game-gated patterns as
+> `orwellStatusPanel.js` / `orwellSocial.js`:
+> - **Route:** `GET /api/orwell/finale` → `{ finale: FinaleView | null }` (mirror `/status`; add an
+>   `orwell_engine.finale_view` client over the **B26** `finaleView` tool). Fail-open to `{ finale: null }`.
+> - **`orwellFinale.js`** — a polling panel shown **only while a finale is staging**: the two **finalists**,
+>   the **stage** (`statements|questions|vote|reveal`), and the **vote reveal IN ORDER** (`reveals[]` as they
+>   appear, with a running tally of **revealed** votes only — **never** a pre-reveal winner/tally). On
+>   completion the crown lands via `AdvanceView.winner`.
+> - **Player decisions** (`finale-statement` / `finale-answer` with the legal `appeals[]` + the asking juror /
+>   `juror-vote` over the two finalists) are surfaced as **composer-prefill shortcuts** (like `orwellSocial`'s
+>   approach chips); binding submission still flows through the chat-agent `submitDecision` seam — the panel
+>   only presents the legal options; the engine validates + scores (the prose carries no score).
+> **Constraints:** render only the Vault-free payloads; fail-open; **0032 keep-set** (live-finale only, no new
+> module deps → browser-smoke safe); script-tag after the social panel. **DoD:** `pytest` green (roles only —
+> finalist/juror); the 0032 headless-browser gate stays green; engine gate unaffected; verify on a running
+> instance. Depends on **B26**. Open a PR.
+
 ---
 
 ## Still on the feature-maker (me)
@@ -687,11 +717,15 @@ between turns), **B25/0036** (`socialInitiatives` + `diaryRoom` live tools), **B
 hero line now shows the engine's snarky tagline, fail-open) + the **0036 front-end API** (`/api/orwell/tagline`,
 `/initiatives`, `/diary-room` + engine-client methods). Full engine gate green: **214 unit + 213 BDD**.
 
-**Remaining wiring — none.** **C10** is now built: `frontend/static/js/orwellSocial.js` (a self-contained,
-fail-open, game-gated panel) renders the NPC approach chips (prefill the composer to start a scene) and a
-Diary-Room modal posting to `/api/orwell/diary-room`, over the live Vault-free routes; `tests/test_orwell_social.py`
-covers the routes (pass-through + fail-open). The live narrator is still `EchoNarrativePort` (stub) on the
-engine; the front-end narrates via `getMomentPrompt` (by design), and the `playerTagline` narrator seam
-(`setNarrator`) is ready when a real narrator is wired.
+**The "continue all wiring" batch is done** (C10 = `orwellSocial.js`, merged). Since then the other agents
+shipped **0037 — the interactive finale / jury-vote choreography** (engine built & BDD-green: appeal scorer +
+staged statements → questions → vote reveal, through the 0034 seam) plus game-UI fixes (draggable HUDs, theme
+picker). Engine gate green: **230 unit + 222 BDD**.
 
-After this: MVP-2 (0022); jury-vote choreography.
+**Remaining:**
+- **0037 finale UI** (the C10-parallel) — drafted (0037 §8): **B26** exposes a Vault-free `finaleView` read,
+  then **C11** renders `orwellFinale.js` (finalists, stage, the vote reveal in order). The engine + decision
+  seam are already green; only the presentation is missing.
+- **0022 — MVP-2 (the rich game UI)** — the one deferred feature.
+- *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
+  `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
