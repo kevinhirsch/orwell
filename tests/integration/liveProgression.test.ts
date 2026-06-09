@@ -66,7 +66,11 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
     const sb = reg.sandboxFor("u1");
     const events = sb.engine.events.query();
     expect(events.length).toBeGreaterThan(10);
-    expect(events.every((e) => !e.hidden)).toBe(true); // the player lived these — never hidden
+    // The BEATS (house-events) are never hidden; NPC confessionals (0040) ride alongside as Vault-only
+    // interiority and are legitimately hidden, so the player-witnessed invariant is asserted on the beats.
+    const beats = events.filter((e) => e.type === "house-event");
+    expect(beats.length).toBeGreaterThan(0);
+    expect(beats.every((e) => !e.hidden)).toBe(true); // the player lived these — never hidden
 
     // The public status reflects the finished game (week advanced well past 1).
     const status = (await player.callTool("gameStatus", {})) as { week: number };

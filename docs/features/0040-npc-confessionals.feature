@@ -40,6 +40,6 @@ Feature: NPC Diary Room confessionals
     And a later recall can surface a specific past confessional to keep their voice consistent
 
   Scenario: Confessionals are seed-deterministic
-    Given two games started from the same seed
+    Given two confessing games started from the same seed
     When the same beats are reached in each
     Then the same houseguests confess the same grounded reads

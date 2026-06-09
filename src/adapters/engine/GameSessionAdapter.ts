@@ -6,6 +6,7 @@ import type {
 } from "../../ports/GameSession";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
+import { involvedConfessionals } from "../../engine/confessionals";
 import { npcInitiatedApproaches } from "../../engine/conversation";
 import type { NarrativePort } from "../../ports/NarrativePort";
 
@@ -356,8 +357,23 @@ export class GameSessionAdapter implements GameSession {
       const action = this.bindingActionFor(ev);
       if (action) this.reconcileDeals(action);
     }
+    // 0040: at the nomination ceremony the directly-involved houseguests (HOH + nominees) privately
+    // confess their REAL engine-grounded read — Vault-only (witnessed by them alone), reaching no one.
+    if (ev && ev.beat === "nominations") this.recordCeremonyConfessionals();
     this.syncProjection();
     this.onPersist?.();
+  }
+
+  /** Record each involved NPC's Vault-only confessional at the nomination ceremony (0040). */
+  private recordCeremonyConfessionals(): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
+    const involved = [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id);
+    for (const conf of involvedConfessionals(involved, everyone, this.rel)) {
+      // witnessSet = [the confessing NPC] → hidden=true (the player is never a witness, 0002).
+      this.onPlayerEvent(conf.content, [conf.npc], "confessional");
+    }
   }
 
   /** Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers. */
