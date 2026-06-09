@@ -922,7 +922,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > mandate at its single most destructive point. **Acceptance:** a second `createCharacter` without the flag leaves
 > state byte-identical (prior save versions intact); the fresh-sandbox onboarding flow is unaffected. Open a PR.
 
-### B37 — one competition authority (`runCompetition`/`resolveCompetition` delegate)  ·  Claude Code  ·  **Wave 1 · audit A1 + A3**
+### B37 — one competition authority (`runCompetition`/`resolveCompetition` delegate)  ·  Claude Code  ·  **Wave 1 · audit A1 + A3** — ✅ DONE
+
+> **DONE.** The two-resolver fork is gone. `liveSeason` now owns the single competition resolution
+> (`resolveHoh`/`resolveVeto` + a non-mutating `peekCompetition`), and `GameSessionAdapter.runCompetition`
+> only PREVIEWS it — the loop (`advanceGame`) crowns the same winner (same seed). It validates references
+> (unknown/evicted ids → null) and ignores foreign input (caller subset/stats never used); the win is
+> recorded by the loop and survives restart. `momentPrompts.ts` steers ceremony comps to `advanceGame`.
+> `tests/unit/runCompetition.test.ts` (9, incl. preview==crown, evicted-never-crowned, survives-restart).
+> Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), eliminate the two-resolver fork. `runCompetition` (`GameSessionAdapter.ts:418-438`)
 > resolves over the **full roster incl. evicted HGs**, accepts arbitrary caller `participantIds`, and records/persists

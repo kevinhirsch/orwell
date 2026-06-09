@@ -131,6 +131,44 @@ export type DecisionInput =
 const HOH_TYPES: readonly CompetitionType[] = ["endurance", "mental", "physical"];
 const VETO_TYPES: readonly CompetitionType[] = ["puzzle", "social", "memory"];
 
+const hohType = (week: number): CompetitionType => HOH_TYPES[(week - 1) % HOH_TYPES.length]!;
+const vetoType = (week: number): CompetitionType => VETO_TYPES[(week - 1) % VETO_TYPES.length]!;
+
+/**
+ * Resolve the HOH competition (no state mutation): the eligible field + the engine-decided winner.
+ * The SOLE place HOH outcomes are computed — `advance` commits it, `peekCompetition` previews it,
+ * both with the same seeded rng, so a narrator's `runCompetition` can never disagree with the loop.
+ */
+function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { field: EntityId[]; winner: EntityId } {
+  const field = eligibleForHOH(weekState(s, ctx));
+  return { field, winner: winnerOf(field, hohType(s.week), ctx, rng) };
+}
+
+/** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
+function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { field: EntityId[]; winner: EntityId } {
+  const field = vetoParticipants(weekState(s, ctx), rng, {
+    houseguestsChoiceChip: true,
+    choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
+  }).participants;
+  return { field, winner: winnerOf(field, vetoType(s.week), ctx, rng) };
+}
+
+/** The current competition beat's deterministic outcome (single authority, B37) — or null if the
+ *  loop is not at a competition beat. PURE: it does not advance the loop; `advance` crowns the same
+ *  winner (same seed) when the beat resolves. */
+export interface CompetitionPeek {
+  beat: "hoh-competition" | "veto-competition";
+  type: CompetitionType;
+  field: EntityId[];
+  winner: EntityId;
+}
+export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionPeek | null {
+  if (s.pending || s.finished) return null;
+  if (s.beat === "hoh-competition") { const { field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: hohType(s.week), field, winner }; }
+  if (s.beat === "veto-competition") { const { field, winner } = resolveVeto(s, ctx, rng); return { beat: s.beat, type: vetoType(s.week), field, winner }; }
+  return null;
+}
+
 export function newLiveSeason(active: EntityId[]): LiveSeasonState {
   return {
     week: 1, beat: active.length > 2 ? "hoh-competition" : "finale",
@@ -370,8 +408,7 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
 
   switch (s.beat) {
     case "hoh-competition": {
-      const ws = weekState(s, ctx);
-      const hoh = winnerOf(eligibleForHOH(ws), HOH_TYPES[(s.week - 1) % HOH_TYPES.length]!, ctx, rng);
+      const { winner: hoh } = resolveHoh(s, ctx, rng);
       s.hoh = hoh; s.beat = "nominations";
       return { beat: "hoh-competition", content: `${hoh} wins Head of Household`, participants: [hoh] };
     }
@@ -387,11 +424,7 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
-      const field = vetoParticipants(weekState(s, ctx), rng, {
-        houseguestsChoiceChip: true,
-        choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
-      }).participants;
-      const holder = winnerOf(field, VETO_TYPES[(s.week - 1) % VETO_TYPES.length]!, ctx, rng);
+      const { field, winner: holder } = resolveVeto(s, ctx, rng);
       s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
       return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
     }

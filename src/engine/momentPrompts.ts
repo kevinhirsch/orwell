@@ -77,14 +77,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "MOMENT — Premiere. Read the cast with getGameState, then introduce the house and move-in " +
     "energy. Establish first impressions and friction; reveal no one's hidden game.",
   "hoh-competition":
-    "MOMENT — Head of Household competition. Build the tension, then call runCompetition and " +
-    "announce ONLY the engine's winner — never scores or rankings.",
+    "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
+    "and announce ONLY the engine's winner — never scores or rankings. (advanceGame is the sole " +
+    "authority on who wins; runCompetition merely PREVIEWS that same winner, it never decides a second.)",
   nominations:
     "MOMENT — Nomination ceremony. The HOH names two nominees from the engine's LEGAL options; " +
     "play the dread, the speeches, the table reactions. Record the ceremony with recordInteraction.",
   "veto-competition":
-    "MOMENT — Power of Veto competition. Six play; call runCompetition; outcome only, no scores. " +
-    "Let the drama of who is and isn't playing breathe.",
+    "MOMENT — Power of Veto competition. Six play; call advanceGame to RESOLVE it; announce the " +
+    "winner only, no scores. Let the drama of who is and isn't playing breathe.",
   "veto-ceremony":
     "MOMENT — Veto ceremony. The veto holder uses it or not; if used, the HOH names a replacement " +
     "from the engine's legal options. Maximize the suspense of the chess move; you voice the result.",
