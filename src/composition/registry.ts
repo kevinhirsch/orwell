@@ -135,14 +135,33 @@ export class GameSessionRegistry {
           }
         }
       }
-      if (this.saveStore) {
-        const persist = (): void => this.saveUser(user);
-        sb.session.setOnPersist(persist); // save-on-mutation (0030)
-        sb.commands.setOnPersist(persist);
-      }
+      // Always wire the commit hook (B41): even without a durable store, a player mutation must run
+      // the integrity checkpoint (+ touch + health) when the orchestrator is the spine. `commit`
+      // falls back to a no-op save when there is neither a store nor a delegate.
+      const persist = (): void => this.commit(user);
+      sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
+      sb.commands.setOnPersist(persist);
       this.sandboxes.set(user, sb);
     }
     return sb;
+  }
+
+  /**
+   * The per-mutation commit hook. By default it is a blind save-on-mutation (0030). When the runtime
+   * wires the orchestrator (B41/audit E3), `setCommit` routes it through a checkpoint-then-save so the
+   * fail-closed integrity check (0031) runs on EVERY player turn, not just watcher ticks.
+   */
+  private commitDelegate?: (user: string) => void;
+
+  /** Route per-mutation persistence through a checkpointed commit (the orchestrator's player-turn). */
+  setCommit(fn: (user: string) => void): void {
+    this.commitDelegate = fn;
+  }
+
+  /** Invoked after every mutation (the wired `onPersist`): the orchestrator's commit, or a blind save. */
+  private commit(user: string): void {
+    if (this.commitDelegate) this.commitDelegate(user);
+    else this.saveUser(user);
   }
 
   /** Persist the user's current sandbox to durable storage (a no-op without a store). */
@@ -164,11 +183,9 @@ export class GameSessionRegistry {
   restore(user: string, snap: SessionSnapshot): UserSandbox {
     const sb = buildUserSandbox();
     importSnapshot(sb, snap);
-    if (this.saveStore) {
-      const persist = (): void => this.saveUser(user);
-      sb.session.setOnPersist(persist);
-      sb.commands.setOnPersist(persist);
-    }
+    const persist = (): void => this.commit(user);
+    sb.session.setOnPersist(persist);
+    sb.commands.setOnPersist(persist);
     this.sandboxes.set(user, sb);
     return sb;
   }
@@ -186,11 +203,9 @@ export class GameSessionRegistry {
   /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
   resetUser(user: string): UserSandbox {
     const sb = buildUserSandbox();
-    if (this.saveStore) {
-      const persist = (): void => this.saveUser(user);
-      sb.session.setOnPersist(persist);
-      sb.commands.setOnPersist(persist);
-    }
+    const persist = (): void => this.commit(user);
+    sb.session.setOnPersist(persist);
+    sb.commands.setOnPersist(persist);
     this.sandboxes.set(user, sb);
     return sb;
   }

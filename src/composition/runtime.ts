@@ -63,8 +63,15 @@ export function watcherConfigFromEnv(env: Record<string, string | undefined> = p
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
   const registry = new GameSessionRegistry(opts.saveStore);
-  const orchestrator = new Orchestrator(registry, clock, opts.seed !== undefined ? { seed: opts.seed } : {});
   const cfg: WatcherConfig = { ...watcherConfigFromEnv(), ...opts.watcher };
+  // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
+  const orchestrator = new Orchestrator(registry, clock, {
+    ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+    turnDriven: cfg.tickEveryMs === 0,
+  });
+  // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
+  // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
+  registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {
     registry,

@@ -1007,7 +1007,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > knowledge shrank; an unknown-version snapshot is rejected, not crashed on. Read `docs/features/0007`, `0030`, `0031`
 > first. Open a PR.
 
-### B41 — make the orchestrator the real per-sandbox spine  ·  Claude Code  ·  **Wave 1 · audit E3 (+ fixes D4 flood)**
+### B41 — make the orchestrator the real per-sandbox spine  ·  Claude Code  ·  **Wave 1 · audit E3 (+ fixes D4 flood)** — ✅ DONE
+
+> **DONE.** The registry's save-on-mutation `onPersist` now routes through `Orchestrator.commitPlayerTurn`
+> (`registry.setCommit`, wired in `composeRuntime`): every player mutation runs the fail-closed integrity
+> checkpoint — a leaky/degrading commit is rolled back and NOT persisted — and `touch`es the user.
+> `idleSince` returns `+Infinity` for a never-active user (not-yet-idle), so the watcher stops flooding
+> off-screen ticks mid-scene; in pure turn-driven mode (`tickEveryMs:0`) each turn fires one bounded
+> off-screen tick so the house still lives. Health reports `lastTrigger:"player-turn"`.
+> `tests/unit/orchestratorSpine.test.ts` (4). Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), player turns **bypass** the orchestrator — nothing outside tests calls
 > `advance(user,"player-turn")`/`touch`, so the fail-closed integrity checkpoint (0031) **never runs on a player action**

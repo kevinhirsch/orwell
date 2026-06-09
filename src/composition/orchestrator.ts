@@ -54,15 +54,23 @@ export interface OrchestratorConfig {
   offscreenInteractions?: number;
   /** Test seam: override the state-mutating step (off-screen + day). Default = the real one. */
   apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number) => number;
+  /**
+   * Pure turn-driven mode (the watcher is disabled, `tickEveryMs:0`): the house can't live between
+   * wakes, so every player turn fires ONE bounded off-screen tick (B41/audit D4/M6). Default false.
+   */
+  turnDriven?: boolean;
 }
 
 export class Orchestrator {
   private readonly seed: number;
   private readonly offscreenInteractions: number;
   private readonly applyFn: NonNullable<OrchestratorConfig["apply"]>;
+  private readonly turnDriven: boolean;
   private readonly rngs = new Map<string, SeededRandom>();
   private readonly health = new Map<string, HealthRecord>();
   private readonly lastActivity = new Map<string, number>();
+  /** The last GOOD persisted state per user — the baseline a player-turn commit checks against (B41). */
+  private readonly baselines = new Map<string, SessionSnapshot>();
   private seq = 0;
 
   constructor(
@@ -73,6 +81,7 @@ export class Orchestrator {
     this.seed = cfg.seed ?? 1;
     this.offscreenInteractions = cfg.offscreenInteractions ?? 2;
     this.applyFn = cfg.apply ?? defaultApply;
+    this.turnDriven = cfg.turnDriven ?? false;
   }
 
   /** Per-user deterministic RNG stream (seed + user), created once and advanced across ticks. */
@@ -90,9 +99,14 @@ export class Orchestrator {
     this.lastActivity.set(user, this.clock.now());
   }
 
-  /** Wall time of the user's last player activity (−∞ if never active ⇒ eligible for idle ticks). */
+  /**
+   * Wall time of the user's last player activity. A user who has NEVER taken a turn is treated as
+   * NOT-yet-idle (B41/audit D4) — `+Infinity`, so the watcher's idle gate (`now - idleSince ≥ …`) is
+   * false and they accrue no off-screen ticks until they've actually played and then gone away. (The
+   * old `−Infinity` made every never-touched user permanently "idle" ⇒ the off-screen flood.)
+   */
   idleSince(user: string): number {
-    return this.lastActivity.has(user) ? this.lastActivity.get(user)! : -Infinity;
+    return this.lastActivity.has(user) ? this.lastActivity.get(user)! : Infinity;
   }
 
   /** The one advance spine. `audit` verifies only (no progression). */
@@ -110,7 +124,7 @@ export class Orchestrator {
     const when = this.clock.now();
 
     if (faults.length === 0) {
-      if (trigger !== "audit") this.registry.saveUser(user);
+      if (trigger !== "audit") { this.registry.saveUser(user); this.baselines.set(user, candidate); }
       if (trigger === "player-turn") this.touch(user);
       this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "ok");
       return { events: produced, integrity: "ok", faults: [] };
@@ -125,12 +139,50 @@ export class Orchestrator {
     return { events: 0, integrity: "fault", faults };
   }
 
+  /**
+   * The player-turn commit (B41/audit E3) — the orchestrator becomes the real spine. The registry
+   * routes its save-on-mutation `onPersist` here, so EVERY player mutation now runs the fail-closed
+   * integrity checkpoint instead of persisting blindly: a leaky/degrading commit is rolled back and
+   * NOT saved (mandate #4). It also `touch`es the user (so the watcher's idle gate stops flooding
+   * off-screen ticks mid-scene) and, in pure turn-driven mode, fires ONE bounded off-screen tick so
+   * the house still lives turn-to-turn without the watcher.
+   */
+  commitPlayerTurn(user: string): void {
+    const sandbox = this.registry.sandboxFor(user);
+    const candidate = this.registry.snapshot(user);
+    const when = this.clock.now();
+    const baseline = this.baselines.get(user);
+
+    // The first commit (e.g. createCharacter) has no prior good state — accept it and establish the
+    // baseline; there is nothing to degrade away from.
+    const faults = baseline ? this.checkpoint(baseline, candidate, sandbox, "player-turn", { requireDailyEvent: false }) : [];
+
+    if (faults.length === 0) {
+      this.registry.saveUser(user);
+      this.baselines.set(user, candidate);
+      this.touch(user);
+      this.maybeTurnDrivenTick(user);            // may record an offscreen-tick health entry…
+      this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "ok"); // …player-turn has the last word
+      return;
+    }
+    // Fail-closed: roll the in-memory sandbox back to the last good state and DO NOT persist.
+    this.registry.restore(user, baseline!);
+    const prior = this.health.get(user);
+    this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "fault", [...(prior?.faults ?? []), ...faults]);
+  }
+
+  /** In pure turn-driven mode, advance one bounded off-screen tick so the house lives between turns (B41). */
+  private maybeTurnDrivenTick(user: string): void {
+    if (this.turnDriven) this.advance(user, "offscreen-tick");
+  }
+
   /** Verify a candidate advance against the baseline — fail-closed (0031 §4.3). */
   checkpoint(
     baseline: SessionSnapshot,
     candidate: SessionSnapshot,
     sandbox: UserSandbox,
     trigger: Trigger = "player-turn",
+    opts: { requireDailyEvent?: boolean } = {},
   ): Fault[] {
     const faults: Fault[] = [];
     const when = this.clock.now();
@@ -141,8 +193,10 @@ export class Orchestrator {
     if (!isSuperset(gsCand, gsBase) || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
       faults.push({ when, kind: "degradation" });
     }
-    // Daily-event (0008): a progression advance must produce ≥1 new event.
-    if (trigger !== "audit" && counts(gsCand).events <= counts(gsBase).events) {
+    // Daily-event (0008): a progression advance must produce ≥1 new event. A player-turn COMMIT
+    // (B41) opts out — not every player tool call adds a beat (a deal, a surfacing, a DR entry).
+    const requireDailyEvent = opts.requireDailyEvent ?? trigger !== "audit";
+    if (requireDailyEvent && counts(gsCand).events <= counts(gsBase).events) {
       faults.push({ when, kind: "no-daily-event" });
     }
     // Vault Wall (0001): no hidden event's content may appear in the player projection.
