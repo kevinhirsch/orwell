@@ -7,7 +7,7 @@ import {
 } from "../domain/eligibility";
 import type { WeekState } from "../domain/eligibility";
 import type { Stats } from "./season";
-import { chooseNominations, tallyJury } from "./season";
+import { chooseNominationsWithMood, tallyJury } from "./season";
 import type { RelationshipModel } from "./relationships";
 import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
@@ -102,6 +102,13 @@ export interface SeasonCtx {
   player: EntityId;
   statsOf: (id: EntityId) => Stats;
   rel: RelationshipModel;
+  /**
+   * The houseguest's LIVE soul emotional state (0041): 0..1, 0.5 = calm baseline. Drives the
+   * competition emotional modifier (0006/0028) and the rattled-HOH nomination leaning. Optional so
+   * pure tests can omit it (a calm 0.5 default leaves outcomes byte-stable). ENGINE-ONLY — a number
+   * that never crosses the wall.
+   */
+  emotionalOf?: (id: EntityId) => number;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -132,7 +139,9 @@ export function newLiveSeason(active: EntityId[]): LiveSeasonState {
 }
 
 function winnerOf(ids: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource): EntityId {
-  const competitors = ids.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: 0.5 }));
+  // The LIVE emotional state (0041) feeds the competition emotional modifier (0006/0028): a rattled
+  // houseguest competes differently. Defaults to the calm baseline so pure tests stay byte-stable.
+  const competitors = ids.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
   return resolveCompetition(competitors, type, new CompetitionIntents(), rng).winner;
 }
 
@@ -371,7 +380,9 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         s.pending = { kind: "nominations", by: ctx.player, options: s.active.filter((h) => h !== ctx.player), pick: 2 };
         return null;
       }
-      const nominees = chooseNominations(s.hoh!, s.active, ctx.rel);
+      // A rattled HOH (low live emotional state, 0041) nominates more erratically; a calm one ranks
+      // purely by threat (byte-identical to before). Emotion bends the read — legality still binds.
+      const nominees = chooseNominationsWithMood(s.hoh!, s.active, ctx.rel, ctx.emotionalOf?.(s.hoh!) ?? 0.5);
       s.nominees = nominees; s.beat = "veto-competition";
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }

@@ -20,8 +20,9 @@ The game is **folded into the main chat**: the player-facing tier is the vendore
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
 (now through **0044**). **Current focus: the post-audit batch 0038–0044** (behavioral-fidelity /
-anti-sycophancy wiring — 0038 partially done, 0040 core done, **0041 is the linchpin**). See
-[Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
+anti-sycophancy wiring — **0041, the linchpin, is now built** (the `SoulStore` is live in the sandbox,
+souls evolve and modulate behavior), 0039 and 0040 done, 0038 partially done; remaining: B27b, 0042–0044).
+See [Current status](#current-status) and `docs/IMPLEMENTATION_QUEUE.md`.
 
 ## Source of truth — read these first
 
@@ -352,12 +353,15 @@ The 0037 **finale UI** is still pending (B26 `finaleView` read tool → C11 `orw
 
 **Post-audit batch (0038–0044) — in progress.** A behavioral-fidelity / anti-sycophancy audit
 found capabilities **built but unwired** plus genuine gaps; the per-item prompts are in
-`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0038** live off-screen society: the varied off-screen
-interaction types run live (B27a ✅, unit-gated); the **gossip→player diffusion** + pathway-aware
-leak heuristic (B27b) remain. **0040** NPC confessionals: core ✅ (`src/engine/confessionals.ts` —
-Vault-only, walled from player **and** admin; unit-gated). **0041** character evolution & arc is
-the **linchpin** — the live sandbox's `engineRoot` has no `SoulStore`, which is what defers 0038's
-soul-deepening and 0040's confessional→voice feedback. **0039** (promise/deal tracking), **0042**
+`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0041** character evolution & arc — **the linchpin — is
+✅ green** (`src/engine/emotionalArc.ts` + `engineRoot` now wires a `SoulStore` into the live
+sandbox): consequential beats + the off-screen tick drive bounded, mean-reverting soul evolution
+that modulates the live competition modifier (0006/0028) and a rattled-HOH nomination read, the arc
+persists + is recall-able, `CHARACTER` stays byte-stable, and no number crosses to the player.
+**This unblocked the deferred soul halves of 0038 + 0040.** **0038** live off-screen society: varied
+interaction types run live (B27a ✅) **+ live soul-deepening (via 0041)**; the **gossip→player
+diffusion** + pathway-aware leak heuristic (B27b) remain. **0039** (promise/deal tracking, ✅) and
+**0040** (NPC confessionals, ✅ — now with **live** soul-recall feedback) are green. **0042**
 (competition library), **0043** (emergent bloc behavior), and **0044** (strategic nom/vote
 refinements) are drafts.
 
@@ -365,8 +369,8 @@ refinements) are drafts.
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0039, **0041 (the
-linchpin — do it early)**, 0042–0044; the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
+**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0042–0044 (0039,
+0040, **and 0041 the linchpin are done**); the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
 **0022** MVP-2 (the one deferred feature); 0010's container smoke test on a real Proxmox host; the
 deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
 in-memory + file today); and full MCP/JSON-RPC over the current HTTP transport. *(By design, not a

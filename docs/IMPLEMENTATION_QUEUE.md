@@ -749,8 +749,17 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > sandbox — **feature 0041**; optionally fire confessionals specifically at nomination/eviction beats (today
 > the trigger is the off-screen tick).
 
-### B30 — 0041 character evolution & season arc  ·  **LINCHPIN (unblocks 0038 + 0040 soul pieces)**
+### B30 — 0041 character evolution & season arc  ·  **LINCHPIN (unblocks 0038 + 0040 soul pieces)** — ✅ DONE
 
+> **DONE.** `SoulStore` is wired into the live `EngineCore`/`buildEngineCore` (deterministic embed),
+> walled engine-only by dependency-cruiser (soul/vector/embedding types in the forbidden set). The live
+> consequence fold (`GameSessionAdapter.commit`) + the off-screen tick (`Orchestrator.defaultApply`) drive
+> `src/engine/emotionalArc.ts` (`evolveEmotion`): bounded, mean-reverting soul `emotionalState`/`volatility`
+> from real events, a persisted `emotionalHistory` arc, and `recordToSoul`/`recall` live. The evolving
+> state modulates the live competition emotional modifier (0006/0028) + a rattled-HOH nomination read
+> (`chooseNominationsWithMood`); `CHARACTER` stays byte-stable (0007); no number on any player surface
+> (canary extended); persisted across restart (0030). Added to `cucumber.cjs`. Original prompt below.
+>
 > Implement `docs/features/0041-character-evolution-and-arc.{md,feature}` — **see §8 for the concrete live
 > wiring.** The crux: the live sandbox's `buildEngineCore` (`engineRoot.ts`) has **no `SoulStore`** — that's
 > why 0038's soul-deepening and 0040's confessional→voice feedback are deferred. (1) Add **`soul: SoulProvider`**
@@ -806,16 +815,19 @@ picker). Engine gate green: **230 unit + 222 BDD**.
 
 **Remaining — ALL implementer-ready (each carries a §8 "Definition of Ready": exact touch points, build
 order/deps, test targets, no open decisions):**
-- **0038** live off-screen society — **B27a done**; **B27b** (gossip↔checkpoint reconciliation) ready (0038 §8).
-- **0040** NPC confessionals — **done (core)**; soul-recall feedback rides on 0041.
-- **0041** character evolution/arc — **Ready (§8), the LINCHPIN** (wires `SoulStore` into the live sandbox →
-  unblocks the deferred soul halves of 0038 + 0040). → B30.
-- **0039** promise/deal tracking (§8) → B28 · **0042** competition library (§8) → B31 · **0043** emergent bloc
+- **0038** live off-screen society — **B27a done**; the **live soul-deepening half is now wired by 0041**
+  (the off-screen tick `recordToSoul`s each scene); **B27b** (gossip↔checkpoint reconciliation) still ready (0038 §8).
+- **0040** NPC confessionals — **done**; soul-recall feedback is now **live** (0041 put the `SoulStore` in the sandbox).
+- **0041** character evolution/arc — **✅ DONE (B30, the LINCHPIN).** `SoulStore` is wired into the live
+  `EngineCore`; the consequence fold + off-screen tick drive bounded, mean-reverting soul evolution that
+  modulates the live competition modifier + a rattled-HOH nomination read; the arc persists + is recall-able;
+  `CHARACTER` byte-stable; no number on any player surface. Unblocked the deferred soul halves of 0038 + 0040.
+- **0039** promise/deal tracking — **done (B28)** · **0042** competition library (§8) → B31 · **0043** emergent bloc
   behavior (§8, honors ADR 0002) → B32 · **0044** strategic nom/vote refinements (§8) → B33.
 - **0037 finale UI** — **B26** (Vault-free `finaleView` read) → **C11** (`orwellFinale.js`), per 0037 §8.
 - **0022 — MVP-2 (the rich game UI)** — the one deferred feature (no DoR yet).
 
-**Suggested build order for the implementer agents:** 0041 (linchpin) → 0039 / 0043 → 0044 (consumes 0043 +
-0041) → 0042 → B27b → 0037 UI. Each is independently buildable per its §8; 0044 reads best after 0043/0041.
+**Suggested build order for the implementer agents:** ~~0041 (linchpin)~~ **done** → 0039 (done) / 0043 → 0044
+(consumes 0043 + 0041) → 0042 → B27b → 0037 UI. Each is independently buildable per its §8; 0044 reads best after 0043/0041.
 - *(By design, not a gap: the live engine narrator is `EchoNarrativePort`; the front-end narrates via
   `getMomentPrompt`. The `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*

@@ -65,7 +65,8 @@ export function toGameState(snap: SessionSnapshot): GameState {
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,
       volatility: hg.soul.volatility,
-      emotionalHistory: [],
+      // The live emotional trajectory (0041) — persisted + counted for non-degradation (0007/0030).
+      emotionalHistory: [...(hg.soul.emotionalHistory ?? [])],
       memory: [...hg.soul.memory],
       relationshipBeliefs: snap.relationships.filter((e) => e.from === hg.id),
     };

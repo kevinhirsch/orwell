@@ -274,6 +274,20 @@ export class BbWorld extends World {
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
 
+  // Character evolution & season arc (0041) scratch state.
+  evoSoul?: import("../../src/engine/characterFactory").Soul;
+  evoStart?: { state: number; volatility: number };
+  evoSpiked?: number;
+  evoSoulStore?: import("../../src/adapters/engine/SoulStore").SoulStore;
+  evoCompCalm?: number;
+  evoCompRattled?: number;
+  evoNomsCalm?: [Eid, Eid];
+  evoNomsRattled?: [Eid, Eid];
+  evoHoh?: Eid;
+  evoCharStart?: Map<string, string>;
+  evoArcA?: number[];
+  evoArcB?: number[];
+
   constructor(options: IWorldOptions) {
     super(options);
   }

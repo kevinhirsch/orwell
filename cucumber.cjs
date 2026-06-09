@@ -40,6 +40,7 @@ module.exports = {
       "docs/features/0037-live-jury-vote-choreography.feature",
       "docs/features/0039-promise-and-deal-tracking.feature",
       "docs/features/0040-npc-confessionals.feature",
+      "docs/features/0041-character-evolution-and-arc.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -38,5 +38,5 @@ Feature: Character evolution & season arc
 
   Scenario: The evolution is Vault-free
     Given a started game whose houseguests have evolved
-    When any player surface is read
+    When the player's surfaces are read after the houseguests evolve
     Then no emotional number or hidden state appears

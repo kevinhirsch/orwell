@@ -69,6 +69,8 @@ export interface Soul {
   emotionalBaseline: number;
   volatility: number;
   emotionalState: number;
+  /** The persisted trajectory of `emotionalState` — the season arc (0041), monotonic (0007/0030). */
+  emotionalHistory: number[];
   memory: string[];
 }
 
@@ -194,7 +196,7 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
         background,
         ...generateAppearance(new SeededRandom(hashSeed(`${name}:${i}`))),
       },
-      soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, memory: [] },
+      soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, emotionalHistory: [], memory: [] },
     };
   });
   return { npcs };
@@ -244,7 +246,7 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       background: input.backstory?.trim() || "human-authored at first-run character creation (OOBE)",
       ...generateAppearance(appearanceRng),
     },
-    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, memory: [] },
+    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: [] },
     // The player's self-described persona (their words), kept for the narrative voice even when it
     // diverges from the canonical archetype/style that drive the hidden stats. Falls back to the
     // canonical labels so the view always has something to show.
