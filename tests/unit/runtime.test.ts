@@ -51,9 +51,9 @@ describe("composeRuntime (feature 0035 — start the watcher in the runtime)", (
     rt.start();
     clock.advance(1000); // exactly one wake
 
-    // richOffscreenStretch yields 3 hidden scenes/tick × at most 2 ticks/wake = a bounded handful
-    // (the per-wake cap bounds TICKS, not scenes — the house lives, but never fast-forwards a season).
-    expect(hidden(rt, U) - before).toBeLessThanOrEqual(2 * 3);
+    // ~4 hidden/tick (3 off-screen scenes + 1 NPC confessional) × at most 2 ticks/wake = a bounded
+    // handful (the per-wake cap bounds TICKS, not events — the house lives, never fast-forwards a season).
+    expect(hidden(rt, U) - before).toBeLessThanOrEqual(2 * 4);
     rt.stop();
   });
 

@@ -4,6 +4,7 @@ import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
+import { confessionalFor, recordConfessional } from "../engine/confessionals";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER, npc } from "../domain/ids";
@@ -210,6 +211,14 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023).
   const scenes = richOffscreenStretch({ events: sandbox.engine.events, rng, npcs: ids, interactions: 3 });
   for (const s of scenes) sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+
+  // NPC interiority (0040): an involved houseguest privately confesses their REAL read — Vault-only
+  // (witnessed by them alone), grounded in their actual relationship signals, never invented. It
+  // reaches no one (player or admin); the player feels it only later through that NPC's behavior.
+  if (scenes.length > 0) {
+    const confessor = scenes[rng.int(scenes.length)]!.initiator;
+    recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships), rng, clockNow);
+  }
 
   if (trigger === "player-turn") {
     // A meaningful, player-witnessed day event (daily-event invariant, 0008).
