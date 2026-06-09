@@ -46,7 +46,7 @@ EventStore:
                                                     # derived; never set to contradict the witness set
 KnowledgeService:
     knownTo(entity) -> KnowledgeState               # beliefs held: each { content, provenance (source chain), confidence }
-    surfaceInformationTo(entity, fact, pathway)     # records a tell/overhear event; adds/updates a belief
+    surfaceInformationTo(entity, fact, pathway)     # ANCHORED only (B39/A4): told-by:<id> requires the teller to hold/have-witnessed it, overheard:<id> requires that event to exist — else it is a SUSPICION, never knowledge (returns null)
     propagateGossip(rng)                            # NPCs may retell along relationship edges; content drifts per hop
     suspicionsOf(entity) -> [Suspicion]             # low-confidence beliefs with no direct tell/witness
 ```

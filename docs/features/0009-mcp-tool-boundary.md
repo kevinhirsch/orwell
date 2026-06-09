@@ -56,9 +56,9 @@ the core/Vault, only a sanitized result crosses the membrane — *new*):
 
 | Tool | Effect / returns |
 |---|---|
-| `recordInteraction(initiator, witnessSet, content)` | records a (player-witnessed) event; returns its id/ack |
+| `recordInteraction(initiator, witnessSet, content)` | records a (player-witnessed) event; **initiator/witnesses must be LIVING houseguests** and per-call folds are capped (B39); returns its id/ack |
 | `resolveCompetition(type, participants, intents)` | the **engine-decided** outcome only — no stats, rankings, or Vault reasoning |
-| `surfaceInformationTo(entity, fact, pathway)` | moves a hidden fact into knowledge via a recorded pathway; returns ack |
+| `surfaceInformationTo(entity, fact, pathway)` | moves a hidden fact into knowledge via an **anchored** pathway (B39/A4); an unanchored one is downgraded to a suspicion; returns `{ ok, surfaced }` |
 
 **Admin / God-Mode channel** (separate registry; non-Vault only):
 `inspectNonVaultState(query)`, `overrideMechanic(...)`.

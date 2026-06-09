@@ -40,10 +40,12 @@ export interface DiaryRoomReq {
 }
 
 export interface EngineCommands {
+  /** Records the interaction + folds its hidden impact. Throws if it names a non-living houseguest (B39). */
   recordInteraction(req: RecordInteractionReq): { eventId: string };
   /** Outcome only — no stat scores, rankings, or Vault-derived reasoning. */
   resolveCompetition(req: ResolveCompetitionReq): { winner: EntityId; type: string };
-  surfaceInformationTo(req: SurfaceReq): { ok: true };
+  /** `surfaced:true` if anchored into knowledge; `false` if the pathway was unanchored ⇒ a suspicion (A4). */
+  surfaceInformationTo(req: SurfaceReq): { ok: true; surfaced: boolean };
   /**
    * Record a player Diary-Room entry (0013): the player's OWN out-of-character knowledge,
    * tagged with NO in-game pathway to any NPC. It may inform the engine's read of player

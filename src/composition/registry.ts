@@ -44,6 +44,9 @@ function buildUserSandbox(): UserSandbox {
   // Wire the engine-only soul store (0024) into the live session so consequential beats + off-screen
   // scenes deepen each NPC's arc and ground their later voice (the 0041 linchpin).
   session.setSoul(engine.soul);
+  // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
+  // knows who's still in the house (player + non-evicted NPCs).
+  commands.setLivingProvider(() => session.livingIds());
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({

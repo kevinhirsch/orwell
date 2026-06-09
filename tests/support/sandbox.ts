@@ -183,6 +183,8 @@ export function buildSandbox(seed = 1): Sandbox {
     surfaceHiddenFactToPlayer: () => {
       recordOffscreen(npc(1), npc(2), "formed a secret alliance with", "surfaceable");
       const gossip = "An NPC told you a secret alliance has formed.";
+      // Anchored (A4): the teller actually holds what they tell — seed npc:1's belief, then surface it.
+      engine.knowledge.seedBelief(npc(1), { content: gossip, factId: "alliance-gossip" }, "witnessed");
       engine.knowledge.surfaceInformationTo(PLAYER, { content: gossip }, "told-by:npc:1");
       return { content: gossip };
     },

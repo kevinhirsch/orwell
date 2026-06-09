@@ -40,7 +40,13 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     entity: EntityId,
     fact: { content: string; subject?: EntityId },
     pathway: string,
-  ): KnowledgeFact {
+  ): KnowledgeFact | null {
+    // Anti-sycophancy anchor (A4): a surfacing must trace to a REAL source. An unanchored "fact" —
+    // the narrator inventing who said what — is downgraded to a SUSPICION, never knowledge.
+    if (!this.pathwayAnchored(pathway, fact)) {
+      this.addSuspicion(entity, fact);
+      return null;
+    }
     const ts = this.clock();
     const sourceEventId = `evt:surface:${++this.seq}`;
     const witnessSet: EntityId[] = [entity];
@@ -50,6 +56,28 @@ export class InMemoryKnowledgeService implements KnowledgeService {
       content: `surfaced via ${pathway}`,
     });
     return this.pushKnown(entity, { content: fact.content, pathway, sourceEventId, ts, subject: fact.subject });
+  }
+
+  /**
+   * Is the pathway anchored to a real source (A4)?
+   *  - `told-by:<id>`     the claimed teller actually holds the fact — they were told it, OR they
+   *                       WITNESSED an event whose content is what they're telling (firsthand).
+   *  - `overheard:<id>`   an event with that id exists (something real was overheard).
+   * Anything else (an invented or sourceless pathway) is NOT anchored.
+   */
+  private pathwayAnchored(pathway: string, fact: { content: string; subject?: EntityId }): boolean {
+    const told = /^told-by:(.+)$/.exec(pathway);
+    if (told) {
+      const teller = told[1]!;
+      const holds = this.knownTo(teller).some(
+        (k) => k.content === fact.content || (fact.subject !== undefined && k.subject === fact.subject),
+      );
+      if (holds) return true;
+      return this.events.query().some((e) => e.witnessSet.includes(teller) && e.content === fact.content);
+    }
+    const heard = /^overheard:(.+)$/.exec(pathway);
+    if (heard) return this.events.query().some((e) => e.id === heard[1]);
+    return false;
   }
 
   recordDiaryRoom(content: string): KnowledgeFact {

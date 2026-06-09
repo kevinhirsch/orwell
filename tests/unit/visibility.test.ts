@@ -26,6 +26,8 @@ describe("event visibility", () => {
 
   it("surfacing adds a fact to knowledge with a traceable pathway and records the telling", () => {
     const core = buildEngineCore();
+    // Anchored (A4): the teller must legitimately hold what they surface — seed npc:1's firsthand belief.
+    core.knowledge.seedBelief(npc(1), { content: "gossip", factId: "g" }, "witnessed");
     core.knowledge.surfaceInformationTo(PLAYER, { content: "gossip" }, "told-by:npc:1");
     const known = core.knowledge.knownTo(PLAYER);
     expect(known).toHaveLength(1);

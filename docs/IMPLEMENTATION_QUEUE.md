@@ -966,7 +966,13 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > magnitudes come only from the constants module; **no number appears on any player surface** (extend the 0001 canary).
 > Read `docs/features/0023`, `0026` first. Open a PR.
 
-### B39 — anchor surfaced facts; validate recorded interactions  ·  Claude Code  ·  **Wave 1 · audit A4 (+ spec amend 0002/0009)**
+### B39 — anchor surfaced facts; validate recorded interactions  ·  Claude Code  ·  **Wave 1 · audit A4 (+ spec amend 0002/0009)** — ✅ DONE
+
+> **DONE.** (a) `surfaceInformationTo` is anchored: `told-by:<id>` requires the teller to hold or have
+> witnessed the fact, `overheard:<eventId>` requires the event to exist — else it is downgraded to a
+> **suspicion** (returns null), never knowledge; and it now persists (`onPersist`). (b) `recordInteraction`
+> refuses any initiator/witness that is not a LIVING houseguest (a `livingProvider` wired from the session)
+> and caps per-call folds. Specs 0002/0009 amended. `tests/unit/knowledgeIntegrity.test.ts` (6). Prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), close the anti-sycophancy hole where the narrator mints ground truth.
 > `surfaceInformationTo` accepts any `fact.content` + free-string `pathway` with no check that the claimed teller holds

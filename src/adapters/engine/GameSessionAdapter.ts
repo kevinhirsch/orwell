@@ -197,6 +197,14 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
+  /** The houseguests still in the game (player + non-evicted NPCs) — the legal references for an
+   *  interaction (B39). Empty before a game starts. */
+  livingIds(): EntityId[] {
+    if (!this.house) return [];
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    return [this.house.player.id, ...this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id)];
+  }
+
   socialInitiatives(): SocialInitiative[] {
     if (!this.house) return [];
     const player = this.house.player.id;
