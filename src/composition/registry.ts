@@ -4,12 +4,14 @@ import { buildOutwardChannels } from "./outwardRoot";
 import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameStateRepository";
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
 import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
+import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledgeService";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
 import type { UserSaveStore } from "../ports/UserSaveStore";
+import { SNAPSHOT_VERSION, snapshotCompatible } from "../engine/sessionSnapshot";
 import type { SessionSnapshot } from "../engine/sessionSnapshot";
 
 /**
@@ -81,20 +83,29 @@ function buildUserSandbox(): UserSandbox {
   };
 }
 
-/** Export the user's full durable snapshot: session core + engine detail (events + hidden beliefs). */
+/** Export the user's full durable snapshot: session core + engine detail (events + hidden beliefs + knowledge). */
 function exportSnapshot(sb: UserSandbox): SessionSnapshot {
   return {
     ...sb.session.snapshot(),
+    snapshotVersion: SNAPSHOT_VERSION,
     events: sb.engine.events.query(),
     relationships: sb.engine.relationships.serialize().edges,
+    // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
+    knowledge: (sb.engine.knowledge as InMemoryKnowledgeService).serialize(),
   };
 }
 
-/** Rebuild a fresh sandbox from a durable snapshot — resume the game, don't reset it. */
+/**
+ * Rebuild a fresh sandbox from a durable snapshot — resume the game, don't reset it. An UNKNOWN
+ * (future) schema version is rejected (throws) rather than silently mis-restored (B40/audit C4); a
+ * versionless legacy save migrates forward (it simply had no persisted knowledge layer).
+ */
 function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
+  if (!snapshotCompatible(snap)) throw new Error(`incompatible snapshot version: ${snap.snapshotVersion}`);
   sb.session.restore(snap);
   for (const e of snap.events) sb.engine.events.record(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
+  if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
 }
 
 export class GameSessionRegistry {
@@ -114,7 +125,15 @@ export class GameSessionRegistry {
       sb = buildUserSandbox();
       if (this.saveStore?.hasSave(user)) {
         const snap = this.saveStore.loadLatest(user);
-        if (snap) importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
+        // Resume from the durable save — but an incompatible/corrupt snapshot must REJECT into a fresh
+        // sandbox (B40/B35), never crash the resume. The bad save is left on disk for inspection.
+        if (snap) {
+          try {
+            importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
+          } catch {
+            sb = buildUserSandbox();
+          }
+        }
       }
       if (this.saveStore) {
         const persist = (): void => this.saveUser(user);

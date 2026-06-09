@@ -3,7 +3,20 @@ import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
+import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
+
+/**
+ * The current durable-snapshot schema version (B40/audit C4). Bump when the shape changes; a save
+ * carrying a HIGHER (unknown) version is rejected rather than silently mis-restored. A save with NO
+ * version is a legacy (pre-B40) save and is migrated forward (it simply lacks the knowledge layer).
+ */
+export const SNAPSHOT_VERSION = 1;
+
+/** A snapshot is loadable iff it is the current version or a versionless legacy save (migrate-forward). */
+export function snapshotCompatible(snap: { snapshotVersion?: number }): boolean {
+  return snap.snapshotVersion === undefined || snap.snapshotVersion === SNAPSHOT_VERSION;
+}
 
 /**
  * The durable per-user game snapshot (feature 0030) — what makes the LIVE game
@@ -37,8 +50,12 @@ export interface SessionCore {
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
 export interface SessionSnapshot extends SessionCore {
+  /** Schema version (B40); absent on legacy pre-B40 saves (migrated forward). */
+  snapshotVersion?: number;
   events: GameEvent[];
   relationships: EdgeRecord[];
+  /** The whole knowledge layer (B40/audit C2): facts + suspicions + counters. Absent on legacy saves. */
+  knowledge?: KnowledgeSnapshot;
 }
 
 export function cloneSession<T>(value: T): T {
@@ -71,12 +88,20 @@ export function toGameState(snap: SessionSnapshot): GameState {
       relationshipBeliefs: snap.relationships.filter((e) => e.from === hg.id),
     };
   }
+  // The knowledge layer is now part of the snapshot (B40), so the non-degradation checkpoint (0031)
+  // can see it — a restart that dropped what houseguests told the player would fail isSuperset/counts.
+  const knowledge: GameState["knowledge"] = [];
+  if (snap.knowledge) {
+    for (const [entity, facts] of Object.entries(snap.knowledge.knowledge)) {
+      for (const fact of facts) knowledge.push({ entity, fact });
+    }
+  }
   return {
     coreVersion: 1,
     vaultVersion: 1,
     journalVersion: 1,
     events: snap.events,
-    knowledge: [],
+    knowledge,
     relationships: snap.relationships,
     souls,
     characters,

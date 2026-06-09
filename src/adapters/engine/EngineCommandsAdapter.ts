@@ -28,7 +28,6 @@ const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
 const MAX_FOLDS_PER_INTERACTION = 12;
 
 export class EngineCommandsAdapter implements EngineCommands {
-  private seq = 0;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
   private onPersist?: () => void;
   /** The living houseguests an interaction may name (B39); when unset, validation is skipped (standalone). */
@@ -60,9 +59,13 @@ export class EngineCommandsAdapter implements EngineCommands {
         if (!living.has(id)) throw new Error(`recordInteraction names a non-living houseguest: ${id}`);
       }
     }
-    const eventId = `evt:mcp:${++this.seq}`;
+    // Derive the id + ts from the store's current size (B40/audit C2): monotonic and restart-safe —
+    // after a restore the count resumes high, so a post-restart interaction never collides with a
+    // pre-restart one (the old `++this.seq` restarted at 0, minting duplicate ids).
+    const n = this.events.query().length;
+    const eventId = `evt:mcp:${n}`;
     this.events.record({
-      id: eventId, ts: this.seq, type: "conversation",
+      id: eventId, ts: n, type: "conversation",
       initiator: req.initiator, witnessSet: req.witnessSet,
       hidden: !req.witnessSet.includes(PLAYER), content: req.content,
     });

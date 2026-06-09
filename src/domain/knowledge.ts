@@ -42,3 +42,15 @@ export interface Suspicion {
   subject?: EntityId;
   ts: number;
 }
+
+/**
+ * The serializable knowledge layer (feature B40 / audit C2): per-entity knowledge + suspicions PLUS
+ * the id/ts counters, so a restart resumes the layer instead of losing it AND post-restart events
+ * get fresh ids (no duplicates). Plain JSON — part of the durable `SessionSnapshot` contract (#6).
+ */
+export interface KnowledgeSnapshot {
+  knowledge: Record<EntityId, KnowledgeFact[]>;
+  suspicions: Record<EntityId, Suspicion[]>;
+  seq: number;
+  tick: number;
+}

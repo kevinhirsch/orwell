@@ -984,7 +984,14 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `docs/features/0002` / `0009` to pin the contract. **Acceptance:** unit — an unanchored surfacing is downgraded/refused;
 > an interaction naming an evicted houseguest is refused; every player-known fact traces to a recorded source. Open a PR.
 
-### B40 — complete the durable snapshot (knowledge + suspicions + counters + version)  ·  Claude Code  ·  **Wave 1 · audit C2 + C3 + C4**
+### B40 — complete the durable snapshot (knowledge + suspicions + counters + version)  ·  Claude Code  ·  **Wave 1 · audit C2 + C3 + C4** — ✅ DONE
+
+> **DONE.** The knowledge layer now round-trips: `InMemoryKnowledgeService.serialize/load` (facts +
+> suspicions + seq/tick) ride in `SessionSnapshot`, `toGameState().knowledge` is populated (the 0031
+> checkpoint counts it), `recordInteraction` derives id+ts from the store size (restart-safe — no more
+> duplicate ids), and `InMemoryEventStore.record` throws on a duplicate id. A `snapshotVersion` is
+> written + validated: an unknown/future version is rejected into a fresh sandbox (no crash), a
+> versionless legacy save migrates forward. `tests/unit/snapshotCompleteness.test.ts` (5). Prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the knowledge layer is **not in the snapshot**: `exportSnapshot` = core + events
 > + relationships only; restore builds a fresh empty `InMemoryKnowledgeService`; `toGameState` hardcodes `knowledge: []`

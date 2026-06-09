@@ -2,13 +2,36 @@ import type { KnowledgeService, BeliefInput } from "../../ports/KnowledgeService
 import type { EventStore } from "../../ports/EventStore";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import type { KnowledgeFact, Suspicion } from "../../domain/knowledge";
+import type { KnowledgeFact, Suspicion, KnowledgeSnapshot } from "../../domain/knowledge";
 
 export class InMemoryKnowledgeService implements KnowledgeService {
   private readonly knowledge = new Map<EntityId, KnowledgeFact[]>();
   private readonly suspicions = new Map<EntityId, Suspicion[]>();
   private seq = 0;
   private tick = 0;
+
+  /**
+   * Serialize the whole knowledge layer (B40/audit C2): per-entity knowledge + suspicions AND the
+   * id/ts counters, so a restart resumes it (no lost facts, no duplicate ids). ENGINE-ONLY — only the
+   * composition root (snapshot) calls this; never an outward surface.
+   */
+  serialize(): KnowledgeSnapshot {
+    const knowledge: Record<EntityId, KnowledgeFact[]> = {};
+    for (const [k, v] of this.knowledge) knowledge[k] = v.map((f) => ({ ...f }));
+    const suspicions: Record<EntityId, Suspicion[]> = {};
+    for (const [k, v] of this.suspicions) suspicions[k] = v.map((s) => ({ ...s }));
+    return { knowledge, suspicions, seq: this.seq, tick: this.tick };
+  }
+
+  /** Rebuild the knowledge layer from a snapshot (B40) — resume, don't reset. */
+  load(snap: KnowledgeSnapshot): void {
+    this.knowledge.clear();
+    this.suspicions.clear();
+    for (const [k, v] of Object.entries(snap.knowledge)) this.knowledge.set(k, v.map((f) => ({ ...f })));
+    for (const [k, v] of Object.entries(snap.suspicions)) this.suspicions.set(k, v.map((s) => ({ ...s })));
+    this.seq = snap.seq;
+    this.tick = snap.tick;
+  }
 
   constructor(
     private readonly events: EventStore,
