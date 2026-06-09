@@ -1,6 +1,7 @@
 # 0037 — Live jury-vote choreography (the interactive finale)
 
-> **Status:** Draft. The **live realization of 0014 §5–6** — the Final 2 finale as an interactive,
+> **Status:** **Engine built & green** (in `cucumber.cjs`); **front-end UI pending (C11, §8).** The
+> **live realization of 0014 §5–6** — the Final 2 finale as an interactive,
 > staged sequence inside the running game, not a single auto-resolved winner. The pure jury logic
 > (`src/engine/jury.ts` — `juryLean`, `castJuryVote`, `finalePerformance`, `tallyJuryVote`, `runFinale`)
 > is **green (0014)** but the live loop ignores almost all of it: `liveSeason.runFinale` hard-codes a
@@ -135,3 +136,59 @@ through the **0034** `advanceGame`/`submitDecision` seam, persisted by **0030**,
 **0002** (jury leans = relationship signals), and **0021** (isolation). Pairs with **B21/0018** (the lever
 manifest must name the finale decisions). Front-end consumption (render statements/questions/reveal in
 chat) is a small follow-up on the **0032** game build — the agent can already drive it through the tools.
+
+## 8. Front-end UI (C11) — rendering the finale to the player
+
+The engine + decision seam are **built and green**; what's missing is the player-facing **presentation**.
+Today `advanceGame` returns the `finale-statement` / `finale-answer` / `juror-vote` decisions and a
+`FinaleView`, but **nothing renders them** — the finale plays out only as chat-agent narration, with no
+visual of the staged vote reveal. This is the **direct parallel to 0036's C10** (the social panel): a
+self-contained, Vault-free, fail-open surface, built in the same patterns as `orwellStatusPanel.js` /
+`orwellSocial.js`.
+
+### 8.1 Small engine prerequisite — a Vault-free finale read (B-item)
+`FinaleView` is currently only attached to `AdvanceView.finale` (returned by `advanceGame`), so a polling
+panel can't read the staged finale without advancing. Promote the existing private
+`GameSessionAdapter.finaleView()` to a **read tool** `finaleView(): FinaleView | null` on the `GameSession`
+port + `PLAYER_TOOLS` + `McpServer` (`readsVault: false`; classified **infra**, like `gameStatus`/
+`playerTagline`, so the lever-manifest drift guard doesn't require naming it). Sentinel-clean (extend the
+0001 canary). It returns the **same Vault-free projection** already proven on `AdvanceView.finale`:
+**names + current stage + the reveals SO FAR only** — never a lean, tally, eviction manner, or the
+pre-reveal winner.
+
+### 8.2 Front-end route
+`GET /api/orwell/finale` → `{ finale: FinaleView | null }` (mirrors `/status`; an `orwell_engine.finale_view`
+client method). **Fail-open:** `{ finale: null }` on any error — the page never blocks on it.
+
+### 8.3 The finale panel (`orwellFinale.js`)
+A self-contained polling panel (sibling to the status/social panels), shown **only while a finale is
+staging** (`finale != null`):
+- **Finalists** — the two finalist names, side by side.
+- **Stage** — `statements | questions | vote | reveal` (a quiet header).
+- **The vote reveal** — each `{ juror → finalist }` from `reveals[]` rendered **in reveal order, as they
+  appear** (the drama). A running per-finalist tally of the **revealed** votes only — never a count of
+  unrevealed jurors, never the winner before the reveals complete. On completion, `AdvanceView.winner`
+  (the crown moment) lands through the normal advance.
+- **The player's turn** — when `advanceGame` yields a finale decision, surface it the same way `orwellSocial`
+  surfaces approaches (consistent + low-risk): a `finale-statement` offers a "make your case" composer
+  prefill; a `finale-answer` shows the juror's question + the legal `appeals[]` as **composer-prefill
+  shortcuts**; a `juror-vote` offers the two finalists. Binding submission still flows through the
+  chat-agent `submitDecision` seam (as nominations/votes do today) — the panel only **presents** the legal
+  options; the engine validates and scores (the prose/statement carries no score — anti-sycophancy).
+
+### 8.4 Constraints (carry the engine's guarantees into the UI)
+- **Vault-free:** render **only** the `FinaleView` / pending payloads; never a lean, tally, manner, or
+  pre-reveal winner.
+- **Fail-open:** finale read errors ⇒ hide the panel; never block the chat.
+- **0032 keep-set:** a game surface, gated to a live finale; survives the prune; `orwellFinale.js` adds no
+  new module deps (browser-smoke safe), script-tagged after the social panel.
+
+### 8.5 Definition of Done (C11)
+- [ ] **Engine:** `finaleView()` is a Vault-free read tool (sentinel-clean; `npm run test:arch` green).
+- [ ] **Route:** `GET /api/orwell/finale` returns the FinaleView, fail-open.
+- [ ] **Panel:** during a finale it shows the finalists, the stage, and the **vote reveal in order**
+      (revealed votes only — no pre-reveal winner/tally); hidden otherwise.
+- [ ] **Player decisions** (statement / answer-appeal / juror-vote) are surfaced over the existing seam,
+      and a submitted finale decision advances the staging.
+- [ ] Name-agnostic (roles only — finalist/juror); `cd frontend && python3 -m pytest tests/` green; the
+      0032 headless-browser gate stays green; engine gate unaffected. Verified on a running instance.
