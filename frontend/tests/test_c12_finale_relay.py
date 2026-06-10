@@ -23,7 +23,11 @@ chat_helpers = importlib.import_module("routes.chat_helpers")
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    # E70: /new-game is admin-gated; these tests exercise route LOGIC under the documented
+    # smoke configuration (AUTH_ENABLED=false — the same bypass deploy/smoke.sh runs with).
+    # The gate itself is proven in test_e70_new_game_gate.py.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     app = FastAPI()
     app.include_router(orwell_routes.setup_orwell_routes())
     return TestClient(app)
