@@ -50,7 +50,8 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Player", archetype: "schemer", strategyStyle: "ruthless", seed: 3 });
     const blob = JSON.stringify(s.getGameState());
-    for (const banned of ["physical", "mental", "social", "stats", "soul", "emotional", "volatility"]) {
+    // "social" is a public strategy-style word (B61); the hidden layer stays banned.
+    for (const banned of ["physical", "mental", '"stats"', '"soul"', "emotionalState", "volatility", "hiddenElement"]) {
       expect(blob.includes(banned)).toBe(false);
     }
   });

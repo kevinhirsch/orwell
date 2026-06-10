@@ -34,15 +34,18 @@ describe("onboarding — createCharacter starts a game (the missing step past ac
 });
 
 describe("onboarding — the Vault-free projection (no hidden houseguest detail crosses the wall)", () => {
-  it("house cards carry name + status only — no stats, souls, archetypes, or backgrounds", () => {
+  it("house cards carry the curated PUBLIC facets (B61) — and nothing hidden", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: PLAYER_NAME, seed: 3 });
     const blob = JSON.stringify(s.getGameState().house);
-    for (const leak of ["physical", "mental", "social", "stats", "soul", "archetype", "background", "volatility", "emotional"]) {
+    // The genuinely hidden layer never crosses: aptitudes, the soul, hidden elements.
+    // (NB: "social" is NOT banned — it is a legitimate public strategy style/archetype word.)
+    for (const leak of ["physical", "mental", '"stats"', '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive", "concealed-aptitude"]) {
       expect(blob.includes(leak), `house projection leaked "${leak}"`).toBe(false);
     }
     const card = s.getGameState().house[0]!;
-    expect(Object.keys(card).sort()).toEqual(["id", "name", "status"]);
+    expect(Object.keys(card).sort()).toEqual(
+      ["age", "appearance", "archetype", "background", "id", "name", "presentation", "status", "strategyStyle"].sort());
   });
 });
 

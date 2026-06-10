@@ -26,7 +26,8 @@ describe("0018 — narrative & moment orchestration", () => {
     game.createCharacter({ playerName: "Player One", seed: 4 });
     const ctx = renderGameContext(game.getGameState());
     expect(ctx).toContain("Player One");
-    for (const banned of ["physical", "mental", "social", "soul", "volatility", "emotionalState"]) {
+    // "social" is a public strategy-style word (B61 cast voices) — ban the hidden layer precisely.
+    for (const banned of ["physical", "mental", '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive"]) {
       expect(ctx.includes(banned)).toBe(false);
     }
   });

@@ -21,11 +21,13 @@ function plantLiveSentinels(reg: GameSessionRegistry, user: string, seed: number
   const sentinels: string[] = [];
   const mk = (tag: string): string => { const s = `SENTINEL-B42-${tag}-${seed}-${++n}`; sentinels.push(s); return s; };
 
-  // (1) The generated house's HIDDEN string fields — backstory + soul memory — via snapshot→restore
-  // (the engine-side post-process of CharacterFactory output). Stats are numeric; the soul text carries the marker.
+  // (1) The generated house's HIDDEN string fields — the typed hidden elements (B50) + soul
+  // memory — via snapshot→restore (the engine-side post-process of CharacterFactory output).
+  // NOTE (B61): `background` is a curated PUBLIC facet (the narrator's voice anchor, projected
+  // on the houseguest card by design) — the hidden material lives in `hiddenElements`.
   const core = sb.session.snapshot();
   for (const hg of core.house!.npcs) {
-    hg.character.background += ` ${mk("bg")}`;
+    hg.character.hiddenElements.push({ kind: "secret-motive", detail: mk("hidden") });
     hg.soul.memory.push(mk("soul"));
   }
   sb.session.restore(core); // also rebuilds the soul recall index from the (now sentinel-bearing) memory
