@@ -1906,7 +1906,18 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > fact for a scene in another room. Read ADR 0003 (§8 + Testability), `docs/features/0002`, `0001`, and
 > B61 first. Open a PR.
 
-### B66 — the ADR-0003 testability harness (reusable structural assertions)  ·  Claude Code  ·  **FE-2 · ADR 0003 Testability section**
+### B66 — the ADR-0003 testability harness (reusable structural assertions)  ·  Claude Code  ·  **FE-2 · ADR 0003 Testability · ✅ DONE 2026-06-10**
+
+> **Built to green.** `tests/support/adr0003.ts` — the REUSABLE helpers, each returning named violations over a
+> production-wired fixture (`adrFixture`: registry + turn-driven orchestrator as commit delegate):
+> `presenceCoherenceViolations` (one room each, adjacency-only, seeded — B64), `knowledgeScopeViolations`
+> (a unique terminated sentinel per NPC: each voices their OWN and no one else's — B65),
+> `personaDriftViolations` (byte-identical narrator facets across turns — B61), `lingeringViolations`
+> (N mill/talk turns ⇒ week/phase/pending untouched + milling counts as watcher activity — B64).
+> Wired into `npm run test:unit` via `tests/unit/adr0003Harness.test.ts`. The FE half:
+> `frontend/tests/test_b66_augment_guard.py` — the augment-not-replace guard as a SOURCE/REGISTRY assertion
+> (game-progressing engine calls reach routes ONLY through the two sanctioned confirm paths — the C20 decision
+> route and the 409-guarded new-game route; static JS never bypasses the FE routes to the engine transport).
 
 > In `kevinhirsch/orwell`, build the reusable test scaffolding the ADR's Testability section promises,
 > so these principles are enforced, not aspirational, and stay green as the game grows. Add helpers +

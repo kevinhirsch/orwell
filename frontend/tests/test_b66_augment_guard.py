@@ -1,0 +1,79 @@
+"""B66 — the augment-not-replace guard (ADR 0003 §4), structurally.
+
+UI may AUGMENT the chat but never REPLACE a game-building interaction: no front-end UI
+route/control may reach a game-PROGRESSING engine action except the two sanctioned,
+explicitly-confirmed paths — the decision route (the C20 confirm card posts the player's
+selection engine-direct) and the new-game route (guarded by a 409 unless confirm=true).
+Everything else progressing belongs to the AGENT path (src/tool_implementations.py),
+where the model acts inside the conversation. This mirrors the engine's dependency-cruiser
+Vault rule at the front-end layer: a registry/source assertion, not a convention.
+"""
+
+import os
+import re
+
+FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Engine-client calls that PROGRESS the game (vs. read-only projections).
+PROGRESSING = [
+    "advance_game", "submit_decision", "create_character", "update_casting",
+    "make_deal", "record_interaction", "surface_information",
+]
+
+# The two sanctioned UI commitment paths (file, function-name marker, required guard marker).
+SANCTIONED = {
+    "submit_decision": ("routes/orwell_routes.py", "orwell_decision", "_DECISION_KINDS"),
+    "create_character": ("routes/orwell_routes.py", "orwell_new_game", "409"),
+}
+
+
+def _route_files():
+    root = os.path.join(FRONTEND, "routes")
+    for name in sorted(os.listdir(root)):
+        if name.endswith(".py"):
+            yield name, open(os.path.join(root, name), encoding="utf-8").read()
+
+
+def test_progressing_actions_reach_routes_only_through_sanctioned_confirm_paths():
+    for fname, src in _route_files():
+        for action in PROGRESSING:
+            hits = [m.start() for m in re.finditer(rf"orwell_engine\.{action}\(", src)]
+            if not hits:
+                continue
+            sanctioned = SANCTIONED.get(action)
+            assert sanctioned and f"routes/{fname}" == sanctioned[0], (
+                f"routes/{fname} calls game-progressing orwell_engine.{action}() — UI must not "
+                "progress the game outside the sanctioned confirm paths (ADR 0003 §4)"
+            )
+            # The sanctioned path must still carry its explicit guard.
+            assert sanctioned[2] in src, (
+                f"the sanctioned {action} path lost its '{sanctioned[2]}' guard"
+            )
+
+
+def test_sanctioned_decision_path_validates_kinds_and_posts_engine_direct():
+    src = open(os.path.join(FRONTEND, "routes", "orwell_routes.py"), encoding="utf-8").read()
+    assert "_DECISION_KINDS" in src and "unknown decision kind" in src
+    assert "confirm" in src and "409" in src  # the new-game guard stays honest
+
+
+def test_static_js_never_calls_the_engine_directly():
+    """The browser talks to /api/orwell/* routes only — never the engine's own transport."""
+    root = os.path.join(FRONTEND, "static", "js")
+    offenders = []
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            if not name.endswith(".js"):
+                continue
+            src = open(os.path.join(dirpath, name), encoding="utf-8").read()
+            # A fetch/XHR to the engine transport (its tool route or default port) is a bypass.
+            if re.search(r"""fetch\([^)]*(player/call|admin/call|:8765)""", src):
+                offenders.append(os.path.relpath(os.path.join(dirpath, name), FRONTEND))
+    assert not offenders, f"static JS bypasses the FE routes to reach the engine: {offenders}"
+
+
+def test_diary_room_route_is_not_treated_as_progressing():
+    # The Diary Room is the player's OOC space (0013): it records knowledge, never advances the
+    # week — it is deliberately NOT in the progressing set. Pin that classification here so a
+    # future change that makes it progressing must revisit this guard.
+    assert "diary_room" not in PROGRESSING
