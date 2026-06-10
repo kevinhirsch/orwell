@@ -34,7 +34,7 @@
           font-family: 'Fira Code', ui-monospace, monospace;
         }
         #orwell-onboarding .ob-card {
-          width: 420px; max-width: 92vw;
+          width: 420px; max-width: 92vw; max-height: 90vh; overflow: auto;
           background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 12px;
           padding: 1.6rem 1.6rem 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,.45);
@@ -85,10 +85,40 @@
     return el;
   }
 
+  // A11Y-1: aria-modal is a PROMISE to assistive tech that the rest of the page is
+  // inert — enforce it. Tab cycles inside the card; everything behind the scrim is
+  // inert (unfocusable, unclickable) until the overlay resolves. Without this a
+  // keyboard/screen-reader player tabbed straight out into a dead chat on their
+  // very first screen.
+  let _inerted = [];
+  function inertBackground(except) {
+    _inerted = [];
+    Array.from(document.body.children).forEach((n) => {
+      if (n === except || n.tagName === "SCRIPT" || n.tagName === "STYLE") return;
+      if (!n.inert) { n.inert = true; _inerted.push(n); }
+    });
+  }
+  function uninertBackground() {
+    _inerted.forEach((n) => { try { n.inert = false; } catch (_) {} });
+    _inerted = [];
+  }
+  function trapFocus(el) {
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
+      const f = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+  }
+
   function mount() {
     if (document.getElementById("orwell-onboarding")) return;
     const el = buildOverlay();
     document.body.appendChild(el);
+    inertBackground(el);
+    trapFocus(el);
     const form = el.querySelector("#ob-form");
     const btn = el.querySelector("#ob-submit");
     const err = el.querySelector("#ob-err");
@@ -114,6 +144,7 @@
           const d = await r.json().catch(() => ({}));
           throw new Error(d.error || ("HTTP " + r.status));
         }
+        uninertBackground();
         el.remove(); // dissolve into the chat — the main chat is now in-character
         // Nudge the status HUD to pick up the freshly-started game immediately.
         window.dispatchEvent(new Event("orwell:gamechanged"));
@@ -123,6 +154,9 @@
       }
     });
   }
+
+  // Seam for the headless browser gate (and future flows): mount on demand.
+  window._orwellOnboardingMount = mount;
 
   ready(async () => {
     try {
