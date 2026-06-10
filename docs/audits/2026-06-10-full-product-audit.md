@@ -73,6 +73,9 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 14. **Admins can retrieve old chat transcripts for debugging** — quiet, not loudly exposed:
     an admin-gated API plus a small entry in the existing admin section of Settings (shape
     chosen 2026-06-10; specced as "Future specs" — 0053).
+15. **The UI enhancements track is prioritized** (2026-06-10): the chrome/windows and
+    transcript-surface lanes are first in dispatch order — see the priority note in the
+    parallel execution plan.
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
@@ -1123,6 +1126,21 @@ The findings parallelize well, but the limit is **file contention and a handful 
 dependencies — not finding count**. Run each lane as a worktree-isolated agent with exclusive
 ownership of its hot files; merge lanes in the integration order given below. With the roster
 as drawn, **11–13 lanes can run concurrently from day one**.
+
+**Priority (ruling #15): the UI enhancements track dispatches first.** The track is
+**Lane 9 (chrome & windows)** — the sidebar status HUD (E64), sidebar Diary Room (E88), the
+sidebar minimize dock (E95), icon-only theme button (E90), position persistence (E91), window
+animations (E97), bottom padding (E92), finale-panel parity (E67), the panel polish set
+(E68–E71), the D2 collision rule, and the 0052 house themes with their frosted/animated
+identity — plus **Lane 7 (transcript surface)**: diegetic beat labels (D5/W6/E11-FE), no
+edit/delete on the played record (E93), decision-card boot re-arm (D3/E66), the dead
+`orwell:gamechanged` dispatcher (E65), and the first-class in-character image attach (E94).
+The UI-visible game-build trims (E72 model picker, E96 Save-to-Documents, D7 holding copy +
+mode toggle, D9 portraits, D6 CDN vendoring) ride with this track from Lane 8. Staff these
+lanes first and fullest; they contend with no engine files, so **Lane 1 (the restart spine)
+runs concurrently at full speed** — prioritizing UI costs the CRIT engine work nothing.
+Within the track, Lane 9's internal sequence below still governs; Lane 7 and the Lane 8 trims
+are unordered with respect to it.
 
 ### The contention map (one owner per hot file — never two agents in these)
 
