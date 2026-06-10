@@ -67,6 +67,9 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
     minimized windows go somewhere sensible (the sidebar) instead (full spec at E95).
 11. **The "Save to Documents" export item is removed** under the game build (full spec at E96).
 12. **Windows animate on open, close, and minimize** (full spec at E97).
+13. **The theme picker leads with 3–6 house themes** — Big Brother / creepy / Orwellian palettes
+    on par with the game's identity, placed as the *first* entries in the picker. Specced as a
+    feature, not a finding (see "Future specs" — 0052).
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
@@ -699,6 +702,32 @@ consequence.*
   image-capable model is configured. Natural pairing: E94's attach flow (analyze in, generate
   out) and D9/E64's portrait surfaces (a generated cast portrait set at season start is the
   obvious first deliverable). Write as `docs/features/0051-in-character-images.{md,feature}`.
+
+- **0052 (proposed) — House themes for the theme picker** *(ruling #13, 2026-06-10)*. Five
+  built-in themes that carry the game's identity, defined **first** in the `THEMES` preset
+  object so they render as the picker's opening row (`theme.js:617–633` renders
+  `Object.entries(THEMES)` in insertion order); each is a full token set in the existing
+  preset shape (`bg/fg/red/accent/…` — same keys the `orwell-theme` localStorage payload and
+  swatch renderer already consume), body text at WCAG AA contrast, no animated textures (any
+  scanline/noise effect is static or `prefers-reduced-motion`-gated):
+  1. **The Feed** — night-vision surveillance: near-black green-cast background, phosphor-green
+     foreground, desaturated mid-grays, a blinking-REC red reserved for `--red`/alerts.
+  2. **Telescreen** — Orwell's CRT: deep charcoal with a faint cyan-white glow for text, pale
+     blue panel tint, vignette-dark borders; accent the cold cyan of a screen that watches back.
+  3. **Room 101** — institutional dread: gray-green walls, fluorescent off-white text,
+     danger-red accent, hard borders (minimal radius via existing tokens where supported).
+  4. **Memory Wall** — the gallery after an eviction: near-black blue-charcoal, backlit
+     portrait-blue accents, warm tungsten highlight for active elements, dimmed gray for
+     "evicted" muted text.
+  5. **Sequester** — the jury house: low-contrast wine/maroon depths, brass-gold accent,
+     velvet-dark panels; cozy with an undertone of waiting.
+  Placement/behavior: house themes appear before `dark/original` and all inherited presets;
+  the default theme for fresh game-build installs may switch to **The Feed** (decide at
+  implementation — record as its own mini-ruling); custom-theme machinery untouched.
+  *Tests:* pytest/browser smoke assert the first five `themeGrid` swatches are the house set,
+  each applies (body computed background matches token), and a contrast check on fg/bg pairs
+  passes AA. Write as `docs/features/0052-house-themes.{md,feature}` (FE pytest-validated,
+  honest 0029-style header — not cucumber-gated).
 
 ## Deferral specs (unchanged status, now concretely scoped)
 
