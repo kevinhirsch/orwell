@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { juryLean, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS, appealEffect, bestAppeal, finalePerformance, FINALE_APPEALS } from "../../src/engine/jury";
+import { juryLean, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS, appealEffect, bestAppeal, finalePerformance, FINALE_APPEALS, NEUTRAL_APPEAL_EFFECT } from "../../src/engine/jury";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { npc } from "../../src/domain/ids";
 
@@ -134,6 +134,15 @@ describe("0037 — engine-legible finale appeals (anti-sycophancy)", () => {
     // Stable across calls (pure).
     expect(bestAppeal({ trust: 0.5, affinity: 0.95, threat: 0.1 }, {}))
       .toBe(bestAppeal({ trust: 0.5, affinity: 0.95, threat: 0.1 }, {}));
+  });
+
+  it("the neutral score for an unanswered finalist sits between the worst and best appeal (A6)", () => {
+    // A juror who never questions a finalist contributes a NEUTRAL finale term for them — never the
+    // engine's optimal bestAppeal (which would silently play their finale), never a penalty.
+    const best = appealEffect(bestAppeal(neutral, {}), neutral, {});
+    const worst = Math.min(...FINALE_APPEALS.map((a) => appealEffect(a, neutral, {})));
+    expect(NEUTRAL_APPEAL_EFFECT).toBeGreaterThan(worst);
+    expect(NEUTRAL_APPEAL_EFFECT).toBeLessThan(best);
   });
 
   it("the finale sway is BOUNDED: a perfect finale cannot overturn a clear relationship lead", () => {

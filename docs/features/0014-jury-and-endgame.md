@@ -34,7 +34,10 @@ Each juror's lean toward a finalist is a function of:
   **less** likely to vote for the responsible finalist; one who felt **respected** is more
   persuadable.
 
-So the long game (how you treat people on the way out) is what mostly decides the finale.
+So the long game (how you treat people on the way out) is what mostly decides the finale. The
+**responsible finalist** is read symmetrically: the **player** counts as a responsible houseguest like
+any NPC (live realization + symmetry fixes in **0037**, audit A5/A6), so a juror the **player**
+blindsided weighs that against them too.
 
 ## 5. Final 2 choreography
 

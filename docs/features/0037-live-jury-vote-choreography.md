@@ -11,6 +11,22 @@
 > wire-it-live" pattern as **0034 / 0035 / 0036**.
 > **Executable spec:** [`0037-live-jury-vote-choreography.feature`](./0037-live-jury-vote-choreography.feature)
 
+> **Amendment (Wave 2 — symmetric jury management, audit A5 + A6).** Two asymmetries that made the
+> finale **inert against / sycophantic toward the player** are closed (`liveSeason.ts`):
+> - **A5 — manner applies to the player.** `recordEvictionManner` no longer exempts the player: when the
+>   player is a **responsible** houseguest (the HOH who nominated, or a voter who voted to evict), the
+>   evictee records their manner (betrayed / blindsided / respected) toward the **player** like anyone else
+>   (§4.2). So a juror the player blindsided on the way out weighs that against them at the player's own
+>   finale — jury management, the signature mechanic, now cuts **both** ways. (It also folds the
+>   evictee→player resentment into the hidden relationship layer at eviction, per 0023.)
+> - **A6 — unanswered jurors are neutral, symmetrically.** **Canon: one question per juror (9 total)** —
+>   each juror questions **one** finalist (the alternating script), *not* one-per-juror-per-finalist;
+>   this supersedes the stray "18" wording in `CLAUDE.md`. The finale performance a finalist contributes
+>   to a juror who **never questioned them** is now a **`NEUTRAL_APPEAL_EFFECT` (0.5)** — applied the
+>   **same** to the player and NPC finalists. Previously the engine back-filled the **optimal** `bestAppeal`
+>   for every unanswered slot, silently playing a finalist's finale for them; a finalist now earns finale
+>   sway **only** from the jurors who actually questioned them.
+
 ## 1. Summary
 
 At Final 2 the live game must stage the finale, not skip to a winner:

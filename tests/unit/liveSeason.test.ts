@@ -174,6 +174,22 @@ describe("live weekly loop (incremental 0011)", () => {
     // A manner toward the HOH was recorded (responsible: the HOH put them up).
     expect(s.mannerByEvictee?.[evictee]?.[npc(1)]).toEqual({ betrayed: true });
   });
+
+  it("records eviction manner toward the PLAYER too — jury management cuts both ways (A5)", () => {
+    // Mirror of the test above with the PLAYER as a responsible houseguest: the player votes the
+    // evictee out, so the evictee reads the manner toward the PLAYER. Before A5 this was skipped, so a
+    // player-finalist faced a structurally toothless jury; now it is recorded like any other.
+    const { active, ctx } = buildHouse(6, 5);
+    const s = newLiveSeason(active);
+    const evictee = npc(2);
+    ctx.rel.edge(evictee, PLAYER).trust = 0.9; // the evictee TRUSTED the player, who votes them out ⇒ betrayed
+    s.hoh = npc(1); s.nominees = [evictee, npc(3)]; s.finalNominees = [evictee, npc(3)]; s.beat = "eviction";
+    advance(s, ctx, new SeededRandom(5));                            // the player is a voter ⇒ pends
+    applyDecision(s, { kind: "eviction-vote", vote: evictee }, ctx); // the player votes the evictee out
+    expect(s.evictionOrder).toContain(evictee);
+    // The exemption is gone: the player is recorded among the responsible houseguests.
+    expect(s.mannerByEvictee?.[evictee]?.[PLAYER]).toEqual({ betrayed: true });
+  });
 });
 
 // --- 0037: the live finale sub-loop -------------------------------------------
@@ -301,6 +317,54 @@ describe("0037 — live finale sub-loop", () => {
     expect(betrayed).toBeLessThan(respected);
   });
 
+  it("a juror the PLAYER blindsided votes for the player-finalist measurably less (A5)", () => {
+    // The same property with the player (finalist A) as the RESPONSIBLE finalist: the eviction manner
+    // the player earned on the way out (recorded live, A5) lowers that juror's lean toward the player,
+    // exactly as it does for an NPC finalist. Jury management is no longer toothless against the player.
+    const shareForA = (manner: import("../../src/engine/jury").EvictionManner, runs = 250): number => {
+      let aVotes = 0;
+      for (let seed = 1; seed <= runs; seed++) {
+        const { s, ctx, A, B, jury } = finalTwoState({ jurors: 9 });
+        for (const j of jury) {
+          Object.assign(ctx.rel.edge(j, A), { trust: 0.5, affinity: 0.5, threat: 0.3 });
+          Object.assign(ctx.rel.edge(j, B), { trust: 0.5, affinity: 0.5, threat: 0.3 });
+        }
+        s.mannerByEvictee = { [jury[0]!]: { [A]: manner } }; // the player (A) is the responsible finalist
+        const events = driveFinale(s, ctx, new SeededRandom(seed), { appeal: "connect" });
+        const reveal = events.find((e) => e.beat === "finale-reveal" && e.participants[0] === jury[0]);
+        if (reveal && reveal.participants[1] === A) aVotes++;
+      }
+      return aVotes / runs;
+    };
+    expect(shareForA({ blindsided: true })).toBeLessThan(shareForA({ respected: true }));
+  });
+
+  it("a finalist earns finale sway only from jurors who questioned them — unanswered slots are neutral and symmetric (A6)", () => {
+    // 2 jurors, identical jury reads for both finalists ⇒ the lean cancels and the finale term alone
+    // decides. By the alternating script juror[0] questions finalist A (the player) and juror[1]
+    // questions finalist B; so A is UNANSWERED by juror[1] and B is UNANSWERED by juror[0]. With A6
+    // each unanswered slot scores NEUTRAL (not the engine's optimal bestAppeal), SYMMETRICALLY — the
+    // questioned finalist is favoured by their own appeal; the unquestioned one is neither helped nor hurt.
+    const edge = (): { trust: number; affinity: number; threat: number } => ({ trust: 0.5, affinity: 0.5, threat: 0.5 });
+    const runs = 400;
+    let aFromJ0 = 0, aFromJ1 = 0;
+    for (let seed = 1; seed <= runs; seed++) {
+      const { s, ctx, A, jury } = finalTwoState({ jurors: 2, edgeToA: edge, edgeToB: edge });
+      // The player answers its one juror with the strong on-type appeal (own-game scores 0.65 here).
+      const events = driveFinale(s, ctx, new SeededRandom(seed), { appeal: "own-game" });
+      const votedFor = (j: EntityId): EntityId | undefined =>
+        events.find((e) => e.beat === "finale-reveal" && e.participants[0] === j)?.participants[1];
+      if (votedFor(jury[0]!) === A) aFromJ0++;
+      if (votedFor(jury[1]!) === A) aFromJ1++;
+    }
+    const shareJ0 = aFromJ0 / runs; // juror[0] questioned A ⇒ A's own-game (0.65) beats B's neutral (0.5)
+    const shareJ1 = aFromJ1 / runs; // juror[1] questioned B ⇒ A is unanswered (neutral) ⇒ B is favoured
+    expect(shareJ0).toBeGreaterThan(0.56); // A EARNED this juror's sway (before A6, B's free bestAppeal tied it ⇒ ~0.5)
+    expect(shareJ1).toBeLessThan(0.44);    // A got NO free optimal here — neutral, so B's own appeal wins
+    // Player and NPC are scored symmetrically: A's edge on the juror it answered mirrors B's on the juror B answered.
+    expect(Math.abs(shareJ0 - (1 - shareJ1))).toBeLessThan(0.12);
+  });
+
   it("jury management dominates: a finalist with strong relationships wins the clear majority of runs", () => {
     let aWins = 0;
     const runs = 80;
@@ -310,8 +374,9 @@ describe("0037 — live finale sub-loop", () => {
         edgeToA: () => ({ trust: 0.85, affinity: 0.85, threat: 0.1 }),
         edgeToB: () => ({ trust: 0.3, affinity: 0.3, threat: 0.45 }),
       });
-      // The NPC finalist B plays optimally (auto bestAppeal); the player A makes its WEAKEST legal
-      // appeal every answer — jury management must still carry A.
+      // The NPC finalist B answers its jurors optimally (auto bestAppeal); the player A makes its
+      // WEAKEST legal appeal every answer (and unanswered slots are now neutral, A6) — jury management
+      // must still carry A.
       const events = driveFinale(s, ctx, new SeededRandom(seed), { appeal: "discredit-rival" });
       if (s.winner === A) aWins++;
       expect(events.some((e) => e.beat === "finale-result")).toBe(true);
