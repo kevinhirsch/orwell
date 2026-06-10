@@ -1310,7 +1310,17 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > states **mean-revert** when calm; same seed ⇒ same trajectory; snapshot/restore preserves states. Read
 > `docs/features/0006`, `0028`, `0026` first. Open a PR.
 
-### B52 — evicted houseguests stop living  ·  Claude Code  ·  **Wave 3 · audit D5**
+### B52 — evicted houseguests stop living  ·  Claude Code  ·  **Wave 3 · audit D5** — ✅ DONE
+
+> **DONE.** Of the three pools, `runCompetition` already excluded evictees (caller ids validated against
+> `evictionOrder`; the default field is the loop's `s.active`). The two real leaks are closed: the
+> **off-screen society** (`orchestrator.ts` `defaultApply`) now filters the pool to LIVING NPCs
+> (`!evictionOrder`), so no evictee schemes, folds relationships, or confessions after leaving (the stretch is
+> skipped when too few remain to pair, and the day-event guards an empty pool); and **`socialInitiatives`**
+> now draws approaches only from living NPCs, so an evictee never "wants a word." `tests/unit/evicteesStopLiving.test.ts`
+> (3): post-eviction off-screen scenes/confessionals never name an evictee (and the living house DID keep
+> scheming — non-vacuous); no evictee is ever offered as an approach; an evictee is rejected as a competition
+> participant and never the default winner. Jury still forms from `evictionOrder` — they stop ACTING, not existing.
 
 > In `kevinhirsch/orwell` (TS engine), evictees keep scheming: the off-screen pool (`orchestrator.ts:206-207`),
 > `socialInitiatives` (`GameSessionAdapter.ts:156-168` / `conversation.ts:57-65`), and `runCompetition`'s default pool
