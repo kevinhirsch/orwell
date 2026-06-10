@@ -24,7 +24,6 @@ import { isNarrow } from './platform.js';
   const POLL_MS = 20000;
   const ID = "orwell-social";
   const MAX_APPROACHES = 3;            // a few houseguests may want you at once — a living house (U7)
-  const POS_KEY = "orwell-social-pos";
   const DISMISS_KEY = "orwell-social-dismissed";
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
   const ready = (fn) =>
@@ -62,17 +61,6 @@ import { isNarrow } from './platform.js';
     return r.json();
   }
 
-  function restorePosition(el) {
-    try {
-      const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
-      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
-        el.style.left = pos.left + "px";
-        el.style.top = pos.top + "px";
-        el.style.right = "auto";
-      }
-    } catch (_) {}
-  }
-
   // True while the dock holds this panel minimized — the poll loop must not reopen it.
   function isMinimized() {
     try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
@@ -94,7 +82,8 @@ import { isNarrow } from './platform.js';
     el.innerHTML = `
       <style>
         #orwell-social {
-          position: fixed; top: 210px; right: 14px; z-index: 9000;
+          /* E91/S11: positioned by the top-right SLOT (orwellSlots.js) — no coordinates here. */
+          position: fixed; z-index: 9000;
           width: 220px; max-width: 60vw; display: none;
           background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 10px;
@@ -161,8 +150,10 @@ import { isNarrow } from './platform.js';
     // sidebar button + a composer mode (orwellDiaryRoom.js). This panel keeps
     // only the approaches.
 
-    // Restore where the player left the panel.
-    restorePosition(el);
+    // E91/S11: the top-right slot owns the position; drag persists an offset-from-slot.
+    el._orwellSlot = window.OrwellSlots
+      ? window.OrwellSlots.register(el, "top-right", { key: "social", draggable: true })
+      : null;
     // Minimize → park as a chip in the shared dock (the fly-out of minimized windows),
     // alongside every other tool, instead of collapsing in place.
     try {
@@ -186,7 +177,7 @@ import { isNarrow } from './platform.js';
       content: el, header: el.querySelector(".osoc-hdr"),
       enableDock: false, enableFullscreen: false, enableResize: false,
       onDragEnd: ({ rect }) => {
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
+        if (el._orwellSlot) el._orwellSlot.saveDragOffset(rect); // E91: offset-from-slot, clamped at restore
       },
     });
     return el;

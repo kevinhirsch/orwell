@@ -41,7 +41,7 @@
     let panel = document.getElementById(ID);
     if (panel) return panel;
     panel = el("div", [
-      "position:fixed", "right:16px", "bottom:96px", "width:min(380px, calc(100vw - 32px))",
+      "position:fixed", "width:min(380px, calc(100vw - 32px))", /* E91/S11: bottom-right slot */
       "max-height:min(70vh, 560px)", "overflow:auto", "z-index:45",
       "background:var(--surface-2, rgba(22,22,26,0.96))", "color:var(--text-1, #ddd)",
       "border:1px solid var(--border-1, rgba(255,255,255,0.14))", "border-radius:12px",
@@ -52,6 +52,7 @@
     panel.setAttribute("role", "complementary");
     panel.setAttribute("aria-label", "Season retrospective");
     document.body.appendChild(panel);
+  if (window.OrwellSlots) window.OrwellSlots.register(panel, "bottom-right", { key: "retro" });
     return panel;
   }
 

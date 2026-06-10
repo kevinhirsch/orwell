@@ -96,3 +96,14 @@ html {
 .chat-input-bar {
   margin-bottom: max(10px, var(--safe-bottom));
 }
+
+/* --- E97: ONE animation contract for every slotted game panel — open is a
+       fade+scale-in; reduced motion disables it entirely. */
+@keyframes orwell-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.orwell-anim-in { animation: orwell-pop 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .orwell-anim-in { animation: none; }
+}

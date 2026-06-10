@@ -68,7 +68,8 @@ import * as modalManager from "./modalManager.js";
     el.innerHTML = `
       <style>
         #orwell-finale {
-          position: fixed; top: 210px; left: 14px; right: auto; z-index: 9000;
+          /* E91/S11: positioned by the top-left SLOT (orwellSlots.js). */
+          position: fixed; z-index: 9000;
           width: 240px; max-width: 64vw; display: none;
           background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 10px;
@@ -116,6 +117,7 @@ import * as modalManager from "./modalManager.js";
       <div id="ofin-reveals"></div>
       <div class="ofin-move" id="ofin-move"></div>`;
     document.body.appendChild(el);
+    if (window.OrwellSlots) window.OrwellSlots.register(el, "top-left", { key: "finale" });
 
     restorePosition(el);
     try {
