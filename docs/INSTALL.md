@@ -99,10 +99,12 @@ touch it (non-degradation, feature 0007).
 
 - Secrets (LLM keys) live **only** in `/opt/orwell/data/.env` — never committed.
 - The engine MCP server binds **loopback** (`ORWELL_ENGINE_HOST=127.0.0.1`); only the front-end UI
-  port is exposed. If you must expose the engine beyond loopback, set `ORWELL_ENGINE_HOST` **and** a
-  shared `ORWELL_ENGINE_TOKEN` (the front-end must then send it) — without a token, requests are
-  refused (401). For a multi-tenant engine also set `ORWELL_ENGINE_MULTIUSER=1` so every request must
-  assert its `x-orwell-user` (no silent shared `default` sandbox).
+  port is exposed. **Engine auth is ON by default** (B67): the installer generates a shared
+  `ORWELL_ENGINE_TOKEN` into `data/.env` — the engine enforces it on every tool route (401 without
+  it) and the front-end sends it automatically (`Authorization: Bearer …`; `BBAI_ENGINE_TOKEN` is
+  the legacy fallback). For a multi-tenant engine also set `ORWELL_ENGINE_MULTIUSER=1`: every request
+  must assert its `x-orwell-user`, and an anonymous front-end call sends NO user header (it is
+  refused, never silently collapsed into a shared `default` sandbox).
 - Each container is its own **sandbox** (one game namespace). The **Vault Wall** keeps secret game
   state off every player-facing surface — enforced structurally, not by prompt.
 

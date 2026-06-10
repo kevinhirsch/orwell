@@ -74,6 +74,10 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     echo "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT}"
     echo "# front-end -> engine MCP endpoint"
     echo "ORWELL_ENGINE_MCP_URL=http://127.0.0.1:${ORWELL_ENGINE_PORT}"
+    # Engine auth ON by default (B67/ops A1): one shared secret in this file equips BOTH services
+    # (the engine enforces it; the front-end sends it) — even co-located behind loopback.
+    echo "# shared secret: the engine requires it on every tool route; the front-end sends it"
+    echo "ORWELL_ENGINE_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     # engine save dir — pin it INSIDE data/ so saves live where docs, update, and the
     # factory-reset script all expect (the engine default is ./.orwell-data, which hid the
     # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
