@@ -5,7 +5,7 @@ import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsA
 import { npcInitiatedApproaches, rankApproaches, npcExpress } from "../../src/engine/conversation";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
-import { pendingNominationDecision, validateNominations } from "../../src/engine/season";
+import { applyDecision } from "../../src/engine/liveSeason";
 import { assertNoSentinels, assertNoneAppear } from "../../tests/support/assertions";
 import { PLAYER, npc } from "../../src/domain/ids";
 
@@ -114,7 +114,7 @@ Then("at most it expresses suspicion, never knowledge", function (this: BbWorld)
 // --- Hybrid decisions (explicit + validated, never from prose) ----------------
 
 When("the player lobbies houseguests in free-text", function (this: BbWorld) {
-  this.pendingBefore = pendingNominationDecision(this.playerState!);
+  this.pendingBefore = JSON.parse(JSON.stringify(this.liveNom!.s.pending));
   const commands = new EngineCommandsAdapter(this.sandbox!.engine.events, this.sandbox!.engine.knowledge);
   // Free-text lobbying is just recorded conversation — it must not move the binding choice.
   commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "Please don't put me up — target someone else." });
@@ -122,20 +122,22 @@ When("the player lobbies houseguests in free-text", function (this: BbWorld) {
 });
 
 Then("the binding choice is not changed by that conversation", function (this: BbWorld) {
-  assert.deepEqual(pendingNominationDecision(this.playerState!), this.pendingBefore);
+  // The LIVE loop's pending decision is byte-identical after the recorded free-text scenes (B55).
+  assert.deepEqual(JSON.parse(JSON.stringify(this.liveNom!.s.pending)), this.pendingBefore);
 });
 
 Then("the choice is made only via an explicit prompt over the legal options", function (this: BbWorld) {
-  const pd = pendingNominationDecision(this.playerState!);
-  assert.equal(pd.kind, "nominations");
-  assert.ok(pd.options.length >= 2 && !pd.options.includes(this.playerState!.hoh));
-  // A legal explicit choice over those options validates.
-  assert.doesNotThrow(() => validateNominations(this.playerState!, [pd.options[0]!, pd.options[1]!]));
+  const { s } = this.liveNom!;
+  const p = s.pending! as { kind: string; options: string[] };
+  assert.equal(p.kind, "nominations");
+  assert.ok(p.options.length >= 2 && !p.options.includes(s.hoh!));
 });
 
 Then("an illegal choice is rejected with a reason", function (this: BbWorld) {
-  assert.throws(() => validateNominations(this.playerState!, [this.playerState!.hoh, npc(1)]), /illegal|nominate/i);
-  assert.throws(() => validateNominations(this.playerState!, [npc(1), npc(1)]), /same|twice/i);
+  const { s, ctx, rng } = this.liveNom!;
+  assert.throws(() => applyDecision(s, { kind: "nominations", choice: [s.hoh!, npc(1)] }, ctx, rng), /illegal|nominate/i);
+  assert.throws(() => applyDecision(s, { kind: "nominations", choice: [npc(1), npc(1)] }, ctx, rng), /same|twice/i);
+  assert.ok(s.pending, "the pending decision survives illegal attempts");
 });
 
 // --- Player-directed scene fidelity -------------------------------------------

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { playSeason, tallyJury, chooseNominations, validateNominations } from "../../src/engine/season";
+import { tallyJury, chooseNominations } from "../../src/engine/season";
+import { playSeason } from "../../src/engine/calibration";
+import { newLiveSeason, advance, applyDecision } from "../../src/engine/liveSeason";
+import type { SeasonCtx } from "../../src/engine/liveSeason";
 import type { SeasonHouseguest } from "../../src/engine/season";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { generateHouse } from "../../src/engine/characterFactory";
@@ -52,10 +55,20 @@ describe("weekly loop orchestration", () => {
     expect(chooseNominations(PLAYER, active, rel).sort()).toEqual([npc(2), npc(4)].sort());
   });
 
-  it("validateNominations rejects illegal player choices", () => {
-    const state = { active: [PLAYER, npc(1), npc(2)], hoh: PLAYER };
-    expect(() => validateNominations(state, [PLAYER, npc(1)])).toThrow();
-    expect(() => validateNominations(state, [npc(1), npc(1)])).toThrow();
-    expect(() => validateNominations(state, [npc(1), npc(2)])).not.toThrow();
+  it("the live loop rejects illegal player nomination choices (one rulebook, B55)", () => {
+    const rng = new SeededRandom(1);
+    const ctx: SeasonCtx = {
+      player: PLAYER,
+      statsOf: () => ({ physical: 0.5, mental: 0.5, social: 0.5 }),
+      rel: new RelationshipModel(0.5),
+    };
+    const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3)]);
+    s.beat = "nominations";
+    s.hoh = PLAYER;
+    expect(advance(s, ctx, rng)).toBeNull(); // pauses on the player's decision
+    expect(() => applyDecision(s, { kind: "nominations", choice: [PLAYER, npc(1)] }, ctx, rng)).toThrow();
+    expect(() => applyDecision(s, { kind: "nominations", choice: [npc(1), npc(1)] }, ctx, rng)).toThrow();
+    expect(s.pending).toBeTruthy(); // the pending decision survives illegal attempts
+    expect(() => applyDecision(s, { kind: "nominations", choice: [npc(1), npc(2)] }, ctx, rng)).not.toThrow();
   });
 });

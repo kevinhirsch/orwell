@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { loadReserveTwists, maybeFireTwist, firedTwists, isDramaticBeat, RESERVE_POOL } from "../../src/engine/reserveTwists";
 import { selectableReplacements, evictionVoters } from "../../src/domain/eligibility";
 import type { WeekState } from "../../src/domain/eligibility";
-import { playSeason } from "../../src/engine/season";
+import { playSeason } from "../../src/engine/calibration";
 import { generateHouse } from "../../src/engine/characterFactory";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { PLAYER, npc } from "../../src/domain/ids";
