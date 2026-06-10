@@ -29,8 +29,12 @@ refute() { # label  haystack  needle-that-must-be-absent
   if have "$2" "$3"; then fail "$1 (leaked: $3)"; else pass "$1"; fi
 }
 
+# A dedicated save dir: the behavioral data-survival check (audit E80) reads it back across the
+# simulated update, and the smoke never pollutes the checkout's default ./.orwell-data.
+SMOKE_DATA_DIR="$(mktemp -d /tmp/orwell-smoke-data-XXXXXX)"
+
 start_engine() { # optional $1 = a shared token to enforce (B67/B71)
-  env ORWELL_ENGINE_PORT="$PORT" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
+  env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
   ENGINE_PID=$!
   for _ in $(seq 1 30); do
     if curl -fsS "${BASE}/health" >/dev/null 2>&1; then return 0; fi
@@ -40,7 +44,7 @@ start_engine() { # optional $1 = a shared token to enforce (B67/B71)
   echo "engine did not become healthy:"; cat /tmp/orwell-smoke-engine.log; return 1
 }
 stop_engine() { [ -n "$ENGINE_PID" ] && kill "$ENGINE_PID" 2>/dev/null; wait "$ENGINE_PID" 2>/dev/null; ENGINE_PID=""; }
-cleanup() { stop_engine; }
+cleanup() { stop_engine; rm -rf "$SMOKE_DATA_DIR"; }
 trap cleanup EXIT
 
 pcall() { curl -s -X POST "${BASE}/player/call" -H 'content-type: application/json' -d "$1"; }
@@ -69,10 +73,17 @@ check  "createCharacter -> started"     "$(pcall '{"name":"createCharacter","arg
 state="$(pcall '{"name":"getGameState","args":{}}')"
 check  "getGameState -> started"        "$state" '"started":true'
 refute "house roster carries no soul"   "$state" '"soul"'
+# Hidden-layer refutes (audit E80): no relationship/stat number may reach a player surface —
+# the full key set, not just "physical".
+for leak in '"physical":' '"mental":' '"social":' '"trust":' '"affinity":' '"threat":'; do
+  refute "getGameState hides hidden layer (${leak})" "$state" "$leak"
+done
 check  "getMomentPrompt -> systemPrompt" "$(pcall '{"name":"getMomentPrompt","args":{}}')" '"systemPrompt"'
 runcomp="$(pcall '{"name":"runCompetition","args":{"type":"endurance"}}')"
 check  "runCompetition -> winner (live house)" "$runcomp" '"winner"'
-refute "runCompetition hides stats/scores"     "$runcomp" '"physical":'
+for leak in '"physical":' '"mental":' '"social":' '"score' '"trust":' '"affinity":' '"threat":'; do
+  refute "runCompetition hides stats/scores (${leak})" "$runcomp" "$leak"
+done
 comp='{"name":"resolveCompetition","args":{"type":"endurance","participants":[{"id":"player","stats":{"physical":0.5,"mental":0.5,"social":0.5}},{"id":"npc:1","stats":{"physical":0.6,"mental":0.5,"social":0.5}}],"intents":[],"seed":1}}'
 check  "resolveCompetition -> winner"   "$(pcall "$comp")" '"winner"'
 refute "competition result hides scores" "$(pcall "$comp")" '"score'
@@ -84,11 +95,52 @@ echo "==> [3/3] simulate update (rebuild + restart), assert still healthy"
 stop_engine
 npm run build >/tmp/orwell-smoke-build2.log 2>&1 && pass "rebuild (update) succeeds" || fail "rebuild"
 start_engine && pass "engine healthy after update" || fail "engine unhealthy after update"
-# Data safety: the update script must never delete the save directory.
+# Data safety, BEHAVIORALLY (audit E80): the game created before the "update" must still be
+# there after the restart — the restarted engine reads the SAVE back from disk, not memory.
+post_update_state="$(pcall '{"name":"getGameState","args":{}}')"
+check  "the save survives the update (game resumes from disk)" "$post_update_state" '"started":true'
+if find "$SMOKE_DATA_DIR" -name 'v*.json' 2>/dev/null | grep -q .; then
+  pass "durable save files exist on disk"
+else
+  fail "no durable save files found under the data dir"
+fi
+# Belt: the update script must never delete the save directory (textual sweep).
 if grep -E '\brm\b' deploy/orwell-update.sh | grep -q 'data'; then
   fail "orwell-update.sh appears to delete data/"
 else
   pass "orwell-update.sh never deletes data/ (save preserved)"
+fi
+
+# ── [A4] private-repo credential helper: git reads GIT_TOKEN from data/.env at use time ────────
+# Proves the EXACT helper line the installer/update wire: against a token-required remote, git
+# asks the helper and gets x-access-token + the .env token — no URL or .git/config credential.
+echo "==> [A4] git credential helper reads the deploy token from data/.env"
+A4_DIR="$(mktemp -d /tmp/orwell-smoke-a4-XXXXXX)"
+(
+  set -e
+  mkdir -p "${A4_DIR}/app/data" "${A4_DIR}/repo"
+  printf 'GIT_TOKEN=%s\n' "smoke-pat-$(date +%s)" > "${A4_DIR}/app/data/.env"
+  git -C "${A4_DIR}/repo" init -q
+  # The same helper command the deploy scripts configure (repo-local here, --system on the box).
+  git -C "${A4_DIR}/repo" config credential.helper \
+    '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p '"${A4_DIR}/app"'/data/.env)"; };f'
+  # Isolate from the machine's own helpers/prompts: this must pass on the configured line alone.
+  out="$(printf 'protocol=https\nhost=github.com\npath=kevinhirsch/orwell.git\n\n' \
+    | env HOME="$A4_DIR" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true \
+      git -C "${A4_DIR}/repo" credential fill 2>/dev/null)"
+  tok="$(sed -n 's/^GIT_TOKEN=//p' "${A4_DIR}/app/data/.env")"
+  case "$out" in *"username=x-access-token"*) : ;; *) echo "MISSING-USERNAME"; exit 1 ;; esac
+  case "$out" in *"password=${tok}"*) : ;; *) echo "MISSING-PASSWORD"; exit 1 ;; esac
+) >/tmp/orwell-smoke-a4.log 2>&1 \
+  && pass "credential helper supplies x-access-token + the .env token to git" \
+  || fail "credential helper did not supply the token (see /tmp/orwell-smoke-a4.log)"
+rm -rf "$A4_DIR"
+# And the A4 lint: no deploy script may fetch branch tips from raw.githubusercontent (E84) —
+# the bootstrap one-liner in comments/docs is the single sanctioned exception.
+if grep -n 'raw\.githubusercontent\.com' deploy/*.sh | grep -Ev '^[^:]+:[0-9]+:[[:space:]]*#' | grep -v 'grep' | grep -q .; then
+  fail "a deploy script still fetches raw branch tips from GitHub (E84)"
+else
+  pass "no deploy script fetches branch tips from GitHub (E84 closed)"
 fi
 
 # ── [4/4] the SYSTEM works (B71/ops A7): engine auth ON + the real front-end + a real turn ──────
