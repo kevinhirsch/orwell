@@ -107,7 +107,10 @@ export function richOffscreenStretch(deps: {
       const side = new SeededRandom(hashSeed(event.id));
       if (hiddenSurfaces(side)) {
         const els = hiddenElementsOf(a);
-        if (els.length > 0) event.content += ` — ${a} ${els[side.int(els.length)]!.detail}`;
+        if (els.length > 0) {
+          event.content += ` — ${a} ${els[side.int(els.length)]!.detail}`;
+          event.reveal = true; // structural (B54): the richness gate counts reveals from the store
+        }
       }
     }
     events.record(event);
