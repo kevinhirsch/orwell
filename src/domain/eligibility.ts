@@ -26,6 +26,16 @@ export interface VetoDraw {
   houseguestsChoice?: { holder: EntityId; picked: EntityId; candidates: EntityId[] };
 }
 
+/**
+ * The legal veto field size for a house of `remaining` active houseguests (feature 0045): the classic
+ * **six** (HOH + 2 nominees + 3 chip draws) until the house is too small, then it **degrades** to
+ * everyone left. At Final 5 the field is 5; at Final 4 it is 4. `vetoParticipants` already yields this
+ * (a short pool simply produces fewer draws); this pins the contract and is asserted in tests.
+ */
+export function vetoFieldSize(remaining: number): number {
+  return Math.min(6, remaining);
+}
+
 function shuffle<T>(items: readonly T[], rng: RandomnessSource): T[] {
   const a = [...items];
   for (let i = a.length - 1; i > 0; i--) {

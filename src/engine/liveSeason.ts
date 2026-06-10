@@ -26,7 +26,7 @@ import {
  */
 export type Beat =
   | "hoh-competition" | "nominations" | "veto-competition"
-  | "veto-ceremony" | "eviction" | "finale" | "complete"
+  | "veto-ceremony" | "eviction" | "final-eviction" | "finale" | "complete"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
   | "finale-reveal" | "finale-result";
 
@@ -36,6 +36,8 @@ export type PendingDecision =
   | { kind: "veto-decision"; by: EntityId; nominees: [EntityId, EntityId]; saveable: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
   | { kind: "eviction-vote"; by: EntityId; nominees: [EntityId, EntityId] }
+  // --- Final 3 (0045): the final HOH personally evicts one of the other two ---
+  | { kind: "final-eviction"; by: EntityId; options: [EntityId, EntityId] }
   // --- finale (0037) ---
   | { kind: "finale-statement"; by: EntityId }
   | { kind: "finale-answer"; by: EntityId; juror: EntityId; appeals: FinaleAppeal[] }
@@ -123,6 +125,7 @@ export type DecisionInput =
   | { kind: "veto-decision"; use: boolean; save?: EntityId }
   | { kind: "replacement"; replacement: EntityId }
   | { kind: "eviction-vote"; vote: EntityId }
+  | { kind: "final-eviction"; evict: EntityId }
   // --- finale (0037) ---
   | { kind: "finale-statement"; statement: string }
   | { kind: "finale-answer"; appeal: FinaleAppeal }
@@ -140,7 +143,9 @@ const vetoType = (week: number): CompetitionType => VETO_TYPES[(week - 1) % VETO
  * both with the same seeded rng, so a narrator's `runCompetition` can never disagree with the loop.
  */
 function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { field: EntityId[]; winner: EntityId } {
-  const field = eligibleForHOH(weekState(s, ctx));
+  // Final 3 (0045): the final-HOH competition lifts the outgoing-HOH restriction — everyone plays.
+  const finalThree = s.active.length === 3;
+  const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
   return { field, winner: winnerOf(field, hohType(s.week), ctx, rng) };
 }
 
@@ -408,9 +413,29 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
 
   switch (s.beat) {
     case "hoh-competition": {
+      const finalThree = s.active.length === 3;
       const { winner: hoh } = resolveHoh(s, ctx, rng);
-      s.hoh = hoh; s.beat = "nominations";
-      return { beat: "hoh-competition", content: `${hoh} wins Head of Household`, participants: [hoh] };
+      s.hoh = hoh;
+      // Final 3 (0045): no nominations or veto — the final HOH goes straight to personally evicting.
+      s.beat = finalThree ? "final-eviction" : "nominations";
+      return {
+        beat: "hoh-competition",
+        content: `${hoh} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
+        participants: [hoh],
+      };
+    }
+    case "final-eviction": {
+      // Final 3 (0045): the final HOH evicts one of the other two; the survivor + HOH are the Final 2.
+      const rivals = s.active.filter((h) => h !== s.hoh) as EntityId[];
+      if (s.hoh === ctx.player) {
+        s.pending = { kind: "final-eviction", by: ctx.player, options: [rivals[0]!, rivals[1]!] };
+        return null;
+      }
+      // NPC final HOH evicts the higher-threat rival (relationship-driven, decision 0002).
+      const evictee = [...rivals].sort((a, b) => ctx.rel.edge(s.hoh!, b).threat - ctx.rel.edge(s.hoh!, a).threat)[0]!;
+      const ev: BeatEvent = { beat: "final-eviction", content: `${s.hoh} evicts ${evictee}, setting the Final 2`, participants: [s.hoh!, evictee] };
+      applyEviction(s, evictee, ctx, [s.hoh!]);
+      return ev;
     }
     case "nominations": {
       if (s.hoh === ctx.player) {
@@ -531,6 +556,15 @@ export function applyDecision(s: LiveSeasonState, input: DecisionInput, ctx: Sea
       const evictee = tallyEviction(s, ctx, input.vote, votesToEvict);
       const ev: BeatEvent = { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
       applyEviction(s, evictee, ctx, [s.hoh!, ...votesToEvict]);
+      return ev;
+    }
+    case "final-eviction": {
+      // Final 3 (0045): the player IS the final HOH and personally evicts one of the other two.
+      const rivals = s.active.filter((h) => h !== s.hoh);
+      if (!rivals.includes(input.evict)) throw new Error("can only evict one of the other two finalists");
+      s.pending = undefined;
+      const ev: BeatEvent = { beat: "final-eviction", content: `${s.hoh} evicts ${input.evict}, setting the Final 2`, participants: [s.hoh!, input.evict] };
+      applyEviction(s, input.evict, ctx, [s.hoh!]);
       return ev;
     }
     // --- finale (0037) ---------------------------------------------------------

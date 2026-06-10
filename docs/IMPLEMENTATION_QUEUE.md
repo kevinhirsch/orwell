@@ -1051,7 +1051,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > pre-reveal). **Acceptance:** every tool name appears in a sentinel sweep wired to the **same object graph the resolver
 > serves**; a planted sentinel in any hidden field fails the sweep. Open a PR.
 
-### B43 — 0045 endgame structure (Final 5 → Final 2)  ·  Claude Code  ·  **Wave 2 · audit B1 · NEEDS SPEC FIRST**
+### B43 — 0045 endgame structure (Final 5 → Final 2)  ·  Claude Code  ·  **Wave 2 · audit B1 · NEEDS SPEC FIRST** — ✅ DONE
+
+> **DONE.** The veto field degrades (`vetoFieldSize = min(6, remaining)`; the draw already yields it,
+> now asserted at F5/F4); Final 4 resolves on the sole non-HOH/non-nominee vote; and **Final 3 is a
+> final-HOH personal eviction** — `liveSeason` skips nominations/veto, runs a final-HOH competition
+> (outgoing-HOH restriction lifted), and the final HOH evicts one of the other two via a new
+> `final-eviction` binding decision (pending for the player; argmax-threat for an NPC; manner recorded).
+> No empty-electorate 0–0 path remains. 0005 prose amended; 0011/0034/0037 stay green.
+> `tests/unit/endgame.test.ts` (7) + `0045-endgame-structure.feature` (6, in `cucumber.cjs`). Prompt below.
 
 > Draft and implement **feature 0045** (`docs/features/0045-endgame-structure.{md,feature}`). Today the late game is
 > mathematically broken: 0005 demands a veto field of **exactly six** (impossible at F5/F4), and **Final 3 is not

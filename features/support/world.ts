@@ -274,6 +274,19 @@ export class BbWorld extends World {
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
 
+  // Endgame structure (0045) scratch state.
+  egSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  egState?: import("../../src/engine/liveSeason").LiveSeasonState;
+  egCtx?: import("../../src/engine/liveSeason").SeasonCtx;
+  egWeek?: import("../../src/domain/eligibility").WeekState;
+  egVetoFieldOk?: boolean;
+  egEmptyElectorate?: boolean;
+  egFinished?: boolean;
+  egSawFinalEviction?: boolean;
+  egPending?: import("../../src/engine/liveSeason").PendingDecision;
+  egIllegalRefused?: boolean;
+  egEvictee?: Eid;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };

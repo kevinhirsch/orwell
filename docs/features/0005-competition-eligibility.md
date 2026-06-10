@@ -6,7 +6,9 @@
 ## 1. Summary
 
 The hard, non-negotiable rules of the weekly loop: the **outgoing HOH cannot play** the next
-HOH; the **veto winner cannot be a replacement nominee**; the **veto field is exactly six**
+HOH; the **veto winner cannot be a replacement nominee**; the **veto field is `min(6, remaining)`**
+— exactly six at a full house, **degrading** to everyone left once fewer than six remain (Final 5 ⇒ 5,
+Final 4 ⇒ 4; the Final-3 endgame skips the veto entirely — see **feature 0045**)
 (HOH + two nominees + three by chip draw incl. a "Houseguest's Choice" chip the holder uses to
 pick — the player cannot influence which chips are drawn); at eviction
 **everyone except the HOH and the two nominees votes**, and the **HOH breaks ties**. These
