@@ -331,6 +331,16 @@ def setup_chat_routes(
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
 
+        # F3/C14: the sync endpoint has NO tools, so a game turn here would be pure
+        # consequence-free imitation (narrated, never recorded). Decline to game-master:
+        # game turns go through the streaming agent path the UI uses.
+        if ctx.game_active:
+            raise HTTPException(
+                409,
+                "A Big Brother game is in progress: game turns must use the streaming chat "
+                "(agent) endpoint so the engine records and decides them.",
+            )
+
         # Research injection
         research_blocked_by_policy = (
             tool_policy.blocks("trigger_research")
@@ -666,8 +676,16 @@ def setup_chat_routes(
             if not _privs.get("can_use_research", True):
                 _research_flags["do"] = False
             if not _privs.get("can_use_agent", True):
-                _effective_mode = 'chat'
-                chat_mode = 'chat'
+                if ctx.game_active:
+                    # F3/C14: a game turn must ACT (record/advance via the engine) or it
+                    # silently becomes consequence-free narration. Game tools are the game,
+                    # not a privilege surface — keep the agent path, collapse the tool set
+                    # to the game keep-set only.
+                    from src.agent_tools import game_build_disabled_additions
+                    disabled_tools.update(game_build_disabled_additions([]))
+                else:
+                    _effective_mode = 'chat'
+                    chat_mode = 'chat'
         # Global admin disabled tools
         from src.settings import get_setting
         _global_disabled = get_setting("disabled_tools", [])
@@ -1121,6 +1139,7 @@ def setup_chat_routes(
                         tool_policy=tool_policy,
                         owner=_user,
                         pinned_tools=(ORWELL_GAME_TOOLS if ctx.engine_available else None),
+                        game_mode=ctx.game_active,
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
                         plan_mode=plan_mode,

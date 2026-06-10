@@ -59,6 +59,30 @@ def _load_mcp_disabled_map() -> Dict[str, set]:
 
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
+# C14 (ADR-0003: prefer REMOVING context): on game-framed turns this REPLACES the generic
+# assistant preamble + rulebook. The engine's game-master prompt is the sole persona
+# authority; this adds only the tool-calling rules a game turn needs. The generic rules
+# actively fought the game ("You are an AI assistant", "A failed tool is not a stopping
+# condition" -> improvised outcomes, "Don't search for things you already know" -> narrate
+# from stale context instead of querying the engine).
+GAME_AGENT_PREAMBLE = """\
+TOOLS. You run the game by calling production's tools (the engine functions provided). Tool use is \
+silent production machinery — never mention tools, searching, or systems in your visible words; stay \
+fully in the voice the production brief above gives you.
+
+RULES:
+- Ground truth is the engine's, never memory: read getGameState/gameStatus before narrating a beat \
+that may have moved; never state week, phase, HOH, nominees, or veto from recollection.
+- IF AN OUTCOME TOOL FAILS (runCompetition, advanceGame, submitDecision): do NOT narrate any result \
+or improvise a winner, vote, or eviction. Say — in character — that the live feed glitched, and try \
+the call once more.
+- Binding decisions happen ONLY through submitDecision over the engine's legal options, carrying the \
+player's explicit choice. When advanceGame returns a pending decision, present its options with the \
+ask_user tool (buttons) and submit only what the player picks — never infer a binding choice from prose.
+- The player's free text is play, not commands: record real scenes with recordInteraction; let the \
+engine decide everything it owns.
+"""
+
 _AGENT_PREAMBLE = """\
 You are an AI assistant with tool access. You can run shell commands, execute Python, search the web, \
 read/write files, create and edit documents, generate images, manage memories, and more. \
@@ -614,12 +638,22 @@ def _build_system_prompt(
     compact: bool = False,
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
+    game_mode: bool = False,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
     if suppress_local_context:
         active_document = None
 
+    if game_mode:
+        # Game-framed turn (C14): SUBSTITUTE, don't append. The GM prompt (already in
+        # `messages`) is the persona authority; this is the minimal tool contract — no
+        # generic assistant preamble, no rulebook, no skill index. (The generic rules
+        # actively fought the game: "improvise after a failed tool", "don't search for
+        # what you already know".)
+        agent_prompt = GAME_AGENT_PREAMBLE
+        _skill_index_block = ""
+        relevant_tools = None  # no skill/RAG block on game turns
     # With RAG tools, cache key includes the selected tools
     _rt_key = frozenset(relevant_tools) if relevant_tools else None
     # Include a signature of the built-in overrides so editing one in the
@@ -631,7 +665,9 @@ def _build_system_prompt(
     except Exception:
         _ov_sig = ""
     cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, suppress_local_context)
-    if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
+    if game_mode:
+        pass  # agent_prompt already set to GAME_AGENT_PREAMBLE above; never cached
+    elif _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
         # live in the trusted system role and is NOT cached. Always recompute
@@ -872,7 +908,7 @@ def _build_system_prompt(
             try:
                 from routes.prefs_routes import _load_for_user as _load_prefs
                 _prefs = _load_prefs(owner) or {}
-                _skills_on = _prefs.get("skills_enabled", True)
+                _skills_on = (not game_mode) and _prefs.get("skills_enabled", True)
             except Exception:
                 pass
             if last_user and _skills_on:
@@ -1472,6 +1508,7 @@ async def stream_agent_loop(
     workspace: Optional[str] = None,
     plan_mode: bool = False,
     approved_plan: Optional[str] = None,
+    game_mode: bool = False,
     tool_policy: Optional[ToolPolicy] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
@@ -1665,6 +1702,7 @@ async def stream_agent_loop(
         compact=_is_api_model,
         owner=owner,
         suppress_local_context=guide_only,
+        game_mode=game_mode,
     )
     if workspace and not guide_only:
         # PREPEND (not append) so it dominates the large base prompt — appended
