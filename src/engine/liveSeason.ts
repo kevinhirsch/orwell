@@ -1,5 +1,6 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
+import { SeededRandom } from "../adapters/random/SeededRandom";
 import { resolveCompetition, CompetitionIntents } from "../domain/competitionOutcome";
 import type { CompetitionType } from "../domain/competitionOutcome";
 import {
@@ -34,6 +35,8 @@ export type Beat =
 export type PendingDecision =
   | { kind: "nominations"; by: EntityId; options: EntityId[]; pick: 2 }
   | { kind: "veto-decision"; by: EntityId; nominees: [EntityId, EntityId]; saveable: EntityId[] }
+  // --- "Houseguest's Choice" (0046/B45): the player drew the chip and picks the sixth veto player ---
+  | { kind: "houseguests-choice"; by: EntityId; options: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
   | { kind: "eviction-vote"; by: EntityId; nominees: [EntityId, EntityId] }
   // --- player-HOH tie-break (0046/B44): the player breaks a tied eviction vote ---
@@ -125,6 +128,7 @@ export interface BeatEvent {
 export type DecisionInput =
   | { kind: "nominations"; choice: [EntityId, EntityId] }
   | { kind: "veto-decision"; use: boolean; save?: EntityId }
+  | { kind: "houseguests-choice"; pick: EntityId }
   | { kind: "replacement"; replacement: EntityId }
   | { kind: "eviction-vote"; vote: EntityId }
   | { kind: "tie-break"; evict: EntityId }
@@ -153,12 +157,21 @@ function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): 
 }
 
 /** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
-function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { field: EntityId[]; winner: EntityId } {
-  const field = vetoParticipants(weekState(s, ctx), rng, {
+/** The veto draw resolves to a winner — UNLESS the player drew Houseguest's Choice, which DEFERS (B45). */
+type VetoResolution =
+  | { field: EntityId[]; winner: EntityId }
+  | { deferred: true; field: EntityId[]; candidates: EntityId[] };
+
+function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): VetoResolution {
+  const draw = vetoParticipants(weekState(s, ctx), rng, {
     houseguestsChoiceChip: true,
     choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
-  }).participants;
-  return { field, winner: winnerOf(field, vetoType(s.week), ctx, rng) };
+    playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
+  });
+  if (draw.houseguestsChoice && draw.houseguestsChoice.picked === undefined) {
+    return { deferred: true, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
+  }
+  return { field: draw.participants, winner: winnerOf(draw.participants, vetoType(s.week), ctx, rng) };
 }
 
 /** The current competition beat's deterministic outcome (single authority, B37) — or null if the
@@ -173,7 +186,11 @@ export interface CompetitionPeek {
 export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionPeek | null {
   if (s.pending || s.finished) return null;
   if (s.beat === "hoh-competition") { const { field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: hohType(s.week), field, winner }; }
-  if (s.beat === "veto-competition") { const { field, winner } = resolveVeto(s, ctx, rng); return { beat: s.beat, type: vetoType(s.week), field, winner }; }
+  if (s.beat === "veto-competition") {
+    const r = resolveVeto(s, ctx, rng);
+    if ("deferred" in r) return null; // the player must pick the sixth player first — no preview yet
+    return { beat: s.beat, type: vetoType(s.week), field: r.field, winner: r.winner };
+  }
   return null;
 }
 
@@ -478,9 +495,16 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
-      const { field, winner: holder } = resolveVeto(s, ctx, rng);
-      s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
-      return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
+      const r = resolveVeto(s, ctx, rng);
+      if ("deferred" in r) {
+        // The player drew Houseguest's Choice (B45/audit B4): pause for THEM to pick the sixth player —
+        // the engine never chooses it from the player's hidden bonds. The field is completed on resume.
+        s.vetoField = r.field;
+        s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
+        return null;
+      }
+      s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
+      return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
     }
     case "veto-ceremony": {
       const nominees = s.nominees!;
@@ -540,7 +564,12 @@ function resolveReplacement(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
 }
 
 /** Apply the player's decision for the current `pending`, then continue to the next beat. */
-export function applyDecision(s: LiveSeasonState, input: DecisionInput, ctx: SeasonCtx): BeatEvent {
+export function applyDecision(
+  s: LiveSeasonState, input: DecisionInput, ctx: SeasonCtx,
+  // Only the Houseguest's-Choice resume needs randomness (to run the veto comp once the field completes);
+  // the live adapter passes the beat-deterministic rng, so the same seed reproduces the same outcome.
+  rng: RandomnessSource = new SeededRandom(1),
+): BeatEvent {
   if (!s.pending || s.pending.kind !== input.kind) {
     throw new Error(`no pending ${input.kind} decision`);
   }
@@ -566,6 +595,16 @@ export function applyDecision(s: LiveSeasonState, input: DecisionInput, ctx: Sea
       // The HOH names the replacement. If the player is ALSO HOH, that's the next decision.
       const ev = resolveReplacement(s, ctx);
       return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${save}`, participants: [ctx.player, save] };
+    }
+    case "houseguests-choice": {
+      // The player drew Houseguest's Choice and picks the sixth veto player (B45/audit B4).
+      const options = (s.pending as { options: EntityId[] }).options;
+      if (!options.includes(input.pick)) throw new Error("the Houseguest's Choice must pick an eligible candidate");
+      s.pending = undefined;
+      const field = [...s.vetoField!, input.pick]; // the player's pick completes the field
+      const holder = winnerOf(field, vetoType(s.week), ctx, rng);
+      s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
+      return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
     }
     case "replacement": {
       const legal = new Set(selectableReplacements(weekState(s, ctx)).filter((h) => h !== s.saved));

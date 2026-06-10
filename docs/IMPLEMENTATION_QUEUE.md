@@ -1089,7 +1089,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > engineered tied NPC votes ⇒ loop pauses with `tie-break`; an illegal pick is refused; the chosen nominee is evicted;
 > restart mid-pending resumes (0030). Open a PR.
 
-### B45 — "Houseguest's Choice" pauses for the player  ·  Claude Code  ·  **Wave 2 · audit B4**
+### B45 — "Houseguest's Choice" pauses for the player  ·  Claude Code  ·  **Wave 2 · audit B4** — ✅ DONE
+
+> **DONE.** `vetoParticipants` gains `playerChoosesOwn`: when the PLAYER draws the chip the draw
+> **defers** (no `picked`, field a player short) instead of `chooseStrongestBond` reading the player's
+> hidden bonds. `liveSeason`'s veto beat pauses on a new `houseguests-choice` pending decision (the
+> candidates are the options); on the player's pick the field completes and the veto comp resolves
+> (`applyDecision` now takes the beat rng so the resume is deterministic). An NPC draw still auto-picks;
+> `peekCompetition` returns null while deferred; survives a restart. Ports + adapter + drivers/UAT
+> updated. `tests/unit/houseguestsChoice.test.ts` (4). Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the veto draw auto-picks for the player: `liveSeason.ts:368-371` passes
 > `chooseStrongestBond` **unconditionally**, so when the player draws the chip the engine picks the sixth player using

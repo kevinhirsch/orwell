@@ -455,7 +455,8 @@ export class GameSessionAdapter implements GameSession {
     if ((req.kind === "eviction-vote" || req.kind === "tie-break" || req.kind === "final-eviction") && req.vote) {
       this.reconcileDeals({ actor: PLAYER, kind: "vote-evict", targets: [req.vote] });
     }
-    const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx());
+    // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
+    const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx(), this.beatRng());
     this.commit(ev);
     return this.advanceView(ev);
   }
@@ -581,6 +582,9 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
+      case "houseguests-choice": // B45: the player picks the sixth veto player; `vote` carries the pick.
+        if (!req.vote) throw new Error("a Houseguest's Choice pick is required");
+        return { kind: "houseguests-choice", pick: req.vote };
       case "replacement":
         if (!req.replacement) throw new Error("a replacement nominee is required");
         return { kind: "replacement", replacement: req.replacement };
@@ -622,6 +626,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
       case "veto-decision":
         return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+      case "houseguests-choice":
+        return { kind: p.kind, by, prompt: "You drew Houseguest's Choice — pick the sixth houseguest to play in the veto competition.", options: refs(p.options), pick: 1 };
       case "replacement":
         return { kind: p.kind, by, prompt: `You used the veto on ${this.nameOf((p as { saved: EntityId }).saved)} — name a replacement nominee.`, options: refs(p.options), pick: 1 };
       case "eviction-vote":
