@@ -168,3 +168,154 @@ Then("the season still reaches a jury of nine and a final two", function (this: 
   assert.equal(outcome.jury.length, 9);
   assert.equal(outcome.finalTwo.length, 2);
 });
+
+// --- B53 amendment: the live double eviction (audit D6 + B8) --------------------
+
+import { GameSessionRegistry } from "../../src/composition/registry";
+import type { AdvanceView, SubmitDecisionReq } from "../../src/ports/GameSession";
+import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+
+const TWIST_WEEK = 3;
+let twistUsers = 0;
+
+function resolveLive(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): AdvanceView {
+  const submit = (req: SubmitDecisionReq): AdvanceView => s.submitDecision(req);
+  if (p.kind === "nominations") return submit({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  if (p.kind === "veto-decision") return submit({ kind: "veto-decision", use: false });
+  if (p.kind === "comp-intent") return submit({ kind: "comp-intent", intent: "compete" });
+  if (p.kind === "finale-statement") return submit({ kind: "finale-statement", statement: "x" });
+  if (p.kind === "finale-answer") return submit({ kind: "finale-answer", appeal: p.appeals![0]! });
+  if (p.kind === "replacement") return submit({ kind: "replacement", replacement: p.options[0]!.id });
+  return submit({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+/** Start a live game and FORCE a double eviction sealed for `TWIST_WEEK` (deterministic test setup). */
+Given("a live seeded game with a double eviction sealed for an upcoming week", function (this: BbWorld) {
+  const reg = new GameSessionRegistry();
+  const user = `twist${twistUsers++}`;
+  const sb = reg.sandboxFor(user);
+  sb.session.createCharacter({ playerName: "The Player", seed: 7 });
+  const core = sb.session.snapshot();
+  core.live!.reserve = [{ kind: "double-eviction", fireAtBeat: TWIST_WEEK }];
+  sb.session.restore(core);
+  // A sentinel-bearing Vault seal (the audit copy) so the invisibility sweep has teeth.
+  this.twistSentinel = "SENTINEL-0025-live-twist";
+  sb.engine.vault.writeHidden({
+    id: "twist:bdd", kind: "reserved-twist",
+    content: `sealed reserve twist: double-eviction, fires week ${TWIST_WEEK} ${this.twistSentinel}`,
+  });
+  this.twistRegistry = reg; this.twistUser = user; this.twistSandbox = sb;
+});
+
+/** Drive to completion, sweeping the surfaces BEFORE the reveal and recording the season trace. */
+When("the season is played through the live decision seam", function (this: BbWorld) {
+  const sb = this.twistSandbox!;
+  const s = sb.session;
+  const trace = {
+    reveals: [] as number[],                 // week of each twist-reveal
+    hohWinsByWeek: new Map<number, string[]>(), // hoh-competition event contents per week
+    evictionsByWeek: new Map<number, number>(), // eviction beats per week
+    preRevealSweeps: [] as string[],
+  };
+  let revealed = false;
+  const note = (v: AdvanceView): void => {
+    const wk = v.status.week;
+    if (!v.event) return;
+    if (v.event.beat === "twist-reveal") { trace.reveals.push(wk); revealed = true; }
+    if (v.event.beat === "hoh-competition") {
+      trace.hohWinsByWeek.set(wk, [...(trace.hohWinsByWeek.get(wk) ?? []), v.event.content]);
+    }
+    if (v.event.beat === "eviction") {
+      trace.evictionsByWeek.set(wk, (trace.evictionsByWeek.get(wk) ?? 0) + 1);
+    }
+  };
+  for (let i = 0; i < 4000; i++) {
+    const v = s.advanceGame();
+    note(v);
+    if (!revealed && i % 7 === 0) {
+      trace.preRevealSweeps.push(
+        JSON.stringify(s.getGameState()) + JSON.stringify(s.gameStatus()) +
+        JSON.stringify(sb.player.getVisibleState()) + JSON.stringify(sb.admin.inspect()),
+      );
+    }
+    if (v.pending) note(resolveLive(s, v.pending));
+    if (v.finished) break;
+  }
+  this.twistTrace = trace;
+  this.twistFinal = s.advanceGame();
+});
+
+Then("the double eviction fires exactly once, at its sealed week", function (this: BbWorld) {
+  assert.deepEqual(this.twistTrace!.reveals, [TWIST_WEEK]);
+});
+
+Then("the reveal is a witnessed live event", function (this: BbWorld) {
+  const reveal = this.twistSandbox!.engine.events
+    .query({ witnessedBy: PLAYER })
+    .find((e) => /DOUBLE EVICTION/.test(e.content));
+  assert.ok(reveal, "the reveal is recorded as a player-witnessed event");
+  assert.equal(reveal!.hidden, false);
+});
+
+Then("no player or admin surface revealed the twist before it fired", function (this: BbWorld) {
+  assert.ok(this.twistTrace!.preRevealSweeps.length > 0, "the pre-reveal surfaces were swept");
+  for (const sweep of this.twistTrace!.preRevealSweeps) {
+    assert.ok(!sweep.includes(this.twistSentinel!), "the Vault seal leaked pre-reveal");
+    assert.ok(!sweep.includes("double-eviction"), "the twist kind leaked pre-reveal");
+    assert.ok(!/DOUBLE EVICTION/.test(sweep), "the reveal copy leaked pre-reveal");
+  }
+});
+
+Then("two houseguests are evicted in the twist week", function (this: BbWorld) {
+  assert.equal(this.twistTrace!.evictionsByWeek.get(TWIST_WEEK), 2, "the twist week evicts twice");
+  for (const [wk, n] of this.twistTrace!.evictionsByWeek) {
+    if (wk !== TWIST_WEEK) assert.equal(n, 1, `week ${wk} evicts once`);
+  }
+});
+
+Then("the first crown's head of household does not win the second crown of the night", function (this: BbWorld) {
+  const wins = this.twistTrace!.hohWinsByWeek.get(TWIST_WEEK) ?? [];
+  assert.equal(wins.length, 2, "the twist week crowns two HOHs");
+  assert.notEqual(wins[0], wins[1], "the outgoing HOH cannot take the second crown (0005 verbatim)");
+});
+
+Then("both evictions count toward the jury order", function (this: BbWorld) {
+  // The full season evicted cast−2 houseguests in strict order — the two twist-night evictions
+  // occupy consecutive slots and the last nine form the jury exactly as in an untwisted season.
+  const core = this.twistSandbox!.session.snapshot();
+  assert.equal(core.live!.evictionOrder.length, 14, "a 16-cast season evicts 14 in order");
+});
+
+Then("the live season still reaches a final two with a winner", function (this: BbWorld) {
+  assert.equal(this.twistFinal!.finished, true);
+  assert.ok(this.twistFinal!.winner, "a winner is crowned");
+  const core = this.twistSandbox!.session.snapshot();
+  assert.equal(core.live!.jury?.length, 9, "the last-9 jury formed");
+  assert.equal(core.live!.finalTwo?.length, 2, "a Final 2 sat at the end");
+});
+
+When("the engine restarts before the twist week", function (this: BbWorld) {
+  const snap = this.twistRegistry!.snapshot(this.twistUser!);
+  const reg2 = new GameSessionRegistry();
+  reg2.restore(this.twistUser!, snap);
+  this.twistSandbox = reg2.sandboxFor(this.twistUser!);
+  this.twistRegistry = reg2;
+});
+
+Then("the restored game still fires the double eviction at its sealed week", function (this: BbWorld) {
+  // The schedule survived: the restored Vault holds the seal and the loop still fires it on time.
+  const sealed = this.twistSandbox!.engine.vault.readHidden({ kind: "reserved-twist" });
+  assert.ok(sealed.some((r) => r.content.includes("double-eviction")), "the Vault seal survived the restart");
+  const s = this.twistSandbox!.session;
+  let revealWeek = 0;
+  for (let i = 0; i < 4000 && revealWeek === 0; i++) {
+    const v = s.advanceGame();
+    if (v.event?.beat === "twist-reveal") { revealWeek = v.status.week; break; }
+    if (v.pending) {
+      const sv = resolveLive(s, v.pending);
+      if (sv.event?.beat === "twist-reveal") { revealWeek = sv.status.week; break; }
+    }
+    if (v.finished) break;
+  }
+  assert.equal(revealWeek, TWIST_WEEK, "the sealed week survived the restart");
+});

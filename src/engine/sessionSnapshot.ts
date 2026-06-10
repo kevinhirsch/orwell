@@ -7,6 +7,7 @@ import type { Deal } from "../domain/deal";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room } from "../domain/house";
+import type { HiddenRecord } from "../ports/VaultStore";
 
 /**
  * The current durable-snapshot schema version (B40/audit C4). Bump when the shape changes; a save
@@ -62,6 +63,12 @@ export interface SessionSnapshot extends SessionCore {
   relationships: EdgeRecord[];
   /** The whole knowledge layer (B40/audit C2): facts + suspicions + counters. Absent on legacy saves. */
   knowledge?: KnowledgeSnapshot;
+  /**
+   * The Vault's hidden records (B53/audit I7): sealed twists, confessionals, hidden threads — so the
+   * producer's secrets survive a restart like everything else (0030). Absent on older saves. The
+   * snapshot itself is ENGINE-ONLY (see above), so carrying Vault content here crosses no wall.
+   */
+  vault?: HiddenRecord[];
 }
 
 export function cloneSession<T>(value: T): T {

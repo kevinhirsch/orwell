@@ -1329,7 +1329,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > all three pools by `evictionOrder` (and `active` once B43 lands). **Acceptance:** unit — no evictee id appears in
 > off-screen scenes/confessionals/initiatives/competition pools after eviction. Open a PR.
 
-### B53 — fire reserve twists in the live game (+ double-eviction mechanics)  ·  Claude Code  ·  **Wave 3 · audit D6 + B8**
+### B53 — fire reserve twists in the live game (+ double-eviction mechanics)  ·  Claude Code  ·  **Wave 3 · audit D6 + B8 · ✅ DONE 2026-06-10**
+
+> **Built to green.** `createCharacter` loads + seals the schedule (`live.reserve`, engine-only, persisted) and the
+> registry writes the Vault `reserved-twist` audit copy; `SessionSnapshot` now carries the **Vault** (audit I7) so
+> seals survive a restart. `rollWeek` arms `maybeFireTwist(week)`; a sealed **double-eviction** fires at that week's
+> eviction as a `twist-reveal` beat + a compressed second cycle in the SAME week (HOH → noms → veto → vote, hard
+> rules verbatim — the outgoing HOH is excluded from the second crown; both evictions count for jury order; the
+> per-beat rng is cycle-disambiguated). Only implemented kinds load (`double-eviction` today). Three live scenarios
+> appended to 0025's .feature (+ amendments row) + `tests/unit/reserveTwistsLive.test.ts`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), 0025's reserve twists are computed but **never fire live** —
 > `loadReserveTwists`/`maybeFireTwist` are referenced only by tests/BDD; nothing in composition loads, seals, or fires a
