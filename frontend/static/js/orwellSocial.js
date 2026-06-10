@@ -24,7 +24,10 @@ import { isNarrow } from './platform.js';
   const POLL_MS = 20000;
   const ID = "orwell-social";
   const MAX_APPROACHES = 3;            // a few houseguests may want you at once — a living house (U7)
-  const DISMISS_KEY = "orwell-social-dismissed";
+  // E71: dismissals are scoped per user (and cleared per game via orwell:gamechanged),
+  // so one account's waved-off approaches never bleed into another's session.
+  const DISMISS_KEY = "orwell-social-dismissed:" +
+    ((document.body && document.body.dataset.user) || "");
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
