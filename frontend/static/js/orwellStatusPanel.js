@@ -34,6 +34,34 @@ import * as modalManager from "./modalManager.js";
     return r.json();
   }
 
+  // The roster (C21): names + status only — Vault-free, exactly what a houseguest sees on
+  // the memory wall. Best-effort: if /state fails the panel still shows the ceremony rows.
+  async function fetchState() {
+    try {
+      const r = await fetch("/api/orwell/state", { credentials: "same-origin" });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (_) { return null; }
+  }
+
+  // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
+  // id-comparison, never a "safe/target" read (0020). Returns "" when the player is just a
+  // houseguest, or their out-of-game seat ("Evicted" / "Jury") when they're out.
+  function selfBadge(status, state) {
+    const me = state && state.player && state.player.id;
+    const seat = state && state.player && state.player.status;
+    if (seat === "evicted") return "EVICTED";
+    if (seat === "jury") return "JURY";
+    if (!me || !status) return "";
+    const idOf = (c) => (c && typeof c === "object" ? c.id : c);
+    if (idOf(status.hoh) === me) return "HOH";
+    const noms = Array.isArray(status.nominees) ? status.nominees.map(idOf) : [];
+    if (noms.includes(me)) return "ON THE BLOCK";
+    const veto = status.veto || {};
+    if (idOf(veto.holder) === me) return "VETO";
+    return "";
+  }
+
   function restorePosition(el) {
     try {
       const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
@@ -84,14 +112,29 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-row .os-k { opacity: .6; min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
+        #orwell-status .os-you { margin: .45rem 0 .1rem; font-weight: 600; }
+        #orwell-status .os-you .os-badge {
+          display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
+          font-size: .72em; font-weight: 700; letter-spacing: .02em;
+          background: var(--accent, var(--red, #e06c75)); color: #fff;
+        }
+        #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .5rem 0 .15rem; }
+        #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; }
+        #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
+        #orwell-status .os-hg.os-out { opacity: .45; text-decoration: line-through; }
+        #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
       </style>
       <div class="os-hdr" title="Drag to move">
         <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></span>
         <button type="button" class="os-min" title="Minimize" aria-label="Minimize">–</button>
       </div>
+      <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
       <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
       <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
-      <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>`;
+      <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+      <div class="os-roster-h" id="os-roster-h">The house</div>
+      <div class="os-roster" id="os-roster"></div>`;
     document.body.appendChild(el);
 
     // Restore where the player last left it.
@@ -158,13 +201,55 @@ import * as modalManager from "./modalManager.js";
     el.querySelector("#os-veto").textContent = veto.used
       ? "used" + (veto.holder ? " · " + veto.holder.name : "")
       : (veto.holder ? veto.holder.name : "—");
+    if (st._state !== undefined) renderRoster(el, st, st._state);
     // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
     if (!isMinimized()) el.style.display = "block";
   }
 
+  // The memory wall: who's still in, who's gone, the attrition count, and the player's own
+  // public role badge. All from getGameState().house[] + the ceremony status. No numbers.
+  function renderRoster(el, st, state) {
+    const badgeEl = el.querySelector("#os-you-badge");
+    const badge = selfBadge(st, state);
+    if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
+    else { badgeEl.hidden = true; }
+
+    const rosterEl = el.querySelector("#os-roster");
+    const headEl = el.querySelector("#os-roster-h");
+    const house = state && Array.isArray(state.house) ? state.house : null;
+    if (!house) { rosterEl.innerHTML = ""; headEl.style.display = "none"; return; }
+    headEl.style.display = "";
+
+    // player (if still active) + NPCs, active first then evicted in eviction order.
+    const playerActive = state.player && state.player.status === "active";
+    const total = house.length + 1; // player + NPCs
+    const activeCount = house.filter((h) => h.status === "active").length + (playerActive ? 1 : 0);
+    headEl.textContent = "The house · " + activeCount + "/" + total;
+
+    const out = house.filter((h) => h.status !== "active");
+    const rows = [];
+    house.filter((h) => h.status === "active").forEach((h) => {
+      rows.push('<div class="os-hg"><span>' + esc(h.name) + "</span></div>");
+    });
+    out.forEach((h, i) => {
+      const seat = h.status === "jury" ? "jury" : (i + 1) + (["th","st","nd","rd"][(i + 1) % 10] || "th") + " out";
+      rows.push('<div class="os-hg os-out"><span>' + esc(h.name) +
+        '</span><span class="os-seat">' + esc(seat) + "</span></div>");
+    });
+    rosterEl.innerHTML = rows.join("");
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
   async function refresh() {
     try {
-      render(await fetchStatus());
+      const st = await fetchStatus();
+      // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
+      st._state = (await fetchState()) || null;
+      render(st);
     } catch (_) {
       // Engine down / no game → hide, fail open.
       hidePanel();
