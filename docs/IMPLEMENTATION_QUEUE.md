@@ -2575,7 +2575,7 @@ PR per item).
 
 ## Audit-lane wave (2026-06-10 full product audit) · parallel lanes
 
-### U-L2 — Lane 2: knowledge integrity (engine) — E9+C2+C3 · C14 · E20 · E21  ·  **✅ DONE (PR #TBD)**
+### U-L2 — Lane 2: knowledge integrity (engine) — E9+C2+C3 · C14 · E20 · E21  ·  **✅ DONE (PR #212)**
 
 > **E9/C2/C3 (one fix site — `InMemoryKnowledgeService.pathwayAnchored`):** anchoring now requires
 > **content lineage** — `told-by:` must derive from what the teller actually holds (content or its
