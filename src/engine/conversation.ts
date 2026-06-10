@@ -21,10 +21,20 @@ export interface Claimable {
   content: string;
 }
 
+/**
+ * The COARSE category of why an NPC seeks the player (audit E60 / ADR 0003 principle 2):
+ * `bond` — their tie to the player is the stronger agenda (allies scheme, friends check in);
+ * `probe` — their threat read on the player is (rivals size up, the wary fish for intent).
+ * This is the FACT the narrator voices in its own words; the underlying number never crosses.
+ */
+export type ApproachMotive = "bond" | "probe";
+
 export interface Approach {
   npc: EntityId;
   /** Relationship-derived motivation to seek the player (bond or threat). */
   drive: number;
+  /** Which agenda won: the bond read or the threat read (Vault-safe category, never the number). */
+  motive: ApproachMotive;
 }
 
 /**
@@ -46,9 +56,10 @@ export function rankApproaches(
     .filter((n) => n !== player)
     .map((n) => {
       const e = rel.edge(n, player);
-      const agenda = Math.max((e.trust + e.affinity) / 2, e.threat);
+      const bond = (e.trust + e.affinity) / 2;
+      const agenda = Math.max(bond, e.threat);
       const temper = 0.9 + 0.2 * rng.next(); // bounded: never flips a clear gap
-      return { npc: n, drive: agenda * temper };
+      return { npc: n, drive: agenda * temper, motive: (bond >= e.threat ? "bond" : "probe") as ApproachMotive };
     })
     .sort((a, b) => b.drive - a.drive);
 }

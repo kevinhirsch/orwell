@@ -249,7 +249,9 @@ import { isNarrow } from './platform.js';
     for (const it of items) {
       const id = it.houseguest.id;
       const name = it.houseguest.name || "A houseguest";
-      const pretext = it.pretext || "wants a word with you";
+      // E60: the engine ships a coarse MOTIVE (bond | probe), never a canned pretext line;
+      // the chip maps it to short UI copy (the GM voices the real approach in the chat).
+      const pretext = it.pretext || ({ bond: "wants to talk game with you", probe: "has been watching your game" })[it.motive] || "wants a word with you";
       const chip = document.createElement("div");
       chip.className = "osoc-chip";
       if (id === pendingApproachId) chip.classList.add("osoc-chip-pending");

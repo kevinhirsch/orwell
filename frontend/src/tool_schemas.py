@@ -451,7 +451,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "Ask the user a multiple-choice question to get a decision or clarification when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target). The user sees clickable option buttons; calling this ENDS your turn and their selection arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow.",
+            "description": "Ask the user a multiple-choice question to get a decision or clarification when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target). The user sees clickable option buttons; calling this ENDS your turn and their selection arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow. In the Big Brother game, game levers are silent production machinery: NEVER use ask_user to ask permission to call a game tool — use it ONLY to present the engine's pending BINDING decision options (nominations, votes, veto and finale choices) as buttons.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1191,7 +1191,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "runCompetition",
-            "description": "Ask the engine to RESOLVE a competition over the live house. The ENGINE decides the winner from its own hidden stats — you do not supply or see stats/scores, only the winner's name. Use this to actually run an HOH/veto competition, then narrate the result.",
+            "description": "PREVIEW the current competition beat's ALREADY-DECIDED winner: the engine has picked from its own hidden stats, and advanceGame crowns the SAME winner when the beat resolves — this tool resolves nothing and is never a second decider. You do not supply or see stats/scores, only the winner's name. Use it to dress the comp scene, then resolve via advanceGame.",
             "parameters": {
                 "type": "object",
                 "properties": {
