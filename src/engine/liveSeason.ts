@@ -36,6 +36,8 @@ export type PendingDecision =
   | { kind: "veto-decision"; by: EntityId; nominees: [EntityId, EntityId]; saveable: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
   | { kind: "eviction-vote"; by: EntityId; nominees: [EntityId, EntityId] }
+  // --- player-HOH tie-break (0046/B44): the player breaks a tied eviction vote ---
+  | { kind: "tie-break"; by: EntityId; nominees: [EntityId, EntityId] }
   // --- Final 3 (0045): the final HOH personally evicts one of the other two ---
   | { kind: "final-eviction"; by: EntityId; options: [EntityId, EntityId] }
   // --- finale (0037) ---
@@ -125,6 +127,7 @@ export type DecisionInput =
   | { kind: "veto-decision"; use: boolean; save?: EntityId }
   | { kind: "replacement"; replacement: EntityId }
   | { kind: "eviction-vote"; vote: EntityId }
+  | { kind: "tie-break"; evict: EntityId }
   | { kind: "final-eviction"; evict: EntityId }
   // --- finale (0037) ---
   | { kind: "finale-statement"; statement: string }
@@ -213,27 +216,53 @@ function otherNominee(s: LiveSeasonState): EntityId {
  * (0037). `votesToEvict` is filled with each voter who voted for the evictee — those voters,
  * plus the HOH who put the nominees up, are the "responsible" houseguests the evictee reads.
  */
-function tallyEviction(
-  s: LiveSeasonState, ctx: SeasonCtx, playerVote?: EntityId, votesToEvict?: EntityId[],
-): EntityId {
+/** A voter's threat-driven pick between the two final nominees (decision 0002). */
+function npcEvictChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: SeasonCtx): EntityId {
+  return ctx.rel.edge(voter, fn[0]).threat >= ctx.rel.edge(voter, fn[1]).threat ? fn[0] : fn[1];
+}
+
+/** Count the eviction votes (NPCs threat-driven; the player's own vote, if any) WITHOUT breaking a tie. */
+function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: EntityId): {
+  fn: [EntityId, EntityId]; votes: Record<EntityId, number>; voteOf: Map<EntityId, EntityId>;
+} {
   const fn = s.finalNominees!;
   const voters = evictionVoters({ ...weekState(s, ctx), nominees: fn });
-  const npcChoice = (voter: EntityId): EntityId =>
-    ctx.rel.edge(voter, fn[0]).threat >= ctx.rel.edge(voter, fn[1]).threat ? fn[0] : fn[1];
   const votes: Record<EntityId, number> = { [fn[0]]: 0, [fn[1]]: 0 };
   const voteOf = new Map<EntityId, EntityId>();
   for (const v of voters) {
-    const target = v === ctx.player && playerVote ? playerVote : npcChoice(v);
+    const target = v === ctx.player && playerVote ? playerVote : npcEvictChoice(v, fn, ctx);
     votes[target]++;
     voteOf.set(v, target);
   }
-  const evictee = votes[fn[0]]! > votes[fn[1]]!
-    ? fn[0]
-    : votes[fn[1]]! > votes[fn[0]]!
-      ? fn[1]
-      : npcChoice(s.hoh!); // HOH breaks the tie
-  if (votesToEvict) for (const [v, t] of voteOf) if (t === evictee) votesToEvict.push(v);
-  return evictee;
+  return { fn, votes, voteOf };
+}
+
+/** Apply an eviction once the evictee is known: record the responsible voters' manner, remove, advance. */
+function commitEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: EntityId, voteOf: Map<EntityId, EntityId>): BeatEvent {
+  const votesToEvict = [...voteOf].filter(([, t]) => t === evictee).map(([v]) => v);
+  const ev: BeatEvent = { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
+  applyEviction(s, evictee, ctx, [s.hoh!, ...votesToEvict]);
+  return ev;
+}
+
+/**
+ * Resolve the eviction from the tally, applying it. On a TIE the HOH breaks it — but if the HOH is the
+ * PLAYER, the loop PAUSES on a `tie-break` decision (B44/audit B2): the single most dramatic HOH power
+ * must be the player's, never silently decided from hidden player→NPC edges. Returns null when it pends.
+ */
+function resolveEvictionBeat(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: EntityId): BeatEvent | null {
+  const { fn, votes, voteOf } = countEvictionVotes(s, ctx, playerVote);
+  let evictee: EntityId;
+  if (votes[fn[0]]! > votes[fn[1]]!) evictee = fn[0];
+  else if (votes[fn[1]]! > votes[fn[0]]!) evictee = fn[1];
+  else {
+    if (s.hoh === ctx.player) {
+      s.pending = { kind: "tie-break", by: ctx.player, nominees: fn };
+      return null; // the player Head of Household casts the deciding vote
+    }
+    evictee = npcEvictChoice(s.hoh!, fn, ctx); // an NPC HOH breaks the tie
+  }
+  return commitEviction(s, ctx, evictee, voteOf);
 }
 
 /**
@@ -478,11 +507,8 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         s.pending = { kind: "eviction-vote", by: ctx.player, nominees: fn };
         return null;
       }
-      const votesToEvict: EntityId[] = [];
-      const evictee = tallyEviction(s, ctx, undefined, votesToEvict);
-      const ev: BeatEvent = { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
-      applyEviction(s, evictee, ctx, [s.hoh!, ...votesToEvict]);
-      return ev;
+      // The player is HOH or a nominee here; resolveEvictionBeat pauses on a tie-break iff player-HOH.
+      return resolveEvictionBeat(s, ctx, undefined);
     }
     case "finale":
       return advanceFinale(s, ctx, rng);
@@ -552,11 +578,16 @@ export function applyDecision(s: LiveSeasonState, input: DecisionInput, ctx: Sea
       const fn = s.finalNominees!;
       if (!fn.includes(input.vote)) throw new Error("can only vote to evict a final nominee");
       s.pending = undefined;
-      const votesToEvict: EntityId[] = [];
-      const evictee = tallyEviction(s, ctx, input.vote, votesToEvict);
-      const ev: BeatEvent = { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
-      applyEviction(s, evictee, ctx, [s.hoh!, ...votesToEvict]);
-      return ev;
+      // The player is a voter here ⇒ the HOH is an NPC ⇒ a tie auto-resolves; this never pends.
+      return resolveEvictionBeat(s, ctx, input.vote)!;
+    }
+    case "tie-break": {
+      // The player Head of Household breaks a tied eviction vote (B44/audit B2).
+      const fn = s.finalNominees!;
+      if (!fn.includes(input.evict)) throw new Error("the tie-break must choose a current nominee");
+      s.pending = undefined;
+      const { voteOf } = countEvictionVotes(s, ctx, undefined); // recover who voted where (the HOH didn't vote)
+      return commitEviction(s, ctx, input.evict, voteOf);
     }
     case "final-eviction": {
       // Final 3 (0045): the player IS the final HOH and personally evicts one of the other two.

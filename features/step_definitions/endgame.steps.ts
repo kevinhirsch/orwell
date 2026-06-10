@@ -24,7 +24,7 @@ function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>):
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
-  else s.submitDecision({ kind: "eviction-vote", vote: p.options[0]!.id });
+  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
 }
 
 // --- Scenario: a seeded season reaches Final 2 with every late ceremony legal ---

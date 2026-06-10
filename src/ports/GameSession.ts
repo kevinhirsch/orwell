@@ -129,7 +129,7 @@ export interface BeatEventView {
 
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "finale-statement" | "finale-answer" | "juror-vote";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
@@ -197,7 +197,7 @@ export interface PlayerTaglineView {
 
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "finale-statement" | "finale-answer" | "juror-vote";
   /** nominations: exactly two houseguest ids. */
   choice?: EntityId[];

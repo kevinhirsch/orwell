@@ -99,7 +99,7 @@ describe("0045 — a seeded season reaches Final 2 with every late ceremony lega
       else if (p.kind === "finale-statement") session.submitDecision({ kind: "finale-statement", statement: "x" });
       else if (p.kind === "finale-answer") session.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
       else if (p.kind === "juror-vote") session.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
-      else session.submitDecision({ kind: "eviction-vote", vote: p.options[0]!.id });
+      else session.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
     };
 
     let finished = false;

@@ -114,7 +114,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
           else if (p.kind === "finale-statement") await player.callTool("submitDecision", { kind: "finale-statement", statement: "I earned this." });
           else if (p.kind === "finale-answer") await player.callTool("submitDecision", { kind: "finale-answer", appeal: p.appeals![0]! });
           else if (p.kind === "juror-vote") await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
-          else await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+          else await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
         }
         finished = adv.finished;
       }

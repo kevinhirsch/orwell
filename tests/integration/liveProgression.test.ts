@@ -49,7 +49,7 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
         } else if (p.kind === "juror-vote") {
           await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
         } else {
-          await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+          await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
         }
       }
       finished = adv.finished;
@@ -91,7 +91,7 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
           ? { kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] }
           : p.kind === "veto-decision" ? { kind: "veto-decision", use: false }
           : p.kind === "replacement" ? { kind: "replacement", replacement: p.options[0]!.id }
-          : { kind: "eviction-vote", vote: p.options[0]!.id };
+          : { kind: p.kind, vote: p.options[0]!.id };
         await player.callTool("submitDecision", body);
       }
     }

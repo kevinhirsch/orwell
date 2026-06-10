@@ -28,7 +28,7 @@ async function playToEnd(player: McpServer): Promise<void> {
     else if (p.kind === "finale-statement") await player.callTool("submitDecision", { kind: "finale-statement", statement: "I ran this house." });
     else if (p.kind === "finale-answer") await player.callTool("submitDecision", { kind: "finale-answer", appeal: p.appeals![0]! });
     else if (p.kind === "juror-vote") await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
-    else await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+    else await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
   }
   throw new Error("game did not finish within bound");
 }
@@ -92,7 +92,7 @@ describe("0041 — character evolution is live (over the MCP boundary)", () => {
       else if (p.kind === "finale-statement") await player.callTool("submitDecision", { kind: "finale-statement", statement: "x" });
       else if (p.kind === "finale-answer") await player.callTool("submitDecision", { kind: "finale-answer", appeal: p.appeals![0]! });
       else if (p.kind === "juror-vote") await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
-      else await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+      else await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
     }
 
     const before = everySoul(houseOf(reg, user)).map((s) => ({
@@ -132,7 +132,7 @@ describe("0041 — character evolution is live (over the MCP boundary)", () => {
       if (p.kind === "nominations") await player.callTool("submitDecision", { kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
       else if (p.kind === "veto-decision") await player.callTool("submitDecision", { kind: "veto-decision", use: false });
       else if (p.kind === "replacement") await player.callTool("submitDecision", { kind: "replacement", replacement: p.options[0]!.id });
-      else await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+      else await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
     }
 
     // The hidden soul numbers that exist engine-side right now.

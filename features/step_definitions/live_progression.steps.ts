@@ -18,7 +18,7 @@ async function resolveLegally(p: Player, d: NonNullable<AdvanceView["pending"]>)
   if (d.kind === "nominations") await p.callTool("submitDecision", { kind: "nominations", choice: [d.options[0]!.id, d.options[1]!.id] });
   else if (d.kind === "veto-decision") await p.callTool("submitDecision", { kind: "veto-decision", use: false });
   else if (d.kind === "replacement") await p.callTool("submitDecision", { kind: "replacement", replacement: d.options[0]!.id });
-  else await p.callTool("submitDecision", { kind: "eviction-vote", vote: d.options[0]!.id });
+  else await p.callTool("submitDecision", { kind: d.kind, vote: d.options[0]!.id });
 }
 
 /** Advance until the first pending decision, counting beats that resolved automatically. */
