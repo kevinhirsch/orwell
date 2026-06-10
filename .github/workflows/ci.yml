@@ -19,6 +19,19 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # Coverage gate (B70/audit C8): per-directory branch thresholds in vitest.config.ts —
+  # coverage can no longer silently regress while the functional gate stays green.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:cov
+
   # Deploy smoke (feature 0010): build + start the engine, probe the HTTP MCP
   # surface, exercise the game tools, prove channel isolation, simulate an update.
   smoke:
