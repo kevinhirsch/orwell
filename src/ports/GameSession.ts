@@ -26,6 +26,12 @@ export interface CastingCard {
   /** The player's own authored material, played back. */
   story?: string;
   motivation?: string;
+  /**
+   * True when the engine DEFAULTED the character type (C6): the interview never captured a
+   * recognizable archetype, so the median spec was used — surfaced so an early finalization
+   * is visible on the card rather than a silent stat assignment.
+   */
+  defaulted?: boolean;
 }
 
 /** The player's own authored card. They authored it, so persona is theirs — but NO numeric stats cross the wall. */

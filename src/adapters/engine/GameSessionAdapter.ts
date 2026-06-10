@@ -6,6 +6,7 @@ import type {
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import { randomBytes } from "node:crypto";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { HOUSE_ADJACENCY } from "../../domain/house";
@@ -76,6 +77,16 @@ import { cloneSession } from "../../engine/sessionSnapshot";
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/**
+ * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
+ * `crypto` randomness, persisted in the snapshot (`gameSeed`) so the season stays reproducible
+ * AFTER creation. This is an adapter (not the pure core) — the one sanctioned place real
+ * entropy enters; everything downstream still flows through the seeded `RandomnessSource`.
+ */
+function entropySeed(): number {
+  return randomBytes(4).readUInt32LE(0);
+}
 
 /** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
 const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
@@ -510,7 +521,11 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
-    const seed = req.seed ?? hashSeed(playerName);
+    // E39/C7/D8: the DEFAULT seed is real entropy, persisted with the snapshot — the same player
+    // name must never replay the byte-identical season (incl. its hidden elements and twist
+    // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
+    // first-class for tests and replays.
+    const seed = req.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
@@ -1220,6 +1235,8 @@ export class GameSessionAdapter implements GameSession {
           },
           ...(p.character.background ? { story: p.character.background } : {}),
           ...(p.motivation ? { motivation: p.motivation } : {}),
+          // C6: an engine-defaulted character type is SURFACED, never a silent grant.
+          ...(p.archetypeDefaulted ? { defaulted: true } : {}),
         },
       },
       house: this.house.npcs.map((n) => ({
