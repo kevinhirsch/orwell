@@ -2572,3 +2572,27 @@ PR per item).
 > Sequester) leading the picker — frosted backdrop-blur chrome with the @supports fallback,
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
+
+## Audit-lane wave (2026-06-10 full product audit) · parallel lanes
+
+### U-L2 — Lane 2: knowledge integrity (engine) — E9+C2+C3 · C14 · E20 · E21  ·  **✅ DONE (PR #TBD)**
+
+> **E9/C2/C3 (one fix site — `InMemoryKnowledgeService.pathwayAnchored`):** anchoring now requires
+> **content lineage** — `told-by:` must derive from what the teller actually holds (content or its
+> undistorted gossip origin) or witnessed (subject-only match no longer anchors, the C2 exploit);
+> `overheard:<id>` must derive from THAT event's content (a strict normalized fragment, the shape
+> `rollOverhears` produces — a real id no longer anchors unrelated invented content, the E9/C3
+> exploit). Anchored knowledge is by construction a fragment of something real; everything else
+> downgrades to a suspicion with **capped** confidence. **C14:** `clamp01` on confidence at every
+> knowledge write seam (`pushKnown` — surfacing/seeding/gossip — and `addSuspicion`, which also caps
+> at 0.5: a hunch is never knowledge-grade). **E20:** `resolveCompetition` is **gone from the player
+> channel** (registry descriptor, McpServer dispatch, the `EngineCommands` port method) —
+> `runCompetition` is the single outcome authority (B37); the pure domain fn stays; smoke + the 0009
+> `.feature` now assert absence + refusal. **E21:** `recordInteraction` requires the **player in the
+> witness set** (the player initiating counts; off-screen scenes are the engine's to mint) and folds
+> are budgeted **per beat per directed edge** (`MAX_FOLDS_PER_PAIR_PER_BEAT`, window keyed off the
+> latest `season:` beat) on top of the B39 per-call cap. Verified by:
+> `tests/unit/knowledgeIntegrity.test.ts` (lineage + clamp), `tests/unit/playerChannelGuards.test.ts`
+> (E20 absence/refusal both channels; E21 throw/auto-seat/budget/budget-reopen), the amended
+> `docs/features/0009-mcp-tool-boundary.feature` scenarios, `tests/integration/httpServer.test.ts`
+> (HTTP 400 refusal), and `deploy/smoke.sh` (refusal probed on a live deploy).
