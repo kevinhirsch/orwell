@@ -2,7 +2,7 @@ import { Given, When, Then } from "@cucumber/cucumber";
 import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { juryLean, castJuryVote, tallyJuryVote, runFinale } from "../../src/engine/jury";
-import { playSeason } from "../../src/engine/season";
+import { playSeason } from "../../src/engine/calibration";
 import type { SeasonHouseguest } from "../../src/engine/season";
 import { generateHouse } from "../../src/engine/characterFactory";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";

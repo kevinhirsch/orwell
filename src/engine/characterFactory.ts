@@ -396,6 +396,16 @@ export function dispositionOf(a: Archetype): Disposition {
   return SPEC_OF.get(a)!.disposition;
 }
 
+/**
+ * The PUBLIC competitive menace of an archetype — its strongest aptitude bias (B55/audit C5).
+ * Drives the move-in THREAT prior: a comp-beast LOOKS dangerous across the kitchen counter on
+ * day one. Public-persona-derived only; the houseguest's actual hidden stats never inform it.
+ */
+export function archetypeMenace(a: Archetype): number {
+  const b = SPEC_OF.get(a)!.bias;
+  return Math.max(b.physical, b.mental, b.social);
+}
+
 const inUnit = (v: number): boolean => v >= 0 && v <= 1;
 
 const JITTER = 0.05; // generateHouse's jittered() spread (±0.05), clamped to [0,1]

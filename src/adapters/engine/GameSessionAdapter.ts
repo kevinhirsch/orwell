@@ -44,13 +44,13 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
-import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier } from "../../engine/characterFactory";
+import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
-import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS } from "../../engine/relationshipConstants";
+import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS, clamp01 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -202,6 +202,7 @@ export class GameSessionAdapter implements GameSession {
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
+    this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
   }
 
   /**
@@ -416,6 +417,7 @@ export class GameSessionAdapter implements GameSession {
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
     this.seedFirstImpressions(seed);
+    this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
     this.presence = assignRooms(
       this.presenceActive(), null,
@@ -442,14 +444,37 @@ export class GameSessionAdapter implements GameSession {
     return castingStatusOf(this.intake);
   }
 
-  /** Give every ordered pair a seeded baseline trust/affinity/threat (deterministic per game). */
+  /**
+   * Realistic move-in reads (B55/audit C5+C6). Day one nobody KNOWS anyone: signals start near the
+   * relationship BASELINE with a small seeded scatter (not uniform noise), the threat read leans on
+   * the target's PUBLIC archetype menace (a comp-beast looks dangerous across the kitchen counter —
+   * never their hidden numbers), and confidence sits BELOW the knowledge threshold, so every
+   * day-one read is a HUNCH the season then firms or breaks. Deterministic per game.
+   */
   private seedFirstImpressions(seed: number): void {
     const all = this.house ? [this.house.player, ...this.house.npcs] : [];
     const rng = new SeededRandom(hashSeed(`${seed}:relationships`));
+    const { baseline, MOVE_IN } = RELATIONSHIP_CONSTANTS;
+    const scatter = (): number => (rng.next() - 0.5) * 2 * MOVE_IN.spread;
     for (const a of all) for (const b of all) {
       if (a.id === b.id) continue;
       const e = this.rel.edge(a.id, b.id);
-      e.trust = rng.next(); e.affinity = rng.next(); e.threat = rng.next(); e.confidence = 0.5;
+      e.trust = clamp01(baseline.trust + scatter());
+      e.affinity = clamp01(baseline.affinity + scatter());
+      e.threat = clamp01(baseline.threat + MOVE_IN.threatWeight * archetypeMenace(b.character.archetype) + scatter());
+      e.confidence = MOVE_IN.confidence;
+    }
+  }
+
+  /**
+   * Wire each houseguest's relationship DISPOSITION from their public archetype (B55/audit C5): a
+   * villain holds grudges (clash, sticky), a loyalist forgives (bond). Derived from the persisted
+   * static Character, so a restore re-derives it — no extra serialization needed.
+   */
+  private wireDispositions(): void {
+    if (!this.house) return;
+    for (const hg of [this.house.player, ...this.house.npcs]) {
+      this.rel.setDisposition(hg.id, dispositionOf(hg.character.archetype));
     }
   }
 

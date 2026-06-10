@@ -28,7 +28,7 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
     let pending: NonNullable<AdvanceView["pending"]> | null = null;
     let sb!: ReturnType<GameSessionRegistry["sandboxFor"]>;
     let a = "", b = "";
-    for (let seed = 1; seed <= 400 && !pending; seed++) {
+    for (let seed = 1; seed <= 1200 && !pending; seed++) {
       const r = new GameSessionRegistry();
       const s = r.sandboxFor("u");
       s.session.createCharacter({ playerName: "P", seed });
@@ -41,7 +41,10 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
       // nudged the whole house), so the nomination's adverse move is clearly observable, not pre-clamped.
       const [o0, o1] = [adv.pending.options[0]!.id, adv.pending.options[1]!.id];
       const e = s.engine.relationships.edge(o0, PLAYER);
-      if (e.trust > 0.2 && e.threat < 0.8) { reg = r; sb = s; rel = s.engine.relationships; pending = adv.pending; a = o0; b = o1; }
+      const e1 = s.engine.relationships.edge(o1, PLAYER);
+      // BOTH nominees need headroom (B55's realistic move-in reads start lower, so a clamped-to-0
+      // trust edge is possible after the HOH-win fold — that would mask the adverse move).
+      if (e.trust > 0.1 && e.threat < 0.85 && e1.trust > 0.1) { reg = r; sb = s; rel = s.engine.relationships; pending = adv.pending; a = o0; b = o1; }
     }
     expect(pending, "found a seed where the player is the opening HOH").toBeTruthy();
     const beforeA = { threat: rel.edge(a, PLAYER).threat, trust: rel.edge(a, PLAYER).trust };
@@ -61,13 +64,16 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
     expect(reg2.sandboxFor("u").engine.relationships.edge(a, PLAYER).threat).toBe(afterThreat);
 
     // The Vault Wall: no edge number appears on any player surface (0001 canary, extended).
+    // A value the math clamped to a SHORT round number ("0", "1") is no sentinel — any JSON
+    // contains those digits — so only high-precision values are meaningful canaries here.
     const surface = [
       JSON.stringify(sb.session.getGameState()),
       JSON.stringify(sb.session.gameStatus()),
       JSON.stringify(sb.session.getMomentPrompt({})),
     ].join("|");
-    expect(surface.includes(String(afterThreat))).toBe(false);
-    expect(surface.includes(String(rel.edge(a, PLAYER).trust))).toBe(false);
+    for (const v of [afterThreat, rel.edge(a, PLAYER).trust]) {
+      if (String(v).length > 6) expect(surface.includes(String(v))).toBe(false);
+    }
   });
 
   it("a competition win raises the house's hidden threat toward the winner", () => {

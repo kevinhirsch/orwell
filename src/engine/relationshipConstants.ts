@@ -59,6 +59,12 @@ export interface RelationshipConstants {
   TEMPERATURE_JITTER: number;
   dispositionFactors: Record<RelationshipDisposition, DispositionProfile>;
   thresholds: { alliance: number; ally: number; enemy: number; knowledge: number };
+  /**
+   * Move-in first impressions (B55/audit C5+C6): day-one reads start NEAR BASELINE (not uniform
+   * noise), the threat read leans on the PUBLIC archetype's competitive menace, and confidence
+   * starts BELOW `thresholds.knowledge` — a move-in read is a HUNCH, never day-one knowledge.
+   */
+  MOVE_IN: { confidence: number; spread: number; threatWeight: number };
 }
 
 // Betrayal-shock: a LARGE single step — the competitive, realistic core, and the single biggest
@@ -87,6 +93,7 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
     neutral: { adverseScale: 1.0, bondScale: 1.0, decayScale: 1.0 },
   },
   thresholds: { alliance: 0.5, ally: 0.35, enemy: 0.3, knowledge: 0.3 },
+  MOVE_IN: { confidence: 0.15, spread: 0.15, threatWeight: 0.35 },
 };
 
 export const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));

@@ -1372,7 +1372,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > diversity / surfacing thresholds hold across ≥20 seeds; the test **fails** if `defaultApply` stops recording typed
 > scenes. Read `docs/features/0003` first. Open a PR.
 
-### B55 — unify the season loop; ground relationship reads  ·  Claude Code  ·  **Wave 3 · audit D12 + C5 + C6**
+### B55 — unify the season loop; ground relationship reads  ·  Claude Code  ·  **Wave 3 · audit D12 + C5 + C6 · ✅ DONE 2026-06-10**
+
+> **Built to green.** ONE weekly-loop rulebook: `playSeason` is now a DRIVER over `newLiveSeason`/`advance`
+> (new `src/engine/calibration.ts`), auto-answering player pendings with the loop's own NPC policy — the new
+> exported `autoDecision` in `liveSeason.ts` (threat-ranked picks, trusted-save veto, bestAppeal finale answers).
+> The duplicated `WEEK_PHASES`/`pendingNominationDecision`/`validateNominations` are DELETED from `season.ts`
+> (now just the shared reads: chooseNominations(+WithMood), tallyJury); their BDD/unit consumers re-point at the
+> live loop (the canonical-phase-order step now DRIVES a live week and asserts the observed beat order — it was a
+> constant-equals-itself tautology). Seed realism (C5/C6): move-in reads start near BASELINE with seeded scatter,
+> the threat prior leans on the PUBLIC archetype menace (`archetypeMenace`), confidence starts BELOW the knowledge
+> threshold (a day-one read is a HUNCH), and `dispositionOf(archetype)` is finally WIRED into the live model at
+> create + restore (derived from the persisted Character — no extra serialization). Constants in
+> `RELATIONSHIP_CONSTANTS.MOVE_IN`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the calibration sim (`season.ts`) **diverges in rules** from the live loop —
 > `vetoParticipants` without the Houseguest's-Choice chip, different comp types, no manner/appeals, and dead duplicate

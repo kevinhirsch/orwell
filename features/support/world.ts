@@ -15,7 +15,8 @@ import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
 import type { RandomnessSource } from "../../src/ports/RandomnessSource";
 import type { Day } from "../../src/engine/schedule";
 import type { McpServer } from "../../src/adapters/mcp/McpServer";
-import type { SeasonOutcome, SeasonHouseguest } from "../../src/engine/season";
+import type { SeasonHouseguest } from "../../src/engine/season";
+import type { SeasonOutcome } from "../../src/engine/calibration";
 import type { EntityId as Eid } from "../../src/domain/ids";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
@@ -92,6 +93,12 @@ export class BbWorld extends World {
   outcome2?: SeasonOutcome;
   chosenReplacement?: Eid;
   playerState?: { active: Eid[]; hoh: Eid };
+  /** B55: the LIVE-loop pending-nomination fixture (the one weekly rulebook). */
+  liveNom?: {
+    s: import("../../src/engine/liveSeason").LiveSeasonState;
+    ctx: import("../../src/engine/liveSeason").SeasonCtx;
+    rng: import("../../src/adapters/random/SeededRandom").SeededRandom;
+  };
 
   // Conversation & scene system (0012) scratch state.
   approaches?: Eid[];
