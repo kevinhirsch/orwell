@@ -350,6 +350,16 @@ export class BbWorld extends World {
   };
   twistFinal?: import("../../src/ports/GameSession").AdvanceView;
 
+  // Season retrospective & the Vault unsealing (0048) scratch state.
+  rtRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  rtUser?: string;
+  rtSandbox?: import("../../src/composition/registry").UserSandbox;
+  rtSandboxB?: import("../../src/composition/registry").UserSandbox;
+  rtRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
+  rtRetroB?: import("../../src/ports/GameSession").RetrospectiveView | null;
+  rtRecap?: import("../../src/ports/GameSession").SeasonRecapView;
+  rtArchive?: import("../../src/engine/sessionSnapshot").SessionSnapshot;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };

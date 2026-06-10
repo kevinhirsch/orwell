@@ -1398,7 +1398,17 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > B51). **Acceptance:** one source of weekly-loop truth; the calibration property green against the live `advance`; move-in
 > reads are **suspicions**, threat priors correlate with public archetype. Open a PR.
 
-### B56 — 0048 season retrospective & the Vault unsealing  ·  Claude Code  ·  **Wave 4 · audit G4 · NEEDS SPEC FIRST · highest fun-per-effort**
+### B56 — 0048 season retrospective & the Vault unsealing  ·  Claude Code  ·  **Wave 4 · audit G4 · ✅ DONE 2026-06-10**
+
+> **Built to green** (spec was already drafted). `seasonRecap()` — the public arc assembled from the EVENT RECORD
+> (`season:`/deal/betrayal events; stores, never narrator memory; Vault-free, any time) — and `seasonRetrospective()`
+> — the ONE sanctioned Vault read, gated IN CODE on `live.finished` (null while live): every hidden event (off-screen
+> scheming, confessionals, gossip) humanized + the sealed twists with fired/unfired weeks. Both on the `GameSession`
+> port (Vault-free types), wired via `setRecordProviders` from the registry; player tools + manifest bullets + the
+> `post-season` moment (the reunion special) + FE wiring (schemas/tags/keep/dispatch/client per the C13 drift test).
+> Lifecycle: the finished snapshot archives intact; `resetUser` + the B36 guard start a new season cleanly. Canary
+> scoping proven: sealed-while-live sweeps + unsealed-post-finale + cross-user isolation (unit + 5 BDD scenarios;
+> 0048 added to `cucumber.cjs`). Pairs with **C17** (the FE surface). Original prompt below.
 
 > Draft and implement **feature 0048** (`docs/features/0048-season-retrospective-and-unsealing.{md,feature}`) — the
 > biggest *fun* payoff the corpus never discusses, and the finished-season lifecycle (0021's archive deferral was never

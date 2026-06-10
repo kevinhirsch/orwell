@@ -61,6 +61,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
              "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts",
+             "seasonRecap", "seasonRetrospective",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
@@ -94,6 +95,8 @@ GAME_TOOL_KEEP = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
+    # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
+    "seasonRecap", "seasonRetrospective",
     "renderScene", "endOfSessionSummary",
     # Weekly loop (0011).
     "createCharacter", "updateCasting", "advanceGame", "submitDecision",

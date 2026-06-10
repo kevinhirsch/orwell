@@ -1349,6 +1349,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "seasonRecap",
+            "description": "The season's public arc straight from the recorded events (0048): HOH reigns, ceremonies, evictions, deals. Use for any recap or reunion beat — it is the record, never memory.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "seasonRetrospective",
+            "description": "POST-SEASON ONLY (0048): opens the Producer's Vault for the FINISHED season — off-screen scheming, confessionals, the twist that never fired. Returns nothing while a season is live; after the winner it is the payoff.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "whereabouts",
             "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
             "parameters": {"type": "object", "properties": {}},
@@ -1548,6 +1564,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
+    # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
+    "seasonRecap", "seasonRetrospective",
 })
 
 

@@ -1167,6 +1167,7 @@ async def execute_tool_block(
         do_manage_sandbox,
         do_create_character, do_update_casting, do_advance_game, do_submit_decision,
         do_social_initiatives, do_diary_room, do_make_deal, do_whereabouts,
+        do_season_recap, do_season_retrospective,
         do_app_api,
     )
 
@@ -1523,6 +1524,12 @@ async def execute_tool_block(
     elif tool == "whereabouts":
         desc = "whereabouts"
         result = await do_whereabouts(content, owner=owner)
+    elif tool == "seasonRecap":
+        desc = "seasonRecap"
+        result = await do_season_recap(content, owner=owner)
+    elif tool == "seasonRetrospective":
+        desc = "seasonRetrospective"
+        result = await do_season_retrospective(content, owner=owner)
     elif tool == "diaryRoom":
         desc = "diaryRoom"
         result = await do_diary_room(content, owner=owner)

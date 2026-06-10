@@ -52,6 +52,12 @@ function buildUserSandbox(): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
+  // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).
+  session.setRecordProviders({
+    events: () => engine.events.query(),
+    hidden: () => engine.vault.readHidden(),
+  });
   // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
   // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
   session.setOnSeal((reserve) => {

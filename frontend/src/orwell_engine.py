@@ -301,6 +301,17 @@ async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None
     return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
 
 
+async def season_recap(user: str | None = None) -> dict:
+    """The season's public arc from the event record (0048) — Vault-free, any time."""
+    return await _call("seasonRecap", {}, user=user)
+
+
+async def season_retrospective(user: str | None = None):
+    """The post-season Vault unsealing (0048): the FINISHED season's hidden story, or ``None``
+    while a season is live (the gate is the engine's terminal state, never a prompt)."""
+    return await _call("seasonRetrospective", {}, user=user)
+
+
 async def whereabouts(user: str | None = None):
     """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
     ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""

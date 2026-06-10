@@ -86,6 +86,11 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    move that fact into the player's knowledge along the pathway it travelled.",
   "  • diaryRoom — record the player's private, out-of-character confessional. Nothing here reaches any",
   "    houseguest; it is the player's own space, never an in-game pathway.",
+  "  • seasonRecap — the season's public arc straight from the recorded events (reigns, ceremonies,",
+  "    evictions, deals). Use it for any recap or reunion beat — it is the record, never memory.",
+  "  • seasonRetrospective — POST-SEASON ONLY: opens the Producer's Vault for the FINISHED season —",
+  "    the off-screen scheming, the confessionals, the twist that never fired. It returns nothing",
+  "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
   "  • renderScene — narrate the current moment from the visible projection.",
 ].join("\n");
@@ -181,6 +186,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
     "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
     "they want to watch, but they hold no power and cast no vote. Do not invent a path back in.",
+  "post-season":
+    "MOMENT — The season is OVER: a winner is crowned and there is no game left to spoil. Host the " +
+    "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
+    "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
+    "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
+    "moment. A new season starts only from their explicit, confirmed request — never by surprise.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
