@@ -18,4 +18,6 @@ export interface UserSaveStore {
   hasSave(user: string): boolean;
   /** The user's latest durable snapshot, or null if they have none. */
   loadLatest(user: string): SessionSnapshot | null;
+  /** The users with durable saves (B60/audit E11) — lets the runtime preload at boot. Optional. */
+  listUsers?(): string[];
 }

@@ -5,8 +5,11 @@ import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameSt
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
 import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
 import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledgeService";
+import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
+import { SeededRandom } from "../adapters/random/SeededRandom";
+import { hashSeed } from "../engine/characterFactory";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -37,13 +40,17 @@ export interface UserSandbox {
   syncAdmin: () => void;
 }
 
-function buildUserSandbox(): UserSandbox {
+function buildUserSandbox(user = "default"): UserSandbox {
   const engine = buildEngineCore();
   const adminState = new InMemoryGameStateRepository({ week: 1, phase: "setup", houseguests: [] });
   const outward = buildOutwardChannels({
     player: PLAYER, events: engine.events, knowledge: engine.knowledge, adminState,
   });
-  const commands = new EngineCommandsAdapter(engine.events, engine.knowledge, engine.relationships);
+  // A PER-USER rng (B60/audit E12): the command seam's folds/overhears were identical across every
+  // sandbox (a shared SeededRandom(1)) — now each user's stream is their own.
+  const commands = new EngineCommandsAdapter(
+    engine.events, engine.knowledge, engine.relationships, new SeededRandom(hashSeed(`commands:${user}`)),
+  );
   const session = new GameSessionAdapter(engine.relationships);
   // Wire the engine-only soul store (0024) into the live session so consequential beats + off-screen
   // scenes deepen each NPC's arc and ground their later voice (the 0041 linchpin).
@@ -146,7 +153,7 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
 function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   if (!snapshotCompatible(snap)) throw new Error(`incompatible snapshot version: ${snap.snapshotVersion}`);
   sb.session.restore(snap);
-  for (const e of snap.events) sb.engine.events.record(e); // ids/ts/hidden preserved exactly
+  for (const e of snap.events) (sb.engine.events as InMemoryEventStore).restoreRecord(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
   if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
@@ -184,7 +191,7 @@ export class GameSessionRegistry {
   sandboxFor(user: string): UserSandbox {
     let sb = this.sandboxes.get(user);
     if (!sb) {
-      sb = buildUserSandbox();
+      sb = buildUserSandbox(user);
       if (this.saveStore?.hasSave(user)) {
         const snap = this.saveStore.loadLatest(user);
         // Resume from the durable save — but an incompatible/corrupt snapshot must REJECT into a fresh
@@ -193,7 +200,7 @@ export class GameSessionRegistry {
           try {
             importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
           } catch {
-            sb = buildUserSandbox();
+            sb = buildUserSandbox(user);
           }
         }
       }
@@ -238,7 +245,7 @@ export class GameSessionRegistry {
    * advance's events behind. The durable save is untouched by this call.
    */
   restore(user: string, snap: SessionSnapshot): UserSandbox {
-    const sb = buildUserSandbox();
+    const sb = buildUserSandbox(user);
     importSnapshot(sb, snap);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
@@ -257,7 +264,7 @@ export class GameSessionRegistry {
 
   /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
   resetUser(user: string): UserSandbox {
-    const sb = buildUserSandbox();
+    const sb = buildUserSandbox(user);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;

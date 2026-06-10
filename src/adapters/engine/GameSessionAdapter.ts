@@ -128,6 +128,8 @@ export class GameSessionAdapter implements GameSession {
    * witnessing, overhearing, and the player's `whereabouts()` read.
    */
   private presence: Map<EntityId, Room> | null = null;
+  /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
+  private gameSeed: number | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -247,6 +249,7 @@ export class GameSessionAdapter implements GameSession {
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
+      ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
     };
@@ -262,6 +265,7 @@ export class GameSessionAdapter implements GameSession {
     this.deals.load(core.deals ?? []);
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
+    this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
@@ -379,7 +383,7 @@ export class GameSessionAdapter implements GameSession {
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
     // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
     // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
-    const rng = new SeededRandom(hashSeed(`approaches:${this.week}:${this.phase}`));
+    const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${this.week}:${this.phase}`));
     return npcInitiatedApproaches(player, npcIds, this.rel, rng, 3).map((id) => ({
       houseguest: { id, name: this.nameOf(id) },
       pretext: "wants a word with you",
@@ -442,6 +446,7 @@ export class GameSessionAdapter implements GameSession {
       );
     }
     const seed = req.seed ?? hashSeed(playerName);
+    this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
@@ -687,11 +692,15 @@ export class GameSessionAdapter implements GameSession {
 
   /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
   private beatRng(): SeededRandom {
+    // B60/audit E12: key off the GAME's seed (persisted), not the player's display name — two
+    // same-named games get distinct streams; a restored game keeps its own. Legacy saves (no seed)
+    // fall back to the old name key so their in-flight moments still resolve identically.
     const name = this.house?.player.name ?? "season";
+    const root = this.gameSeed ?? name;
     // A double-eviction night (0025/B53) repeats the week's beats in its compressed second cycle —
     // disambiguate so the second HOH comp / eviction don't replay the first cycle's rolls.
     const cycle = this.live?.twist?.phase === "running" ? ":2" : "";
-    return new SeededRandom(hashSeed(`${name}:${this.live?.week}:${this.live?.beat}${cycle}`));
+    return new SeededRandom(hashSeed(`${root}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
   advanceGame(): AdvanceView {

@@ -92,6 +92,18 @@ export class FileSaveStore implements UserSaveStore {
     return this.latestVersion(this.userDir(user)) > 0;
   }
 
+  /** The users with at least one durable save (B60/E11) — dir names are hex-encoded user ids. */
+  listUsers(): string[] {
+    if (!existsSync(this.dataDir)) return [];
+    const users: string[] = [];
+    for (const entry of readdirSync(this.dataDir)) {
+      if (!/^([0-9a-f]{2})+$/i.test(entry)) continue; // not a user dir (e.g. stray files)
+      const user = Buffer.from(entry, "hex").toString("utf8");
+      if (this.hasSave(user)) users.push(user);
+    }
+    return users;
+  }
+
   /**
    * The newest READABLE save. A corrupt highest version (e.g. truncated by a crash) is **quarantined**
    * (renamed `.corrupt`, so it can never be "latest" again → no restart crash-loop) and we **step
