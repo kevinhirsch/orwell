@@ -762,6 +762,11 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         # Let client JS/CSS branch on the build honestly (game-framed copy, tips, holding
         # states) instead of guessing from engine reachability.
         html = html.replace("<body", '<body data-game-build="1"', 1)
+    else:
+        # C18/audit F8: the game-trim stylesheet hides workspace chrome — with the build OFF
+        # (ORWELL_GAME_BUILD=0 debugging) the full workspace must come back, so strip the link.
+        import re as _re
+        html = _re.sub(r'<link[^>]*game-trim\.css[^>]*>\s*(<!--[^>]*-->)?', "", html, count=1)
     return HTMLResponse(html)
 
 @app.get("/")

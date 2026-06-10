@@ -109,6 +109,30 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] initiatives failed: {e}")
             return {"initiatives": []}
 
+    @router.get("/recap")
+    async def orwell_recap(request: Request):
+        """The season's public arc from the EVENT RECORD (0048/C17) — Vault-free, any time
+        (mid-season it is simply the story so far). Fails OPEN: {recap: null} on any error."""
+        try:
+            return {"recap": await orwell_engine.season_recap(user=_current_user(request))}
+        except Exception as e:
+            logger.warning(f"[orwell] recap failed: {e}")
+            return {"recap": None}
+
+    @router.get("/retrospective")
+    async def orwell_retrospective(request: Request):
+        """The post-season Vault unsealing (0048/C17). The Wall stays ABSOLUTE pre-finale: the
+        engine's terminal-state gate returns null for a live season and this route surfaces that
+        as a 404 — the unseal affordance does not exist mid-season."""
+        try:
+            retro = await orwell_engine.season_retrospective(user=_current_user(request))
+        except Exception as e:
+            logger.warning(f"[orwell] retrospective failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+        if retro is None:
+            return JSONResponse(status_code=404, content={"error": "The season is still live — the Vault opens only after a winner is crowned."})
+        return {"retrospective": retro}
+
     @router.get("/whereabouts")
     async def orwell_whereabouts(request: Request):
         """The Vault-free presence read (0049/C28): the player's room, who is in it, and who is in
