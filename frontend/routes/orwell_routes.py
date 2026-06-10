@@ -78,7 +78,7 @@ def setup_orwell_routes() -> APIRouter:
             return await orwell_engine.player_tagline(user=_current_user(request))
         except Exception as e:
             logger.warning(f"[orwell] tagline failed: {e}")
-            return {"text": "Yours for the voyage."}
+            return {"text": "The house is waiting."}
 
     @router.get("/initiatives")
     async def orwell_initiatives(request: Request):

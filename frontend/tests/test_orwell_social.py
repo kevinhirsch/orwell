@@ -41,7 +41,7 @@ def test_tagline_fails_open_to_default(client, monkeypatch):
     monkeypatch.setattr(orwell_engine, "player_tagline", _raise)
     r = client.get("/api/orwell/tagline")
     assert r.status_code == 200
-    assert r.json()["text"] == "Yours for the voyage."  # never blank, never blocks
+    assert r.json()["text"] == "The house is waiting."  # never blank, never blocks
 
 
 # --- approaches (0036): pass through, fail open -------------------------------
