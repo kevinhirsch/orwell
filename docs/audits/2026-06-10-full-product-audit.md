@@ -1330,3 +1330,22 @@ toggles when viewing as non-admin-relevant.
 **Test spec:** schema-assembly test — game turn, `game_tools_enabled=["chat_with_model"]`,
 assert the schema array handed to the API call contains `chat_with_model` (and the A1
 composition cases); pytest for the gate-4 UI copy.
+
+## A3 [MED · UX/System] The settings pane has no shared layout primitives — stray dividers and margin defects are the symptom
+
+**User-reported (2026-06-10):** stray dividers and margin problems in the settings pane (on
+top of the ruling-16 crowding report). **Root cause verified:** `frontend/static/js/settings.js`
+contains **219 inline `style="…"` attributes** and the settings markup defines **zero** shared
+section/divider classes (no `.settings-section`, no `.settings-divider`, no `<hr>` — section
+breaks are improvised per tab, e.g. `<div style="font-size:11px;font-weight:600;opacity:0.6;
+margin:8px 0 2px">` pseudo-headers). With no spacing scale or section component, every tab
+accumulates its own margins/borders independently — orphaned separators and uneven gutters
+are the inevitable result, and no single fix can hold.
+
+**Fix spec (folds into the S-stream mechanism — ruling #16):** a small settings layout kit in
+`style.css` — `.settings-section` (titled group with one consistent top rule + spacing-token
+margins), `.settings-divider`, `.settings-row` variants on a shared spacing scale — then a
+mechanical sweep of `settings.js` replacing inline layout styles with the kit (non-layout
+inline styles like the spinner can stay). Add a regression gate: a pytest/source check that
+caps inline `style=` attributes in `settings.js` (ratchet from 219 down as the sweep
+proceeds) so the pane can't silently re-accrete ad-hoc layout.
