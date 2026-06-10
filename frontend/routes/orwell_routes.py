@@ -92,6 +92,17 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] initiatives failed: {e}")
             return {"initiatives": []}
 
+    @router.get("/finale")
+    async def orwell_finale(request: Request):
+        """The Vault-free in-progress finale projection for the finale panel (0037 §8.2): finalists,
+        stage, and the votes revealed so far — null when no finale is staging. Fails OPEN: {finale: null}
+        on any error, so the page never blocks on it."""
+        try:
+            return {"finale": await orwell_engine.finale_view(user=_current_user(request))}
+        except Exception as e:
+            logger.warning(f"[orwell] finale failed: {e}")
+            return {"finale": None}
+
     class DiaryRoomRequest(BaseModel):
         entry: str
 

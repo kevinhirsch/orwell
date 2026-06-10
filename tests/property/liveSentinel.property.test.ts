@@ -95,7 +95,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         const adv = (await player.callTool("advanceGame", {})) as AdvanceView;
         swept.add("advanceGame");
         for (const s of sentinels) expect(JSON.stringify(adv).includes(s), `seed ${seed}: advanceGame leaked ${s}`).toBe(false);
-        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor"]) await sweep(player, name);
+        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor", "finaleView"]) await sweep(player, name);
 
         // Finale projection lock (no pre-reveal tally): while the finale stages, no winner crosses, and
         // the precomputed votes / script are never serialized — only the reveals shown so far.

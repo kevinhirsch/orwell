@@ -676,7 +676,12 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > with no broken modules; verify on a **running instance** (per `frontend/INTEGRATION.md`). Engine gate
 > unaffected (front-end quarantined). Open a PR.
 
-### B26 — 0037 engine: expose a Vault-free `finaleView` read  ·  Claude Code  ·  **small; unblocks C11**
+### B26 — 0037 engine: expose a Vault-free `finaleView` read  ·  Claude Code  ·  **small; unblocks C11** — ✅ DONE
+
+> **DONE.** `GameSessionAdapter.finaleView()` is public + on the `GameSession` port; `finaleView` added to
+> `PLAYER_TOOLS` + `McpServer` dispatch + `INFRA_LEVERS` (so the lever-manifest drift guard doesn't name it).
+> The B42 sentinel sweep now calls it at every beat (incl. the live finale); a behavioral test proves it is
+> null off-finale and mirrors `AdvanceView.finale` during one (no votes/script/tally/lean). arch + gate green.
 
 > In `kevinhirsch/orwell` (TS engine), promote the existing private `GameSessionAdapter.finaleView()` to a
 > **read tool** `finaleView(): FinaleView | null` on the `GameSession` port + `PLAYER_TOOLS` + `McpServer`
@@ -686,7 +691,17 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > stage + the reveals SO FAR only, **never** a lean/tally/eviction-manner/pre-reveal winner. Extend the 0001
 > sentinel canary to `finaleView`; `npm run test:arch` + `npm test` green. Open a PR.
 
-### C11 — 0037 front-end: render the interactive finale  ·  OpenHands  ·  **depends on B26**
+### C11 — 0037 front-end: render the interactive finale  ·  Claude Code  ·  **depends on B26** — ✅ DONE
+
+> **DONE** (built in the Claude Code lane). `GET /api/orwell/finale` → `{ finale: FinaleView | null }`
+> (fail-open) + an `orwell_engine.finale_view` client over the B26 tool. `static/js/orwellFinale.js` — a
+> self-contained, fail-open, draggable/minimizable polling panel (sibling of `orwellSocial.js`, no new module
+> deps, script-tagged after the social panel): shown only while a finale stages, it renders the finalists, the
+> stage, and the vote reveal IN ORDER with a tally of the revealed votes only (never a pre-reveal winner). The
+> player's turn is surfaced as composer-prefill shortcuts (player-finalist → statement/appeals; player-juror →
+> finalist vote); binding submission flows through the chat-agent `submitDecision` seam. `tests/test_orwell_finale.py`
+> (3, fail-open) + 184 pytest green; the 0032 headless-browser keep-set gate stays green (`orwellFinale.js`
+> loads cleanly). No new `submitDecision` kind ⇒ no C12 relay change.
 
 > In `kevinhirsch/orwell` `frontend/`, build the finale **presentation UI** for feature **0037** per its design
 > note **§8** — the direct parallel to 0036's C10, in the same self-contained, fail-open, game-gated patterns as

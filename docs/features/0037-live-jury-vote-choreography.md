@@ -1,6 +1,6 @@
 # 0037 — Live jury-vote choreography (the interactive finale)
 
-> **Status:** **Engine built & green** (in `cucumber.cjs`); **front-end UI pending (C11, §8).** The
+> **Status:** ✅ **Built & green** (engine in `cucumber.cjs`; **front-end UI done — B26 + C11, §8**). The
 > **live realization of 0014 §5–6** — the Final 2 finale as an interactive,
 > staged sequence inside the running game, not a single auto-resolved winner. The pure jury logic
 > (`src/engine/jury.ts` — `juryLean`, `castJuryVote`, `finalePerformance`, `tallyJuryVote`, `runFinale`)
@@ -202,12 +202,19 @@ staging** (`finale != null`):
 - **0032 keep-set:** a game surface, gated to a live finale; survives the prune; `orwellFinale.js` adds no
   new module deps (browser-smoke safe), script-tagged after the social panel.
 
-### 8.5 Definition of Done (C11)
-- [ ] **Engine:** `finaleView()` is a Vault-free read tool (sentinel-clean; `npm run test:arch` green).
-- [ ] **Route:** `GET /api/orwell/finale` returns the FinaleView, fail-open.
-- [ ] **Panel:** during a finale it shows the finalists, the stage, and the **vote reveal in order**
-      (revealed votes only — no pre-reveal winner/tally); hidden otherwise.
-- [ ] **Player decisions** (statement / answer-appeal / juror-vote) are surfaced over the existing seam,
-      and a submitted finale decision advances the staging.
-- [ ] Name-agnostic (roles only — finalist/juror); `cd frontend && python3 -m pytest tests/` green; the
-      0032 headless-browser gate stays green; engine gate unaffected. Verified on a running instance.
+### 8.5 Definition of Done (C11) — ✅ done (B26 + C11)
+- [x] **Engine (B26):** `finaleView(): FinaleView | null` is a Vault-free player read tool (`PLAYER_TOOLS`,
+      `McpServer`, classified **infra** so the lever-manifest drift guard doesn't require naming it); the
+      B42 sentinel sweep covers it across the live finale; `npm run test:arch` green.
+- [x] **Route:** `GET /api/orwell/finale` returns `{ finale: FinaleView | null }`, **fail-open** (`{finale:
+      null}` on any error).
+- [x] **Panel (`orwellFinale.js`):** during a finale it shows the finalists, the stage, and the **vote
+      reveal in order** with a tally of the **revealed votes only** (no pre-reveal winner/tally); hidden
+      otherwise. A self-contained, fail-open, draggable/minimizable sibling of `orwellSocial.js` (no new
+      module deps; script-tagged after the social panel).
+- [x] **Player decisions** (statement / answer-appeal / juror-vote) are surfaced as composer-prefill
+      shortcuts (player-finalist → statement/appeals; player-juror → finalist vote); the binding submission
+      still flows through the chat-agent `submitDecision` seam, which advances the staging.
+- [x] Name-agnostic (roles only — finalist/juror); `python3 -m pytest tests/` green (184, +3 finale route);
+      the 0032 headless-browser keep-set gate stays green (`orwellFinale.js` loads cleanly); engine gate
+      unaffected (352 unit + 256 BDD).

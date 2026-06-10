@@ -281,4 +281,12 @@ export interface GameSession {
    * pre-game). Vault-free, anti-sycophantic (a weak spot is ribbed, not flattered), one line.
    */
   playerTagline(): PlayerTaglineView;
+
+  /**
+   * The Vault-free projection of an in-progress finale (0037 §8.1) for a polling finale panel — the
+   * SAME projection already proven on `AdvanceView.finale`: names + the current stage + the reveals SO
+   * FAR only. `null` unless a finale is actively staging. No lean, tally, manner, or pre-reveal winner.
+   * Infra (like `gameStatus`/`playerTagline`), not a game-driving lever.
+   */
+  finaleView(): FinaleView | null;
 }
