@@ -238,6 +238,30 @@ def main() -> int:
                   f"mobile: hamburger follows a LEFT sidebar ({left_state})")
             check(right_state.get("ham") == right_state.get("sidebar") == "R",
                   f"mobile: hamburger follows a RIGHT sidebar ({right_state})")
+
+            # C26/M1: on a phone the game HUDs are full-width TOP SHEETS — they must never
+            # cover the composer (the old fixed 220px floaters sat right on top of it).
+            hud_geo = mob.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const el = document.getElementById('orwell-status');
+              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+              if (!el || !ta) return { ok: false, why: 'missing' };
+              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
+              return { ok: true, fullWidth: r.width >= window.innerWidth * 0.95,
+                       clearsComposer: r.bottom <= c.top, top: r.top };
+            }""")
+            check(hud_geo.get("fullWidth") is True, f"mobile: status HUD is a full-width sheet ({hud_geo})")
+            check(hud_geo.get("clearsComposer") is True, f"mobile: status HUD never covers the composer ({hud_geo})")
+            soc_geo = mob.evaluate("""() => {
+              if (window._orwellSocialEnsure) window._orwellSocialEnsure();
+              const el = document.getElementById('orwell-social');
+              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+              if (!el || !ta) return { ok: false };
+              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
+              return { fullWidth: r.width >= window.innerWidth * 0.95, clearsComposer: r.bottom <= c.top };
+            }""")
+            check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
+            check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
             mob.close()
 
             browser.close()
