@@ -118,6 +118,15 @@ Given("a started game in which houseguests have confessed", function (this: BbWo
 });
 
 When("any player surface is read", function (this: BbWorld) {
+  if (this.blSandbox) {
+    // 0043 reuses this phrase over a registry-built sandbox (the live object graph).
+    this.lastOutput = JSON.stringify(this.blSandbox.session.getGameState())
+      + JSON.stringify(this.blSandbox.session.gameStatus())
+      + JSON.stringify(this.blSandbox.player.getVisibleState())
+      + JSON.stringify(this.blSandbox.session.getMomentPrompt({}));
+    this.lastView = this.blSandbox.player.getVisibleState();
+    return;
+  }
   this.lastOutput = this.sandbox.allPlayerOutputs();
   this.lastView = this.sandbox.player.getVisibleState();
 });

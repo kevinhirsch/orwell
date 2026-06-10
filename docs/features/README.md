@@ -89,7 +89,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0040 | [NPC Diary Room confessionals (Vault-only interiority)](./0040-npc-confessionals.md) | Behavioral fidelity | Done · soul-recall feedback live (0041) |
 | 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | **Done — linchpin: SoulStore live; souls evolve + modulate behavior + recall** |
 | 0042 | [Competition library (variety + narrative formats)](./0042-competition-library.md) | Gameplay | **Ready (DoR §8)** |
-| 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | **Ready (DoR §8)** |
+| 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | **Done** — `detectBlocs` (derived per read, clique-like, never stored — ADR 0002) · loyalty = disposition × soul (weakest-weighted) · pre-betrayal defection · the bloc term bends live noms/votes · B32 |
 | 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | Gameplay / anti-sycophancy | **Ready (DoR §8)** |
 | 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | Gameplay / correctness | **Done** — veto field degrades · F4 sole vote · F3 final-HOH eviction |
 | 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | Gameplay / player UX | **Done** — player.status active/jury/evicted · ceremonies-as-broadcast juror knowledge · B48 |

@@ -68,6 +68,7 @@ import {
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
+import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
 import { cloneSession } from "../../engine/sessionSnapshot";
@@ -619,6 +620,15 @@ export class GameSessionAdapter implements GameSession {
       rel: this.rel,
       // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
       emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
+      // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
+      // emergent bloc term. Derived per read; never stored (decision 0002).
+      loyaltyOf: (id) => {
+        const hg = this.house
+          ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
+          : undefined;
+        if (!hg) return 0.55;
+        return derivedLoyalty(dispositionOf(hg.character.archetype), hg.soul.emotionalState);
+      },
     };
   }
 

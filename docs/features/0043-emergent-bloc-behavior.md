@@ -1,6 +1,6 @@
 # 0043 — Emergent multi-party bloc behavior
 
-> **Status:** Draft. _Big Brother_ is **bloc politics** — three- and four-person alliances coordinate
+> **Status:** **Built** (B32, green 2026-06-10). _Big Brother_ is **bloc politics** — three- and four-person alliances coordinate
 > nominations and votes and shatter on betrayal. Today the engine has **no multi-party construct at all**:
 > relationships are **pairwise** edges (`relationships.ts`), and `allianceActive(a, b)` is just a *bilateral*
 > threshold read — so NPCs never move *together*. This feature adds an **emergent bloc read**: transient
