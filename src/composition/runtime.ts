@@ -79,6 +79,8 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
   // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
   registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
+  // God Mode can SEE sandbox health (B58/audit E5+E6): integrity, faults, the circuit state.
+  registry.setHealthProvider((user) => orchestrator.sandboxHealth(user));
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {
     registry,

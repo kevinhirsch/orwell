@@ -1512,7 +1512,17 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `executeDecision`/`advancePhase`; (H3) pin 0033's "standing" to public ceremony facts; (H4) pin admin save/load vs the
 > 0007 ratchet + account-deletion→sandbox-data; (H5–H9) the smaller notes. Docs-only; no gate impact. Open a PR.
 
-### B58 — ops: save pruning, live admin state, fault surfacing  ·  Claude Code  ·  **continuous · audit E4 + E5 + E6**
+### B58 — ops: save pruning, live admin state, fault surfacing  ·  Claude Code  ·  **continuous · audit E4 + E5 + E6 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E4) `FileSaveStore` retention is BOUNDED: newest 5 versions + newest 3 periodic
+> checkpoints (every 50th), pruned on save — a 500-save soak keeps ≤8 files and the latest superset intact
+> (0007 lives in the snapshot's CONTENT). (E5) the admin surface is LIVE: every persisted mutation mirrors
+> week/phase/a roles-only roster onto `adminState` (`UserSandbox.syncAdmin`); `manageSandbox("reset")` routes
+> to the REAL `registry.resetUser` via `AdminPort.setResetDelegate`; new Vault-free **`sandboxHealth`** admin
+> tool (orchestrator health through `registry.setHealthProvider`, wired in `composeRuntime`). (E6) faults are
+> LOUD and bounded: stderr log with user+kinds, stored faults capped at 20, and a circuit breaker — after 3
+> consecutive faults off-screen ticks SKIP the sandbox (`HealthRecord.circuitOpen`); a clean player turn closes
+> it. `tests/unit/opsHardening.test.ts`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), three operational gaps. (1) **Unbounded disk** (E4): a full snapshot file per
 > mutation, never pruned, snapshot size linear in events ⇒ O(n²) disk — retain a bounded window (last K + periodic
