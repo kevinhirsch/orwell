@@ -9,14 +9,19 @@
  * `tsPreCompilationDeps: true` makes the check catch even type-only imports, so
  * an outward module cannot so much as *name* the Vault types.
  */
+// B59/audit E7: OUTWARD covers every leak-sensitive outward consumer — the narrative adapters
+// (the LLM seam itself) and the process entrypoint included, not just surfaces/services/mcp.
 const OUTWARD =
-  "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$|^src/adapters/mcp/";
+  "^src/(surfaces|services)/|^src/composition/outwardRoot\\.ts$|^src/adapters/(mcp|narrative)/|^src/main\\.ts$";
+// B59/audit E7: VAULT also names the engine modules that HOLD hidden logic/state (the relationship
+// ledger, confessionals, off-screen life, gossip, the live loop) — a surface could otherwise import
+// confessionalFor()/relationship internals without tripping the gate. Type-only imports count.
 const VAULT =
   "^src/ports/(VaultStore|VectorIndex|SoulProvider|EmbeddingProvider|UserSaveStore)\\.ts$" +
   "|^src/adapters/inmemory/(InMemoryVaultStore|InMemoryVectorIndex)\\.ts$" +
   "|^src/adapters/engine/(SoulStore|FileSaveStore)\\.ts$" +
   "|^src/adapters/embedding/DeterministicEmbedding\\.ts$" +
-  "|^src/engine/sessionSnapshot\\.ts$" +
+  "|^src/engine/(sessionSnapshot|relationships|confessionals|offscreen|gossip|liveSeason)\\.ts$" +
   "|^src/composition/engineRoot\\.ts$";
 
 module.exports = {

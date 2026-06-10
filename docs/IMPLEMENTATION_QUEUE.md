@@ -1537,7 +1537,21 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `advanceGame`; `manageSandbox reset` re-onboards; a forced-leak apply ⇒ stderr log + health fault over `/admin/call` +
 > sandbox skipped after K. Read `docs/features/0007`, `0016`, `0031` first. Open a PR.
 
-### B59 — close the boundary gaps + the engine cleanup catalog  ·  Claude Code  ·  **continuous · audit E7 + I**
+### B59 — close the boundary gaps + the engine cleanup catalog  ·  Claude Code  ·  **continuous · audit E7 + I · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E7) the dependency-cruiser OUTWARD set now covers `src/adapters/narrative/**` and
+> `src/main.ts` (the entrypoint no longer imports `FileSaveStore` — `composeRuntime({durable:true})` owns the
+> default store and exposes `knownUser`), and VAULT now names the hidden-logic engine modules
+> (`relationships|confessionals|offscreen|gossip|liveSeason`) — type-only imports included; `test:arch` runs in CI
+> via the unit lane (`tests/architecture/vault-boundary.test.ts` reuses the same config). (I) bug fixes: the
+> veto-decision arm validates BEFORE consuming `pending` (an illegal save used to strand the loop) and the
+> `nominees.filter(()=>true)` no-op is gone. Tunables consolidated: `thresholds.vetoSave` (was 0.6 ×3 inline),
+> `TWIST_LOAD_PROB`, and `offscreenInteractions` is finally a REAL orchestrator knob (passed through to the apply
+> step; was dead config + a hard-coded 3). The duplicate consequence fold is ONE implementation
+> (`foldHiddenImpact` in `consequence.ts`, shared by `ConsequenceEngine` + `EngineCommandsAdapter`). New
+> `tests/unit/constantsGate.test.ts` = the grep gate + the retune (knob-turn) test. *Deferred from the catalog
+> (test-consumed seams, no production callers — not worth churn now):* the 0019 `decisions.ts` seam,
+> `producerPrompt`/`deriveNpcKnowledge` routing, approach jitter, goodbye-tone 0.6. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), (1) **dependency-cruiser rule gaps** (E7): OUTWARD omits
 > `src/adapters/narrative/**` and `src/main.ts` (the most leak-sensitive outward consumers); VAULT omits
