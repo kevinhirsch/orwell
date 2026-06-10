@@ -9,6 +9,7 @@ import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
+import { isNarrow } from './platform.js';
 
 const API_BASE = window.location.origin;
 
@@ -225,7 +226,7 @@ function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
       sub.style.display = 'none';
     } else {
       const rect = moveItem.getBoundingClientRect();
-      const isMobile = window.innerWidth <= 768;
+      const isMobile = isNarrow();
       sub.style.top = '-9999px';
       sub.style.display = 'block';
       const subRect = sub.getBoundingClientRect();
@@ -393,7 +394,7 @@ function createSessionItem(s) {
   div.addEventListener('touchstart', (e) => {
     _touchMoved = false;
     _longPressed = false;
-    if (window.innerWidth > 768) return;
+    if (!isNarrow()) return;
     _longPressTimer = setTimeout(() => {
       _longPressed = true;
       // Haptic feedback if available
@@ -549,7 +550,7 @@ function createSessionItem(s) {
     });
     // On mobile, "Select" is the primary multi-pick action — put it at the top
     // of the menu. On desktop keep its original position.
-    if (window.innerWidth <= 768) {
+    if (isNarrow()) {
       dropdown.insertBefore(selectMoreItem, dropdown.firstChild);
     } else {
       dropdown.appendChild(selectMoreItem);
@@ -670,7 +671,7 @@ function createSessionItem(s) {
       if (pm.removePersistentChat) pm.removePersistentChat(s.id);
     } catch (e) {}
     // On mobile, close sidebar if we deleted the active session so user sees welcome screen
-    if (wasCurrentSession && window.innerWidth <= 768) {
+    if (wasCurrentSession && isNarrow()) {
       const sidebar = document.getElementById('sidebar');
       if (sidebar) sidebar.classList.add('hidden');
       const backdrop = document.getElementById('sidebar-backdrop');
@@ -1140,7 +1141,7 @@ function _showSwipeHint(list) {
 
 // ── Force sidebar open on mobile (after dropdown actions) ──
 function _forceSidebarOpen() {
-  if (window.innerWidth > 768) return;
+  if (!isNarrow()) return;
   // Suppress backdrop close
   if (window._suppressSidebarClose !== undefined) {
     window._suppressSidebarClose = true;
@@ -1161,7 +1162,7 @@ function _forceSidebarOpen() {
 // the sidebar directly and re-open it if anything hides it — bulletproof against
 // whichever path fires. Returns a stopper to call once the rename is committed.
 function _guardSidebarDuringRename() {
-  if (window.innerWidth > 768 || !window.MutationObserver) return () => {};
+  if (!isNarrow() || !window.MutationObserver) return () => {};
   const sb = document.getElementById('sidebar');
   if (!sb) return () => {};
   const obs = new MutationObserver(() => {
@@ -1438,7 +1439,7 @@ export async function loadSessions() {
             } else {
               await createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
               // On mobile, hide sidebar so user lands directly in chat
-              if (window.innerWidth < 768) {
+              if (isNarrow()) {
                 const sb = document.getElementById('sidebar');
                 if (sb) sb.classList.add('hidden');
               }
@@ -1463,7 +1464,7 @@ export async function loadSessions() {
       const msgInput = document.getElementById('message');
       if (msgInput) {
         msgInput.disabled = false;
-        if (window.innerWidth > 768) msgInput.focus();
+        if (!isNarrow()) msgInput.focus();
       }
       if (window.chatModule && window.chatModule.showWelcomeScreen) {
         window.chatModule.showWelcomeScreen();
@@ -1751,7 +1752,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     // which is intrusive when the user is just navigating between chats
     // (e.g. picking a chat from the Library). They can tap the input to
     // bring up the keyboard when they actually want to type.
-    if (!_sessionListFocused && window.innerWidth > 768) {
+    if (!_sessionListFocused && !isNarrow()) {
       const msgInput = document.getElementById('message');
       if (msgInput) msgInput.focus();
     }

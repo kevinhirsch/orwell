@@ -12,7 +12,7 @@
        in email bodies — was wrapping random digits in <a href="tel:..."> with
        browser-default styling that didn't match the Orwell theme. -->
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
-  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <script nonce="{{CSP_NONCE}}">
   window._orwellLoadTime = Date.now();
   (function(){
@@ -213,6 +213,7 @@
       }, { once: true });
     })();
   </script>
+  <link rel="stylesheet" href="/static/css/responsive-tokens.css">  <!-- Stream S: the responsive mechanism — MUST precede style.css -->
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/css/game-trim.css?v=20260608">  <!-- Orwell: hide non-game tool surfaces -->
   <link rel="modulepreload" href="/static/app.js">

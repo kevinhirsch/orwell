@@ -7,14 +7,18 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'orwell-v328';
+const CACHE_NAME = 'orwell-v329';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
 // and <link rel="stylesheet"> in index.html.
 const PRECACHE = [
   '/',
+  '/static/css/responsive-tokens.css',
   '/static/style.css',
+  '/static/icon-192.png',
+  '/static/icon-512.png',
+  '/static/apple-touch-icon.png',
   '/static/app.js',
   '/static/js/storage.js',
   '/static/js/ui.js',

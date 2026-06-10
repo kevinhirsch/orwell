@@ -45,3 +45,30 @@ export function isAltGrEvent(e, isMac = IS_MAC) {
     !!(e.getModifierState && e.getModifierState('AltGraph'))
   );
 }
+
+// ============================================
+// Viewport mode (Stream S / ruling #16)
+// ============================================
+// THE one source of truth for "are we in the narrow (sheet) layout?". The app
+// previously compared window.innerWidth to 768 in four different ways across
+// 15 files — at exactly 768px modules disagreed which mode they were in. All
+// width-mode checks now go through these matchMedia-backed helpers; the FE
+// lint gate (tests/test_s_responsive_mechanism.py) bans literal innerWidth
+// threshold comparisons anywhere else. The thresholds are the breakpoint
+// tokens in static/css/responsive-tokens.css.
+
+const NARROW_QUERY = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(max-width: 768px)') : { matches: false, addEventListener() {} };
+const BELOW_MEDIUM_QUERY = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(max-width: 1024px)') : { matches: false, addEventListener() {} };
+
+/** ≤768px — the narrow/sheet boundary (--bp-narrow). */
+export function isNarrow() { return NARROW_QUERY.matches; }
+
+/** ≤1024px — below the medium boundary (--bp-medium). */
+export function isBelowMedium() { return BELOW_MEDIUM_QUERY.matches; }
+
+/** Subscribe to narrow-mode flips (preferred over per-resize innerWidth reads). */
+export function onNarrowChange(fn) {
+  NARROW_QUERY.addEventListener('change', fn);
+}

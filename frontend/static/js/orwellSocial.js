@@ -16,6 +16,7 @@
 // surface never nags about something you already handled.
 import { makeWindowDraggable } from "./windowDrag.js";
 import * as modalManager from "./modalManager.js";
+import { isNarrow } from './platform.js';
 
 (function () {
   "use strict";
@@ -416,7 +417,7 @@ import * as modalManager from "./modalManager.js";
     // Keep approaches fresh, but if the player parked it in the dock, leave it there.
     // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
     // unobstructed); the dock chip restores it as a full-width top sheet.
-    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+    if (isNarrow() && !_mobileParkedOnce && !isMinimized()) {
       _mobileParkedOnce = true;
       el.style.display = "block";
       try { modalManager.minimize(ID); return; } catch (_) {}

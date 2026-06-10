@@ -28,6 +28,7 @@
 import { previewZoneAt, clearPreview, snapModalToZone } from './tileManager.js';
 import { suspendDock, resumeDock, clearRightDock, applyEdgeDock } from './modalSnap.js';
 import { dismissOrRemove } from './escMenuStack.js';
+import { isNarrow } from './platform.js';
 
 const _state = new Map(); // id -> { restoreFn, closeFn, railBtnId, isMinimized, restoreMinHeight }
 
@@ -88,7 +89,7 @@ function _captureRestoreHeight(modal, state) {
   const rect = content.getBoundingClientRect();
   if (!rect || rect.height < 120) return;
   const maxHeight = Math.max(180, window.innerHeight - 24);
-  const minHeight = modal.id === 'email-lib-modal' && window.innerWidth > 768
+  const minHeight = modal.id === 'email-lib-modal' && !isNarrow()
     ? Math.min(560, maxHeight)
     : 0;
   state.restoreMinHeight = `${Math.round(Math.max(minHeight, Math.min(rect.height, maxHeight)))}px`;
@@ -100,7 +101,7 @@ function _applyRestoreHeight(modal, state) {
   if (!content) return;
   const maxHeight = Math.max(180, window.innerHeight - 24);
   const requested = parseInt(state.restoreMinHeight, 10);
-  const minHeight = modal.id === 'email-lib-modal' && window.innerWidth > 768
+  const minHeight = modal.id === 'email-lib-modal' && !isNarrow()
     ? Math.min(560, maxHeight)
     : 0;
   const height = Number.isFinite(requested) ? Math.max(minHeight, Math.min(requested, maxHeight)) : null;
@@ -260,7 +261,7 @@ function _renderDock() {
   // On mobile we ALSO keep chips around for any modal that's been
   // free-positioned on screen — even while it's open — so the chip acts as
   // a persistent toggle (tap to minimize, tap again to restore).
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = isNarrow();
   const persistentIds = isMobile
     ? [..._state.entries()].filter(([id, _]) => _chipPositions.has(id)).map(([id]) => id)
     : [];
@@ -389,7 +390,7 @@ function _renderDock() {
     // transform: translateX(-50%) doesn't shift their `position: fixed`
     // coords. Dock-resident chips render as normal flex children.
     const pos = _chipPositions.get(id);
-    if (pos && window.innerWidth <= 768) {
+    if (pos && isNarrow()) {
       chip.style.setProperty('position', 'fixed', 'important');
       chip.style.setProperty('left', `${pos.left}px`, 'important');
       chip.style.setProperty('top', `${pos.top}px`, 'important');
@@ -652,7 +653,7 @@ function _wireChipDrag(chip, dock) {
     chipStartLeft = cr.left;
     chipStartTop = cr.top;
 
-    const onTouch = (e.pointerType === 'touch' || window.innerWidth <= 768);
+    const onTouch = (e.pointerType === 'touch' || isNarrow());
     if (onTouch) {
       const isFree = _chipPositions.has(chip.dataset.modalId);
       trashZone = _ensureTrashZone();
@@ -752,7 +753,7 @@ function _wireChipDrag(chip, dock) {
     // Touch fingers drift a few pixels even on a "still" tap, so the touch
     // threshold is generous — otherwise a tap-to-restore reads as a drag
     // and the click gets eaten when the chain settles.
-    const DRAG_THRESHOLD = (e.pointerType === 'touch' || window.innerWidth <= 768) ? 14 : 5;
+    const DRAG_THRESHOLD = (e.pointerType === 'touch' || isNarrow()) ? 14 : 5;
     if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     if (!dragging) {
       dragging = true;
@@ -789,7 +790,7 @@ function _wireChipDrag(chip, dock) {
     // Desktop: dragging a chip into a screen snap zone previews restoring the
     // window + snapping it there (top → maximize/fullscreen, right → right
     // dock). Releasing in the zone commits it (see onPointerUp).
-    if (e.pointerType !== 'touch' && window.innerWidth > 768) {
+    if (e.pointerType !== 'touch' && !isNarrow()) {
       const z = previewZoneAt(e.clientX, e.clientY, modal);
       // Ignore the bottom zone — the dock lives at the bottom, so horizontal
       // chip reordering must not get hijacked into a bottom-half snap.

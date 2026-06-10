@@ -8,6 +8,7 @@ import themeModule from './theme.js';
 import * as Modals from './modalManager.js';
 import spinnerModule from './spinner.js';
 import { registerMenuDismiss, dismissTopMenu, dismissOrRemove } from './escMenuStack.js';
+import { isNarrow } from './platform.js';
 
 let toastEl = null;
 let autoScrollEnabled = true;
@@ -363,7 +364,7 @@ export function showToast(msg, durationOrOpts) {
 
     // Keyboard-shortcut hints (Ctrl+Z / ⌘Z) are meaningless on touch devices —
     // skip them on mobile so the toast just shows the Undo button.
-    if (actionHint && window.innerWidth > 768) {
+    if (actionHint && !isNarrow()) {
       const hint = document.createElement('span');
       hint.textContent = actionHint;
       hint.style.cssText = 'font-size:9px;opacity:0.55;letter-spacing:0.4px;text-transform:uppercase;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:1px;pointer-events:none;';
@@ -481,7 +482,7 @@ function _smoothScrollStep() {
   }
 
   // Lerp: gentle catch-up
-  const factor = window.innerWidth <= 768 ? 0.4 : 0.2;
+  const factor = isNarrow() ? 0.4 : 0.2;
   box.scrollTop = current + diff * factor;
   _scrollRafId = requestAnimationFrame(_smoothScrollStep);
 }
@@ -518,7 +519,7 @@ export function getAutoScroll() {
  */
 export function autoResize(textarea) {
   const lineHeight = parseInt(getComputedStyle(textarea).lineHeight);
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = isNarrow();
   const maxHeight = isMobile ? 150 : lineHeight * 8;
 
   // Use a hidden clone to measure without disrupting the real textarea
@@ -859,7 +860,7 @@ if (typeof window !== 'undefined') {
 // ── Mobile: clear enter animation so inline transform works for dragging ──
 // The CSS `animation: sheet-enter ... forwards` holds the final transform,
 // blocking any inline style changes. We clear it once the animation completes.
-if ('ontouchstart' in window || window.innerWidth <= 768) {
+if ('ontouchstart' in window || isNarrow()) {
   document.addEventListener('animationend', (e) => {
     if (e.animationName === 'sheet-enter' &&
         (e.target.classList.contains('modal-content') || e.target.id === 'theme-popup')) {
@@ -1130,7 +1131,7 @@ if ('ontouchstart' in window) {
 // own scrolling container that often fails — the user types blind.
 // Scroll the input into the middle of the still-visible viewport
 // after the keyboard has had a moment to animate in.
-if ('ontouchstart' in window || window.innerWidth <= 768) {
+if ('ontouchstart' in window || isNarrow()) {
   let _kbScrollTimer = null;
   document.addEventListener('focusin', (e) => {
     const el = e.target;

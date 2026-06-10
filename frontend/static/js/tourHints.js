@@ -1,3 +1,4 @@
+import { isNarrow } from './platform.js';
 // tourHints.js — secret continuation of /tour. The first time the user opens
 // a tool modal (after the welcome experience), surface a single "pro tip"
 // hint pointing out that modals can be snapped to the screen edge or
@@ -58,7 +59,7 @@ function _onModalOpened(modal) {
   if (document.body.classList.contains('tour-active')) return;
   if (document.getElementById('tour-tooltip')) return;
   // Mobile: skip — snapping isn't a desktop-only feature there
-  if (window.innerWidth <= 768) return;
+  if (isNarrow()) return;
 
   _shown = true;
   // Give the modal a moment to settle (some open with their own animation).

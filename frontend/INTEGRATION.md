@@ -119,3 +119,27 @@ instance** (Python deps installed, config set), not done blind.
 
 See [`README.md`](./README.md) and `requirements.txt` (FastAPI + uvicorn); `.env.example`
 documents config. During the refactor we'll run it as the Orwell front-end service.
+
+## The responsive contract (Stream S — ruling #16; binding)
+
+`static/css/responsive-tokens.css` (loaded **before** `style.css`) is the one responsive
+mechanism. The rules, enforced by `tests/test_s_responsive_mechanism.py` (source gate) and
+`scripts/responsive_matrix.py` (runtime gate, in CI):
+
+- **Breakpoints are tokens**: every `@media` width is one of **480 / 768 / 1024 / 1440**
+  (complements 481/769/1025/1441 for `min-width` pairs). Container tiers: **360 / 620**.
+  Viewport queries are for *page chrome only* — anything draggable or dockable responds to
+  `@container`.
+- **JS never compares `innerWidth` to a literal** — use `isNarrow()` / `isBelowMedium()` /
+  `onNarrowChange()` from `static/js/platform.js` (matchMedia-backed; kills the 768
+  off-by-one that was written four different ways).
+- **Type sits on the rem scale** (`--fs-2xs` … `--fs-xl`); the floor for any UI text is
+  `--fs-2xs` (~11px). The root font is fluid (`clamp()`), so rem surfaces breathe and the
+  density classes actually work; `text-size-adjust: 100%` is set.
+- **Touch**: one `(pointer: coarse)` floor on `--tap-min` (44px height / 36px width) for
+  buttons, role=button, selects, and settings tabs; `.tap-exempt` opts out.
+- **Installed app**: real maskable icons (192/512 + 180 apple) are precached and asserted
+  by the gate; the `display-mode: standalone` tier pads fixed chrome with
+  `env(safe-area-inset-*)`. A vendored update must not regress the manifest/SW posture.
+- **The matrix gate ratchets**: known failures live in `responsive_matrix.py`'s `XFAIL`
+  registry keyed by finding ID; landing a finding removes its entry in the same PR.

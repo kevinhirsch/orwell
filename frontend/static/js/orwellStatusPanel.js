@@ -13,6 +13,7 @@
 // in place, and the dock chip restores it.
 import { makeWindowDraggable } from "./windowDrag.js";
 import * as modalManager from "./modalManager.js";
+import { isNarrow } from './platform.js';
 
 (function () {
   "use strict";
@@ -261,7 +262,7 @@ import * as modalManager from "./modalManager.js";
     // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
     // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
     // unobstructed); the dock chip restores it as a full-width top sheet.
-    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+    if (isNarrow() && !_mobileParkedOnce && !isMinimized()) {
       _mobileParkedOnce = true;
       el.style.display = "block";
       try { modalManager.minimize(ID); return; } catch (_) {}

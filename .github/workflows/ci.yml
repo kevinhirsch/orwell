@@ -82,6 +82,8 @@ jobs:
         run: pip install playwright && python3 -m playwright install --with-deps chromium
       - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
         run: cd frontend && python3 scripts/browser_smoke.py
+      - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
+        run: cd frontend && python3 scripts/responsive_matrix.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22

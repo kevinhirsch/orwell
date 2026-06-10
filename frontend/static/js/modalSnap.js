@@ -1,3 +1,4 @@
+import { isNarrow, isBelowMedium } from './platform.js';
 // Right-edge snap docking for draggable modals.
 //
 // Adds a "drag-to-right" gesture that docks a modal as a right-side panel
@@ -87,7 +88,7 @@ function _saveDockWidth(modal, content, side, width) {
 }
 
 function _minEdgeDockWidth() {
-  return window.innerWidth < 900 ? 280 : MIN_EDGE_DOCK_WIDTH;
+  return isBelowMedium() ? 280 : MIN_EDGE_DOCK_WIDTH;
 }
 
 function _activeDockWidth(side) {
@@ -232,7 +233,7 @@ function _applyEmailDocSplitGeometry(left, emailWidth) {
   // after opening a document beside a snapped email. Update that inline
   // geometry too, otherwise the email resizes but the document stays put.
   const docPane = document.getElementById('doc-editor-pane');
-  if (!docPane || window.innerWidth <= 768) return;
+  if (!docPane || isNarrow()) return;
   docPane.style.setProperty('position', 'fixed', 'important');
   docPane.style.setProperty('left', `${x}px`, 'important');
   docPane.style.setProperty('right', 'var(--right-dock-w, 0px)', 'important');
@@ -899,10 +900,10 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
   _edgeDockHandlePositioner = () => {
     const splitOwnsLeftSeam = document.body.classList.contains('email-doc-split-active')
       && document.body.classList.contains('doc-view')
-      && window.innerWidth > 768;
+      && !isNarrow();
     for (const side of ['left', 'right']) {
       const handle = handles[side];
-      if (window.innerWidth <= 768 || (side === 'left' && splitOwnsLeftSeam)) {
+      if (isNarrow() || (side === 'left' && splitOwnsLeftSeam)) {
         _hideHandle(handle);
         continue;
       }
@@ -1014,7 +1015,7 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
   const _position = () => {
     const splitActive = document.body.classList.contains('email-doc-split-active')
       && document.body.classList.contains('doc-view')
-      && window.innerWidth > 768;
+      && !isNarrow();
     if (!splitActive) { stripe.style.display = 'none'; return; }
     const x = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--email-doc-split-right-x')) || 0;
     if (!x) { stripe.style.display = 'none'; return; }
