@@ -1003,7 +1003,12 @@ export class GameSessionAdapter implements GameSession {
       case "nominations":
         return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
       case "veto-decision":
-        return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+        // The 0034 legal-options contract (E36): the options ARE the legally saveable nominees.
+        // At Final 4 no replacement exists, so the set is EMPTY and the prompt says why — the
+        // engine never offers "use" only to silently invert it into "does not use the veto".
+        return p.saveable.length === 0
+          ? { kind: p.kind, by, prompt: "You hold the Power of Veto — but no replacement nominee exists at Final 4, so the veto cannot change the nominations. Confirm leaving them standing.", options: [], pick: 1 }
+          : { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.saveable), pick: 1 };
       case "comp-intent":
         // The "options" ARE the three intents (id = the intent value), so the generic decision path
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).

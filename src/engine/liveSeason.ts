@@ -42,6 +42,9 @@ import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
 export type Beat =
   | "hoh-competition" | "nominations" | "veto-competition"
   | "veto-ceremony" | "eviction" | "final-eviction" | "finale" | "complete"
+  // the witnessed veto chip-draw ceremony (E35) — emitted on BeatEvent only; the structural
+  // beat stays `veto-competition` (the draw is its first stage, the comp its second).
+  | "veto-draw"
   // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
   | "twist-reveal"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
@@ -249,26 +252,6 @@ function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): 
   return { def, field, winner: winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete") };
 }
 
-/** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
-/** The veto draw resolves to a winner — UNLESS the player drew Houseguest's Choice, which DEFERS (B45). */
-type VetoResolution =
-  | { def: CompetitionDef; field: EntityId[]; winner: EntityId }
-  | { deferred: true; def: CompetitionDef; field: EntityId[]; candidates: EntityId[] };
-
-function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): VetoResolution {
-  // The comp is drawn FIRST (one rng draw) so `advance` and `peekCompetition` replay identically.
-  const def = drawFor(s, "veto", rng);
-  const draw = vetoParticipants(weekState(s, ctx), rng, {
-    houseguestsChoiceChip: true,
-    choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
-    playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
-  });
-  if (draw.houseguestsChoice && draw.houseguestsChoice.picked === undefined) {
-    return { deferred: true, def, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
-  }
-  return { def, field: draw.participants, winner: winnerOf(draw.participants, def.type, ctx, rng, s.compIntent ?? "compete") };
-}
-
 /** Resolve the HOH competition beat (used by `advance` and the comp-intent resume); consumes the intent. */
 function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
   const finalThree = s.active.length === 3;
@@ -284,21 +267,57 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
   };
 }
 
-/** Resolve the Power of Veto beat — may pause for a Houseguest's Choice pick (B45); consumes the intent. */
-function resolveVetoBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
-  const r = resolveVeto(s, ctx, rng);
-  if ("deferred" in r) {
-    // The player drew Houseguest's Choice (B45): pause for THEM to pick the sixth player. The declared
-    // intent stays set; the houseguests-choice resume runs the SAME drawn comp (0042) with it.
-    s.vetoComp = r.def.id;
-    s.vetoField = r.field;
-    s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
-    return null;
+/**
+ * Stage A of the veto beat (E35): the chip draw is a WITNESSED ceremony of its own — the player
+ * experiences who plays and who held Houseguest's Choice, before any winner exists. Stores the
+ * drawn comp + the field; the competition itself resolves on a later advance (`resolveVetoComp`),
+ * after any player intent declaration. Pauses (pending set, event still returned) when the
+ * PLAYER drew the Houseguest's Choice chip (B45).
+ */
+function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  // The comp is drawn FIRST (one rng draw) and held in `vetoComp` so every later stage —
+  // including a restart mid-pause (0030) — resolves the SAME drawn competition (0042).
+  const def = drawFor(s, "veto", rng);
+  s.vetoComp = def.id;
+  const draw = vetoParticipants(weekState(s, ctx), rng, {
+    houseguestsChoiceChip: true,
+    choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
+    playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
+  });
+  s.vetoField = draw.participants;
+  const hc = draw.houseguestsChoice;
+  if (hc && hc.picked === undefined) {
+    // The player drew Houseguest's Choice (B45): the draw is still a witnessed beat — the five
+    // drawn players and the chip in the player's hand are public — and the loop pauses for THEM
+    // to name the sixth. The candidates were snapshotted AFTER the full draw (C1).
+    s.pending = { kind: "houseguests-choice", by: ctx.player, options: hc.candidates };
+    return {
+      beat: "veto-draw",
+      content: `the veto players are drawn: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the final player`,
+      participants: [...draw.participants],
+    };
   }
-  recordDraw(s, "veto", r.def); // the comp resolved — the next veto draw avoids it (0042)
+  const hcNote = hc?.picked !== undefined
+    ? ` — ${hc.holder} draws Houseguest's Choice and picks ${hc.picked}`
+    : "";
+  return {
+    beat: "veto-draw",
+    content: `the veto players are drawn: ${draw.participants.join(", ")}${hcNote}`,
+    participants: [...draw.participants],
+  };
+}
+
+/** Stage B of the veto beat (E35): resolve the drawn competition over the COMPLETED field;
+ *  consumes the declared intent. The draw (`resolveVetoDraw`) always precedes this. */
+function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  const field = s.vetoField!;
+  // The SAME comp drawn at stage A (0042) — looked up, never re-drawn (restart-safe, 0030).
+  const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
+  const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
+  recordDraw(s, "veto", def); // the comp resolved — the next veto draw avoids it (0042)
   s.compIntent = undefined; // consumed
-  s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
-  return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
+  s.vetoHolder = holder; s.beat = "veto-ceremony";
+  return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
 }
 
 /** The current competition beat's deterministic outcome (single authority, B37) — or null if the
@@ -316,9 +335,14 @@ export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomn
   if (s.pending || s.finished) return null;
   if (s.beat === "hoh-competition") { const { def, field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: def.type, def, field, winner }; }
   if (s.beat === "veto-competition") {
-    const r = resolveVeto(s, ctx, rng);
-    if ("deferred" in r) return null; // the player must pick the sixth player first — no preview yet
-    return { beat: s.beat, type: r.def.type, def: r.def, field: r.field, winner: r.winner };
+    // E35: before the chips are drawn there IS no field — nothing to preview (the draw is a
+    // witnessed ceremony of its own). Once drawn, the preview replays stage B exactly: the same
+    // stored comp over the same completed field with the same per-beat rng from position zero.
+    if (!s.vetoField || !s.vetoComp) return null;
+    const def = competitionById(s.vetoComp);
+    if (!def) return null;
+    const winner = winnerOf(s.vetoField, def.type, ctx, rng, s.compIntent ?? "compete");
+    return { beat: s.beat, type: def.type, def, field: s.vetoField, winner };
   }
   return null;
 }
@@ -791,19 +815,25 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
-      // B46: the player plays the veto if they're a puller (HOH or a nominee) — pause for intent first.
-      const pullers = [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id);
-      if (s.compIntent === undefined && pullers.includes(ctx.player)) {
+      // E35 stage A: the chip draw is a witnessed ceremony of its own — it precedes any winner.
+      if (!s.vetoField) return resolveVetoDraw(s, ctx, rng);
+      // E35 + B46: ANY player in the drawn field — puller (HOH/nominee) or chip-drawn — declares
+      // the canonical compete/throw/play-safe intent before the comp resolves.
+      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
         s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
         return null;
       }
-      return resolveVetoBeat(s, ctx, rng);
+      return resolveVetoComp(s, ctx, rng);
     }
     case "veto-ceremony": {
       const nominees = s.nominees!;
       if (s.vetoHolder === ctx.player) {
-        // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable.
-        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable: [...nominees] };
+        // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable…
+        // …UNLESS no legal replacement exists (the Final-4 rule, E36): then "use" is not a real
+        // option and the legal set says so up front, instead of accepting a save and silently
+        // inverting it into "does not use the veto".
+        const saveable = selectableReplacements(weekState(s, ctx)).length > 0 ? [...nominees] : [];
+        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable };
         return null;
       }
       // NPC veto holder: save self if nominated, else a strongly-trusted nominee.
@@ -900,10 +930,11 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       return { kind: "nominations", choice: [a, b] };
     }
     case "veto-decision": {
-      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee.
-      const saved = p.nominees.includes(p.by)
+      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee —
+      // from the LEGAL saveable set only (empty at Final 4, E36: using the veto is barred).
+      const saved = p.saveable.includes(p.by)
         ? p.by
-        : p.nominees.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
+        : p.saveable.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
       return saved ? { kind: "veto-decision", use: true, save: saved } : { kind: "veto-decision", use: false };
     }
     case "houseguests-choice":
@@ -952,6 +983,11 @@ export function applyDecision(
       // and leave the decision standing — the old order cleared `pending` first and stranded the loop.
       const save = input.use ? input.save : undefined;
       if (input.use && (!save || !nominees.includes(save))) throw new Error("can only veto a current nominee");
+      // E36: with no legal replacement (Final 4) "use" is refused with the decision STANDING —
+      // never accepted and then silently inverted into "does not use the veto".
+      if (input.use && selectableReplacements(weekState(s, ctx)).length === 0) {
+        throw new Error("the veto cannot be used — no legal replacement nominee exists, so the nominations stand");
+      }
       s.pending = undefined;
       if (!input.use) {
         s.vetoUsed = false; s.finalNominees = [nominees[0], nominees[1]]; s.beat = "eviction";
@@ -967,23 +1003,29 @@ export function applyDecision(
       s.compIntent = input.intent;
       s.pending = undefined;
       if (s.beat === "hoh-competition") return resolveHohBeat(s, ctx, rng);
-      const veto = resolveVetoBeat(s, ctx, rng);
-      // The veto may have deferred to a Houseguest's Choice pick (B45) — surface the declaration as the beat.
-      return veto ?? { beat: "veto-competition", content: `${ctx.player} sets their competition strategy`, participants: [ctx.player] };
+      // E35: at the veto the field is already drawn (the draw ceremony precedes intent) — resolve it.
+      return resolveVetoComp(s, ctx, rng);
     }
     case "houseguests-choice": {
       // The player drew Houseguest's Choice and picks the sixth veto player (B45/audit B4).
       const options = (s.pending as { options: EntityId[] }).options;
-      if (!options.includes(input.pick)) throw new Error("the Houseguest's Choice must pick an eligible candidate");
+      // C1: legality is RE-DERIVED at resume — the pick must be an offered candidate AND must not
+      // already stand in the drawn field (a stale offer can never produce a duplicate competitor).
+      if (!options.includes(input.pick) || s.vetoField!.includes(input.pick)) {
+        throw new Error("the Houseguest's Choice must pick an eligible candidate who is not already drawn");
+      }
       s.pending = undefined;
-      const field = [...s.vetoField!, input.pick]; // the player's pick completes the field
-      // The SAME comp drawn at the deferral (0042) — looked up, never re-drawn (restart-safe, 0030).
-      const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
-      const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
-      recordDraw(s, "veto", def);
-      s.compIntent = undefined; // the declared intent is consumed
-      s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
-      return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
+      s.vetoField = [...s.vetoField!, input.pick]; // the player's pick completes the field
+      // E35: the completed field is the witnessed beat; the comp resolves on the NEXT advance —
+      // after the player (always in the field here: they drew the chip as a puller) declares intent.
+      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
+        s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
+      }
+      return {
+        beat: "veto-draw",
+        content: `${ctx.player} names ${input.pick} as the final veto player`,
+        participants: [...s.vetoField],
+      };
     }
     case "replacement": {
       const legal = new Set(selectableReplacements(weekState(s, ctx)).filter((h) => h !== s.saved));

@@ -99,7 +99,8 @@ describe("live weekly loop (incremental 0011)", () => {
         if (s.pending) {
           const p = s.pending;
           if (p.kind === "nominations") applyDecision(s, { kind: "nominations", choice: [p.options[0]!, p.options[1]!] }, ctx);
-          else if (p.kind === "veto-decision") applyDecision(s, { kind: "veto-decision", use: true, save: p.nominees[0] }, ctx);
+          // E36: save from the LEGAL set — empty at Final 4 means using the veto is barred.
+          else if (p.kind === "veto-decision") applyDecision(s, p.saveable.length > 0 ? { kind: "veto-decision", use: true, save: p.saveable[0]! } : { kind: "veto-decision", use: false }, ctx);
           else if (p.kind === "replacement") applyDecision(s, { kind: "replacement", replacement: p.options[0]! }, ctx);
           else if (p.kind === "eviction-vote") applyDecision(s, { kind: "eviction-vote", vote: p.nominees[0] }, ctx);
           else if (p.kind === "finale-statement") applyDecision(s, { kind: "finale-statement", statement: "thanks" }, ctx);
