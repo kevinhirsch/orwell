@@ -697,7 +697,7 @@ export class GameSessionAdapter implements GameSession {
    * manner, and no pre-reveal winner ever crosses — a juror's vote appears only after it is
    * revealed in order. Null unless the finale is actively staging.
    */
-  private finaleView(): FinaleView | null {
+  finaleView(): FinaleView | null {
     const f: FinaleProgress | undefined = this.live?.finale;
     if (!f || this.live?.finished) return null;
     const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });

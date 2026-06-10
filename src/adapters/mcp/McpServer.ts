@@ -48,6 +48,8 @@ export class McpServer {
         return this.deps.session.gameStatus();
       case "playerTagline":
         return this.deps.session.playerTagline();
+      case "finaleView":
+        return this.deps.session.finaleView();
       case "getMomentPrompt":
         return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
       case "runCompetition":
