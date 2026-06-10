@@ -31,6 +31,11 @@ export interface SeasonResult {
 }
 
 /**
+ * CALIBRATION-ONLY (B69/audit C2): this sim has NO production callers — the live game's richness
+ * is gated on the REAL spine by `tests/property/liveRichness.property.test.ts` (B54). It remains
+ * as the fast, tunable harness behind the 0003 thresholds; a source-scan test asserts nothing in
+ * `src/` (beyond `richness.ts`'s type import) ever wires it into the game.
+ *
  * Simulate a season of off-screen-heavy NPC social life over many in-game days.
  * Records every interaction in the EventStore (visibility derived from the
  * witness set, per feature 0002), evolves the relationship model (alliances form
