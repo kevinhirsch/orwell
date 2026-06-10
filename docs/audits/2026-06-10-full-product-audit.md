@@ -171,7 +171,7 @@ File references are to `main` @ 87687c0.
 
 ### Theme 2 — Vault Wall & knowledge integrity
 
-- **E9 [HIGH · Bug] `surfaceInformationTo` launders invented facts into full-confidence
+- **E9 [HIGH · Bug] ✅ PR #212 — `surfaceInformationTo` launders invented facts into full-confidence
   knowledge.** `InMemoryKnowledgeService.ts:110–111` — `overheard:<id>` anchoring checks only
   that *some* event with that id exists; the fact's content is never compared. Any caller with
   one legitimate event id can mint arbitrary "anchored" player knowledge with clean provenance.
@@ -232,12 +232,12 @@ File references are to `main` @ 87687c0.
 
 ### Theme 3 — Anti-sycophancy & "recorded or it didn't happen"
 
-- **E20 [MED · Bug] `resolveCompetition` is a seed-shopping oracle on the player channel.**
+- **E20 [MED · Bug] ✅ PR #212 — `resolveCompetition` is a seed-shopping oracle on the player channel.**
   `surfaces/tools/registry.ts:36` + `EngineCommandsAdapter.ts:112–117` — caller supplies
   participants **with stats** and the seed; nothing recorded, no folds. *Fix:* remove from
   `PLAYER_TOOLS` (keep the pure fn for tests) or delegate to the live loop's already-resolved
   result (remediation principle #1). *Test:* absent from `listTools()`, refused by `callTool`.
-- **E21 [MED · Bug] `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
+- **E21 [MED · Bug] ✅ PR #212 — `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
   edges without bound.** `EngineCommandsAdapter.ts:88–92` (player-channel witness set excluding
   the player ⇒ off-screen "ground truth" indistinguishable from engine scenes), `:105–107`
   (caller picks kind/direction; `MAX_FOLDS_PER_INTERACTION` caps per call, not per beat).
@@ -952,13 +952,13 @@ traceability; E-batch cross-references inline.
   (`candidates − vetoField`), reject already-drawn picks, snapshot deferred candidates after
   the full draw. *Test:* property over seeds × house sizes 5–16 + a live submit loop
   asserting no duplicates and correct field size.
-- **C2 [HIGH · Bug · confirmed]** `pathwayAnchored`'s `told-by:` check passes on
+- **C2 [HIGH · Bug · confirmed] ✅ PR #212 —** `pathwayAnchored`'s `told-by:` check passes on
   subject-match alone (`k.content === fact.content || k.subject === fact.subject`) —
   seeding an NPC with "npc:9 likes to cook breakfast" anchors the invented "npc:9 has a
   final-two deal against you and is throwing comps" as real player knowledge. On the
   player-channel allowlist. *Fix:* anchor on content lineage (`factId`/fuzzy content match);
   subject-only ⇒ suspicion with capped confidence. (Sister of E9; both close together.)
-- **C3 [HIGH · confirmed]** E9's `overheard:` hole verified by execution ("totally fabricated
+- **C3 [HIGH · confirmed] ✅ PR #212 —** E9's `overheard:` hole verified by execution ("totally fabricated
   secret" surfaced as knowledge against an unrelated event id). The legitimate engine caller
   always passes a strict content fragment — make the anchor require it.
 - **C4 [MED · Bug]** `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
@@ -1006,7 +1006,7 @@ traceability; E-batch cross-references inline.
   `rebuildSoulIndex` replays it — any future direct `recordToSoul` writer is silently lost on
   restart and invisible to the checkpoint (C4). *Fix:* make the durable mirror the API
   (`deepenSoul(id, note)`); property test through public seams.
-- **C14 [LOW]** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
+- **C14 [LOW] ✅ PR #212 —** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
   or −3 persists and feeds prompts. `clamp01` at `pushKnown`.
 - **C15 [LOW]** `vetoParticipants` doesn't validate the `choose` callback's return (could
   insert the HOH/a nominee/a duplicate); `chooseStrongestBond([])` returns `undefined`.
