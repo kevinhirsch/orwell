@@ -23,7 +23,8 @@ type Chip = EntityId | typeof HOUSEGUESTS_CHOICE;
 
 export interface VetoDraw {
   participants: EntityId[];
-  houseguestsChoice?: { holder: EntityId; picked: EntityId; candidates: EntityId[] };
+  /** `picked` is omitted when the PLAYER drew the chip and must pick the sixth player themselves (B45). */
+  houseguestsChoice?: { holder: EntityId; picked?: EntityId; candidates: EntityId[] };
 }
 
 /**
@@ -64,7 +65,12 @@ export function eligibleForHOH(
 export function vetoParticipants(
   week: WeekState,
   rng: RandomnessSource,
-  opts?: { houseguestsChoiceChip?: boolean; choose?: (holder: EntityId, candidates: EntityId[]) => EntityId },
+  opts?: {
+    houseguestsChoiceChip?: boolean;
+    choose?: (holder: EntityId, candidates: EntityId[]) => EntityId;
+    /** When this entity (the player) draws the chip, DEFER the pick to them (B45): no auto-pick. */
+    playerChoosesOwn?: EntityId;
+  },
 ): VetoDraw {
   const [n1, n2] = week.nominees;
   const pullers = [week.hoh, n1, n2];
@@ -84,6 +90,12 @@ export function vetoParticipants(
       if (chip === HOUSEGUESTS_CHOICE) {
         const candidates = pool.filter((p) => !selected.includes(p));
         if (candidates.length === 0) continue;
+        if (opts?.playerChoosesOwn === puller) {
+          // The PLAYER drew the chip — DON'T pick for them (B45/audit B4). The field is left a player
+          // short; the loop pauses and the player picks the sixth competitor.
+          houseguestsChoice = { holder: puller, candidates };
+          break;
+        }
         const picked = opts?.choose ? opts.choose(puller, candidates) : candidates[rng.int(candidates.length)]!;
         selected.push(picked);
         houseguestsChoice = { holder: puller, picked, candidates };

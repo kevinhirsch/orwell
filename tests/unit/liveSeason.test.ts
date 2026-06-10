@@ -41,6 +41,7 @@ function playToEnd(s: LiveSeasonState, ctx: SeasonCtx, seed: number): BeatEvent[
       else if (p.kind === "finale-answer") events.push(applyDecision(s, { kind: "finale-answer", appeal: p.appeals[0]! }, ctx));
       else if (p.kind === "final-eviction") events.push(applyDecision(s, { kind: "final-eviction", evict: p.options[0]! }, ctx));
       else if (p.kind === "tie-break") events.push(applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx));
+      else if (p.kind === "houseguests-choice") events.push(applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx));
       else events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
     } else {
       const ev = advance(s, ctx, rng);
@@ -97,6 +98,7 @@ describe("live weekly loop (incremental 0011)", () => {
           else if (p.kind === "finale-answer") applyDecision(s, { kind: "finale-answer", appeal: p.appeals[0]! }, ctx);
           else if (p.kind === "final-eviction") applyDecision(s, { kind: "final-eviction", evict: p.options[0]! }, ctx);
           else if (p.kind === "tie-break") applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx);
+          else if (p.kind === "houseguests-choice") applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx);
           else applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);
         } else {
           if (s.replacement) {

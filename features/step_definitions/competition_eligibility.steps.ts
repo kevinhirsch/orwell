@@ -120,8 +120,9 @@ When("its holder makes a selection", function (this: BbWorld) {
 
 Then("the holder picks the sixth competitor rather than receiving a random name", function (this: BbWorld) {
   const hc = this.veto!.houseguestsChoice!;
-  assert.ok(hc.candidates.includes(hc.picked));
-  assert.ok(this.veto!.participants.includes(hc.picked));
+  assert.ok(hc.picked, "an NPC holder's pick is made during the draw (only the PLAYER defers — B45)");
+  assert.ok(hc.candidates.includes(hc.picked!));
+  assert.ok(this.veto!.participants.includes(hc.picked!));
   assert.equal(this.veto!.participants.length, 6);
 });
 
