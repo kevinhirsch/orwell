@@ -109,7 +109,7 @@ GAME_TOOL_KEEP = frozenset({
     # never game truth (the engine tools above stay the sole authority on game facts).
     "web_search",
     # Core UI / account tools whose backends survive the game build.
-    "ask_user", "update_plan", "ui_control", "generate_image", "search_chats",
+    "ask_user", "update_plan", "ui_control", "generate_image",
     "manage_settings", "manage_endpoints", "manage_tokens", "manage_mcp", "list_models",
 })
 
@@ -120,6 +120,10 @@ GAME_TOOL_OPTIONAL = frozenset({
     "chat_with_model", "create_session", "list_sessions", "send_to_session",
     "pipeline", "manage_session",
     "api_call", "app_api",
+    # E17 (2026-06-10 audit): transcript search lets the GM "remember" prior seasons
+    # and OOC chats — a parallel memory rivaling the engine's stores ("memory is the
+    # store *recalled*, never the chat *remembered*"). Off by default; opt-in only.
+    "search_chats",
 })
 
 

@@ -12,9 +12,27 @@ import sessionModule from './sessions.js';
  * Handle a ui_control SSE event — AI-driven UI manipulation.
  * Extracted from the duplicated ui_control + tool_output.ui_event handlers.
  */
+// W1 (2026-06-10 audit): the ui_control safe subset under the game build — camera
+// direction + house theming only. The server refuses everything else in
+// do_ui_control; this client-side belt makes sure no stray/replayed event can flip
+// the mode, swap the model, toggle incognito, or open a dropped panel either.
+var GAME_UI_SAFE_EVENTS = ['highlight', 'clear_highlight', 'set_theme', 'create_theme'];
+
+function _gameBuildOn() {
+  return !!(document.body && document.body.dataset && document.body.dataset.gameBuild === '1');
+}
+
 export function handleUIControl(uiData) {
   var uiEvent = uiData.ui_event || uiData;
   var esc = uiModule.esc;
+
+  if (_gameBuildOn()) {
+    var evName = typeof uiEvent === 'string' ? uiEvent : (uiData.ui_event || '');
+    if (GAME_UI_SAFE_EVENTS.indexOf(evName) === -1) {
+      console.warn('ui_control event blocked under the game build:', evName);
+      return;
+    }
+  }
 
   try {
     if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {

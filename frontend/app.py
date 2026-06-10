@@ -736,8 +736,11 @@ mount_optional(app, "codex", setup_codex_routes(
 ))
 mount_optional(app, "codex", setup_claude_routes())
 
+# Bitwarden/Vaultwarden password-manager integration — dropped under the game build
+# (W3: an admin-gated, password-handling, subprocess-spawning surface the game has no
+# use for; this is the inherited workspace's vault, not the engine's Vault store).
 from routes.vault_routes import setup_vault_routes
-app.include_router(setup_vault_routes())
+mount_optional(app, "vault", setup_vault_routes())
 
 # Contacts (CardDAV) — dropped under the game build.
 from routes.contacts_routes import setup_contacts_routes
@@ -789,10 +792,11 @@ async def serve_index(request: Request):
 # part of the game UI, and their entry points are hidden (static/css/game-trim.css).
 # They can be restored by re-adding the routes here.
 
-@app.get("/backgrounds")
-async def serve_backgrounds(request: Request):
-    """Sandbox page for prototyping background effects. No auth required."""
-    return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
+# W7 (2026-06-10 audit): the /backgrounds dev-prototype route was REMOVED. It was an
+# unauthenticated sandbox page for background effects whose static/backgrounds.html
+# was never vendored into this repo (the route 500'd) — a dev surface with no place
+# in the game build. Restore it deliberately, behind game_build_enabled(), if the
+# prototype page ever returns.
 
 @app.get("/login")
 async def serve_login(request: Request):

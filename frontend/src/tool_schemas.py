@@ -1564,6 +1564,70 @@ FUNCTION_TOOL_SCHEMAS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# W1/W5 (2026-06-10 audit): the game-only ui_control schema.
+# Under the game build the native function-calling manifest must advertise the
+# same curated safe subset do_ui_control enforces — no open_panel into dropped
+# verticals, no mode/model/toggle levers. Pure transform + applied at import
+# (the game build is a process-stable env switch, like the rest of the build).
+# ---------------------------------------------------------------------------
+
+def game_ui_control_schema(schema: dict) -> dict:
+    """Return the game-build variant of the ui_control function schema: camera
+    direction (highlight/clear_highlight) + house theming (set_theme/create_theme)
+    only. Pure — does not mutate its input."""
+    from src.settings import GAME_UI_CONTROL_SAFE_ACTIONS
+
+    import copy
+    out = copy.deepcopy(schema)
+    fn = out["function"]
+    fn["description"] = (
+        "Camera direction: visually direct the player's screen. Actions: highlight "
+        "(call out an on-screen element by CSS selector, optional label), clear_highlight, "
+        "set_theme (apply a preset theme), create_theme (CREATE a custom theme with a name "
+        "+ colors object — pick distinctive, evocative hex colors that match the requested "
+        "aesthetic, NOT generic defaults. The theme auto-applies after creation). When the "
+        "player asks for ANY theme not in the preset list, ALWAYS use create_theme. "
+        "No other UI control exists."
+    )
+    props = fn["parameters"]["properties"]
+    props["action"] = {
+        "type": "string",
+        # Stable order for the manifest; membership == the enforced safe subset.
+        "enum": [a for a in ("highlight", "clear_highlight", "set_theme", "create_theme")
+                 if a in GAME_UI_CONTROL_SAFE_ACTIONS],
+        "description": "The UI action. Use set_theme for presets, create_theme for custom colors",
+    }
+    props["name"] = {
+        "type": "string",
+        "description": "For highlight: the CSS selector to call out. For set_theme: a preset "
+                       "theme name. For create_theme: the custom theme name.",
+    }
+    props["value"] = {
+        "type": "string",
+        "description": "For highlight: an optional short label shown beside the highlight. "
+                       "For set_theme: the theme name (alias of name).",
+    }
+    # Email-reply plumbing has no game-build meaning.
+    for dead in ("uid", "folder", "mode"):
+        props.pop(dead, None)
+    return out
+
+
+def _apply_game_build_schemas() -> None:
+    from src.settings import game_build_enabled
+
+    if not game_build_enabled():
+        return
+    for i, schema in enumerate(FUNCTION_TOOL_SCHEMAS):
+        if isinstance(schema, dict) and schema.get("function", {}).get("name") == "ui_control":
+            FUNCTION_TOOL_SCHEMAS[i] = game_ui_control_schema(schema)
+            break
+
+
+_apply_game_build_schemas()
+
+
 # The Big Brother game tools (Vault-free). These are PINNED whenever the engine is
 # reachable so RAG/keyword selection can never drop them — the model must always be
 # able to call createCharacter (OOBE), getGameState (state check), and the full
@@ -1737,6 +1801,11 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             folder = args.get("folder") or value or "INBOX"
             mode = args.get("mode") or "reply"
             content = f"open_email_reply {uid} {folder} {mode}"
+        elif action == "highlight":
+            # name = CSS selector, value = optional label (the game-build manifest's
+            # primary action; previously fell into the bare-action fallback and lost
+            # its selector).
+            content = f"highlight {name or value} {value if name else ''}".strip()
         elif action == "set_mode":
             content = f"set_mode {value or name}"
         elif action == "switch_model":
