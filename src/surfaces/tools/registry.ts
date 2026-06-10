@@ -14,7 +14,8 @@ export interface ToolDescriptor {
 
 export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   // Onboarding + per-moment narration framing (Vault-free game-session port).
-  { name: "createCharacter", channel: "player", readsVault: false, description: "Run OOBE and start a new game; returns the Vault-free game state." },
+  { name: "updateCasting", channel: "player", readsVault: false, description: "Record casting-interview answers as they land (0050) — any subset of fields, any number of times pre-game (notes accumulate). Returns where the interview stands: what's on file, what's missing, the engine-picked next step, and whether casting is ready to finalize." },
+  { name: "createCharacter", channel: "player", readsVault: false, description: "End the casting interview and start the season (0050): finalizes from everything updateCasting recorded (args may fill gaps or override; the recorded name is required). Returns the Vault-free game state with the player's casting card." },
   { name: "getGameState", channel: "player", readsVault: false, description: "Current Vault-free game state: phase, the player's card, and the house roster (names)." },
   { name: "gameStatus", channel: "player", readsVault: false, description: "Vault-free public status for the status panel: week/phase/HOH/nominees/veto (ceremony-level facts only)." },
   { name: "playerTagline", channel: "player", readsVault: false, description: "A snarky, state-aware one-line Big Brother hero tagline for the player (Vault-free; reflects current standing)." },

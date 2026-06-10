@@ -125,14 +125,15 @@ def main() -> int:
             page.evaluate("const h = document.getElementById('orwell-onboarding'); if (h) h.remove();"
                           "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
 
-            # C23/J5: the authoring form offers the canonical archetype chips.
+            # 0050: character creation lives in the CHAT — onboarding never mounts a
+            # data-entry form (the holding card is the only modal, and it has no inputs).
             page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
             page.wait_for_selector("#orwell-onboarding", timeout=3000)
-            chips = page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip').length")
-            check(chips >= 10, f"onboarding offers canonical archetype chips ({chips})")
-            page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip')[0].click()")
-            chip_fill = page.evaluate("(document.getElementById('ob-arche')||{}).value || ''")
-            check(len(chip_fill) > 0, f"an archetype chip fills the field ({chip_fill!r})")
+            no_form = page.evaluate("""() => {
+              const el = document.getElementById('orwell-onboarding');
+              return el.querySelectorAll('input, select, textarea, form').length === 0;
+            }""")
+            check(no_form is True, "onboarding mounts NO data-entry form (the interview owns intake)")
             page.evaluate("document.getElementById('orwell-onboarding').remove();"
                           "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
 
@@ -164,17 +165,18 @@ def main() -> int:
             page.evaluate("document.querySelector('#orwell-decision-card .odec-x').click()")
             check(page.query_selector("#orwell-decision-card") is None, "decision card: dismissible (prose path stays open)")
 
-            # C25/A11Y-1: the onboarding overlay is a REAL modal — focus trapped inside the
-            # card, everything behind the scrim inert. Driven with actual Tab keypresses.
+            # C25/A11Y-1: the holding card is a REAL modal — focus lands on the card,
+            # Tab never escapes it, everything behind the scrim inert.
             page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
             page.wait_for_selector("#orwell-onboarding", timeout=3000)
-            in_card = page.evaluate("document.activeElement && document.activeElement.id === 'ob-name'")
+            in_card = page.evaluate(
+                "document.getElementById('orwell-onboarding').contains(document.activeElement)")
             check(in_card is True, "onboarding: initial focus lands in the card")
-            for _ in range(12):  # tab far past the card's focusables — must wrap, never escape
+            for _ in range(12):  # tab hard — focus must stay inside the modal, never escape
                 page.keyboard.press("Tab")
             trapped = page.evaluate(
                 "document.getElementById('orwell-onboarding').contains(document.activeElement)")
-            check(trapped is True, "onboarding: Tab cycles INSIDE the card (focus trap)")
+            check(trapped is True, "onboarding: Tab stays INSIDE the card (focus trap)")
             sidebar_inert = page.evaluate("(document.getElementById('sidebar')||{}).inert === true "
                                           "|| document.querySelector('#sidebar') === null "
                                           "|| !!document.querySelector('#sidebar').closest('[inert]')")

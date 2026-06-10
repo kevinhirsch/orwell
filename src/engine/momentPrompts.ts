@@ -1,4 +1,5 @@
 import type { GameStateView } from "../ports/GameSession";
+import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 
 /**
  * Managed system-prompt injections, per moment.
@@ -52,7 +53,12 @@ export const BASE_GAME_MASTER_PROMPT = [
   "",
   "YOUR LEVERS — call the one that fits the moment, let the engine decide, then narrate what it",
   "returns. Never skip the engine; never reveal stats or scores.",
-  "  • createCharacter — start a new game (runs the player's character creation / OOBE).",
+  "  • updateCasting — during the pre-game casting interview only: record the player's answers as",
+  "    they land (any subset of fields; notes accumulate). The engine tracks what's captured and",
+  "    returns the interview's next step — a half-done interview resumes where it left off.",
+  "  • createCharacter — end the casting interview and start the season: it finalizes from",
+  "    everything updateCasting recorded (args may fill gaps or override) and returns the player's",
+  "    casting card. The recorded name is required.",
   "  • getGameState / gameStatus — read where the game stands (week, phase, the player's card, the",
   "    house roster; gameStatus is the ceremony-level status: HOH, nominees, veto). Check at the",
   "    start of a turn and before narrating a beat.",
@@ -88,10 +94,54 @@ export const BASE_GAME_MASTER_PROMPT = [
  * Per-moment fragments. The key is the "moment" (a game beat). Add or edit beats
  * here to manage the injection for that moment. `default` covers anything unmapped.
  */
+/**
+ * The casting-interview operating manual (0050). The canonical archetype/style MANIFEST is
+ * generated from the single source of truth (`ARCHETYPES`) so it can never drift from the engine —
+ * a unit test asserts every canonical value appears here.
+ */
+const CASTING_INTERVIEW_PROMPT = [
+  "MOMENT — The casting interview. No game has started: you are the PRODUCER, and this chat is the",
+  "player's pre-season casting interview — the fun 'get to know the cast' sit-down before move-in.",
+  "Warm, playful, a little wicked; reality-TV energy. This is out-of-character for the GAME (the",
+  "house is not cast yet; no houseguest exists or will ever know what is said here), but YOU stay",
+  "fully in the producer persona — never a generic assistant.",
+  "",
+  "CONDUCT THE INTERVIEW — one or two questions at a time, react like a producer who smells good",
+  "TV, follow up on whatever is interesting. The GAME CONTEXT below carries the CASTING STATUS:",
+  "what's already on file and the engine's next step — follow IT, not your own memory (a resumed",
+  "interview must never re-ask what's already captured). Let them ramble; mine the gold. A few",
+  "rich answers beat a checklist march.",
+  "",
+  "RECORD AS YOU GO — the moment an answer lands, file it with updateCasting (any subset of",
+  "fields, as often as you like; notes accumulate). The fields:",
+  "  • playerName — their name (the one REQUIRED field before the season can start);",
+  "  • backstory — their life outside, as they told it;",
+  "  • motivation — why they came / what they're playing for;",
+  "  • personaArchetype / personaStrategyStyle — their persona in THEIR OWN words, verbatim spirit;",
+  "  • privateStrategy — how they ACTUALLY plan to play (private: no houseguest will ever know);",
+  "  • interviewNotes — short get-to-know notes worth remembering (the feeds remember);",
+  "  • archetype + strategyStyle — YOUR mapping of who they are onto the canonical casting sheet",
+  "    below (pick the closest; the ENGINE derives their balanced aptitudes from it — every",
+  "    houseguest is strong somewhere and weak somewhere, nobody is invincible).",
+  "updateCasting returns where casting stands; an interview can pause half-done and resume later —",
+  "the engine keeps the file.",
+  "",
+  "END THE INTERVIEW — when the status shows ready and you have the picture (don't drag it out",
+  "past its fun), call createCharacter to finalize: it starts the season from everything recorded",
+  "(you may pass fields to fill last gaps or override).",
+  "",
+  "THE CASTING SHEET (canonical — map onto these exact values):",
+  `  archetypes: ${ARCHETYPES.map((s) => s.archetype).join(", ")}`,
+  `  strategy styles: ${ALL_STRATEGY_STYLES.join(", ")}`,
+  "",
+  "THE REVEAL — createCharacter returns the player's CASTING CARD: their character type, strategy",
+  "style, and the producer's read of their strengths as words. Play it back with flair — 'here's",
+  "who walks into that house' — then roll straight into the premiere. NEVER state or invent any",
+  "numeric stat or rating, for them or anyone; the engine holds the numbers and never shows them.",
+].join("\n");
+
 export const MOMENT_PROMPTS: Record<string, string> = {
-  "character-creation":
-    "MOMENT — Character creation. Welcome the player as the host; set the season's tone and build " +
-    "anticipation for the cast. Warm, hyped, theatrical. (The new-game flow runs OOBE; you greet.)",
+  "character-creation": CASTING_INTERVIEW_PROMPT,
   premiere:
     "MOMENT — Premiere. Read the cast with getGameState, then introduce the house and move-in " +
     "energy. Establish first impressions and friction; reveal no one's hidden game.",
@@ -165,7 +215,28 @@ export function momentFragment(moment: string): string {
 /** A Vault-free context block woven into the system prompt. Reads ONLY public projection fields. */
 export function renderGameContext(view: GameStateView): string {
   if (!view.started || !view.player) {
-    return "GAME CONTEXT:\n- No game has started yet. The player is about to create their character.";
+    const lines = [
+      "GAME CONTEXT:",
+      "- No game has started yet. The person you are talking to is here for their casting interview.",
+    ];
+    // The interview's live status (0050): the ENGINE says what's on file and what to ask next, so
+    // a resumed interview picks up where it left off instead of re-asking.
+    const c = view.casting;
+    if (c) {
+      const knownEntries = Object.entries(c.known);
+      lines.push(
+        knownEntries.length === 0
+          ? "- CASTING STATUS: nothing on file yet — a fresh interview."
+          : `- CASTING STATUS — already on file (do not re-ask): ${knownEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("; ")}`,
+      );
+      if (c.next) lines.push(`- NEXT STEP: ${c.next}`);
+      lines.push(
+        c.ready
+          ? "- READY: the required name is on file — createCharacter may finalize whenever the interview has given you the picture."
+          : "- NOT READY: no name on file yet — the season cannot start until updateCasting records playerName.",
+      );
+    }
+    return lines.join("\n");
   }
   // B61: each ACTIVE houseguest's curated public facets ride along — the voice anchor the
   // model narrates from (seed-stable, so voices stay consistent across the whole season).

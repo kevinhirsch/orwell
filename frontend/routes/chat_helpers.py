@@ -39,13 +39,15 @@ FEED_DOWN_PROMPT = (
     "anything unrelated to the game."
 )
 
+# The fail-open fallback when the engine's casting-interview moment prompt (0050) can't be
+# fetched: still a production voice, still steers into the interview — never a generic assistant.
 PRE_GAME_PROMPT = (
     "OUT OF CHARACTER — NO SEASON IS RUNNING. This app IS the Big Brother game, but this player "
     "has no started game in their sandbox (a new player, or their season was reset). Do NOT "
-    "improvise a game, invent houseguests, or narrate any scene. In a warm production voice, tell "
-    "the player the house is dark and walk them into casting: they can start a season from the "
-    "onboarding panel, or you may call the createCharacter tool with their chosen name (plus an "
-    "optional archetype / strategy style) once they tell you how they want to enter the house. "
+    "improvise a game, invent houseguests, or narrate any scene. You are the show's PRODUCER and "
+    "this chat is the player's pre-season casting interview: get to know them — their name, life "
+    "outside, why Big Brother, how they plan to play — recording answers with the updateCasting "
+    "tool as they land, and start the season with createCharacter once a name is on file. "
     "You may help with anything unrelated to the game."
 )
 
@@ -144,9 +146,19 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
     else:
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
         if game_build:
-            # The game IS the product but this sandbox has no season: say so and steer into
-            # casting — never improvise as a generic assistant.
-            preface.insert(0, {"role": "system", "content": PRE_GAME_PROMPT})
+            # The game IS the product but this sandbox has no season: pre-game, the chat IS
+            # the producer's casting interview (0050). Fetch the engine's interview moment
+            # prompt — it carries the live casting status (what's on file, the next step), so
+            # a half-done interview resumes instead of re-asking. The engine mints the user's
+            # sandbox on this call (its guard allowlists the casting tools). If the fetch
+            # hiccups, fall back to the static pre-game steer — never a generic assistant.
+            try:
+                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
+                pre_prompt = (mp or {}).get("systemPrompt") or PRE_GAME_PROMPT
+            except Exception as e:
+                logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
+                pre_prompt = PRE_GAME_PROMPT
+            preface.insert(0, {"role": "system", "content": pre_prompt})
     return engine_available, game_active, feed_down
 
 

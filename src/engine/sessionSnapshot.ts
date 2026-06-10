@@ -1,4 +1,5 @@
 import type { GameHouse } from "./characterFactory";
+import type { CastingIntake } from "./castingIntake";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
@@ -50,6 +51,8 @@ export interface SessionCore {
   deals?: Deal[];
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
+  /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
+  casting?: CastingIntake;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
