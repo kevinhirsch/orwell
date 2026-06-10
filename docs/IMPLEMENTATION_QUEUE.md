@@ -729,7 +729,16 @@ A behavioral-fidelity / anti-sycophancy audit (transcript) found several capabil
 and two genuine gaps. These specs close them. Build priority: **0038 first** (biggest "feels flat" risk,
 pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 
-### B27 — 0038 live off-screen society  ·  **B27a DONE; B27b remaining**
+### B27 — 0038 live off-screen society  ·  **✅ DONE (B27a + B27b, 2026-06-10)**
+
+> **B27b shipped with B70's PR.** `diffuseGossip` is wired into the live off-screen tick: a rumor RISES from a
+> scene occasionally (`GOSSIP.riseProb`), travels the AFFINITY graph (who actually talks to whom; the player is
+> a node) with low per-edge transmission, decaying confidence and per-telling drift, and lands on the player —
+> when a chain terminates there — as a belief with source+confidence. The rumor is a vague PARAPHRASE
+> (`rumorFrom` + `RUMOR_GLOSS`), never the verbatim hidden scene; retelling events are recipient-specific (the
+> B64 twin-content lesson). The 0031 leak heuristic is PATHWAY-AWARE: hidden content covered by the player's
+> legitimate pathway-borne facts is not a leak — the checkpoint commits legal propagation; the 0001 canary stays
+> the precise guard. 0035 + 0038 are now in `cucumber.cjs` (11 new scenarios). `tests/unit/liveGossip.test.ts`.
 
 > **B27a (DONE):** the orchestrator's live off-screen tick (`Orchestrator.defaultApply`) now runs
 > `richOffscreenStretch` — **seven varied interaction types** folded into the relationship layer by their true
@@ -2047,7 +2056,16 @@ PR per item).
 > confessional sentinel on a player surface fails the canary. Read `docs/features/0003`, `0006`, `0001`
 > first. Open a PR.
 
-### B70 — close the structural test & CI gaps (boundary · 0038 · coverage)  ·  Claude Code (tests + CI)  ·  **R-1 · MAJOR · test C4 + C7 + C8 + C9**
+### B70 — close the structural test & CI gaps (boundary · 0038 · coverage)  ·  Claude Code (tests + CI)  ·  **R-1 · MAJOR · test C4 + C7 + C8 + C9 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (C4) done by B59 — `adapters/narrative/` + `main.ts` joined the depcruise OUTWARD set.
+> (C7) 0038 is now genuinely gated: B27b built (see B27 above) and BOTH 0035 and 0038 run in `cucumber.cjs`
+> with real step definitions (`offscreen_society.steps.ts` — reusing the 0031 watcher steps where the phrases
+> are shared). (C8) CI gains a `coverage` job; per-directory BRANCH thresholds live in `vitest.config.ts`
+> (engine 90 · composition 88 · adapters/engine 82 — floors at today's real levels so coverage can only
+> ratchet up; engine/composition meet the audit's ≥90). (C9) `tests/unit/failClosed.test.ts`: a leaking apply
+> ⇒ fault + ROLLBACK + zero saves (a counting store proves no persist) + no aborted event left behind; the
+> finale-answer rejection path covered (illegal appeal refused, the pending question survives, legal proceeds).
 
 > In `kevinhirsch/orwell`, four gaps let mandate-violating regressions through a green gate:
 > 1. **C4 — the narrative adapter is outside the Vault boundary.** `.dependency-cruiser.cjs` OUTWARD

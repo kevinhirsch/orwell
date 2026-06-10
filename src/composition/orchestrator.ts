@@ -5,6 +5,7 @@ import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
 import { rollOverhears } from "../engine/presence";
+import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
@@ -239,11 +240,18 @@ export class Orchestrator {
     if (requireDailyEvent && counts(gsCand).events <= counts(gsBase).events) {
       faults.push({ when, kind: "no-daily-event" });
     }
-    // Vault Wall (0001): no hidden event's content may appear in the player projection.
+    // Vault Wall (0001): no hidden event's content may appear in the player projection — UNLESS the
+    // player legitimately holds it through a real pathway (B27b: gossip/overhears/tellings surface
+    // sanctioned, traceable beliefs; flagging those would refuse every legal propagation). The 0001
+    // sentinel canary remains the precise guard for content with NO pathway to the player.
     const hidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
     if (hidden.length > 0) {
       const view = playerSweep(sandbox);
-      if (hidden.some((c) => c && view.includes(c))) faults.push({ when, kind: "vault-leak" });
+      const playerFacts = (candidate.knowledge?.knowledge?.[PLAYER] ?? [])
+        .filter((f) => /^(told-by:|overheard:|gossip|surfaced)/.test(f.pathway))
+        .map((f) => f.content);
+      const sanctioned = (c: string): boolean => playerFacts.some((f) => f.includes(c));
+      if (hidden.some((c) => c && view.includes(c) && !sanctioned(c))) faults.push({ when, kind: "vault-leak" });
     }
     return faults;
   }
@@ -335,6 +343,36 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       rollOverhears({
         eventId: s.event.id, room, content: s.event.content, participants: s.event.witnessSet,
         occupancy, knowledge: sandbox.engine.knowledge, rng,
+      });
+    }
+  }
+
+  // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
+  // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
+  // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
+  // them lands the belief — a vague paraphrase with source+confidence, never the verbatim hidden
+  // scene and never a number. Every retelling is a recorded, traceable event (0002).
+  if (core.house && scenes.length > 0 && rng.next() < GOSSIP.riseProb) {
+    const scene = scenes[rng.int(scenes.length)]!;
+    const everyone: EntityId[] = [core.house.player.id, ...activeNpcs];
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < everyone.length; i++) {
+      for (let j = i + 1; j < everyone.length; j++) {
+        if (sandbox.engine.relationships.edge(everyone[i]!, everyone[j]!).affinity > GOSSIP.affinityEdge) {
+          edges.push([everyone[i]!, everyone[j]!] as const);
+        }
+      }
+    }
+    if (edges.length > 0) {
+      diffuseGossip({
+        knowledge: sandbox.engine.knowledge,
+        graph: makeSocialGraph(edges),
+        rng,
+        origin: scene.initiator,
+        fact: { content: rumorFrom(scene.initiator, scene.partner, scene.type) },
+        rounds: GOSSIP.rounds,
+        transmitProb: GOSSIP.transmitProb,
+        decay: GOSSIP.decay,
       });
     }
   }

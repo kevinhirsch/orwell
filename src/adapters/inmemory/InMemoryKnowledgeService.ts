@@ -132,10 +132,12 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     const sourceEventId = `evt:gossip:${++this.seq}`;
     const witnessSet: EntityId[] = [from, to];
     // The retelling is its own traceable event; player-witnessed iff the listener is the player.
+    // Recipient-specific content (B27b — the B64 lesson): two retellings of one rumor must never
+    // mint textually identical hidden/visible twins, or the 0031 substring sweep false-fires.
     this.events.record({
       id: sourceEventId, ts, type: "gossip",
       initiator: from, witnessSet, hidden: !witnessSet.includes(PLAYER),
-      content: `gossip ${pathway}`,
+      content: `gossip ${pathway} reaches ${to}`,
     });
     return this.pushKnown(to, { ...fact, pathway, sourceEventId, ts });
   }

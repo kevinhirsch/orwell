@@ -1,10 +1,8 @@
 # DRAFT executable spec — author: feature-maker; implementer makes it pass.
 # Feature 0038 — Live off-screen society. Tests use a FAKE clock (no real timers). Roles only.
 #
-# STATUS: the "varied off-screen society" half is IMPLEMENTED + unit-gated (tests/unit/offscreenSociety.test.ts)
-# — scenarios 1, 5, 6 below hold today. PARKED (B27b): the gossip→player diffusion scenarios (2, 3) need the
-# 0031 checkpoint's substring leak-heuristic reconciled with legitimate gossip pathway propagation; the soul
-# scenario (4) needs a SoulStore wired into the live sandbox (feature 0041). Not yet in cucumber.cjs.
+# STATUS: BUILT + BDD-gated (B27a varied society · 0041 live souls · B27b gossip→player diffusion with the
+# pathway-aware 0031 leak heuristic). All six scenarios run in cucumber.cjs.
 
 Feature: Live off-screen society
 
