@@ -40,6 +40,10 @@ from routes.chat_helpers import (
     run_post_response_tasks,
     clean_thinking_for_save,
     _enforce_chat_privileges,
+    auto_escalation_withhold,
+    ensure_turn_recorded,
+    discard_last_user_message,
+    unmark_session_framed,
 )
 from src.action_intents import classify_tool_intent as _classify_tool_intent
 from src.tool_policy import build_effective_tool_policy
@@ -318,6 +322,22 @@ def setup_chat_routes(
         if memory_response:
             return {"response": memory_response}
 
+        # E25: refuse a game turn BEFORE build_chat_context persists the user message —
+        # the old post-context 409 left an orphaned transcript row (duplicated on retry).
+        # Engine unreachable / no game ⇒ fall through (framing handles feeds-down honestly).
+        _game_409 = (
+            "A Big Brother game is in progress: game turns must use the streaming chat "
+            "(agent) endpoint so the engine records and decides them."
+        )
+        try:
+            from src import orwell_engine as _oe
+            from src.auth_helpers import effective_user as _eff
+            _pre_state = await _oe.get_game_state(user=_eff(request))
+        except Exception:
+            _pre_state = None
+        if isinstance(_pre_state, dict) and _pre_state.get("started"):
+            raise HTTPException(409, _game_409)
+
         # Build shared context (preset, preprocess, preface, compact)
         ctx = await build_chat_context(
             sess, request, chat_handler, chat_processor,
@@ -333,13 +353,12 @@ def setup_chat_routes(
 
         # F3/C14: the sync endpoint has NO tools, so a game turn here would be pure
         # consequence-free imitation (narrated, never recorded). Decline to game-master:
-        # game turns go through the streaming agent path the UI uses.
+        # game turns go through the streaming agent path the UI uses. (Belt — the E25 hoist
+        # above normally refuses first; this covers a game starting between the two reads.)
         if ctx.game_active:
-            raise HTTPException(
-                409,
-                "A Big Brother game is in progress: game turns must use the streaming chat "
-                "(agent) endpoint so the engine records and decides them.",
-            )
+            discard_last_user_message(sess)   # E25: never leave the refused turn persisted
+            unmark_session_framed(session)    # P2: the refusal must not consume re-entry
+            raise HTTPException(409, _game_409)
 
         # Research injection
         research_blocked_by_policy = (
@@ -420,6 +439,15 @@ def setup_chat_routes(
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
+        # E24/P7: under the game build the "Nobody"/incognito toggle is inert server-side.
+        # Reachable via /incognito + a hidden checkbox, it stripped ALL game framing while the
+        # in-character transcript rode along — an unframed, unrecorded imitation-play channel
+        # (and a memory/persistence bypass). The game is the product; the toggle cannot be.
+        if incognito:
+            from src.settings import game_build_enabled as _gbe
+            if _gbe():
+                logger.info("[orwell] incognito requested under the game build — ignored (E24/P7)")
+                incognito = False
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
         # Workspace: confine the agent's file/shell tools to this folder. Validate
@@ -559,12 +587,15 @@ def setup_chat_routes(
         # the agent loop so the model can call createCharacter (OOBE), getGameState,
         # and the full weekly-loop surface (advanceGame/submitDecision) instead of
         # falling back to bash/curl exploration. This covers both pre-game OOBE and
-        # in-progress play. The game tools are pinned (see pinned_tools below) and
-        # the heavy shell/code/file tools stay withheld by the auto_escalated block.
+        # in-progress play. The game tools are pinned (see pinned_tools below); the
+        # auto_escalated withhold below is escalation-reason-aware (A1): on THIS path
+        # it must not re-disable tools the admin explicitly opted in.
         # (A later privilege gate still downgrades users who can't use agent mode.)
+        game_escalated = False
         if chat_mode == "chat" and (ctx.engine_available or ctx.game_active):
             chat_mode = "agent"
             auto_escalated = True
+            game_escalated = True
             logger.info(
                 "chat→agent auto-escalation: engine_available=%s game_active=%s",
                 ctx.engine_available, ctx.game_active,
@@ -702,15 +733,19 @@ def setup_chat_routes(
                 game_build_disabled_additions(get_setting("game_tools_enabled", []))
             )
 
-        # Light auto-escalation: the user is in chat mode and just expressed a
-        # notes/calendar/email intent. Grant the relevant managers but withhold
-        # the heavy "do things on the computer" tools — otherwise the model
-        # tries to shell out for a request that never needed it, then fails
-        # (and looks broken when the shell is disabled).
+        # Light auto-escalation: the user is in chat mode and the turn was promoted to
+        # agent mode. The withhold is ESCALATION-REASON-AWARE (A1):
+        #   • intent escalation (notes/calendar/email) withholds the heavy "do things on
+        #     the computer" tools — the model must not shell out for a chat request;
+        #   • the GAME escalation (the default player path) subtracts the admin's explicit
+        #     opt-ins (Settings → Agent tools) — the game-build chokepoint above is the
+        #     single source of truth for that turn class, and the old unconditional
+        #     withhold silently defeated bash/python/read_file/write_file opt-ins on
+        #     every chat-originated game turn. builtin_browser stays withheld always.
         if auto_escalated:
-            disabled_tools.update({
-                "bash", "python", "read_file", "write_file", "builtin_browser",
-            })
+            disabled_tools.update(
+                auto_escalation_withhold(game_escalated, get_setting("game_tools_enabled", []))
+            )
 
         # Disable document tools in compare sessions — they break the pane UI
         if sess.name and sess.name.startswith("[CMP]"):
@@ -1107,6 +1142,7 @@ def setup_chat_routes(
                 # ── Agent mode: full agent loop with tools ──
                 _agent_rounds = 0
                 _agent_tool_calls = 0
+                _agent_tools_called: List[str] = []  # E22: which tools actually ran this turn
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
@@ -1139,7 +1175,13 @@ def setup_chat_routes(
                         tool_policy=tool_policy,
                         owner=_user,
                         pinned_tools=(ORWELL_GAME_TOOLS if ctx.engine_available else None),
-                        game_mode=ctx.game_active,
+                        # P3: substitution keys on FRAMED, not game_active — a pre-game
+                        # casting turn gets the minimal casting tool contract instead of
+                        # stacking the producer persona on the generic assistant rulebook.
+                        game_mode=(
+                            "game" if ctx.game_active
+                            else ("casting" if (ctx.framed and not ctx.feed_down) else False)
+                        ),
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
                         plan_mode=plan_mode,
@@ -1171,6 +1213,8 @@ def setup_chat_routes(
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
                                     elif data.get("type") == "tool_start":
                                         _agent_tool_calls += 1
+                                        if data.get("tool"):
+                                            _agent_tools_called.append(str(data["tool"]))
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
@@ -1196,6 +1240,14 @@ def setup_chat_routes(
                         elif chunk.startswith("event: "):
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
+                            # E22: "narrated but never recorded" is enforced in CODE, not
+                            # prompt wording — a completed game turn with non-trivial
+                            # narration and zero engine writes gets a bounded fallback
+                            # recordInteraction so the beat has consequence and memory.
+                            if ctx.game_active and full_response:
+                                asyncio.create_task(ensure_turn_recorded(
+                                    ctx.user, message, full_response, _agent_tools_called,
+                                ))
                             if full_response:
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
@@ -1296,6 +1348,10 @@ def setup_chat_routes(
     # ------------------------------------------------------------------ #
     @router.get("/api/chat/events/{session_id}")
     async def chat_events(request: Request, session_id: str) -> StreamingResponse:
+        # W2: same owner guard as every sibling session endpoint — without it any
+        # authenticated user could subscribe to another user's activity stream
+        # (a metadata side-channel + an unbounded subscriber slot).
+        _verify_session_owner(request, session_id)
         return StreamingResponse(
             session_events.subscribe(session_id),
             media_type="text/event-stream",
