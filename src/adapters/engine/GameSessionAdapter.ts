@@ -629,6 +629,16 @@ export class GameSessionAdapter implements GameSession {
         if (!hg) return 0.55;
         return derivedLoyalty(dispositionOf(hg.character.archetype), hg.soul.emotionalState);
       },
+      // Static disposition (0044): gates which nomination tactic an HOH plays (pawn/backdoor/direct).
+      dispositionOf: (id) => {
+        const hg = this.house
+          ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
+          : undefined;
+        return hg ? dispositionOf(hg.character.archetype) : "neutral";
+      },
+      // Open deals binding the houseguest (0039 → 0044): the vote leans to honor; the ledger still
+      // reconciles a break with its full betrayal consequence downstream.
+      dealsOf: (id) => this.deals.open().filter((d) => d.condition.promisors.includes(id)),
     };
   }
 

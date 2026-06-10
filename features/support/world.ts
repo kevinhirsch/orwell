@@ -404,6 +404,24 @@ export class BbWorld extends World {
   evoArcA?: number[];
   evoArcB?: number[];
 
+  // Strategic nomination & vote refinements (0044) scratch state.
+  sdRel?: import("../../src/engine/relationships").RelationshipModel;
+  sdActive?: Eid[];
+  sdDisposition?: import("../../src/engine/relationshipConstants").RelationshipDisposition;
+  sdNoms?: [Eid, Eid];
+  sdNomsLoyal?: [Eid, Eid];
+  sdVoter?: Eid;
+  sdNominees?: Eid[];
+  sdLedger?: import("../../src/engine/deals").DealLedger;
+  sdCalmVote?: Eid;
+  sdRattledVote?: Eid;
+  sdBlocVote?: Eid;
+  sdSandbox?: import("../../src/composition/registry").UserSandbox;
+  sdRegistryA?: import("../../src/composition/registry").GameSessionRegistry;
+  sdRegistryB?: import("../../src/composition/registry").GameSessionRegistry;
+  sdTrailA?: string[];
+  sdTrailB?: string[];
+
   // The casting interview (0050) scratch state.
   castSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
   castView?: import("../../src/ports/GameSession").GameStateView;

@@ -11,9 +11,12 @@ import {
 } from "../domain/eligibility";
 import type { WeekState } from "../domain/eligibility";
 import type { Stats } from "./season";
-import { chooseNominationsWithMood, nominationScore, tallyJury } from "./season";
+import { nominationStrategy, nominationScore, tallyJury } from "./season";
 import { detectBlocs, blocTerm } from "./blocs";
 import type { Bloc } from "./blocs";
+import { DECISION } from "./decisionConstants";
+import type { Deal } from "../domain/deal";
+import type { RelationshipDisposition } from "./relationshipConstants";
 import type { RelationshipModel } from "./relationships";
 import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
@@ -182,6 +185,18 @@ export interface SeasonCtx {
    * blocs themselves are recomputed every read and NEVER stored (decision 0002).
    */
   loyaltyOf?: (id: EntityId) => number;
+  /**
+   * The houseguest's static relationship DISPOSITION (0044): gates WHICH nomination tactic an HOH
+   * plays (a loyalist sits a pawn; a schemer backdoors; neutral plays direct). Optional: pure
+   * tests omit it and every HOH plays the direct, threat-primary read — byte-stable.
+   */
+  dispositionOf?: (id: EntityId) => RelationshipDisposition;
+  /**
+   * The OPEN deals binding a houseguest (0039 → 0044): an eviction vote leans away from evicting
+   * a party the voter promised to protect — and breaking that lean anyway is a real betrayal the
+   * ledger reconciles downstream. Optional: omitted ⇒ no deal term.
+   */
+  dealsOf?: (id: EntityId) => readonly Deal[];
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -340,13 +355,30 @@ function currentBlocs(s: LiveSeasonState, ctx: SeasonCtx): Bloc[] {
 }
 
 /**
- * A voter's pick between the two final nominees (decision 0002) — threat-driven, with the 0043
- * BLOC term layered on: a bloc-mate on the block is shielded (vote the other), the bloc's shared
- * enemy is leaned into, all scaled by the bloc's loyalty strength. Voting blocs vote TOGETHER
- * because every member reads the same derived bloc — coordination without stored membership.
+ * A voter's pick between the two final nominees — the enriched vote model (feature 0044, layered
+ * on the 0002 threat read). The blend, every magnitude from `decisionConstants`:
+ *
+ *   threat × (1 + paranoia·moodWeight)   — self-protection: a rattled voter's nerves shout loudest (0041)
+ *   + blocTerm                            — vote WITH your bloc: shield a mate, lean into the shared enemy (0043)
+ *   − dealHonorWeight (if deal-bound)     — an open promise pulls the vote off the protected party (0039);
+ *                                           a strong enough opposing read still BREAKS it — and the ledger
+ *                                           reconciles that betrayal with its full consequence downstream
+ *   − juryMgmt × trust(nominee → voter)   — light jury management: don't make a bitter juror needlessly (0014)
+ *
+ * Engine-decided + bounded: the terms shade the threat-primary read, never replace it; voting
+ * blocs vote TOGETHER because every member computes the same derived bloc (decision 0002).
  */
-function npcEvictChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: SeasonCtx, blocs: readonly Bloc[] = []): EntityId {
-  const score = (n: EntityId): number => ctx.rel.edge(voter, n).threat + blocTerm(blocs, voter, n);
+export function voteChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: SeasonCtx, blocs: readonly Bloc[] = []): EntityId {
+  const V = DECISION.vote;
+  const paranoia = Math.max(0, (0.5 - (ctx.emotionalOf?.(voter) ?? 0.5)) * 2); // 0 calm … 1 fully rattled
+  const deals = ctx.dealsOf?.(voter) ?? [];
+  const dealBound = (n: EntityId): boolean =>
+    deals.some((d) => d.status === "open" && d.condition.promisors.includes(voter) && d.parties.includes(n) && n !== voter);
+  const score = (n: EntityId): number =>
+    ctx.rel.edge(voter, n).threat * (1 + paranoia * V.moodSelfProtectWeight) +
+    blocTerm(blocs, voter, n) -
+    (dealBound(n) ? V.dealHonorWeight : 0) -
+    V.juryManagementWeight * ctx.rel.edge(n, voter).trust;
   return score(fn[0]) >= score(fn[1]) ? fn[0] : fn[1];
 }
 
@@ -360,7 +392,7 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
   const votes: Record<EntityId, number> = { [fn[0]]: 0, [fn[1]]: 0 };
   const voteOf = new Map<EntityId, EntityId>();
   for (const v of voters) {
-    const target = v === ctx.player && playerVote ? playerVote : npcEvictChoice(v, fn, ctx, blocs);
+    const target = v === ctx.player && playerVote ? playerVote : voteChoice(v, fn, ctx, blocs);
     votes[target]++;
     voteOf.set(v, target);
   }
@@ -538,7 +570,7 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
       else if (tally[e.nominees[1]]! > tally[e.nominees[0]]!) evictee = e.nominees[1];
       else {
         if (s.hoh === ctx.player) { s.pending = { kind: "tie-break", by: ctx.player, nominees: e.nominees }; return null; }
-        evictee = npcEvictChoice(s.hoh!, e.nominees, ctx, currentBlocs(s, ctx));
+        evictee = voteChoice(s.hoh!, e.nominees, ctx, currentBlocs(s, ctx));
       }
       return commitStagedEviction(s, ctx, evictee, rng);
     }
@@ -729,18 +761,14 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         s.pending = { kind: "nominations", by: ctx.player, options: s.active.filter((h) => h !== ctx.player), pick: 2 };
         return null;
       }
-      // A rattled HOH (low live emotional state, 0041) nominates more erratically; a calm one ranks
-      // purely by threat. The 0043 BLOC term layers on when loyalty is wired: the HOH shields
-      // bloc-mates and leans toward the bloc's shared enemy. Legality still binds downstream.
-      const mood = ctx.emotionalOf?.(s.hoh!) ?? 0.5;
-      const blocs = currentBlocs(s, ctx);
-      const nominees = blocs.length > 0
-        ? (s.active.filter((h) => h !== s.hoh)
-            .sort((a, b) =>
-              (nominationScore(s.hoh!, b, ctx.rel, mood) + blocTerm(blocs, s.hoh!, b)) -
-              (nominationScore(s.hoh!, a, ctx.rel, mood) + blocTerm(blocs, s.hoh!, a)))
-            .slice(0, 2) as [EntityId, EntityId])
-        : chooseNominationsWithMood(s.hoh!, s.active, ctx.rel, mood);
+      // The strategic nomination read (0044): threat-primary, bent by the rattled-HOH paranoia
+      // term (0041), the bloc shield (0043), the week's political temperature, and the HOH's own
+      // disposition-gated tactic (pawn / backdoor / direct). Legality still binds downstream.
+      const nominees = nominationStrategy(s.hoh!, s.active, ctx.rel, {
+        blocs: currentBlocs(s, ctx),
+        mood: ctx.emotionalOf?.(s.hoh!) ?? 0.5,
+        disposition: ctx.dispositionOf?.(s.hoh!) ?? "neutral",
+      });
       s.nominees = nominees; s.beat = "veto-competition";
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
@@ -814,7 +842,14 @@ function resolveReplacement(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
     s.pending = { kind: "replacement", by: ctx.player, saved: s.saved!, options };
     return null;
   }
-  const replacement = [...options].sort((a, b) => ctx.rel.edge(s.hoh!, b).threat - ctx.rel.edge(s.hoh!, a).threat)[0]!;
+  // The replacement reads the same blended strategy (0044): threat + the rattled-paranoia term +
+  // the bloc shield. This is also what COMPLETES a backdoor — the real target, left off the block
+  // at nominations, tops this ranking the moment the veto comes off.
+  const mood = ctx.emotionalOf?.(s.hoh!) ?? 0.5;
+  const blocs = currentBlocs(s, ctx);
+  const replacement = [...options].sort((a, b) =>
+    (nominationScore(s.hoh!, b, ctx.rel, mood) + blocTerm(blocs, s.hoh!, b)) -
+    (nominationScore(s.hoh!, a, ctx.rel, mood) + blocTerm(blocs, s.hoh!, a)))[0]!;
   s.replacement = replacement; s.finalNominees = [otherNominee(s), replacement]; s.beat = "eviction";
   return {
     beat: "veto-ceremony",
@@ -838,7 +873,12 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
     case "comp-intent":
       return { kind: "comp-intent", intent: "compete" };
     case "nominations": {
-      const [a, b] = chooseNominationsWithMood(p.by, s.active, ctx.rel, ctx.emotionalOf?.(p.by) ?? 0.5);
+      // The same strategic read the loop's own NPC HOHs use (no second rulebook).
+      const [a, b] = nominationStrategy(p.by, s.active, ctx.rel, {
+        blocs: currentBlocs(s, ctx),
+        mood: ctx.emotionalOf?.(p.by) ?? 0.5,
+        disposition: ctx.dispositionOf?.(p.by) ?? "neutral",
+      });
       return { kind: "nominations", choice: [a, b] };
     }
     case "veto-decision": {
@@ -853,9 +893,9 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
     case "replacement":
       return { kind: "replacement", replacement: byThreat(p.by, p.options) };
     case "eviction-vote":
-      return { kind: "eviction-vote", vote: npcEvictChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
+      return { kind: "eviction-vote", vote: voteChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "tie-break":
-      return { kind: "tie-break", evict: npcEvictChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
+      return { kind: "tie-break", evict: voteChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "final-eviction":
       return { kind: "final-eviction", evict: byThreat(p.by, p.options) };
     case "finale-statement":

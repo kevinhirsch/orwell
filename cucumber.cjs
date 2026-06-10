@@ -44,6 +44,7 @@ module.exports = {
       "docs/features/0040-npc-confessionals.feature",
       "docs/features/0041-character-evolution-and-arc.feature",
       "docs/features/0043-emergent-bloc-behavior.feature",
+      "docs/features/0044-strategic-nomination-and-vote-refinements.feature",
       "docs/features/0045-endgame-structure.feature",
       "docs/features/0046-player-eviction-and-jury.feature",
       "docs/features/0047-eviction-night-live.feature",

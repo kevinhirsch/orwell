@@ -130,6 +130,15 @@ export class Orchestrator {
     return (this.consecutiveFaults.get(user) ?? 0) >= Orchestrator.BREAKER_THRESHOLD;
   }
 
+  /** How many LIVING NPCs the off-screen society can draw on (B52: evictees stop living).
+   *  No live game ⇒ the synthetic test pool — always enough. */
+  private offscreenPoolSize(user: string): number {
+    const core = this.registry.sandboxFor(user).session.snapshot();
+    if (!core.house) return Infinity;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    return core.house.npcs.filter((n) => !evicted.has(n.id)).length;
+  }
+
   /** Surface a fault where an operator can see it (B58/E6) — stderr, with user + kinds. */
   private logFaults(user: string, trigger: Trigger, faults: Fault[]): void {
     console.error(
@@ -144,6 +153,14 @@ export class Orchestrator {
     // sandbox instead of blindly retrying — the flag shows in health; a good player turn resets it.
     if (trigger === "offscreen-tick" && this.circuitOpen(user)) {
       return { events: 0, integrity: "fault", faults: this.health.get(user)?.faults.slice(-1) ?? [] };
+    }
+    // Deep endgame (0044 follow-through of the B52 rule): with fewer than two LIVING NPCs there is
+    // no off-screen society left to run — e.g. the player standing in the Final 2. That tick is a
+    // clean no-op, NOT an integrity fault: the daily-event invariant belongs to the live loop's own
+    // beats (the finale is full of them), and flagging the empty house would log a false fault on
+    // every finale turn of a healthy, player-won game.
+    if (trigger === "offscreen-tick" && this.offscreenPoolSize(user) < 2) {
+      return { events: 0, integrity: "ok", faults: [] };
     }
     const sandbox = this.registry.sandboxFor(user);
     const baseline = this.registry.snapshot(user);
