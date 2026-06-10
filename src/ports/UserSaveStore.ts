@@ -20,4 +20,11 @@ export interface UserSaveStore {
   loadLatest(user: string): SessionSnapshot | null;
   /** The users with durable saves (B60/audit E11) — lets the runtime preload at boot. Optional. */
   listUsers?(): string[];
+  /**
+   * A season RESTART (audit E1/D1/R1): retire the user's saves off the live path so `hasSave` is
+   * false and the new season's history starts clean — an engine restart must resume season 2,
+   * never resurrect the dead one. Implementations ROTATE rather than destroy (non-degradation:
+   * the retired season's record stays on disk for inspection). Optional.
+   */
+  resetUser?(user: string): void;
 }
