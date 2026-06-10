@@ -38,6 +38,15 @@ describe("the constants grep gate (B59)", () => {
     const jury = read("src/engine/jury.ts");
     expect(jury).toContain("juryConstants"); // weights/manner/appeal magnitudes are imported
   });
+
+  it("the 0044 strategy magnitudes live only in decisionConstants", () => {
+    const season = read("src/engine/season.ts");
+    const live = read("src/engine/liveSeason.ts");
+    expect(season).toContain("decisionConstants");
+    expect(live).toContain("decisionConstants");
+    expect(season).not.toMatch(/PARANOIA_WEIGHT = 0\./); // re-homed into the module
+    expect(live).not.toMatch(/threat \* \(1 \+ paranoia \* 0\./); // no inline vote weight
+  });
 });
 
 describe("the retune test (a knob turn genuinely changes behavior)", () => {

@@ -94,6 +94,28 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     expect(health.faults.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("an off-screen tick with fewer than two living NPCs is a clean no-op, not a fault (deep endgame)", () => {
+    const registry = new GameSessionRegistry();
+    const orch = new Orchestrator(registry, new FakeClock(), { seed: 13 });
+    registry.sandboxFor(U).session.createCharacter({ playerName: "Finalist", seed: 13 });
+    // The player stands in the Final 2: every NPC but one has been evicted (B52: evictees stop
+    // living), so there is no off-screen society left to run. The tick must be a clean no-op —
+    // the old behavior logged a no-daily-event integrity fault on every finale turn.
+    const snap = registry.snapshot(U);
+    const npcs = snap.house!.npcs.map((n) => n.id);
+    snap.live!.evictionOrder = npcs.slice(0, npcs.length - 1);
+    snap.live!.active = [PLAYER, npcs[npcs.length - 1]!];
+    registry.restore(U, snap);
+    const before = registry.sandboxFor(U).engine.events.query().length;
+
+    const res = orch.advance(U, "offscreen-tick");
+    expect(res.integrity).toBe("ok");
+    expect(res.faults).toEqual([]);
+    expect(res.events).toBe(0);
+    expect(registry.sandboxFor(U).engine.events.query().length).toBe(before);
+    expect((orch.sandboxHealth(U) as { lastIntegrity: string }).lastIntegrity).not.toBe("fault");
+  });
+
   it("the checkpoint detects dropped detail (degradation)", () => {
     const registry = new GameSessionRegistry();
     const orch = new Orchestrator(registry, new FakeClock(), { seed: 1 });

@@ -829,7 +829,22 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > enemy); fracture is implicit (recomputed). **Nothing stored** — the serialized soul holds no bloc/label
 > (decision 0002; cross-check 0007). Vault-free. Add to `cucumber.cjs`. Open a PR.
 
-### B33 — 0044 strategic nomination & vote refinements  ·  depends on 0039/0041/0043
+### B33 — 0044 strategic nomination & vote refinements  ·  **✅ DONE 2026-06-10**
+
+> **Built to green.** `src/engine/decisionConstants.ts` is the single tunable module (sibling to 0026/0028 —
+> the paranoia weight re-homed there; the B59 grep gate extended). **Nominations**: `nominationStrategy`
+> (season.ts) layers on the built threat-primary read — `politicalTemperature` (house-wide threat spread; a
+> runaway threat forces everyone DIRECT), disposition-gated tactics (bond ⇒ PAWN beside the target; clash ⇒
+> BACKDOOR — the real target stays off the block and the replacement read completes the plan when the veto
+> comes off; neutral ⇒ direct), and hard bloc protection (a mate is never nominated, even as the cheapest pawn,
+> while two legal others remain). **Votes**: `voteChoice` (liveSeason.ts) blends threat × (1 + paranoia·mood
+> weight) (0041 self-protection — a rattled voter can break a deal a calm one honors) + `blocTerm` (0043) −
+> deal-honor pull (0039 — the ledger still reconciles a break with full consequence) − light jury management
+> (don't make a bitter juror in a near-tie). `SeasonCtx` gained optional `dispositionOf`/`dealsOf` (adapter-
+> wired); `autoDecision` + the NPC replacement read use the same strategy (no second rulebook). Also fixed the
+> deep-endgame fault spam this surfaced: an off-screen tick with <2 living NPCs (player in the Final 2) is now
+> a clean no-op, not a per-turn `no-daily-event` integrity fault. `tests/unit/strategicDecisions.test.ts` +
+> all 6 BDD scenarios in `cucumber.cjs`. Original prompt below.
 
 > Implement `docs/features/0044-strategic-nomination-and-vote-refinements.{md,feature}`. Enrich the **built**
 > `chooseNominations` (add pawn/backdoor/bloc-protection, archetype-gated, + the week's political temperature)
