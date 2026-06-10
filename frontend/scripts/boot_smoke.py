@@ -25,12 +25,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # frontend/
 PY = os.environ.get("PYTHON", sys.executable)
 
 # Inherited verticals that must be GONE under the game build. Specific enough not to
-# collide with kept endpoints — note "/api/search/" (web-search subpaths) excludes the
-# kept bare "/api/search" (conversation search, owned by chat_routes).
+# collide with kept endpoints. NOTE: web search (/api/search/*) is NOT in this list —
+# it is a kept in-game agent capability since the C32 ruling (amends 0032).
 DROP_PREFIXES = (
     "/api/shell", "/api/email", "/api/gallery", "/api/compare", "/api/memory",
     "/api/calendar", "/api/contacts", "/api/notes", "/api/tasks", "/api/research",
-    "/api/cookbook", "/api/hwfit", "/api/webhooks", "/api/skills", "/api/search/",
+    "/api/cookbook", "/api/hwfit", "/api/webhooks", "/api/skills",
     "/api/signature", "/api/document", "/api/editor",
 )
 
@@ -107,6 +107,7 @@ try:
     leaked = sorted(p for p in paths if p.startswith(DROP_PREFIXES))
     check(not leaked, f"no dropped vertical is mounted (leaked: {leaked})")
     check("/api/search" in paths, "keep-set: conversation search (/api/search) mounted")
+    check("/api/search/query" in paths, "keep-set: web search mounted (C32 in-fiction capability)")
     check(any(p.startswith("/api/auth") for p in paths), "keep-set: accounts/auth mounted")
     check(any("mcp" in p for p in paths), "keep-set: engine MCP backend mounted")
     check(status(base, "/") == 200, "keep-set: GET / -> 200")
