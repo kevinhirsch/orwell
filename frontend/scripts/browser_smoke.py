@@ -89,6 +89,20 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # Final FE batch: V3 phase labels + A3 delta announcer live in the status HUD.
+            hud_a11y = page.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const el = document.getElementById('orwell-status');
+              if (!el) return { ok: false };
+              const a = el.querySelector('#os-announce');
+              return { announcer: !!a, polite: a && a.getAttribute('aria-live') === 'polite',
+                       hiddenVisually: a && a.offsetWidth <= 1 };
+            }""")
+            check(hud_a11y.get("announcer") is True and hud_a11y.get("polite") is True,
+                  f"status HUD has a polite delta announcer ({hud_a11y})")
+            check(page.evaluate("document.getElementById('chat-history').getAttribute('aria-live')") == "polite",
+                  "chat log is a polite live region (aria-busy gates it during streams)")
+
             # C23/C15: the game build marks the body, and the engine-down landing is a DARK
             # HOUSE holding card (game-framed), never the silent generic-workspace welcome.
             # (The smoke runs with the engine down, so this is the real F5 path.)

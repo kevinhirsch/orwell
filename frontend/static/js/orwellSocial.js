@@ -32,6 +32,9 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  // C18: a hidden tab polls nothing; consecutive failures back the poll off (max 2 min).
+  let _failures = 0;
+  function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
   let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
   let pendingApproachId = null;  // approach prefilled but not yet sent
   let _shown = false;  // shown a real game this session (U5: keep last-known on a hiccup)
@@ -112,7 +115,7 @@ import * as modalManager from "./modalManager.js";
           background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600;
           font-family: inherit; font-size: .76rem;
         }
-        #orwell-social .osoc-hd { opacity: .6; margin: .55rem 0 .3rem; letter-spacing: .03em; }
+        #orwell-social .osoc-hd { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); margin: .55rem 0 .3rem; letter-spacing: .03em; }
         #orwell-social .osoc-chip {
           display: flex; align-items: center; gap: .35rem; margin: .25rem 0;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
@@ -154,7 +157,7 @@ import * as modalManager from "./modalManager.js";
         }
         #orwell-dr-modal .osoc-drhdr { cursor: move; user-select: none; }
         #orwell-dr-modal h3 { margin: 0 0 .3rem; font-size: .95rem; }
-        #orwell-dr-modal .osoc-note { opacity: .65; font-size: .72rem; margin-bottom: .6rem; }
+        #orwell-dr-modal .osoc-note { color: color-mix(in srgb, var(--fg, #9cdef2) 80%, var(--panel, #111)); font-size: .72rem; margin-bottom: .6rem; }
         #orwell-dr-modal textarea {
           width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box;
           background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
@@ -398,9 +401,11 @@ import * as modalManager from "./modalManager.js";
     } catch (_) {
       // ENGINE HICCUP (not "no game"): keep a shown panel up (U5) — just don't refresh
       // approaches. Only hide when we've never shown it (nothing to keep).
+      _failures += 1;
       if (!_shown) hidePanel();
       return;
     }
+    _failures = 0;
     if (!(st && st.started)) {
       _shown = false;
       hidePanel(); // genuinely no game
@@ -429,7 +434,11 @@ import * as modalManager from "./modalManager.js";
     ensureUI();
     refresh();
     if (timer) clearInterval(timer);
-    timer = setInterval(refresh, POLL_MS);
+    const tick = async () => {
+      if (!document.hidden) await refresh();  // C18: no polling in a hidden tab
+      timer = setTimeout(tick, _pollDelay());
+    };
+    timer = setTimeout(tick, _pollDelay());
   }
 
   window.orwellRefreshSocial = refresh;
