@@ -166,18 +166,25 @@ function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
 }
 
 export class GameSessionRegistry {
+  /** Default cap on RESIDENT sandboxes (R4): beyond it, the least-recently-used unloads to disk. */
+  private static readonly DEFAULT_MAX_RESIDENT = 64;
+
   private readonly sandboxes = new Map<string, UserSandbox>();
+  private readonly maxResident: number;
 
   /**
    * An optional durable store (0030) makes the live game survive an engine restart:
    * `sandboxFor` recalls the user's saved game on first build, and every mutation
    * saves it. With no store, the registry is purely in-memory (the prior behavior).
    */
-  constructor(private readonly saveStore?: UserSaveStore) {}
+  constructor(private readonly saveStore?: UserSaveStore, opts: { maxResident?: number } = {}) {
+    this.maxResident = Math.max(1, opts.maxResident ?? GameSessionRegistry.DEFAULT_MAX_RESIDENT);
+  }
 
   /**
    * Wire the per-user hooks every sandbox needs (B41/B58): the commit hook (checkpoint-then-save),
-   * the live admin mirror, the REAL admin reset delegate, and the Vault-free health provider.
+   * the live admin mirror, the REAL admin reset delegate, the ONE restart door for the player
+   * channel, and the Vault-free health provider.
    */
   private wireHooks(user: string, sb: UserSandbox): void {
     const persist = (): void => {
@@ -188,6 +195,14 @@ export class GameSessionRegistry {
     sb.commands.setOnPersist(persist);
     sb.admin.setResetDelegate(() => {
       this.resetUser(user); // the admin reset re-onboards the REAL game (B58/E5; B36/C12 route here)
+    });
+    // ONE sanctioned restart door (audit E1/D1/R1): a confirmed player-channel restart
+    // (`createCharacter` + `confirmRestart` — the FE's reset path) converges on the SAME
+    // `resetUser` the admin door uses — orchestrator baseline forgotten, dead season's saves
+    // rotated, a clean sandbox — and season 2 is created THERE. Two doors, one hinge.
+    sb.session.setOnRestart((req) => {
+      const fresh = this.resetUser(user);
+      return fresh.session.createCharacter(req);
     });
     sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
     sb.syncAdmin();
@@ -212,8 +227,31 @@ export class GameSessionRegistry {
       }
       this.wireHooks(user, sb);
       this.sandboxes.set(user, sb);
+    } else {
+      // LRU touch (R4): Map iteration is insertion-ordered — re-inserting keeps the oldest first.
+      this.sandboxes.delete(user);
+      this.sandboxes.set(user, sb);
     }
+    this.unloadIdle(user);
     return sb;
+  }
+
+  /**
+   * Idle-sandbox LRU unload (audit R4): resident sandboxes were never evicted — +1.6MB RSS per
+   * user, permanently. With a durable store, a sandbox provably rebuilds from its save, so beyond
+   * `maxResident` the least-recently-used ones are saved and dropped from memory; their next
+   * request resumes from disk. Without a store nothing unloads (an in-memory game has no disk to
+   * come back from). The engine is synchronous through every mutation, so an unload can never
+   * interleave a half-applied turn.
+   */
+  private unloadIdle(current: string): void {
+    if (!this.saveStore) return;
+    while (this.sandboxes.size > this.maxResident) {
+      const lru = this.sandboxes.keys().next().value;
+      if (lru === undefined || lru === current) return; // never unload the sandbox being served
+      this.saveUser(lru); // park the latest state before dropping the object graph
+      this.sandboxes.delete(lru);
+    }
   }
 
   /**
@@ -234,10 +272,11 @@ export class GameSessionRegistry {
     else this.saveUser(user);
   }
 
-  /** Persist the user's current sandbox to durable storage (a no-op without a store). */
-  saveUser(user: string): void {
+  /** Persist the user's current sandbox to durable storage (a no-op without a store). A caller
+   *  that already exported the snapshot passes it (R3) — never re-serialize the same state. */
+  saveUser(user: string, snap?: SessionSnapshot): void {
     const sb = this.sandboxes.get(user);
-    if (sb && this.saveStore) this.saveStore.saveFor(user, exportSnapshot(sb));
+    if (sb && this.saveStore) this.saveStore.saveFor(user, snap ?? exportSnapshot(sb));
   }
 
   /** The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031. */
@@ -268,12 +307,28 @@ export class GameSessionRegistry {
     return this.sandboxes.size;
   }
 
-  /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
+  /**
+   * The ONE sanctioned restart door (audit E1/D1/R1): start a fresh game for the user — replaces
+   * ONLY their own sandbox (others untouched). Both restart surfaces converge here (the admin's
+   * `manageSandbox("reset")` delegate and the player channel's confirmed `createCharacter`), and
+   * the reset is COMPLETE: the dead season's durable saves rotate off the live path (so an engine
+   * restart can never resurrect it — R1) and the orchestrator forgets its baseline/faults/health
+   * via `onReset` (so season 2's first commit isn't a "degradation" against a finished season — E1).
+   */
   resetUser(user: string): UserSandbox {
+    this.saveStore?.resetUser?.(user); // rotate the dead season's saves off the live path (R1)
+    this.onReset?.(user); // invalidate the orchestrator's baseline/health/rng for this user (E1)
     const sb = buildUserSandbox(user);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;
+  }
+
+  /** Reset hook (E1): the runtime wires this to `Orchestrator.forgetUser`. */
+  private onReset?: (user: string) => void;
+
+  setOnReset(fn: (user: string) => void): void {
+    this.onReset = fn;
   }
 
   /** Vault-free per-user health (B58/E5+E6) — composed by the runtime over the orchestrator. */
