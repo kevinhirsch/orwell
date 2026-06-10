@@ -1,12 +1,25 @@
-// Orwell onboarding — first-class character creation folded into the MAIN app.
+// Orwell onboarding — the casting interview lives in the CHAT (feature 0050).
 //
-// On boot, if the engine reports no active game, this overlays a character-creation
-// screen before the chat (it is NOT a separate page — it lives in the main app and
-// dissolves into the chat once a houseguest exists). It uses only the Vault-free
-// /api/orwell endpoints. It FAILS OPEN: if the engine is unreachable it never shows,
-// so the normal chat is never blocked.
+// There is NO data-entry modal: character creation is the game's first scene. Pre-game,
+// the server frames every chat turn as the producer's casting interview (the engine's
+// character-creation moment prompt), the producer asks, the player answers, and the model
+// records each answer with updateCasting — the ENGINE tracks what's captured and what the
+// next step is, so the interview can be none, half, or fully done and always resumes.
+//
+// This module's remaining jobs:
+//   • J4 (model gate): no chat model configured → a game-framed holding card ("Production
+//     needs a feed source") — the interview literally cannot speak without one.
+//   • F5 (engine down): the dark-house holding card instead of a generic workspace welcome.
+//   • F7 (fresh season): the FIRST seat-taking of a new interview opens a fresh chat
+//     session so a dead season's transcript never rides along as narrator context.
+//   • Hand-off: pre-game with everything ready, PREFILL the composer (never auto-send —
+//     ADR 0003: the player owns the first keypress) and let the chat do the rest.
+//
+// On a non-game build an unreachable engine never blocks the normal chat (fail open).
 (function () {
   "use strict";
+
+  const SEAT_TAKEN_KEY = "orwell-interview-open"; // sessionStorage: one fresh-session+prefill per interview
 
   const ready = (fn) =>
     document.readyState === "loading"
@@ -24,7 +37,7 @@
     el.id = "orwell-onboarding";
     el.setAttribute("role", "dialog");
     el.setAttribute("aria-modal", "true");
-    el.setAttribute("aria-label", "Create your houseguest");
+    el.setAttribute("aria-label", "Big Brother production notice");
     el.innerHTML = `
       <style>
         #orwell-onboarding {
@@ -45,62 +58,16 @@
             color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 60%, var(--fg, #fff)));
           -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
         }
-        #orwell-onboarding p.sub { margin: 0 0 1.1rem; font-size: .82rem; opacity: .7; line-height: 1.5; }
-        #orwell-onboarding label { display: block; font-size: .8rem; opacity: .8; margin: .7rem 0 .3rem; }
-        #orwell-onboarding input {
-          width: 100%; padding: .6rem .7rem; box-sizing: border-box;
-          background: var(--input-bg, rgba(255,255,255,.05)); color: var(--fg, #fff);
-          border: 1px solid var(--input-border, var(--border, #355a66)); border-radius: 8px;
-          font-family: inherit; font-size: .9rem;
-        }
-        #orwell-onboarding .row { display: flex; gap: .6rem; }
-        #orwell-onboarding .row > div { flex: 1; }
-        #orwell-onboarding button {
-          margin-top: 1.2rem; width: 100%; padding: .7rem; cursor: pointer;
-          background: var(--send-btn-bg, var(--red, #e06c75)); color: #fff;
-          border: none; border-radius: 8px; font-family: inherit; font-weight: 600; font-size: .92rem;
-        }
-        #orwell-onboarding button[disabled] { opacity: .6; cursor: default; }
-        #orwell-onboarding .err { margin-top: .8rem; font-size: .8rem; color: var(--red, #e06c75); min-height: 1em; }
-        #orwell-onboarding .ob-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; }
-        #orwell-onboarding .ob-chip {
-          cursor: pointer; font: inherit; font-size: .72rem; padding: .15rem .55rem; margin: 0;
-          width: auto; border-radius: 999px; border: 1px solid var(--border, #355a66);
-          background: rgba(255,255,255,.05); color: inherit;
-        }
         #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
         #orwell-onboarding .ob-hold .ob-hold-sub { opacity: .7; font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
       </style>
-      <form class="ob-card" id="ob-form">
-        <h1>Welcome to the house</h1>
-        <p class="sub">Big Brother is watching. Create your houseguest to begin — the rest of the
-          house is cast for you, and every conversation from here is in-character.
-          Your strengths are drawn from who you are: like every houseguest, balanced — never
-          invincible. The house plays fair, and so does the game.</p>
-        <label for="ob-name">Your houseguest's name</label>
-        <input id="ob-name" name="name" autocomplete="off" required placeholder="e.g. Alex" />
-        <div class="row">
-          <div>
-            <label for="ob-arche">Archetype <span style="opacity:.5">(optional — these shape your hidden strengths)</span></label>
-            <input id="ob-arche" name="archetype" autocomplete="off" placeholder="mastermind…" />
-            <div class="ob-chips" id="ob-arche-chips" aria-label="Archetype suggestions"></div>
-          </div>
-          <div>
-            <label for="ob-style">Strategy <span style="opacity:.5">(optional)</span></label>
-            <input id="ob-style" name="style" autocomplete="off" placeholder="social…" />
-          </div>
-        </div>
-        <button type="submit" id="ob-submit">Enter the house</button>
-        <div class="err" id="ob-err" aria-live="polite"></div>
-      </form>`;
+      <div class="ob-card"></div>`;
     return el;
   }
 
   // A11Y-1: aria-modal is a PROMISE to assistive tech that the rest of the page is
-  // inert — enforce it. Tab cycles inside the card; everything behind the scrim is
-  // inert (unfocusable, unclickable) until the overlay resolves. Without this a
-  // keyboard/screen-reader player tabbed straight out into a dead chat on their
-  // very first screen.
+  // inert — enforce it. Tab stays inside the card; everything behind the scrim is
+  // inert (unfocusable, unclickable) until the overlay resolves.
   let _inerted = [];
   function inertBackground(except) {
     _inerted = [];
@@ -117,111 +84,21 @@
     el.addEventListener("keydown", (e) => {
       if (e.key !== "Tab") return;
       const f = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-      if (!f.length) return;
+      if (!f.length) { e.preventDefault(); return; } // nothing focusable → focus stays on the card
       const first = f[0], last = f[f.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
   }
 
-  function mount() {
-    if (document.getElementById("orwell-onboarding")) return;
-    const el = buildOverlay();
-    document.body.appendChild(el);
-    inertBackground(el);
-    trapFocus(el);
-    const form = el.querySelector("#ob-form");
-    const btn = el.querySelector("#ob-submit");
-    const err = el.querySelector("#ob-err");
-    // Canonical archetypes (engine: characterFactory ARCHETYPES) as one-tap suggestions —
-    // free text is still allowed; canonical words also steer the hidden stat derivation.
-    const ARCHETYPES = ["mastermind", "social-butterfly", "comp-beast", "villain", "underdog",
-      "flirt", "loyalist", "wildcard", "analyst", "hothead", "peacemaker", "floater"];
-    const chipWrap = el.querySelector("#ob-arche-chips");
-    if (chipWrap) {
-      ARCHETYPES.forEach((a) => {
-        const c = document.createElement("button");
-        c.type = "button"; c.className = "ob-chip"; c.textContent = a;
-        c.addEventListener("click", () => {
-          const inp = el.querySelector("#ob-arche");
-          inp.value = a; inp.dispatchEvent(new Event("input", { bubbles: true }));
-        });
-        chipWrap.appendChild(c);
-      });
-    }
-    el.querySelector("#ob-name").focus();
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const name = el.querySelector("#ob-name").value.trim();
-      if (!name) { err.textContent = "Please enter a name."; return; }
-      btn.disabled = true; err.textContent = "Casting the house…";
-      try {
-        const body = { playerName: name };
-        const a = el.querySelector("#ob-arche").value.trim();
-        const s = el.querySelector("#ob-style").value.trim();
-        if (a) body.archetype = a;
-        if (s) body.strategyStyle = s;
-        const r = await fetch("/api/orwell/new-game", {
-          method: "POST", credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!r.ok) {
-          const d = await r.json().catch(() => ({}));
-          throw new Error(d.error || ("HTTP " + r.status));
-        }
-        uninertBackground();
-        el.remove(); // dissolve into the chat — the main chat is now in-character
-        // F7: a NEW SEASON gets a NEW chat session — the prior transcript (a finished or
-        // reset season) must never ride along as context for the narrator.
-        try {
-          const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
-          if (nb) nb.click();
-        } catch (_) {}
-        // Nudge the status HUD to pick up the freshly-started game immediately.
-        window.dispatchEvent(new Event("orwell:gamechanged"));
-        // C22/J1 (slice): tee up the premiere — prefill (NEVER auto-send) so the player's
-        // very next Enter walks them into the house and the model opens the season from
-        // the engine's premiere moment prompt. The curtain is one keypress away, and the
-        // player still owns the keypress.
-        setTimeout(() => {
-          const box = document.getElementById("message");
-          if (box && !box.value.trim()) {
-            box.value = "I take a breath, pick up my bag, and walk into the house.";
-            box.dispatchEvent(new Event("input", { bubbles: true }));
-            box.focus();
-          }
-        }, 400); // after the fresh-session click settles
-      } catch (e2) {
-        err.textContent = "Couldn't start the game: " + e2.message;
-        btn.disabled = false;
-      }
-    });
-  }
-
-  // Seam for the headless browser gate (and future flows): mount on demand.
-  window._orwellOnboardingMount = mount;
-
-  // J4: "is any chat model configured?" — the game cannot speak without one, and the old
-  // flow let the player author a houseguest then dead-end at "No model selected".
-  async function anyModelConfigured() {
-    try {
-      const r = await fetch("/api/models", { credentials: "same-origin" });
-      if (!r.ok) return true; // can't tell → don't block the flow on a probe
-      const d = await r.json();
-      // /api/models shape: { items: [{ models: [...] , offline }] } per endpoint group.
-      const items = (d && Array.isArray(d.items)) ? d.items : [];
-      return items.some((it) => Array.isArray(it.models) && it.models.length > 0 && !it.offline);
-    } catch (_) { return true; }
-  }
-
-  // F5: the engine is down on a GAME build — show the house, dark, instead of silently
-  // dropping the player into a generic workspace welcome.
+  // F5/J4: a blocking production notice — the only modal left in onboarding (it carries
+  // no data entry; it blocks because the game genuinely cannot proceed). Re-probes
+  // quietly and dissolves back into the flow the moment the blocker clears.
   function mountHolding(title, sub, readyAgain) {
     if (document.getElementById("orwell-onboarding")) return;
     const el = buildOverlay();
     const card = el.querySelector(".ob-card");
+    card.setAttribute("tabindex", "-1");
     card.innerHTML = `
       <div class="ob-hold">
         <h1>${title}</h1>
@@ -230,7 +107,7 @@
     document.body.appendChild(el);
     inertBackground(el);
     trapFocus(el);
-    // Re-probe quietly; dissolve back into the flow the moment the blocker clears.
+    try { card.focus(); } catch (_) {}
     const t = setInterval(async () => {
       try {
         if (await readyAgain()) {
@@ -243,11 +120,59 @@
     }, 5000);
   }
 
+  // Seam for the headless browser gate: mount the dark-house holding card on demand.
+  window._orwellOnboardingMount = function () {
+    mountHolding("The house is dark",
+      "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
+      async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
+  };
+
+  // J4: "is any chat model configured?" — the interview cannot speak without one, and the
+  // old flow let the player author a houseguest then dead-end at "No model selected".
+  async function anyModelConfigured() {
+    try {
+      const r = await fetch("/api/models", { credentials: "same-origin" });
+      if (!r.ok) return true; // can't tell → don't block the flow on a probe
+      const d = await r.json();
+      // /api/models shape: { items: [{ models: [...] , offline }] } per endpoint group.
+      const items = (d && Array.isArray(d.items)) ? d.items : [];
+      return items.some((it) => Array.isArray(it.models) && it.models.length > 0 && !it.offline);
+    } catch (_) { return true; }
+  }
+
+  // Hand the player to the producer — in the chat, no modal. Runs ONCE per interview
+  // (sessionStorage marker): opens a fresh chat session (F7 — a finished or reset season's
+  // transcript must never ride along as narrator context for the new one), then PREFILLS
+  // the composer so the player's own Enter starts the interview. Never auto-sends.
+  function takeASeat() {
+    let seated = false;
+    try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
+    if (seated) return; // mid-interview reload: the conversation is already underway
+    try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
+    try {
+      const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
+      if (nb) nb.click();
+    } catch (_) {}
+    setTimeout(() => {
+      const box = document.getElementById("message");
+      if (box && !box.value.trim()) {
+        box.value = "I take my seat for the casting interview.";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.focus();
+      }
+    }, 400); // after the fresh-session click settles
+  }
+
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     try {
       const st = await fetchState();
-      if (!st || st.started !== false) return; // game running (or unreadable): normal chat
+      if (!st || st.started !== false) {
+        // A season is running (or the state is unreadable): the NEXT reset begins a new
+        // interview, so clear the seat marker.
+        try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
+        return;
+      }
       if (!(await anyModelConfigured())) {
         // Sequence the prerequisite (J4): production needs a feed source first. Admins get
         // pointed at setup; everyone else knows what to ask for. Re-probe and continue.
@@ -258,12 +183,10 @@
           anyModelConfigured);
         return;
       }
-      mount();
+      takeASeat();
     } catch (_) {
       // Engine unreachable: on the game build that's a dark house, not a silent skip (F5).
-      if (gameBuild) mountHolding("The house is dark",
-        "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
-        async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
+      if (gameBuild) window._orwellOnboardingMount();
     }
   }
 

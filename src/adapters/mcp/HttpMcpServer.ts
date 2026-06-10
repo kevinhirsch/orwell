@@ -31,9 +31,10 @@ export interface HttpMcpResolver {
  *   `x-orwell-token`); a mismatch is 401. Lets the engine be safely reachable beyond loopback.
  * - `requireUser` — multi-user mode: a missing/empty `x-orwell-user` header is **rejected (400)**
  *   instead of silently routing to a shared `"default"` sandbox (cross-user bleed).
- * - `knownUser` — a non-`createCharacter` call for a user with no game is refused (404) **without
- *   minting a sandbox**, so an anonymous caller can't spray ids to exhaust memory (DoS). Only
- *   `createCharacter` may create a new sandbox.
+ * - `knownUser` — a call for a user with no game is refused (404) **without minting a sandbox**,
+ *   so an anonymous caller can't spray ids to exhaust memory (DoS) — except the casting tools
+ *   (`createCharacter`, `updateCasting`, `getMomentPrompt`), which legitimately run BEFORE a game
+ *   exists (0050: the pre-game chat is the casting interview).
  *
  * All three default OFF, so the single-tenant trusted-loopback deploy (and existing tests) are
  * unchanged; production turns them on via env (`main.ts`).
@@ -47,7 +48,10 @@ export interface HttpMcpOptions {
 /** The front-end (trusted loopback auth tier, 0021) asserts the user via this header. */
 const USER_HEADER = "x-orwell-user";
 /** Tools that may run for a user with no existing game (i.e. may mint a fresh sandbox). */
-const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter"]);
+// 0050: the casting interview happens BEFORE a game exists, so its tools must be able to mint the
+// user's sandbox — updateCasting records the first answers; getMomentPrompt serves the interview
+// manual to a brand-new user (the front-end frames the pre-game chat with it).
+const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt"]);
 
 function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
   return typeof (d as HttpMcpResolver).resolve === "function";

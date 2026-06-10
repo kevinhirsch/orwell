@@ -323,6 +323,15 @@ export class BbWorld extends World {
   evoArcA?: number[];
   evoArcB?: number[];
 
+  // The casting interview (0050) scratch state.
+  castSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  castView?: import("../../src/ports/GameSession").GameStateView;
+  castPrompt?: string;
+  castRestoredPlayer?: import("../../src/engine/characterFactory").PlayerCharacter;
+  castStatus?: import("../../src/ports/GameSession").CastingStatusView;
+  castResumed?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  castError?: Error;
+
   constructor(options: IWorldOptions) {
     super(options);
   }
