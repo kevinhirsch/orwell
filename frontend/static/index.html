@@ -962,10 +962,28 @@
         'Tip: Use Compare mode to test different models side by side.',
         'Tip: Attach images or files using the + button next to the input.',
       ];
+      // Game build (J8/RES-1): the landing speaks Big Brother, never the inherited
+      // workspace ("Compare mode", "web search and code execution" don't exist here).
+      if (document.body && document.body.hasAttribute('data-game-build')) {
+        desktop = [
+          'Tip: Just talk — every conversation is in-character once your season starts.',
+          'Tip: The Status panel tracks the week, the HOH, and who is on the block.',
+          'Tip: The House panel shows who wants a word with you — and the Diary Room.',
+          'Tip: Deals are real. Break one and the jury will remember.',
+        ];
+        phone = [
+          'Tip: Just talk — every conversation is in-character once your season starts.',
+          'Tip: Swipe from the edge to open The House panel.',
+          'Tip: The Diary Room is private — the house never hears it.',
+          'Tip: Deals are real. Break one and the jury will remember.',
+        ];
+      }
       var tips = mobile ? phone : desktop;
       var el = document.getElementById('welcome-tip');
       if (el) {
-        el.textContent = 'Type /setup, then choose Local models or API.';
+        el.textContent = document.body && document.body.hasAttribute('data-game-build')
+          ? tips[Math.floor(Math.random() * tips.length)]
+          : 'Type /setup, then choose Local models or API.';
       }
       fetch('/api/version').then(function(r){return r.json()}).then(function(d){
         if (d.version) window._appVersion = d.version;
@@ -2206,6 +2224,8 @@
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <script type="module" src="/static/js/orwellSocial.js"></script>  <!-- BB social: NPC approaches + Diary Room (Vault-free, 0036) -->
 <script type="module" src="/static/js/orwellFinale.js"></script>  <!-- BB finale: staged jury-vote reveal (Vault-free, 0037/C11) -->
+<script type="module" src="/static/js/orwellEngineStatus.js"></script>  <!-- BB engine-down banner: visible OOC error reporting -->
+<script type="module" src="/static/js/orwellDecision.js"></script>  <!-- BB decisions: confirm-on-binding guardrail (Vault-free, C20) -->
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>
 </html>

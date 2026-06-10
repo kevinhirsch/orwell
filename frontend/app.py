@@ -753,8 +753,12 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         html = f.read()
     nonce = getattr(request.state, "csp_nonce", "")
     html = html.replace("{{CSP_NONCE}}", nonce)
-    from src.settings import strip_dropped_scripts
+    from src.settings import strip_dropped_scripts, game_build_enabled
     html = strip_dropped_scripts(html)
+    if game_build_enabled():
+        # Let client JS/CSS branch on the build honestly (game-framed copy, tips, holding
+        # states) instead of guessing from engine reachability.
+        html = html.replace("<body", '<body data-game-build="1"', 1)
     return HTMLResponse(html)
 
 @app.get("/")

@@ -89,6 +89,110 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # Final FE batch: V3 phase labels + A3 delta announcer live in the status HUD.
+            hud_a11y = page.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const el = document.getElementById('orwell-status');
+              if (!el) return { ok: false };
+              const a = el.querySelector('#os-announce');
+              return { announcer: !!a, polite: a && a.getAttribute('aria-live') === 'polite',
+                       hiddenVisually: a && a.offsetWidth <= 1 };
+            }""")
+            check(hud_a11y.get("announcer") is True and hud_a11y.get("polite") is True,
+                  f"status HUD has a polite delta announcer ({hud_a11y})")
+            check(page.evaluate("document.getElementById('chat-history').getAttribute('aria-live')") == "polite",
+                  "chat log is a polite live region (aria-busy gates it during streams)")
+
+            # C23/C15: the game build marks the body, and the engine-down landing is a DARK
+            # HOUSE holding card (game-framed), never the silent generic-workspace welcome.
+            # (The smoke runs with the engine down, so this is the real F5 path.)
+            gb_flag = page.evaluate("document.body.hasAttribute('data-game-build')")
+            check(gb_flag is True, "game build marks <body data-game-build>")
+            page.wait_for_timeout(1500)  # onboarding's route() resolves its probes
+            holding = page.evaluate("""() => {
+              const el = document.getElementById('orwell-onboarding');
+              if (!el) return { mounted: false };
+              return { mounted: true, dark: (el.textContent || '').includes('The house is dark') };
+            }""")
+            check(holding.get("mounted") is True, f"engine-down: holding card mounts ({holding})")
+            check(holding.get("dark") is True, "engine-down: it's the dark-house card, not the form")
+            tip_ok = page.evaluate("""() => {
+              const t = (document.getElementById('welcome-tip') || {}).textContent || '';
+              return !/compare mode|web search and code/i.test(t);
+            }""")
+            check(tip_ok is True, "welcome tip never names a dropped vertical")
+            # Clear the holding card so later sections (settings, modals) aren't behind inert.
+            page.evaluate("const h = document.getElementById('orwell-onboarding'); if (h) h.remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C23/J5: the authoring form offers the canonical archetype chips.
+            page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
+            page.wait_for_selector("#orwell-onboarding", timeout=3000)
+            chips = page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip').length")
+            check(chips >= 10, f"onboarding offers canonical archetype chips ({chips})")
+            page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip')[0].click()")
+            chip_fill = page.evaluate("(document.getElementById('ob-arche')||{}).value || ''")
+            check(len(chip_fill) > 0, f"an archetype chip fills the field ({chip_fill!r})")
+            page.evaluate("document.getElementById('orwell-onboarding').remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C20: the confirm-on-binding decision guardrail. Dispatch a synthetic pending
+            # (exactly what chat.js emits from an advanceGame result) and assert the card
+            # renders the engine's prompt + legal options, enforces the pick count, and only
+            # arms Confirm at exactly N selected. No engine needed — pure module behavior.
+            page.evaluate("""
+              window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
+                kind: 'nominations', pick: 2,
+                prompt: 'Name two houseguests for eviction.',
+                options: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'}, {id:'npc:3',name:'C'} ],
+              }}}));
+            """)
+            page.wait_for_selector("#orwell-decision-card", timeout=3000)
+            opts = page.query_selector_all("#orwell-decision-card .odec-opt")
+            check(len(opts) == 3, f"decision card renders the engine's legal options ({len(opts)})")
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is True, "decision card: Confirm disarmed until the pick count is met")
+            opts[0].click()
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is True, "decision card: 1 of 2 selected still disarmed")
+            opts[1].click()
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is False, "decision card: exactly 2 selected arms Confirm")
+            opts[2].click()  # pick-count cap: a third selection is refused
+            n_sel = page.evaluate('document.querySelectorAll(`#orwell-decision-card .odec-opt[aria-pressed="true"]`).length')
+            check(n_sel == 2, "decision card: pick count capped at 2")
+            page.evaluate("document.querySelector('#orwell-decision-card .odec-x').click()")
+            check(page.query_selector("#orwell-decision-card") is None, "decision card: dismissible (prose path stays open)")
+
+            # C25/A11Y-1: the onboarding overlay is a REAL modal — focus trapped inside the
+            # card, everything behind the scrim inert. Driven with actual Tab keypresses.
+            page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
+            page.wait_for_selector("#orwell-onboarding", timeout=3000)
+            in_card = page.evaluate("document.activeElement && document.activeElement.id === 'ob-name'")
+            check(in_card is True, "onboarding: initial focus lands in the card")
+            for _ in range(12):  # tab far past the card's focusables — must wrap, never escape
+                page.keyboard.press("Tab")
+            trapped = page.evaluate(
+                "document.getElementById('orwell-onboarding').contains(document.activeElement)")
+            check(trapped is True, "onboarding: Tab cycles INSIDE the card (focus trap)")
+            sidebar_inert = page.evaluate("(document.getElementById('sidebar')||{}).inert === true "
+                                          "|| document.querySelector('#sidebar') === null "
+                                          "|| !!document.querySelector('#sidebar').closest('[inert]')")
+            check(sidebar_inert is True, "onboarding: background is inert while mounted")
+            page.evaluate("document.getElementById('orwell-onboarding').remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C25/A11Y-2: the Diary Room is a real dialog — Escape closes it and focus returns.
+            page.evaluate("window._orwellOpenDiaryRoom && window._orwellOpenDiaryRoom()")
+            page.wait_for_selector("#orwell-dr-modal", timeout=3000)
+            dr_open = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'flex'")
+            check(dr_open is True, "diary room: opens via the seam")
+            dr_focus = page.evaluate("document.activeElement && document.activeElement.id === 'osoc-dr-text'")
+            check(dr_focus is True, "diary room: focus lands in the entry box")
+            page.keyboard.press("Escape")
+            dr_closed = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'none'")
+            check(dr_closed is True, "diary room: Escape closes the dialog")
+
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
             # Drive the REAL user flow (open Settings via the gear, switch to the
@@ -181,6 +285,30 @@ def main() -> int:
                   f"mobile: hamburger follows a LEFT sidebar ({left_state})")
             check(right_state.get("ham") == right_state.get("sidebar") == "R",
                   f"mobile: hamburger follows a RIGHT sidebar ({right_state})")
+
+            # C26/M1: on a phone the game HUDs are full-width TOP SHEETS — they must never
+            # cover the composer (the old fixed 220px floaters sat right on top of it).
+            hud_geo = mob.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const el = document.getElementById('orwell-status');
+              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+              if (!el || !ta) return { ok: false, why: 'missing' };
+              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
+              return { ok: true, fullWidth: r.width >= window.innerWidth * 0.95,
+                       clearsComposer: r.bottom <= c.top, top: r.top };
+            }""")
+            check(hud_geo.get("fullWidth") is True, f"mobile: status HUD is a full-width sheet ({hud_geo})")
+            check(hud_geo.get("clearsComposer") is True, f"mobile: status HUD never covers the composer ({hud_geo})")
+            soc_geo = mob.evaluate("""() => {
+              if (window._orwellSocialEnsure) window._orwellSocialEnsure();
+              const el = document.getElementById('orwell-social');
+              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+              if (!el || !ta) return { ok: false };
+              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
+              return { fullWidth: r.width >= window.innerWidth * 0.95, clearsComposer: r.bottom <= c.top };
+            }""")
+            check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
+            check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
             mob.close()
 
             browser.close()

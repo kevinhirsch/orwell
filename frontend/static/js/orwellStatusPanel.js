@@ -27,6 +27,7 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
 
   async function fetchStatus() {
     const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -84,7 +85,9 @@ import * as modalManager from "./modalManager.js";
     if (el) return el;
     el = document.createElement("div");
     el.id = "orwell-status";
-    el.setAttribute("aria-live", "polite");
+    // A3: announcements happen via the dedicated delta announcer below — a live region
+    // on a root that toggles display:none and swaps every field per poll announces
+    // nothing useful (either silence or a full re-read with no sense of what changed).
     el.innerHTML = `
       <style>
         #orwell-status {
@@ -109,9 +112,11 @@ import * as modalManager from "./modalManager.js";
         }
         #orwell-status .os-min:hover { opacity: .9; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
-        #orwell-status .os-row .os-k { opacity: .6; min-width: 4.2em; }
+        #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
+        #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
         #orwell-status .os-you { margin: .45rem 0 .1rem; font-weight: 600; }
         #orwell-status .os-you .os-badge {
@@ -122,11 +127,22 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .5rem 0 .15rem; }
         #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; }
         #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
-        #orwell-status .os-hg.os-out { opacity: .45; text-decoration: line-through; }
+        #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
+        /* C26/M1: on phones the panel is a full-width top sheet under the header —
+           never a free-floating box over the chat or composer. Drag is disabled
+           (windowDrag's default mobile cutoff) so it can't be stranded off-screen. */
+        @media (max-width: 768px) {
+          #orwell-status {
+            left: 0 !important; right: 0 !important; top: 44px !important;
+            width: auto !important; max-width: none !important;
+            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
+            max-height: 38vh; overflow: auto;
+          }
+        }
       </style>
       <div class="os-hdr" title="Drag to move">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></span>
+        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
         <button type="button" class="os-min" title="Minimize" aria-label="Minimize">–</button>
       </div>
       <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
@@ -134,7 +150,8 @@ import * as modalManager from "./modalManager.js";
       <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
       <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
       <div class="os-roster-h" id="os-roster-h">The house</div>
-      <div class="os-roster" id="os-roster"></div>`;
+      <div class="os-roster" id="os-roster"></div>
+      <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
     document.body.appendChild(el);
 
     // Restore where the player last left it.
@@ -167,7 +184,6 @@ import * as modalManager from "./modalManager.js";
       enableDock: false,
       enableFullscreen: false,
       enableResize: false,
-      mobileSkip: 0,
       onDragEnd: ({ rect }) => {
         try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
       },
@@ -184,25 +200,72 @@ import * as modalManager from "./modalManager.js";
     el.style.display = "none";
   }
 
+  // V3: engine phase enums are internal vocabulary — the HUD speaks the show's.
+  const PHASE_LABELS = {
+    "setup": "Move-in day", "premiere": "Premiere", "hoh-competition": "HOH competition",
+    "nominations": "Nominations", "veto-competition": "Veto competition",
+    "veto-ceremony": "Veto ceremony", "eviction": "Eviction night",
+    "final-eviction": "Final eviction", "finale": "The finale", "jury": "Jury",
+    "social": "A day in the house",
+  };
+  const phaseLabel = (p) => PHASE_LABELS[p] || String(p || "").replace(/-/g, " ");
+
+  // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
+  let _last = { phase: null, hoh: null, noms: null, veto: null };
+  function announceDeltas(el, st, names) {
+    const a = el.querySelector("#os-announce");
+    if (!a) return;
+    const msgs = [];
+    const cur = {
+      phase: phaseLabel(st.phase),
+      hoh: names.hoh, noms: names.noms, veto: names.veto,
+    };
+    if (_last.phase !== null) {
+      if (cur.phase !== _last.phase) msgs.push(cur.phase + ".");
+      if (cur.hoh !== _last.hoh && cur.hoh !== "—") msgs.push("Head of Household: " + cur.hoh + ".");
+      if (cur.noms !== _last.noms && cur.noms !== "—") msgs.push("On the block: " + cur.noms + ".");
+      if (cur.veto !== _last.veto && cur.veto !== "—") msgs.push("Veto: " + cur.veto + ".");
+    }
+    _last = cur;
+    if (msgs.length) a.textContent = msgs.join(" ");
+  }
+
   function render(st) {
     const el = ensurePanel();
-    // No active game (engine reports week 0 / setup) → hide and keep polling.
+    // No active game (engine reports week 0 / setup) → genuinely hide (not a hiccup).
     if (!st || typeof st.week !== "number" || st.week < 1) {
+      _shown = false;
+      _failures = 0;
+    markStale(false);
       hidePanel();
       return;
     }
+    _shown = true;
     const name = (c) => (c && c.name) || "—";
     el.querySelector("#os-week").textContent = "Week " + st.week;
-    el.querySelector("#os-phase").textContent = st.phase || "";
+    el.querySelector("#os-phase").textContent = phaseLabel(st.phase);
     el.querySelector("#os-hoh").textContent = name(st.hoh);
     const noms = Array.isArray(st.nominees) ? st.nominees.map((n) => n.name).filter(Boolean) : [];
     el.querySelector("#os-noms").textContent = noms.length ? noms.join(", ") : "—";
     const veto = st.veto || {};
-    el.querySelector("#os-veto").textContent = veto.used
+    const vetoText = veto.used
       ? "used" + (veto.holder ? " · " + veto.holder.name : "")
       : (veto.holder ? veto.holder.name : "—");
+    el.querySelector("#os-veto").textContent = vetoText;
+    announceDeltas(el, st, {
+      hoh: name(st.hoh),
+      noms: noms.length ? noms.join(", ") : "—",
+      veto: vetoText,
+    });
     if (st._state !== undefined) renderRoster(el, st, st._state);
     // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
+    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
+    // unobstructed); the dock chip restores it as a full-width top sheet.
+    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+      _mobileParkedOnce = true;
+      el.style.display = "block";
+      try { modalManager.minimize(ID); return; } catch (_) {}
+    }
     if (!isMinimized()) el.style.display = "block";
   }
 
@@ -244,22 +307,49 @@ import * as modalManager from "./modalManager.js";
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  async function refresh() {
-    try {
-      const st = await fetchStatus();
-      // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
-      st._state = (await fetchState()) || null;
-      render(st);
-    } catch (_) {
-      // Engine down / no game → hide, fail open.
-      hidePanel();
-    }
+  // True once we've shown a real game at least once this session. Lets a transient engine
+  // hiccup keep the last-known panel up (U5) instead of vanishing the player's only readout.
+  let _shown = false;
+
+  // C18: a hidden tab polls nothing; consecutive failures back the poll off (max 2 min).
+  let _failures = 0;
+  function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
+
+  function markStale(on) {
+    const el = document.getElementById("orwell-status");
+    const dot = el && el.querySelector("#os-stale");
+    if (dot) dot.hidden = !on;
   }
+
+  async function refresh() {
+    let st;
+    try {
+      st = await fetchStatus();
+    } catch (_) {
+      // ENGINE HICCUP (not "no game"): if we've shown the panel, keep the last-known
+      // values up and flag the feed as reconnecting — don't blink the readout out.
+      _failures += 1;
+      if (_shown) markStale(true);
+      else hidePanel();
+      return;
+    }
+    markStale(false);
+    // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
+    st._state = (await fetchState()) || null;
+    render(st);
+  }
+
+  // Seam for the headless browser gate: build + show the panel on demand.
+  window._orwellStatusEnsure = () => { const el = ensurePanel(); el.style.display = "block"; return true; };
 
   function start() {
     refresh();
     if (timer) clearInterval(timer);
-    timer = setInterval(refresh, POLL_MS);
+    const tick = async () => {
+      if (!document.hidden) await refresh();  // C18: no polling in a hidden tab
+      timer = setTimeout(tick, _pollDelay());
+    };
+    timer = setTimeout(tick, _pollDelay());
   }
 
   // Let onboarding (or any flow that changes the game) trigger an immediate refresh.

@@ -5,6 +5,8 @@ never reaches the engine's Vault (the Vault Wall is enforced structurally on the
 engine side, not here). Endpoint comes from ``ORWELL_ENGINE_MCP_URL``.
 """
 import os
+import time
+
 import httpx
 
 # ORWELL_* are primary; BBAI_* are kept as silent deprecated fallbacks so a pre-rename .env
@@ -27,16 +29,92 @@ def _user_headers(user: str | None) -> dict:
     return {"X-Orwell-User": user or "default"}
 
 
+class EngineToolError(RuntimeError):
+    """The engine RESPONDED with a structured error — it is reachable and answered. Distinct from a
+    transport outage (connection refused / timeout / proxy 5xx), which propagates as httpx's own
+    ``RequestError``/``HTTPStatusError`` so callers can tell "the engine said no" apart from "the
+    engine is down". ``no_game`` flags the engine's intentional "no active game for this user" reply
+    (the knownUser guard) — a NORMAL pre-game state the caller should treat as ``started: False``."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+        self.no_game = "no active game" in (message or "").lower()
+
+
+# --- last-error tracking: VISIBLE error reporting for "engine up but erroring" -----------------
+# Every failed engine call records here; the next successful call clears it. /api/orwell/health
+# surfaces it (recency-gated), so the front-end banner can report a TECHNICAL problem (a failing
+# tool, a corrupt-save 500) even while the engine process itself is reachable — not only a hard
+# outage. Process-local on purpose: it describes THIS front-end's view of the engine right now.
+_LAST_ERROR: dict | None = None
+_LAST_ERROR_TTL_S = 90.0
+
+
+def _record_error(tool: str, kind: str, message: str) -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = {"ts": time.time(), "tool": tool, "kind": kind, "error": message}
+
+
+def _clear_error() -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = None
+
+
+def last_engine_error() -> dict | None:
+    """The most recent engine problem if it is RECENT and not superseded by a success.
+    ``kind`` is ``"unreachable"`` (transport) or ``"tool-error"`` (the engine answered with an
+    error). The pre-game "no active game" refusal is a normal state and is never recorded."""
+    e = _LAST_ERROR
+    if e and (time.time() - e["ts"]) <= _LAST_ERROR_TTL_S:
+        return e
+    return None
+
+
+async def _post_tool(path: str, name: str, args: dict | None, user: str | None) -> dict:
+    """POST one tool call to the engine; shared by the player and admin channels.
+
+    Raises :class:`EngineToolError` when the engine answers with a structured ``{"error": ...}`` body
+    (it is UP — e.g. bad args, or no active game). A genuine outage (no JSON error body, refused
+    connection, timeout) propagates as httpx's own exception, so the framing layer can fail CLOSED
+    on outages while treating "no active game" as an ordinary pre-game state. Failures are recorded
+    for the visible health banner (`last_engine_error`); a success clears the record."""
+    url = ENGINE_URL.rstrip("/") + path
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
+            if r.status_code >= 400:
+                err = None
+                try:
+                    err = r.json().get("error")
+                except Exception:
+                    err = None
+                if err is not None:
+                    exc = EngineToolError(err, status=r.status_code)  # engine answered with a reason
+                    if not exc.no_game:  # the pre-game refusal is a normal state, not a problem
+                        _record_error(name, "tool-error", f"{err} (HTTP {r.status_code})")
+                    raise exc
+                r.raise_for_status()  # no structured body → a transport/proxy failure (engine down)
+            data = r.json()
+    except EngineToolError:
+        raise
+    except httpx.HTTPStatusError as e:
+        _record_error(name, "unreachable", f"engine returned HTTP {e.response.status_code} with no error detail")
+        raise
+    except Exception as e:
+        _record_error(name, "unreachable", f"{type(e).__name__}: {e}")
+        raise
+    if "result" not in data:
+        msg = str(data.get("error", "engine call failed"))
+        _record_error(name, "tool-error", msg)
+        raise EngineToolError(msg)
+    _clear_error()
+    return data["result"]
+
+
 async def _call(name: str, args: dict | None = None, user: str | None = None) -> dict:
     """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
-    url = ENGINE_URL.rstrip("/") + "/player/call"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
-        r.raise_for_status()
-        data = r.json()
-    if "result" not in data:
-        raise RuntimeError(data.get("error", "engine call failed"))
-    return data["result"]
+    return await _post_tool("/player/call", name, args, user)
 
 
 async def create_character(player_name: str, *, archetype=None, strategy_style=None, seed=None,
@@ -80,8 +158,17 @@ async def create_character(player_name: str, *, archetype=None, strategy_style=N
 
 
 async def get_game_state(user: str | None = None) -> dict:
-    """Current Vault-free game state for this user: phase, the player's card, the house roster."""
-    return await _call("getGameState", {}, user=user)
+    """Current Vault-free game state for this user: phase, the player's card, the house roster.
+
+    The engine refuses a no-game user with a 404 "no active game" (it won't mint a sandbox just to
+    answer a probe). That is NOT an outage — it is the ordinary pre-game state, so map it to
+    ``{"started": False}``. A genuine engine outage still raises, so callers fail closed only then."""
+    try:
+        return await _call("getGameState", {}, user=user)
+    except EngineToolError as e:
+        if e.no_game:
+            return {"started": False}
+        raise
 
 
 async def get_moment_prompt(moment: str | None = None, user: str | None = None) -> dict:
@@ -210,15 +297,10 @@ async def diary_room(entry: str, user: str | None = None) -> dict:
 # side (the agent tools below are in _ADMIN_TOOLS); the engine isolates per user (0021).
 
 async def _admin_call(name: str, args: dict | None = None, user: str | None = None) -> dict:
-    """Invoke an admin/God-Mode tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
-    url = ENGINE_URL.rstrip("/") + "/admin/call"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
-        r.raise_for_status()
-        data = r.json()
-    if "result" not in data:
-        raise RuntimeError(data.get("error", "engine call failed"))
-    return data["result"]
+    """Invoke an admin/God-Mode tool over the engine's HTTP MCP transport, for `user`'s sandbox.
+    Shares `_post_tool`'s semantics: structured engine errors raise :class:`EngineToolError`, real
+    outages propagate as httpx errors, and failures feed the visible health banner."""
+    return await _post_tool("/admin/call", name, args, user)
 
 
 async def inspect_non_vault_state(user: str | None = None) -> dict:
@@ -245,11 +327,33 @@ async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict
     return await _admin_call("manageSandbox", args, user=user)
 
 
-async def engine_health() -> bool:
-    """True if the engine HTTP MCP server answers /health."""
+async def engine_health_detail() -> dict:
+    """Engine reachability plus a human-readable reason when something is wrong — for VISIBLE
+    front-end error reporting. ``{"ok": bool, "engineUrl": str, "error"?: str, "lastError"?: dict}``.
+    ``ok`` reflects the engine process answering /health; ``lastError`` additionally reports a RECENT
+    failed tool call (a technical problem while the engine is up — e.g. a corrupt-save 500), with
+    ``{tool, kind, error, ageSeconds}``. Never raises."""
+    detail: dict
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(ENGINE_URL.rstrip("/") + "/health")
-            return r.status_code == 200
-    except Exception:
-        return False
+        if r.status_code == 200:
+            detail = {"ok": True, "engineUrl": ENGINE_URL}
+        else:
+            detail = {"ok": False, "engineUrl": ENGINE_URL, "error": f"engine returned HTTP {r.status_code}"}
+    except Exception as e:
+        # Connection refused / DNS / timeout: the most common real failure (engine not running, or a
+        # wrong ORWELL_ENGINE_MCP_URL). Report the concrete reason so the operator can act on it.
+        detail = {"ok": False, "engineUrl": ENGINE_URL, "error": f"{type(e).__name__}: {e}"}
+    le = last_engine_error()
+    if le:
+        detail["lastError"] = {
+            "tool": le["tool"], "kind": le["kind"], "error": le["error"],
+            "ageSeconds": int(time.time() - le["ts"]),
+        }
+    return detail
+
+
+async def engine_health() -> bool:
+    """True if the engine HTTP MCP server answers /health."""
+    return bool((await engine_health_detail()).get("ok"))
