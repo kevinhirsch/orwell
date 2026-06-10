@@ -450,9 +450,9 @@ export class GameSessionAdapter implements GameSession {
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error).
     if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
-    // Reconcile the PLAYER's own eviction vote against open deals BEFORE the tally clears state —
-    // a player who votes out their deal partner breaks it (engine-decided, 0039).
-    if (req.kind === "eviction-vote" && req.vote) {
+    // Reconcile the PLAYER's own eviction BEFORE the tally clears state — a player who votes out (or,
+    // as final HOH at F3, personally evicts) their deal partner breaks the deal (engine-decided, 0039).
+    if ((req.kind === "eviction-vote" || req.kind === "final-eviction") && req.vote) {
       this.reconcileDeals({ actor: PLAYER, kind: "vote-evict", targets: [req.vote] });
     }
     const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx());
@@ -587,6 +587,9 @@ export class GameSessionAdapter implements GameSession {
       case "eviction-vote":
         if (!req.vote) throw new Error("an eviction vote is required");
         return { kind: "eviction-vote", vote: req.vote };
+      case "final-eviction": // Final 3 (0045): the final HOH evicts; `vote` carries the evictee.
+        if (!req.vote) throw new Error("a final-eviction target is required");
+        return { kind: "final-eviction", evict: req.vote };
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: "finale-statement", statement: req.statement ?? "" };
@@ -620,6 +623,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: `You used the veto on ${this.nameOf((p as { saved: EntityId }).saved)} — name a replacement nominee.`, options: refs(p.options), pick: 1 };
       case "eviction-vote":
         return { kind: p.kind, by, prompt: "Cast your vote to evict one of the two nominees.", options: refs(p.nominees), pick: 1 };
+      case "final-eviction":
+        return { kind: p.kind, by, prompt: "You are the final Head of Household — evict one houseguest; the other sits beside you at the Final 2.", options: refs(p.options), pick: 1 };
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: p.kind, by, prompt: "You are a finalist — give your opening statement to the jury.", options: [], pick: 0 };
