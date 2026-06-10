@@ -1476,3 +1476,58 @@ versioned; `body{height:100dvh}` + `overscroll-behavior:none` already handle the
 keyboard/pull-to-refresh classes; `windowResize.js` clamps restored sizes (the pattern to
 unify); the composer's coarse-pointer bump works; and the decision card is the one game
 surface already on the correct sizing idiom — the model for the rest.
+
+## A4 [Ruling #17 + spec] Going private on GitHub — one PAT prompt, ever
+
+**Ruling (2026-06-10):** `kevinhirsch/orwell` becomes a private repo; no deploy/update-adjacent
+script may break, and the user is asked for a credential **at most once**.
+
+**What breaks today (inventory):** anonymous `git clone` (`orwell-install.sh:8,42`,
+`orwell.sh:101`); the in-container `git fetch/pull` in `orwell-update.sh` (origin is the
+anonymous https URL); the five raw-curl bridge fetches (`orwell-update.sh:52`,
+`orwell-factory-reset.sh:69`, `orwell-game-reset.sh:71`, `orwell-doctor.sh:75` fallback,
+`orwell.sh:199`); every `bash -c "$(curl raw…)"` one-liner in `deploy/README.md`. Unaffected:
+GitHub Actions CI (automatic `GITHUB_TOKEN`), the front-end (no GH fetches), the fastembed
+model fetch (not GH-hosted).
+
+**The design (auth once, then never again):**
+
+1. **One fine-grained PAT, captured at install only.** Scope: repo `kevinhirsch/orwell`,
+   permission **Contents: Read-only**, nothing else. The bootstrap one-liner becomes the
+   single authenticated moment:
+   `GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"`
+   (authenticated raw works on private repos). `orwell.sh` passes `GIT_TOKEN` into the
+   container; `orwell-install.sh` clones with it and then **persists it to
+   `${APP_DIR}/data/.env`** (`GIT_TOKEN=…`) — the one file every reset already preserves, so
+   the factory reset, game reset, and updates never re-prompt. For an EXISTING install,
+   `orwell-update.sh` gains a one-time `--set-token` prompt (and rotation path) that writes
+   the same line.
+2. **The token never lives in the remote URL or `.git/config`.** Configure a credential
+   helper that reads `.env` at use time:
+   `git config credential.helper '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p '"$APP_DIR"'/data/.env)"; };f'`
+   — `git pull/fetch` in every script then just works; rotation = edit one line of `.env`.
+3. **Kill the raw-curl bridges — which also closes E84.** Post-install, every host bridge
+   stops fetching from GitHub entirely: when run from a local file it pushes its own copy
+   (the doctor already does this — `orwell-doctor.sh:73`); otherwise it runs the
+   **in-container checked-out copy** via `pct exec bash ${APP_DIR}/deploy/<script>.sh`. The
+   in-container update does `git pull` first (credential helper supplies auth), so the
+   "one-version-stale script" window is a single update cycle — the exact integrity shape
+   E84 recommended. Net: zero GitHub fetches outside `git`, zero `curl | bash` of branch
+   tips, zero token exposure on the host.
+4. **README rewrite:** first-install keeps the one authenticated one-liner (step 1);
+   every other command becomes the local-copy form
+   (`bash /opt/orwell/deploy/orwell-update.sh`, or from the host the same script which
+   bridges via the local/in-container copy). The raw-curl maintenance one-liners are
+   deleted.
+5. **PAT expiry note:** fine-grained PATs cap at one year — document `--set-token` as the
+   annual rotation (still "once," per year). The zero-expiry alternative — a read-only
+   **deploy key** (SSH) pasted into GH once — is recorded as the variant for users who
+   prefer never rotating; the PAT-in-`.env` path is the default because the
+   preserve-`.env` infrastructure already exists.
+
+**Tests/gates:** extend `deploy/smoke.sh` to run the update flow against a token-required
+local git remote (proves the credential helper path); a deploy-lint test asserting **no
+`raw.githubusercontent.com` URL remains in any script** (only the README's first-install
+line); the existing secrets guard already covers "no token literal committed" — extend its
+scope per E78 so a pasted PAT in any tracked file fails CI; factory-reset test asserts
+`GIT_TOKEN` survives the scrub (it lives in the preserved `.env`).
