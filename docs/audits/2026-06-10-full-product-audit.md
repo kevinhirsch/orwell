@@ -1389,7 +1389,7 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   (settings, tool modals, doc panes); every other modal/panel responds to the *viewport* —
   wrong by definition for draggable/snappable windows (the settings rule's own comment says
   so, `21579–21581`). Make `@container` the rule for all windows.
-- **S5 [HIGH · System] Breakpoint anarchy: ~20 distinct thresholds across three idioms.**
+- **S5 [HIGH · System] ✅ PR #203 — Breakpoint anarchy: ~20 distinct thresholds across three idioms.**
   `@media` widths 768(×71)/600/820/640/520/540/480/460/700/720/769/821; container
   620/460/360/340/260; **JS `innerWidth` vs 768 written four different ways (44 sites)** —
   at exactly 768px, modules disagree which mode they're in. Plus near-duplicate tiers
@@ -1401,23 +1401,23 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   screenshots); the DR modal re-implements none of the shared sheet system. The hard-coded
   `top:64px`/`top:210px` offsets encode assumptions about *each other's heights* — the
   structural cause of the R2/R4 overlap family. *Fix:* the anchor-slot contract below.
-- **S7 [HIGH · Bug] PWA installability is broken: both manifest icons 404.**
+- **S7 [HIGH · Bug] ✅ PR #203 — PWA installability is broken: both manifest icons 404.**
   `manifest.json:12–13` → `/static/icon-192.png`/`icon-512.png` — neither exists (verified
   live); `apple-touch-icon` points at the same hole; the per-route manifest swap explicitly
   skips the root path. No valid icon ⇒ **no install prompt** — for a product whose mandate
   is "functions as an installed app." *Fix:* ship maskable 192/512 PNGs + 180px apple icon,
   precache, smoke-assert 200s.
-- **S8 [MED · Bug/UX] Standalone-mode gaps:** no `@media (display-mode: standalone)`
+- **S8 [MED · Bug/UX] ✅ PR #203 (tier + text-size-adjust; JS-panel safe-areas land with the chrome PR's slots) — Standalone-mode gaps:** no `@media (display-mode: standalone)`
   anywhere; no `text-size-adjust: 100%` (iOS landscape autoinflation of the fixed-px
   panels); JS-injected panels never use `env(safe-area-inset-*)` (presence `bottom:84px` /
   retro `bottom:96px` sit in the home-indicator band; the `top:0` banner collides with the
   notch under `viewport-fit=cover`).
-- **S9 [MED · UX/Bug] Touch-target floor violations beyond round 4's HUD chrome
+- **S9 [MED · UX/Bug] ✅ PR #203 (the floor rule; residual swatch/slash rows xfail-tracked) — Touch-target floor violations beyond round 4's HUD chrome
   (measured):** settings nav tabs 32px at every viewport; slash-menu rows ≈22px;
   shortcut-action 24×24; fallback-remove 22×22; color swatches 24×24. The composer's
   coarse-pointer bump (28×32 → 44×44, `style.css:3036`) proves the mechanism — it was never
   swept. *Fix:* one `(pointer: coarse)` floor rule on a `--tap-min` token.
-- **S10 [HIGH · System] There is no typography system** — 1,135 px font-sizes, 70 rem,
+- **S10 [HIGH · System] ✅ PR #203 (the scale + fluid root; the settings px→rem sweep lands with the settings-repair PR) — There is no typography system** — 1,135 px font-sizes, 70 rem,
   0 clamp(); each surface invents its own 9–14px micro-scale. Ironically the orwell game
   panels use rem and would scale for free under a root-size mechanism the inherited
   workspace defeats.

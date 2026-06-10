@@ -2521,3 +2521,20 @@ PR per item).
 ### D9 — portraits on roster/status/decision surfaces (C21/V2 as stated)  ·  MAJOR  ·  FE
 ### D10 — malformed tool args ⇒ 400 refusal, never 500 (schema-validate at the HTTP boundary)  ·  MAJOR  ·  engine
 ### D11 — HUD chrome tap-target floor (–/× buttons); state cache-bust on new-game  ·  MINOR  ·  FE
+
+## The prioritized UI track (rulings #15/#16) · 2026-06-10 — IN PROGRESS
+
+### U1 — Stream S responsive mechanism (the spine)  ·  **✅ DONE (PR #203)**
+
+> `responsive-tokens.css` (breakpoint tokens 480/768/1024/1440 · container 360/620 · rem scale on a
+> fluid root · --tap-min coarse floor · standalone tier · text-size-adjust) + the S5 normalization
+> (41 JS innerWidth sites → platform.js `isNarrow()`/`isBelowMedium()`; every @media width on the
+> token set, settings-600 dup as a ratcheted exception) + S7 PWA icons (real maskable 192/512 +
+> apple 180, precached, served-200-asserted) + the source lint gate
+> (`tests/test_s_responsive_mechanism.py`) + the runtime matrix gate
+> (`scripts/responsive_matrix.py`, in CI: 6 viewports + settings passes + 200% font; overflow/
+> overlap/crowding/touch; XFAIL registry by finding ID — ratchets as U2–U4 land).
+
+### U2 — settings repair (S1 S2 S3 S12 A3)  ·  next
+### U3 — chrome & windows (rulings #3/#4/#7/#8/#10/#12; E64 E88 E95 E90 E91+S11 E97 E92 E67–E71, D2)
+### U4 — transcript surface + trims + 0052 themes (E65 E93 D3/E66 D5/W6 E94-FE E72 E96 D7 D6/W8 · 0052)
