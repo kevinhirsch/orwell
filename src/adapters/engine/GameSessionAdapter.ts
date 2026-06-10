@@ -63,9 +63,11 @@ import { RelationshipModel, relationshipLabel } from "../../engine/relationships
 import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
+  firstCeremonyBeatResolved,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
+import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
 import { derivedLoyalty } from "../../engine/blocs";
@@ -441,6 +443,15 @@ export class GameSessionAdapter implements GameSession {
 
   socialInitiatives(): SocialInitiative[] {
     if (!this.house) return [];
+    // E89 (ruling #5): no approach fires before the house has actually started playing —
+    // empty until the season's first ceremony beat (the week-1 HOH result) has resolved.
+    // Structural engine gate; the FE's started-gate is only the belt.
+    if (
+      APPROACH_GATE.requireFirstCeremonyBeat &&
+      (!this.live || !firstCeremonyBeatResolved(this.live))
+    ) {
+      return [];
+    }
     const player = this.house.player.id;
     // B52/audit D5: an evicted houseguest can't pull you aside — only LIVING NPCs approach.
     const evicted = new Set(this.live?.evictionOrder ?? []);

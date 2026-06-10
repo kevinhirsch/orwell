@@ -457,6 +457,24 @@ export function recordDealBetrayal(s: LiveSeasonState, wronged: EntityId, breake
   row[breaker] = { ...(row[breaker] ?? {}), betrayed: true };
 }
 
+/**
+ * E89: has the season's FIRST ceremony beat (the week-1 HOH result) resolved yet? Pure and
+ * DERIVED — never stored: any of these only exist once at least one ceremony beat committed
+ * (rollWeek clears `hoh` but bumps `week` and sets `outgoingHoh`, so the predicate stays true
+ * for the rest of the season). Gates NPC approaches (`socialInitiatives`) per ruling #5:
+ * move-in gets room to breathe before anyone "wants a word".
+ */
+export function firstCeremonyBeatResolved(s: LiveSeasonState): boolean {
+  return (
+    s.finished ||
+    s.week > 1 ||
+    s.evictionOrder.length > 0 ||
+    s.outgoingHoh !== undefined ||
+    s.hoh !== undefined ||
+    s.nominees !== undefined
+  );
+}
+
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
 function removeEvictee(s: LiveSeasonState, evictee: EntityId): void {
   s.evictee = evictee;

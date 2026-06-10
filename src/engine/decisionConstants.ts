@@ -49,3 +49,15 @@ export const DECISION = {
     juryManagementWeight: 0.1,
   },
 } as const;
+
+/**
+ * E89 (product ruling #5, 2026-06-10): "'___ wants a word with you' must not spawn at the
+ * beginning of the game." The approach gate — no NPC approach fires until the season's FIRST
+ * ceremony beat (the week-1 HOH result) has resolved, so move-in and the first scenes get room
+ * to breathe. STRUCTURAL and engine-side (`socialInitiatives` returns empty until then); the
+ * front-end's started-gate is only the belt. The threshold lives HERE, not inline (B59).
+ */
+export const APPROACH_GATE = {
+  /** Approaches stay silent until the first ceremony beat of the season has resolved. */
+  requireFirstCeremonyBeat: true,
+} as const;
