@@ -487,12 +487,11 @@ Live status is deliberately **not** duplicated here (prose drifts):
 ## Open decisions
 
 The original open list (stack, datastore, soul storage, temperature model, veto/jury
-procedure, non-degradation strategy) is **resolved** — see
+procedure, non-degradation strategy, embedding provider) is **fully resolved** — see
 [`docs/decisions/`](docs/decisions/) and the constants modules the features firmed up.
-One genuinely open item remains:
-
-1. **Embedding provider** — which model backs `EmbeddingProvider` at runtime for semantic
-   soul recall (a deterministic fake covers all seeded tests today).
+The last item, the **embedding provider** for semantic soul recall, was resolved 2026-06-10
+([ADR 0004](docs/decisions/0004-embedding-provider.md)): **fastembed (local ONNX)** at
+runtime, with the deterministic fake remaining the test adapter.
 
 ---
 

@@ -1568,8 +1568,10 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > stays hidden (0041). **Acceptance:** the started-game prompt lists each active NPC's public vibe; two
 > different-archetype NPCs get demonstrably different descriptors; a sentinel-embedded soul/stat string never appears
 > in `cast`/`renderGameContext` output over a **registry-built** sandbox (extends E8/B42); a drift test asserts the
-> prompt names the cast fields + the consistency rule and no longer names `resolveCompetition`. Read ADR 0003,
-> `docs/features/0018`, `0004` first. Open a PR.
+> prompt names the cast fields + the consistency rule and no longer names `resolveCompetition`. **Also (ruling
+> 2026-06-10, v1-audit §3.9 — "finality language"):** add one line to the prompt — voice unresolved outcomes as
+> *reads* ("the house looks like…"), never as settled results; results exist only when the engine resolves/reveals
+> them. Read ADR 0003, `docs/features/0018`, `0004` first. Open a PR.
 
 ### B62 — server-initiated lifecycle moments (premiere / re-entry / terminal), recap from the store  ·  Claude Code  ·  **FE-1 · audit J1+J7+J2 (engine half)**
 
@@ -1733,9 +1735,11 @@ play** (mill around rooms, learn who's present/adjacent, talk to anyone while NP
 knowledge-scoped speech, stable persona); and each principle must be **testable structurally** where
 possible — that section is the contract these items must satisfy. Read ADR 0003 before any of them.
 
-### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · NEEDS SPEC FIRST**
+### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · spec drafted 2026-06-10**
 
-> Draft and implement **feature 0049** (`docs/features/0049-house-presence-and-lingering.{md,feature}`):
+> **Spec is drafted** (`docs/features/0049-house-presence-and-lingering.{md,feature}`, per the v1-transcript
+> audit ruling — `docs/audits/2026-06-10-v1-transcript-meta-feedback-audit.md` §3.7: note overhearing is
+> **bidirectional**, NPCs overhearing the player included). Implement **feature 0049** to green:
 > a **light** spatial model that makes unhurried, information-gathering play real (ADR 0003 §7). Keep it
 > minimal — this is *facts the narrator queries*, not a simulation the player operates. (1) **Rooms +
 > adjacency** — the canonical BB house spaces (kitchen, living room, backyard, bedrooms, HOH room,

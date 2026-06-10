@@ -95,6 +95,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | Gameplay / player UX | **Done** — player.status active/jury/evicted · ceremonies-as-broadcast juror knowledge · B48 |
 | 0047 | [Eviction night live (reveal + goodbyes)](./0047-eviction-night-live.md) | Gameplay | **Done** — staged one-at-a-time vote reveal · goodbye→manner · Vault-free EvictionView · B49 |
 | 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Ready (DoR §8)** · B56 |
+| 0049 | [House presence & lingering play (rooms, occupancy, overhearing)](./0049-house-presence-and-lingering.md) | **Behavioral fidelity / ADR 0003** | **Ready (DoR §8)** · B64 |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
