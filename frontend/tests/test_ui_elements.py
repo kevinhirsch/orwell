@@ -452,8 +452,11 @@ class TestKeptElements:
     def test_model_select_present_in_html(self):
         assert "model-select" in HTML_SRC
 
-    def test_model_select_not_hidden(self):
-        assert "#model-select" not in CSS_TRIM
+    def test_model_select_admin_only_under_game_build(self):
+        # E72: players never see raw model ids — the picker is admin-gated under
+        # the game build (the old "never hidden" pin is retired with the ruling).
+        assert "body[data-game-build] #model-select { display: none; }" in CSS_TRIM
+        assert "body[data-game-build].is-admin #model-select" in CSS_TRIM
 
 
 # ===========================================================================
