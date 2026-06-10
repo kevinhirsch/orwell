@@ -2535,7 +2535,7 @@ PR per item).
 > (`scripts/responsive_matrix.py`, in CI: 6 viewports + settings passes + 200% font; overflow/
 > overlap/crowding/touch; XFAIL registry by finding ID — ratchets as U2–U4 land).
 
-### U2 — settings repair (S1 S2 S3 S12 A3)  ·  **✅ DONE (PR #204)**
+### U2 — settings repair (S1 S2 S3 S12 A3)  ·  **✅ DONE (PR #205)**
 
 > The modal sizes with `clamp(560px, 58cqw, 880px)` against its overlay container (S13's cqw fix) +
 > `max-height: min(85dvh, 720px)` with the S2 short-viewport tier; the rail is fluid

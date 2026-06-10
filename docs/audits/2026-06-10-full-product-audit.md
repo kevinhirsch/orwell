@@ -1331,7 +1331,7 @@ toggles when viewing as non-admin-relevant.
 assert the schema array handed to the API call contains `chat_with_model` (and the A1
 composition cases); pytest for the gate-4 UI copy.
 
-## A3 [MED · UX/System] ✅ PR #204 — The settings pane has no shared layout primitives — stray dividers and margin defects are the symptom
+## A3 [MED · UX/System] ✅ PR #205 — The settings pane has no shared layout primitives — stray dividers and margin defects are the symptom
 
 **User-reported (2026-06-10):** stray dividers and margin problems in the settings pane (on
 top of the ruling-16 crowding report). **Root cause verified:** `frontend/static/js/settings.js`
@@ -1362,7 +1362,7 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
 
 ## Findings
 
-- **S1 [HIGH · Bug/UX] ✅ PR #204 — The settings modal cannot de-crowd at normal desktop sizes —
+- **S1 [HIGH · Bug/UX] ✅ PR #205 — The settings modal cannot de-crowd at normal desktop sizes —
   root-caused.** Measured: at 1366×768, 1024×768, and 960×900 the modal renders
   **byte-identically** (720px wide, 160px rail, 30px rows, 10px hints, 12px labels).
   Causes: (1) `width: min(720px, 92vw)` (`style.css:21349`) — `min()` only shrinks, never
@@ -1376,11 +1376,11 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   unreachable by any future rule (S12). *Fix:* width `clamp(560px, 58cqw, 880px)` against
   the overlay container; rem scale per the mechanism; rail `clamp(140px, 18cqw, 200px)`.
   *Acceptance:* hints ≥12px-equivalent at 1366×768; density toggle visibly scales the modal.
-- **S2 [MED · UX] ✅ PR #204** — No short-viewport tier for settings: `min-height: 400px` +
+- **S2 [MED · UX] ✅ PR #205** — No short-viewport tier for settings: `min-height: 400px` +
   `max-height: calc(85vh - 60px)` (`21379–21380`) with `margin-top: 7vh` nearly touches the
   viewport bottom at 614px CSS height. Use `min(85dvh, 720px)`; drop the min-height under a
   height breakpoint.
-- **S3 [MED · UX/Bug] ✅ PR #204** — The narrow settings tab rail hides 476px of tabs with zero
+- **S3 [MED · UX/Bug] ✅ PR #205** — The narrow settings tab rail hides 476px of tabs with zero
   affordance (`scrollWidth 866` vs `clientWidth 390`, `scrollbar-width:none` at `21595`) —
   Appearance/Shortcuts/Account/admin tabs are invisible on phones; and the layout switch
   exists as two diverging copies (`@media 600` at `21561` vs `@container 620` at `21582`).
@@ -1425,10 +1425,10 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   (`orwellStatusPanel.js:68–73` et al.; `windowDrag.js`'s clamp runs only on `resize`) — a
   position saved at 2560px restores fully off-screen at 1366px. `windowResize.js:223`
   already clamps restored *sizes* — unify the pattern at restore (cross-device half of E91).
-- **S12 [MED · System] ✅ PR #204 (type fully tokenized; the A3 ratchet caps the rest)** — Sizing-in-markup: dozens of inline `font-size`/`width` styles in
+- **S12 [MED · System] ✅ PR #205 (type fully tokenized; the A3 ratchet caps the rest)** — Sizing-in-markup: dozens of inline `font-size`/`width` styles in
   the settings tree (`index.html:1794–1810`, `settings.js` builders) escape any central
   refactor — sweep into classes + the A3 ratchet gate.
-- **S13 [LOW · Bug latent] ✅ PR #204 (settings; remaining modals move as they're touched)** — Modal width clamps use `vw` against a viewport the modal
+- **S13 [LOW · Bug latent] ✅ PR #205 (settings; remaining modals move as they're touched)** — Modal width clamps use `vw` against a viewport the modal
   doesn't occupy (overlays are narrowed by the sidebar; `92vw` is inert at 1024px with the
   sidebar open) — use `cqw` against the overlay container they already have.
 
