@@ -125,6 +125,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // ONE fold implementation (B59): shared with the 0023 ConsequenceEngine; bounded per call (B39)
     // AND per beat per edge (E21) — repeating an identical call can't pump an edge without bound.
     if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
+      this.rollBeatWindow();
       const toward = (req.toward ?? witnessSet.filter((w) => w !== req.initiator))
         .filter((o) => this.spendFoldBudget(o, req.initiator));
       foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType, toward, MAX_FOLDS_PER_INTERACTION);
@@ -134,16 +135,22 @@ export class EngineCommandsAdapter implements EngineCommands {
   }
 
   /**
-   * E21: take one unit of the per-beat fold budget for the directed edge `from → initiator`;
-   * false once the beat's budget for that edge is spent. The beat window is keyed off the most
-   * recent recorded season beat (`season:` event) — when the loop advances, the budget re-opens.
+   * E21: roll the fold-budget window forward if the loop has advanced. The window is keyed off the
+   * most recent recorded season beat (`season:` event) — a new beat re-opens every edge's budget.
    */
-  private spendFoldBudget(from: EntityId, initiator: EntityId): boolean {
+  private rollBeatWindow(): void {
     const key = this.currentBeatKey();
     if (key !== this.foldBeatKey) {
       this.foldBeatKey = key;
       this.foldCounts.clear();
     }
+  }
+
+  /**
+   * E21: take one unit of the current beat window's fold budget for the directed edge
+   * `from → initiator`; false once that edge's budget for the beat is spent.
+   */
+  private spendFoldBudget(from: EntityId, initiator: EntityId): boolean {
     const pair = `${from}->${initiator}`;
     const spent = this.foldCounts.get(pair) ?? 0;
     if (spent >= MAX_FOLDS_PER_PAIR_PER_BEAT) return false;
