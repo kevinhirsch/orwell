@@ -262,8 +262,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   const before = sandbox.engine.events.query().length;
 
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
-  // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023).
-  const scenes = richOffscreenStretch({ events: sandbox.engine.events, rng, npcs: ids, interactions: 3 });
+  // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
+  // houseguest's hidden element (B50) rarely slips into a scene's hidden content (rare-reveal loop).
+  const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
+  const scenes = richOffscreenStretch({
+    events: sandbox.engine.events, rng, npcs: ids, interactions: 3,
+    hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
+  });
   for (const s of scenes) {
     sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues

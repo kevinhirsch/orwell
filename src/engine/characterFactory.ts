@@ -53,6 +53,19 @@ export const ENSEMBLE = {
   MAX_PER_ARCHETYPE: 3,
 } as const;
 
+/**
+ * A typed HIDDEN element of an NPC (feature 0050/B50) — "tons of hidden elements" per the mandate.
+ * Engine-side ONLY (it lives on the NPC's static Character, which the player projection never carries);
+ * it surfaces RARELY into off-screen scene content (gated by `hiddenSurfaces`) and reaches the player
+ * only if an in-game pathway later carries it (gossip / being told). Seed-stable (part of the static
+ * character, 0007). Distinct from the dynamic Soul (0041 evolution): these are fixed secrets, not mood.
+ */
+export type HiddenElementKind = "secret-motive" | "pre-game-tie" | "concealed-aptitude" | "divergent-persona";
+export interface HiddenElement {
+  kind: HiddenElementKind;
+  detail: string;
+}
+
 export interface Character {
   archetype: Archetype;
   strategyStyle: StrategyStyle;
@@ -63,6 +76,13 @@ export interface Character {
   appearance: string;
   age: number;
   presentation: string;
+  /**
+   * Seeded, typed HIDDEN elements (B50) — engine-side secrets the public persona may match or wildly
+   * diverge from. NEVER projected to the player (the NPC card carries name + status only); they surface
+   * rarely into hidden off-screen content and reach the player only via a pathway. Empty for the player
+   * (their hidden material is the authored `privateStrategy`).
+   */
+  hiddenElements: HiddenElement[];
 }
 
 export interface Soul {
@@ -173,6 +193,59 @@ function generateAppearance(rng: RandomnessSource): { appearance: string; age: n
   };
 }
 
+// --- Hidden-element generation (B50): typed secrets, engine-side, surfacing rarely ---
+const HIDDEN_ELEMENT_POOLS: Record<HiddenElementKind, readonly string[]> = {
+  "secret-motive": [
+    "is secretly playing to win money for someone back home",
+    "is here for redemption after a public failure",
+    "wants the fame far more than the prize",
+    "has something to prove to a doubter watching at home",
+    "is quietly desperate and will gamble bigger than they let on",
+  ],
+  "pre-game-tie": [
+    "recognized another houseguest from before the show",
+    "shares a hometown with someone in the house",
+    "has a mutual friend with a rival they haven't admitted",
+    "once crossed paths with a houseguest years ago",
+    "made a quiet pre-show pact they intend to honor",
+  ],
+  "concealed-aptitude": [
+    "is far sharper at puzzles than they pretend",
+    "is a hidden endurance machine",
+    "has a near-photographic memory",
+    "is a closet strategist playing the fool",
+    "is physically stronger than their frame suggests",
+  ],
+  "divergent-persona": [
+    "plays sweet but keeps a private target list",
+    "acts like a harmless floater while reading the whole house",
+    "smiles through a grudge they will never forget",
+    "seems naive but clocks every move",
+    "looks fiercely loyal but will cut first when it counts",
+  ],
+};
+const HIDDEN_KINDS = Object.keys(HIDDEN_ELEMENT_POOLS) as HiddenElementKind[];
+
+/** How many hidden elements each NPC carries (the mandate's "tons", bounded for a season). */
+export const HIDDEN_ELEMENT_RANGE = { min: 3, max: 6 } as const;
+
+/**
+ * Mint 3–6 DISTINCT, seeded, typed hidden elements for one NPC (B50). Driven by a SIDE rng (hashed off
+ * the name) at generation so it never perturbs the main house stream (stats/names stay byte-stable, 0007).
+ */
+export function generateHiddenElements(rng: RandomnessSource): HiddenElement[] {
+  const count = HIDDEN_ELEMENT_RANGE.min + rng.int(HIDDEN_ELEMENT_RANGE.max - HIDDEN_ELEMENT_RANGE.min + 1); // 3..6
+  const out: HiddenElement[] = [];
+  const seen = new Set<string>();
+  for (let attempts = 0; out.length < count && attempts < 200; attempts++) {
+    const kind = rng.pick(HIDDEN_KINDS);
+    const detail = rng.pick(HIDDEN_ELEMENT_POOLS[kind]);
+    const key = `${kind}::${detail}`;
+    if (!seen.has(key)) { seen.add(key); out.push({ kind, detail }); }
+  }
+  return out;
+}
+
 export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
   const specs = curatedArchetypes(rng, NPC_COUNT);
   const used = new Set<string>();
@@ -195,6 +268,8 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
         stats,
         background,
         ...generateAppearance(new SeededRandom(hashSeed(`${name}:${i}`))),
+        // B50: minted off a SEPARATE side rng so the main stream stays byte-stable (engine-side secrets).
+        hiddenElements: generateHiddenElements(new SeededRandom(hashSeed(`${name}:hidden:${i}`))),
       },
       soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, emotionalHistory: [], memory: [] },
     };
@@ -245,6 +320,9 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       stats: { ...spec.bias },
       background: input.backstory?.trim() || "human-authored at first-run character creation (OOBE)",
       ...generateAppearance(appearanceRng),
+      // The player authors their own hidden material (`privateStrategy`); the typed hidden-element pool
+      // is for generated NPCs only, so the player's stays empty.
+      hiddenElements: [],
     },
     soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: [] },
     // The player's self-described persona (their words), kept for the narrative voice even when it

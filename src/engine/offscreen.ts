@@ -2,6 +2,9 @@ import type { EventStore } from "../ports/EventStore";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { EntityId, GameEvent } from "../domain/event";
 import type { InteractionType } from "./relationships";
+import { SeededRandom } from "../adapters/random/SeededRandom";
+import { hashSeed, type HiddenElement } from "./characterFactory";
+import { hiddenSurfaces } from "../domain/temperatureConstants";
 
 /**
  * Minimal off-screen life: records NPC-to-NPC interactions the player is not
@@ -72,8 +75,14 @@ export function richOffscreenStretch(deps: {
   rng: RandomnessSource;
   npcs: readonly EntityId[];
   interactions: number;
+  /**
+   * The initiator's hidden elements (B50). When provided, one RARELY (gated by `hiddenSurfaces`)
+   * surfaces into the scene's HIDDEN content — never reaching the player without a later pathway.
+   * Rolled on a per-scene SIDE rng (hashed off the event id) so the main `rng` stream is untouched.
+   */
+  hiddenElementsOf?: (id: EntityId) => readonly HiddenElement[];
 }): OffscreenScene[] {
-  const { events, rng, npcs, interactions } = deps;
+  const { events, rng, npcs, interactions, hiddenElementsOf } = deps;
   const scenes: OffscreenScene[] = [];
 
   for (let i = 0; i < interactions; i++) {
@@ -92,6 +101,15 @@ export function richOffscreenStretch(deps: {
       hidden: true,
       content: `${a} ${RICH_VERBS[type]} ${b}`,
     };
+    // B50: a hidden element of the initiator occasionally slips into the (still-hidden) scene — the
+    // rare-reveal "treat" loop. The side rng keeps the main stream byte-stable; the content stays hidden.
+    if (hiddenElementsOf) {
+      const side = new SeededRandom(hashSeed(event.id));
+      if (hiddenSurfaces(side)) {
+        const els = hiddenElementsOf(a);
+        if (els.length > 0) event.content += ` — ${a} ${els[side.int(els.length)]!.detail}`;
+      }
+    }
     events.record(event);
     scenes.push({ event, type, initiator: a, partner: b });
   }
