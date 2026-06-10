@@ -89,9 +89,22 @@ journalctl -u orwell-frontend -f
 
 ## Data & backups
 
-Everything stateful is under **`/opt/orwell/data`** — the `.env`, the SQLite save, and the souls.
-Back it up by copying that directory; restore by putting it back before starting. Updates never
-touch it (non-degradation, feature 0007).
+State lives in **two** places (B72 — the old prose misstated this):
+
+| Dir | What |
+|---|---|
+| `/opt/orwell/data/` | engine config — `.env` (incl. the generated `ORWELL_ENGINE_TOKEN`) — and **`saves/`** (the per-user games: JSON snapshots incl. souls + the hidden layer) |
+| `/opt/orwell/frontend/data/` | the front-end SQLite (`app.db`: accounts, chats, settings) + uploads |
+
+- **Backup:** `bash deploy/orwell-backup.sh [dest]` — one timestamped tarball covering **both** dirs.
+- **Restore:** `bash deploy/orwell-restore.sh <backup.tar.gz>` — stops services, restores, fixes
+  ownership, restarts.
+- **Readiness:** `bash deploy/orwell-ready.sh` — not just liveness: engine reachable + front-end up
+  + an LLM genuinely configured (at least one online model). Exit 0 = a player can sit down and play.
+- **Update pin/rollback (B71):** `REF=<sha|tag> orwell-update.sh` pins; `orwell-update.sh --rollback`
+  returns to the previous SHA + build. A failed build never restarts services.
+
+Updates never touch either data dir (non-degradation, feature 0007).
 
 ---
 

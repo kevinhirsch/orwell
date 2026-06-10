@@ -82,19 +82,28 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     # factory-reset script all expect (the engine default is ./.orwell-data, which hid the
     # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
     # gitignored); scrubbed by orwell-factory-reset.sh.
-    echo "ORWELL_DATA_DIR=${DATA_DIR}"
-    # LLM provider: written through from the host installer's prompt when supplied; otherwise a
-    # commented hint. Secrets only ever live here, in the container — never in the repo.
-    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-      echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
-    elif [[ -n "${OLLAMA_HOST:-}" ]]; then
-      echo "OLLAMA_HOST=${OLLAMA_HOST}"
+    echo "ORWELL_DATA_DIR=${DATA_DIR}/saves"
+    # LLM provider (B72/ops A3): write the names the FRONT-END actually consumes — LLM_HOSTS
+    # (OpenAI-compatible endpoints, e.g. Ollama's /v1) and OPENAI_API_KEY — so "configured" is a
+    # real signal, not a key nothing reads. Secrets only ever live here, in the container.
+    if [[ -n "${OLLAMA_HOST:-}" ]]; then
+      _llm_host="${OLLAMA_HOST#http://}"; _llm_host="${_llm_host#https://}"
+      echo "LLM_HOSTS=${_llm_host}"
+    elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
+      echo "OPENAI_API_KEY=${OPENAI_API_KEY}"
+      [[ -n "${LLM_HOSTS:-}" ]] && echo "LLM_HOSTS=${LLM_HOSTS}"
     else
-      echo "# LLM (pick one): OLLAMA_HOST=http://127.0.0.1:11434  OR  ANTHROPIC_API_KEY=..."
+      echo "# LLM: configure under Settings -> Services/AI after first login (admin), or set"
+      echo "# LLM_HOSTS=<host:port of an OpenAI-compatible endpoint>  and/or  OPENAI_API_KEY=..."
     fi
   } >> "${DATA_DIR}/.env"
   chmod 600 "${DATA_DIR}/.env"
 fi
+
+echo "==> least-privilege user (B72/ops A5)"
+id -u orwell >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /opt/orwell orwell
+mkdir -p "${DATA_DIR}/saves" "${APP_DIR}/frontend/data"
+chown -R orwell:orwell "${APP_DIR}"
 
 echo "==> systemd services"
 install -m 644 "${APP_DIR}/deploy/systemd/orwell-engine.service"   /etc/systemd/system/orwell-engine.service

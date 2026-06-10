@@ -1,12 +1,22 @@
 [Unit]
 Description=orwell front-end (orwell — Python/FastAPI/uvicorn)
+# Wants= (not Requires=): the FE boots and serves a DEGRADED game-down state when the engine is
+# absent (the engine-status banner; reads fail open) — an engine crash must not take the UI down.
 After=network.target orwell-engine.service
 Wants=orwell-engine.service
 
 [Service]
 Type=simple
+# Least privilege (B72/ops A5): same dedicated user + sandboxing as the engine.
+User=orwell
+Group=orwell
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/orwell/data /opt/orwell/frontend/data
 WorkingDirectory=/opt/orwell/frontend
-EnvironmentFile=/opt/orwell/data/.env
+EnvironmentFile=-/opt/orwell/data/.env
 # The orwell app reads ORWELL_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
 # MCP server (frontend/INTEGRATION.md). The UI port comes from ORWELL_PORT.
 ExecStart=/opt/orwell/frontend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port ${ORWELL_PORT}
