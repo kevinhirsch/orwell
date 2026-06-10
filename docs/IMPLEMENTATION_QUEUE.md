@@ -2136,7 +2136,19 @@ PR per item).
 >    reject path.
 > **Acceptance:** all four above; dropping a covered branch below threshold fails CI. Open a PR.
 
-### B71 — production-grade deploy: atomic/rollback updates, boot preload, real smoke  ·  Claude Code (deploy + engine runtime)  ·  **R-2 · MAJOR · ops A4 + A6 + A7**
+### B71 — production-grade deploy: atomic/rollback updates, boot preload, real smoke  ·  Claude Code (deploy + engine runtime)  ·  **R-2 · MAJOR · ops A4 + A6 + A7 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (A4) `orwell-update.sh` builds BEFORE committing to the swap: a failed build reverts to the
+> previous SHA + the preserved `dist.prev` and does NOT restart (clear message + hints); `REF=<sha|tag>` pins the
+> target; `--rollback` returns to the recorded previous SHA/dist (`data/.update-prev`). (A6) done by **B60**
+> (`composeRuntime` preloads every saved user at boot via `listUsers`). (A7) `deploy/smoke.sh` gained a real
+> END-TO-END stage: a TOKEN-ENFORCING engine (tokenless 401 proven), the REAL front-end booted against it, and one
+> full create→advance→decision turn driven through the FE's guarded routes (`deploy/smoke_turn.py`) — proving B67
+> end-to-end; a stale-port pre-flight stops false positives; CI's smoke job installs the FE deps. The new stage
+> immediately CAUGHT a real restart bug: off-screen/confessional event ids were index+rng-keyed, so a restarted
+> process re-minted identical ids against a restored store and the duplicate-id guard killed the tick — ids are
+> now store-size-keyed (the B40 pattern). Note: `advanceGame` is deliberately agent-path-only, so the smoke turn
+> advances on the engine's authed channel and binds the decision through the FE's sanctioned `/decision` route.
 
 > In `kevinhirsch/orwell` `deploy/` (+ a small `src/` runtime change), make the deploy lifecycle safe:
 > 1. **A4 — atomic, pinned, rollback-able updates.** `orwell-update.sh:66-72` does
