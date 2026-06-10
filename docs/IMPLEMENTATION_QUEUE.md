@@ -1108,7 +1108,15 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > the loop with the legal candidates; an illegal pick is refused; an NPC holder still auto-picks; the resolved 6-player
 > field includes the pick; restart mid-pending resumes. Open a PR.
 
-### B46 — live competition intent (compete / throw / play safe)  ·  Claude Code  ·  **Wave 2 · audit B5**
+### B46 — live competition intent (compete / throw / play safe)  ·  Claude Code  ·  **Wave 2 · audit B5** — ✅ DONE
+
+> **DONE.** A `comp-intent` pending fires before each comp the player plays (HOH if eligible, veto if a
+> puller); `winnerOf` threads the player's declared intent into a real `CompetitionIntents` (the 0028
+> throw/play-safe penalties); NPCs stay compete. The intent is consumed when the comp resolves and is
+> immutable after (the pending is cleared ⇒ a late declaration is refused); survives a restart. The
+> pending's `options` ARE the three intents (compete first = default), so the generic decision path +
+> front-end pick from them. 0034 amended. `tests/unit/compIntent.test.ts` (4) — throw measurably lowers
+> the player's win rate across seeds; the lock refuses post-beat intent. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the player **never declares competition intent** — every live resolution builds an
 > empty `CompetitionIntents` (`liveSeason.ts:136`, `GameSessionAdapter.ts:435`), so the Bible-mandated, immutable

@@ -20,6 +20,14 @@ player's turn) and **`submitDecision(req)`** (validates the choice, applies it, 
 **persists** — 0030). This is the **live realization** of 0011/0019, the same pattern as **0023** (the
 live consequence loop) and **0030** (live persistence).
 
+> **Amendment (Wave 2 — endgame & agency).** The binding-decision seam grew new `pending` kinds, all
+> validated through the SAME `submitDecision` contract (no choice ever parsed from prose): **`comp-intent`**
+> — declare compete / throw / play-safe before a comp the player plays (B46/audit B5; default compete);
+> **`tie-break`** — the player HOH breaks a tied eviction vote (B44/audit B2); **`final-eviction`** — the
+> Final-3 HOH personally evicts (0045/audit B1); **`houseguests-choice`** — the player picks the sixth veto
+> player when they draw the chip (B45/audit B4). Each is immutable once its beat resolves (the pending is
+> cleared) and survives a restart.
+
 It shipped **without a `.feature`**. 0034 closes that gap: it pins the live loop's invariants as an
 executable, name-agnostic spec — so the guarantees that matter (no Vault leak, no lost detail, no
 illegal ceremony, no binding choice parsed from prose) are **continuously enforced**, not incidental to

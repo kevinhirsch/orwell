@@ -21,11 +21,18 @@ async function resolveLegally(p: Player, d: NonNullable<AdvanceView["pending"]>)
   else await p.callTool("submitDecision", { kind: d.kind, vote: d.options[0]!.id });
 }
 
-/** Advance until the first pending decision, counting beats that resolved automatically. */
+/** Advance until the first BINDING pending decision, counting beats that resolved automatically. */
 async function driveToPending(p: Player): Promise<{ view: AdvanceView; beats: number }> {
   let beats = 0;
   for (let i = 0; i < 3000; i++) {
     const view = await adv(p);
+    // B46: a competition-intent declaration auto-resolves to compete and counts as an auto beat — it is
+    // not the "first binding decision" the scenario means (that's a nomination / vote / etc.).
+    if (view.pending?.kind === "comp-intent") {
+      await p.callTool("submitDecision", { kind: "comp-intent", intent: "compete" });
+      beats++;
+      continue;
+    }
     if (view.pending || view.finished) return { view, beats };
     beats++;
   }
