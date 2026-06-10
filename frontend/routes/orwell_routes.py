@@ -74,9 +74,16 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/status")
     async def orwell_status(request: Request):
-        """Vault-free public ceremony status for the status panel (week/phase/HOH/nominees/veto)."""
+        """Vault-free public ceremony status for the status panel (week/phase/HOH/nominees/veto).
+        Pre-game ("no active game") is an honest 200 {started:false} — NOT a fake 502 outage
+        (field bug: the panel's poll logged a 502 per refresh on a healthy, game-less box)."""
         try:
             return await orwell_engine.game_status(user=_current_user(request))
+        except orwell_engine.EngineToolError as e:
+            if e.no_game:
+                return {"started": False}
+            logger.warning(f"[orwell] status failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] status failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
