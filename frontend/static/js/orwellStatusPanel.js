@@ -210,10 +210,12 @@ import { onNarrowChange } from './platform.js';
       _shown = false;
       _failures = 0;
       markStale(false);
+      try { document.body.dataset.gameActive = ""; } catch (_) {} // E93: pre-game is OOC
       hidePanel();
       return;
     }
     _shown = true;
+    try { document.body.dataset.gameActive = "1"; } catch (_) {} // E93: the record is live
     const name = (c) => (c && c.name) || "—";
     el.querySelector("#os-week").textContent = "Week " + st.week;
     el.querySelector("#os-phase").textContent = phaseLabel(st.phase);

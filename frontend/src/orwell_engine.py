@@ -446,3 +446,31 @@ async def engine_health_detail() -> dict:
 async def engine_health() -> bool:
     """True if the engine HTTP MCP server answers /health."""
     return bool((await engine_health_detail()).get("ok"))
+
+
+# ── D3/E66: the last-seen pending decision, per user ─────────────────────────
+# Every AdvanceView flows through this server (the agent's advanceGame/
+# submitDecision tools and the /api/orwell/decision route), so caching the last
+# `pending` here lets GET /api/orwell/status re-arm the decision card after a
+# reload WITHOUT any poll ever advancing the game (ADR 0003: progressing is an
+# explicit act). The cache holds the engine's own Vault-free legal-options view,
+# nothing more; it clears whenever an AdvanceView shows no pending.
+_LAST_PENDING: dict = {}
+
+
+def remember_pending(view, user=None) -> None:
+    """Record (or clear) the pending decision from any AdvanceView-shaped dict."""
+    try:
+        key = user or ""
+        pending = view.get("pending") if isinstance(view, dict) else None
+        if pending:
+            _LAST_PENDING[key] = pending
+        else:
+            _LAST_PENDING.pop(key, None)
+    except Exception:
+        pass
+
+
+def last_pending(user=None):
+    """The last pending decision this server saw for the user (or None)."""
+    return _LAST_PENDING.get(user or "")
