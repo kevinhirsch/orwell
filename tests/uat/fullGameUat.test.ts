@@ -533,7 +533,8 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
     },
     // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1
     // (measured at ~62s on an unmodified main in a shared-CPU environment — the old 60s budget
-    // was a hair-trigger env flake; assertions unchanged, only the wall-clock budget breathes).
+    // was a hair-trigger env flake; and the E42–E55 consequence folds added real per-beat work
+    // on top of the transport cost; assertions unchanged, only the wall-clock budget breathes).
     { timeout: 180_000 },
   );
 

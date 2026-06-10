@@ -2,6 +2,7 @@ import type { EntityId } from "../domain/ids";
 import { PLAYER } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { RelationshipModel } from "./relationships";
+import { DEAL_IMPACTS } from "./relationshipConstants";
 import {
   type BindingAction,
   type Deal,
@@ -9,19 +10,26 @@ import {
   actionBreaks,
   actionHonors,
   conditionFor,
+  horizonOf,
   wrongedParty,
 } from "../domain/deal";
 
 export type { BindingAction, Deal, DealKind } from "../domain/deal";
 
 /**
- * Feature 0039 — the deal ledger (engine layer).
+ * Feature 0039 — the deal ledger (engine layer), horizon-aware per audit E43.
  *
  * Tracks every open promise and RECONCILES it against the binding actions flowing through the live
  * loop (0034). When a bound party moves against their partner, the engine — not the storyteller —
  * marks the deal broken and makes it HURT: the betrayal-shock relationship fold (0026), a
  * jury-management demerit (0014, surfaced as `manner.betrayed`), and a witnessed reveal to the
- * wronged party when they see/learn it (0002). Honoring a deal leaves it `kept` with no consequence.
+ * wronged party when they see/learn it (0002).
+ *
+ * Honoring is no longer terminal (the pre-E43 bug: a week-2 final-two deal stopped binding at the
+ * week-3 noms). Each honoring action applies a BOUNDED positive fold (`DEAL_IMPACTS.honored` —
+ * kept promises build trust + the E54 evidence signal), and a deal RESOLVES `kept` only at its
+ * horizon: `safety`/`vote` at that week's eviction (the vote endpoint or the week rollover);
+ * `final-two`/`target-other` stay binding until broken or the season ends.
  *
  * Pure of I/O: side effects (relationship moves, jury demerits, reveal events) are delivered through
  * an injected `ReconcileSink`, so the ledger is unit-testable and the integration owns the wiring.
@@ -48,8 +56,9 @@ export class DealLedger {
   private deals: Deal[] = [];
   private seq = 0;
 
-  /** Make a new OPEN deal between two parties. `id`/`madeEventId` are assigned/threaded by the caller. */
-  make(parties: [EntityId, EntityId], kind: DealKind, terms: string, madeEventId?: string): Deal {
+  /** Make a new OPEN deal between two parties. `id`/`madeEventId` are assigned/threaded by the caller.
+   *  `madeWeek` (E43) anchors the week-scoped horizon of `safety`/`vote` promises. */
+  make(parties: [EntityId, EntityId], kind: DealKind, terms: string, madeEventId?: string, madeWeek?: number): Deal {
     const deal: Deal = {
       id: `deal:${++this.seq}`,
       parties,
@@ -58,6 +67,7 @@ export class DealLedger {
       condition: conditionFor(kind, parties),
       status: "open",
       ...(madeEventId ? { madeEventId } : {}),
+      ...(madeWeek !== undefined ? { madeWeek } : {}),
     };
     this.deals.push(deal);
     return deal;
@@ -83,8 +93,11 @@ export class DealLedger {
   }
 
   /**
-   * Reconcile a binding action against every OPEN deal it implicates: honoring → `kept`, violating →
-   * `broken` (+ consequences via the sink). Engine-decided from the action + condition, never prose.
+   * Reconcile a binding action against every OPEN deal it implicates (E43 horizon-aware):
+   * violating → `broken` (+ consequences via the sink); honoring → a BOUNDED positive fold
+   * (kept promises build trust — `DEAL_IMPACTS.honored`), and the deal resolves `kept` only at
+   * its horizon endpoint (a week-scoped deal's eviction vote). A `final-two` keeps binding —
+   * and keeps paying — until it is broken or the season ends. Engine-decided, never prose.
    */
   reconcile(action: BindingAction, sink: ReconcileSink = {}): Reconciliation {
     const broken: Deal[] = [];
@@ -99,11 +112,41 @@ export class DealLedger {
         broken.push(deal);
         if (wronged) this.applyBreak(deal, wronged, action.actor, sink);
       } else if (actionHonors(deal, action)) {
-        deal.status = "kept";
-        kept.push(deal);
+        this.applyHonor(deal, action.actor, sink);
+        // The horizon (E43): a safety/vote promise runs through ITS week's eviction; the vote is
+        // the endpoint where it resolves kept. Season-scoped kinds stay open (and stay binding).
+        if (horizonOf(deal.kind) === "week" && action.kind === "vote-evict") {
+          deal.status = "kept";
+          kept.push(deal);
+        }
       }
     }
     return { broken, kept };
+  }
+
+  /**
+   * Resolve week-scoped (`safety`/`vote`) deals whose week has passed un-broken (E43): the house
+   * rolled into `currentWeek` and the promise ran its course — mark them `kept`. Deals without a
+   * recorded `madeWeek` (pre-E43 saves) are left alone. Returns the deals it resolved.
+   */
+  expireWeekScoped(currentWeek: number): Deal[] {
+    const resolved: Deal[] = [];
+    for (const deal of this.deals) {
+      if (deal.status !== "open" || horizonOf(deal.kind) !== "week") continue;
+      if (deal.madeWeek !== undefined && deal.madeWeek < currentWeek) {
+        deal.status = "kept";
+        resolved.push(deal);
+      }
+    }
+    return resolved;
+  }
+
+  /** The kept-promise fold (E43/E54): the protected party registers the demonstrated loyalty. */
+  private applyHonor(deal: Deal, honorer: EntityId, sink: ReconcileSink): void {
+    const other = deal.parties.find((p) => p !== honorer);
+    if (other && sink.rel && sink.rng) {
+      sink.rel.applyImpactDirected(other, honorer, DEAL_IMPACTS.honored, sink.rng);
+    }
   }
 
   /** The betrayal-shock fold + jury demerit + (if witnessed) the reveal event. */
