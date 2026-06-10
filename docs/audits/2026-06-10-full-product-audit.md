@@ -164,7 +164,7 @@ File references are to `main` @ 87687c0.
   **400** and leaks the data-dir path. *Fix:* catch around `saveUser` ⇒ `persist-failure` fault
   + rollback + typed error; classify refusals by an `EngineRefusal` type, not
   `constructor === Error`. *Test:* throwing `saveFor` ⇒ HTTP 500, health fault, state rolled back.
-- **E8 [LOW · Ops] `FileSaveStore` durability + user-id length.** `FileSaveStore.ts:66–70` (no
+- **E8 [LOW · Ops] ✅ PR #218 — `FileSaveStore` durability + user-id length.** `FileSaveStore.ts:66–70` (no
   fsync of file/dir before rename — power loss ⇒ `.corrupt` latest, silent multi-turn step-back);
   `:39` (hex-doubling ⇒ >127-byte user header = `ENAMETOOLONG` 500s). *Fix:* fsync before
   rename; cap `x-orwell-user` ≤64 chars at the HTTP edge (400).
@@ -291,7 +291,7 @@ File references are to `main` @ 87687c0.
 - **E31 [MED · Bug] Malformed tool args are 500s** (= **D10**, endorsed) — plus
   `McpServer.ts:43–101` casts blindly; add per-tool required-field/shape checks returning
   deliberate 400s with field names.
-- **E32 [LOW · Ops] Edge hygiene cluster.** Installer never sets `ORWELL_ENGINE_MULTIUSER=1`
+- **E32 [LOW · Ops] ✅ PR #218 — Edge hygiene cluster.** Installer never sets `ORWELL_ENGINE_MULTIUSER=1`
   though FE auth defaults on; `SECURE_COOKIES` defaults off and is never written by the
   installer (document for TLS deploys); reads shouldn't mint sandboxes
   (`orchestrator.ts:307–321` `freshHealth` — add `peekSandbox`).
@@ -653,7 +653,7 @@ consequence.*
 - **E79 [LOW · Test] `transportHardening.test.ts` vacuous/racy spots.** `:42` passes with zero
   assertions when the fetch rejects; `:92` real-timer race on the E10 ordering test. *Fix:*
   assert the disjunction + no side effect; gate on entering `callTool` instead of wall time.
-- **E80 [LOW · Test] `deploy/smoke.sh` refutes are textual and shallow.** `:88` grep-"proves"
+- **E80 [LOW · Test] ✅ PR #218 — `deploy/smoke.sh` refutes are textual and shallow.** `:88` grep-"proves"
   update never deletes data; `:75` stat-leak refute checks only `"physical":`/`"score` (not
   mental/social/trust/affinity/threat). *Fix:* behavioral sentinel-save check; extend the
   refute list. Also promote the round-4 Playwright harness into `frontend/scripts/` as a
@@ -667,17 +667,17 @@ consequence.*
 
 ### Theme 9 — Ops, deploy & supply chain
 
-- **E83 [MED · Ops] Frontend Python deps are 100% unpinned and reinstalled blind on every
+- **E83 [MED · Ops] ✅ PR #218 — Frontend Python deps are 100% unpinned and reinstalled blind on every
   update** (`requirements.txt`: zero `==`; `orwell-update.sh` runs `pip install -r` each time;
   ADR 0004 claims fastembed is version-pinned — it is not, see E86). *Fix:* `pip-compile`
   lockfile + CI pin-check.
-- **E84 [MED · Ops/Security] `curl | bash`-as-root self-update with no integrity check**
+- **E84 [MED · Ops/Security] ✅ PR #218 — `curl | bash`-as-root self-update with no integrity check**
   (update/factory-reset host bridges fetch branch-tip from raw.githubusercontent; nodesource
   pipe; mutable CI action tags). *Fix:* execute the already-checked-out in-container copy after
   a pinned-ref fetch, or verify a published SHA-256; pin action SHAs. *(The new
   `orwell-game-reset.sh` inherits the same bridge pattern by consistency — fix all three
   together.)*
-- **E85 [LOW · Ops] systemd hardening stops early + frontend unit crash-loops without `.env`.**
+- **E85 [LOW · Ops] ✅ PR #218 — systemd hardening stops early + frontend unit crash-loops without `.env`.**
   Missing `CapabilityBoundingSet=`, `RestrictAddressFamilies`, `SystemCallFilter=@system-service`,
   `ProtectKernel*`, `RestrictSUIDSGID`, `LockPersonality`, `UMask=0077` (test
   `MemoryDenyWriteExecute` carefully — Node JIT); `orwell-frontend.service` needs a default
@@ -1477,7 +1477,7 @@ keyboard/pull-to-refresh classes; `windowResize.js` clamps restored sizes (the p
 unify); the composer's coarse-pointer bump works; and the decision card is the one game
 surface already on the correct sizing idiom — the model for the rest.
 
-## A4 [Ruling #17 + spec] Going private on GitHub — one PAT prompt, ever
+## A4 [Ruling #17 + spec] ✅ PR #218 — Going private on GitHub — one PAT prompt, ever
 
 **Ruling (2026-06-10):** `kevinhirsch/orwell` becomes a private repo; no deploy/update-adjacent
 script may break, and the user is asked for a credential **at most once**.

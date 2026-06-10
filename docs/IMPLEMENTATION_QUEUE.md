@@ -2593,3 +2593,20 @@ PR per item).
 > E70: `POST /api/orwell/new-game` admin-gated (the chat tools are the player door; smoke/matrix
 > configs keep working); T14: the restore-into-fresh-registry tick regression test. Unit gates:
 > `restartDoor.test.ts` + `spineHardening.test.ts` + `test_e70_new_game_gate.py`.
+
+### L8 — ops & private-repo (A4/ruling #17+E84 · E80 · E83 · E85 · E8 · E32)  ·  **✅ DONE (PR #218)**
+
+> **A4/ruling #17 (closes E84):** the single-PAT private-repo design — `GIT_TOKEN` lives in
+> `data/.env`, a git credential helper supplies it to every fetch/pull, and the host
+> update/factory-reset bridges become LOCAL-COPY (execute the already-checked-out in-container
+> copy after a pinned-ref `git fetch`; zero raw-curl of branch tips); the installer tolerates a
+> checkout missing its origin remote. **E80:** `deploy/smoke.sh` refutes are behavioral (sentinel
+> save + the full stat/edge refute list + the credential-helper gate), not textual greps.
+> **E83:** the frontend Python deps ride a pip-compile lockfile (Python 3.11/Debian 12 target),
+> pinned on every update. **E85:** systemd units harden fully (`CapabilityBoundingSet`,
+> `RestrictAddressFamilies`, `SystemCallFilter=@system-service`, `ProtectKernel*`,
+> `RestrictSUIDSGID`, `LockPersonality`, `UMask=0077`) and `orwell-frontend.service` carries a
+> default `ORWELL_PORT`. **E8:** `FileSaveStore` fsyncs file + dir before rename (power-loss
+> durability). **E32:** user-id capped at the HTTP edge (400) + constant-time token compare in
+> `HttpMcpServer`. Verified by `tests/unit/opsPrivateRepo.test.ts`, `saveDurability.test.ts`,
+> `httpEdgeAuth.test.ts`, and the upgraded smoke refutes.
