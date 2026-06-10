@@ -1,11 +1,11 @@
 // Orwell social surface (feature 0036 / C10) — the player-facing UI for NPC approaches
-// and the Diary Room, over the engine's Vault-free routes. Built as a self-contained,
+// over the engine's Vault-free routes (the Diary Room lives in the sidebar —
+// orwellDiaryRoom.js). Built as a self-contained,
 // fail-open sibling to orwellStatusPanel.js: it only shows while a game is in progress,
 // renders ONLY what the routes return, and never disturbs the chat if the engine is down.
 //
 //   • GET  /api/orwell/state        → gate on an active game (started)
 //   • GET  /api/orwell/initiatives  → houseguests who want to approach (name + pretext)
-//   • POST /api/orwell/diary-room   → the player's private, OOC confessional
 //
 // Vault-free by construction (the engine withholds all hidden state); fail-open everywhere.
 //
@@ -24,8 +24,10 @@ import { isNarrow } from './platform.js';
   const POLL_MS = 20000;
   const ID = "orwell-social";
   const MAX_APPROACHES = 3;            // a few houseguests may want you at once — a living house (U7)
-  const POS_KEY = "orwell-social-pos";
-  const DISMISS_KEY = "orwell-social-dismissed";
+  // E71: dismissals are scoped per user (and cleared per game via orwell:gamechanged),
+  // so one account's waved-off approaches never bleed into another's session.
+  const DISMISS_KEY = "orwell-social-dismissed:" +
+    ((document.body && document.body.dataset.user) || "");
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
@@ -62,17 +64,6 @@ import { isNarrow } from './platform.js';
     return r.json();
   }
 
-  function restorePosition(el) {
-    try {
-      const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
-      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
-        el.style.left = pos.left + "px";
-        el.style.top = pos.top + "px";
-        el.style.right = "auto";
-      }
-    } catch (_) {}
-  }
-
   // True while the dock holds this panel minimized — the poll loop must not reopen it.
   function isMinimized() {
     try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
@@ -94,7 +85,8 @@ import { isNarrow } from './platform.js';
     el.innerHTML = `
       <style>
         #orwell-social {
-          position: fixed; top: 210px; right: 14px; z-index: 9000;
+          /* E91/S11: positioned by the top-right SLOT (orwellSlots.js) — no coordinates here. */
+          position: fixed; z-index: 9000;
           width: 220px; max-width: 60vw; display: none;
           background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 10px;
@@ -147,60 +139,24 @@ import { isNarrow } from './platform.js';
             max-height: 38vh; overflow: auto;
           }
         }
-        #orwell-dr-modal {
-          position: fixed; inset: 0; z-index: 10000; display: none;
-          align-items: center; justify-content: center; background: rgba(0,0,0,.55);
-        }
-        #orwell-dr-modal .osoc-box {
-          width: 420px; max-width: 92vw; max-height: 90vh; overflow: auto; background: var(--panel, #111); color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 12px; padding: 1rem;
-          font-family: 'Fira Code', ui-monospace, monospace;
-        }
-        #orwell-dr-modal .osoc-drhdr { cursor: move; user-select: none; }
-        #orwell-dr-modal h3 { margin: 0 0 .3rem; font-size: .95rem; }
-        #orwell-dr-modal .osoc-note { color: color-mix(in srgb, var(--fg, #9cdef2) 80%, var(--panel, #111)); font-size: .72rem; margin-bottom: .6rem; }
-        #orwell-dr-modal textarea {
-          width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box;
-          background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
-          border-radius: 8px; padding: .5rem; font-family: inherit; font-size: .8rem;
-        }
-        #orwell-dr-modal .osoc-row { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .6rem; }
-        #orwell-dr-modal button { cursor: pointer; border-radius: 8px; padding: .4rem .8rem; font-family: inherit; }
-        #orwell-dr-modal .osoc-cancel { background: transparent; color: inherit; border: 1px solid var(--border, #355a66); }
-        #orwell-dr-modal .osoc-send { background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600; }
       </style>
       <div class="osoc-hdr" title="Drag to move">
         <span class="osoc-ttl">The House</span>
         <button type="button" class="osoc-min" title="Minimize" aria-label="Minimize">–</button>
       </div>
       <div class="osoc-body">
-        <button class="osoc-dr" id="osoc-dr-open">📔 Diary Room</button>
         <div class="osoc-hd" id="osoc-appr-hd" style="display:none">Wants a word</div>
         <div id="osoc-appr"></div>
       </div>`;
     document.body.appendChild(el);
+    // E88 (ruling #4): the Diary Room is NOT here anymore — it is a standing
+    // sidebar button + a composer mode (orwellDiaryRoom.js). This panel keeps
+    // only the approaches.
 
-    const modal = document.createElement("div");
-    modal.id = "orwell-dr-modal";
-    modal.innerHTML = `
-      <div class="osoc-box" role="dialog" aria-modal="true" aria-label="Diary Room">
-        <div class="osoc-drhdr" title="Drag to move"><h3>Diary Room</h3></div>
-        <div class="osoc-note">Private &amp; out-of-character — the house never hears this.</div>
-        <textarea id="osoc-dr-text" placeholder="Tell the producers what you're really thinking…"></textarea>
-        <div class="osoc-row">
-          <button class="osoc-cancel" id="osoc-dr-cancel">Cancel</button>
-          <button class="osoc-send" id="osoc-dr-send">Record</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-
-    el.querySelector("#osoc-dr-open").addEventListener("click", openDR);
-    modal.querySelector("#osoc-dr-cancel").addEventListener("click", closeDR);
-    modal.addEventListener("click", (e) => { if (e.target === modal) closeDR(); });
-    modal.querySelector("#osoc-dr-send").addEventListener("click", submitDR);
-
-    // Restore where the player left the panel.
-    restorePosition(el);
+    // E91/S11: the top-right slot owns the position; drag persists an offset-from-slot.
+    el._orwellSlot = window.OrwellSlots
+      ? window.OrwellSlots.register(el, "top-right", { key: "social", draggable: true })
+      : null;
     // Minimize → park as a chip in the shared dock (the fly-out of minimized windows),
     // alongside every other tool, instead of collapsing in place.
     try {
@@ -224,78 +180,13 @@ import { isNarrow } from './platform.js';
       content: el, header: el.querySelector(".osoc-hdr"),
       enableDock: false, enableFullscreen: false, enableResize: false,
       onDragEnd: ({ rect }) => {
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
+        if (el._orwellSlot) el._orwellSlot.saveDragOffset(rect); // E91: offset-from-slot, clamped at restore
       },
-    });
-    makeWindowDraggable(modal, {
-      content: modal.querySelector(".osoc-box"), header: modal.querySelector(".osoc-drhdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false,
     });
     return el;
   }
 
-  // --- Diary Room ---------------------------------------------------------------
-
-  let _drReturnFocus = null; // give focus back where the player was (A11Y-2)
-
-  function openDR() {
-    const m = document.getElementById("orwell-dr-modal");
-    const t = document.getElementById("osoc-dr-text");
-    if (!m) return;
-    _drReturnFocus = document.activeElement;
-    t.value = "";
-    document.getElementById("osoc-dr-send").disabled = false;
-    // Re-center the dialog each open (a prior drag may have left it elsewhere).
-    const box = m.querySelector(".osoc-box");
-    if (box) { box.style.left = ""; box.style.top = ""; box.style.position = ""; box.style.transform = ""; box.style.margin = ""; }
-    m.style.display = "flex";
-    // A11Y-2: a real dialog — Escape closes, Tab cycles inside the box.
-    if (!m._orwellA11yWired) {
-      m._orwellA11yWired = true;
-      m.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") { e.preventDefault(); closeDR(); return; }
-        if (e.key !== "Tab") return;
-        const f = m.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-        if (!f.length) return;
-        const first = f[0], last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      });
-    }
-    t.focus();
-  }
-  function closeDR() {
-    const m = document.getElementById("orwell-dr-modal");
-    if (m) m.style.display = "none";
-    if (_drReturnFocus && typeof _drReturnFocus.focus === "function") {
-      try { _drReturnFocus.focus(); } catch (_) {}
-    }
-    _drReturnFocus = null;
-  }
-  async function submitDR() {
-    const t = document.getElementById("osoc-dr-text");
-    const send = document.getElementById("osoc-dr-send");
-    const entry = (t.value || "").trim();
-    if (!entry) { t.focus(); return; }
-    send.disabled = true;
-    try {
-      const r = await fetch("/api/orwell/diary-room", {
-        method: "POST", credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entry }),
-      });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      // Brief confirmation, then close — the entry is the player's own private knowledge.
-      send.textContent = "Recorded ✓";
-      setTimeout(() => { closeDR(); send.textContent = "Record"; }, 750);
-    } catch (_) {
-      send.textContent = "Try again";
-      send.disabled = false;
-      setTimeout(() => { send.textContent = "Record"; }, 1500);
-    }
-  }
-
-  // --- Approaches ---------------------------------------------------------------
+  // --- Approaches -------------------------------------------------------
 
   // The NPC INITIATED the approach (socialInitiatives = who wants the player now), so the
   // prefill frames them coming to the player — not the player pulling them aside (U6). Varied
@@ -390,8 +281,6 @@ import { isNarrow } from './platform.js';
   // Seam for the headless browser gate: build + show the social panel on demand.
   window._orwellSocialEnsure = () => { const el = ensureUI(); el.style.display = "block"; return true; };
 
-  // Seam for the headless browser gate (and future flows): open the Diary Room on demand.
-  window._orwellOpenDiaryRoom = () => { ensureUI(); openDR(); };
 
   // --- Poll loop ----------------------------------------------------------------
 

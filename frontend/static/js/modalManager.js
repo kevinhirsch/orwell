@@ -149,8 +149,14 @@ function _ensureDock() {
   if (dock) return dock;
   dock = document.createElement('div');
   dock.id = 'minimized-dock';
-  document.body.appendChild(dock);
-  _loadDockState();
+  // E95 (ruling #10): minimized windows dock as rows in a "Windows" cluster at
+  // the bottom of the sidebar — never as chips parked over the chatbox.
+  dock.innerHTML = '<div class="minimized-dock-hd">Windows</div><div class="minimized-dock-rows"></div>';
+  const sidebar = document.getElementById('sidebar');
+  const userBar = sidebar && sidebar.querySelector('.sidebar-user-bar');
+  if (userBar) sidebar.insertBefore(dock, userBar);
+  else if (sidebar) sidebar.appendChild(dock);
+  else document.body.appendChild(dock);
   return dock;
 }
 
@@ -261,11 +267,7 @@ function _renderDock() {
   // On mobile we ALSO keep chips around for any modal that's been
   // free-positioned on screen — even while it's open — so the chip acts as
   // a persistent toggle (tap to minimize, tap again to restore).
-  const isMobile = isNarrow();
-  const persistentIds = isMobile
-    ? [..._state.entries()].filter(([id, _]) => _chipPositions.has(id)).map(([id]) => id)
-    : [];
-  const allIds = Array.from(new Set([...minimizedIds, ...persistentIds]));
+  const allIds = Array.from(new Set(minimizedIds)); // E95: minimized only — no floating chips
   // Keep _dockOrder for every modal still alive in _state — even when it's
   // currently restored (not in allIds). That way re-minimizing a chip lands
   // back in its original slot instead of being pushed to the right edge.
@@ -312,17 +314,10 @@ function _renderDock() {
   // new chip would land in the dock by itself — visually unlinking the
   // group. Collapse everyone back into the dock so the chain stays
   // together as a single group at the new size.
-  const newIds = renderIds.filter(id => !_renderedChipIds.has(id));
-  if (newIds.length && _chipPositions.size) {
-    _chipPositions.clear();
-    _saveDockState();
-  }
   if (!renderIds.length) {
-    dock.innerHTML = '';
-    // Scrub ALL drag/animation inline styles, then re-apply display:none so
-    // the empty dock stays hidden until new chips arrive.
-    dock.style.cssText = '';
     dock.style.display = 'none';
+    const rows0 = dock.querySelector('.minimized-dock-rows');
+    if (rows0) rows0.innerHTML = '';
     return;
   }
 
@@ -333,11 +328,8 @@ function _renderDock() {
   });
 
   dock.style.display = '';
-  // Re-assert the remembered position — the empty-dock branch clears inline
-  // styles, so without this the dock would snap back to its CSS default the
-  // first time it re-populates after every chip was restored.
-  _applyDockPos(dock);
-  dock.innerHTML = '';
+  const rows = dock.querySelector('.minimized-dock-rows') || dock;
+  rows.innerHTML = '';
   for (const id of renderIds) {
     const meta = _LABELS[id] || { label: id, icon: '' };
     const chip = document.createElement('button');
@@ -380,25 +372,10 @@ function _renderDock() {
         restore(id);
       }
     });
-    _wireChipDrag(chip, dock);
-    // Visually mark whether the modal is currently open (chip-active) so
-    // the user can see at a glance which floating chip belongs to the
-    // visible modal.
+    // E95: a plain sidebar row — icon + name, click restores; no drag.
     const st = _state.get(id);
     if (st && !st.isMinimized) chip.classList.add('chip-active');
-    // Free-positioned chips on mobile live OUTSIDE the dock so the dock's
-    // transform: translateX(-50%) doesn't shift their `position: fixed`
-    // coords. Dock-resident chips render as normal flex children.
-    const pos = _chipPositions.get(id);
-    if (pos && isNarrow()) {
-      chip.style.setProperty('position', 'fixed', 'important');
-      chip.style.setProperty('left', `${pos.left}px`, 'important');
-      chip.style.setProperty('top', `${pos.top}px`, 'important');
-      chip.style.setProperty('z-index', '10020', 'important');
-      document.body.appendChild(chip);
-    } else {
-      dock.appendChild(chip);
-    }
+    rows.appendChild(chip);
   }
 
   // FLIP: animate from old → new positions

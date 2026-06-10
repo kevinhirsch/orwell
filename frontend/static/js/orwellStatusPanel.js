@@ -1,34 +1,29 @@
-// Orwell status panel — a compact, Vault-free HUD for the live Big Brother game.
+// Orwell status panel — the game's standing readout, docked in the sidebar (E64).
 //
 // Polls the engine's public ceremony status (week / phase / HOH / nominees / veto)
-// via GET /api/orwell/status and pins a small panel to the corner whenever a game
-// is in progress. It shows ONLY ceremony-level public facts the engine projects —
-// no stats, souls, or hidden state ever reach it (the Vault Wall holds on the
-// engine side). It FAILS OPEN: if the engine is unreachable or no game is running,
-// the panel simply hides and never disturbs the normal chat.
+// via GET /api/orwell/status and renders a permanent section inside #sidebar
+// whenever a game is in progress. It shows ONLY ceremony-level public facts the
+// engine projects — no stats, souls, or hidden state ever reach it (the Vault
+// Wall holds on the engine side). It FAILS OPEN: if the engine is unreachable or
+// no game is running, the section simply hides and never disturbs the chat.
 //
-// Like the settings panel it is a real moveable window: drag it by its header and
-// it remembers where you put it. Minimize sends it to the shared chip dock — the
-// same "fly-out" strip every other minimized tool lands in — instead of collapsing
-// in place, and the dock chip restores it.
-import { makeWindowDraggable } from "./windowDrag.js";
-import * as modalManager from "./modalManager.js";
-import { isNarrow } from './platform.js';
+// RULING (#3 / E64): this is not a window. No drag, no saved position, no
+// minimize dock, no z-index — it is sidebar chrome, full sidebar width, below
+// the session list; on mobile it lives in the sidebar drawer like everything
+// else. Collapsible in place; the collapsed state persists per user+game (E71).
+import { onNarrowChange } from './platform.js';
 
 (function () {
   "use strict";
 
   const POLL_MS = 20000;
   const ID = "orwell-status";
-  const POS_KEY = "orwell-status-pos";
-  const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2'/><path d='M3 9h18M9 21V9'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
       : fn();
 
   let timer = null;
-  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
 
   async function fetchStatus() {
     const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -44,6 +39,14 @@ import { isNarrow } from './platform.js';
       if (!r.ok) return null;
       return await r.json();
     } catch (_) { return null; }
+  }
+
+  // E71: panel client state is keyed per user + game (the player's name is the
+  // closest stable public game discriminator the FE holds), so one account's
+  // collapse/dismiss state never leaks into another's, or into season 2.
+  let _gameKey = "";
+  function storageKey(base) {
+    return base + ":" + _gameKey;
   }
 
   // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
@@ -64,54 +67,38 @@ import { isNarrow } from './platform.js';
     return "";
   }
 
-  function restorePosition(el) {
-    try {
-      const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
-      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
-        el.style.left = pos.left + "px";
-        el.style.top = pos.top + "px";
-        el.style.right = "auto";
-      }
-    } catch (_) {}
-  }
-
-  // True while the dock holds this panel minimized — the poll loop must not force it
-  // back open on the next tick.
-  function isMinimized() {
-    try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
-  }
-
   function ensurePanel() {
-    let el = document.getElementById("orwell-status");
+    let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("div");
-    el.id = "orwell-status";
+    el = document.createElement("section");
+    el.id = ID;
+    el.setAttribute("aria-label", "Game status");
     // A3: announcements happen via the dedicated delta announcer below — a live region
     // on a root that toggles display:none and swaps every field per poll announces
     // nothing useful (either silence or a full re-read with no sense of what changed).
     el.innerHTML = `
       <style>
+        /* E64: sidebar chrome, not a window — static flow, full sidebar width. */
         #orwell-status {
-          position: fixed; top: 64px; right: 14px; z-index: 9000;
-          width: 220px; max-width: 60vw; display: none;
-          background: var(--panel, #111); color: var(--fg, #9cdef2);
+          display: none;
+          margin: var(--space-2) var(--space-2) 0;
+          padding: var(--space-2) var(--space-3);
+          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
+          color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 10px;
-          padding: .7rem .8rem; box-shadow: 0 10px 30px rgba(0,0,0,.35);
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .76rem; line-height: 1.5;
+          font-family: 'Fira Code', ui-monospace, monospace;
+          font-size: var(--fs-xs); line-height: 1.5;
         }
         #orwell-status .os-hdr {
           display: flex; align-items: baseline; gap: .4rem;
-          margin-bottom: .4rem; font-weight: 600; letter-spacing: .03em;
-          cursor: move; user-select: none;
+          margin-bottom: .3rem; font-weight: 600; letter-spacing: .03em;
+          cursor: pointer; user-select: none;
         }
-        #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; }
+        #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
         #orwell-status .os-hdr .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
-        #orwell-status .os-min {
-          cursor: pointer; border: none; background: none; color: inherit;
-          opacity: .55; font-size: 1rem; line-height: 1; padding: 0 .15rem; margin-left: auto;
-          font-family: inherit;
-        }
-        #orwell-status .os-min:hover { opacity: .9; }
+        #orwell-status .os-chev { opacity: .55; margin-left: auto; transition: transform .15s; }
+        #orwell-status.os-collapsed .os-chev { transform: rotate(-90deg); }
+        #orwell-status.os-collapsed .os-body { display: none; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
@@ -119,86 +106,64 @@ import { isNarrow } from './platform.js';
         /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
         #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
-        #orwell-status .os-you { margin: .45rem 0 .1rem; font-weight: 600; }
+        #orwell-status .os-you { margin: .35rem 0 .1rem; font-weight: 600; }
         #orwell-status .os-you .os-badge {
           display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
           font-size: .72em; font-weight: 700; letter-spacing: .02em;
           background: var(--accent, var(--red, #e06c75)); color: #fff;
         }
-        #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .5rem 0 .15rem; }
-        #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; }
+        #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .4rem 0 .15rem; }
+        #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
         #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
         #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
-        /* C26/M1: on phones the panel is a full-width top sheet under the header —
-           never a free-floating box over the chat or composer. Drag is disabled
-           (windowDrag's default mobile cutoff) so it can't be stranded off-screen. */
-        @media (max-width: 768px) {
-          #orwell-status {
-            left: 0 !important; right: 0 !important; top: 44px !important;
-            width: auto !important; max-width: none !important;
-            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
-            max-height: 38vh; overflow: auto;
-          }
-        }
       </style>
-      <div class="os-hdr" title="Drag to move">
+      <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
         <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
-        <button type="button" class="os-min" title="Minimize" aria-label="Minimize">–</button>
+        <span class="os-chev" aria-hidden="true">▾</span>
       </div>
-      <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
-      <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
-      <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
-      <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
-      <div class="os-roster-h" id="os-roster-h">The house</div>
-      <div class="os-roster" id="os-roster"></div>
+      <div class="os-body">
+        <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
+        <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
+        <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
+        <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+        <div class="os-roster-h" id="os-roster-h">The house</div>
+        <div class="os-roster" id="os-roster"></div>
+      </div>
       <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
-    document.body.appendChild(el);
 
-    // Restore where the player last left it.
-    restorePosition(el);
+    // E64: mount INSIDE the sidebar, below the session list — never document.body.
+    const sidebar = document.getElementById("sidebar");
+    const sessions = document.getElementById("sessions-section");
+    if (sessions && sessions.parentElement) {
+      sessions.parentElement.insertBefore(el, sessions.nextSibling);
+    } else if (sidebar) {
+      sidebar.appendChild(el);
+    } else {
+      document.body.appendChild(el); // headless/degraded DOM — still functional
+    }
 
-    // Register with the shared minimized-window dock so the minimize button parks the
-    // panel as a chip in the same fly-out strip as every other tool. restoreFn brings
-    // it back; closeFn hides it entirely (the chip's ×).
+    // Collapse in place (sidebar chrome, not a dock park) — persisted per user+game.
+    const hdr = el.querySelector(".os-hdr");
+    const setCollapsed = (on) => {
+      el.classList.toggle("os-collapsed", !!on);
+      hdr.setAttribute("aria-expanded", on ? "false" : "true");
+      try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
+    };
+    const toggle = () => setCollapsed(!el.classList.contains("os-collapsed"));
+    hdr.addEventListener("click", toggle);
+    hdr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    });
     try {
-      modalManager.register(ID, {
-        label: "Status",
-        icon: ICON,
-        restoreFn: () => { el.style.display = "block"; },
-        closeFn: () => { el.style.display = "none"; },
-      });
+      if (localStorage.getItem(storageKey("orwell-status-collapsed")) === "1") setCollapsed(true);
     } catch (_) {}
-    el.querySelector(".os-min").addEventListener("click", () => {
-      try { modalManager.minimize(ID); } catch (_) {}
-      // The HUD isn't a `.modal`, so the dock's `.hidden` class is overridden by its
-      // inline display — hide it explicitly. restoreFn / the poll-loop guard bring it back.
-      el.style.display = "none";
-    });
-
-    // A real moveable window: drag by the header, no dock/fullscreen/resize (it is a
-    // small fixed-size HUD), and remember the final position. The minimize button is a
-    // <button>, so the default skipSelector keeps a click on it from starting a drag.
-    makeWindowDraggable(el, {
-      content: el,
-      header: el.querySelector(".os-hdr"),
-      enableDock: false,
-      enableFullscreen: false,
-      enableResize: false,
-      onDragEnd: ({ rect }) => {
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
-      },
-    });
     return el;
   }
 
-  // Fully hide the panel and clear any dock chip — used when no game is running or the
-  // engine is unreachable, so a stale "Status" chip never lingers in the fly-out.
   function hidePanel() {
     const el = document.getElementById(ID);
-    if (!el) return;
-    if (isMinimized()) { try { modalManager.restore(ID); } catch (_) {} }
-    el.style.display = "none";
+    if (el) el.style.display = "none";
   }
 
   // V3: engine phase enums are internal vocabulary — the HUD speaks the show's.
@@ -210,6 +175,13 @@ import { isNarrow } from './platform.js';
     "social": "A day in the house",
   };
   const phaseLabel = (p) => PHASE_LABELS[p] || String(p || "").replace(/-/g, " ");
+
+  // E69: a correct English ordinal — 11/12/13 (and 111/112/113…) take "th".
+  function ordinal(n) {
+    const mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 13) return n + "th";
+    return n + (["th", "st", "nd", "rd"][n % 10] || "th");
+  }
 
   // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
   let _last = { phase: null, hoh: null, noms: null, veto: null };
@@ -237,7 +209,7 @@ import { isNarrow } from './platform.js';
     if (!st || typeof st.week !== "number" || st.week < 1) {
       _shown = false;
       _failures = 0;
-    markStale(false);
+      markStale(false);
       hidePanel();
       return;
     }
@@ -259,15 +231,7 @@ import { isNarrow } from './platform.js';
       veto: vetoText,
     });
     if (st._state !== undefined) renderRoster(el, st, st._state);
-    // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
-    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
-    // unobstructed); the dock chip restores it as a full-width top sheet.
-    if (isNarrow() && !_mobileParkedOnce && !isMinimized()) {
-      _mobileParkedOnce = true;
-      el.style.display = "block";
-      try { modalManager.minimize(ID); return; } catch (_) {}
-    }
-    if (!isMinimized()) el.style.display = "block";
+    el.style.display = "block";
   }
 
   // The memory wall: who's still in, who's gone, the attrition count, and the player's own
@@ -277,6 +241,10 @@ import { isNarrow } from './platform.js';
     const badge = selfBadge(st, state);
     if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
     else { badgeEl.hidden = true; }
+
+    // E71: key panel state to this user's game.
+    _gameKey = ((state && state.player && state.player.name) || "") + ":" +
+               ((document.body && document.body.dataset.user) || "");
 
     const rosterEl = el.querySelector("#os-roster");
     const headEl = el.querySelector("#os-roster-h");
@@ -296,7 +264,7 @@ import { isNarrow } from './platform.js';
       rows.push('<div class="os-hg"><span>' + esc(h.name) + "</span></div>");
     });
     out.forEach((h, i) => {
-      const seat = h.status === "jury" ? "jury" : (i + 1) + (["th","st","nd","rd"][(i + 1) % 10] || "th") + " out";
+      const seat = h.status === "jury" ? "jury" : ordinal(i + 1) + " out";
       rows.push('<div class="os-hg os-out"><span>' + esc(h.name) +
         '</span><span class="os-seat">' + esc(seat) + "</span></div>");
     });
@@ -313,11 +281,12 @@ import { isNarrow } from './platform.js';
   let _shown = false;
 
   // C18: a hidden tab polls nothing; consecutive failures back the poll off (max 2 min).
+  // E68: a SUCCESS resets the backoff — one blip must not degrade a live game to 2-minute polls.
   let _failures = 0;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
   function markStale(on) {
-    const el = document.getElementById("orwell-status");
+    const el = document.getElementById(ID);
     const dot = el && el.querySelector("#os-stale");
     if (dot) dot.hidden = !on;
   }
@@ -334,6 +303,7 @@ import { isNarrow } from './platform.js';
       else hidePanel();
       return;
     }
+    _failures = 0; // E68: recovered — poll at full cadence again
     markStale(false);
     // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
     st._state = (await fetchState()) || null;
@@ -356,6 +326,9 @@ import { isNarrow } from './platform.js';
   // Let onboarding (or any flow that changes the game) trigger an immediate refresh.
   window.orwellRefreshStatus = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
+  // The sidebar drawer handles narrow layouts; nothing to repark (E64). Kept as a
+  // no-op subscription so a future narrow-specific treatment has its hook.
+  onNarrowChange(() => {});
 
   ready(start);
 })();

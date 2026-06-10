@@ -184,16 +184,38 @@ def main() -> int:
             page.evaluate("document.getElementById('orwell-onboarding').remove();"
                           "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
 
-            # C25/A11Y-2: the Diary Room is a real dialog — Escape closes it and focus returns.
+            # C25/E88: the Diary Room is a composer mode in the chat (no dialog) — ruling #4.
             page.evaluate("window._orwellOpenDiaryRoom && window._orwellOpenDiaryRoom()")
-            page.wait_for_selector("#orwell-dr-modal", timeout=3000)
-            dr_open = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'flex'")
-            check(dr_open is True, "diary room: opens via the seam")
-            dr_focus = page.evaluate("document.activeElement && document.activeElement.id === 'osoc-dr-text'")
-            check(dr_focus is True, "diary room: focus lands in the entry box")
+            # E88 (ruling #4): no floating dialog — the composer enters DR mode.
+            check(page.evaluate("!document.getElementById('orwell-dr-modal')") is True,
+                  "diary room: no floating dialog exists")
+            check(page.evaluate("!document.querySelector('.osoc-box')") is True,
+                  "diary room: no dialog box node is created")
+            check(page.evaluate("window._orwellDiaryRoomActive && window._orwellDiaryRoomActive()") is True,
+                  "diary room: composer mode engages via the seam")
+            check(page.evaluate("document.body.classList.contains('orwell-dr-mode')") is True,
+                  "diary room: the composer carries the mode indicator")
+            sb_btn = page.evaluate("(function(){ var b = document.getElementById('sidebar-diary-room-btn'); return !!(b && document.getElementById('sidebar').contains(b)); })()")
+            check(sb_btn is True, "diary room: the standing trigger lives in the sidebar")
+            dr_focus = page.evaluate("document.activeElement && document.activeElement.id === 'message'")
+            check(dr_focus is True, "diary room: focus lands in the composer")
             page.keyboard.press("Escape")
-            dr_closed = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'none'")
-            check(dr_closed is True, "diary room: Escape closes the dialog")
+            dr_closed = page.evaluate("!(window._orwellDiaryRoomActive && window._orwellDiaryRoomActive())")
+            check(dr_closed is True, "diary room: Escape leaves the composer mode")
+
+            # E90 (ruling #7): the theme trigger is icon-only in the sidebar's
+            # bottom cluster, beside the settings gear, with an accessible name.
+            tbtn = page.evaluate("""() => {
+              const b = document.getElementById('tool-theme-btn');
+              if (!b) return { ok: false };
+              const bar = document.getElementById('sidebar-user-bar');
+              return { ok: true, inCluster: !!(bar && bar.contains(b)),
+                       named: !!(b.getAttribute('aria-label') || b.title),
+                       textless: (b.textContent || '').trim() === '' };
+            }""")
+            check(tbtn.get("inCluster") is True, f"theme: trigger docks in the bottom cluster ({tbtn})")
+            check(tbtn.get("named") is True, "theme: trigger has an accessible name")
+            check(tbtn.get("textless") is True, "theme: trigger renders no text node")
 
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
@@ -288,19 +310,20 @@ def main() -> int:
             check(right_state.get("ham") == right_state.get("sidebar") == "R",
                   f"mobile: hamburger follows a RIGHT sidebar ({right_state})")
 
-            # C26/M1: on a phone the game HUDs are full-width TOP SHEETS — they must never
-            # cover the composer (the old fixed 220px floaters sat right on top of it).
+            # E64 (ruling #3): the status panel is SIDEBAR CHROME — on a phone it lives
+            # inside the off-canvas drawer, so it can never cover the composer at all.
             hud_geo = mob.evaluate("""() => {
               if (window._orwellStatusEnsure) window._orwellStatusEnsure();
               const el = document.getElementById('orwell-status');
-              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
-              if (!el || !ta) return { ok: false, why: 'missing' };
-              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
-              return { ok: true, fullWidth: r.width >= window.innerWidth * 0.95,
-                       clearsComposer: r.bottom <= c.top, top: r.top };
+              const sb = document.getElementById('sidebar');
+              if (!el || !sb) return { ok: false, why: 'missing' };
+              const cs = getComputedStyle(el);
+              return { ok: true, inSidebar: sb.contains(el), fixed: cs.position === 'fixed' };
             }""")
-            check(hud_geo.get("fullWidth") is True, f"mobile: status HUD is a full-width sheet ({hud_geo})")
-            check(hud_geo.get("clearsComposer") is True, f"mobile: status HUD never covers the composer ({hud_geo})")
+            check(hud_geo.get("inSidebar") is True, f"mobile: status panel is sidebar chrome ({hud_geo})")
+            check(hud_geo.get("fixed") is False, f"mobile: status panel is never fixed-position ({hud_geo})")
+            # C26/M1: the social HUD (still a window) stays a full-width top sheet that
+            # never covers the composer.
             soc_geo = mob.evaluate("""() => {
               if (window._orwellSocialEnsure) window._orwellSocialEnsure();
               const el = document.getElementById('orwell-social');

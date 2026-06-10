@@ -69,7 +69,7 @@ html {
   select:not(.tap-exempt),
   .settings-nav-item:not(.tap-exempt) {
     min-height: var(--tap-min);
-    min-width: 2.25rem;
+    min-width: max(36px, 2.25rem);
   }
   input[type="checkbox"]:not(.tap-exempt),
   input[type="radio"]:not(.tap-exempt) {
@@ -89,4 +89,21 @@ html {
   #orwell-engine-banner {
     top: var(--safe-top) !important;
   }
+}
+
+/* --- E92: the composer never touches the viewport bottom edge — a small
+       constant inset on every viewport, breathing with the home indicator. */
+.chat-input-bar {
+  margin-bottom: max(10px, var(--safe-bottom));
+}
+
+/* --- E97: ONE animation contract for every slotted game panel — open is a
+       fade+scale-in; reduced motion disables it entirely. */
+@keyframes orwell-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.orwell-anim-in { animation: orwell-pop 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .orwell-anim-in { animation: none; }
 }

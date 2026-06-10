@@ -46,7 +46,7 @@
     el.setAttribute("role", "status");
     el.setAttribute("aria-live", "polite");
     el.style.cssText = [
-      "position:fixed", "bottom:84px", "left:50%", "transform:translateX(-50%)",
+      "position:fixed", /* E91/S11: the bottom-center slot owns the coordinates */
       "max-width:min(720px, calc(100vw - 24px))", "z-index:40",
       "background:var(--surface-2, rgba(24,24,28,0.92))", "color:var(--text-1, #ddd)",
       "border:1px solid var(--border-1, rgba(255,255,255,0.12))", "border-radius:10px",
@@ -63,6 +63,7 @@
       el.style.display = "none";
     });
     document.body.appendChild(el);
+    if (window.OrwellSlots) window.OrwellSlots.register(el, "bottom-center", { key: "presence" });
     return el;
   }
 

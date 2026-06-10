@@ -2535,6 +2535,27 @@ PR per item).
 > (`scripts/responsive_matrix.py`, in CI: 6 viewports + settings passes + 200% font; overflow/
 > overlap/crowding/touch; XFAIL registry by finding ID — ratchets as U2–U4 land).
 
-### U2 — settings repair (S1 S2 S3 S12 A3)  ·  next
-### U3 — chrome & windows (rulings #3/#4/#7/#8/#10/#12; E64 E88 E95 E90 E91+S11 E97 E92 E67–E71, D2)
+### U2 — settings repair (S1 S2 S3 S12 A3)  ·  **✅ DONE (PR #205)**
+
+> The modal sizes with `clamp(560px, 58cqw, 880px)` against its overlay container (S13's cqw fix) +
+> `max-height: min(85dvh, 720px)` with the S2 short-viewport tier; the rail is fluid
+> (`clamp(140px, 18cqw, 200px)`); the WHOLE settings type tree is on the --fs-* rem scale (45 region
+> rules + 99 settings.js + 49 index.html inline sizes — zero px font-sizes remain, enforced; the
+> density lever works again); ONE narrow-layout switch (the @container 620 query — the @media-600
+> dup is deleted and the lint-gate exception registry is EMPTY); tab-rail edge-fade affordance; the
+> A3 layout kit (.settings-section/-title/-divider/-hint/row variants/gap utilities) with the
+> inline-style ratchet (219 → 212, capped). Matrix gate: S1 + S9 flipped from xfail to hard passes
+> (37 pass · 0 xfail · 0 fail).
+### U3 — chrome & windows (rulings #3/#4/#7/#8/#10/#12)  ·  **✅ DONE (PR #206)**
+
+> In the lane's order: E64 status HUD → permanent sidebar section (collapse-in-place, E68 backoff
+> reset + E69 ordinals folded in) · E88 Diary Room → standing sidebar button + composer DR mode
+> (capture-phase send interception; the floating dialog is gone; social keeps only approaches) ·
+> E95 minimize dock → sidebar "Windows" rows (chatbox chip strip dead; the .modal-minimized
+> pointer-events leak killed by CSS) · E90 icon-only theme button in the bottom cluster · E91/S11
+> the anchor-slot registry (`orwellSlots.js`: four slots stacking by measured height; drag persists
+> a clamped offset-from-slot; D2 structural — the matrix XFAIL registry is EMPTY) · E97 one shared
+> open animation honoring reduced-motion · E92 composer bottom inset · E67 finale-panel parity
+> (adaptive poll, sheet, aria-live reveals) · E71 per-user panel keys. E70 deferred to Lane 1's D1
+> one-door work by design.
 ### U4 — transcript surface + trims + 0052 themes (E65 E93 D3/E66 D5/W6 E94-FE E72 E96 D7 D6/W8 · 0052)
