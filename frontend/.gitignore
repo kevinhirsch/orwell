@@ -55,6 +55,10 @@ output.txt.txt
 *.jpg
 *.jpeg
 *.png
+# PWA install icons (S7) — the one sanctioned set of committed PNGs
+!static/icon-192.png
+!static/icon-512.png
+!static/apple-touch-icon.png
 *.gif
 *.bmp
 *.webp
