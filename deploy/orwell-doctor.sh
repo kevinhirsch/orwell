@@ -2,14 +2,23 @@
 #
 # deploy/orwell-doctor.sh — diagnose and (by default) FIX a deployed Orwell instance.
 #
+# Inside the container:
 #   bash deploy/orwell-doctor.sh             # diagnose; restart whatever is unhealthy; verify
 #   bash deploy/orwell-doctor.sh --status    # diagnose only — no restarts
 #   bash deploy/orwell-doctor.sh --bounce    # unconditional restart of engine + front-end; verify
 #
+# From the PROXMOX HOST (same bridge as orwell-update.sh / orwell-factory-reset.sh — it
+# locates the orwell LXC by hostname "orwell", override with CTID=<id> / CT_HOSTNAME=<name>,
+# and re-runs itself inside, forwarding the flag):
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)"
+#   bash -c "$(curl -fsSL .../deploy/orwell-doctor.sh)" -- --status
+#   CTID=112 bash -c "$(curl -fsSL .../deploy/orwell-doctor.sh)" -- --bounce
+#
 # For the systemd install (orwell-install.sh): units orwell-engine / orwell-frontend
-# (legacy bbai-* detected automatically), app in /opt/orwell (override: ORWELL_HOME),
-# config in <app>/data/.env. Exit 0 = healthy at the end; non-zero = still broken
-# (the script prints the failing unit's recent journal so you can see why).
+# (legacy bbai-* detected automatically), app in /opt/orwell or legacy /opt/bbai
+# (override: ORWELL_HOME), config in <app>/data/.env. Exit 0 = healthy at the end;
+# non-zero = still broken (the script prints the failing unit's recent journal so you
+# can see why).
 #
 # What "healthy" means here, end to end:
 #   1. both units active;
@@ -21,7 +30,45 @@
 set -uo pipefail
 
 MODE="${1:---fix}"
-APP_DIR="${ORWELL_HOME:-/opt/orwell}"
+BRANCH="${BRANCH:-main}"
+CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+# First install dir found: an explicit override, then the current path, then the legacy one.
+find_app() {
+  local d
+  for d in "${ORWELL_HOME:-}" /opt/orwell /opt/bbai; do
+    [[ -n "$d" && -d "$d" ]] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+
+# ── Host → container bridge ─────────────────────────────────────────────────────────────
+# On a Proxmox host (pct present, no app dir) locate the orwell LXC and re-run this script
+# inside it, forwarding the mode flag. Same pattern as orwell-factory-reset.sh. When run
+# from a local file, push THAT file (no network, no branch drift); when run via
+# `bash -c "$(curl ...)"` there is no file, so fetch the script from ${BRANCH}.
+if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
+  CTID="${CTID:-$(pct list 2>/dev/null | awk -v n="$CT_HOSTNAME" 'NR>1 && $NF==n {print $1}' || true)}"
+  [[ -n "$CTID" ]] || die "no orwell LXC found (hostname '${CT_HOSTNAME}'). Set CTID=<id> and retry."
+  [[ "$(printf '%s' "$CTID" | wc -w)" -eq 1 ]] || die "multiple containers named '${CT_HOSTNAME}' (${CTID//$'\n'/ }). Set CTID=<id>."
+  [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || die "LXC ${CTID} is not running — start it first: pct start ${CTID}"
+
+  echo "==> orwell lives in LXC ${CTID}; running the doctor inside the container"
+  TMP_DOC="$(mktemp /tmp/orwell-doctor-XXXXXX.sh)"
+  if [[ -n "${BASH_SOURCE[0]:-}" && -r "${BASH_SOURCE[0]:-}" ]]; then
+    cp "${BASH_SOURCE[0]}" "$TMP_DOC"
+  else
+    curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-doctor.sh" -o "$TMP_DOC" \
+      || die "could not fetch orwell-doctor.sh from branch '${BRANCH}'"
+  fi
+  pct push "$CTID" "$TMP_DOC" /tmp/orwell-doctor.sh || die "pct push into LXC ${CTID} failed"
+  rm -f "$TMP_DOC"
+  pct exec "$CTID" -- bash /tmp/orwell-doctor.sh "$MODE"
+  exit $?
+fi
+
+APP_DIR="$(find_app || echo "${ORWELL_HOME:-/opt/orwell}")"
 ENV_FILE="${APP_DIR}/data/.env"
 
 fails=0

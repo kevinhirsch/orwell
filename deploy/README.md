@@ -64,9 +64,18 @@ one script that deliberately **does**.
 ### Doctor / bounce (when the game misbehaves)
 
 When the chat says **"the live feeds are down"**, the engine banner shows, or things just look
-wrong, run the doctor **inside the container** (legacy `bbai-*` units auto-detected):
+wrong, run the doctor. Like update/factory-reset it is **host-aware**: run it on the **Proxmox
+host** and it locates the orwell LXC (hostname `orwell`; `CTID=<id>` / `CT_HOSTNAME=<name>` to
+override) and re-runs itself inside, or run it directly **inside the container** (legacy `bbai-*`
+units auto-detected):
 
 ```bash
+# from the Proxmox host
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)" -- --status
+CTID=112 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)" -- --bounce
+
+# or directly inside the container
 bash /opt/orwell/deploy/orwell-doctor.sh             # diagnose; restart whatever is unhealthy; verify
 bash /opt/orwell/deploy/orwell-doctor.sh --status    # diagnose only — no restarts
 sudo bash /opt/orwell/deploy/orwell-doctor.sh --bounce  # force-restart engine + front-end; verify
