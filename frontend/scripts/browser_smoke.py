@@ -144,6 +144,19 @@ def main() -> int:
             page.evaluate("document.getElementById('orwell-onboarding').remove();"
                           "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
 
+            # C31/S5: the System Danger Zone only offers wipes for data the game build has.
+            wipes = page.evaluate("""() => {
+              const vis = (k) => {
+                const b = document.querySelector(`button[data-wipe-kind="${k}"]`);
+                if (!b || !b.parentElement) return null;
+                return getComputedStyle(b.parentElement).display !== 'none';
+              };
+              return { chats: vis('chats'), memory: vis('memory'), notes: vis('notes'), gallery: vis('gallery') };
+            }""")
+            check(wipes.get("chats") is True, f"system wipe: chats (live data) stays ({wipes})")
+            check(wipes.get("memory") is False and wipes.get("notes") is False and wipes.get("gallery") is False,
+                  f"system wipe: dropped verticals hidden under the game build ({wipes})")
+
             # C20: the confirm-on-binding decision guardrail. Dispatch a synthetic pending
             # (exactly what chat.js emits from an advanceGame result) and assert the card
             # renders the engine's prompt + legal options, enforces the pick count, and only

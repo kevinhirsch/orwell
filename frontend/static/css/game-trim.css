@@ -76,3 +76,16 @@ body[data-game-build] #export-doc-btn { display: none !important; }
 /* ── D7: game turns always act — the Agent|Chat mode toggle invites the
       broken tool-less mode while a game is live. ── */
 body[data-game-build][data-game-active="1"] .mode-toggle { display: none !important; }
+
+/* C31/S5: the game build has no memory/skills/notes/tasks/documents/gallery/calendar —
+   their Danger-Zone wipe rows are dead surface. Scoped on the server-injected body flag,
+   so the debug build keeps the full list even though this stylesheet loads unconditionally. */
+body[data-game-build] div:has(> button[data-wipe-kind="memory"]),
+body[data-game-build] div:has(> button[data-wipe-kind="skills"]),
+body[data-game-build] div:has(> button[data-wipe-kind="notes"]),
+body[data-game-build] div:has(> button[data-wipe-kind="tasks"]),
+body[data-game-build] div:has(> button[data-wipe-kind="documents"]),
+body[data-game-build] div:has(> button[data-wipe-kind="gallery"]),
+body[data-game-build] div:has(> button[data-wipe-kind="calendar"]) {
+  display: none !important;
+}
