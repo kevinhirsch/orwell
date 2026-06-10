@@ -2572,3 +2572,27 @@ PR per item).
 > Sequester) leading the picker — frosted backdrop-blur chrome with the @supports fallback,
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
+
+## Full product audit (2026-06-10, round 5/6) — parallel lanes
+
+### Lane 5 — prompt content (engine, fast)  ·  Claude Code  ·  **audit P1 + P4 + P6 + P9 + P10 + P11 + E58 + E60 + C8 — ✅ DONE (PR #213)**
+
+> Each finding shipped with its proving pin in the same PR (`tests/unit/leverManifest.test.ts`,
+> `tests/unit/castingInterview.test.ts`, new `tests/unit/houseEvents.test.ts`, new
+> `frontend/tests/test_lane5_prompt_pins.py`): **P1** the FINALITY line (unresolved outcomes are
+> reads, never settled results) · **P4** levers are silent production machinery + `ask_user` scoped
+> to pending BINDING decisions (engine + FE schema) · **P6** `runCompetition` accurately described
+> as a PREVIEW of the loop's already-decided winner (commits only via `advanceGame`) in the base
+> manifest, registry, and FE schema · **P9** the casting FIELD manifest drift-pinned against
+> `CASTING_COVERAGE` · **P10** `submitDecision`'s bullet de-enumerated + a drift pin parsing the
+> `PendingDecisionView` kind union from the port source (no partial subset can return) · **P11**
+> the two quoted example lines cut to descriptions (ADR 0003: facts to voice, never scripts to
+> recite) · **E58** `src/engine/houseEvents.ts` — `dayOfWeek()` (Day 1 HOH → Day 5 eviction, woven
+> into GAME CONTEXT) + `nextHouseEvent()` (seeded 12-line variety pool, store-consulted: no two
+> consecutive house events share content), one-line orchestrator integration (sequenced after
+> Lane 1) · **E60** the canned "wants a word with you" pretext replaced by the coarse motive enum
+> (`bond` | `probe`) the GM voices — 0036 amendment row in `docs/features/README.md` · **C8**
+> casting-intake hard caps (`CASTING_LIMITS`) + system-prompt echo neutralization
+> (`neutralizeForPrompt`; the prompt-forgery scenario asserted end-to-end). **Deferred:** C8's
+> overwrite flag (a `CastingStatusView` contract change — casting-UX follow-up); E58's
+> `gameStatus.day` field (one line in Lane 4's view group once lanes merge).
