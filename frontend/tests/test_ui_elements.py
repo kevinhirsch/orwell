@@ -24,6 +24,7 @@ CSS_TRIM = (FRONTEND_DIR / "static" / "css" / "game-trim.css").read_text(encodin
 JS_ONBOARDING = (FRONTEND_DIR / "static" / "js" / "orwellOnboarding.js").read_text(encoding="utf-8")
 JS_STATUS = (FRONTEND_DIR / "static" / "js" / "orwellStatusPanel.js").read_text(encoding="utf-8")
 JS_SOCIAL = (FRONTEND_DIR / "static" / "js" / "orwellSocial.js").read_text(encoding="utf-8")
+JS_DIARY = (FRONTEND_DIR / "static" / "js" / "orwellDiaryRoom.js").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +227,12 @@ class TestStatusHUD:
     def test_status_fail_open_on_error(self):
         assert "catch" in JS_STATUS or "try" in JS_STATUS
 
-    def test_status_is_draggable(self):
+    def test_status_is_sidebar_chrome(self):
+        # E64 (ruling #3): the status HUD is a permanent sidebar section — the old
+        # draggable-window pin is retired with the ruling.
         src = JS_STATUS
-        assert "Draggable" in src or "draggable" in src.lower()
+        assert "makeWindowDraggable" not in src
+        assert 'getElementById("sidebar")' in src
 
     # -- Route contracts (C-level) -------------------------------------------
 
@@ -284,21 +288,27 @@ class TestSocialSurface:
     def test_social_panel_root_id(self):
         assert "orwell-social" in JS_SOCIAL
 
-    def test_social_dr_open_button(self):
-        assert "osoc-dr-open" in JS_SOCIAL
+    def test_social_has_no_diary_room(self):
+        # E88 (ruling #4): the social HUD keeps only approaches.
+        assert "osoc-dr-open" not in JS_SOCIAL
 
-    def test_social_dr_modal_id(self):
-        assert "orwell-dr-modal" in JS_SOCIAL
+    def test_social_has_no_dr_modal(self):
+        assert "orwell-dr-modal" not in JS_SOCIAL
 
-    def test_social_dr_textarea_id(self):
-        # Textarea is created dynamically; referenced via getElementById
-        assert "osoc-dr-text" in JS_SOCIAL
+    def test_dr_module_is_a_sidebar_button_plus_composer_mode(self):
+        # E88 (ruling #4): the standing trigger + the composer mode live in orwellDiaryRoom.js.
+        assert "sidebar-diary-room-btn" in JS_DIARY
+        assert "orwell-dr-mode" in JS_DIARY
+        assert "/api/orwell/diary-room" in JS_DIARY
 
-    def test_social_dr_cancel_button(self):
-        assert "osoc-dr-cancel" in JS_SOCIAL
+    def test_dr_module_has_no_floating_dialog(self):
+        assert "aria-modal" not in JS_DIARY
+        assert "makeWindowDraggable" not in JS_DIARY
 
-    def test_social_dr_send_button(self):
-        assert "osoc-dr-send" in JS_SOCIAL
+    def test_dr_send_is_intercepted_in_capture_phase(self):
+        # The confessional must never reach the chat pipeline as a turn.
+        assert "stopImmediatePropagation" in JS_DIARY
+        assert '}, true)' in JS_DIARY
 
     def test_social_approach_header(self):
         # Header element shown/hidden based on approach count
@@ -317,14 +327,16 @@ class TestSocialSurface:
         src = JS_SOCIAL
         assert "value" in src and ("= ''" in src or '= ""' in src or ".value = " in src)
 
-    def test_social_dr_disables_send_during_submit(self):
-        assert "disabled" in JS_SOCIAL
+    def test_dr_send_is_intercepted_in_capture_phase(self):
+        # The confessional must never reach the chat pipeline as a turn.
+        assert "stopImmediatePropagation" in JS_DIARY
+        assert '}, true)' in JS_DIARY
 
     def test_social_dr_reenables_on_error(self):
         assert "catch" in JS_SOCIAL or "finally" in JS_SOCIAL
 
-    def test_social_dr_shows_confirmation_on_success(self):
-        assert "Recorded" in JS_SOCIAL or "recorded" in JS_SOCIAL
+    def test_dr_shows_confirmation_on_success(self):
+        assert "Recorded" in JS_DIARY or "recorded" in JS_SOCIAL
 
     def test_social_start_scene_prefills_composer(self):
         assert "pull" in JS_SOCIAL and "aside" in JS_SOCIAL
@@ -344,8 +356,8 @@ class TestSocialSurface:
     def test_social_polls_periodically(self):
         assert "setInterval" in JS_SOCIAL or "setTimeout" in JS_SOCIAL
 
-    def test_social_empty_entry_guard(self):
-        assert "trim()" in JS_SOCIAL or ".trim" in JS_SOCIAL
+    def test_dr_empty_entry_guard(self):
+        assert ".trim" in JS_DIARY
 
     def test_social_dr_modal_accessibility(self):
         src = JS_SOCIAL + HTML_SRC

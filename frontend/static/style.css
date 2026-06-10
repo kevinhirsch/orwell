@@ -836,26 +836,28 @@ body.bg-pattern-sparkles {
       transition: left 0.12s ease, top 0.12s ease, width 0.12s ease, height 0.12s ease, opacity 0.12s, transform 0.12s;
     }
     #tile-ghost.visible { opacity: 1; transform: scale(1); }
-    /* Bottom dock — chip per minimized modal */
+    /* E95 (ruling #10): minimized windows dock as ROWS in a "Windows" cluster
+       at the bottom of the sidebar — the chatbox chip strip is gone. */
     #minimized-dock {
-      position: fixed; bottom: var(--composer-clearance, 12px); left: 50%; transform: translateX(-50%);
-      display: flex; gap: 6px; flex-wrap: wrap;
-      max-width: calc(100vw - 24px);
-      padding: 4px;
-      z-index: 100;
-      pointer-events: none;
+      display: none;
+      margin: var(--space-2) var(--space-2);
+      padding-top: var(--space-2);
+      border-top: 1px solid var(--border);
     }
+    #minimized-dock .minimized-dock-hd {
+      font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; opacity: 0.4; padding: 0 4px 4px;
+    }
+    #minimized-dock .minimized-dock-rows { display: flex; flex-direction: column; gap: 2px; }
+    /* The .hidden/.modal-minimized pointer-events leak (R2/R4/D2) dies here:
+       a minimized or hidden window can NEVER intercept a click. */
+    .modal-minimized, .modal-minimized * { pointer-events: none !important; }
     .minimized-dock-chip {
-      pointer-events: auto;
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 8px 6px 10px;
-      background: var(--panel, var(--bg));
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      color: var(--fg); font-family: inherit; font-size: 12px;
-      cursor: grab; touch-action: none; user-select: none;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-      transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, border-color 0.15s;
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 5px 8px;
+      background: none; border: none; border-radius: 6px;
+      color: var(--fg); font-family: inherit; font-size: var(--fs-sm);
+      cursor: pointer; user-select: none; text-align: left;
       animation: dock-chip-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
     }
     .minimized-dock-chip:hover {
@@ -888,18 +890,7 @@ body.bg-pattern-sparkles {
        the trash zone at top-center to close. touch-action:none lets the
        pointermove listener claim the gesture instead of the page scroll. */
     @media (max-width: 768px) {
-      .minimized-dock-chip {
-        width: 40px; height: 40px;
-        padding: 0 !important;
-        border-radius: 50% !important;
-        justify-content: center;
-        position: relative;
-        overflow: visible;
-        touch-action: none;
-      }
-      .minimized-dock-chip svg { width: 18px; height: 18px; opacity: 0.9; }
-      .minimized-dock-label,
-      .minimized-dock-x { display: none !important; }
+      /* E95: rows in the sidebar drawer on mobile too — same shape as desktop. */
       .minimized-dock-chip.chip-free-drag {
         box-shadow: 0 8px 22px rgba(0,0,0,0.55),
                     0 0 0 2px color-mix(in srgb, var(--accent, var(--red)) 50%, transparent) !important;
