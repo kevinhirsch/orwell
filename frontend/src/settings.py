@@ -304,6 +304,9 @@ def mount_optional(app, feature: str, router, **kwargs) -> bool:
 GAME_DROP_SCRIPTS = (
     "memory.js", "skills.js", "rag.js", "search.js", "document.js", "gallery.js",
     "cookbook.js", "cookbookSchedule.js", "compare/index.js",
+    # C27: the workspace tour narrates inherited features the game build doesn't have.
+    # Import-free standalone tags, so dropping them removes the load entirely.
+    "tourHints.js", "tourAutoplay.js",
 )
 GAME_VOICE_SCRIPTS = ("tts-ai.js", "voiceRecorder.js")
 
@@ -325,10 +328,17 @@ def strip_dropped_scripts(html: str, *, features: dict | None = None) -> str:
     if not drops:
         return html
     kept = []
+    game_build = game_build_enabled()
     for line in html.splitlines(keepends=True):
         s = line.lstrip()
         if s.startswith("<script") and any((f"/{d}\"" in line or f"/{d}?" in line) for d in drops):
             continue  # a dropped vertical's script — not shipped under the game build
+        # C27/P3: a Big Brother game renders no math or diagrams — drop the render-blocking
+        # third-party CDN deps (KaTeX css+js, Mermaid) under the game build. markdown.js
+        # guards both globals (`if (window.katex)` / `if (!window.mermaid) return`), so
+        # absent libraries degrade to plain text, never an error.
+        if game_build and "cdn.jsdelivr.net" in line and ("katex" in line or "mermaid" in line):
+            continue
         kept.append(line)
     return "".join(kept)
 
