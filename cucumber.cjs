@@ -42,6 +42,7 @@ module.exports = {
       "docs/features/0040-npc-confessionals.feature",
       "docs/features/0041-character-evolution-and-arc.feature",
       "docs/features/0045-endgame-structure.feature",
+      "docs/features/0046-player-eviction-and-jury.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -1172,7 +1172,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > (was even-indexed ~5); add the A5 test mirroring the manner-effect pattern at
 > `liveSeason.test.ts:276-296` with the **player** as the responsible finalist.
 
-### B48 — 0046 player eviction & the juror's seat  ·  Claude Code  ·  **Wave 2 · audit B6 · NEEDS SPEC FIRST**
+### B48 — 0046 player eviction & the juror's seat  ·  Claude Code  ·  **Wave 2 · audit B6 · NEEDS SPEC FIRST** — ✅ DONE
+
+> **DONE.** Feature 0046 built & green (in `cucumber.cjs`). `GameStateView.player.status` now marks the
+> player `active` → `jury` (evicted into the last-9 jury — derived from the public eviction order + cast
+> size) or `evicted` (pre-jury); the projection switches `moment` to a `jury` / `evicted` `MOMENT_PROMPTS`
+> fragment. **Juror knowledge model = ceremonies-as-broadcast** (the spec's recommendation, made canonical):
+> a sequestered juror keeps witnessing the PUBLIC ceremony beats (non-hidden house-events) and nothing
+> private — already enforced by the 0002 witness model (off-screen scenes + confessionals exclude the
+> player), so the juror's knowledge provably contains only the broadcast facts. The season completes for ANY
+> eviction index (the loop plays NPCs to Final 2 + a winner without the player), and a player evicted into the
+> jury still casts their own vote at the 0037 finale; out-of-game status survives a restart. `tests/unit/
+> playerEviction.test.ts` (6) + the name-agnostic `.feature`. The pre-jury terminal recap ties to 0048
+> (out of scope). Original prompt below.
 
 > Draft and implement **feature 0046** (`docs/features/0046-player-eviction-and-jury.{md,feature}`) — the game's most
 > common ending has **no spec**. Spec the player-evicted paths: **pre-jury** ⇒ a closure beat + a defined season-end

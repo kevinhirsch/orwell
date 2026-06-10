@@ -746,17 +746,37 @@ export class GameSessionAdapter implements GameSession {
     return { started: true, type: fallbackType, week: this.week, phase: this.phase, winner: null };
   }
 
+  /**
+   * Where the player stands (0046). `active` until they are evicted; once evicted, `jury` if they fall
+   * in the last-9 jury (they spectate the public ceremonies and vote at the finale) or `evicted` if they
+   * went out pre-jury. Derived purely from the public eviction order + the (fixed) cast size — the jury
+   * is the last 9 of the `cast − 2` evictions, so a player evicted at index ≥ that threshold is a juror.
+   * Vault-free: nothing here reads a hidden number.
+   */
+  private playerStatus(): "active" | "jury" | "evicted" {
+    const order = this.live?.evictionOrder ?? [];
+    const idx = order.indexOf(PLAYER);
+    if (idx < 0) return "active";
+    const cast = this.house ? this.house.npcs.length + 1 : 16;
+    const preJury = Math.max(0, cast - 2 - 9); // evictions before the last-9 jury forms
+    return idx >= preJury ? "jury" : "evicted";
+  }
+
   /** The Vault-free projection. Player card = authored persona (no numeric stats); NPCs = name + status only. */
   private view(): GameStateView {
     if (!this.house) {
       return { started: false, week: 0, phase: this.phase, moment: "character-creation", player: null, house: [] };
     }
     const p = this.house.player;
+    const status = this.playerStatus();
+    // Once the player is out, the moment frames their new seat (closure / the jury spectator box, 0046)
+    // rather than the ceremony phase they can no longer act in. An active player keeps the phase moment.
+    const moment = status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
       week: this.week,
       phase: this.phase,
-      moment: momentForPhase(this.phase),
+      moment,
       player: {
         id: p.id,
         name: p.name,
@@ -764,6 +784,7 @@ export class GameSessionAdapter implements GameSession {
         // described; fall back to the canonical labels. Stats stay hidden behind the Vault either way.
         archetype: p.persona?.archetype ?? p.character.archetype,
         strategyStyle: p.persona?.strategyStyle ?? p.character.strategyStyle,
+        status,
       },
       house: this.house.npcs.map((n) => ({
         id: n.id, name: n.name,

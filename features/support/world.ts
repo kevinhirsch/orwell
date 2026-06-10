@@ -287,6 +287,15 @@ export class BbWorld extends World {
   egIllegalRefused?: boolean;
   egEvictee?: Eid;
 
+  // Player eviction & the juror's seat (0046) scratch state.
+  peRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  peUser?: string;
+  peSandbox?: import("../../src/composition/registry").UserSandbox;
+  peView?: import("../../src/ports/GameSession").GameStateView;
+  peWitnessedAtEviction?: number;
+  peSentinel?: string;
+  peSawJurorVote?: boolean;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };

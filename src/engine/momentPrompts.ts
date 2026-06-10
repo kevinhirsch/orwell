@@ -102,6 +102,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
   "jury-finale":
     "MOMENT — Jury & finale. Final statements, one question per juror, and the engine's jury vote to " +
     "crown the winner. Gravitas and payoff; you voice the engine's result.",
+  evicted:
+    "MOMENT — Evicted (pre-jury). The player has been voted out before the jury formed; their season is " +
+    "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
+    "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
+    "they want to watch, but they hold no power and cast no vote. Do not invent a path back in.",
+  jury:
+    "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
+    "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
+    "only, never the private scheming or diary-room confessionals happening in the house. Voice the " +
+    "broadcasts and their growing read of who deserves to win; reveal no off-screen content. They cast " +
+    "their own vote at the finale.",
   default:
     "MOMENT — Continue the game. Read getGameState, keep the house in motion true to the GAME " +
     "CONTEXT, and pull the lever the beat calls for.",
