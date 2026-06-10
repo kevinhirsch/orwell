@@ -1349,3 +1349,130 @@ mechanical sweep of `settings.js` replacing inline layout styles with the kit (n
 inline styles like the spinner can stay). Add a regression gate: a pytest/source check that
 caps inline `style=` attributes in `settings.js` (ratchet from 219 down as the sweep
 proceeds) so the pane can't silently re-accrete ad-hoc layout.
+
+---
+
+# Stream S — responsiveness & installed-app audit (ruling #16; live-measured)
+
+**Method:** static analysis of `style.css` (36,494 lines) + all injected panel styles, plus a
+**live boot** driven with Playwright at 1366×768, 1024×768 (the ~125%-scaling proxy), 960×900
+(half-snap), and 390×844 — measuring real modal/panel geometry, scrollWidth vs clientWidth,
+computed font sizes, and touch targets, with per-tab settings screenshots. Round-4 and
+E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12.
+
+## Findings
+
+- **S1 [HIGH · Bug/UX] The settings modal cannot de-crowd at normal desktop sizes —
+  root-caused.** Measured: at 1366×768, 1024×768, and 960×900 the modal renders
+  **byte-identically** (720px wide, 160px rail, 30px rows, 10px hints, 12px labels).
+  Causes: (1) `width: min(720px, 92vw)` (`style.css:21349`) — `min()` only shrinks, never
+  grows; at 125% scaling the same 720px eats 66% of a ~1093px viewport while `85vh`
+  collapses to ~522px ⇒ less room, same density; (2) the whole modal is fixed sub-13px px
+  type (`21415` 9px, `22488` 12px labels, `5664` 10px hints…); (3) **the density feature is
+  dead on arrival** — `:root.density-compact/spacious` set root font-size (`152–156`) but
+  the stylesheet has **1,135 px font-sizes vs 70 rem and 0 clamp()**; the user's only
+  "bigger text" lever does nothing to the surface they complain about; (4) fixed chrome
+  (160px rail, fixed paddings/gaps) absorbs nothing; (5) dozens of inline px styles are
+  unreachable by any future rule (S12). *Fix:* width `clamp(560px, 58cqw, 880px)` against
+  the overlay container; rem scale per the mechanism; rail `clamp(140px, 18cqw, 200px)`.
+  *Acceptance:* hints ≥12px-equivalent at 1366×768; density toggle visibly scales the modal.
+- **S2 [MED · UX]** No short-viewport tier for settings: `min-height: 400px` +
+  `max-height: calc(85vh - 60px)` (`21379–21380`) with `margin-top: 7vh` nearly touches the
+  viewport bottom at 614px CSS height. Use `min(85dvh, 720px)`; drop the min-height under a
+  height breakpoint.
+- **S3 [MED · UX/Bug]** The narrow settings tab rail hides 476px of tabs with zero
+  affordance (`scrollWidth 866` vs `clientWidth 390`, `scrollbar-width:none` at `21595`) —
+  Appearance/Shortcuts/Account/admin tabs are invisible on phones; and the layout switch
+  exists as two diverging copies (`@media 600` at `21561` vs `@container 620` at `21582`).
+  Keep only the container query; add an edge-fade affordance or two-row wrap.
+- **S4 [MED · System]** Container-query adoption is half-finished: six surfaces use it
+  (settings, tool modals, doc panes); every other modal/panel responds to the *viewport* —
+  wrong by definition for draggable/snappable windows (the settings rule's own comment says
+  so, `21579–21581`). Make `@container` the rule for all windows.
+- **S5 [HIGH · System] Breakpoint anarchy: ~20 distinct thresholds across three idioms.**
+  `@media` widths 768(×71)/600/820/640/520/540/480/460/700/720/769/821; container
+  620/460/360/340/260; **JS `innerWidth` vs 768 written four different ways (44 sites)** —
+  at exactly 768px, modules disagree which mode they're in. Plus near-duplicate tiers
+  (820/821, 600/620). *Fix:* the token set + lint gate in the mechanism.
+- **S6 [HIGH · System] Every floating panel sizes itself differently; four have no narrow
+  handling at all.** Inventory: status/social = fixed top offsets + 220px + a ≤768 sheet
+  rule; **finale (240px floater, zero @media), presence, retrospective — no narrow tier**;
+  the engine banner overlays at `top:0` (covered the mobile sheet grab-handle in
+  screenshots); the DR modal re-implements none of the shared sheet system. The hard-coded
+  `top:64px`/`top:210px` offsets encode assumptions about *each other's heights* — the
+  structural cause of the R2/R4 overlap family. *Fix:* the anchor-slot contract below.
+- **S7 [HIGH · Bug] PWA installability is broken: both manifest icons 404.**
+  `manifest.json:12–13` → `/static/icon-192.png`/`icon-512.png` — neither exists (verified
+  live); `apple-touch-icon` points at the same hole; the per-route manifest swap explicitly
+  skips the root path. No valid icon ⇒ **no install prompt** — for a product whose mandate
+  is "functions as an installed app." *Fix:* ship maskable 192/512 PNGs + 180px apple icon,
+  precache, smoke-assert 200s.
+- **S8 [MED · Bug/UX] Standalone-mode gaps:** no `@media (display-mode: standalone)`
+  anywhere; no `text-size-adjust: 100%` (iOS landscape autoinflation of the fixed-px
+  panels); JS-injected panels never use `env(safe-area-inset-*)` (presence `bottom:84px` /
+  retro `bottom:96px` sit in the home-indicator band; the `top:0` banner collides with the
+  notch under `viewport-fit=cover`).
+- **S9 [MED · UX/Bug] Touch-target floor violations beyond round 4's HUD chrome
+  (measured):** settings nav tabs 32px at every viewport; slash-menu rows ≈22px;
+  shortcut-action 24×24; fallback-remove 22×22; color swatches 24×24. The composer's
+  coarse-pointer bump (28×32 → 44×44, `style.css:3036`) proves the mechanism — it was never
+  swept. *Fix:* one `(pointer: coarse)` floor rule on a `--tap-min` token.
+- **S10 [HIGH · System] There is no typography system** — 1,135 px font-sizes, 70 rem,
+  0 clamp(); each surface invents its own 9–14px micro-scale. Ironically the orwell game
+  panels use rem and would scale for free under a root-size mechanism the inherited
+  workspace defeats.
+- **S11 [MED · Bug] Saved panel positions restore unclamped on a different-sized viewport**
+  (`orwellStatusPanel.js:68–73` et al.; `windowDrag.js`'s clamp runs only on `resize`) — a
+  position saved at 2560px restores fully off-screen at 1366px. `windowResize.js:223`
+  already clamps restored *sizes* — unify the pattern at restore (cross-device half of E91).
+- **S12 [MED · System]** Sizing-in-markup: dozens of inline `font-size`/`width` styles in
+  the settings tree (`index.html:1794–1810`, `settings.js` builders) escape any central
+  refactor — sweep into classes + the A3 ratchet gate.
+- **S13 [LOW · Bug latent]** Modal width clamps use `vw` against a viewport the modal
+  doesn't occupy (overlays are narrowed by the sidebar; `92vw` is inert at 1024px with the
+  sidebar open) — use `cqw` against the overlay container they already have.
+
+## The coherent mechanism (implementation-ready — the spine of the UI track)
+
+One new `frontend/static/css/responsive-tokens.css` loaded before `style.css` + a contract
+section in `INTEGRATION.md`:
+
+1. **One breakpoint token set** — `--bp-compact: 480px / --bp-narrow: 768px / --bp-medium:
+   1024px / --bp-wide: 1440px` (container tiers {360, 620}); enforced by a pytest lint gate
+   that fails any `@media`/`innerWidth` threshold outside the set; JS normalized to a single
+   `isNarrow()` via `matchMedia` (kills the 768 off-by-one written four ways). **Viewport
+   queries are for page chrome only; anything draggable/dockable responds to `@container`.**
+2. **The modal & floating-panel sizing contract** — every modal: `width: clamp(min,
+   preferred-cqw, max)` (never bare fixed, never plain `min()`), `max-height: min(85dvh,
+   cap)` with internal body scroll, mandatory `container-type`, and ≤768 becomes the shared
+   bottom sheet (DR modal + onboarding move onto the shared classes). Every floating panel:
+   **anchor slots, not coordinates** — a slot registry (`top-right`, `top-left`,
+   `bottom-center`, `banner`) owned by `modalManager` stacks panels by measured height,
+   deleting the `top:64/210px` constants and making the D2 collision rule structural; drag
+   is a persisted offset-from-slot, clamped at restore (S11/E91); safe-area-inset offsets
+   everywhere fixed positioning exists (S8).
+3. **Fluid type on a rem scale** — fluid root via clamp(), token scale `--fs-2xs … --fs-xl`,
+   floor `--fs-2xs` (~11px) for all UI text, density classes revived for free; migration is
+   mechanical px→rem starting with the settings tree; add `text-size-adjust: 100%`.
+4. **The PWA baseline** — real maskable icons (S7), a `display-mode: standalone` tier
+   (status-bar-safe banner), the one coarse-pointer `--tap-min` floor rule (S9), and
+   codifying the already-correct meta/dvh/overscroll/SW posture in INTEGRATION.md so a
+   vendored update can't regress it.
+5. **The responsive matrix gate** — promote the round-4 Playwright harness into
+   `frontend/scripts/responsive_matrix.py` (FE pytest lane): ~10 staged surfaces × 6
+   viewports + one standalone emulation + one 200% root-font pass; measurable assertions
+   for overflow (`scrollWidth ≤ clientWidth+1` unless declared + affordance), overlap (no
+   registered surface intersects another or the composer — D2, executable), **crowding**
+   (no unellipsized text overflow; computed font ≥ `--fs-2xs`; label/control collision
+   check; line-box overflow on nowrap elements), and touch (≥36px boxes at coarse-pointer).
+   The full matrix ran in <2 minutes in the audit environment.
+
+## Sound (keep-list)
+
+The mobile sheet system (`6504–6660`: dvh, safe-area, grab pills, overscroll-contain) is
+genuinely good — just not universal; the settings container query is the right template;
+viewport meta is correct and zoom is not disabled; the SW caching strategy is tiered and
+versioned; `body{height:100dvh}` + `overscroll-behavior:none` already handle the
+keyboard/pull-to-refresh classes; `windowResize.js` clamps restored sizes (the pattern to
+unify); the composer's coarse-pointer bump works; and the decision card is the one game
+surface already on the correct sizing idiom — the model for the rest.
