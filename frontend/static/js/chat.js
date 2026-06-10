@@ -1111,6 +1111,29 @@ import { createStreamRenderer } from './streamingRenderer.js';
       // Tool-aware thinking spinner
       let _lastToolName = '';
       const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+      // C14 (immersion): the Big Brother engine tools render as quiet production
+      // beats — a label, never raw camelCase names or JSON payloads in the player's
+      // transcript. Applies wherever these names appear (they exist only in the game).
+      const _orwellToolBeats = {
+        'createCharacter': '\ud83c\udfac Casting',
+        'getGameState': '\ud83d\udccb Production notes',
+        'gameStatus': '\ud83d\udccb Production notes',
+        'getVisibleStateFor': '\ud83d\udccb Production notes',
+        'getMomentPrompt': '\ud83d\udccb Production notes',
+        'runCompetition': '\ud83c\udfc6 Competition',
+        'advanceGame': '\ud83d\udcfa Production',
+        'submitDecision': '\ud83d\uddf3 Your move',
+        'recordInteraction': '\ud83c\udfac Scene log',
+        'surfaceInformationTo': '\ud83e\udd2b Word travels',
+        'socialRead': '\ud83d\udc40 Reading the room',
+        'socialInitiatives': '\ud83d\udeaa Who wants a word',
+        'diaryRoom': '\ud83d\udcd4 Diary Room',
+        'makeDeal': '\ud83e\udd1d Handshake',
+        'askProducers': '\ud83c\udf99 Producers',
+        'renderScene': '\ud83d\udcfa Production',
+        'endOfSessionSummary': '\ud83d\udcfc Tape check',
+        'finaleView': '\ud83d\udc51 Finale',
+      };
       const _toolLabels = {
         'web_search': _searchIcon + 'Searching',
         'bash': 'Running',
@@ -2045,7 +2068,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
                 _lastToolName = json.tool || '';
 
                 // --- Thread timeline: group tools in a thread container ---
-                const cmd = json.command || '';
+                let cmd = json.command || '';
                 const chatBox = document.getElementById('chat-history');
                 // Find existing thread to append to — check last few children
                 // (agent_step may insert an empty msg-ai between tool rounds)
@@ -2078,7 +2101,9 @@ import { createStreamRenderer } from './streamingRenderer.js';
                   chatBox.appendChild(threadWrap);
                 }
                 threadWrap.classList.add('streaming');
-                const toolLabel = _toolLabels[json.tool.toLowerCase()] || json.tool;
+                const _beat = _orwellToolBeats[json.tool];
+                const toolLabel = _beat || _toolLabels[json.tool.toLowerCase()] || json.tool;
+                if (_beat) cmd = '';  // production machinery: never show raw args
                 const node = document.createElement('div')
                 node.className = 'agent-thread-node running';
                 const cmdHtml = cmd ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
@@ -2156,7 +2181,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
                     currentToolBubble._elapsedTicker = null;
                   }
                   const ok = (json.exit_code === 0 || json.exit_code == null);
-                  const cmd = json.command || '';
+                  let cmd = json.command || '';
                   let outHtml = '';
                   if (json.output && json.output.trim()) {
                     outHtml = `<details class="agent-tool-output"><summary>Output</summary><pre>${esc(json.output)}</pre></details>`;
@@ -2187,6 +2212,8 @@ import { createStreamRenderer } from './streamingRenderer.js';
                   }
                   // For file edits the "command" is the raw JSON args — redundant
                   // next to the diff, so hide it when we have a diff to show.
+                  const _beatOut = _orwellToolBeats[json.tool];
+                  if (_beatOut) { cmd = ''; outHtml = ''; }  // game beats: label + status only, no raw JSON
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
                   // Preserve the user's .open choice across the innerHTML
                   // rewrite \u2014 otherwise expanding a running tool collapses
@@ -2195,7 +2222,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
                   // bottom of file) so no per-node listener needed.
                   const _wasOpen = currentToolBubble.classList.contains('open');
                   currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_wasOpen ? ' open' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${cmdHtml2}${outHtml}${diffHtml}</div>`;
+                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beatOut || json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${cmdHtml2}${outHtml}${diffHtml}</div>`;
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();
