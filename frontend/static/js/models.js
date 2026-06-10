@@ -579,7 +579,15 @@ export async function refreshModels(force = false) {
       }
       const welcomeTip = document.getElementById('welcome-tip');
       if (welcomeTip) {
-        const tips = window.innerWidth <= 768
+        const _gb = document.body && document.body.hasAttribute('data-game-build');
+        const tips = _gb
+          ? [
+              'Tip: Just talk — every conversation is in-character once your season starts.',
+              'Tip: The Status panel tracks the week, the HOH, and who is on the block.',
+              'Tip: The Diary Room is private — the house never hears it.',
+              'Tip: Deals are real. Break one and the jury will remember.',
+            ]
+          : window.innerWidth <= 768
           ? [
               'Tip: Long-press a session for rename, delete, and memory options.',
               'Tip: Swipe from the edge to open The House panel.',

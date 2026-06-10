@@ -27,11 +27,40 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
 
   async function fetchStatus() {
     const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
     if (!r.ok) throw new Error("status " + r.status);
     return r.json();
+  }
+
+  // The roster (C21): names + status only — Vault-free, exactly what a houseguest sees on
+  // the memory wall. Best-effort: if /state fails the panel still shows the ceremony rows.
+  async function fetchState() {
+    try {
+      const r = await fetch("/api/orwell/state", { credentials: "same-origin" });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (_) { return null; }
+  }
+
+  // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
+  // id-comparison, never a "safe/target" read (0020). Returns "" when the player is just a
+  // houseguest, or their out-of-game seat ("Evicted" / "Jury") when they're out.
+  function selfBadge(status, state) {
+    const me = state && state.player && state.player.id;
+    const seat = state && state.player && state.player.status;
+    if (seat === "evicted") return "EVICTED";
+    if (seat === "jury") return "JURY";
+    if (!me || !status) return "";
+    const idOf = (c) => (c && typeof c === "object" ? c.id : c);
+    if (idOf(status.hoh) === me) return "HOH";
+    const noms = Array.isArray(status.nominees) ? status.nominees.map(idOf) : [];
+    if (noms.includes(me)) return "ON THE BLOCK";
+    const veto = status.veto || {};
+    if (idOf(veto.holder) === me) return "VETO";
+    return "";
   }
 
   function restorePosition(el) {
@@ -84,14 +113,42 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-row .os-k { opacity: .6; min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
+        #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
+        /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
+        #orwell-status .os-you { margin: .45rem 0 .1rem; font-weight: 600; }
+        #orwell-status .os-you .os-badge {
+          display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
+          font-size: .72em; font-weight: 700; letter-spacing: .02em;
+          background: var(--accent, var(--red, #e06c75)); color: #fff;
+        }
+        #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .5rem 0 .15rem; }
+        #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; }
+        #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
+        #orwell-status .os-hg.os-out { opacity: .45; text-decoration: line-through; }
+        #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
+        /* C26/M1: on phones the panel is a full-width top sheet under the header —
+           never a free-floating box over the chat or composer. Drag is disabled
+           (windowDrag's default mobile cutoff) so it can't be stranded off-screen. */
+        @media (max-width: 768px) {
+          #orwell-status {
+            left: 0 !important; right: 0 !important; top: 44px !important;
+            width: auto !important; max-width: none !important;
+            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
+            max-height: 38vh; overflow: auto;
+          }
+        }
       </style>
       <div class="os-hdr" title="Drag to move">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></span>
+        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
         <button type="button" class="os-min" title="Minimize" aria-label="Minimize">–</button>
       </div>
+      <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
       <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
       <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
-      <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>`;
+      <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+      <div class="os-roster-h" id="os-roster-h">The house</div>
+      <div class="os-roster" id="os-roster"></div>`;
     document.body.appendChild(el);
 
     // Restore where the player last left it.
@@ -124,7 +181,6 @@ import * as modalManager from "./modalManager.js";
       enableDock: false,
       enableFullscreen: false,
       enableResize: false,
-      mobileSkip: 0,
       onDragEnd: ({ rect }) => {
         try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
       },
@@ -143,11 +199,14 @@ import * as modalManager from "./modalManager.js";
 
   function render(st) {
     const el = ensurePanel();
-    // No active game (engine reports week 0 / setup) → hide and keep polling.
+    // No active game (engine reports week 0 / setup) → genuinely hide (not a hiccup).
     if (!st || typeof st.week !== "number" || st.week < 1) {
+      _shown = false;
+      markStale(false);
       hidePanel();
       return;
     }
+    _shown = true;
     const name = (c) => (c && c.name) || "—";
     el.querySelector("#os-week").textContent = "Week " + st.week;
     el.querySelector("#os-phase").textContent = st.phase || "";
@@ -158,18 +217,85 @@ import * as modalManager from "./modalManager.js";
     el.querySelector("#os-veto").textContent = veto.used
       ? "used" + (veto.holder ? " · " + veto.holder.name : "")
       : (veto.holder ? veto.holder.name : "—");
+    if (st._state !== undefined) renderRoster(el, st, st._state);
     // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
+    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
+    // unobstructed); the dock chip restores it as a full-width top sheet.
+    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+      _mobileParkedOnce = true;
+      el.style.display = "block";
+      try { modalManager.minimize(ID); return; } catch (_) {}
+    }
     if (!isMinimized()) el.style.display = "block";
   }
 
-  async function refresh() {
-    try {
-      render(await fetchStatus());
-    } catch (_) {
-      // Engine down / no game → hide, fail open.
-      hidePanel();
-    }
+  // The memory wall: who's still in, who's gone, the attrition count, and the player's own
+  // public role badge. All from getGameState().house[] + the ceremony status. No numbers.
+  function renderRoster(el, st, state) {
+    const badgeEl = el.querySelector("#os-you-badge");
+    const badge = selfBadge(st, state);
+    if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
+    else { badgeEl.hidden = true; }
+
+    const rosterEl = el.querySelector("#os-roster");
+    const headEl = el.querySelector("#os-roster-h");
+    const house = state && Array.isArray(state.house) ? state.house : null;
+    if (!house) { rosterEl.innerHTML = ""; headEl.style.display = "none"; return; }
+    headEl.style.display = "";
+
+    // player (if still active) + NPCs, active first then evicted in eviction order.
+    const playerActive = state.player && state.player.status === "active";
+    const total = house.length + 1; // player + NPCs
+    const activeCount = house.filter((h) => h.status === "active").length + (playerActive ? 1 : 0);
+    headEl.textContent = "The house · " + activeCount + "/" + total;
+
+    const out = house.filter((h) => h.status !== "active");
+    const rows = [];
+    house.filter((h) => h.status === "active").forEach((h) => {
+      rows.push('<div class="os-hg"><span>' + esc(h.name) + "</span></div>");
+    });
+    out.forEach((h, i) => {
+      const seat = h.status === "jury" ? "jury" : (i + 1) + (["th","st","nd","rd"][(i + 1) % 10] || "th") + " out";
+      rows.push('<div class="os-hg os-out"><span>' + esc(h.name) +
+        '</span><span class="os-seat">' + esc(seat) + "</span></div>");
+    });
+    rosterEl.innerHTML = rows.join("");
   }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // True once we've shown a real game at least once this session. Lets a transient engine
+  // hiccup keep the last-known panel up (U5) instead of vanishing the player's only readout.
+  let _shown = false;
+
+  function markStale(on) {
+    const el = document.getElementById("orwell-status");
+    const dot = el && el.querySelector("#os-stale");
+    if (dot) dot.hidden = !on;
+  }
+
+  async function refresh() {
+    let st;
+    try {
+      st = await fetchStatus();
+    } catch (_) {
+      // ENGINE HICCUP (not "no game"): if we've shown the panel, keep the last-known
+      // values up and flag the feed as reconnecting — don't blink the readout out.
+      if (_shown) markStale(true);
+      else hidePanel();
+      return;
+    }
+    markStale(false);
+    // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
+    st._state = (await fetchState()) || null;
+    render(st);
+  }
+
+  // Seam for the headless browser gate: build + show the panel on demand.
+  window._orwellStatusEnsure = () => { const el = ensurePanel(); el.style.display = "block"; return true; };
 
   function start() {
     refresh();

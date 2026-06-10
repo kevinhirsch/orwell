@@ -10,18 +10,21 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: under active implementation (BDD/TDD-first).** Features **0001–0037 are built**
-(0022 / MVP-2 is the one deferral): the eight priority invariants, the MCP seam, the one-liner
+**Status: under active implementation (BDD/TDD-first).** Features **0001–0041 plus the endgame
+batch 0045–0047 are built** (0022 / MVP-2 is the one deferral; 0042–0044 and 0048–0049 are drafted
+specs still to build): the eight priority invariants, the MCP seam, the one-liner
 deploy, the gameplay loop, the MVP-1 batch — including the **living, persisted consequence loop
 (0023)** that was the long-standing critical gap (act → hidden impact → persist → recall is wired
-into the live game) — and the live-loop batch (game build, tagline, live decision seam, running
-off-screen watcher, social surface, interactive finale — the 0037 finale *UI* is still pending).
+into the live game) — the live-loop batch (game build, tagline, live decision seam, running
+off-screen watcher, social surface, interactive finale **including its UI**), and the endgame
+batch (Final 5 → Final 2 structure, player eviction & the juror's seat, eviction night live).
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
 (now through **0049**). **Active work — start
-here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full product-audit batch
-(B34–B60 / C12–C18)" + the front-end & experience batch B61–B66 / C19–C28) — the live, wave-ordered
+here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` (the full product-audit
+batch B34–B60 / C12–C18, the front-end & experience batch B61–B63 / C19–C27, and the operations,
+security & test-integrity batch B67–B72 / C29–C33) — the live, wave-ordered
 dispatch lists, backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation
 principles"** section first) and `docs/audits/2026-06-09-frontend-experience-audit.md`, governed by
 **ADR `docs/decisions/0003`**. *Pick the next item from the queue, not from this paragraph* (it stays
@@ -370,7 +373,9 @@ per-juror questions → ordered vote reveal, through the 0034 seam) are BDD-gate
 between the player's own turns via per-turn ticks and does not exist while the player is away), and
 **0036** (`socialInitiatives` + `diaryRoom` live tools) shipped unit-gated. **0032** (front-end surface reduction / the game
 build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`.
-The 0037 **finale UI** is still pending (B26 `finaleView` read tool → C11 `orwellFinale.js`).
+The 0037 **finale UI is built** (B26 — the Vault-free `finaleView` read tool on the `GameSession`
+port / `PLAYER_TOOLS` — plus C11, the `frontend/static/js/orwellFinale.js` panel over an
+`orwell_engine.finale_view` client; fail-open to `{ finale: null }`).
 
 **Post-audit batch (0038–0044) — in progress.** A behavioral-fidelity / anti-sycophancy audit
 found capabilities **built but unwired** plus genuine gaps; the per-item prompts are in
@@ -386,12 +391,26 @@ diffusion** + pathway-aware leak heuristic (B27b) remain. **0039** (promise/deal
 (competition library), **0043** (emergent bloc behavior), and **0044** (strategic nom/vote
 refinements) are drafts.
 
+**Endgame batch (0045–0047) — green** (Wave 2 of the product-audit queue; BDD-gated in
+`cucumber.cjs`): **0045** endgame structure (the explicit Final 5 → Final 4 → Final 3 → Final 2
+ladder replacing a generic late-game loop), **0046** player eviction & the juror's seat (the
+player can genuinely lose — `GameStateView.player.status`; evicted pre-jury ⇒ terminal recap,
+jury ⇒ the player serves as a juror under a defined **juror knowledge model**: jurors witness
+ceremonies-as-broadcast only), and **0047** eviction night live (staged vote reveal + goodbye
+messages). **0048** (season retrospective & the Vault unsealing — B56, then C17 for its UI) and
+**0049** (house presence & lingering play — B64, per ADR 0003) are **drafted specs, not yet
+built**. The product-audit waves are landing continuously beyond these (e.g. live hidden
+elements, the live emotional modifier on competitions, evictee filtering, front-end immersion
+fixes) — the queue marks each item ✅ as it merges; trust it over this paragraph.
+
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work:** the post-audit batch — B27b (0038 gossip→player diffusion), 0042–0044 (0039,
-0040, **and 0041 the linchpin are done**); the 0037 finale UI (B26 `finaleView` + C11 `orwellFinale.js`);
+**Remaining work** (the live list is the audit batches in `docs/IMPLEMENTATION_QUEUE.md`):
+B27b (0038 gossip→player diffusion); 0042–0044 (0039, 0040, **and 0041 the linchpin are done**);
+**0048** retrospective/unsealing (B56 + C17) and **0049** lingering play (B64); the unfinished
+items in the product-audit, front-end/experience, and ops/security waves (B34–B72 / C12–C33);
 **0022** MVP-2 (the one deferred feature); 0010's container smoke test on a real Proxmox host; the
 deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
 in-memory + file today); and full MCP/JSON-RPC over the current HTTP transport. *(By design, not a
