@@ -1285,7 +1285,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > ≤ `hiddenSurfacingRate` of moments surface one; the player projection contains **none** without a pathway event;
 > same seed ⇒ same elements. Read `docs/features/0003`, `0024` first. Open a PR.
 
-### B51 — wire the emotional modifier into live competitions  ·  Claude Code  ·  **Wave 3 · audit D2**
+### B51 — wire the emotional modifier into live competitions  ·  Claude Code  ·  **Wave 3 · audit D2** — ✅ DONE
+
+> **DONE.** The core was already live via **0041** (the line refs below are stale): `ctx.emotionalOf` feeds
+> the live soul `emotionalState` into `winnerOf`/the 0028 modifier, `evolveFromBeat` inflects comp wins / ally
+> blindsides, mean-reversion + snapshot are in place. This closes the two real gaps: **(1) nominated ⇒
+> negative** — a new `"nominated"` `EmotionalEvent` (valence −0.35) inflected at the live `nominations` (and
+> the veto-ceremony replacement) beat, so a nominee carries the rattle INTO the veto and their odds dip below
+> their calm baseline; **(2) `rel.decay(DECAY_RATE)` on week rollover** (audit C5) — the previously-uncalled
+> decay now runs on each `eviction-result` beat, eroding untended extreme edges toward baseline so the house
+> doesn't pin over a season. `tests/unit/emotionalModifierLive.test.ts` (6): a rattled competitor wins the
+> veto measurably less than at baseline; the live nominees' state drops once the ceremony resolves; a season
+> of rollovers decays pinned edges toward neutral; same seed ⇒ identical trajectory; snapshot/restore preserves
+> states. (`season.ts` stays 0.5 — it is the test-only one-shot sim, no soul source.)
 
 > In `kevinhirsch/orwell` (TS engine), the emotional modifier is structurally **zero** on every live comp —
 > `emotionalState: 0.5` is hard-coded for every competitor (`liveSeason.ts:135`, `season.ts:78`), `emotionalModifier()`

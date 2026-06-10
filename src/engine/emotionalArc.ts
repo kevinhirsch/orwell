@@ -19,6 +19,7 @@ import type { TemperatureConstants } from "../domain/temperatureConstants";
 export type EmotionalEvent =
   | "blindside"      // an eviction you never saw coming — rattling
   | "betrayed"       // an ally moved against you / broke a deal
+  | "nominated"      // put on the block — exposed and rattled going into the veto (B51)
   | "comp-loss"      // lost a competition you contested
   | "scheme"         // an off-screen scheming scene — low-grade agitation
   | "calm"           // a quiet stretch — settle toward baseline
@@ -36,6 +37,7 @@ interface Impact {
 const IMPACT: Record<EmotionalEvent, Impact> = {
   blindside:       { valence: -0.6,  arousal: +0.5 },
   betrayed:        { valence: -0.5,  arousal: +0.45 },
+  nominated:       { valence: -0.35, arousal: +0.25 },
   "comp-loss":     { valence: -0.2,  arousal: +0.1 },
   scheme:          { valence: -0.05, arousal: +0.2 },
   calm:            { valence:  0.0,  arousal: -0.3 },
@@ -97,6 +99,7 @@ export function arcNote(event: EmotionalEvent, week: number): string {
   switch (event) {
     case "blindside":      return `week ${week}: blindsided by an eviction — rattled, guarded now`;
     case "betrayed":       return `week ${week}: betrayed by someone they trusted — wary`;
+    case "nominated":      return `week ${week}: put on the block — exposed, rattled going into the veto`;
     case "comp-loss":      return `week ${week}: lost a competition — frustrated`;
     case "scheme":         return `week ${week}: deep in off-screen scheming — restless`;
     case "calm":           return `week ${week}: a quiet stretch — steadier`;
