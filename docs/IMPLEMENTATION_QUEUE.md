@@ -2558,4 +2558,17 @@ PR per item).
 > open animation honoring reduced-motion · E92 composer bottom inset · E67 finale-panel parity
 > (adaptive poll, sheet, aria-live reveals) · E71 per-user panel keys. E70 deferred to Lane 1's D1
 > one-door work by design.
-### U4 — transcript surface + trims + 0052 themes (E65 E93 D3/E66 D5/W6 E94-FE E72 E96 D7 D6/W8 · 0052)
+### U4 — transcript surface + trims + 0052 themes  ·  **✅ DONE (PR #208)**
+
+> E65 the gamechanged dispatcher + restart-opens-a-fresh-session · E93 the played record (game
+> transcripts keep only copy/fork — no edit/delete/regenerate/rewrites) · D3/E66 pending survives
+> reload (per-user FE cache at the three AdvanceView chokepoints, served on /status, card re-arms
+> on boot/gamechanged) · D5/W6 diegetic beat labels for the ENTIRE keep-set incl. ui_control, with
+> the drift test iterating GAME_TOOL_KEEP · E72 model picker admin-only under the game build ·
+> E96 Save-to-Documents removed · D7 game-framed empty-state copy + the Agent|Chat toggle hidden
+> on game turns · D6/W8 zero third-party CDN under the game build (KaTeX/Mermaid stripped at
+> serve; jsdelivr gone) · E94-FE the first-class composer paperclip + the framing/attachment
+> coexistence gate · 0052 the five house themes (The Feed · Telescreen · Room 101 · Memory Wall ·
+> Sequester) leading the picker — frosted backdrop-blur chrome with the @supports fallback,
+> per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
+> contrast gated in pytest.

@@ -491,7 +491,7 @@ consequence.*
   `position:fixed`, and the composer/Diary-trigger overlap checks (D2) pass trivially for it.
   *Note:* this shrinks D2's scope to the presence strip + retrospective panel and removes a
   whole colliding window from R4.
-- **E65 [HIGH · Bug] `orwell:gamechanged` has four listeners and zero dispatchers.**
+- **E65 [HIGH · Bug] ✅ PR #208 — `orwell:gamechanged` has four listeners and zero dispatchers.**
   Listeners at `orwellSocial.js:446`, `orwellStatusPanel.js:357`, `orwellFinale.js:225`,
   `orwellEngineStatus.js:99`; no `dispatchEvent` anywhere — so panels never refresh on a new
   game and dismissed approaches (`localStorage orwell-social-dismissed`, keyed by recurring
@@ -500,7 +500,7 @@ consequence.*
   a dispatcher, not just listeners. Pair with the in-chat restart needing a fresh session
   (F7 currently runs only at page load) — on restart success, reuse `takeASeat` so a dead
   season's transcript never rides as narrator context.
-- **E66 [MED · UX] Pending decisions must survive reload** (= **D3**, endorsed) — concretely:
+- **E66 [MED · UX] ✅ PR #208 — Pending decisions must survive reload** (= **D3**, endorsed) — concretely:
   expose `pending` on `GET /api/orwell/status` (Vault-free legal-options view) and have
   `orwellDecision.js` render from it on load/poll, rather than only the live
   `orwell:pending` event.
@@ -521,7 +521,7 @@ consequence.*
 - **E71 [LOW · UX] ✅ PR #206 — Panel client state isn't keyed per user/game** (bare `localStorage` keys —
   dismissals/positions shared across accounts and seasons). *Fix:* suffix with username +
   game/seed id.
-- **E72 [LOW · UX] The composer model picker shows raw model ids to every player under the
+- **E72 [LOW · UX] ✅ PR #208 — The composer model picker shows raw model ids to every player under the
   game build** (`index.html:813`). *Fix:* hide `#model-select` for non-admins (per-user default
   model resolution already exists, `settings.py:388–401`).
 - **E73 [LOW · Improvement] Deals are write-only from the player's seat** — no read lever
@@ -585,7 +585,7 @@ consequence.*
   `margin-bottom` on `.chat-input-bar`), all viewports; verify the chat-history scroll
   bottom-anchor compensates. *Test:* browser smoke asserts the composer's bounding rect bottom
   sits ≥8px above `window.innerHeight` at 390/820/1440 widths.
-- **E93 [MED · Bug] Message edit/delete controls are active on game turns — the player can
+- **E93 [MED · Bug] ✅ PR #208 — Message edit/delete controls are active on game turns — the player can
   rewrite recorded history.** The live transcript shows `✎ Edit` / `✕ Delete` actions on both
   player messages and GM narration (`msg-action-btn` footers). The chat transcript is the
   *played record* of events the engine has already recorded and folded; editing or deleting it
@@ -595,7 +595,7 @@ consequence.*
   under the game build, on `game_active` sessions: hide edit/delete/regenerate on all
   messages after game start (keep copy); pre-game OOC sessions unaffected. *Test:* pytest/
   browser smoke asserts no edit/delete affordances render on a started game's transcript.
-- **E94 [MED · UX/Bug · ruling] Image attach: promote it out of the overflow menu and make it
+- **E94 [MED · UX/Bug · ruling] ✅ PR #208 (FE half: first-class paperclip + the framing/attachment coexistence gate; the one-line scene framing rides Lane 6) — Image attach: promote it out of the overflow menu and make it
   work in character.** Today "Attach files" is an overflow-menu item behind the `+` button
   (`index.html` `#overflow-attach-btn`) — one icon hidden behind another — and nothing
   guarantees an attached image reaches the model with game framing intact. *Fix spec:* (a) a
@@ -619,7 +619,7 @@ consequence.*
   mobile the dock rows live in the sidebar drawer. *Tests:* browser smoke minimizes each
   surviving floating panel and asserts the chip renders inside `#sidebar`, restores on click,
   and no dock element overlaps the composer at any width.
-- **E96 [LOW · UX · ruling] Remove "Save to Documents" from the export menu.** The export
+- **E96 [LOW · UX · ruling] ✅ PR #208 — Remove "Save to Documents" from the export menu.** The export
   dropdown (`#export-doc-btn`, `index.html` chat top bar) carries the inherited workspace's
   "Save to Documents" — pointing at a Documents feature the game build doesn't surface.
   *Fix spec:* remove/hide the item under the game build (keep Copy/PDF/Rename); if Documents

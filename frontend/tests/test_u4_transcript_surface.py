@@ -162,3 +162,63 @@ def test_e94_game_framing_does_not_strip_attachments(monkeypatch):
     assert msg.metadata == {"attachments": [{"name": "home.png", "kind": "image"}]}
     assert any(isinstance(c, dict) and c.get("type") == "image_url" for c in msg.content), \
         "the image content block rides the game turn"
+
+
+# ── 0052 (ruling #13): the house themes lead the picker ──────────────────────
+
+HOUSE = ["the-feed", "telescreen", "room-101", "memory-wall", "sequester"]
+
+
+def _themes_in_order():
+    import re as _re
+    theme_js = (FE / "static" / "js" / "theme.js").read_text(encoding="utf-8")
+    body = _re.search(r"export const THEMES = \{(.*?)\n\};", theme_js, _re.S).group(1)
+    return _re.findall(r"^\s*'?([a-z0-9-]+)'?:\s*\{", body, _re.M), body
+
+
+def test_0052_house_themes_are_first_in_the_picker():
+    order, _ = _themes_in_order()
+    assert order[:5] == HOUSE, f"the picker must open with the house set, got {order[:5]}"
+
+
+def test_0052_house_palettes_meet_aa_contrast():
+    import re as _re
+    _, body = _themes_in_order()
+
+    def lum(hexstr):
+        r, g, b = (int(hexstr[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+    for name in HOUSE:
+        m = _re.search(rf"'{name}':\s*\{{\s*bg:'#([0-9a-f]{{6}})',\s*fg:'#([0-9a-f]{{6}})',\s*panel:'#([0-9a-f]{{6}})'", body)
+        assert m, f"{name} palette missing/odd shape"
+        bg, fg, panel = m.group(1), m.group(2), m.group(3)
+        for ground in (bg, panel):  # the frost composites toward the panel/bg
+            l1, l2 = sorted((lum(fg), lum(ground)), reverse=True)
+            ratio = (l1 + 0.05) / (l2 + 0.05)
+            assert ratio >= 4.5, f"{name}: fg on #{ground} is {ratio:.2f}:1 (< AA 4.5)"
+
+
+def test_0052_frost_is_capability_gated_and_off_the_chat_column():
+    css = (FE / "static" / "css" / "orwellHouseThemes.css").read_text(encoding="utf-8")
+    assert "@supports (backdrop-filter" in css, "frost needs the no-support fallback"
+    assert "backdrop-filter: blur(" in css
+    assert "chat-history" not in css and "#message" not in css, \
+        "frost never touches the chat text column (readability first)"
+
+
+def test_0052_motion_is_reduced_motion_gated_never_the_frost():
+    css = (FE / "static" / "css" / "orwellHouseThemes.css").read_text(encoding="utf-8")
+    assert "@media (prefers-reduced-motion: no-preference)" in css
+    # every keyframe lives inside the motion gate
+    pre_gate = css.split("@media (prefers-reduced-motion: no-preference)")[0]
+    assert "@keyframes" not in pre_gate, "motion outside the reduced-motion gate"
+    # the frost lives OUTSIDE it (reduced motion strips motion, never frost)
+    assert "backdrop-filter" in pre_gate
+
+
+def test_0052_theme_js_applies_the_house_treatment():
+    theme_js = (FE / "static" / "js" / "theme.js").read_text(encoding="utf-8")
+    assert "house-theme" in theme_js and "--panel-frost" in theme_js
+    assert "house: true" in theme_js
