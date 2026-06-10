@@ -45,6 +45,7 @@ module.exports = {
       "docs/features/0046-player-eviction-and-jury.feature",
       "docs/features/0047-eviction-night-live.feature",
 "docs/features/0049-house-presence-and-lingering.feature",
+      "docs/features/0048-season-retrospective-and-unsealing.feature",
       "docs/features/0050-casting-interview.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],

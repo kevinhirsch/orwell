@@ -3,8 +3,10 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
+  SeasonRecapView, RetrospectiveView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { HOUSE_ADJACENCY } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
@@ -172,6 +174,66 @@ export class GameSessionAdapter implements GameSession {
 
   setOnSeal(fn: (reserve: readonly ReserveTwist[]) => void): void {
     this.onSeal = fn;
+  }
+
+  /**
+   * The season record providers (0048/B56): the full event record + the Vault's hidden records,
+   * wired by the registry. The recap reads only the PUBLIC record; the retrospective reads the
+   * hidden side and is gated on the finished terminal state in `seasonRetrospective`.
+   */
+  private record?: {
+    events: () => GameEvent[];
+    hidden: () => ReadonlyArray<{ kind: string; content: string }>;
+  };
+
+  setRecordProviders(p: {
+    events: () => GameEvent[];
+    hidden: () => ReadonlyArray<{ kind: string; content: string }>;
+  }): void {
+    this.record = p;
+  }
+
+  /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
+  seasonRecap(): SeasonRecapView {
+    const events = this.record?.events() ?? [];
+    // The structural filter: ceremony beats land as `season:` events; deals/betrayal reveals are
+    // their own recorded types. All player-witnessed by construction — this is the public record.
+    const highlights = events
+      .filter((e) => !e.hidden && (e.id.startsWith("season:") || e.type === "deal" || e.type === "betrayal"))
+      .map((e) => e.content);
+    return {
+      started: this.house !== null,
+      finished: !!this.live?.finished,
+      winner: this.named(this.live?.winner),
+      weeksPlayed: this.week,
+      highlights,
+      evicted: (this.live?.evictionOrder ?? []).map((id) => ({ id, name: this.nameOf(id) })),
+      deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+    };
+  }
+
+  /**
+   * The Vault unsealing (0048 §1) — the Wall's ONE sanctioned exception, and THE GATE lives here:
+   * a live (or unstarted) season returns null, enforced by the terminal state in code, never by
+   * prompt. Post-season it returns the real story: every hidden event (off-screen scheming, NPC
+   * confessionals, gossip) plus the producer's sealed twists — fired and unfired alike.
+   */
+  seasonRetrospective(): RetrospectiveView | null {
+    if (!this.live?.finished) return null; // the structural gate: no finished season, no unsealing
+    const events = this.record?.events() ?? [];
+    const hiddenStory = events
+      .filter((e) => e.hidden)
+      .map((e) => ({ type: e.type, content: this.humanize(e.content) }));
+    for (const r of this.record?.hidden() ?? []) {
+      if (r.kind === "reserved-twist") continue; // surfaced structurally via `twists` below
+      hiddenStory.push({ type: r.kind, content: this.humanize(r.content) });
+    }
+    const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
+    const twists = (this.live.reserve ?? []).map((t) => ({
+      kind: t.kind as string,
+      firedWeek: fired.get(t.kind) ?? null,
+    }));
+    return { winner: this.named(this.live.winner), hiddenStory, twists };
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -1003,7 +1065,10 @@ export class GameSessionAdapter implements GameSession {
     const status = this.playerStatus();
     // Once the player is out, the moment frames their new seat (closure / the jury spectator box, 0046)
     // rather than the ceremony phase they can no longer act in. An active player keeps the phase moment.
-    const moment = status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
+    // The finished terminal state (0048) trumps every seat: the season is over, the reunion begins.
+    const moment = this.live?.finished
+      ? "post-season"
+      : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
       week: this.week,

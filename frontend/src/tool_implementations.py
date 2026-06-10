@@ -4741,6 +4741,26 @@ async def do_social_initiatives(content: str, owner: Optional[str] = None) -> Di
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_season_recap(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.season_recap(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_season_retrospective(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.season_retrospective(user=owner)
+        if res is None:
+            return {"output": "The Vault stays sealed: the season is still live. It opens only after a winner is crowned.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_whereabouts(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
