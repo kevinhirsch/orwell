@@ -89,6 +89,34 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # C20: the confirm-on-binding decision guardrail. Dispatch a synthetic pending
+            # (exactly what chat.js emits from an advanceGame result) and assert the card
+            # renders the engine's prompt + legal options, enforces the pick count, and only
+            # arms Confirm at exactly N selected. No engine needed — pure module behavior.
+            page.evaluate("""
+              window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
+                kind: 'nominations', pick: 2,
+                prompt: 'Name two houseguests for eviction.',
+                options: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'}, {id:'npc:3',name:'C'} ],
+              }}}));
+            """)
+            page.wait_for_selector("#orwell-decision-card", timeout=3000)
+            opts = page.query_selector_all("#orwell-decision-card .odec-opt")
+            check(len(opts) == 3, f"decision card renders the engine's legal options ({len(opts)})")
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is True, "decision card: Confirm disarmed until the pick count is met")
+            opts[0].click()
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is True, "decision card: 1 of 2 selected still disarmed")
+            opts[1].click()
+            confirm_disabled = page.evaluate("document.querySelector('#orwell-decision-card .odec-confirm').disabled")
+            check(confirm_disabled is False, "decision card: exactly 2 selected arms Confirm")
+            opts[2].click()  # pick-count cap: a third selection is refused
+            n_sel = page.evaluate('document.querySelectorAll(`#orwell-decision-card .odec-opt[aria-pressed="true"]`).length')
+            check(n_sel == 2, "decision card: pick count capped at 2")
+            page.evaluate("document.querySelector('#orwell-decision-card .odec-x').click()")
+            check(page.query_selector("#orwell-decision-card") is None, "decision card: dismissible (prose path stays open)")
+
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
             # Drive the REAL user flow (open Settings via the gear, switch to the

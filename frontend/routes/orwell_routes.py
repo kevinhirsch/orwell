@@ -119,6 +119,38 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] diary-room failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
+    class DecisionRequest(BaseModel):
+        kind: str
+        choice: Optional[list] = None
+        use: Optional[bool] = None
+        save: Optional[str] = None
+        replacement: Optional[str] = None
+        vote: Optional[str] = None
+        statement: Optional[str] = None
+        appeal: Optional[str] = None
+        intent: Optional[str] = None
+
+    _DECISION_KINDS = {
+        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "replacement", "eviction-vote", "tie-break", "final-eviction",
+        "finale-statement", "finale-answer", "juror-vote",
+    }
+
+    @router.post("/decision")
+    async def orwell_decision(body: DecisionRequest, request: Request):
+        """The STRUCTURAL commitment path for a binding decision (C20 / audit U1+U2, per
+        ADR 0003): the confirm card posts the player's explicit selection ENGINE-DIRECT, so
+        prose can never bind through this surface. The engine validates legality and remains
+        idempotent (no-op unless a matching pending exists)."""
+        if body.kind not in _DECISION_KINDS:
+            return JSONResponse(status_code=400, content={"error": f"unknown decision kind: {body.kind}"})
+        decision = {k: v for k, v in body.model_dump().items() if v is not None}
+        try:
+            return await orwell_engine.submit_decision(decision, user=_current_user(request))
+        except Exception as e:
+            logger.warning(f"[orwell] decision failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest, request: Request):
         if not body.playerName.strip():
