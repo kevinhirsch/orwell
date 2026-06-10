@@ -1716,6 +1716,7 @@ PR per item).
 | **R-0 — Settings ruling** | C30 global LLM config (admin-set, hidden from non-admins; chat-bar picker stays per-profile) + per-profile prefs | front-end | settings S1·S4 · ruling |
 | **R-0 — search re-wire** | C32 web search as an in-fiction agent capability (amends 0032) | front-end + engine prompt | ruling 2026-06-09 |
 | **R-2 — Settings prune** | C31 dead-JS gating + live-data wipes (search prune superseded by C32) | front-end | settings S3·S5 |
+| **R-2 — tagline** | C33 hero tagline genuinely AI-generated (curated/static only as fallback) | front-end + engine | ruling 2026-06-09 |
 
 > **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
 > started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
@@ -1974,3 +1975,34 @@ PR per item).
 > never feed a `submitDecision`/game-outcome path (assert: no search-derived content in binding
 > calls); the Settings search tab is admin-only and its Test works; `pytest` + the 0032 headless
 > gate green; engine gate green. Open a PR.
+
+### C33 — the snarky hero tagline is genuinely AI-generated (not the curated fallback)  ·  Claude Code (front-end + engine)  ·  **R-2 · MINOR · RULING 2026-06-09**
+
+> In `kevinhirsch/orwell`, make the player tagline (0033) **actually AI-generated** when a game is live,
+> reserving curated/static text for the fail-open path only. Today it is **never** model-generated:
+> `GameSessionAdapter.playerTagline()` (`src/adapters/engine/GameSessionAdapter.ts:232-256`) only calls
+> a narrator if `this.narrator` is set, and **`setNarrator` is never called in the live composition**
+> (`outwardRoot.ts` wires `EchoNarrativePort` and nothing wires the tagline narrator) — so every live
+> tagline is the hardcoded `SNARKY_TAGLINES[standing]` curated line, and the front-end client
+> (`orwell_engine.player_tagline`) just relays it. Per ADR 0003 (engine supplies Vault-free facts, the
+> **front-end LLM voices**), generate the line where the real model lives:
+> 1. **Front-end generates it** from the engine's Vault-free standing/state (`gameStatus` + the engine's
+>    curated line as a seed/anchor) via the existing `llm_core`/`llm_call_async` path, with a tight
+>    anti-sycophantic instruction (a weak standing must NOT flatter — keep 0033's calibration). One line,
+>    bounded length; **cache per `(user, week, phase, standing)`** so it regenerates only when the moment
+>    advances, not per page load (mirror the engine cache at `GameSessionAdapter.ts:102-103,234-236`).
+> 2. **Fallback chain, in order:** FE LLM line → the engine's curated `SNARKY_TAGLINES[standing]`
+>    (still Vault-free, state-aware) → the static **"The house is waiting."** (PR #136). Never blank,
+>    never blocks the homepage (keep the fail-open contract + `test_orwell_social.py`).
+> 3. **Pre-game** (no started game) keeps a themed default — generation only kicks in once there's state
+>    to be snarky about.
+> *(Alternative if engine-side generation is ever preferred: wire a real `NarrativePort` via the
+> existing `setNarrator` seam in the live root — but the FE-LLM path is the ADR-0003-consistent choice
+> and needs no new engine narrator.)*
+> **Vault-free by construction:** the tagline is built only from the public standing projection — never
+> hidden votes/targeting/souls/off-screen (extend the 0001 canary on `playerTagline` already covers the
+> engine side; assert the FE prompt carries no Vault field). **DoD:** with a live game + LLM configured,
+> the hero line varies and is model-written (not one of the fixed curated strings); with the LLM/engine
+> down it falls through curated → "The house is waiting." without blocking; cached per moment; `pytest`
+> green; engine gate unaffected. Read `docs/features/0033-dynamic-player-tagline.md` + ADR 0003 first.
+> Open a PR.
