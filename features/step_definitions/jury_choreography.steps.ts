@@ -77,7 +77,7 @@ async function driveFinaleSeam(
       else if (d.kind === "nominations") await p.callTool("submitDecision", { kind: "nominations", choice: [d.options[0]!.id, d.options[1]!.id] });
       else if (d.kind === "veto-decision") await p.callTool("submitDecision", { kind: "veto-decision", use: false });
       else if (d.kind === "replacement") await p.callTool("submitDecision", { kind: "replacement", replacement: d.options[0]!.id });
-      else await p.callTool("submitDecision", { kind: "eviction-vote", vote: d.options[0]!.id });
+      else await p.callTool("submitDecision", { kind: d.kind, vote: d.options[0]!.id });
     }
   }
   return views;

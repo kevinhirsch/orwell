@@ -1072,7 +1072,14 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > amended predicates; player-as-final-HOH gets the binding choice; eligibility invariance under temperature preserved;
 > 0011/0034/0037 scenarios stay green. Read `docs/features/0005`, `0011`, `0034`, `0037` first. Open a PR.
 
-### B44 — player-HOH eviction tie-break (pending decision)  ·  Claude Code  ·  **Wave 2 · audit B2**
+### B44 — player-HOH eviction tie-break (pending decision)  ·  Claude Code  ·  **Wave 2 · audit B2** — ✅ DONE
+
+> **DONE.** `liveSeason` splits the eviction tally (`countEvictionVotes` → `resolveEvictionBeat` →
+> `commitEviction`): on a tie, if the HOH is the **player** the loop PAUSES on a new `tie-break` pending
+> decision (the two nominees are the options; illegal pick refused) instead of the silent
+> `npcChoice(player)`. An NPC HOH still auto-resolves; the decision survives a restart. Ports + adapter
+> gain the `tie-break` kind; every full-game driver/UAT handles it (terminal `else` is now kind-generic
+> so tie-break/final-eviction can't hang a drive). `tests/unit/tieBreak.test.ts` (4). Prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), a player HOH **never** breaks a tied eviction vote: `npcChoice(s.hoh!)` fires even
 > when `s.hoh === ctx.player` (`liveSeason.ts:178-182`), deciding via the **hidden** player→NPC threat edges the player

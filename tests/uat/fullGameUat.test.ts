@@ -36,7 +36,7 @@ import type { McpServer } from "../../src/adapters/mcp/McpServer";
 interface NamedRef { id: string; name: string; }
 
 interface PendingDecision {
-  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
       | "finale-statement" | "finale-answer" | "juror-vote";
   by: NamedRef;
   options: NamedRef[];
@@ -109,6 +109,8 @@ function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<str
       return { kind: "replacement", replacement: p.options[0]!.id };
     case "eviction-vote":
       return { kind: "eviction-vote", vote: p.options[0]!.id };
+    case "tie-break": // B44: the player HOH breaks a tied eviction vote.
+      return { kind: "tie-break", vote: p.options[0]!.id };
     case "final-eviction": // Final 3 (0045): the player is the final HOH — evict one of the other two.
       return { kind: "final-eviction", vote: p.options[0]!.id };
     // --- 0037 interactive finale ---

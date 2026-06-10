@@ -27,7 +27,7 @@ function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pendi
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
-  else s.submitDecision({ kind: "eviction-vote", vote: p.options[0]!.id });
+  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
 }
 
 describe("B41 — every player turn commits through the fail-closed checkpoint", () => {

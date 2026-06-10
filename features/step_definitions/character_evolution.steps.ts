@@ -35,7 +35,7 @@ async function driveLive(player: McpServer, steps: number): Promise<void> {
     else if (p.kind === "finale-statement") await player.callTool("submitDecision", { kind: "finale-statement", statement: "x" });
     else if (p.kind === "finale-answer") await player.callTool("submitDecision", { kind: "finale-answer", appeal: p.appeals![0]! });
     else if (p.kind === "juror-vote") await player.callTool("submitDecision", { kind: "juror-vote", vote: p.options[0]!.id });
-    else await player.callTool("submitDecision", { kind: "eviction-vote", vote: p.options[0]!.id });
+    else await player.callTool("submitDecision", { kind: p.kind, vote: p.options[0]!.id });
   }
 }
 
