@@ -2003,7 +2003,15 @@ PR per item).
 > tokenless `curl /player/call` 401s; with it unset, behavior is unchanged; under multi-user an anonymous
 > FE call is refused, not routed to `default`. Read `docs/features/0021`, `0009` first. Open a PR.
 
-### B68 — stop dropping the player's knowledge layer on save (live non-degradation)  ·  Claude Code (engine)  ·  **R-0 · CRITICAL · test C1 (= product-audit C2)**
+### B68 — stop dropping the player's knowledge layer on save (live non-degradation)  ·  Claude Code (engine)  ·  **R-0 · CRITICAL · test C1 · ✅ DONE 2026-06-10 (fix shipped with B40; the missing test added now)**
+
+> The snapshot fix itself shipped with **B40** (`SessionSnapshot.knowledge` carries facts + suspicions + the
+> id/ts counters; `InMemoryKnowledgeService.serialize/load`; `toGameState().knowledge` feeds the 0031
+> checkpoint). What this audit item still lacked was the LIVE-PATH test: new
+> `tests/unit/knowledgeSurvivesRestart.test.ts` surfaces a real anchored fact + a suspicion to the player,
+> saves through `FileSaveStore`, boots a NEW registry over the same dir (a process restart), and asserts the
+> factId + pathway + suspicion survive, `counts().knowledge` is non-decreasing, `isSuperset` holds over the
+> live path, and the resumed counters mint fresh ids (audit C3). Memory thinning stays impossible.
 
 > In `kevinhirsch/orwell` (TS engine), a real **non-degradation regression ships today**: the live
 > durable snapshot hardcodes `knowledge: []` (`src/engine/sessionSnapshot.ts:79`) and `SessionSnapshot`
