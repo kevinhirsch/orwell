@@ -52,7 +52,6 @@ XFAIL = {
     "R2": "overlap:orwell-presence",    # presence strip over the composer until the chrome PR's slots
     "R2b": "overlap:orwell-retro",      # retrospective over the composer (post-season) — chrome PR
     "R4": "overlap:orwell-status",      # status HUD over the social HUD until E64 moves it to the sidebar
-    "E92": "composer-bottom-inset",     # composer touches the viewport bottom until the chrome PR
 }
 
 passes, failures, xfails, xpasses = [], [], [], []

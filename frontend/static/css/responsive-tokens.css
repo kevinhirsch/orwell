@@ -90,3 +90,9 @@ html {
     top: var(--safe-top) !important;
   }
 }
+
+/* --- E92: the composer never touches the viewport bottom edge — a small
+       constant inset on every viewport, breathing with the home indicator. */
+.chat-input-bar {
+  margin-bottom: max(10px, var(--safe-bottom));
+}

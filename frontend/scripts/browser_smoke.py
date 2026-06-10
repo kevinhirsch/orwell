@@ -203,6 +203,20 @@ def main() -> int:
             dr_closed = page.evaluate("!(window._orwellDiaryRoomActive && window._orwellDiaryRoomActive())")
             check(dr_closed is True, "diary room: Escape leaves the composer mode")
 
+            # E90 (ruling #7): the theme trigger is icon-only in the sidebar's
+            # bottom cluster, beside the settings gear, with an accessible name.
+            tbtn = page.evaluate("""() => {
+              const b = document.getElementById('tool-theme-btn');
+              if (!b) return { ok: false };
+              const bar = document.getElementById('sidebar-user-bar');
+              return { ok: true, inCluster: !!(bar && bar.contains(b)),
+                       named: !!(b.getAttribute('aria-label') || b.title),
+                       textless: (b.textContent || '').trim() === '' };
+            }""")
+            check(tbtn.get("inCluster") is True, f"theme: trigger docks in the bottom cluster ({tbtn})")
+            check(tbtn.get("named") is True, "theme: trigger has an accessible name")
+            check(tbtn.get("textless") is True, "theme: trigger renders no text node")
+
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
             # Drive the REAL user flow (open Settings via the gear, switch to the
