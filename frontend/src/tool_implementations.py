@@ -4647,10 +4647,17 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
     kind = (args.get("kind") or "").strip()
-    if kind not in {"nominations", "veto-decision", "replacement", "eviction-vote"}:
-        return {"error": "kind must be one of: nominations, veto-decision, replacement, eviction-vote", "exit_code": 1}
+    # Mirror the engine's SubmitDecisionReq kinds (src/ports/GameSession.ts) exactly — the engine
+    # validates legality; the relay must never be the thing that makes a pending kind unplayable.
+    _DECISION_KINDS = {
+        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "replacement", "eviction-vote", "tie-break", "final-eviction",
+        "finale-statement", "finale-answer", "juror-vote",
+    }
+    if kind not in _DECISION_KINDS:
+        return {"error": f"kind must be one of: {', '.join(sorted(_DECISION_KINDS))}", "exit_code": 1}
     decision: dict = {"kind": kind}
-    for k in ("choice", "use", "save", "replacement", "vote"):
+    for k in ("choice", "use", "save", "replacement", "vote", "statement", "appeal", "intent"):
         if args.get(k) is not None:
             decision[k] = args[k]
     try:

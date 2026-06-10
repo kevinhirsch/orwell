@@ -39,8 +39,13 @@ async def _call(name: str, args: dict | None = None, user: str | None = None) ->
     return data["result"]
 
 
-async def create_character(player_name: str, *, archetype=None, strategy_style=None, seed=None, user: str | None = None) -> dict:
-    """Run OOBE and start a new game in this user's sandbox. Returns the Vault-free game state."""
+async def create_character(player_name: str, *, archetype=None, strategy_style=None, seed=None,
+                           confirm_restart: bool = False, user: str | None = None) -> dict:
+    """Run OOBE and start a new game in this user's sandbox. Returns the Vault-free game state.
+
+    Over a STARTED game the engine no-ops unless `confirm_restart` is set (B36 guard); the
+    /new-game route additionally 409s so the UI gets an honest signal instead of a silent no-op.
+    """
     args: dict = {"playerName": player_name}
     if archetype:
         args["archetype"] = archetype
@@ -48,6 +53,8 @@ async def create_character(player_name: str, *, archetype=None, strategy_style=N
         args["strategyStyle"] = strategy_style
     if seed is not None:
         args["seed"] = seed
+    if confirm_restart:
+        args["confirmRestart"] = True
     return await _call("createCharacter", args, user=user)
 
 

@@ -1316,12 +1316,23 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["nominations", "veto-decision", "replacement", "eviction-vote"], "description": "The pending decision's kind."},
-                    "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids to nominate."},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+                            "replacement", "eviction-vote", "tie-break", "final-eviction",
+                            "finale-statement", "finale-answer", "juror-vote",
+                        ],
+                        "description": "The pending decision's kind (mirror the engine's pending.kind exactly).",
+                    },
+                    "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids. houseguests-choice / tie-break / final-eviction: one houseguest id."},
                     "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
                     "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
                     "replacement": {"type": "string", "description": "replacement: the houseguest id the HOH names as the replacement nominee."},
-                    "vote": {"type": "string", "description": "eviction-vote: the nominee id the player votes to evict."},
+                    "vote": {"type": "string", "description": "eviction-vote: the nominee id to evict. juror-vote: the finalist id the juror crowns."},
+                    "statement": {"type": "string", "description": "finale-statement: the player's opening statement to the jury (flavor; carries no score)."},
+                    "appeal": {"type": "string", "enum": ["own-game", "mend", "connect", "discredit-rival"], "description": "finale-answer: the structured appeal the player makes to the asking juror (engine-scored; never the prose)."},
+                    "intent": {"type": "string", "enum": ["compete", "throw", "play-safe"], "description": "comp-intent: the player's declared approach for the upcoming competition (locked once the comp runs)."},
                 },
                 "required": ["kind"],
             },

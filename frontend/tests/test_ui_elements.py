@@ -129,22 +129,30 @@ class TestOnboardingOverlay:
         assert resp.status_code in (400, 422)
 
     def test_new_game_success(self, monkeypatch):
-        async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None, user=None):
+        async def fake_state(user=None):
+            return {"started": False}  # fresh sandbox: no confirm needed (C12 guard)
+
+        async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
+                              confirm_restart=False, user=None):
             return {"ok": True}
 
-        client = _build_client(monkeypatch, {"create_character": fake_create})
+        client = _build_client(monkeypatch, {"create_character": fake_create, "get_game_state": fake_state})
         resp = client.post("/api/orwell/new-game", json={"playerName": "Alice"})
         assert resp.status_code == 200
 
     def test_new_game_forwards_optional_fields(self, monkeypatch):
         captured = {}
 
-        async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None, user=None):
+        async def fake_state(user=None):
+            return {"started": False}
+
+        async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
+                              confirm_restart=False, user=None):
             captured["archetype"] = archetype
             captured["strategy_style"] = strategy_style
             return {"ok": True}
 
-        client = _build_client(monkeypatch, {"create_character": fake_create})
+        client = _build_client(monkeypatch, {"create_character": fake_create, "get_game_state": fake_state})
         client.post(
             "/api/orwell/new-game",
             json={"playerName": "Alice", "archetype": "Strategist", "strategyStyle": "aggressive"},
