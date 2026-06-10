@@ -9,10 +9,11 @@
 #
 # From the PROXMOX HOST (same bridge as orwell-update.sh / orwell-factory-reset.sh — it
 # locates the orwell LXC by hostname "orwell", override with CTID=<id> / CT_HOSTNAME=<name>,
-# and re-runs itself inside, forwarding the flag):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)"
-#   bash -c "$(curl -fsSL .../deploy/orwell-doctor.sh)" -- --status
-#   CTID=112 bash -c "$(curl -fsSL .../deploy/orwell-doctor.sh)" -- --bounce
+# and re-runs itself inside, forwarding the flag). Run a LOCAL copy — the repo is private and
+# no script fetches branch tips from GitHub (A4/ruling #17):
+#   bash /opt/orwell/deploy/orwell-doctor.sh            # or any local checkout's copy
+#   bash deploy/orwell-doctor.sh --status
+#   CTID=112 bash deploy/orwell-doctor.sh --bounce
 #
 # For the systemd install (orwell-install.sh): units orwell-engine / orwell-frontend
 # (legacy bbai-* detected automatically), app in /opt/orwell or legacy /opt/bbai
@@ -70,10 +71,13 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
     # re-fetch from ${BRANCH} 404s when testing a branch that main doesn't have yet).
     printf '%s\n' "$BASH_EXECUTION_STRING" > "$TMP_DOC"
   else
-    # Last resort (e.g. `curl | bash`): fetch from ${BRANCH}. Set BRANCH=<name> when testing
-    # an unmerged branch.
-    curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-doctor.sh" -o "$TMP_DOC" \
-      || die "could not fetch orwell-doctor.sh from branch '${BRANCH}' (set BRANCH=<name> for an unmerged branch)"
+    # Last resort (e.g. `curl | bash`): run the container's own CHECKED-OUT copy — never a raw
+    # branch-tip fetch from GitHub (A4/ruling #17 — closes audit E84; works on a private repo).
+    rm -f "$TMP_DOC"
+    pct exec "$CTID" -- bash -c "for d in /opt/orwell /opt/bbai; do
+        [ -f \"\$d/deploy/orwell-doctor.sh\" ] && exec bash \"\$d/deploy/orwell-doctor.sh\" '$MODE'
+      done; echo 'ERROR: no in-container deploy/orwell-doctor.sh found' >&2; exit 1"
+    exit $?
   fi
   pct push "$CTID" "$TMP_DOC" /tmp/orwell-doctor.sh || die "pct push into LXC ${CTID} failed"
   rm -f "$TMP_DOC"
@@ -208,6 +212,30 @@ diagnose() {
   else
     warn "ORWELL_PORT/BBAI_PORT not set in ${ENV_FILE} — skipping front-end probes"
   fi
+  systemd_security_floor
+}
+
+# ---- systemd hardening floor (audit E85) -------------------------------------------------
+# `systemd-analyze security` scores a unit's sandbox 0 (tight) … 10 (wide open). The deploy
+# units ship hardened (deploy/systemd/*.service); a score drifting above the floor means a
+# unit lost its hardening (e.g. hand-edited on the box). Warn-level: scores vary slightly by
+# systemd version, and an old build must not read as "broken" for this alone.
+SECURITY_FLOOR="${ORWELL_SECURITY_FLOOR:-7.0}"
+systemd_security_floor() {
+  command -v systemd-analyze >/dev/null 2>&1 || return 0
+  [[ "$UNITS_MISSING" == 1 ]] && return 0
+  local svc score
+  for svc in "$ENGINE_SVC" "$FRONTEND_SVC"; do
+    unit_active "$svc" || continue   # scoring needs a running unit
+    score="$(systemd-analyze security "${svc}.service" 2>/dev/null \
+      | sed -n 's/.*Overall exposure level[^0-9]*\([0-9.]*\).*/\1/p' | head -1)"
+    [[ -n "$score" ]] || continue
+    if awk -v s="$score" -v f="$SECURITY_FLOOR" 'BEGIN{exit !(s<=f)}'; then
+      pass "systemd hardening: ${svc} exposure ${score} (floor ${SECURITY_FLOOR})"
+    else
+      warn "systemd hardening: ${svc} exposure ${score} ABOVE floor ${SECURITY_FLOOR} — unit lost its sandboxing? (systemd-analyze security ${svc})"
+    fi
+  done
 }
 
 bounce() {
