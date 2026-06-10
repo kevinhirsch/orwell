@@ -18,6 +18,12 @@ export interface PlayerCard {
   name: string;
   archetype: string;
   strategyStyle: string;
+  /**
+   * Where the player stands in the game (0046): `active` (still playing), `jury` (evicted into the
+   * last-9 jury — they spectate the public ceremonies and vote at the finale), or `evicted` (voted out
+   * pre-jury — their season is over). Public, Vault-free: it says nothing about anyone's hidden state.
+   */
+  status: "active" | "jury" | "evicted";
 }
 
 /** A public houseguest card: name + status only. No stats, no soul, no archetype, no hidden attributes. */

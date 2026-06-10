@@ -1,0 +1,152 @@
+import { describe, it, expect } from "vitest";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import type { AdvanceView, SubmitDecisionReq } from "../../src/ports/GameSession";
+import { PLAYER } from "../../src/domain/ids";
+import type { EntityId } from "../../src/domain/ids";
+
+/**
+ * Feature 0046 — player eviction & the juror's seat. The game's most common ending, finally specced:
+ * the projection marks the player out (active → jury / evicted), the season completes no matter when
+ * they go, and a sequestered player-juror witnesses ONLY the public ceremony broadcasts (the juror
+ * knowledge model, 0002-compatible) — never the off-screen scheming. HARD rule: roles only — no names.
+ */
+
+/** A simple, deterministic player policy: compete, take the first legal options, never use the veto. */
+function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
+  const submit = (req: SubmitDecisionReq): void => void s.submitDecision(req);
+  if (p.kind === "nominations") submit({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  else if (p.kind === "veto-decision") submit({ kind: "veto-decision", use: false });
+  else if (p.kind === "replacement") submit({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "comp-intent") submit({ kind: "comp-intent", intent: "compete" });
+  else if (p.kind === "finale-statement") submit({ kind: "finale-statement", statement: "x" });
+  else if (p.kind === "finale-answer") submit({ kind: "finale-answer", appeal: p.appeals![0]! });
+  else if (p.kind === "juror-vote") submit({ kind: "juror-vote", vote: p.options[0]!.id });
+  else submit({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+let userSeq = 0;
+function newGame(seed: number): ReturnType<GameSessionRegistry["sandboxFor"]> {
+  const reg = new GameSessionRegistry();
+  const sb = reg.sandboxFor(`u${userSeq++}`);
+  sb.session.createCharacter({ playerName: "P", seed });
+  return sb;
+}
+
+const playerIdx = (s: GameSessionAdapter): number => (s.snapshot().live?.evictionOrder ?? []).indexOf(PLAYER);
+
+/** Advance until the player is evicted (returns the index) or the game finishes. */
+function driveToPlayerEviction(s: GameSessionAdapter): { idx: number; finished: boolean } {
+  for (let i = 0; i < 8000; i++) {
+    const v = s.advanceGame();
+    if (v.pending) resolve(s, v.pending);
+    if (playerIdx(s) >= 0) return { idx: playerIdx(s), finished: v.finished };
+    if (v.finished) return { idx: -1, finished: true };
+  }
+  throw new Error("game did not resolve");
+}
+
+/** Play a fresh game to its end; report the outcome. */
+function playToEnd(seed: number): { finished: boolean; winner?: EntityId; idx: number; finalists: number } {
+  const sb = newGame(seed);
+  let v = sb.session.advanceGame();
+  for (let i = 0; i < 8000 && !v.finished; i++) {
+    if (v.pending) resolve(sb.session, v.pending);
+    v = sb.session.advanceGame();
+  }
+  const snap = sb.session.snapshot().live!;
+  return { finished: v.finished, winner: snap.winner, idx: snap.evictionOrder.indexOf(PLAYER), finalists: snap.active.length };
+}
+
+/** The first seed (≤ bound) whose game evicts the player into an index the predicate accepts. */
+function seedEvicting(inRange: (idx: number) => boolean, bound = 40): ReturnType<typeof newGame> {
+  for (let seed = 1; seed <= bound; seed++) {
+    const sb = newGame(seed);
+    if (inRange(driveToPlayerEviction(sb.session).idx)) return sb;
+  }
+  throw new Error("no seed evicted the player into range within the bound");
+}
+
+// The jury is the last 9 of the (cast − 2) evictions; with the standard 16-cast that is eviction index ≥ 5.
+const PRE_JURY = (idx: number): boolean => idx >= 0 && idx < 5;
+const JURY = (idx: number): boolean => idx >= 5;
+
+describe("0046 — player eviction & the juror's seat", () => {
+  it("marks the player EVICTED (pre-jury) and frames the closure moment", () => {
+    const sb = seedEvicting(PRE_JURY);
+    const view = sb.session.getGameState();
+    expect(view.player?.status).toBe("evicted");
+    expect(view.moment).toBe("evicted"); // the spectator/closure framing, not the ceremony phase they can't act in
+    expect(playerIdx(sb.session)).toBeLessThan(5);
+  });
+
+  it("marks the player JURY when evicted into the last-9 jury and frames the jury seat", () => {
+    const sb = seedEvicting(JURY);
+    const view = sb.session.getGameState();
+    expect(view.player?.status).toBe("jury");
+    expect(view.moment).toBe("jury");
+    expect(playerIdx(sb.session)).toBeGreaterThanOrEqual(5);
+  });
+
+  it("a season completes to a Final 2 + a winner no matter when the player is evicted", () => {
+    for (const seed of [1 /* pre-jury */, 4 /* jury (final eviction) */]) {
+      const r = playToEnd(seed);
+      expect(r.finished).toBe(true);
+      expect(r.idx).toBeGreaterThanOrEqual(0);          // the player WAS evicted in these seeds
+      expect(r.finalists).toBe(2);                      // reached Final 2
+      expect(r.winner).toBeDefined();                   // a winner was crowned (an NPC — the player is out)
+      expect(r.winner).not.toBe(PLAYER);
+    }
+  });
+
+  it("the player on the jury still casts their OWN finale vote (the rest are engine-decided)", () => {
+    const sb = seedEvicting(JURY);
+    let sawJurorVote = false;
+    for (let i = 0; i < 8000; i++) {
+      const v = sb.session.advanceGame();
+      if (v.pending?.kind === "juror-vote") sawJurorVote = true;
+      if (v.pending) resolve(sb.session, v.pending);
+      if (v.finished) break;
+    }
+    expect(sawJurorVote).toBe(true);
+    expect(sb.session.snapshot().live!.finished).toBe(true);
+  });
+
+  it("a sequestered player-juror witnesses ONLY the public ceremony broadcasts — never the off-screen game", () => {
+    // The juror knowledge model (0002-compatible): once out, the player keeps receiving the PUBLIC
+    // ceremony results (house-event broadcasts) but none of the private scheming / confessionals.
+    const sb = seedEvicting((idx) => idx >= 5 && idx <= 10); // a mid-jury seed: several ceremonies still to spectate
+    const witnessedAtEviction = sb.engine.events.query({ witnessedBy: PLAYER }).length;
+
+    // Spectate several more beats from the jury box.
+    for (let k = 0; k < 8; k++) {
+      const v = sb.session.advanceGame();
+      if (v.pending) resolve(sb.session, v.pending);
+      if (v.finished) break;
+    }
+
+    const witnessed = sb.engine.events.query({ witnessedBy: PLAYER });
+    const hidden = sb.engine.events.query().filter((e) => e.hidden);
+
+    // They are not cut off: the broadcasts keep coming (their witnessed set grew while spectating).
+    expect(witnessed.length).toBeGreaterThan(witnessedAtEviction);
+    // Every event the juror witnesses is a PUBLIC broadcast — no confessional / off-screen type leaks in.
+    expect(witnessed.every((e) => e.type === "house-event")).toBe(true);
+    expect(witnessed.every((e) => e.hidden === false)).toBe(true);
+    // The house keeps a hidden life the juror cannot see — and none of it lists the player as a witness.
+    expect(hidden.length).toBeGreaterThan(0);
+    expect(hidden.every((e) => !e.witnessSet.includes(PLAYER))).toBe(true);
+  });
+
+  it("Vault Wall holds for the juror: a planted hidden scheme never reaches the player's witnessed events", () => {
+    const sb = seedEvicting(JURY);
+    const sentinel = "SENTINEL-0046-jury-secret-scheme";
+    sb.engine.events.record({
+      id: "hidden:0046", ts: 10_000_001, type: "conversation",
+      initiator: sb.session.getGameState().house[0]!.id, witnessSet: [sb.session.getGameState().house[0]!.id],
+      hidden: true, content: sentinel,
+    });
+    const witnessedContent = sb.engine.events.query({ witnessedBy: PLAYER }).map((e) => e.content).join("\n");
+    expect(witnessedContent.includes(sentinel)).toBe(false);
+  });
+});
