@@ -205,11 +205,11 @@ File references are to `main` @ 87687c0.
 - **E14 [LOW · Improvement] Raw `npc:N` ids leak into visible text on the
   `PlayerSurface.renderLog`/gossip path.** `gossip.ts:64–66`; only adapter-mediated views
   humanize. *Fix:* humanize at the projection (inject a name resolver).
-- **E15 [MED · Change] `GET /api/orwell/moment` hands any player the full GM system prompt**
+- **E15 [MED · Change] ✅ PR #214 — `GET /api/orwell/moment` hands any player the full GM system prompt**
   (lever manifest, casting status, per-moment instruction) — no JS consumes it
   (`orwell_routes.py:67–73`); pure meta-knowledge + prompt-extraction shortcut. *Fix:* delete
   or admin-gate the route.
-- **E16 [MED · Change] Player-authored preset system prompts ride the GM stack on game turns.**
+- **E16 [MED · Change] ✅ PR #214 — Player-authored preset system prompts ride the GM stack on game turns.**
   `chat_helpers.py:142–145` prepends the GM prompt onto `preface[0]` = the preset persona; the
   custom-preset modal survives the game build (`index.html:1129–1206`). A player can steer
   narration tone/recording discipline ("always portray the house as adoring me"). *Fix:* drop
@@ -243,21 +243,21 @@ File references are to `main` @ 87687c0.
   (caller picks kind/direction; `MAX_FOLDS_PER_INTERACTION` caps per call, not per beat).
   *Fix:* player channel requires `PLAYER ∈ witnessSet`; per-beat/per-pair fold budget. *Test:*
   witness set without player throws; N identical calls move an edge ≤ budget.
-- **E22 [HIGH · Improvement] The cardinal sin is enforced only by prompt wording FE-side.**
+- **E22 [HIGH · Improvement] ✅ PR #214 — The cardinal sin is enforced only by prompt wording FE-side.**
   `agent_loop.py:68–84` is the entire enforcement; nothing in the agent-stream completion
   (`chat_routes.py:1198–1221`) checks that a narrated `game_active` turn made ≥1 engine write.
   *Fix:* on `[DONE]`, if narration is non-trivial and `_agent_tool_calls` holds zero engine
   writes, fire a server-side fallback `recordInteraction` (bounded digest) + counter. *Test:*
   pytest asserting the guard.
-- **E23 [MED · Bug] Instructed retry of `advanceGame` with no idempotency key can
+- **E23 [MED · Bug] ✅ PR #214 — Instructed retry of `advanceGame` with no idempotency key can
   double-advance a beat.** `agent_loop.py:76–78` ("try the call once more") + 30s client
   timeout where the engine may have committed. *Fix:* on transport failure re-read
   `gameStatus`/pending and report "may already be resolved" (or add an idempotency token).
-- **E24 [MED · Bug] Incognito ("Nobody") bypasses all game framing under the game build.**
+- **E24 [MED · Bug] ✅ PR #214 — Incognito ("Nobody") bypasses all game framing under the game build.**
   `chat_helpers.py:105–106` early-returns; reachable via `/incognito` + hidden checkbox —
   unframed, unrecorded imitation play. *Fix:* under `game_build_enabled()` disable the toggle
   or apply game framing regardless.
-- **E25 [MED · Bug] Sync `/api/chat` persists the user message *before* the 409 game-turn
+- **E25 [MED · Bug] ✅ PR #214 — Sync `/api/chat` persists the user message *before* the 409 game-turn
   refusal** (`chat_routes.py:322–342`) ⇒ orphaned/duplicated transcript messages. *Fix:* hoist
   the check before `add_user_message` (or pop on raise).
 - **E26 [LOW · Improvement] Idempotent no-op answers look like acceptance.**
@@ -279,7 +279,7 @@ File references are to `main` @ 87687c0.
   *Fix:* serve the static per-channel tool list without resolving; apply `knownUser` to GET;
   LRU-cap un-started intake sandboxes. *Test:* unknown-user `GET /player/tools` ⇒
   `userCount()` unchanged, follow-up POST still 404.
-- **E29 [MED · Security] All FE bearer-token (`ody_`) callers collapse into one engine user
+- **E29 [MED · Security] ✅ PR #214 — All FE bearer-token (`ody_`) callers collapse into one engine user
   `"api"`.** `app.py:349` + `orwell_routes.py:28–30` (uses `current_user`, not
   `effective_user`) — two tokens from different owners share one game: a direct cross-user
   isolation break. *Fix:* resolve `api_token_owner` in game routes (or 403 bearer callers on
@@ -548,7 +548,7 @@ consequence.*
   `window._orwellOpenDiaryRoom` seam re-pointed at the composer mode. *Note:* with E64 (status
   HUD) and this, R4's Diary-trigger occlusion becomes unreachable and D2 shrinks to the
   presence strip + retrospective panel.
-- **E89 [MED · UX · ruling] NPC approaches must not fire at the very start of the game.**
+- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate; the FE started-gate belt already existed) — NPC approaches must not fire at the very start of the game.**
   `orwellSocial.js` gates only on `st.started` (`:6, :409`), and engine-side `socialInitiatives`
   ranks approaches from move-in — so "___ wants a word with you" can pop before the player has
   had a single unprompted beat in the house. *Ruling:* the approach surface may stay a window,
@@ -595,7 +595,7 @@ consequence.*
   under the game build, on `game_active` sessions: hide edit/delete/regenerate on all
   messages after game start (keep copy); pre-game OOC sessions unaffected. *Test:* pytest/
   browser smoke asserts no edit/delete affordances render on a started game's transcript.
-- **E94 [MED · UX/Bug · ruling] ✅ PR #208 (FE half: first-class paperclip + the framing/attachment coexistence gate; the one-line scene framing rides Lane 6) — Image attach: promote it out of the overflow menu and make it
+- **E94 [MED · UX/Bug · ruling] ✅ PR #208 (FE half: first-class paperclip + the framing/attachment coexistence gate) + ✅ PR #214 (the one-line scene framing: the player is SHOWING something to whoever is present) — Image attach: promote it out of the overflow menu and make it
   work in character.** Today "Attach files" is an overflow-menu item behind the `+` button
   (`index.html` `#overflow-attach-btn`) — one icon hidden behind another — and nothing
   guarantees an attached image reaches the model with game framing intact. *Fix spec:* (a) a
@@ -860,14 +860,14 @@ traceability; E-batch cross-references inline.
   exact v1 §3.9 failure. *Fix:* one line in `BASE_GAME_MASTER_PROMPT` after AUTHORITY
   ("unresolved outcomes are READS… never results until the engine resolves and reveals") +
   a `leverManifest.test.ts` regex pin.
-- **P2 [HIGH · Bug]** The re-entry moment is never requested: `storyFacts`/THE RECORD attach
+- **P2 [HIGH · Bug] ✅ PR #214 —** The re-entry moment is never requested: `storyFacts`/THE RECORD attach
   only to `re-entry`/`post-season` (`GameSessionAdapter.ts:1104–1105`), `view.moment` can
   never *be* `re-entry` (`:1195–1197`), and the FE always passes the phase moment
   (`chat_helpers.py:135,156`). A player resuming in a fresh session mid-season gets zero
   recorded history (ADR 0003 §6). C22's DONE note verified only the premiere slice. *Fix:*
   FE requests `re-entry` on the first game turn of a (re)opened session; pytest pins the
   requested moment.
-- **P3 [HIGH · Change]** Casting-interview turns stack the producer persona ("never a generic
+- **P3 [HIGH · Change] ✅ PR #214 —** Casting-interview turns stack the producer persona ("never a generic
   assistant", `momentPrompts.ts:115–116`) on top of the full generic-assistant preamble +
   rulebook + skills index, because substitution keys on `game_active` (false pre-game)
   (`chat_routes.py:1142`, `agent_loop.py:86–135, 911`) — and `test_c14_immersion.py:56–59`
@@ -885,10 +885,10 @@ traceability; E-batch cross-references inline.
   the winner" (`momentPrompts.ts:66–67`); the preview semantics live only in the HOH fragment
   — on other turns the model can announce a never-committed winner. *Fix:* reword BASE + FE
   schema to "previews… resolves only via advanceGame"; manifest test pin.
-- **P7 [MED · Bug]** Incognito strips all game framing while the in-character transcript rides
+- **P7 [MED · Bug] ✅ PR #214 —** Incognito strips all game framing while the in-character transcript rides
   along — ungrounded, consequence-free continuation (mechanism behind E24). *Fix:* disable
   under the game build or substitute a FEED_DOWN-style non-narration frame.
-- **P8 [LOW]** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
+- **P8 [LOW] ✅ PR #214 —** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
   policy referencing memories/skills the game build disables (ADR 0003 §1).
 - **P9 [LOW]** The casting-sheet *field* manifest isn't drift-pinned against
   `CASTING_COVERAGE` (the archetype table is; the nine field names aren't).
@@ -910,7 +910,7 @@ traceability; E-batch cross-references inline.
   the narrating LLM mid-scene, or toggle incognito (which strips all framing — P7/E24).
   *Fix:* game-build allowlist of safe actions (highlight only); reject
   mode/model/incognito/panel actions on game turns; pytest + JS guards.
-- **W2 [MED · Security]** `GET /api/chat/events/{session_id}` is the only session endpoint
+- **W2 [MED · Security] ✅ PR #214 —** `GET /api/chat/events/{session_id}` is the only session endpoint
   missing `_verify_session_owner` (`chat_routes.py:1297–1303` vs `:1311+`) — any
   authenticated user can subscribe to another user's activity stream (metadata side-channel +
   unbounded subscriber slot). *Fix:* one line, same guard as `chat_resume`.
@@ -1247,7 +1247,7 @@ result; the liveSentinel/liveFairness lanes are the cross-lane regression net.
 
 # Post-merge addenda (2026-06-10, after the round-5/6 merge to main)
 
-## A1 [MED-HIGH · Bug + Vacuous-test] Admin-enabled optional agent tools are silently re-disabled on every default game turn
+## A1 [MED-HIGH · Bug + Vacuous-test] ✅ PR #214 — Admin-enabled optional agent tools are silently re-disabled on every default game turn
 
 **The ruling/request (2026-06-10):** the Settings → Admin → Agent tools page lists the
 optional "power" tools (off by default); when an admin ENABLES one, it must actually work
@@ -1293,7 +1293,7 @@ in it — mirror case (no opt-in) asserts it IS; (b) the same pair for a non-wit
 game turn and the tool executes. This closes the gap the existing test's isolation
 assertion papers over.
 
-## A2 [MED · Bug + Change] Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
+## A2 [MED · Bug + Change] ✅ PR #214 — Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
 
 End-to-end answer to "do disabled tools actually work when activated and called by the LLM's
 lever?" Four gates sit between the Settings → Admin → Agent tools toggle and a working call:
