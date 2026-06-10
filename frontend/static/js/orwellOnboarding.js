@@ -62,17 +62,28 @@
         }
         #orwell-onboarding button[disabled] { opacity: .6; cursor: default; }
         #orwell-onboarding .err { margin-top: .8rem; font-size: .8rem; color: var(--red, #e06c75); min-height: 1em; }
+        #orwell-onboarding .ob-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; }
+        #orwell-onboarding .ob-chip {
+          cursor: pointer; font: inherit; font-size: .72rem; padding: .15rem .55rem; margin: 0;
+          width: auto; border-radius: 999px; border: 1px solid var(--border, #355a66);
+          background: rgba(255,255,255,.05); color: inherit;
+        }
+        #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
+        #orwell-onboarding .ob-hold .ob-hold-sub { opacity: .7; font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
       </style>
       <form class="ob-card" id="ob-form">
         <h1>Welcome to the house</h1>
         <p class="sub">Big Brother is watching. Create your houseguest to begin — the rest of the
-          house is cast for you, and every conversation from here is in-character.</p>
+          house is cast for you, and every conversation from here is in-character.
+          Your strengths are drawn from who you are: like every houseguest, balanced — never
+          invincible. The house plays fair, and so does the game.</p>
         <label for="ob-name">Your houseguest's name</label>
         <input id="ob-name" name="name" autocomplete="off" required placeholder="e.g. Alex" />
         <div class="row">
           <div>
-            <label for="ob-arche">Archetype <span style="opacity:.5">(optional)</span></label>
-            <input id="ob-arche" name="archetype" autocomplete="off" placeholder="strategist…" />
+            <label for="ob-arche">Archetype <span style="opacity:.5">(optional — these shape your hidden strengths)</span></label>
+            <input id="ob-arche" name="archetype" autocomplete="off" placeholder="mastermind…" />
+            <div class="ob-chips" id="ob-arche-chips" aria-label="Archetype suggestions"></div>
           </div>
           <div>
             <label for="ob-style">Strategy <span style="opacity:.5">(optional)</span></label>
@@ -122,6 +133,22 @@
     const form = el.querySelector("#ob-form");
     const btn = el.querySelector("#ob-submit");
     const err = el.querySelector("#ob-err");
+    // Canonical archetypes (engine: characterFactory ARCHETYPES) as one-tap suggestions —
+    // free text is still allowed; canonical words also steer the hidden stat derivation.
+    const ARCHETYPES = ["mastermind", "social-butterfly", "comp-beast", "villain", "underdog",
+      "flirt", "loyalist", "wildcard", "analyst", "hothead", "peacemaker", "floater"];
+    const chipWrap = el.querySelector("#ob-arche-chips");
+    if (chipWrap) {
+      ARCHETYPES.forEach((a) => {
+        const c = document.createElement("button");
+        c.type = "button"; c.className = "ob-chip"; c.textContent = a;
+        c.addEventListener("click", () => {
+          const inp = el.querySelector("#ob-arche");
+          inp.value = a; inp.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        chipWrap.appendChild(c);
+      });
+    }
     el.querySelector("#ob-name").focus();
 
     form.addEventListener("submit", async (e) => {
@@ -146,6 +173,12 @@
         }
         uninertBackground();
         el.remove(); // dissolve into the chat — the main chat is now in-character
+        // F7: a NEW SEASON gets a NEW chat session — the prior transcript (a finished or
+        // reset season) must never ride along as context for the narrator.
+        try {
+          const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
+          if (nb) nb.click();
+        } catch (_) {}
         // Nudge the status HUD to pick up the freshly-started game immediately.
         window.dispatchEvent(new Event("orwell:gamechanged"));
       } catch (e2) {
@@ -158,12 +191,69 @@
   // Seam for the headless browser gate (and future flows): mount on demand.
   window._orwellOnboardingMount = mount;
 
-  ready(async () => {
+  // J4: "is any chat model configured?" — the game cannot speak without one, and the old
+  // flow let the player author a houseguest then dead-end at "No model selected".
+  async function anyModelConfigured() {
+    try {
+      const r = await fetch("/api/models", { credentials: "same-origin" });
+      if (!r.ok) return true; // can't tell → don't block the flow on a probe
+      const d = await r.json();
+      // /api/models shape: { items: [{ models: [...] , offline }] } per endpoint group.
+      const items = (d && Array.isArray(d.items)) ? d.items : [];
+      return items.some((it) => Array.isArray(it.models) && it.models.length > 0 && !it.offline);
+    } catch (_) { return true; }
+  }
+
+  // F5: the engine is down on a GAME build — show the house, dark, instead of silently
+  // dropping the player into a generic workspace welcome.
+  function mountHolding(title, sub, readyAgain) {
+    if (document.getElementById("orwell-onboarding")) return;
+    const el = buildOverlay();
+    const card = el.querySelector(".ob-card");
+    card.innerHTML = `
+      <div class="ob-hold">
+        <h1>${title}</h1>
+        <p class="ob-hold-sub">${sub}</p>
+      </div>`;
+    document.body.appendChild(el);
+    inertBackground(el);
+    trapFocus(el);
+    // Re-probe quietly; dissolve back into the flow the moment the blocker clears.
+    const t = setInterval(async () => {
+      try {
+        if (await readyAgain()) {
+          clearInterval(t);
+          uninertBackground();
+          el.remove();
+          route();
+        }
+      } catch (_) { /* still blocked */ }
+    }, 5000);
+  }
+
+  async function route() {
+    const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     try {
       const st = await fetchState();
-      if (st && st.started === false) mount();
+      if (!st || st.started !== false) return; // game running (or unreadable): normal chat
+      if (!(await anyModelConfigured())) {
+        // Sequence the prerequisite (J4): production needs a feed source first. Admins get
+        // pointed at setup; everyone else knows what to ask for. Re-probe and continue.
+        mountHolding("Production needs a feed source",
+          "No chat model is configured yet, so the house can't speak. " +
+          (window._isAdmin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
+                           : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
+          anyModelConfigured);
+        return;
+      }
+      mount();
     } catch (_) {
-      // Engine unreachable → fail open; never block the normal chat.
+      // Engine unreachable: on the game build that's a dark house, not a silent skip (F5).
+      if (gameBuild) mountHolding("The house is dark",
+        "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
+        async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
     }
-  });
+  }
+
+  ready(route);
 })();

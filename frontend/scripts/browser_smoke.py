@@ -89,6 +89,39 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # C23/C15: the game build marks the body, and the engine-down landing is a DARK
+            # HOUSE holding card (game-framed), never the silent generic-workspace welcome.
+            # (The smoke runs with the engine down, so this is the real F5 path.)
+            gb_flag = page.evaluate("document.body.hasAttribute('data-game-build')")
+            check(gb_flag is True, "game build marks <body data-game-build>")
+            page.wait_for_timeout(1500)  # onboarding's route() resolves its probes
+            holding = page.evaluate("""() => {
+              const el = document.getElementById('orwell-onboarding');
+              if (!el) return { mounted: false };
+              return { mounted: true, dark: (el.textContent || '').includes('The house is dark') };
+            }""")
+            check(holding.get("mounted") is True, f"engine-down: holding card mounts ({holding})")
+            check(holding.get("dark") is True, "engine-down: it's the dark-house card, not the form")
+            tip_ok = page.evaluate("""() => {
+              const t = (document.getElementById('welcome-tip') || {}).textContent || '';
+              return !/compare mode|web search and code/i.test(t);
+            }""")
+            check(tip_ok is True, "welcome tip never names a dropped vertical")
+            # Clear the holding card so later sections (settings, modals) aren't behind inert.
+            page.evaluate("const h = document.getElementById('orwell-onboarding'); if (h) h.remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C23/J5: the authoring form offers the canonical archetype chips.
+            page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
+            page.wait_for_selector("#orwell-onboarding", timeout=3000)
+            chips = page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip').length")
+            check(chips >= 10, f"onboarding offers canonical archetype chips ({chips})")
+            page.evaluate("document.querySelectorAll('#ob-arche-chips .ob-chip')[0].click()")
+            chip_fill = page.evaluate("(document.getElementById('ob-arche')||{}).value || ''")
+            check(len(chip_fill) > 0, f"an archetype chip fills the field ({chip_fill!r})")
+            page.evaluate("document.getElementById('orwell-onboarding').remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
             # C20: the confirm-on-binding decision guardrail. Dispatch a synthetic pending
             # (exactly what chat.js emits from an advanceGame result) and assert the card
             # renders the engine's prompt + legal options, enforces the pick count, and only
