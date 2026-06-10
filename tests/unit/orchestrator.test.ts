@@ -166,7 +166,7 @@ describe("0031 — game orchestrator & integrity watcher", () => {
 
     const health = orch.sandboxHealth(U) as unknown as Record<string, unknown>;
     expect(Object.keys(health).sort()).toEqual(
-      ["eventCount", "faults", "lastAdvanceAt", "lastIntegrity", "lastTrigger", "phase", "started", "user", "week"],
+      ["circuitOpen", "eventCount", "faults", "lastAdvanceAt", "lastIntegrity", "lastTrigger", "phase", "started", "user", "week"],
     );
     const json = JSON.stringify(health);
     expect(json.includes(SENT)).toBe(false); // no Vault data

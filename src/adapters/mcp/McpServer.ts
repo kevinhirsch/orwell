@@ -96,6 +96,8 @@ export class McpServer {
         return this.deps.admin.configure(args as Record<string, unknown>);
       case "manageSandbox":
         return this.deps.admin.manageSandbox(args["op"] as "create" | "reset" | "save" | "load" | undefined);
+      case "sandboxHealth":
+        return this.deps.admin.health();
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

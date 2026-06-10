@@ -33,6 +33,8 @@ export interface UserSandbox {
   session: GameSessionAdapter;
   commands: EngineCommandsAdapter;
   mcp: { player: McpServer; admin: McpServer };
+  /** Project the live session's PUBLIC facts onto the admin state (B58/audit E5) — roles only. */
+  syncAdmin: () => void;
 }
 
 function buildUserSandbox(): UserSandbox {
@@ -92,6 +94,24 @@ function buildUserSandbox(): UserSandbox {
     return id;
   });
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
+  // B58/audit E5: the admin's inspectable state mirrors the LIVE session's public facts (week,
+  // phase, roles-only roster) — refreshed on every persisted mutation, never a never-updated stub.
+  const syncAdmin = (): void => {
+    const core = session.snapshot();
+    const prev = adminState.getAdminVisibleState();
+    const seat = (id: string): string => (core.live?.evictionOrder ?? []).includes(id) ? "evicted" : "active";
+    adminState.setAdminVisibleState({
+      ...prev,
+      week: core.week,
+      phase: core.phase,
+      houseguests: core.house
+        ? [
+            { role: "player", status: seat(core.house.player.id) },
+            ...core.house.npcs.map((n) => ({ role: "npc", status: seat(n.id) })),
+          ]
+        : [],
+    });
+  };
   return {
     engine,
     player: outward.player,
@@ -100,6 +120,7 @@ function buildUserSandbox(): UserSandbox {
     session,
     commands,
     mcp: { player: new McpServer("player", deps), admin: new McpServer("admin/God Mode", deps) },
+    syncAdmin,
   };
 }
 
@@ -141,6 +162,24 @@ export class GameSessionRegistry {
    */
   constructor(private readonly saveStore?: UserSaveStore) {}
 
+  /**
+   * Wire the per-user hooks every sandbox needs (B41/B58): the commit hook (checkpoint-then-save),
+   * the live admin mirror, the REAL admin reset delegate, and the Vault-free health provider.
+   */
+  private wireHooks(user: string, sb: UserSandbox): void {
+    const persist = (): void => {
+      sb.syncAdmin(); // the admin's inspectable state tracks the live game (B58/E5)
+      this.commit(user);
+    };
+    sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
+    sb.commands.setOnPersist(persist);
+    sb.admin.setResetDelegate(() => {
+      this.resetUser(user); // the admin reset re-onboards the REAL game (B58/E5; B36/C12 route here)
+    });
+    sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
+    sb.syncAdmin();
+  }
+
   /** The user's isolated sandbox — created on first use, RESUMED from durable storage on return. */
   sandboxFor(user: string): UserSandbox {
     let sb = this.sandboxes.get(user);
@@ -158,12 +197,7 @@ export class GameSessionRegistry {
           }
         }
       }
-      // Always wire the commit hook (B41): even without a durable store, a player mutation must run
-      // the integrity checkpoint (+ touch + health) when the orchestrator is the spine. `commit`
-      // falls back to a no-op save when there is neither a store nor a delegate.
-      const persist = (): void => this.commit(user);
-      sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
-      sb.commands.setOnPersist(persist);
+      this.wireHooks(user, sb);
       this.sandboxes.set(user, sb);
     }
     return sb;
@@ -206,9 +240,7 @@ export class GameSessionRegistry {
   restore(user: string, snap: SessionSnapshot): UserSandbox {
     const sb = buildUserSandbox();
     importSnapshot(sb, snap);
-    const persist = (): void => this.commit(user);
-    sb.session.setOnPersist(persist);
-    sb.commands.setOnPersist(persist);
+    this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;
   }
@@ -226,11 +258,16 @@ export class GameSessionRegistry {
   /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
   resetUser(user: string): UserSandbox {
     const sb = buildUserSandbox();
-    const persist = (): void => this.commit(user);
-    sb.session.setOnPersist(persist);
-    sb.commands.setOnPersist(persist);
+    this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;
+  }
+
+  /** Vault-free per-user health (B58/E5+E6) — composed by the runtime over the orchestrator. */
+  private healthProvider?: (user: string) => unknown;
+
+  setHealthProvider(fn: (user: string) => unknown): void {
+    this.healthProvider = fn;
   }
 
   /** A Vault-free channel resolver for the HTTP transport (keeps the outward layer Vault-free). */
