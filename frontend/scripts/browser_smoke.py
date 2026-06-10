@@ -103,6 +103,13 @@ def main() -> int:
             check(page.evaluate("document.getElementById('chat-history').getAttribute('aria-live')") == "polite",
                   "chat log is a polite live region (aria-busy gates it during streams)")
 
+            # C27: the game build ships no third-party CDN deps (KaTeX/Mermaid — no math or
+            # diagrams in BB) and no workspace tour. Asserted on the SERVED page.
+            served = page.content()
+            check("cdn.jsdelivr.net" not in served, "game build: no jsdelivr CDN dependency")
+            check("tourHints.js" not in served and "tourAutoplay.js" not in served,
+                  "game build: workspace tour not shipped")
+
             # C23/C15: the game build marks the body, and the engine-down landing is a DARK
             # HOUSE holding card (game-framed), never the silent generic-workspace welcome.
             # (The smoke runs with the engine down, so this is the real F5 path.)
@@ -136,6 +143,19 @@ def main() -> int:
             check(no_form is True, "onboarding mounts NO data-entry form (the interview owns intake)")
             page.evaluate("document.getElementById('orwell-onboarding').remove();"
                           "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C31/S5: the System Danger Zone only offers wipes for data the game build has.
+            wipes = page.evaluate("""() => {
+              const vis = (k) => {
+                const b = document.querySelector(`button[data-wipe-kind="${k}"]`);
+                if (!b || !b.parentElement) return null;
+                return getComputedStyle(b.parentElement).display !== 'none';
+              };
+              return { chats: vis('chats'), memory: vis('memory'), notes: vis('notes'), gallery: vis('gallery') };
+            }""")
+            check(wipes.get("chats") is True, f"system wipe: chats (live data) stays ({wipes})")
+            check(wipes.get("memory") is False and wipes.get("notes") is False and wipes.get("gallery") is False,
+                  f"system wipe: dropped verticals hidden under the game build ({wipes})")
 
             # C20: the confirm-on-binding decision guardrail. Dispatch a synthetic pending
             # (exactly what chat.js emits from an advanceGame result) and assert the card
