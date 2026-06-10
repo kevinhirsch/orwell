@@ -34,11 +34,14 @@ BRANCH="${BRANCH:-main}"
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# First install dir found: an explicit override, then the current path, then the legacy one.
+# First REAL install found: an explicit override, then the current path, then the legacy one.
+# The marker is the git checkout (`<app>/.git`), exactly like orwell-update.sh /
+# orwell-factory-reset.sh — a bare directory is NOT an install (a leftover empty /opt/orwell
+# on the Proxmox host must not stop the bridge; that bug ran the doctor on the host itself).
 find_app() {
   local d
-  for d in "${ORWELL_HOME:-}" /opt/orwell /opt/bbai; do
-    [[ -n "$d" && -d "$d" ]] && { echo "$d"; return 0; }
+  for d in "${ORWELL_HOME:-}" "${APP_DIR:-}" /opt/orwell /opt/bbai; do
+    [[ -n "$d" && -d "$d/.git" ]] && { echo "$d"; return 0; }
   done
   return 1
 }
@@ -160,6 +163,15 @@ bounce() {
   if [[ $EUID -ne 0 ]]; then
     echo "Restarting services needs root. Re-run:  sudo bash $0 ${MODE}"
     exit 2
+  fi
+  # If the unit doesn't exist on THIS machine, restarting (and waiting) is meaningless: either
+  # orwell isn't installed here, or you are on the Proxmox host and the app lives in the LXC.
+  if ! systemctl cat "$ENGINE_SVC" >/dev/null 2>&1; then
+    fail "unit ${ENGINE_SVC} is not installed on this machine"
+    echo "  -> If orwell runs in an LXC: run this script on the Proxmox host (it bridges via pct;"
+    echo "     set CTID=<id> if the container is not named '${CT_HOSTNAME}')."
+    echo "  -> If this IS the right machine: install first — bash deploy/orwell-install.sh"
+    return 1
   fi
   echo "==> bounce: engine first, then front-end (front-end depends on the engine)"
   systemctl restart "$ENGINE_SVC"
