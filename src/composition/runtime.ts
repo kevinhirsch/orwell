@@ -32,6 +32,8 @@ export interface RuntimeOptions {
   watcher?: Partial<WatcherConfig>;
   /** Deterministic off-screen RNG seed for the orchestrator. */
   seed?: number;
+  /** Resident-sandbox LRU cap (audit R4); env `ORWELL_MAX_RESIDENT_SANDBOXES` otherwise. */
+  maxResidentSandboxes?: number;
 }
 
 export interface Runtime {
@@ -79,7 +81,10 @@ export function watcherConfigFromEnv(env: Record<string, string | undefined> = p
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
   const saveStore = opts.saveStore ?? (opts.durable ? new FileSaveStore() : undefined);
-  const registry = new GameSessionRegistry(saveStore);
+  const envResident = parseInt((process.env.ORWELL_MAX_RESIDENT_SANDBOXES ?? "").trim(), 10);
+  const maxResident = opts.maxResidentSandboxes
+    ?? (Number.isFinite(envResident) && envResident > 0 ? envResident : undefined);
+  const registry = new GameSessionRegistry(saveStore, maxResident !== undefined ? { maxResident } : {});
   const cfg: WatcherConfig = { ...watcherConfigFromEnv(), ...opts.watcher };
   // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
   const orchestrator = new Orchestrator(registry, clock, {
@@ -89,13 +94,23 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
   // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
   registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
+  // The ONE restart door is COMPLETE (audit E1/D1/R1): when a season resets — admin reset or the
+  // player channel's confirmed restart, both via registry.resetUser — the orchestrator forgets the
+  // dead season's baseline/faults/rng, so season 2's first commit is a first commit, never a
+  // "degradation" against a finished season.
+  registry.setOnReset((user) => orchestrator.forgetUser(user));
   // God Mode can SEE sandbox health (B58/audit E5+E6): integrity, faults, the circuit state.
   registry.setHealthProvider((user) => orchestrator.sandboxHealth(user));
   // Preload saved users at boot (B60/audit E11): without this, every deploy froze each house until
   // that user's NEXT request — resume them now so the watcher/turn loop can see them immediately.
   // A user whose save fails to resolve is skipped (B35's tolerant-load handles the quarantine).
+  // Each resumed game also SEEDS the non-degradation baseline (audit E6): the first commit after an
+  // engine restart used to be checkpoint-blind — the guard's hole sat exactly at resume-from-disk.
   for (const user of saveStore?.listUsers?.() ?? []) {
-    try { registry.sandboxFor(user); } catch { /* skip an unresumable save; the rest still boot */ }
+    try {
+      registry.sandboxFor(user);
+      orchestrator.seedBaseline(user);
+    } catch { /* skip an unresumable save; the rest still boot */ }
   }
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {

@@ -2573,6 +2573,27 @@ PR per item).
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
 
+## The round-5/6 parallel lanes · 2026-06-10
+
+### L1 — restart & spine (E1+D1+R1 · E2 · E3 · E6 · E7 · E57/R5 · R3 · R4 · E70 · T14)  ·  **✅ DONE (PR #215)**
+
+> The ONE sanctioned restart door: `Orchestrator.forgetUser` + save-dir rotation
+> (`UserSaveStore.resetUser`/`FileSaveStore`) wired into `registry.resetUser`, and the player
+> channel's confirmed `createCharacter` restart now delegates through that same hinge
+> (`GameSessionAdapter.setOnRestart`) — season 2 commits clean, persists, and survives an engine
+> restart (the headline R1 production bug; proven end-to-end in
+> `tests/integration/restartSpine.test.ts`, the audit's named missing test). E3: a refused commit
+> THROWS typed (`TurnRefusedError` ⇒ 409; never 200-then-rollback) with one `onPersist` per beat
+> (`inOneCommit`); E7: persist failures are their own fault class (`PersistFailureError` ⇒
+> sanitized 500, fail-closed rollback) + `EngineRefusal` typing; E2: pre-game ticks gated and the
+> synthetic npc pool deleted; E6: boot preload seeds baselines (`seedBaseline`); E57/R5: the
+> turn-driven tick debounced to the turn boundary (beat commits always tick; aux tool calls share
+> one); R3: the exported snapshot reused across checkpoint/save/tick (≤2 serializations per
+> mutation, save by reference); R4: idle-sandbox LRU unload (`maxResident`, rebuilds from disk);
+> E70: `POST /api/orwell/new-game` admin-gated (the chat tools are the player door; smoke/matrix
+> configs keep working); T14: the restore-into-fresh-registry tick regression test. Unit gates:
+> `restartDoor.test.ts` + `spineHardening.test.ts` + `test_e70_new_game_gate.py`.
+
 ## Round-5/6 audit parallel phase — Lane 4 (player agency & ladder, engine) · 2026-06-10 — ✅ DONE (PR #217)
 
 > Source: `docs/audits/2026-06-10-full-product-audit.md` (lane plan: E34–E37, E12+T2, E38,

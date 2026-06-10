@@ -531,10 +531,9 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
       expect(merged["nominations"] ?? 0, "nominations decisions hit").toBeGreaterThan(0);
       expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
     },
-    // 5 full games over the real HTTP transport: measured at ~62s on an UNMODIFIED main in a
-    // shared-CPU environment, so the old 60s budget was a hair-trigger env flake (the direct
-    // 12-seed suite above is the reliability lane — this leg keeps the transport honest).
-    // Assertions unchanged; only the wall-clock budget breathes.
+    // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1
+    // (measured at ~62s on an unmodified main in a shared-CPU environment — the old 60s budget
+    // was a hair-trigger env flake; assertions unchanged, only the wall-clock budget breathes).
     { timeout: 180_000 },
   );
 
