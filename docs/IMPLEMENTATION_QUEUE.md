@@ -1261,7 +1261,18 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > leaks (extend the 0001 canary); a respectful vs. cold goodbye **measurably** moves the evictee's juror lean. Read
 > `docs/features/0034`, `0037`, `0014` first. Open a PR.
 
-### B50 — live NPC hidden elements (generation)  ·  Claude Code  ·  **Wave 3 · audit D1**
+### B50 — live NPC hidden elements (generation)  ·  Claude Code  ·  **Wave 3 · audit D1** — ✅ DONE
+
+> **DONE.** The production `Character` now carries `hiddenElements: HiddenElement[]` — `generateHouse` mints
+> **3–6 distinct, seeded, typed** elements per NPC (`secret-motive` / `pre-game-tie` / `concealed-aptitude` /
+> `divergent-persona`) off a **side rng** (hashed off the name) so the main house stream stays byte-stable
+> (stats/names/0007); the player's is empty (they author `privateStrategy`). `richOffscreenStretch` takes a
+> `hiddenElementsOf` lookup and, gated by `hiddenSurfaces` on a **per-scene side rng** (zero perturbation of
+> the existing off-screen stream), occasionally slips one element into the scene's HIDDEN content — the
+> orchestrator's off-screen tick wires it. Engine-side throughout (NPC `Character` is never projected); the
+> element reaches the player only if a later pathway carries it. `tests/property/hiddenElements.property.test.ts`
+> (3): every NPC has 3–6 distinct elements + the player none; seed-reproducible; over a season the surfacing
+> rate sits at the configured ~5% and **no** detail crosses to the player projection / their witnessed events.
 
 > In `kevinhirsch/orwell` (TS engine), live NPCs have **no hidden elements at all** — the production `CharacterFactory`
 > (`characterFactory.ts:56-73`) generates archetype/style/stats/background only; "tons of hidden elements" exist solely in
