@@ -10,29 +10,23 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: under active implementation (BDD/TDD-first).** Features **0001–0041 plus the endgame
-batch 0045–0047 are built** (0022 / MVP-2 is the one deferral; 0042–0044 and 0048–0049 are drafted
-specs still to build): the eight priority invariants, the MCP seam, the one-liner
-deploy, the gameplay loop, the MVP-1 batch — including the **living, persisted consequence loop
-(0023)** that was the long-standing critical gap (act → hidden impact → persist → recall is wired
-into the live game) — the live-loop batch (game build, tagline, live decision seam, running
-off-screen watcher, social surface, interactive finale **including its UI**), and the endgame
-batch (Final 5 → Final 2 structure, player eviction & the juror's seat, eviction night live).
-The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
-front-end (`frontend/`, Python) talking to the TS engine over MCP (see
-[Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0050**). **Active work — start
-here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` (the full product-audit
-batch B34–B60 / C12–C18, the front-end & experience batch B61–B63 / C19–C27, and the operations,
-security & test-integrity batch B67–B72 / C29–C33) — the live, wave-ordered
-dispatch lists, backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation
-principles"** section first) and `docs/audits/2026-06-09-frontend-experience-audit.md`, governed by
-**ADR `docs/decisions/0003`**. *Pick the next item from the queue, not from this paragraph* (it stays
-current; this prose drifts). Claude Code currently owns both lanes (engine **B-** and front-end **C-**;
-OpenHands isn't configured). The prior post-audit batch 0038–0044 folds into that queue — **0041, the
-linchpin, is now built** (the `SoulStore` is live in the sandbox; souls evolve and modulate behavior),
-0039 and 0040 done, 0038 partially done (B27b remains), 0042–0044 still to build. See
-[Current status](#current-status).
+**Status: feature-complete through the drafted spec set (BDD/TDD-first; 2026-06-10).** Every
+feature **0001–0050 is built and green except 0022 / MVP-2 (the one deferral)**: the eight
+priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
+including the **living, persisted consequence loop (0023)** (act → hidden impact → persist →
+recall, wired into the live game) — the live-loop batch, the endgame batch (Final 5 → Final 2,
+player eviction & the juror's seat, eviction night live), the post-audit batch (0038 live
+society + gossip diffusion, 0039 deals, 0040 confessionals, **0041 character evolution — the
+linchpin**, 0042 competition library, 0043 emergent blocs, 0044 strategic noms/votes), 0048
+retrospective/unsealing, 0049 house presence & lingering, and 0050 the casting interview.
+**The audit batches in `docs/IMPLEMENTATION_QUEUE.md` (B34–B73 / C12–C33) are all ✅ DONE — the
+queue is drained** (each item carries its verifying artifact). The game is **folded into the
+main chat**: the player-facing tier is the vendored **Orwell** front-end (`frontend/`, Python)
+talking to the TS engine over MCP (see [Architecture](#architecture-hexagonal)).
+Priority-ordered feature specs live in `docs/features/` (through **0050**). **New work starts
+as a new spec/queue item** — the remaining known deferrals are listed under
+[Current status](#current-status); the governing design rulings are
+`docs/audits/2026-06-09-product-audit.md` ("Remediation principles") and ADR `docs/decisions/0003`.
 
 ## Source of truth — read these first
 
@@ -382,19 +376,18 @@ The 0037 **finale UI is built** (B26 — the Vault-free `finaleView` read tool o
 port / `PLAYER_TOOLS` — plus C11, the `frontend/static/js/orwellFinale.js` panel over an
 `orwell_engine.finale_view` client; fail-open to `{ finale: null }`).
 
-**Post-audit batch (0038–0044) — in progress.** A behavioral-fidelity / anti-sycophancy audit
-found capabilities **built but unwired** plus genuine gaps; the per-item prompts are in
-`docs/IMPLEMENTATION_QUEUE.md` (B27–B33). **0041** character evolution & arc — **the linchpin — is
-✅ green** (`src/engine/emotionalArc.ts` + `engineRoot` now wires a `SoulStore` into the live
-sandbox): consequential beats + the off-screen tick drive bounded, mean-reverting soul evolution
-that modulates the live competition modifier (0006/0028) and a rattled-HOH nomination read, the arc
-persists + is recall-able, `CHARACTER` stays byte-stable, and no number crosses to the player.
-**This unblocked the deferred soul halves of 0038 + 0040.** **0038** live off-screen society: varied
-interaction types run live (B27a ✅) **+ live soul-deepening (via 0041)**; the **gossip→player
-diffusion** + pathway-aware leak heuristic (B27b) remain. **0039** (promise/deal tracking, ✅) and
-**0040** (NPC confessionals, ✅ — now with **live** soul-recall feedback) are green. **0042**
-(competition library), **0043** (emergent bloc behavior), and **0044** (strategic nom/vote
-refinements) are drafts.
+**Post-audit batch (0038–0044) — ✅ complete (2026-06-10).** **0041** character evolution & arc
+— **the linchpin** — is green (`src/engine/emotionalArc.ts` + a live `SoulStore`): consequential
+beats + the off-screen tick drive bounded, mean-reverting soul evolution that modulates the live
+competition modifier (0006/0028) and a rattled-HOH read; the arc persists and is recall-able;
+`CHARACTER` stays byte-stable; no number crosses to the player. **0038** live off-screen society
+is fully green (varied scenes, live soul-deepening, B27b gossip→player diffusion with the
+pathway-aware 0031 leak heuristic). **0039** (deals), **0040** (confessionals with live
+soul-recall), **0042** (the competition library — curated defs + seeded no-repeat draws +
+Vault-free narrative scaffolds on the result view), **0043** (emergent blocs — derived per read,
+never stored, per ADR 0002), and **0044** (strategic nominations & enriched votes —
+disposition-gated pawn/backdoor/direct tactics, political temperature, mood/bloc/deal-aware
+votes, all magnitudes in `src/engine/decisionConstants.ts`) are green and BDD-gated.
 
 **Endgame batch (0045–0047) — green** (Wave 2 of the product-audit queue; BDD-gated in
 `cucumber.cjs`): **0045** endgame structure (the explicit Final 5 → Final 4 → Final 3 → Final 2
@@ -402,9 +395,11 @@ ladder replacing a generic late-game loop), **0046** player eviction & the juror
 player can genuinely lose — `GameStateView.player.status`; evicted pre-jury ⇒ terminal recap,
 jury ⇒ the player serves as a juror under a defined **juror knowledge model**: jurors witness
 ceremonies-as-broadcast only), and **0047** eviction night live (staged vote reveal + goodbye
-messages). **0048** (season retrospective & the Vault unsealing — B56, then C17 for its UI) and
-**0049** (house presence & lingering play — B64, per ADR 0003) are **drafted specs, not yet
-built**. **0050 — the casting interview — is green** (BDD-gated): character creation is the
+messages). **0048** (season retrospective & the Vault unsealing — `seasonRecap` from the record
++ the one sanctioned, code-gated post-season Vault read, with its front-end panel) and **0049**
+(house presence & lingering play — rooms/adjacency in the pure core, seeded occupancy, the
+`whereabouts` lever, overheard-pathway eavesdropping, per ADR 0003) are **✅ green and
+BDD-gated**. **0050 — the casting interview — is green** (BDD-gated): character creation is the
 game's first scene, acquired **through the chat, no modal** — pre-game, the chat is a
 producer-led "get to know the cast" interview (the `character-creation` moment prompt carries
 the canonical casting-sheet manifest, drift-tested, plus the live casting status). The intake
@@ -413,24 +408,21 @@ is **incremental**: `updateCasting` records answers as they land into a durable 
 missing / the next step, and `createCharacter` finalizes from it (persona, backstory,
 motivation, private strategy, interview notes seed the Character/Soul datastore) returning a
 **casting card** (character type, strategy, per-aptitude tier words — qualitative only, no
-number crosses). The product-audit waves are landing continuously beyond these (e.g. live hidden
-elements, the live emotional modifier on competitions, evictee filtering, front-end immersion
-fixes) — the queue marks each item ✅ as it merges; trust it over this paragraph.
+number crosses). **The product-audit, front-end & experience, and ops/security/test-integrity
+waves (B34–B73 / C12–C33) all landed** — every queue item is marked ✅ with its verifying
+artifact; the queue is drained as of 2026-06-10.
 
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
 `cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
-**Remaining work** (the live list is the audit batches in `docs/IMPLEMENTATION_QUEUE.md`):
-B27b (0038 gossip→player diffusion); 0042–0044 (0039, 0040, **and 0041 the linchpin are done**);
-**0048** retrospective/unsealing (B56 + C17) and **0049** lingering play (B64); the unfinished
-items in the product-audit, front-end/experience, and ops/security waves (B34–B72 / C12–C33);
-**0022** MVP-2 (the one deferred feature); 0010's container smoke test on a real Proxmox host; the
-deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector — souls/vectors run
-in-memory + file today); and full MCP/JSON-RPC over the current HTTP transport. *(By design, not a
-gap: the live engine-side narrator is `EchoNarrativePort` — narration happens in the front-end via
-`getMomentPrompt`; the `playerTagline` `setNarrator` seam is ready if engine-side narration is ever
-wired.)*
+**Remaining work — only the long-acknowledged deferrals** (the queue is drained; new work
+starts as a new spec/queue item): **0022** MVP-2 (the one deferred feature); 0010's container
+smoke test on a real Proxmox host; the deferred real relational adapters (SQLite/Postgres,
+sqlite-vec/pgvector — souls/vectors run in-memory + file today); and full MCP/JSON-RPC over the
+current HTTP transport. *(By design, not a gap: the live engine-side narrator is
+`EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
+`playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 
 ## Open decisions (remaining)
 
