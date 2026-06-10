@@ -12,6 +12,7 @@ import spinnerModule from './spinner.js';
 import { modelColor } from './chatRenderer.js';
 import { providerLogo } from './providers.js';
 import { sortModelIds } from './modelSort.js';
+import { isNarrow } from './platform.js';
 
 let API_BASE = '';
 let _cachedItems = []; // cached /api/models items for model-switch dropdown
@@ -587,7 +588,7 @@ export async function refreshModels(force = false) {
               'Tip: The Diary Room is private — the house never hears it.',
               'Tip: Deals are real. Break one and the jury will remember.',
             ]
-          : window.innerWidth <= 768
+          : isNarrow()
           ? [
               'Tip: Long-press a session for rename, delete, and memory options.',
               'Tip: Swipe from the edge to open The House panel.',

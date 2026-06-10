@@ -1,3 +1,4 @@
+import { isNarrow } from './platform.js';
 /**
  * tileManager.js — desktop window tiling for tool modals.
  *
@@ -31,7 +32,7 @@ let _ghost = null;
 let _activeZone = null;
 let _tracking = null; // { content, startRect }
 
-function _isDesktop() { return window.innerWidth > 768; }
+function _isDesktop() { return !isNarrow(); }
 
 function _dockClassForSide(side) {
   return side === 'left' ? 'modal-left-docked' : 'modal-right-docked';

@@ -5,6 +5,7 @@ import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
 import settingsModule from './settings.js';
 import { sortModelObjects } from './modelSort.js';
+import { isNarrow } from './platform.js';
 
 const API_BASE = window.location.origin;
 
@@ -520,7 +521,7 @@ function _initModelPickerDropdown() {
     if (document.activeElement) document.activeElement.blur();
     _close();
     // Refocus main textarea — skip on mobile to avoid keyboard bounce
-    if (window.innerWidth >= 768) {
+    if (!isNarrow()) {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
@@ -624,7 +625,7 @@ function _initModelPickerDropdown() {
       _refreshLocalProbe().then(() => {
         if (!menu.classList.contains('hidden')) _populate(search.value || '');
       });
-      if (window.innerWidth >= 768) search.focus();
+      if (!isNarrow()) search.focus();
       // Hide scroll button so it doesn't overlap
       const _scrollBtn = document.getElementById('scroll-bottom-btn');
       if (_scrollBtn) _scrollBtn.style.display = 'none';

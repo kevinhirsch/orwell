@@ -22,6 +22,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 // Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
 const searchModule = null, documentModule = null, emailInbox = null, createResearchSynapse = null;
 import { createStreamRenderer } from './streamingRenderer.js';
+import { isNarrow } from './platform.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -652,7 +653,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
       // input readonly which forces the keyboard to retract, then blur,
       // then drop the readonly attribute after the keyboard is gone so
       // typing still works for the next message.
-      if (window.innerWidth <= 768) {
+      if (isNarrow()) {
         try {
           messageInput.setAttribute('readonly', 'readonly');
           messageInput.blur();
@@ -3119,7 +3120,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
         // Re-enable message input; on mobile blur to dismiss keyboard
         if (messageInput) {
           messageInput.disabled = false;
-          if (window.innerWidth <= 768) {
+          if (isNarrow()) {
             messageInput.blur();
           } else {
             messageInput.focus();
@@ -3897,7 +3898,7 @@ import { createStreamRenderer } from './streamingRenderer.js';
     });
 
     // On mobile, fade out welcome text when keyboard opens to prevent overlap
-    if (window.innerWidth <= 768) {
+    if (isNarrow()) {
       const msgInput = document.getElementById('message');
       if (msgInput) {
         msgInput.addEventListener('focus', () => {
