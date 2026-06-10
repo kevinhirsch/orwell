@@ -1,6 +1,6 @@
 # 0019 — Agent-driven play loop
 
-> **Status:** Draft. **How Orwell is actually played.** The LLM agent drives each turn by
+> **Status:** Built (see the [README status index](./README.md#index)). **How Orwell is actually played.** The LLM agent drives each turn by
 > *calling engine tools* — read the visible state, narrate the moment (0018), surface the legal
 > decision set when a binding choice is due, take the player's choice, and execute it through a
 > **validated** engine tool; the engine resolves and advances. The agent **never** decides
@@ -16,7 +16,7 @@ Each turn is an **agent loop over engine tools**:
 getVisibleStateFor(player)  →  narrate the moment (0018)
    →  if a binding decision is pending: surface the engine's LEGAL option set (0011/0005)
    →  player responds:  free-text social play   OR   an explicit binding choice
-   →  binding choice ⇒ executeDecision(...) [validated]  →  engine resolves & advances (0006/0011/0014)
+   →  binding choice ⇒ executeDecision(...) [validated; as built: submitDecision]  →  engine resolves & advances (0006/0011/0014)
    →  repeat
 ```
 
@@ -72,11 +72,13 @@ getMomentPrompt(moment?)   -> { moment, systemPrompt }
 # The decision seam
 pendingDecision(state)         -> { kind, options[] } | none   # the engine's LEGAL set (0011/0005)
 executeDecision(kind, choice)  -> result                       # validated; rejects illegal/ineligible (0005)
+                                                               # (as built: submitDecision; the loop advances via advanceGame)
 
 # Outcomes come from the engine, never the agent (0006/0011/0014); the agent voices them.
 ```
 
-**Invariants:** a binding decision changes state **only** via `executeDecision` over a legal
+**Invariants:** a binding decision changes state **only** via `executeDecision` (as built:
+`submitDecision`) over a legal
 option (never via prose); illegal/ineligible choices are rejected; the presented options equal
 the engine's legal set; the agent cannot fabricate an outcome the engine didn't decide; every
 tool the agent touches is Vault-free.

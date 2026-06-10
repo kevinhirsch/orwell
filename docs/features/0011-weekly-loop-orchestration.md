@@ -1,6 +1,6 @@
 # 0011 — Weekly loop orchestration
 
-> **Status:** Draft. **The gameplay spine** — the playable week + season as a pure-domain state
+> **Status:** Built (see the [README status index](./README.md#index)). **The gameplay spine** — the playable week + season as a pure-domain state
 > machine, binding the rules (0005), outcomes (0006), pacing (0008), and the relationship model
 > (decision 0002) into the actual flow. The engine has the rules and the off-screen sim, but not
 > yet the orchestrated competition loop.
@@ -65,7 +65,9 @@ not a frozen snapshot. The player witnesses only a slice and infers the rest.
 - The **jury** is the **last 9 evictees**; for a 16-cast Final-2 that is evictions **6–14** (the
   first 5 are pre-jury). Sequester begins at the first juror's eviction.
 - At **Final 2**, the season moves to the jury vote; the winner has the **most jury votes**; a tie
-  is broken by the **last-evicted juror** (0005/spec). The vote *choreography* (statements,
+  is broken by the **last-evicted juror** (0005/spec). *(Deliberate: with a jury of 9 — odd — this
+  tie is **unreachable in the untwisted format**; the rule exists for the returning-juror twist
+  family, where the jury can become even.)* The vote *choreography* (statements,
   one-question-per-juror, reveal order) is a separate endgame feature.
 
 ## 7. Contracts (stack-agnostic, pure core)
@@ -77,7 +79,8 @@ advancePhase(state, decision, rng) -> state'                            # applie
 winner(state) -> Houseguest | none
 ```
 
-`advancePhase` rejects an illegal decision (e.g. naming the veto winner as replacement) — the
+`advancePhase` (as built, the live tools are `advanceGame` / `submitDecision`) rejects an illegal
+decision (e.g. naming the veto winner as replacement) — the
 0005 predicates are the gate.
 
 ## 8. Test strategy
@@ -95,7 +98,8 @@ winner(state) -> Houseguest | none
 ## 9. Definition of Done
 
 - [ ] A seeded season runs end-to-end to one winner with a legal phase sequence every week.
-- [ ] Every per-week rule from 0005 holds; illegal decisions are rejected by `advancePhase`.
+- [ ] Every per-week rule from 0005 holds; illegal decisions are rejected by `advancePhase`
+      (as built: `submitDecision`).
 - [ ] Jury = last 9 evictees; endgame produces a winner with the correct tie-break.
 - [ ] NPC decisions are relationship-driven (not random); player decision points are surfaced
       and validated.
@@ -105,7 +109,7 @@ winner(state) -> Houseguest | none
 
 0005 (eligibility/voting), 0006 (outcomes/temperature), 0008 (cadence), the relationship model
 (decision 0002, for NPC decisions), 0007 (the season state persists/deepens). **Feeds** the MCP
-action tools (`resolveCompetition`, etc. — 0009), the player-decision interaction layer, and a
+action tools (`resolveCompetition` — as built: `runCompetition` — etc., 0009), the player-decision interaction layer, and a
 dedicated endgame/jury feature.
 
 ## 11. Traceability

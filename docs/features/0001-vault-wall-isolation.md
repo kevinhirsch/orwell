@@ -1,6 +1,6 @@
 # 0001 — Vault Wall isolation
 
-> **Status:** Draft (authored by the feature-maker; awaiting an implementer).
+> **Status:** Built (see the [README status index](./README.md#index)).
 > **Build priority:** #1 — the top of the order (`CLAUDE_CODE_INSTRUCTIONS.md` §9) and the
 > #2 non-negotiable in the mandate (`CLAUDE.md`).
 > **Stack (resolved):** TypeScript / Node 22 · SQLite-now / Postgres-ready · vector store from

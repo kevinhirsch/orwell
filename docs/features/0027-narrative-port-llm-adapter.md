@@ -1,6 +1,6 @@
 # 0027 — NarrativePort LLM adapter (the real narrator)
 
-> **Status:** Draft. The real async LLM behind **`NarrativePort`** — provider-agnostic, streaming,
+> **Status:** Built (see the [README status index](./README.md#index)). The real async LLM behind **`NarrativePort`** — provider-agnostic, streaming,
 > resilient — replacing the `EchoNarrativePort` stub. It receives **only the Vault-free
 > `NarrationContext`** (the visible projection + the moment prompt) and returns narration; it
 > **never decides outcomes** (the engine does). In the folded deployment the **Orwell front-end's

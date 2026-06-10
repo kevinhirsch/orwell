@@ -1,6 +1,7 @@
 # 0050 — The casting interview (producer-led character creation)
 
-> **Status:** Drafted with the implementation. Evolves **0015** (the OOBE) from a form intake
+> **Status:** Built (see the [README status index](./README.md#index); spec drafted with the
+> implementation). Evolves **0015** (the OOBE) from a form intake
 > into a **conversation**: the model, in the producer's voice, conducts a fun "get to know the
 > cast" interview that ends in the player's character type, strategy, and a qualitative read of
 > their strengths — and seeds the prompt + datastore with the building blocks of who the player

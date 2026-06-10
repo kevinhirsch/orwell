@@ -1,6 +1,6 @@
 # 0026 — Relationship math (firmed update rule & tunable constants)
 
-> **Status:** Draft. Concretizes [0017](./0017-relationship-model.md)'s *shape* (directed, graded,
+> **Status:** Built (see the [README status index](./README.md#index)). Concretizes [0017](./0017-relationship-model.md)'s *shape* (directed, graded,
 > computed signals) into a **firmed update rule + default constants** — the numbers behind every
 > edge, and what **0023's `apply()`** uses. **Baseline feel: realistic & competitive (sticky /
 > grudge-holding)** — betrayals linger, trust is earned slowly. **But the feel is per-game, not

@@ -1,6 +1,6 @@
 # 0025 — Reserve twists (Vault-sealed, engine-timed)
 
-> **Status:** Draft. A **small curated pool of classic, non-structural twists** held **in reserve**.
+> **Status:** Built (see the [README status index](./README.md#index)). A **small curated pool of classic, non-structural twists** held **in reserve**.
 > The engine decides **if and when** one fires, at a dramatic beat — and the twist (what *and* when)
 > is **sealed in the Vault so neither the player NOR the admin knows in advance**. Variety and
 > surprise without breaking the 16 → jury-9 → final-2 core.

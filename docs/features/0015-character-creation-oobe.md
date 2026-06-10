@@ -1,6 +1,6 @@
 # 0015 — Character creation (OOBE)
 
-> **Status:** Draft. **The one human-authored profile.** First-run out-of-box experience that
+> **Status:** Built (see the [README status index](./README.md#index)). **The one human-authored profile.** First-run out-of-box experience that
 > produces the *player* — the only authored houseguest — and seeds the rest of the house around
 > them. Feeds `CharacterFactory` (0004) and the Character/Soul split (decision 0001).
 > **Executable spec:** [`0015-character-creation-oobe.feature`](./0015-character-creation-oobe.feature)

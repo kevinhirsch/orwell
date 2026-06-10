@@ -3,6 +3,12 @@
 Dispatch these to implementer agents **in order** (respecting `depends on`). Items on different
 tracks can run **in parallel** once their deps are met.
 
+> 🎯 **The CURRENT dispatch point is the audit batches at the BOTTOM of this file** — the
+> [full product-audit batch (B34–B60 / C12–C18)](#full-product-audit-batch-b34b60--c12c18--2026-06-09),
+> the front-end & experience batch (B61+ / C19+), and the operations/security batch (B67+ / C29+).
+> Every earlier "NOW" / "start here" block in this file is **historical** (kept as the work record);
+> do not dispatch from them.
+
 **Agent split (suggested, not strict):**
 - **Claude Code → the TypeScript engine** (`src/`) — it has built the hexagonal core.
 - **OpenHands → the Python front-end** (`frontend/`, vendored Orwell).
@@ -15,14 +21,12 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 
 > ⚠️ **Adjustments to already-built specs — pick these up.** See the
 > [Amendments table in `docs/features/README.md`](features/README.md#amendments-to-shipped-specs-implementer-pick-these-up).
-> Current: **0004 (Done)** — `CharacterFactory` must also generate **public appearance/identity**
-> fields (appearance, age, presentation/style) into `character.md`, seed-stable and free of any
-> aptitude/hidden data, to feed the Vault-free **portrait descriptor** (0020 §5, 0004 §8). Small,
-> additive; fold it into the built cast generation.
+> *(The 0004 appearance-fields and 0023 durability rows there are **satisfied — implemented**;
+> check the table for any newer, still-open amendments before starting work.)*
 
-## Dispatch strategy — NOW (concurrent Claude Code + OpenHands)
+## Dispatch strategy — HISTORICAL (2026-06-08; complete — dispatch from the audit batches at the bottom)
 
-**True state as of 2026-06-08:**
+**State as of 2026-06-08 (since superseded — C8/0032 shipped):**
 - **Engine: 0001–0031 are Done.** The consequence loop (0023), soul recall (0024), per-user sandboxes
   (0021), reserve twists (0025), the streaming narrator (0027), durable persistence (0030), relationship
   + temperature constants (0026/0028), and now the **runtime orchestrator/integrity watcher (0031)** are
@@ -47,7 +51,8 @@ is now drained; the active front-end work is the prune.
 - **0032 tier order:** Tier 1 (flag-gate + 404) → Tier 2 (stop shipping JS) → Tier 3 (delete code).
   Tiers 1–2 go green in CI (`pytest`); Tier 3's DoD is a **documented run on a live instance** (boots,
   onboards, plays a turn, portraits render, accounts/admin work) per `frontend/INTEGRATION.md`.
-- **First move NOW:** OpenHands → **C8**. (Claude Code engine lane idle — pick up review/maintenance.)
+- **First move (historical):** OpenHands → **C8** — since shipped. (This block is the 2026-06-08
+  record; the live dispatch point is the audit batches at the bottom.)
 
 *(The full per-item prompts are below.)*
 
@@ -339,7 +344,7 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > window. Done when two logged-in users each get their own isolated game and neither can see the
 > other's. Depends on **B12**. Open a PR.
 
-### C6 — Tight, lever-complete system prompts  ·  OpenHands (+ Claude Code)  ·  **START NOW (ready part)**
+### C6 — Tight, lever-complete system prompts  ·  OpenHands (+ Claude Code)  ·  **HISTORICAL — shipped (was "START NOW")**
 
 > In `kevinhirsch/orwell`, make the game agent able to **access and pull every engine lever**. The
 > engine's game-master prompt (`src/engine/momentPrompts.ts`, 0018) is already a **tight operating

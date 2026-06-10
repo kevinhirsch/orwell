@@ -277,13 +277,21 @@ Authoritative record of decisions and corrections from the design conversation.
 
 ---
 
-## 15. Decisions still to confirm with the human
+## 15. Decisions still to confirm with the human — ALL RESOLVED
 
-1. **Soul/profile storage** (md / vector / hybrid) and the **schema** for deep hidden
-   attributes + how evolution is persisted.
-2. **Temperature model** — distributions, per-variable weighting, bounds, and the
-   **surfacing-rate** for hidden elements.
-3. **Vector approach**, if adopted — embedding/store and what it indexes.
-4. **Exact veto-draw participant rules**, jury procedure, twists/specials.
-5. **Non-degradation test strategy** — how to operationalize "detail must accumulate."
-6. **Tech-stack preference** (Node/TS vs Python; DB choice).
+Every open item is now decided; the list is kept with pointers (cross-check `CLAUDE.md`
+"Open decisions (remaining)"):
+
+1. **Soul/profile storage** — ✅ resolved: markdown + vector behind `SoulProvider`
+   (feature 0024; evolution persisted per 0007/0041).
+2. **Temperature model** — ✅ resolved: shape in feature 0006 / `docs/decisions/0001`;
+   constants firmed in `src/domain/temperatureConstants.ts` (feature 0028).
+3. **Vector approach** — ✅ resolved: adopted, engine-only; embedding provider is
+   **fastembed, local ONNX** per ADR `docs/decisions/0004` (deterministic fake in tests).
+4. **Veto-draw rules, jury procedure, twists** — ✅ resolved: six-player veto +
+   "Houseguest's Choice" (`docs/decisions/0001`, 0005); jury choreography (0037);
+   reserve twists Vault-sealed (0025).
+5. **Non-degradation test strategy** — ✅ resolved: superset + monotonic counts +
+   lossless round-trip (feature 0007).
+6. **Tech stack** — ✅ resolved: TypeScript / Node 22 engine; Python/FastAPI front-end;
+   in-memory + file stores today, SQLite→Postgres deferred behind the ports (`CLAUDE.md`).

@@ -1,6 +1,6 @@
 # 0021 — Game session & save lifecycle (per-user sandboxes)
 
-> **Status:** Draft. **How a game maps to users now that Orwell *is* the game (the fold, #60).**
+> **Status:** Built (see the [README status index](./README.md#index)). **How a game maps to users now that Orwell *is* the game (the fold, #60).**
 > **One active game per physical-world user**, each in its **own isolated sandbox**; **unlimited
 > concurrent games across different users**; the chat is each user's **window** into *their* game.
 > Introduces **cross-user (multi-tenant) isolation** as a first-class guarantee — a new axis
@@ -131,3 +131,14 @@ This session's calibration (one active game per physical-world user; sandbox per
 concurrent games across users; the chat as the window); `CLAUDE.md` ("each running game is its own
 isolated sandbox (own state namespace/instance)"; three channels); the fold (#60) that put the
 game in the main chat; `docs/features/0007-persistence-non-degradation.md` (the save that persists).
+
+## 12. Amendment (B57 / audit H4) — save/load semantics & account deletion
+
+- **Save/load respects the 0007 ratchet.** Any load/resume path on a sandbox (admin- or
+  lifecycle-driven) may **not silently regress persisted detail**; **restore-to-checkpoint** is
+  the sanctioned rollback (explicit, recorded, history-preserving). A new game replacing the
+  user's current one (§3) is the deliberate exception — a fresh save lineage, not a regression
+  of the old one.
+- **Account deletion ⇒ sandbox deletion.** Deleting a user's account implies deleting that
+  user's **sandbox data** (saves, events, souls, portraits under their key) — per-user data has
+  no owner once the account is gone (cross-user isolation's complement; ties to 0029).

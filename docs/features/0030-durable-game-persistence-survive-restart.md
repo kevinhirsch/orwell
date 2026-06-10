@@ -1,6 +1,6 @@
 # 0030 — Durable game persistence (survive engine restart)
 
-> **Status:** Draft. Wire **durable, per-user persistence into the LIVE game** so a started
+> **Status:** Built (see the [README status index](./README.md#index)). Wire **durable, per-user persistence into the LIVE game** so a started
 > game survives an **engine restart**. Today the live path is in-memory only: a process restart
 > wipes every game, so the front-end's onboarding overlay ("Welcome to the house") **re-fires every
 > time** and all event/relationship/soul detail is lost. This completes the **persist → recall**
@@ -115,3 +115,14 @@ sandboxes — saves are per-user), **0023** (this is its persist→recall half, 
 game), and **0024** (souls persist via `SoulProvider`, co-versioned). Fixes the user-reported
 regression: the "Welcome to the house" overlay (`frontend/static/js/orwellOnboarding.js`) firing on
 every load because `GET /api/orwell/state` reported `started:false` after each engine restart.
+
+## 9. Amendments (B57 / audit H4 + H8)
+
+- **Admin save/load vs the ratchet (H4).** Any save/load surface over this store (incl. God
+  Mode's `manageSandbox`, 0016) must respect the **0007 monotonic ratchet**: a load may not
+  silently regress persisted detail; **restore-to-checkpoint** is the sanctioned rollback.
+  **Account deletion implies deleting that user's sandbox data** (0021/0029).
+- **The re-entry beat (H8).** A resume must open **in-fiction**: a fresh morning-in-the-house
+  scene (the 0018 moment framing picks up where the game stands), **never** an out-of-fiction
+  recap dump. The store recalls everything; the *chat* re-enters the fiction — recall is the
+  engine's job, not an exposition paragraph (ADR 0003: the conversation is the game).

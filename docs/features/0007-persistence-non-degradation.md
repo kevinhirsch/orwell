@@ -1,6 +1,6 @@
 # 0007 — Persistence non-degradation
 
-> **Status:** Draft. **Build priority:** #7.
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #7.
 > **Executable spec:** [`0007-persistence-non-degradation.feature`](./0007-persistence-non-degradation.feature)
 
 ## 1. Summary

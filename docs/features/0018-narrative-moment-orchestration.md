@@ -1,6 +1,6 @@
 # 0018 — Narrative & moment orchestration
 
-> **Status:** Draft. **The narrator framing.** The engine owns the *moment* (the current game
+> **Status:** Built (see the [README status index](./README.md#index)). **The narrator framing.** The engine owns the *moment* (the current game
 > beat) and hands the narrative LLM a **managed, Vault-free per-moment system prompt**; the LLM
 > narrates that moment and nothing more. Promotes the prototype seam (`src/engine/momentPrompts.ts`,
 > the `getMomentPrompt` tool) into a spec now that **Orwell is the game** and every chat turn must
@@ -74,6 +74,12 @@ place to "manage system-prompt injections for every moment."
 > **Tightness bar.** The manual must be **tight**: precise, no filler, unambiguous about who
 > decides (the engine) and which lever serves each beat. A vague prompt that leaves the model
 > guessing which lever to pull — or unaware a lever exists — is a failure of this feature.
+
+> **The re-entry beat (B57 / audit H8).** When a player **resumes** a persisted game (0030), the
+> opening moment is a **fresh, in-fiction morning-in-the-house scene** at wherever the game
+> stands — **never an out-of-fiction recap dump**. The store recalls everything (0023/0030); the
+> narration re-enters the fiction rather than summarizing it (ADR 0003: the conversation is the
+> game).
 
 ## 5. The narrator constraint
 

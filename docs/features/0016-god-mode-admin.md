@@ -1,6 +1,6 @@
 # 0016 — God Mode (the administrator port)
 
-> **Status:** Draft. The **third channel** (admin / God Mode), alongside player-level and
+> **Status:** Built (see the [README status index](./README.md#index)). The **third channel** (admin / God Mode), alongside player-level and
 > in-character (`CLAUDE.md`). The administrator configures the sandbox, overrides **non-Vault**
 > mechanics, and inspects **non-Vault** state — and is **walled from the Vault even for the
 > admin**. Extends the existing `AdminPort` (`src/surfaces/admin/AdminPort.ts`) and `ADMIN_TOOLS`.
@@ -121,3 +121,12 @@ override advances). Builds directly on the existing `AdminPort` and `ADMIN_TOOLS
 admin"; three channels); `docs/bb-sim-spec.md` §5, §12 (God Mode walled); mandate #2 (the human
 has never read the Vault and must not be able to); `docs/CLAUDE_CODE_INSTRUCTIONS.md` §2 (the
 permission boundary; God Mode walled); 0001 (structural enforcement reused here).
+
+## 11. Amendment (B57 / audit H4) — admin save/load vs the 0007 ratchet
+
+`manageSandbox(save | load)` must respect the **0007 monotonic non-degradation ratchet**: an
+admin **load may not silently regress persisted detail** (counts stay non-decreasing across the
+save lineage; nothing thins). The sanctioned rollback is **restore-to-checkpoint** — an explicit,
+recorded operation that starts from a known checkpoint without destroying the later history it
+rolls past. An admin "load" that quietly discards accumulated events/souls would violate
+mandate #4.

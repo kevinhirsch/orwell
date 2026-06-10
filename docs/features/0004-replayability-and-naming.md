@@ -1,15 +1,13 @@
 # 0004 — Replayability & naming
 
-> **Status:** Done — **amended** (see §8). **Build priority:** #4.
+> **Status:** Done — **amended; amendment implemented** (see §8). **Build priority:** #4.
 > **Executable spec:** [`0004-replayability-and-naming.feature`](./0004-replayability-and-naming.feature)
 >
-> ⚠️ **Amendment — implementer action needed (for 0020 portraits).** `CharacterFactory` must also
-> generate **public appearance/identity** fields into the static `Character` (`character.md`) —
-> appearance, approximate age, presentation/style — so houseguest **portraits** ([0020](./0020-player-experience.md))
-> render from a **Vault-free descriptor** over those public facets. These fields are **public**
-> (Vault-free), distinct from the P/M/S aptitudes (which never surface) and from hidden
-> attributes/`Soul`. 0004 already ships the cast; this adds the public-appearance fields + their
-> generation/consistency check. Detail in **§8**.
+> ✅ **Amendment satisfied.** `CharacterFactory` now generates the **public appearance/identity**
+> fields (appearance, approximate age, presentation/style) into the static `Character` —
+> built in `src/engine/characterFactory.ts` (`generateAppearance`, seed-stable, Vault-free) —
+> feeding the **Vault-free portrait descriptor** ([0020](./0020-player-experience.md) §5).
+> Detail in **§8** (kept as the design record).
 
 ## 1. Summary
 

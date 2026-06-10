@@ -312,7 +312,7 @@ The handoff should be seamless. Ryne should feel like he is walking back into th
 
 ### Jury of 9
 
-The final 9 houseguests evicted from the game form the jury. Beginning with the 8th eviction, all evicted houseguests go to jury sequester rather than leaving the game entirely. Jury members observe the remainder of the game and vote for the winner at the Final 2.
+The final 9 houseguests evicted from the game form the jury. Beginning with the 8th eviction, all evicted houseguests go to jury sequester rather than leaving the game entirely. *[Orwell annotation: the "8th eviction" figure is wrong — canon is jury = the last NINE evictees of a 16-cast / Final-2 season (14 evictions total), so sequester begins with the **6th** eviction. Legacy text left as-is per the do-not-rewrite rule.]* Jury members observe the remainder of the game and vote for the winner at the Final 2.
 
 ### Jury Management as a Mechanic
 

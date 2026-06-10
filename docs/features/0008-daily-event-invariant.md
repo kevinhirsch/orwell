@@ -1,6 +1,6 @@
 # 0008 — Daily-event invariant
 
-> **Status:** Draft. **Build priority:** #8.
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #8.
 > **Executable spec:** [`0008-daily-event-invariant.feature`](./0008-daily-event-invariant.feature)
 
 ## 1. Summary

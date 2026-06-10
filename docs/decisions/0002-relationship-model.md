@@ -33,7 +33,7 @@ hand-set flags.
 | **threat** | how dangerous A thinks B is to A's game (targeting, nominations) |
 | **alignment** | overlap of strategic interest *this week* (shifts fast) |
 | **reliability** | track record — has B actually had A's back? (computed from past votes/actions) |
-| **confidence** | how much interaction data backs this read — **uncertainty**, shrinks as data accrues |
+| **confidence** | how much interaction data backs this read — **grows** as data accrues (uncertainty shrinks); a read only counts as *knowledge* **above** the confidence threshold, below it it is *suspicion* |
 
 ### Properties
 

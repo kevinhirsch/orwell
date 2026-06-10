@@ -157,10 +157,13 @@ The opinion change lives in the **hidden layer** (Soul/Vault) — the player **n
 numbers**, only the later behavior. That is the Vault Wall working: the change is real, recorded,
 and invisible. **This is the point of the game.** It is now **green** (feature 0023): the live
 game wires events (0002), relationships (0017/0026), and persistence (0007/0030) together —
-`recordInteraction` records the event, `src/engine/consequence.ts` folds its hidden impact into
-the relationship/soul layer, and the orchestrator (`src/composition/orchestrator.ts`) persists it
-with a fail-closed integrity checkpoint (0031). Hold the line that made it work: **never ship an
-action that is narrated but never recorded** — it has no consequence and no memory.
+the **live** folds happen in the adapters: `EngineCommandsAdapter.recordInteraction` records the
+event and folds its hidden impact, and `GameSessionAdapter` folds ceremony beats
+(`foldCeremonyConsequence`) and soul evolution (`evolveFromBeat`); `src/engine/consequence.ts` is
+the older 0023 module (off-screen-sim path). The orchestrator (`src/composition/orchestrator.ts`)
+persists each turn with a fail-closed integrity checkpoint (0031). Hold the line that made it
+work: **never ship an action that is narrated but never recorded** — it has no consequence and no
+memory.
 
 ## Characters, souls & per-moment temperature
 
@@ -296,12 +299,14 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 `SoulStore`), `mcp/` (`McpServer` / `HttpMcpServer`), `narrative/` (`LlmNarrativePort`,
 `DeterministicNarrator`, `Echo…`), `embedding/`, `random/`, `time/`) · `src/engine` (the season
 loop `season.ts` + the live loop `liveSeason.ts`, plus `conversation.ts`, `relationships.ts`,
-`consequence.ts` (the hidden-impact fold), `gossip.ts`, `offscreen.ts`, `confessionals.ts`,
+`consequence.ts` (the original 0023 hidden-impact fold module — the **live** folds run in
+`GameSessionAdapter`/`EngineCommandsAdapter`), `gossip.ts`, `offscreen.ts`, `confessionals.ts`,
 `momentPrompts.ts`, and tunable constants) · `src/composition`
-(`engineRoot` wires the Vault; `outwardRoot`/`appRoot` never do; `orchestrator.ts` is the single
-per-sandbox game-advance path with a fail-closed integrity checkpoint, driven by `gameWatcher.ts`
-over a `registry` of per-user sandboxes; `runtime.ts` composes + starts the live watcher from
-`src/main.ts`). BDD steps + support in `features/`; unit/property/
+(`engineRoot` wires the Vault; `outwardRoot`/`appRoot` never do; `orchestrator.ts` is the
+per-sandbox **commit/integrity spine** with a fail-closed checkpoint — game advances also flow
+through the session's `advanceGame`/`submitDecision`, with the orchestrator as the commit hook —
+driven by `gameWatcher.ts` over a `registry` of per-user sandboxes; `runtime.ts` composes +
+starts the live watcher from `src/main.ts`). BDD steps + support in `features/`; unit/property/
 architecture/integration tests in `tests/`. The
 `.feature` files in `docs/features/` remain the source of truth. The **player-facing tier** is the
 vendored **Orwell** front-end in `frontend/` (Python/FastAPI) — its own app, quarantined from the
