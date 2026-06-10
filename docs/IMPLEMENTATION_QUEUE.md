@@ -1595,7 +1595,9 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > on the build flag (today it's the one game-build asset the flag doesn't control). (V1, per ADR 0003: still light)
 > a game-branded landing/hero (season title, "Enter the house" CTA = onboarding) + BB composer placeholder, instead
 > of the generic "type /setup" workspace. (V3) Map engine phase enums → player labels ("Veto Ceremony", not
-> `veto-ceremony`); no raw enum in any HUD. (V5) Prune the theme picker to a curated set of season themes. (R2) Gate
+> `veto-ceremony`); no raw enum in any HUD. (V5, **RULING 2026-06-09: keep ALL theme customization tools and make
+> them better** — do NOT prune: add curated season presets *on top of* the full customizer, wire an AA contrast
+> clamp into the theme apply path (a11y A4), and keep the harmony generator + custom fonts working.) (R2) Gate
 > the residual inherited modals/"Save to Documents" export so no dropped-vertical control is keyboard-reachable under
 > the game build. **DoD:** game-build page weight drops materially (`admin.js`/`presets.js` absent); no jsdelivr
 > request on a game-build load; `ORWELL_GAME_BUILD=0` restores full workspace chrome; no raw enum or dropped-vertical
@@ -1711,6 +1713,10 @@ PR per item).
 | **R-1 — re-point the mandate gates** | B69 live richness + fairness + sentinel · B70 structural test/CI gaps | tests+engine | C2·C3·C6 / C4·C7·C8·C9 |
 | **R-2 — production-grade deploy** | B71 atomic/rollback update + boot-preload + real smoke · B72 root-drop + hardening + backup/DR + hygiene | deploy/systemd (+engine runtime) | A4·A6·A7 / A5·A8·A9·A3·A10 |
 | **R-1 — FE hardening** | C29 secure-cookies + proxy rate-limit + stray verticals + entitlements + deps + isolation test | front-end | secB2·B4·B5·B6·B7 + testC5 |
+| **R-0 — Settings ruling** | C30 global LLM config (admin-set, hidden from non-admins; chat-bar picker stays per-profile) + per-profile prefs | front-end | settings S1·S4 · ruling |
+| **R-0 — search re-wire** | C32 web search as an in-fiction agent capability (amends 0032) | front-end + engine prompt | ruling 2026-06-09 |
+| **R-2 — Settings prune** | C31 dead-JS gating + live-data wipes (search prune superseded by C32) | front-end | settings S3·S5 |
+| **R-2 — tagline** | C33 hero tagline genuinely AI-generated (curated/static only as fallback) | front-end + engine | ruling 2026-06-09 |
 
 > **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
 > started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
@@ -1882,3 +1888,121 @@ PR per item).
 > **DoD:** the isolation test fails if the route trusts a client `user`; `/api/vault/config` and
 > `/api/mcp/servers` 404 under the game build; `pytest` + the 0032 headless gate green; engine gate
 > unaffected. Open a PR.
+
+### C30 — settings model ruling: global LLM config (admin-set, hidden from non-admins) · per-profile preferences  ·  Claude Code (front-end)  ·  **R-0 · CRITICAL (multi-user) · settings S1 + S4 · RULING 2026-06-09**
+
+> In `kevinhirsch/orwell` `frontend/`, implement the **settings model ruling** (see the addendum in
+> `docs/audits/2026-06-09-settings-menu-audit.md`): **the first admin sets up the LLM (services/ai)
+> and those settings are GLOBAL for all users** — logically-global things are global, unchangeable
+> by, and **hidden from** non-admins; **user-based preferences persist per-profile**, never globally.
+> Concretely:
+> 1. **Mark `services` and `ai` admin-only** (join `tools`/`users`/`system` in `syncAdminVisibility`,
+>    `settings.js:5060-5062`) so a non-admin never sees LLM config at all — today they land on
+>    `services` as the **default tab**, see "None", and 403 on every action (`model_routes.py:1421,
+>    1488,1684`, `auth_routes.py:461-466`). Pick a sensible non-admin default tab (account or
+>    appearance).
+> 2. **Verify and test that a non-admin actually inherits the global LLM config** — the global
+>    `default_chat` endpoint/model must drive a non-admin's game turn with zero settings interaction
+>    (this is the crux of the ruling: admin configures once, everyone plays). **The chat-bar model
+>    switcher STAYS for every user** (ruling): selecting *among* the admin-provisioned
+>    endpoints/models is a per-profile preference (persist via the `_PER_USER_KEYS`
+>    `default_endpoint_id`/`default_model` seam, `settings.py:379-388` / `prefs_routes.py:82`),
+>    layered over the global default — what's hidden is the config/management surface (endpoints,
+>    keys, global defaults), never the picker.
+> 3. **Per-profile preferences done right (S4):** `saveKeybinds()` swallows the admin-only 403 and
+>    toasts "Shortcut saved" while nothing persists (`settings.js:1855-1868`). Persist keybinds via
+>    per-user **`/api/prefs`** (`prefs_routes.py:82`), and apply the same rule to any other genuine
+>    preference (appearance is localStorage today — optionally migrate to `/api/prefs` for
+>    cross-device). No preference ever writes the global settings store.
+> 4. Amend **B69**'s readiness check: "playable after install" must hold for a **non-admin** user —
+>    admin sets the model once, a fresh non-admin account plays with zero config.
+> **DoD:** a non-admin sees no `services`/`ai`/LLM surface anywhere; their game speaks using the
+> admin's global config with zero setup; their keybind change persists per-profile across reload and
+> does NOT affect other users; an admin's change to the global model affects everyone; `pytest`
+> green; engine gate unaffected. Open a PR.
+
+### C31 — finish the Settings game-build prune (no dead tabs, no live JS behind hidden ones)  ·  Claude Code (front-end)  ·  **R-2 · MAJOR · settings S3 + S5 (S2 superseded by C32)**
+
+> In `kevinhirsch/orwell` `frontend/`, close the cosmetic-hide-live-code pattern in the Settings
+> modal (`docs/audits/2026-06-09-settings-menu-audit.md` S3/S5). **Note the ruling: `search` is NOT
+> pruned — it is re-wired as a core in-game capability by C32** (the settings tab becomes
+> admin-only global config like services/ai, per C30). Remaining prune work:
+> (1) `email`/`reminders`/`integrations` are CSS-hidden (`game-trim.css:59-63`) but their `init*`
+> handlers still run on every settings open (`settings.js:2081-2085`) and bind controls to 404'd
+> endpoints (reminders Test → `/api/notes/fire-reminder`; email → `/api/email/*`). Gate those
+> `init*` calls behind the game-build flag, and ideally strip the dropped panels **server-side**
+> (extend the `index.html` rewrite that already does `strip_dropped_scripts`).
+> (2) Trim the admin **System** tab's Danger-Zone wipe list + export/import to live game data —
+> today it names memory/skills/notes/tasks/documents/gallery/calendar (`index.html:2099-2153`),
+> categories the game build doesn't have (pair with **B71/B72**'s backup work; chats + the engine
+> save dir are the real categories).
+> **DoD:** under the game build no settings-originated request hits a 404'd endpoint (network-spy
+> test); System offers only live-data wipes; with `ORWELL_GAME_BUILD=0` the full inherited Settings
+> works unchanged; `pytest` + the 0032 headless gate green. Open a PR.
+
+### C32 — re-wire web search as an in-fiction agent capability (the house knows the real world)  ·  Claude Code (front-end + engine prompt)  ·  **R-0 · CRITICAL · RULING 2026-06-09 · amends 0032**
+
+> In `kevinhirsch/orwell`, implement the **search ruling**: the LLM must be able to **leverage web
+> search in-character** — when the player references something the model doesn't know (say, a new
+> movie, mid-conversation with a houseguest), the agent quickly searches, gathers results, and
+> synthesizes an appropriate **in-game response in the voice of whoever the player is talking to**.
+> This **amends feature 0032**: `web_search` moves from the drop-set to the **keep-set** (see the
+> amendments table in `docs/features/README.md`).
+> 1. **Re-mount the vertical:** remove `web_search` from `GAME_DROP_SET` (`settings.py:215`) so the
+>    router mounts (`app.py:581`) and `/api/search/query` works under the game build; keep the
+>    Settings `search` tab, **admin-only** (global provider/key config, per the C30 ruling) — its
+>    Test button now actually tests.
+> 2. **Expose it to the agent:** add `web_search` to the game build's agent tool surface
+>    (`GAME_TOOL_KEEP` / `agent_tools.py` / schemas) so the model can call it during game turns.
+>    Fail-soft: if no provider is configured, the tool returns a clean "no search available" result
+>    — the model improvises in character, never errors at the player.
+> 3. **In-fiction synthesis (the crux):** add a moment-prompt clause (engine,
+>    `src/engine/momentPrompts.ts` — pairs with C19's preamble work): real-world references may be
+>    looked up **silently**; results are woven into the houseguest's voice ("oh I saw the trailer
+>    before we came in the house!") — never presented as search output, never breaking fiction.
+>    **Hard guardrail (anti-sycophancy + ADR 0003):** search informs **flavor and real-world
+>    knowledge only** — it must never resolve a game fact, outcome, or hidden state; game truth
+>    comes only from the engine tools. NPC knowledge of the real world is fine (houseguests lived
+>    in it until move-in day); awareness of events *after* move-in is a fiction-consistency choice
+>    the prompt should handle gracefully (the house has no internet — a houseguest can know the
+>    movie, not this week's box office).
+> 4. **Diegetic rendering:** the search tool-node must not break immersion (pair with C14/F6's
+>    restyle — e.g. a quiet "📺 production research…" node, raw results never dumped in the
+>    transcript).
+> **DoD:** under the game build, a scripted agent turn where the player mentions a real-world topic
+> can call `web_search` and the reply is in the NPC's voice with no raw search output in the
+> transcript; with no provider configured the turn still completes in character; search results
+> never feed a `submitDecision`/game-outcome path (assert: no search-derived content in binding
+> calls); the Settings search tab is admin-only and its Test works; `pytest` + the 0032 headless
+> gate green; engine gate green. Open a PR.
+
+### C33 — the snarky hero tagline is genuinely AI-generated (not the curated fallback)  ·  Claude Code (front-end + engine)  ·  **R-2 · MINOR · RULING 2026-06-09**
+
+> In `kevinhirsch/orwell`, make the player tagline (0033) **actually AI-generated** when a game is live,
+> reserving curated/static text for the fail-open path only. Today it is **never** model-generated:
+> `GameSessionAdapter.playerTagline()` (`src/adapters/engine/GameSessionAdapter.ts:232-256`) only calls
+> a narrator if `this.narrator` is set, and **`setNarrator` is never called in the live composition**
+> (`outwardRoot.ts` wires `EchoNarrativePort` and nothing wires the tagline narrator) — so every live
+> tagline is the hardcoded `SNARKY_TAGLINES[standing]` curated line, and the front-end client
+> (`orwell_engine.player_tagline`) just relays it. Per ADR 0003 (engine supplies Vault-free facts, the
+> **front-end LLM voices**), generate the line where the real model lives:
+> 1. **Front-end generates it** from the engine's Vault-free standing/state (`gameStatus` + the engine's
+>    curated line as a seed/anchor) via the existing `llm_core`/`llm_call_async` path, with a tight
+>    anti-sycophantic instruction (a weak standing must NOT flatter — keep 0033's calibration). One line,
+>    bounded length; **cache per `(user, week, phase, standing)`** so it regenerates only when the moment
+>    advances, not per page load (mirror the engine cache at `GameSessionAdapter.ts:102-103,234-236`).
+> 2. **Fallback chain, in order:** FE LLM line → the engine's curated `SNARKY_TAGLINES[standing]`
+>    (still Vault-free, state-aware) → the static **"The house is waiting."** (PR #136). Never blank,
+>    never blocks the homepage (keep the fail-open contract + `test_orwell_social.py`).
+> 3. **Pre-game** (no started game) keeps a themed default — generation only kicks in once there's state
+>    to be snarky about.
+> *(Alternative if engine-side generation is ever preferred: wire a real `NarrativePort` via the
+> existing `setNarrator` seam in the live root — but the FE-LLM path is the ADR-0003-consistent choice
+> and needs no new engine narrator.)*
+> **Vault-free by construction:** the tagline is built only from the public standing projection — never
+> hidden votes/targeting/souls/off-screen (extend the 0001 canary on `playerTagline` already covers the
+> engine side; assert the FE prompt carries no Vault field). **DoD:** with a live game + LLM configured,
+> the hero line varies and is model-written (not one of the fixed curated strings); with the LLM/engine
+> down it falls through curated → "The house is waiting." without blocking; cached per moment; `pytest`
+> green; engine gate unaffected. Read `docs/features/0033-dynamic-player-tagline.md` + ADR 0003 first.
+> Open a PR.
