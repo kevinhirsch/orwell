@@ -2572,3 +2572,23 @@ PR per item).
 > Sequester) leading the picker — frosted backdrop-blur chrome with the @supports fallback,
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
+
+### U5 — game-build trim remainder (Lane 8: W1+W5 · W3 · W4 · W7 · E17)  ·  **✅ DONE (PR #211)**
+
+> The Stream-W half U4 didn't carry. W1 `ui_control` collapses to the curated safe subset under
+> the game build — highlight/clear_highlight + set_theme/create_theme — enforced in code at
+> `do_ui_control` (mode/model/incognito-toggle/panel/email actions refused, game-framed) with a
+> `chatStream.js` data-game-build belt · W5 the ui_control manifest is game-only on BOTH paths
+> (the prompt section via a structural builtin-override injection on the settings read path —
+> `GAME_UI_CONTROL_SECTION`, never persisted, wins over user overrides — and the native function
+> schema via `game_ui_control_schema`: enum = safe subset, email args gone; `highlight` now
+> converts with its selector) · W3 the Bitwarden vault vertical joins `GAME_DROP_SET` +
+> `mount_optional` (404 server-side under the build, back off-build; boot-smoke proven live both
+> ways) · W4 the slash surface is the keep-set only (`GAME_SLASH_KEEP` + a dispatch-time gate
+> covering legacy aliases, with a game-framed refusal; /help, fuzzy suggestions, and the
+> autocomplete menu all filter through one `isGameSlashAllowed` seam) · W7 `/backgrounds`
+> removed outright (its static page was never vendored — the route only 500'd) · E17
+> `search_chats` KEEP → OPTIONAL (off by default; opt-in via Settings → Tools; membership lines
+> only — the gate logic is Lane 6's). Proving suite `frontend/tests/test_lane7_game_trim.py`
+> (25 tests); pytest 357 · boot/browser smokes · responsive matrix all green; the W6 keep-set
+> beat-label drift test stays green after the shrink.
