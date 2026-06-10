@@ -31,13 +31,19 @@ export interface LiveRichnessMetrics {
 }
 
 export function liveRichnessMetrics(events: readonly GameEvent[]): LiveRichnessMetrics {
-  const offscreen = events.filter((e) => classify(e, PLAYER) === "HIDDEN").length;
+  // The off-screen share measures SOCIAL life (mandate #1: most of it happens away from the
+  // player) — the broadcast ceremony record (`season:` beats, day markers) is inherently public
+  // and would dilute the measure; legal pathway surfacings to the player (gossip tellings,
+  // overhears) stay IN the denominator, so a game that funnels everything to the player still
+  // fails the gate.
+  const social = events.filter((e) => !e.id.startsWith("season:") && e.type !== "house-event");
+  const offscreen = social.filter((e) => classify(e, PLAYER) === "HIDDEN").length;
   const types = [...new Set(events.map((e) => e.type))];
   const typed = events.filter((e) => TYPED_SCENES.has(e.type));
   const reveals = typed.filter((e) => e.reveal === true).length;
   return {
     totalEvents: events.length,
-    offscreenShare: events.length === 0 ? 0 : offscreen / events.length,
+    offscreenShare: social.length === 0 ? 0 : offscreen / social.length,
     typeDiversity: types.length,
     types,
     typedScenes: typed.length,

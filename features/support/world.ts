@@ -360,6 +360,22 @@ export class BbWorld extends World {
   rtRecap?: import("../../src/ports/GameSession").SeasonRecapView;
   rtArchive?: import("../../src/engine/sessionSnapshot").SessionSnapshot;
 
+  // Live off-screen society (0038) + running watcher (0035) scratch state.
+  osRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  osUser?: string;
+  osSandbox?: import("../../src/composition/registry").UserSandbox;
+  osOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  osSandboxA?: import("../../src/composition/registry").UserSandbox;
+  osOrchA?: import("../../src/composition/orchestrator").Orchestrator;
+  osUserA?: string;
+  osFactOrigin?: Eid;
+  osFactId?: string;
+  osPlayerRumor?: import("../../src/domain/knowledge").KnowledgeFact;
+  osRuntime?: import("../../src/composition/runtime").Runtime;
+  osRuntime2?: import("../../src/composition/runtime").Runtime;
+  osClock?: import("../../src/adapters/time/FakeClock").FakeClock;
+  osHiddenBefore?: number;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };

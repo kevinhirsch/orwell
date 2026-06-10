@@ -81,10 +81,10 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
 | 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Done |
 | 0034 | [Live weekly progression & binding-decision seam](./0034-live-weekly-progression-and-decision-seam.md) | Gameplay (as-built) | Done |
-| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | Done |
+| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | **Done — BDD-gated (B70)**: the running watcher's five scenarios in `cucumber.cjs` (FakeClock; pure turn-driven default per the 2026-06-10 ruling) |
 | 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done |
 | 0037 | [Live jury-vote choreography (the interactive finale)](./0037-live-jury-vote-choreography.md) | Gameplay | **Done** — engine + finale UI (B26 `finaleView` read · C11 `orwellFinale.js`) |
-| 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | Varied society + live soul-deepening (via 0041) · *gossip→player (B27b) pending* |
+| 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | **Done — B27a varied society · 0041 live souls · B27b gossip→player diffusion (pathway-aware 0031 heuristic) · all six scenarios BDD-gated (B70)** |
 | 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | Done |
 | 0040 | [NPC Diary Room confessionals (Vault-only interiority)](./0040-npc-confessionals.md) | Behavioral fidelity | Done · soul-recall feedback live (0041) |
 | 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | **Done — linchpin: SoulStore live; souls evolve + modulate behavior + recall** |
