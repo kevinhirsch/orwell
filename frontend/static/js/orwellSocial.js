@@ -32,6 +32,7 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
   let pendingApproachId = null;  // approach prefilled but not yet sent
   let _shown = false;  // shown a real game this session (U5: keep last-known on a hiccup)
 
@@ -132,6 +133,16 @@ import * as modalManager from "./modalManager.js";
         #orwell-social .osoc-chip.osoc-chip-pending .osoc-go b {
           color: var(--accent, #e06c75);
         }
+        /* C26/M1: phones — a full-width sheet under the status panel's slot, never a
+           floating box over the composer. No touch drag (default mobile cutoff). */
+        @media (max-width: 768px) {
+          #orwell-social {
+            left: 0 !important; right: 0 !important; top: 44px !important;
+            width: auto !important; max-width: none !important;
+            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
+            max-height: 38vh; overflow: auto;
+          }
+        }
         #orwell-dr-modal {
           position: fixed; inset: 0; z-index: 10000; display: none;
           align-items: center; justify-content: center; background: rgba(0,0,0,.55);
@@ -207,14 +218,14 @@ import * as modalManager from "./modalManager.js";
     // default skipSelector, so the minimize click never starts a drag.
     makeWindowDraggable(el, {
       content: el, header: el.querySelector(".osoc-hdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false, mobileSkip: 0,
+      enableDock: false, enableFullscreen: false, enableResize: false,
       onDragEnd: ({ rect }) => {
         try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
       },
     });
     makeWindowDraggable(modal, {
       content: modal.querySelector(".osoc-box"), header: modal.querySelector(".osoc-drhdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false, mobileSkip: 0,
+      enableDock: false, enableFullscreen: false, enableResize: false,
     });
     return el;
   }
@@ -372,6 +383,9 @@ import * as modalManager from "./modalManager.js";
     }
   }
 
+  // Seam for the headless browser gate: build + show the social panel on demand.
+  window._orwellSocialEnsure = () => { const el = ensureUI(); el.style.display = "block"; return true; };
+
   // Seam for the headless browser gate (and future flows): open the Diary Room on demand.
   window._orwellOpenDiaryRoom = () => { ensureUI(); openDR(); };
 
@@ -395,6 +409,13 @@ import * as modalManager from "./modalManager.js";
     _shown = true;
     const el = ensureUI();
     // Keep approaches fresh, but if the player parked it in the dock, leave it there.
+    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
+    // unobstructed); the dock chip restores it as a full-width top sheet.
+    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+      _mobileParkedOnce = true;
+      el.style.display = "block";
+      try { modalManager.minimize(ID); return; } catch (_) {}
+    }
     if (!isMinimized()) el.style.display = "block";
     try {
       const data = await getJSON("/api/orwell/initiatives");

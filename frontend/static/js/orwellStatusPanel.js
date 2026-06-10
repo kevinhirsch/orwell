@@ -27,6 +27,7 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
 
   async function fetchStatus() {
     const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -126,6 +127,17 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
         #orwell-status .os-hg.os-out { opacity: .45; text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
+        /* C26/M1: on phones the panel is a full-width top sheet under the header —
+           never a free-floating box over the chat or composer. Drag is disabled
+           (windowDrag's default mobile cutoff) so it can't be stranded off-screen. */
+        @media (max-width: 768px) {
+          #orwell-status {
+            left: 0 !important; right: 0 !important; top: 44px !important;
+            width: auto !important; max-width: none !important;
+            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
+            max-height: 38vh; overflow: auto;
+          }
+        }
       </style>
       <div class="os-hdr" title="Drag to move">
         <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
@@ -169,7 +181,6 @@ import * as modalManager from "./modalManager.js";
       enableDock: false,
       enableFullscreen: false,
       enableResize: false,
-      mobileSkip: 0,
       onDragEnd: ({ rect }) => {
         try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
       },
@@ -208,6 +219,13 @@ import * as modalManager from "./modalManager.js";
       : (veto.holder ? veto.holder.name : "—");
     if (st._state !== undefined) renderRoster(el, st, st._state);
     // Keep the data fresh, but if the player minimized it to the dock, leave it parked.
+    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
+    // unobstructed); the dock chip restores it as a full-width top sheet.
+    if (window.innerWidth <= 768 && !_mobileParkedOnce && !isMinimized()) {
+      _mobileParkedOnce = true;
+      el.style.display = "block";
+      try { modalManager.minimize(ID); return; } catch (_) {}
+    }
     if (!isMinimized()) el.style.display = "block";
   }
 
@@ -275,6 +293,9 @@ import * as modalManager from "./modalManager.js";
     st._state = (await fetchState()) || null;
     render(st);
   }
+
+  // Seam for the headless browser gate: build + show the panel on demand.
+  window._orwellStatusEnsure = () => { const el = ensurePanel(); el.style.display = "block"; return true; };
 
   function start() {
     refresh();
