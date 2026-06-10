@@ -1686,7 +1686,13 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > correct week/phase and only witnessed events; outputs are sentinel-clean. Pairs with **C22**. Read ADR 0003,
 > `docs/features/0018`, `0030`, `0002` (witness model) first. Open a PR.
 
-### B63 — Vault-free jury-status & player-standing facts for the memory wall  ·  Claude Code  ·  **FE-3 · audit U3 (engine half)**
+### B63 — Vault-free jury-status & player-standing facts for the memory wall  ·  Claude Code  ·  **FE-3 · audit U3 (engine half) · ✅ DONE (by prior work; verified 2026-06-10)**
+
+> **Already satisfied** by B48 (`player.status` active/jury/evicted) + B61 (`seatOf` marks every houseguest's
+> card active/**jury**/evicted) + 0020 (`gameStatus` carries hoh/nominees/veto-holder ids, so the player's
+> ceremony role is derivable from public facts alone). Verified by a dedicated test in
+> `tests/unit/lifecycleMoments.test.ts` (roster seats distinct; role computable; no hidden-layer key on either
+> projection). No standing read ("safe"/"target") was added — that stays forbidden (0020).
 
 > In `kevinhirsch/orwell` (TS engine), the roster the FE wants to render (C21) needs two tiny **public-fact**
 > additions: (1) mark evictees who are **jurors** (a `status:"juror"` once jury forms, or expose a public `juryStart`

@@ -54,7 +54,7 @@ import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
 import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS, clamp01 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
-import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
@@ -1004,7 +1004,27 @@ export class GameSessionAdapter implements GameSession {
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
     const view = this.view();
     const moment = req.moment ?? view.moment;
-    return { moment, systemPrompt: buildSystemPrompt(moment, view) };
+    return { moment, systemPrompt: buildSystemPrompt(moment, view, this.storyFacts(moment)) };
+  }
+
+  /** How many recorded witnessed events ground a server-initiated lifecycle beat (B62). */
+  private static readonly STORY_FACT_EVENTS = 8;
+
+  /**
+   * The story-so-far facts for a server-initiated lifecycle beat (B62/audit J1+J7+J2): the most
+   * recent WITNESSED events from the record — the store recalled, never the chat remembered
+   * (ADR 0003) — plus the result for a finished season. Vault-free by construction: hidden
+   * events never enter, and the winner/week are public ceremony facts. Other moments get none
+   * (the per-turn prompt stays tight — prefer removing context to adding it).
+   */
+  private storyFacts(moment: string): string | undefined {
+    if (moment !== "re-entry" && moment !== "post-season") return undefined;
+    const recent = (this.record?.events() ?? [])
+      .filter((e) => !e.hidden)
+      .slice(-GameSessionAdapter.STORY_FACT_EVENTS)
+      .map((e) => ({ content: this.humanize(e.content) }));
+    const winner = this.live?.finished ? this.named(this.live.winner) : null;
+    return renderStoryFacts(recent, winner ? { winner: winner.name, week: this.week } : null);
   }
 
   /**
