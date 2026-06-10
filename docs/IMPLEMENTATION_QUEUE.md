@@ -1153,17 +1153,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ### B47 — jury manner applies to the player; symmetric finale appeals  ·  Claude Code  ·  **Wave 2 · audit A5 + A6** — ✅ DONE
 
-> **DONE.** Two finale asymmetries closed in `liveSeason.ts`. **A5:** `recordEvictionManner` no longer
-> exempts the player — when the player is a responsible houseguest (HOH/evict-voter), the evictee records
-> their manner toward the player like any NPC, so jury management cuts both ways (and the evictee→player
-> resentment now folds into the hidden layer at eviction, 0023). **A6:** `appealMade` returns the recorded
-> appeal or **null**; an unanswered (finalist, juror) pair now scores `NEUTRAL_APPEAL_EFFECT` (0.5,
-> `jury.ts`) instead of the optimal `bestAppeal` back-fill — the SAME for the player and NPC finalists, so
-> a finalist earns finale sway only from jurors who questioned them. **Canon resolved as 9** (one question
-> per juror — code + Bible + 0014/0037; supersedes the stray "18" in CLAUDE.md). Tests (`liveSeason`/`jury`,
-> both fail-before/pass-after): the player records manner toward a juror they evicted; a juror the player
-> blindsided votes for them measurably less; questioned-finalist favoured / unanswered-slot neutral +
-> symmetric. 0014/0037 amended. Original prompt below.
+> **DONE** (built **per the RULING below**). **A5:** `recordEvictionManner` no longer exempts the player —
+> when the player is a responsible houseguest (HOH/evict-voter), the evictee records their manner toward the
+> player like any NPC, so jury management cuts both ways (and the evictee→player resentment folds into the
+> hidden layer at eviction, 0023). **A6 (ruling 1):** `runFinale` now has **every juror question BOTH
+> finalists** (9×2 = **18** Q&A) — the player-finalist answers all 9 themselves, the NPC uses `bestAppeal`
+> for all 9. No `(finalist, juror)` pair is ever unanswered, so the asymmetry vanishes at the root and the
+> `appealMade` back-fill is a never-hit safety guard; CLAUDE.md's per-finalist canon stands. **Ruling 2:**
+> the jury/finale magnitudes are extracted to **`src/engine/juryConstants.ts`** (`JURY_WEIGHTS`, signed
+> `MANNER_LEAN`, `MANNER_THRESHOLDS`, `APPEAL`) — extraction only, 0037 calibration unchanged. Tests:
+> the player records manner toward a juror they evicted + a juror they blindsided votes for them less (A5);
+> the 18-Q&A leaves no unanswered pair + identical reads ⇒ a coin flip (A6 symmetry); choreography asserts
+> 18 questions. 0014/0037 specs updated. *(An earlier build of this item shipped the pre-ruling 9-Q + neutral
+> approach in #142; this is the ruling-compliant correction.)* Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), jury management — the signature mechanic — is **inert against the player**:
 > `liveSeason.ts:209` skips recording eviction **manner** toward the player, so `juryLean`'s second-largest term
@@ -1196,7 +1198,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > (was even-indexed ~5); add the A5 test mirroring the manner-effect pattern at
 > `liveSeason.test.ts:276-296` with the **player** as the responsible finalist.
 
-### B48 — 0046 player eviction & the juror's seat  ·  Claude Code  ·  **Wave 2 · audit B6 · NEEDS SPEC FIRST**
+### B48 — 0046 player eviction & the juror's seat  ·  Claude Code  ·  **Wave 2 · audit B6 · NEEDS SPEC FIRST** — ✅ DONE
+
+> **DONE.** Feature 0046 built & green (in `cucumber.cjs`). `GameStateView.player.status` now marks the
+> player `active` → `jury` (evicted into the last-9 jury — derived from the public eviction order + cast
+> size) or `evicted` (pre-jury); the projection switches `moment` to a `jury` / `evicted` `MOMENT_PROMPTS`
+> fragment. **Juror knowledge model = ceremonies-as-broadcast** (the spec's recommendation, made canonical):
+> a sequestered juror keeps witnessing the PUBLIC ceremony beats (non-hidden house-events) and nothing
+> private — already enforced by the 0002 witness model (off-screen scenes + confessionals exclude the
+> player), so the juror's knowledge provably contains only the broadcast facts. The season completes for ANY
+> eviction index (the loop plays NPCs to Final 2 + a winner without the player), and a player evicted into the
+> jury still casts their own vote at the 0037 finale; out-of-game status survives a restart. `tests/unit/
+> playerEviction.test.ts` (6) + the name-agnostic `.feature`. The pre-jury terminal recap ties to 0048
+> (out of scope). Original prompt below.
 
 > Draft and implement **feature 0046** (`docs/features/0046-player-eviction-and-jury.{md,feature}`) — the game's most
 > common ending has **no spec**. Spec the player-evicted paths: **pre-jury** ⇒ a closure beat + a defined season-end
@@ -1209,7 +1223,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > the defined-pathway facts; the Vault Wall holds throughout; the post-eviction view marks the player and
 > `momentForPhase` selects the jury framing. Read `docs/features/0002`, `0014`, `0037` first. Open a PR.
 
-### B49 — 0047 eviction night live (reveal + goodbye messages)  ·  Claude Code  ·  **Wave 2 · audit B7 · NEEDS SPEC FIRST**
+### B49 — 0047 eviction night live (reveal + goodbye messages)  ·  Claude Code  ·  **Wave 2 · audit B7** — ✅ DONE
+
+> **DONE** (the 0047 spec already existed — built straight from its §8; the "NEEDS SPEC FIRST" tag was
+> stale). The weekly eviction is staged through the 0034 seam like the finale: a new `EvictionProgress`
+> sub-state machine in `liveSeason.ts` reveals the (engine-decided) votes ONE AT A TIME in a seeded order
+> (`applyEviction` split into `recordEvictionManner` + `removeEvictee` + `rollWeek` so the week-roll defers
+> past the goodbyes), then an evictee goodbye + goodbye messages from a seeded selection whose
+> relationship-derived tone (warm/respectful/cold) folds into the evictee's manner (jury lean, 0014). A
+> Vault-free `EvictionView` (`{stage, nominees, votesRevealed}`) lands on `AdvanceView` — names + the votes
+> read so far only, never a pre-reveal tally or the evictee before the last vote. **No new pending decision
+> kind** (eviction-vote / tie-break unchanged) ⇒ no FE relay mirror needed. `tests/unit/evictionNight.test.ts`
+> (6) + the name-agnostic `.feature`; the tie-break/eviction unit tests updated to drive through the reveal.
+> Original prompt below.
 
 > Draft and implement **feature 0047** (`docs/features/0047-eviction-night-live.{md,feature}`). The weekly eviction —
 > the show's defining beat, ~13×/season — emits one line (`liveSeason.ts:403`); the finale got staged choreography (0037)

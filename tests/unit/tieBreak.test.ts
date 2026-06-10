@@ -1,9 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { newLiveSeason, advance, applyDecision, type SeasonCtx, type LiveSeasonState } from "../../src/engine/liveSeason";
+import { newLiveSeason, advance, applyDecision, type SeasonCtx, type LiveSeasonState, type BeatEvent } from "../../src/engine/liveSeason";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { cloneSession } from "../../src/engine/sessionSnapshot";
 import { PLAYER, npc } from "../../src/domain/ids";
+
+/**
+ * Drive a staged eviction (0047) from the "eviction" beat through its one-at-a-time vote reveal until
+ * the result lands (the evictee is committed) OR it pauses for the player-HOH tie-break. Returns the
+ * last beat (the "eviction" beat on a clean result; null when it pauses).
+ */
+function driveToEvictionResult(s: LiveSeasonState, ctx: SeasonCtx, rng: SeededRandom): BeatEvent | null {
+  let last: BeatEvent | null = null;
+  for (let g = 0; g < 50 && !s.pending && !s.eviction?.evictee && s.beat === "eviction"; g++) last = advance(s, ctx, rng);
+  return last;
+}
 
 /**
  * Feature B44 / audit B2 — a player HOH breaks a tied eviction vote. The single most dramatic HOH
@@ -28,19 +39,19 @@ function tiedEvictionState(hoh: typeof PLAYER): LiveSeasonState {
 }
 
 describe("B44 — a player HOH breaks a tied eviction vote", () => {
-  it("on a tie with the player as HOH, the loop pauses for the player's deciding vote", () => {
+  it("on a tie with the player as HOH, the loop pauses for the player's deciding vote — after the reveal", () => {
     const ctx = ctxOf(tiedVoters());
     const s = tiedEvictionState(PLAYER);
-    const ev = advance(s, ctx, new SeededRandom(1));
-    expect(ev).toBeNull(); // paused — not silently resolved
-    expect(s.pending?.kind).toBe("tie-break");
+    // The votes reveal one at a time (0047); the tie surfaces only once the last vote is read.
+    driveToEvictionResult(s, ctx, new SeededRandom(1));
+    expect(s.pending?.kind).toBe("tie-break"); // paused — not silently resolved
     expect((s.pending as { nominees: string[] }).nominees).toEqual([npc(1), npc(2)]);
   });
 
   it("refuses an illegal tie-break pick, then evicts the player's chosen nominee", () => {
     const ctx = ctxOf(tiedVoters());
     const s = tiedEvictionState(PLAYER);
-    advance(s, ctx, new SeededRandom(1));
+    driveToEvictionResult(s, ctx, new SeededRandom(1));
     expect(() => applyDecision(s, { kind: "tie-break", evict: npc(3) }, ctx)).toThrow(); // not a nominee
     const ev = applyDecision(s, { kind: "tie-break", evict: npc(2) }, ctx);
     expect(ev.beat).toBe("eviction");
@@ -61,20 +72,22 @@ describe("B44 — a player HOH breaks a tied eviction vote", () => {
     expect(paused).toBeNull(); // the PLAYER is a voter ⇒ pends an eviction-vote first
     expect(s.pending?.kind).toBe("eviction-vote");
 
-    const ev = applyDecision(s, { kind: "eviction-vote", vote: npc(2) }, ctx); // player → npc:2, npc:3 → npc:1 ⇒ 1–1
-    expect(s.pending).toBeUndefined(); // NO tie-break pend — the NPC HOH auto-resolved
-    expect(ev.beat).toBe("eviction");
+    applyDecision(s, { kind: "eviction-vote", vote: npc(2) }, ctx); // player → npc:2, npc:3 → npc:1 ⇒ 1–1; opens the reveal
+    expect(s.pending).toBeUndefined(); // NO tie-break pend — the NPC HOH auto-resolves at the reveal's end
+    const ev = driveToEvictionResult(s, ctx, new SeededRandom(1));
+    expect(ev!.beat).toBe("eviction");
     expect(s.evictionOrder).toContain(npc(1)); // the HOH broke toward npc:1
   });
 
   it("the tie-break decision survives an engine restart (resumes from the snapshot)", () => {
     const ctx = ctxOf(tiedVoters());
     const s = tiedEvictionState(PLAYER);
-    advance(s, ctx, new SeededRandom(1));
+    driveToEvictionResult(s, ctx, new SeededRandom(1));
     expect(s.pending?.kind).toBe("tie-break");
 
-    const restored = cloneSession<LiveSeasonState>(s); // a durable round-trip (0030)
+    const restored = cloneSession<LiveSeasonState>(s); // a durable round-trip (0030), mid-reveal + owed the tie-break
     expect(restored.pending?.kind).toBe("tie-break");
+    expect(restored.eviction?.stage).toBe("votes"); // the staged eviction round-trips too
     const ev = applyDecision(restored, { kind: "tie-break", evict: npc(1) }, ctx);
     expect(ev.beat).toBe("eviction");
     expect(restored.evictionOrder).toContain(npc(1));

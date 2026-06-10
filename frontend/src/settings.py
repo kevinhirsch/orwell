@@ -181,7 +181,7 @@ DEFAULT_FEATURES = {
     # game build (the default) the whole drop-set is forced off regardless of these — see
     # GAME_DROP_SET / is_feature_enabled below; these values only apply with the game build
     # disabled (full-workspace/debug mode) and drive the admin Features panel.
-    "web_search": False,    # "Web Search" — removed from the game UI
+    "web_search": True,     # in-game agent capability (ruling 2026-06-10; C32) — also on in debug build
     "web_fetch": True,
     "deep_research": False,  # "Deep Research" — removed from the game UI
     "memory": False,         # "Brain" (memory) — removed from the game UI
@@ -209,13 +209,17 @@ GAME_KEEP_SET = frozenset({
     "chat", "history", "onboarding", "llm", "agent", "engine_mcp",
     "status_panel", "portraits", "image_gen", "accounts", "settings",
     "theme", "search",  # conversation/session search — NOT web_search
+    # Web search is a CORE in-game capability (ruling 2026-06-10, amends 0032): the agent
+    # quietly looks up real-world references the player makes and answers in the houseguest's
+    # voice. Search informs real-world flavor ONLY — never a game fact or outcome (C32).
+    "web_search",
 })
 
 # Inherited workspace verticals the game build removes (forced off; routers not mounted).
 GAME_DROP_SET = frozenset({
     "email", "calendar", "contacts", "documents", "document_editor", "gallery",
     "cookbook", "hwfit", "compare", "deep_research", "research", "rag", "memory",
-    "skills", "notes", "tasks", "shell", "web_search", "web_fetch", "youtube",
+    "skills", "notes", "tasks", "shell", "web_fetch", "youtube",
     "webhooks", "signature", "companion", "codex", "copilot",
 })
 
@@ -264,6 +268,11 @@ def front_end_context_sources(*, incognito: bool = False, features: dict | None 
     engine's per-moment game-master prompt (0018) is the only injected framing — there is no
     parallel front-end memory rivaling the engine's soul/Vault (0023/0024). Incognito also
     suppresses them. Pure and dependency-light so chat assembly and tests share one rule.
+
+    NOTE (C32): the web_search FEATURE is now part of the game keep-set — the agent calls the
+    web_search TOOL deliberately, in-fiction. That is distinct from this AUTOMATIC web-context
+    injection into the chat preface, which must stay OFF under the game build (raw search
+    context in the system prompt would rival the engine's framing and break fiction).
     """
     def _on(name: str) -> bool:
         return (not incognito) and is_feature_enabled(name, features=features)
@@ -271,7 +280,7 @@ def front_end_context_sources(*, incognito: bool = False, features: dict | None 
         "memory": _on("memory"),
         "rag": _on("rag"),
         "skills": _on("skills"),
-        "web": _on("web_search"),
+        "web": (not game_build_enabled()) and _on("web_search"),
     }
 
 
@@ -385,6 +394,10 @@ _PER_USER_KEYS = {
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
+    # Keyboard shortcuts are a genuine PER-PROFILE preference, not global config
+    # (C30 / settings ruling): a non-admin can change their own keybinds, and the
+    # global `keybinds` default still applies until they do. Saved via /api/prefs.
+    "keybinds",
 }
 
 

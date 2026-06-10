@@ -1,12 +1,18 @@
 # 0046 — Player eviction & the juror's seat
 
-> **Status:** Draft (queue **B48**, "NEEDS SPEC FIRST"). The game's **most common ending has no spec.** Today
-> the live projection **never marks the player out** (`GameSessionAdapter` always renders an active card), so
-> a player who is voted out has no defined state, no jury seat, and no path to the finale. This feature specs
-> the **player-evicted paths**: a **pre-jury** closure + season-end state, and the **jury** path — a defined
-> **juror knowledge model** (Vault-safe), bounded spectating to the finale, then the existing 0037 juror
-> interactivity — plus a `player.status` projection and a jury/spectate moment framing.
+> **Status:** ✅ **Built & green** (queue **B48**; in `cucumber.cjs`). The game's **most common ending** now
+> has a spec and an implementation. The live projection marks the player out — `GameStateView.player.status`
+> is `active` → `jury` (evicted into the last-9 jury: spectate the public ceremonies + vote at the finale) or
+> `evicted` (pre-jury: season over) — and `momentForPhase` switches to the jury/closure framing. The **juror
+> knowledge model** is **ceremonies-as-broadcast** (the recommendation below, made canonical): a sequestered
+> juror keeps witnessing the **public** ceremony beats (non-hidden house-events) and **nothing** private —
+> structurally enforced by the 0002 witness model (off-screen scenes + confessionals exclude the player), so a
+> juror's knowledge contains only the broadcast facts. The season completes for **any** eviction index, and an
+> evicted player on the jury still casts their own vote at the 0037 finale. The pre-jury **terminal recap**
+> (rich season-end content) ties to **0048** and is out of scope here.
 > **Executable spec:** [`0046-player-eviction-and-jury.feature`](./0046-player-eviction-and-jury.feature)
+> **Tests:** `tests/unit/playerEviction.test.ts` (status/moment, completion, juror vote, broadcast-only
+> knowledge, Vault canary) + the name-agnostic `.feature` (`features/step_definitions/player_eviction.steps.ts`).
 
 ## 1. Summary
 
@@ -71,16 +77,16 @@ MOMENT_PROMPTS += jury/spectate fragment; momentForPhase maps the out-of-game ph
 
 ## 6. Definition of Done
 
-- [ ] **Any eviction index completes:** a seeded season where the player is evicted at week N (pre-jury or
-      jury) runs to a defined end — pre-jury terminal state, or juror → finale vote.
-- [ ] **Juror knowledge is provably Vault-safe:** a juror's derived knowledge contains **only** the
-      defined-pathway (public ceremony) facts — **no** off-screen scheme or confessional (extend the 0001
-      canary to the juror projection); 0002 holds.
-- [ ] **The projection marks the player out:** `player.status` flips to `evicted`/`jury`, and
-      `momentForPhase` selects the jury/spectate framing.
-- [ ] **Vault Wall holds throughout** the spectate + jury experience; restart resumes the out-of-game state
-      (0030).
-- [ ] 0014/0037 scenarios stay green; name-agnostic (roles only — evictee/juror/finalist); `0046` added to
+- [x] **Any eviction index completes:** a seeded season where the player is evicted at week N (pre-jury or
+      jury) runs to a defined end — the loop reaches Final 2 + crowns a winner; a juror → finale vote.
+- [x] **Juror knowledge is provably Vault-safe:** a juror's witnessed events contain **only** the
+      defined-pathway (public ceremony broadcast) facts — **no** off-screen scheme or confessional (a planted
+      Vault sentinel never reaches the juror); 0002 holds.
+- [x] **The projection marks the player out:** `player.status` flips to `evicted`/`jury`, and the projection
+      switches the moment to the jury/closure framing.
+- [x] **Vault Wall holds throughout** the spectate + jury experience; the out-of-game status resumes after a
+      restart (0030).
+- [x] 0014/0037 scenarios stay green; name-agnostic (roles only — evictee/juror/finalist); `0046` added to
       `cucumber.cjs`; `npm test` green.
 
 ## 7. Dependencies & traceability

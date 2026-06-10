@@ -7,7 +7,7 @@
 Feature: Live jury-vote choreography — the interactive finale
 
   At Final 2 the live game stages the finale instead of skipping to a winner: each finalist gives an
-  opening statement, each of the nine jurors asks one question, and the votes are revealed one at a time.
+  opening statement, each of the nine jurors questions both finalists, and the votes are revealed one at a time.
   Jury management (relationship + how each juror was evicted) dominates; the player's engine-legible
   finale appeals sway close jurors but never overturn a clear lead; the last-evicted juror breaks a tie.
 
@@ -15,7 +15,7 @@ Feature: Live jury-vote choreography — the interactive finale
     Given a live game advanced to Final 2 with the player as a finalist
     When the finale is advanced beat by beat
     Then an opening statement beat is surfaced for each finalist
-    And one question beat is surfaced for each of the nine jurors
+    And each of the nine jurors questions both finalists
     And the votes are revealed one juror at a time before the winner is named
 
   Scenario: A finalist answers every juror question through the validated seam
