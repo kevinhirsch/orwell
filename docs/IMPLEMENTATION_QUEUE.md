@@ -1920,7 +1920,15 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > the suite fails if presence/ knowledge-scope/persona-stability/lingering invariants regress. Read ADR
 > 0003 (Testability) first. Open a PR.
 
-### C28 — augment the chat with presence, never replace it (whereabouts surface)  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · ADR 0003 §4/§7 (depends B64)**
+### C28 — augment the chat with presence, never replace it (whereabouts surface)  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · ✅ DONE 2026-06-10**
+
+> **Built to green** (B64 unblocked it). GET `/api/orwell/whereabouts` (read-only, fail-open: `{whereabouts:null}`
+> on any error/pre-game) + `orwellPresence.js` — a LIGHT, dismissible AMBIENT strip ("📍 Backyard — with A, B ·
+> nearby: Kitchen (C)"): no click-to-move, no scene buttons, the ONLY control is dismiss (which hides until the
+> player's ROOM changes); game-build gated; hidden-tab + backoff poll hygiene (C18). Moving/milling/talking stay
+> PROSE; the engine grounds the narration. `tests/test_c28_presence.py` pins route passthrough/fail-open + the
+> ambient contract (no POST, one control); the B66 augment guard covers it structurally. pytest 275 + boot smoke
+> + the local headless browser smoke all green.
 
 > In `kevinhirsch/orwell` `frontend/`, surface presence so milling is legible **without** moving play
 > out of the chat (ADR 0003 §4: augment, never replace). Render `whereabouts()` (B64) as an **ambient**
