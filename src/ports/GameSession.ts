@@ -172,6 +172,20 @@ export interface FinaleView {
   reveals: Array<{ juror: NamedRef; votedFor: NamedRef }>;
 }
 
+/**
+ * The Vault-free projection of an in-progress weekly eviction (0047). The two nominees by name, the
+ * current stage, and the votes REVEALED SO FAR only — NEVER the unread votes, never a pre-reveal tally,
+ * never the evictee before the last vote lands. A vote appears here only once read in the seeded order.
+ */
+export interface EvictionView {
+  /** Which stage the eviction is in: votes | goodbye | result. */
+  stage: string;
+  /** The two nominees by name. */
+  nominees: NamedRef[];
+  /** The votes revealed so far, in reveal order — each a (voter → the nominee they voted to evict) by name. */
+  votesRevealed: Array<{ voter: NamedRef; votedFor: NamedRef }>;
+}
+
 /** The Vault-free result of advancing the game or resolving a decision. */
 export interface AdvanceView {
   started: boolean;
@@ -184,6 +198,8 @@ export interface AdvanceView {
   winner: NamedRef | null;
   /** The in-progress finale projection (0037); present only while the finale is staging. */
   finale?: FinaleView | null;
+  /** The in-progress eviction projection (0047); present only while a weekly eviction is staging. */
+  eviction?: EvictionView | null;
 }
 
 /**

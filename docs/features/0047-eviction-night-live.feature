@@ -12,16 +12,16 @@ Feature: Eviction night live
   Scenario: Votes are revealed one at a time in a deterministic order
     Given a started game at an eviction with a decided vote
     When the eviction is advanced through the seam
-    Then the votes are revealed one at a time
+    Then the eviction votes are revealed one at a time
     And the reveal order is the same for the same seed
     And the running tally shows only the votes revealed so far
 
   Scenario: The evictee is not knowable before the last vote
     Given an eviction mid-reveal
-    When any player surface is read
+    When the eviction surface is read mid-reveal
     Then it shows no pre-reveal tally and no unread vote
     And it does not name the evictee until the final vote lands
-    And no Vault sentinel value appears
+    And no Vault sentinel value appears on the eviction surface
 
   Scenario: The evicted houseguest gets a goodbye beat
     Given an eviction whose result has landed

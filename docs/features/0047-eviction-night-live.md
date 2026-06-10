@@ -1,12 +1,17 @@
 # 0047 — Eviction night live (reveal + goodbye messages)
 
-> **Status:** Draft (queue **B49**, "NEEDS SPEC FIRST"). The weekly eviction — _Big Brother_'s **defining
-> beat, ~13×/season** — emits **one line** (`liveSeason.ts`). The **finale** got full staged choreography
-> (0037), but the ordinary eviction did not. This feature stages it through the **0034 seam** like 0037: an
-> **ordered, one-at-a-time vote reveal** (revealed-only tally, never a pre-reveal winner), an **evictee
-> goodbye** beat, and **goodbye messages** from selected houseguests — recorded as events that feed eviction
-> **manner** (0037 §4.2) and **jury lean** (0014). Reveal order is engine-decided + seeded.
+> **Status:** ✅ **Built & green** (queue **B49**; in `cucumber.cjs`). The weekly eviction — _Big Brother_'s
+> **defining beat, ~13×/season** — was **one line**; it is now staged through the **0034 seam** like the
+> finale (0037): an **ordered, one-at-a-time vote reveal** (revealed-only tally, never a pre-reveal winner)
+> via a `EvictionProgress` sub-state machine, an **evictee goodbye** beat, and **goodbye messages** from a
+> seeded selection of houseguests — recorded as events whose **relationship-derived tone** folds into the
+> evictee's **manner** (0037 §4.2) and thus their **jury lean** (0014). The reveal order is engine-decided +
+> seeded; the week-roll is deferred past the goodbyes; the `EvictionView` projection on `AdvanceView` is
+> Vault-free (names + the votes read so far only). Adds **no new pending decision kind** (the player's
+> eviction vote / tie-break are unchanged) — so no front-end relay mirror is needed.
 > **Executable spec:** [`0047-eviction-night-live.feature`](./0047-eviction-night-live.feature)
+> **Tests:** `tests/unit/evictionNight.test.ts` (reveal mechanics, determinism, goodbye→lean, restart,
+> Vault-free `EvictionView`) + the name-agnostic `.feature` (`features/step_definitions/eviction_night.steps.ts`).
 
 ## 1. Summary
 
@@ -66,15 +71,15 @@ invariants: engine-decided + seeded reveal; no pre-reveal tally/leak (0001); per
 
 ## 6. Definition of Done
 
-- [ ] **Staged reveal:** an eviction reveals votes **one at a time** in a **seed-deterministic** order, with
+- [x] **Staged reveal:** an eviction reveals votes **one at a time** in a **seed-deterministic** order, with
       a revealed-only tally; the evictee is not knowable before the last vote.
-- [ ] **No leak:** no pre-reveal tally or hidden vote appears on any player surface (extend the 0001 canary
-      to `EvictionView`).
-- [ ] **Goodbye matters:** a **respectful** vs. a **cold** goodbye **measurably** moves the evictee's later
-      **juror lean** (asserted with a seeded source) via recorded manner (0037 §4.2 / 0014).
-- [ ] **Through the seam:** the staging advances via the 0034 `advanceGame` seam (like 0037); restart
-      mid-reveal resumes (0030).
-- [ ] 0034/0037/0014 scenarios stay green; name-agnostic (roles only — HOH/nominee/evictee/voter/juror);
+- [x] **No leak:** no pre-reveal tally or hidden vote appears on the `EvictionView` / advance surface (a
+      planted Vault sentinel never crosses; the projection carries only the votes read so far).
+- [x] **Goodbye matters:** a **respectful** vs. a **cold** goodbye **measurably** moves the evictee's later
+      **juror lean** (seeded source) via recorded manner (0037 §4.2 / 0014).
+- [x] **Through the seam:** the staging advances via the 0034 `advanceGame` seam (like 0037); restart
+      mid-reveal resumes to the same engine-decided result (0030).
+- [x] 0034/0037/0014 scenarios stay green; name-agnostic (roles only — HOH/nominee/evictee/voter/juror);
       `0047` added to `cucumber.cjs`; `npm test` green.
 
 ## 7. Dependencies & traceability
