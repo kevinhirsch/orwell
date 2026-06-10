@@ -38,9 +38,16 @@ export interface Runtime {
   stop(): void;
 }
 
-/** Defaults: wake each minute, treat 5 min idle as "away", at most 3 off-screen ticks/wake, audit every 10 min. */
+/**
+ * Defaults: pure turn-driven (tickEveryMs=0). The house does not exist when the player is away —
+ * no background scheming, no relationship drift, nothing. The game clock runs only when the player
+ * acts. One bounded off-screen tick fires per player turn via maybeTurnDrivenTick (Orchestrator).
+ *
+ * The watcher (tickEveryMs>0) is an opt-in operator knob via ORWELL_WATCHER_TICK_MS. Never enable
+ * it by default — it would let the house scheme freely while the player has zero ability to react.
+ */
 export const DEFAULT_WATCHER: WatcherConfig = {
-  tickEveryMs: 60_000,
+  tickEveryMs: 0,
   idleTickAfterMs: 300_000,
   maxOffscreenTicksPerWake: 3,
   auditEveryMs: 600_000,

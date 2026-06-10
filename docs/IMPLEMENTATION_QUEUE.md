@@ -838,6 +838,30 @@ B34–B36/C12 first**; B61/C19 are the highest-leverage experience pair). Each i
 
 ---
 
+## Product ruling: the house does not exist when the player leaves (2026-06-10)
+
+**Ruling.** The game clock runs only when the player is playing. When the player steps away — closes
+the browser, ends the session — **the house ceases to exist**. No background scheming, no NPC social
+ticks, no relationship drift, nothing. The lack of real estate is the core mechanic of Big Brother:
+nobody leaves the house. Because the player *can* leave and NPCs cannot, any background activity that
+accrues during player absence creates a structural playability asymmetry. The engine must not exploit
+the player's absence against them.
+
+**Implementation (done — `src/composition/runtime.ts`).** `DEFAULT_WATCHER.tickEveryMs` is now `0`
+(pure turn-driven). The watcher is disabled by default. The house **only lives between the player's
+own turns** via the existing `Orchestrator.maybeTurnDrivenTick` (one bounded off-screen tick per
+player action, already built). If an operator wants real-time background life, they opt in via
+`ORWELL_WATCHER_TICK_MS` — but it must never be the default.
+
+**What "a player turn" means.** A player turn is any **state-mutating game action**: `advanceGame`,
+`submitDecision`, `recordInteraction`, `makeDeal`, `diaryRoom`, `surfaceInformationTo`,
+`createCharacter`. Read-only calls (`getGameState`, `gameStatus`, `playerTagline`, `getMomentPrompt`,
+`socialInitiatives`, `runCompetition`) are not player turns — they don't mutate state and don't
+trigger the off-screen tick. This is already encoded: only mutating ops call `onPersist()` →
+`commitPlayerTurn()` → `touch()` → `maybeTurnDrivenTick()`.
+
+---
+
 ## Full product-audit batch (B34–B60 / C12–C18) · 2026-06-09
 
 Dispatch prompts for the **full product audit** (`docs/audits/2026-06-09-product-audit.md`). All gates were
