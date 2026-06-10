@@ -1288,3 +1288,41 @@ in it — mirror case (no opt-in) asserts it IS; (b) the same pair for a non-wit
 (`grep`) to pin the consistency; (c) optional E2E: a scripted model calls `bash` on a
 game turn and the tool executes. This closes the gap the existing test's isolation
 assertion papers over.
+
+## A2 [MED · Bug + Change] Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
+
+End-to-end answer to "do disabled tools actually work when activated and called by the LLM's
+lever?" Four gates sit between the Settings → Admin → Agent tools toggle and a working call:
+
+1. **Game-build chokepoint** (`chat_routes.py:699-703`) — honors the opt-in. ✅
+2. **Auto-escalation withhold** (`:710-713`) — finding **A1**: silently defeats
+   `bash`/`python`/`read_file`/`write_file` on every chat-originated game turn. ❌
+3. **Schema selection** (`agent_loop.py:1600-1627, 1898-1922`) — on game turns
+   `_relevant_tools` is always a filtered set (RAG/keyword retrieval + pinned
+   `ORWELL_GAME_TOOLS`), and the function-calling array is
+   `FUNCTION_TOOL_SCHEMAS ∩ _relevant_tools − disabled_tools`. Tools in `ALWAYS_AVAILABLE`
+   (`tool_index.py:32-40`: bash, python, read/write/edit_file, grep, glob, ls, api_call)
+   reach the model when enabled — but the session-class optionals (`chat_with_model`,
+   `create_session`, `list_sessions`, `send_to_session`, `pipeline`, `manage_session`) and
+   `app_api` are NOT in `ALWAYS_AVAILABLE` and enter only via keyword hints
+   (`tool_index.py:395-403`) that in-character prose never triggers — **enabled but never
+   offered**: the toggle is a no-op for them on game turns. ❌
+4. **Per-owner security** (`tool_security.py:178-182` + `NON_ADMIN_BLOCKED_TOOLS:14-51`) —
+   non-admin owners are blocked from every power tool regardless of the toggle (sound
+   policy), but nothing in the admin UI says the toggle is admin-owner-only, so for
+   multi-account installs it reads as breakage. ⚠️ document.
+
+**Net matrix (single-admin install, default game turn):** work when enabled —
+`grep`/`glob`/`ls`/`edit_file`/`api_call`; defeated by gate 2 —
+`bash`/`python`/`read_file`/`write_file` (manual Agent mode only); defeated by gate 3 —
+the six session-class tools + `app_api` (which would additionally 404 against dropped
+verticals, A1 sub-note). Non-admin players: nothing optional works (gate 4, by design).
+
+**Fix spec:** (a) gate 2 per A1; (b) gate 3 — union the explicit opt-ins into the candidate
+set alongside the pinned game tools (one line at the `pinned_tools` merge,
+`agent_loop.py:1626`): an admin grant is not something retrieval should have to guess;
+(c) gate 4 — admin UI copy: "optional tools apply to admin accounts only," and gray the
+toggles when viewing as non-admin-relevant.
+**Test spec:** schema-assembly test — game turn, `game_tools_enabled=["chat_with_model"]`,
+assert the schema array handed to the API call contains `chat_with_model` (and the A1
+composition cases); pytest for the gate-4 UI copy.
