@@ -109,10 +109,9 @@ export function simulateSeason(opts: {
     }
   }
 
-  // Over a long game at least one hidden element surfaces (DoD: rate > 0).
-  if (!moments.some((m) => m.reveals > 0) && moments.length > 0) {
-    moments[moments.length - 1]!.reveals = 1;
-  }
+  // B54/audit D3: the old back-stop here force-set `reveals = 1` when none surfaced — a test
+  // asserting its own input. Deleted: at `surfaceProb` over 224 moments the no-reveal case is
+  // (1-p)^224 ≈ never, and if calibration ever drives reveals to zero the gate SHOULD fail.
 
   const edgeStrengthsChanged = rel.allBondStrengths().some((s) => Math.abs(s - 0.25) > 1e-9);
 
