@@ -86,21 +86,36 @@ pass() { echo "  ok   — $*"; }
 warn() { echo "  warn — $*"; }
 fail() { echo "  FAIL — $*"; fails=$((fails + 1)); }
 
-# ---- service names (legacy-aware, mirrors orwell-update.sh) -------------------------
-if systemctl list-unit-files 2>/dev/null | grep -q '^bbai-engine\.service'; then
+# ---- service names (legacy-aware): detect by unit-file EXISTENCE (`systemctl cat`), not by
+# parsing `list-unit-files` output — the grep form missed legacy bbai-* units in the field and
+# the doctor then diagnosed/bounced unit names that don't exist on the box.
+unit_exists() { systemctl cat "$1" >/dev/null 2>&1; }
+UNITS_MISSING=0
+if unit_exists bbai-engine.service; then
   ENGINE_SVC="bbai-engine"; FRONTEND_SVC="bbai-frontend"
+elif unit_exists orwell-engine.service; then
+  ENGINE_SVC="orwell-engine"; FRONTEND_SVC="orwell-frontend"
 else
   ENGINE_SVC="orwell-engine"; FRONTEND_SVC="orwell-frontend"
+  UNITS_MISSING=1
 fi
 
 # ---- config ---------------------------------------------------------------------------
+# Read a key with its legacy BBAI_* fallback (pre-rename installs keep their old .env keys —
+# the engine and front-end honor them, so the doctor must too).
+env_get() { # ORWELL-key  BBAI-key
+  local v
+  v="$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  [[ -z "$v" && -n "${2:-}" ]] && v="$(grep -E "^$2=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  printf '%s' "$v"
+}
+
 ENGINE_PORT="8765"; FE_PORT=""; MCP_URL=""
 if [[ -f "$ENV_FILE" ]]; then
   pass "config: ${ENV_FILE}"
-  # shellcheck disable=SC2046
-  ENGINE_PORT="$(grep -E '^ORWELL_ENGINE_PORT=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
-  FE_PORT="$(grep -E '^ORWELL_PORT=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
-  MCP_URL="$(grep -E '^ORWELL_ENGINE_MCP_URL=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
+  ENGINE_PORT="$(env_get ORWELL_ENGINE_PORT BBAI_ENGINE_PORT)"
+  FE_PORT="$(env_get ORWELL_PORT BBAI_PORT)"
+  MCP_URL="$(env_get ORWELL_ENGINE_MCP_URL BBAI_ENGINE_MCP_URL)"
   ENGINE_PORT="${ENGINE_PORT:-8765}"
 else
   warn "config: ${ENV_FILE} not found (using defaults; set ORWELL_HOME if installed elsewhere)"
@@ -152,17 +167,26 @@ journal_tail() {
 
 diagnose() {
   echo "==> diagnose (engine=${ENGINE_SVC} :${ENGINE_PORT}, frontend=${FRONTEND_SVC}${FE_PORT:+ :${FE_PORT}})"
-  unit_active "$ENGINE_SVC"   && pass "unit active: ${ENGINE_SVC}"   || fail "unit active: ${ENGINE_SVC}"
-  unit_active "$FRONTEND_SVC" && pass "unit active: ${FRONTEND_SVC}" || fail "unit active: ${FRONTEND_SVC}"
+  if [[ "$UNITS_MISSING" == 1 ]]; then
+    fail "no engine unit installed (neither orwell-engine nor bbai-engine has a unit file)"
+  else
+    unit_active "$ENGINE_SVC"   && pass "unit active: ${ENGINE_SVC}"   || fail "unit active: ${ENGINE_SVC}"
+    unit_active "$FRONTEND_SVC" && pass "unit active: ${FRONTEND_SVC}" || fail "unit active: ${FRONTEND_SVC}"
+  fi
   [[ -f "${APP_DIR}/dist/main.js" ]] && pass "build artifact: dist/main.js" || fail "build artifact missing — run: bash ${APP_DIR}/deploy/orwell-update.sh"
   engine_http_ok       && pass "engine /health answers"        || fail "engine /health answers (${ENGINE_BASE}/health)"
   engine_serves_tools  && pass "engine serves player tools"    || fail "engine serves player tools"
+  # An engine that ANSWERS while its unit is inactive/missing is running OUTSIDE systemd (a stray
+  # manual process). Restarting the unit would fight it for the port — name the situation instead.
+  if engine_http_ok && { [[ "$UNITS_MISSING" == 1 ]] || ! unit_active "$ENGINE_SVC"; }; then
+    warn "an engine answers on :${ENGINE_PORT} but not under ${ENGINE_SVC} — a stray process? (pct/ssh in and check: pgrep -af 'dist/main.js')"
+  fi
   if [[ -n "$FE_BASE" ]]; then
     fe_http_ok       && pass "front-end answers /api/orwell/health" || fail "front-end answers /api/orwell/health (${FE_BASE})"
     fe_sees_engine   && pass "front-end sees the engine (engine:true)" \
                      || fail "front-end CANNOT see the engine — check ORWELL_ENGINE_MCP_URL in ${ENV_FILE}"
   else
-    warn "ORWELL_PORT not set in ${ENV_FILE} — skipping front-end probes"
+    warn "ORWELL_PORT/BBAI_PORT not set in ${ENV_FILE} — skipping front-end probes"
   fi
 }
 
