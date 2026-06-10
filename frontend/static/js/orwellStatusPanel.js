@@ -112,6 +112,8 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-row .os-k { opacity: .6; min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
+        #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
         #orwell-status .os-you { margin: .45rem 0 .1rem; font-weight: 600; }
         #orwell-status .os-you .os-badge {
@@ -126,7 +128,7 @@ import * as modalManager from "./modalManager.js";
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
       </style>
       <div class="os-hdr" title="Drag to move">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span></span>
+        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
         <button type="button" class="os-min" title="Minimize" aria-label="Minimize">–</button>
       </div>
       <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
@@ -186,11 +188,14 @@ import * as modalManager from "./modalManager.js";
 
   function render(st) {
     const el = ensurePanel();
-    // No active game (engine reports week 0 / setup) → hide and keep polling.
+    // No active game (engine reports week 0 / setup) → genuinely hide (not a hiccup).
     if (!st || typeof st.week !== "number" || st.week < 1) {
+      _shown = false;
+      markStale(false);
       hidePanel();
       return;
     }
+    _shown = true;
     const name = (c) => (c && c.name) || "—";
     el.querySelector("#os-week").textContent = "Week " + st.week;
     el.querySelector("#os-phase").textContent = st.phase || "";
@@ -244,16 +249,31 @@ import * as modalManager from "./modalManager.js";
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // True once we've shown a real game at least once this session. Lets a transient engine
+  // hiccup keep the last-known panel up (U5) instead of vanishing the player's only readout.
+  let _shown = false;
+
+  function markStale(on) {
+    const el = document.getElementById("orwell-status");
+    const dot = el && el.querySelector("#os-stale");
+    if (dot) dot.hidden = !on;
+  }
+
   async function refresh() {
+    let st;
     try {
-      const st = await fetchStatus();
-      // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
-      st._state = (await fetchState()) || null;
-      render(st);
+      st = await fetchStatus();
     } catch (_) {
-      // Engine down / no game → hide, fail open.
-      hidePanel();
+      // ENGINE HICCUP (not "no game"): if we've shown the panel, keep the last-known
+      // values up and flag the feed as reconnecting — don't blink the readout out.
+      if (_shown) markStale(true);
+      else hidePanel();
+      return;
     }
+    markStale(false);
+    // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
+    st._state = (await fetchState()) || null;
+    render(st);
   }
 
   function start() {

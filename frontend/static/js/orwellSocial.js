@@ -10,9 +10,10 @@
 // Vault-free by construction (the engine withholds all hidden state); fail-open everywhere.
 //
 // Like the settings panel it is a real moveable window: drag it by its header, minimize it,
-// and it remembers both across reloads. Only ONE houseguest pulls you aside at a time (more
-// realistic than a crowd), and an approach you act on or dismiss STAYS gone across a refresh
-// (until a new game), so the surface never nags about something you already handled.
+// and it remembers both across reloads. A few houseguests may want you at once (a living
+// house, not a crowd), the NPC is framed as the one approaching (they initiated), and an
+// approach you act on or dismiss STAYS gone across a refresh (until a new game), so the
+// surface never nags about something you already handled.
 import { makeWindowDraggable } from "./windowDrag.js";
 import * as modalManager from "./modalManager.js";
 
@@ -21,7 +22,7 @@ import * as modalManager from "./modalManager.js";
 
   const POLL_MS = 20000;
   const ID = "orwell-social";
-  const MAX_APPROACHES = 1;            // one person pulls you aside at a time — not a crowd
+  const MAX_APPROACHES = 3;            // a few houseguests may want you at once — a living house (U7)
   const POS_KEY = "orwell-social-pos";
   const DISMISS_KEY = "orwell-social-dismissed";
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
@@ -32,6 +33,7 @@ import * as modalManager from "./modalManager.js";
 
   let timer = null;
   let pendingApproachId = null;  // approach prefilled but not yet sent
+  let _shown = false;  // shown a real game this session (U5: keep last-known on a hiccup)
 
   // Approaches the player has acted on or waved off. Persisted so a refresh (or a sent
   // scene) doesn't resurrect a handled approach; cleared when a new game begins.
@@ -257,12 +259,23 @@ import * as modalManager from "./modalManager.js";
 
   // --- Approaches ---------------------------------------------------------------
 
+  // The NPC INITIATED the approach (socialInitiatives = who wants the player now), so the
+  // prefill frames them coming to the player — not the player pulling them aside (U6). Varied
+  // so it doesn't read as one canned line; the player still sends it themselves.
+  const _APPROACH_LINES = [
+    (n) => `${n} catches my eye and drifts over — I turn to hear them out.`,
+    (n) => `${n} pulls me aside; I give them my attention.`,
+    (n) => `${n} sidles up wanting a word. I bite. "What's up?"`,
+    (n) => `${n} flags me down — I stop and see what they want.`,
+  ];
+
   function startScene(name, id) {
     // "Acting" on an approach starts a scene the normal way: prefill the composer and focus it,
     // so the player sends it themselves (we never auto-send or fabricate a turn).
     const box = document.getElementById("message");
     if (!box) return;
-    box.value = `I pull ${name} aside for a quiet word.`;
+    const line = _APPROACH_LINES[Math.floor(Math.random() * _APPROACH_LINES.length)];
+    box.value = line(name);
     box.dispatchEvent(new Event("input", { bubbles: true }));
     box.focus();
     pendingApproachId = id;
@@ -301,7 +314,7 @@ import * as modalManager from "./modalManager.js";
     _wireComposer();
     const items = (Array.isArray(list) ? list : [])
       .filter((it) => it && it.houseguest && it.houseguest.id && !dismissed.has(it.houseguest.id))
-      .slice(0, MAX_APPROACHES); // only one houseguest pulls you aside at a time
+      .slice(0, MAX_APPROACHES); // a few may want you at once (U7)
     wrap.innerHTML = "";
     hd.style.display = items.length ? "block" : "none";
     for (const it of items) {
@@ -337,17 +350,21 @@ import * as modalManager from "./modalManager.js";
   // --- Poll loop ----------------------------------------------------------------
 
   async function refresh() {
-    let active = false;
+    let st;
     try {
-      const st = await getJSON("/api/orwell/state");
-      active = !!(st && st.started);
+      st = await getJSON("/api/orwell/state");
     } catch (_) {
-      active = false; // engine down → fail open (hide)
-    }
-    if (!active) {
-      hidePanel();
+      // ENGINE HICCUP (not "no game"): keep a shown panel up (U5) — just don't refresh
+      // approaches. Only hide when we've never shown it (nothing to keep).
+      if (!_shown) hidePanel();
       return;
     }
+    if (!(st && st.started)) {
+      _shown = false;
+      hidePanel(); // genuinely no game
+      return;
+    }
+    _shown = true;
     const el = ensureUI();
     // Keep approaches fresh, but if the player parked it in the dock, leave it there.
     if (!isMinimized()) el.style.display = "block";
@@ -355,7 +372,7 @@ import * as modalManager from "./modalManager.js";
       const data = await getJSON("/api/orwell/initiatives");
       renderApproaches(data && data.initiatives);
     } catch (_) {
-      renderApproaches([]); // no chips on error — never block
+      // initiatives hiccup: leave the existing chips, never blank them on a transient error
     }
   }
 
