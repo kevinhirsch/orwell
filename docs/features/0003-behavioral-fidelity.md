@@ -1,6 +1,6 @@
 # 0003 — Behavioral fidelity (richness)
 
-> **Status:** Draft. **Build priority:** #3 (and the project's #1 *mandate*).
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #3 (and the project's #1 *mandate*).
 > **Executable spec:** [`0003-behavioral-fidelity.feature`](./0003-behavioral-fidelity.feature)
 
 ## 1. Summary

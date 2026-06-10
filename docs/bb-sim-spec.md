@@ -31,7 +31,8 @@ and `docs/features/`) supersede or extend it where they conflict:
 - **The consequence & memory loop (0023)** — the MVP-1 backbone: every happening is recorded,
   **folds its hidden impact into the relationship/soul layer** (the player's actions change how
   houseguests feel about them, invisibly), and **persists to long-term memory**, recalled in full
-  on return. The current biggest gap (the live game does not yet wire it).
+  on return. **Built and wired into the live game** (0023, with durable persistence via 0030 and
+  the orchestrator's integrity checkpoint via 0031) — formerly the biggest gap, now closed.
 - **Human-driven player reads (0017/0020):** the engine computes relationship edges but **never
   shows the player a number** or asserts their feelings — surfaces show facts + observable
   behavior; the player **infers** trust/threat. Paranoia is the human's to form.
@@ -41,11 +42,22 @@ and `docs/features/`) supersede or extend it where they conflict:
 - **Tight per-moment narration (0018):** the narrator gets a managed, engine-owned per-moment
   system prompt — a tight operating manual + **lever manifest** (it knows how to access and pull
   every engine tool); the engine decides outcomes, the narrator voices them.
-- **Feature set:** priority specs **0001–0023** in `docs/features/` (0001–0014 built); the index
-  and `docs/IMPLEMENTATION_QUEUE.md` track status + implementer prompts.
+- **Feature set:** priority specs in `docs/features/` (now through 0050; most are built — the
+  `README.md` status index there is authoritative); the index and `docs/IMPLEMENTATION_QUEUE.md`
+  track status + implementer prompts.
 
-The §12 BDD invariants and §16 open decisions below still hold except where a `docs/decisions/`
-record or a `docs/features/NNNN` spec refines them.
+The §12 BDD invariants below still hold except where a `docs/decisions/` record or a
+`docs/features/NNNN` spec refines them; the §16 open decisions are **all resolved** (§16 keeps
+the history with pointers).
+
+**Deliberate design notes (recorded so they aren't mistaken for gaps):**
+
+- The fixed **16-cast / jury-of-9 / Final-2** format is **canon** — not a placeholder awaiting
+  configurability. Core structure never varies; only reserve production twists (0025) may.
+- The **last-evicted-juror jury tie-break** is **unreachable in the untwisted format** (a jury of
+  9 casts an odd number of votes). It exists for the **returning-juror twist** family, where a
+  juror re-enters the game and the jury can become even.
+- **Walk-outs / quits** are not modeled; they are **optional future scope**, not an omission.
 
 ---
 
@@ -299,7 +311,9 @@ neither initiates all of them.
 ## 11. Suggested domain model (provisional)
 
 - **PlayerCharacter** — authored at OOBE; public persona + optional hidden attributes;
-  no fixed identity; name may change.
+  no fixed identity. *(The original "name may change" mid-game promise is **not implemented**
+  and is dropped as a requirement: the name varies per game/save, but is stable within one
+  game.)*
 - **Houseguest**
   - *PublicProfile* (Journal-visible): randomized display name, public persona, status,
     publicly-known relationships.
@@ -310,7 +324,11 @@ neither initiates all of them.
   **initiator** (player or NPC); content. The single source for both Journal and Vault projections.
 - **KnowledgeState** (per houseguest, incl. player) — facts that entity may legitimately
   act on; grows via propagation (§6.4).
-- **Relationship / edge** — type, strength, **known-by set** (public vs hidden).
+- **Relationship / edge** — *(as built — `docs/decisions/0002` + feature 0026 supersede the
+  original "type + strength" shape)*: a **directed, graded, asymmetric** belief held per
+  houseguest (trust / affinity / threat / alignment / reliability / confidence), **computed from
+  event history** — never a stored label or binary ally/enemy flag — plus a **known-by set**
+  (public vs hidden).
 - **Season** → **Weeks**; **Week** (HOH, nominees, veto holder, veto used?, replacement,
   evictee, phase); **Competition** (type, eligible set, stat + temperature weighting,
   result); **Nomination**, **VetoCeremony**, **Eviction**, **Vote**, **Jury**,
@@ -435,7 +453,8 @@ Feature: Persistence integrity
 
   Scenario: Each in-game day has a meaningful event
     When an in-game day completes
-    Then at least one of {HOH comp, nominations, veto comp, veto ceremony, eviction} occurred
+    Then at least one of {HOH comp, nominations, veto comp, veto ceremony, eviction,
+      or a significant house event} occurred
 ```
 
 ---
@@ -464,13 +483,20 @@ Vault Wall is the point.
 
 ---
 
-## 16. Decisions to confirm with the human
+## 16. Decisions to confirm with the human — ALL RESOLVED
 
-1. **Soul/profile storage** — md, vector, or hybrid; and the **schema** for deep hidden
-   attributes + how evolution is persisted.
-2. **Temperature model** — distributions, per-variable weighting, how the per-moment roll
-   is bounded, and the surfacing-rate for hidden elements.
-3. **Vector approach** — if adopted, which embedding/store and what it indexes
-   (personalities, behavioral memory, conversation recall).
-4. **Exact veto-draw participant rules**, jury procedure, and any twists/specials.
-5. **Non-degradation test strategy** — how to operationalize "detail must accumulate."
+Kept for history; every item below is decided (cross-check `CLAUDE.md` "Open decisions
+(remaining)" and `docs/decisions/`):
+
+1. **Soul/profile storage** — ✅ resolved: **markdown + vector** behind `SoulProvider`
+   (feature 0024); evolution persisted per 0007/0041 (the dynamic soul deepens; the static
+   character is byte-stable).
+2. **Temperature model** — ✅ resolved: shape in feature 0006 / `docs/decisions/0001`; constants
+   firmed into `src/domain/temperatureConstants.ts` (feature 0028). Only fine-tuning remains.
+3. **Vector approach** — ✅ resolved: adopted, engine-only (`VectorIndex`); embedding provider is
+   **fastembed, local ONNX** per ADR `docs/decisions/0004` (deterministic fake in tests).
+4. **Veto-draw rules, jury procedure, twists** — ✅ resolved: six-player veto with the
+   "Houseguest's Choice" chip (`docs/decisions/0001`, feature 0005); jury choreography by
+   feature 0037; reserve twists Vault-sealed (feature 0025).
+5. **Non-degradation test strategy** — ✅ resolved: superset + monotonic-count + lossless
+   round-trip (feature 0007).

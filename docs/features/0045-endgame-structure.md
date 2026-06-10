@@ -1,6 +1,6 @@
 # 0045 — Endgame structure (Final 5 → Final 2)
 
-> **Status:** Draft (queue **B43**, "NEEDS SPEC FIRST"). The **late game is mathematically broken.** Two
+> **Status:** Built (see the [README status index](./README.md#index); was queue **B43**). The **late game was mathematically broken.** Two
 > bugs make the endgame illegal/ill-defined: (1) **0005 demands a veto field of exactly six** — impossible at
 > Final 5 / Final 4; (2) **Final 3 is not modeled** — at 3 active the loop runs a full nomination/veto week
 > that ends with `evictionVoters = ∅`, a permanent **0–0 "tie"** silently resolved by `npcChoice(hoh)`

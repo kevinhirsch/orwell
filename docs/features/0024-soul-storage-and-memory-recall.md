@@ -1,6 +1,6 @@
 # 0024 — Soul storage & memory recall (markdown + vector)
 
-> **Status:** Draft. **How a houseguest's mind is stored and how it recalls the *right* past
+> **Status:** Built (see the [README status index](./README.md#index)). **How a houseguest's mind is stored and how it recalls the *right* past
 > moment.** The dynamic `Soul` is a **markdown narrative** (the evolving inner story — memory,
 > emotional history, leanings) **plus an engine-only vector index** for **semantic recall**: the
 > most *relevant* past beats, not just the most recent. Recall serves **both** the **narrator** (a

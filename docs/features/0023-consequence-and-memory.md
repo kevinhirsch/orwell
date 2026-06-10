@@ -1,12 +1,12 @@
 # 0023 — Consequence & memory (the living, persisted game loop)
 
-> **Status:** Draft. **The MVP-1 backbone — and today's biggest gap.** Every happening
+> **Status:** Built (see the [README status index](./README.md#index)). **The MVP-1 backbone — formerly the project's biggest gap, now closed.** Every happening
 > (conversation, competition win, vote, scheme) is **recorded as an event**, **folds its hidden
 > impact into the relationship/soul layer** (your actions change how houseguests feel about you,
 > invisibly), and **persists to long-term memory** so leaving and returning never erases it. The
-> building blocks exist (0002 events, 0017 relationships, 0007 persistence) but are **not wired
-> into the live game** (`GameSessionAdapter` logs events and changes no opinions; nothing is
-> persisted). This feature is that wiring — and the tests that prove it works.
+> building blocks (0002 events, 0017 relationships, 0007 persistence) are now **wired into the
+> live game** (durably via 0030; committed through the 0031 orchestrator checkpoint). This
+> feature was that wiring — and the tests that prove it works.
 > **Executable spec:** [`0023-consequence-and-memory.feature`](./0023-consequence-and-memory.feature)
 
 ## 1. Summary
@@ -84,6 +84,9 @@ The end-to-end guarantees (§9) hold regardless of how these resolve — pick du
 - **Update timing.** Apply impacts **eagerly per event** (the stateful `apply` model that exists)
   **vs** **recompute from the full event history** on read (the "computed from history" model,
   decision 0002). Both must pass the same tests; recompute leans harder on persisted events.
+  *(**Foreclosed — eager `apply` won.** The as-built game applies impacts eagerly per event, and
+  0026 (relationship math), 0039 (deal/betrayal folds), and 0041 (soul evolution) all build on the
+  applied model. Switching to recompute-on-read is no longer a live option.)*
 
 ## 9. Test strategy (the heart of this feature — roles only, seeded)
 

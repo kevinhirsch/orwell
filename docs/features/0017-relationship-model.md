@@ -1,6 +1,6 @@
 # 0017 — Relationship model
 
-> **Status:** Draft. **Promotes [decision 0002](../decisions/0002-relationship-model.md) into an
+> **Status:** Built (see the [README status index](./README.md#index)). **Promotes [decision 0002](../decisions/0002-relationship-model.md) into an
 > executable spec.** The single most important social signal in the sim — *who you confide in and
 > who your enemies are* — as **directed, graded, asymmetric, computed beliefs**, never binary
 > flags. The engine already has a relationship seam (`src/engine/relationships.ts`, used by 0003's

@@ -1,6 +1,6 @@
 # 0005 — Competition eligibility & legality
 
-> **Status:** Draft. **Build priority:** #5.
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #5.
 > **Executable spec:** [`0005-competition-eligibility.feature`](./0005-competition-eligibility.feature)
 
 ## 1. Summary

@@ -1,6 +1,6 @@
 # 0014 — Jury & endgame
 
-> **Status:** Draft. The finale — jury of 9, Final 2, the jury vote, and **jury management** as a
+> **Status:** Built (see the [README status index](./README.md#index)). The finale — jury of 9, Final 2, the jury vote, and **jury management** as a
 > real mechanic.
 > **Executable spec:** [`0014-jury-and-endgame.feature`](./0014-jury-and-endgame.feature)
 
@@ -53,7 +53,9 @@ Each juror votes for a finalist based on **(a) accumulated jury relationship —
 rarely overturns a clear lead**. The relative weight is **tunable config** (default:
 jury-management-dominant). The **engine decides** the vote; the **LLM voices** jurors but never
 decides — the player cannot talk past the model arbitrarily (anti-sycophancy). Most votes wins;
-**last-evicted juror breaks a tie**.
+**last-evicted juror breaks a tie**. *(Deliberate: with a jury of 9 — odd — a tied jury vote is
+**unreachable in the untwisted format**; the tie-break exists for the returning-juror twist
+family, where the jury can become even.)*
 
 ## 7. Contracts (stack-agnostic)
 

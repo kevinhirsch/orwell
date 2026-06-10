@@ -1,6 +1,6 @@
 # 0031 — Game orchestrator & integrity watcher (per-sandbox)
 
-> **Status:** Draft. A **per-sandbox game orchestrator** with two layers: (1) a **turn-driven**
+> **Status:** Built (see the [README status index](./README.md#index)). A **per-sandbox game orchestrator** with two layers: (1) a **turn-driven**
 > deterministic spine — one `advance()` path that runs the off-screen NPC tick, applies the next
 > scheduled meaningful day, folds consequences, persists, and runs an **integrity checkpoint**; and
 > (2) a **background watcher/scheduler** that, on a wall clock, triggers **bounded off-screen

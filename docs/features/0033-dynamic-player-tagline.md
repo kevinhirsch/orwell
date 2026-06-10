@@ -1,6 +1,6 @@
 # 0033 — Dynamic player tagline (snarky, state-aware hero line)
 
-> **Status:** Draft. Replace the static homepage hero subtitle ("Yours for the voyage.") with an
+> **Status:** Built (see the [README status index](./README.md#index)). Replace the static homepage hero subtitle ("Yours for the voyage.") with an
 > **engine-generated, Vault-free, snarky _Big Brother_ one-liner** that reflects the **current state of
 > the player's game** (week, phase, public standing) — a welcome line in the hero placement that ribs
 > the player in the house's voice and **changes as the game advances**. Engine owns the generation
@@ -48,6 +48,10 @@ itself (0027 — reused); long copy (this is **one** line only); per-NPC tagline
 - **Context in:** the same Vault-free public projection the status panel uses (0020 `gameStatus`):
   `{ week, phase, standing }` where `standing` ∈ public facets only (e.g. `hoh | nominee | veto-holder
   | houseguest | pre-game`). **No** hidden votes/targeting/souls/off-screen content.
+  **"Standing" here means PUBLIC ceremony facts only** — the broadcast roles the whole house
+  witnessed (HOH / nominee / veto-holder). This does **not** conflict with 0020's "never tell the
+  player where they stand": that rule is about the **hidden relationship/threat read** (the
+  player's to infer), which the tagline never touches.
 - **Generation:** `NarrativePort.narrate` (0027) with a **snarky-host** instruction ("one biting
   _Big Brother_ welcome line for the player at this moment; no spoilers; ≤ one sentence"). A
   **deterministic fake** narrator backs tests (seeded, reproducible).

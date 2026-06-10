@@ -1,6 +1,6 @@
 # 0034 — Live weekly progression & binding-decision seam
 
-> **Status:** Draft — **codifies an already-built capability.** Unusually for this repo, the engine
+> **Status:** Built (see the [README status index](./README.md#index)) — **codifies an already-built capability.** Unusually for this repo, the engine
 > code landed **before** the spec: the live weekly loop + binding-decision seam were implemented in the
 > "live weekly loop, full tool wiring" change (`src/engine/liveSeason.ts`,
 > `GameSessionAdapter.advanceGame`/`submitDecision`, the `GameSession` port, `advanceGame`/`submitDecision`

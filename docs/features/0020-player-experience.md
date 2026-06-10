@@ -1,6 +1,6 @@
 # 0020 — Player experience (status panel, inline decisions, portraits)
 
-> **Status:** Draft. **MVP-1 of the player experience** for "Orwell is the game": the chat
+> **Status:** Built (see the [README status index](./README.md#index)). **MVP-1 of the player experience** for "Orwell is the game": the chat
 > narration (0018/0019) **plus** a light always-visible **status panel**, **inline quick-button**
 > binding decisions over the engine's legal set, and **generated photo-style portraits** for the
 > houseguests. **MVP-2 — the rich game UI** (house view, houseguest cards, a browsable journal,
@@ -63,7 +63,7 @@ readout (decision 0002; anti-sycophancy).
 
 When the engine surfaces a **pending decision** (0019: `pendingDecision` → legal options from
 0011/0005), the chat renders **exactly those options** as buttons. Tapping one executes the choice
-through the **validated** path (`executeDecision`), and the engine re-validates. The player can
+through the **validated** path (`executeDecision` — as built: `submitDecision`), and the engine re-validates. The player can
 **never be offered, or pick, an illegal move**. Free-text social play continues in the chat
 (the hybrid model, 0019); only the buttons make a binding choice.
 
@@ -110,7 +110,7 @@ land one at a time; quiet beats breathe.
 ```
 gameStatus() -> { week, phase, hoh, nominees[], veto: { holder, used } }   # Vault-free (visible projection)
 pendingDecision() -> { kind, options[] } | none                            # engine LEGAL set (0019/0011/0005)
-executeDecision(kind, choice) -> result                                    # validated; rejects illegal (0005)
+executeDecision(kind, choice) -> result                                    # validated; rejects illegal (0005) (as built: submitDecision)
 portraitDescriptorFor(houseguest) -> publicDescriptor                      # built from character.md PUBLIC facets (0004/0015);
                                                                            #   Vault-free — NO aptitudes, hidden elements, or Soul/Vault
 portraitFor(houseguest) -> imageRef                                        # frontend image-gen renders the descriptor; persisted (0007)

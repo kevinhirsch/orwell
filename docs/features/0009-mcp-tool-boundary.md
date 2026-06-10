@@ -1,6 +1,6 @@
 # 0009 — MCP tool boundary (the engine's outward tool API)
 
-> **Status:** Draft. **Milestone:** M5 (integration) — not one of the eight invariants, but the
+> **Status:** Built (see the [README status index](./README.md#index)). **Milestone:** M5 (integration) — not one of the eight invariants, but the
 > **MVP seam** between the TypeScript engine and the Orwell front-end/agent (`frontend/`).
 > **Executable spec:** [`0009-mcp-tool-boundary.feature`](./0009-mcp-tool-boundary.feature)
 
@@ -57,7 +57,7 @@ the core/Vault, only a sanitized result crosses the membrane — *new*):
 | Tool | Effect / returns |
 |---|---|
 | `recordInteraction(initiator, witnessSet, content)` | records a (player-witnessed) event; **initiator/witnesses must be LIVING houseguests** and per-call folds are capped (B39); returns its id/ack |
-| `resolveCompetition(type, participants, intents)` | the **engine-decided** outcome only — no stats, rankings, or Vault reasoning |
+| `resolveCompetition(type, participants, intents)` *(as built: `runCompetition`)* | the **engine-decided** outcome only — no stats, rankings, or Vault reasoning |
 | `surfaceInformationTo(entity, fact, pathway)` | moves a hidden fact into knowledge via an **anchored** pathway (B39/A4); an unanchored one is downgraded to a suspicion; returns `{ ok, surfaced }` |
 
 **Admin / God-Mode channel** (separate registry; non-Vault only):
@@ -73,7 +73,7 @@ There are **two kinds of tool**, and the boundary is the membrane between them:
   **outward** side (no Vault, ever).
 - **Action tools** are *requests*: the **engine** performs them (the engine root may read the
   Vault/core to simulate), and only a **Vault-free result** is returned. So `resolveCompetition`
-  can weigh hidden stats internally yet return just the outcome — "the engine reads the Vault to
+  (as built: `runCompetition`) can weigh hidden stats internally yet return just the outcome — "the engine reads the Vault to
   decide; no outward tool returns Vault data."
 
 To keep the outward MCP adapter Vault-free, action tools reach the engine **only through
@@ -105,18 +105,17 @@ buildOutwardChannels(deps) -> { player, admin, summary } # outward root; no Vaul
 # new for this feature
 EngineCommands (Vault-free port the engine implements; the MCP server depends on THIS, not the engine root):
     recordInteraction(req) -> { eventId }
-    resolveCompetition(req) -> Result                    # outcome only
+    resolveCompetition(req) -> Result                    # outcome only (as built: runCompetition)
     surfaceInformationTo(req) -> { ok }
 McpServer (outward adapter):
     serve(channel, transport)                            # mounts toolsFor(channel) over stdio|http
 ```
 
-## 8. Required refactor (flag for the implementer)
+## 8. Required refactor — RESOLVED (stale flag removed)
 
-`NarrativePort.narrate()` is currently **synchronous** (`EchoNarrativePort`). A live LLM
-(Ollama / Anthropic, from `frontend/`) is async, so `narrate` and the `renderScene` tool become
-`Promise`-returning. This is the one real refactor to the existing code; it does not change the
-Vault-free `NarrationContext` (feature 0001 stays intact).
+The sync-`narrate` flag that lived here is **stale**: the async `NarrativePort` landed with
+feature 0027 (`LlmNarrativePort`, streaming); the Vault-free `NarrationContext` was unchanged.
+No implementer action remains.
 
 ## 9. Test strategy
 

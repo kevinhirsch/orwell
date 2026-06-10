@@ -1,6 +1,6 @@
 # 0028 — Temperature & emotional-modifier constants
 
-> **Status:** Draft. Firms [0006](./0006-outcomes-by-stats-and-temperature.md)'s *shape* (bounded
+> **Status:** Built (see the [README status index](./README.md#index)). Firms [0006](./0006-outcomes-by-stats-and-temperature.md)'s *shape* (bounded
 > per-moment temperature + a soul-sourced emotional modifier) into a **single tunable constants
 > module** — the distributions, per-variable weighting, bounds, the emotional modifier's
 > volatility/mean-reversion, and the **hidden-element surfacing rate**. Defaults match 0006's

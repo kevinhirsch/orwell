@@ -1,7 +1,7 @@
 # 0036 — Live social surface: NPC-initiated approaches + the Diary Room
 
-> **Status:** Draft — **functional gap.** Two built social capabilities are **not reachable in the live
-> game** because no player tool exposes them: (1) **NPC-initiated approaches** — `npcInitiatedApproaches()`
+> **Status:** Built (see the [README status index](./README.md#index)) — was a **functional gap**. Two built social capabilities were **not reachable in the live
+> game** because no player tool exposed them: (1) **NPC-initiated approaches** — `npcInitiatedApproaches()`
 > (0012) exists but is never called live, so conversations are **one-directional** (player→NPC only),
 > violating the **bidirectional-scenes** mandate; and (2) the **Diary Room** — 0013's logic
 > (`recordDiaryRoom`, `NO_NPC_PATHWAY`) exists but is **not a player tool**, so the player can't use their

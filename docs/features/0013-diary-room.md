@@ -1,6 +1,6 @@
 # 0013 — The Diary Room
 
-> **Status:** Draft. Two distinct things wear the "diary room" name, and the split is an
+> **Status:** Built (see the [README status index](./README.md#index)). Two distinct things wear the "diary room" name, and the split is an
 > **integrity boundary** — keep them apart.
 > **Executable spec:** [`0013-diary-room.feature`](./0013-diary-room.feature)
 
@@ -62,6 +62,12 @@ deriveNpcKnowledge(...) -> MUST exclude NO_NPC_PATHWAY content    # the DR -> NP
 producerPrompt(state) -> suggest a DR moment | none              # dramatic-beat hook
 # NPC confessionals are VaultStore content (engine-only), recorded with witnessSet excluding the player
 ```
+
+**Who consumes `playerStrategyRead` (B57 / audit H7 — making "informs the engine" concrete).**
+The named consumers of the player's DR strategy read are: the **producer prompts** (§5 — picking
+when and how to pull the player aside), the **0033 tagline** (the snarky state-aware hero line),
+and the **0048 season retrospective** (the end-of-season recap). All are player-level / OOC
+surfaces; **no NPC-facing path consumes it** (the §4 wall).
 
 ## 8. Test strategy
 

@@ -1,6 +1,6 @@
 # 0006 — Outcomes by stats + temperature
 
-> **Status:** Draft. **Build priority:** #6.
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #6.
 > **Executable spec:** [`0006-outcomes-by-stats-and-temperature.feature`](./0006-outcomes-by-stats-and-temperature.feature)
 
 ## 1. Summary

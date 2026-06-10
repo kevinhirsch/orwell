@@ -1,6 +1,6 @@
 # 0012 — Conversation & scene system
 
-> **Status:** Draft. **The player's moment-to-moment interface** — the social game, where the
+> **Status:** Built (see the [README status index](./README.md#index)). **The player's moment-to-moment interface** — the social game, where the
 > #1 mandate (behavioral fidelity) meets the player. **Interaction model (decided): hybrid** —
 > free-text for social play, explicit validated prompts for binding decisions.
 > **Executable spec:** [`0012-conversation-and-scene-system.feature`](./0012-conversation-and-scene-system.feature)
@@ -49,6 +49,15 @@ first-class query returning an **honest, character-appropriate read** — source
 player's visible projection and the relationship reads the player could plausibly perceive. It
 may **hint** at off-screen shifts (the effects of gossip diffusion, 0002) **without naming**
 them, and it **never** contains Vault data.
+
+**The honesty boundary, sharpened (B57 / audit H6).** When a hint derives from **hidden** edges,
+it crosses to the player only as **vague, qualitative texture** — "the room feels tense,"
+"they seem guarded around you" — never more. Concretely: a `socialRead` **never names an
+off-screen event** (no "they met in the storage room"), **never names third parties** a hidden
+edge involves, and **never quantifies** (no numbers, rankings, or trust/threat levels). The
+player gets atmosphere they could plausibly perceive; the facts behind it still require a real
+pathway (told / overheard / surfaced — 0002). This is the same fuzziness rule behind the 0031
+leak heuristic.
 
 ## 6. Vault Wall & anti-sycophancy (the hard constraints)
 

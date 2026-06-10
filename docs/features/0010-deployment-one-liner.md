@@ -1,6 +1,6 @@
 # 0010 — One-liner deployment & update (Proxmox, containerized)
 
-> **Status:** Draft. **Priority:** **MVP-1 (blocking)** — per product call, the deploy + update
+> **Status:** Built (see the [README status index](./README.md#index)). **Priority:** **MVP-1 (blocking)** — per product call, the deploy + update
 > scripts are part of MVP 1, not a later add-on.
 > **Executable spec:** [`0010-deployment-one-liner.feature`](./0010-deployment-one-liner.feature)
 
@@ -74,8 +74,12 @@ non-degradation). Re-running install is also safe (detects an existing install �
 
 ## 6. Acceptance criteria / Definition of Done
 
-- [x] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
-      up reachable on its port, with **no manual steps** beyond entering LLM config. *(host-validated)*
+- [ ] On a **fresh Proxmox host**, the install one-liner creates the container and brings the UI
+      up reachable on its port, with **no manual steps** beyond entering LLM config.
+      *(**OUTSTANDING** — the container smoke test on a real Proxmox host has not been run;
+      a prior "host-validated" claim here was wrong. `deploy/smoke.sh` in CI covers
+      build → probe → update only, not LXC provisioning. `CLAUDE.md` "Remaining work" is the
+      accurate record.)*
 - [x] The update one-liner pulls + rebuilds + restarts and the **existing save survives**
       (`data/` is never touched; asserted by the smoke).
 - [x] Both scripts are **idempotent** (safe to re-run).

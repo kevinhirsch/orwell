@@ -1,6 +1,6 @@
 # 0002 — Event visibility & propagation
 
-> **Status:** Draft. **Build priority:** #2.
+> **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #2.
 > **Executable spec:** [`0002-event-visibility-and-propagation.feature`](./0002-event-visibility-and-propagation.feature)
 
 ## 1. Summary

@@ -1,6 +1,6 @@
 # 0029 — App administrator role & user management
 
-> **Status:** Draft. An **app-level administrator role** for Orwell (the account tier), with a
+> **Status:** Built (see the [README status index](./README.md#index)). An **app-level administrator role** for Orwell (the account tier), with a
 > **role-based entitlement model**, an **admin-only user manager** in Settings, and **password
 > reset** (self for everyone; admin-for-others). The **first account created at setup is the
 > administrator**, and admin is **propagable** to other users. Distinct from the game's **God Mode**
@@ -141,3 +141,11 @@ This session's product call (first user = admin; propagable; admin = manage LLM 
 users; role-based entitlements "could be cool"; self password reset; admin reset for others);
 Orwell's existing `core/auth.py` (`AuthManager`, `privileges`) and `routes/auth_routes.py`; the
 distinction from `docs/features/0016-god-mode-admin.md` (game God Mode, Vault-walled).
+
+## 14. Amendment (B57 / audit H4) — account deletion implies sandbox deletion
+
+`delete_user` (the admin user-manager) must also delete that user's **game sandbox data** — the
+per-user saves/events/souls the engine keeps under that account key (0021/0030,
+`ORWELL_DATA_DIR`). An orphaned sandbox after account deletion is a data-retention bug, not a
+non-degradation feature; the 0007 ratchet protects a *living* game's detail, not data whose
+owner no longer exists.
