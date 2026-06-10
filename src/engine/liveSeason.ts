@@ -11,7 +11,9 @@ import {
 } from "../domain/eligibility";
 import type { WeekState } from "../domain/eligibility";
 import type { Stats } from "./season";
-import { chooseNominationsWithMood, tallyJury } from "./season";
+import { chooseNominationsWithMood, nominationScore, tallyJury } from "./season";
+import { detectBlocs, blocTerm } from "./blocs";
+import type { Bloc } from "./blocs";
 import type { RelationshipModel } from "./relationships";
 import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
@@ -173,6 +175,13 @@ export interface SeasonCtx {
    * that never crosses the wall.
    */
   emotionalOf?: (id: EntityId) => number;
+  /**
+   * The houseguest's derived LOYALTY (0043: disposition × soul state). When present, decisions
+   * gain the emergent BLOC term — bloc-mates shield each other and vote together, scaled by the
+   * bloc's loyalty strength. Optional: pure tests omit it and the loop stays byte-stable. The
+   * blocs themselves are recomputed every read and NEVER stored (decision 0002).
+   */
+  loyaltyOf?: (id: EntityId) => number;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -324,9 +333,21 @@ function otherNominee(s: LiveSeasonState): EntityId {
  * (0037). `votesToEvict` is filled with each voter who voted for the evictee — those voters,
  * plus the HOH who put the nominees up, are the "responsible" houseguests the evictee reads.
  */
-/** A voter's threat-driven pick between the two final nominees (decision 0002). */
-function npcEvictChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: SeasonCtx): EntityId {
-  return ctx.rel.edge(voter, fn[0]).threat >= ctx.rel.edge(voter, fn[1]).threat ? fn[0] : fn[1];
+/** The house's CURRENT blocs (0043) — derived fresh per decision; [] when loyalty isn't wired. */
+function currentBlocs(s: LiveSeasonState, ctx: SeasonCtx): Bloc[] {
+  if (!ctx.loyaltyOf) return [];
+  return detectBlocs({ rel: ctx.rel, active: s.active, loyaltyOf: ctx.loyaltyOf });
+}
+
+/**
+ * A voter's pick between the two final nominees (decision 0002) — threat-driven, with the 0043
+ * BLOC term layered on: a bloc-mate on the block is shielded (vote the other), the bloc's shared
+ * enemy is leaned into, all scaled by the bloc's loyalty strength. Voting blocs vote TOGETHER
+ * because every member reads the same derived bloc — coordination without stored membership.
+ */
+function npcEvictChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: SeasonCtx, blocs: readonly Bloc[] = []): EntityId {
+  const score = (n: EntityId): number => ctx.rel.edge(voter, n).threat + blocTerm(blocs, voter, n);
+  return score(fn[0]) >= score(fn[1]) ? fn[0] : fn[1];
 }
 
 /** Count the eviction votes (NPCs threat-driven; the player's own vote, if any) WITHOUT breaking a tie. */
@@ -335,10 +356,11 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
 } {
   const fn = s.finalNominees!;
   const voters = evictionVoters({ ...weekState(s, ctx), nominees: fn });
+  const blocs = currentBlocs(s, ctx); // one derived read for the whole vote — the bloc votes together
   const votes: Record<EntityId, number> = { [fn[0]]: 0, [fn[1]]: 0 };
   const voteOf = new Map<EntityId, EntityId>();
   for (const v of voters) {
-    const target = v === ctx.player && playerVote ? playerVote : npcEvictChoice(v, fn, ctx);
+    const target = v === ctx.player && playerVote ? playerVote : npcEvictChoice(v, fn, ctx, blocs);
     votes[target]++;
     voteOf.set(v, target);
   }
@@ -516,7 +538,7 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
       else if (tally[e.nominees[1]]! > tally[e.nominees[0]]!) evictee = e.nominees[1];
       else {
         if (s.hoh === ctx.player) { s.pending = { kind: "tie-break", by: ctx.player, nominees: e.nominees }; return null; }
-        evictee = npcEvictChoice(s.hoh!, e.nominees, ctx);
+        evictee = npcEvictChoice(s.hoh!, e.nominees, ctx, currentBlocs(s, ctx));
       }
       return commitStagedEviction(s, ctx, evictee, rng);
     }
@@ -708,8 +730,17 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         return null;
       }
       // A rattled HOH (low live emotional state, 0041) nominates more erratically; a calm one ranks
-      // purely by threat (byte-identical to before). Emotion bends the read — legality still binds.
-      const nominees = chooseNominationsWithMood(s.hoh!, s.active, ctx.rel, ctx.emotionalOf?.(s.hoh!) ?? 0.5);
+      // purely by threat. The 0043 BLOC term layers on when loyalty is wired: the HOH shields
+      // bloc-mates and leans toward the bloc's shared enemy. Legality still binds downstream.
+      const mood = ctx.emotionalOf?.(s.hoh!) ?? 0.5;
+      const blocs = currentBlocs(s, ctx);
+      const nominees = blocs.length > 0
+        ? (s.active.filter((h) => h !== s.hoh)
+            .sort((a, b) =>
+              (nominationScore(s.hoh!, b, ctx.rel, mood) + blocTerm(blocs, s.hoh!, b)) -
+              (nominationScore(s.hoh!, a, ctx.rel, mood) + blocTerm(blocs, s.hoh!, a)))
+            .slice(0, 2) as [EntityId, EntityId])
+        : chooseNominationsWithMood(s.hoh!, s.active, ctx.rel, mood);
       s.nominees = nominees; s.beat = "veto-competition";
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
@@ -822,9 +853,9 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
     case "replacement":
       return { kind: "replacement", replacement: byThreat(p.by, p.options) };
     case "eviction-vote":
-      return { kind: "eviction-vote", vote: npcEvictChoice(p.by, p.nominees, ctx) };
+      return { kind: "eviction-vote", vote: npcEvictChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "tie-break":
-      return { kind: "tie-break", evict: npcEvictChoice(p.by, p.nominees, ctx) };
+      return { kind: "tie-break", evict: npcEvictChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "final-eviction":
       return { kind: "final-eviction", evict: byThreat(p.by, p.options) };
     case "finale-statement":

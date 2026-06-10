@@ -37,12 +37,19 @@ export const NOMINATION_PARANOIA_WEIGHT = 0.5;
 export function chooseNominationsWithMood(
   hoh: EntityId, active: EntityId[], rel: RelationshipModel, mood: number,
 ): [EntityId, EntityId] {
-  const paranoia = Math.max(0, (0.5 - mood) * 2); // 0 when calm … 1 when fully rattled
-  if (paranoia === 0) return chooseNominations(hoh, active, rel);
-  const score = (t: EntityId): number =>
-    rel.edge(hoh, t).threat + paranoia * NOMINATION_PARANOIA_WEIGHT * (1 - rel.edge(hoh, t).trust);
-  const ranked = active.filter((h) => h !== hoh).sort((a, b) => score(b) - score(a));
+  if (Math.max(0, (0.5 - mood) * 2) === 0) return chooseNominations(hoh, active, rel);
+  const ranked = active.filter((h) => h !== hoh)
+    .sort((a, b) => nominationScore(hoh, b, rel, mood) - nominationScore(hoh, a, rel, mood));
   return [ranked[0]!, ranked[1]!];
+}
+
+/**
+ * The HOH's raw nomination leaning toward one target: threat + the rattled-paranoia term (0041).
+ * Exposed so layered reads (the 0043 bloc term) can ADD to the same base instead of forking it.
+ */
+export function nominationScore(hoh: EntityId, target: EntityId, rel: RelationshipModel, mood: number): number {
+  const paranoia = Math.max(0, (0.5 - mood) * 2); // 0 when calm … 1 when fully rattled
+  return rel.edge(hoh, target).threat + paranoia * NOMINATION_PARANOIA_WEIGHT * (1 - rel.edge(hoh, target).trust);
 }
 
 /** Tally a jury vote: most votes wins; a tie is broken by the last-evicted juror. */

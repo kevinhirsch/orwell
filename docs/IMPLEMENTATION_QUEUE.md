@@ -810,7 +810,18 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > `VETO_TYPES`. Resolution stays `resolveCompetition` (engine decides — 0006/0028); the Vault-free result
 > carries name+format+narrative (no stats/scores); 0005 eligibility holds. Add to `cucumber.cjs`. Open a PR.
 
-### B32 — 0043 emergent multi-party bloc behavior
+### B32 — 0043 emergent multi-party bloc behavior  ·  **✅ DONE 2026-06-10**
+
+> **Built to green.** New `src/engine/blocs.ts`: `detectBlocs` clusters the LIVE relationship graph at decision
+> time — CLIQUE-LIKE growth over mutual bonds (a bloc can't span two members who distrust each other), bounded
+> to BB sizes, deriving `{members, sharedTarget (aggregate threat), cohesion, loyaltyStrength}`. **Loyalty** (the
+> 2026-06-10 dial): `derivedLoyalty(disposition × soul state)`, weakest-member-weighted per bloc; a low-loyalty
+> member with a stronger outside pull DEFECTS pre-betrayal. The **bloc term** (`blocTerm`, scaled by loyalty)
+> bends live nominations + eviction votes + tie-breaks (`SeasonCtx.loyaltyOf`, wired by the adapter): bloc HOHs
+> shield bloc-mates, blocs vote together toward the shared enemy. Fracture is implicit (a betrayal-collapsed edge
+> excludes the betrayer next read). NOTHING stored — decision 0002 holds (the snapshot is bloc-free, proven);
+> Vault-free; deterministic. `tests/unit/blocs.test.ts` (incl. a live engineered-bloc drive) + all 9 BDD scenarios
+> in `cucumber.cjs`. Original prompt below.
 
 > Implement `docs/features/0043-emergent-bloc-behavior.{md,feature}`. A **pure, stateless** `detectBlocs(rel,
 > active)` that clusters mutual bonds at decision time (size ~2–5), each bloc deriving a shared target +

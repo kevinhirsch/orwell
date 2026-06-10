@@ -376,6 +376,20 @@ export class BbWorld extends World {
   osClock?: import("../../src/adapters/time/FakeClock").FakeClock;
   osHiddenBefore?: number;
 
+  // Emergent blocs (0043) scratch state.
+  blRel?: import("../../src/engine/relationships").RelationshipModel;
+  blActive?: Eid[];
+  blBlocs?: import("../../src/engine/blocs").Bloc[];
+  blSandbox?: import("../../src/composition/registry").UserSandbox;
+  blRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  blMembers?: Eid[];
+  blViolations?: string[];
+  blEnemyTargeted?: number;
+  blLoyaltyOf?: (id: Eid) => number;
+  blSoulState?: Record<Eid, number>;
+  blCalmStrength?: number;
+  blSerialized?: string;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };
