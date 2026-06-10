@@ -73,9 +73,21 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 14. **Admins can retrieve old chat transcripts for debugging** — quiet, not loudly exposed:
     an admin-gated API plus a small entry in the existing admin section of Settings (shape
     chosen 2026-06-10; specced as "Future specs" — 0053).
-15. **The UI enhancements track is prioritized** (2026-06-10): the chrome/windows and
-    transcript-surface lanes are first in dispatch order — see the priority note in the
-    parallel execution plan.
+15. **The UI enhancements track is prioritized** (2026-06-10, reaffirmed same day:
+    "high-impact UI changes should be prioritized first whenever possible"): the
+    chrome/windows and transcript-surface lanes are first in dispatch order — and when any
+    scheduling trade-off arises between a UI lane and a non-CRIT lane, the UI lane wins.
+    The S-stream's responsive-mechanism spec (ruling #16) slots at the top of the track,
+    since every other window change builds on it. See the priority note in the parallel
+    execution plan.
+16. **Responsiveness is a system, not a per-panel fix** (2026-06-10): the settings window
+    must work at normal desktop scaling (text currently crowds on a standard PC); **all**
+    windows need one coherent mechanism for internal responsiveness across devices and
+    viewport widths; and the product is held to the bar of **a mobile web app that functions
+    as if it's an installed app — integration and perfection with every placement**. A
+    dedicated responsiveness & installed-app audit stream (S) is commissioned under this
+    ruling; its system-level mechanism spec becomes the spine of the prioritized UI track
+    (ruling #15).
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
@@ -1230,3 +1242,237 @@ result; the liveSentinel/liveFairness lanes are the cross-lane regression net.
 5. **Wave E-POLISH/OPS/DOCS:** the LOW clusters (E8, E13, E14, E26, E32, E37, E40, E41,
    E59–E63, E67–E75, E79–E82, E85, E90, E92, E96, E97), E76–E78, E83/E84, E86/E87. Then the
    0051 future spec.
+
+---
+
+# Post-merge addenda (2026-06-10, after the round-5/6 merge to main)
+
+## A1 [MED-HIGH · Bug + Vacuous-test] Admin-enabled optional agent tools are silently re-disabled on every default game turn
+
+**The ruling/request (2026-06-10):** the Settings → Admin → Agent tools page lists the
+optional "power" tools (off by default); when an admin ENABLES one, it must actually work
+when the LLM pulls it as a lever.
+
+**The bug:** it doesn't, for exactly the four most likely candidates. Every Chat-mode turn
+auto-escalates to the agent loop whenever the engine is reachable — the *default* player path
+(`frontend/routes/chat_routes.py:565-567`, `auto_escalated = True`; the comment even
+documents the intent: "the heavy shell/code/file tools stay withheld by the auto_escalated
+block"). The withhold block at `:710-713` then updates `disabled_tools` with
+`{"bash","python","read_file","write_file","builtin_browser"}` **unconditionally — after**
+the game-build chokepoint at `:699-703` honored
+`game_build_disabled_additions(get_setting("game_tools_enabled"))`. Net effect: the admin's
+opt-in for `bash`/`python`/`read_file`/`write_file` is silently ignored on every
+chat-originated game turn and honored only when the player manually selects Agent mode.
+The rest of `GAME_TOOL_OPTIONAL` (`grep`/`glob`/`ls`/`edit_file`/`api_call`/
+`chat_with_model`/session tools, `agent_tools.py:116-123`) is NOT in the withhold set and
+works when enabled — so the admin panel behaves inconsistently per tool, which reads as
+random breakage.
+
+**The vacuous claimer (T-stream pattern):** `frontend/tests/test_game_tools_gating.py:161-162`
+asserts `game_build_disabled_additions(["bash"])` excludes bash — true in isolation, never
+composed with the auto-escalation override, so the suite "proves" the toggle while the
+production path defeats it.
+
+**Sub-note:** `app_api`/`api_call`, when enabled under the game build, will 404 against
+dropped verticals (their routes are unmounted by design) — the admin UI copy should say so
+rather than letting an enabled tool look broken.
+
+**Fix spec:** distinguish the two escalation reasons. The intent escalation
+(`chat_routes.py:453-457`, notes/email in plain chat) keeps the withhold as designed; the
+game escalation (`:565-567`) must not re-disable explicitly opted-in tools — subtract the
+opt-ins: `withheld - set(get_setting("game_tools_enabled", []))` (or skip the block entirely
+on the game path, since the game-build chokepoint at `:699-703` is already the single source
+of truth for that turn class). Keep `builtin_browser` withheld unconditionally (not in
+`GAME_TOOL_OPTIONAL` — there is no sanctioned opt-in).
+
+**Test spec:** (a) chat-path composition test in `test_game_tools_gating.py`: game build on,
+`game_tools_enabled=["bash"]`, drive the chat route with `engine_available` true and
+`chat_mode="chat"`; capture the disabled set handed to the agent loop; assert `bash` is NOT
+in it — mirror case (no opt-in) asserts it IS; (b) the same pair for a non-withheld optional
+(`grep`) to pin the consistency; (c) optional E2E: a scripted model calls `bash` on a
+game turn and the tool executes. This closes the gap the existing test's isolation
+assertion papers over.
+
+## A2 [MED · Bug + Change] Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
+
+End-to-end answer to "do disabled tools actually work when activated and called by the LLM's
+lever?" Four gates sit between the Settings → Admin → Agent tools toggle and a working call:
+
+1. **Game-build chokepoint** (`chat_routes.py:699-703`) — honors the opt-in. ✅
+2. **Auto-escalation withhold** (`:710-713`) — finding **A1**: silently defeats
+   `bash`/`python`/`read_file`/`write_file` on every chat-originated game turn. ❌
+3. **Schema selection** (`agent_loop.py:1600-1627, 1898-1922`) — on game turns
+   `_relevant_tools` is always a filtered set (RAG/keyword retrieval + pinned
+   `ORWELL_GAME_TOOLS`), and the function-calling array is
+   `FUNCTION_TOOL_SCHEMAS ∩ _relevant_tools − disabled_tools`. Tools in `ALWAYS_AVAILABLE`
+   (`tool_index.py:32-40`: bash, python, read/write/edit_file, grep, glob, ls, api_call)
+   reach the model when enabled — but the session-class optionals (`chat_with_model`,
+   `create_session`, `list_sessions`, `send_to_session`, `pipeline`, `manage_session`) and
+   `app_api` are NOT in `ALWAYS_AVAILABLE` and enter only via keyword hints
+   (`tool_index.py:395-403`) that in-character prose never triggers — **enabled but never
+   offered**: the toggle is a no-op for them on game turns. ❌
+4. **Per-owner security** (`tool_security.py:178-182` + `NON_ADMIN_BLOCKED_TOOLS:14-51`) —
+   non-admin owners are blocked from every power tool regardless of the toggle (sound
+   policy), but nothing in the admin UI says the toggle is admin-owner-only, so for
+   multi-account installs it reads as breakage. ⚠️ document.
+
+**Net matrix (single-admin install, default game turn):** work when enabled —
+`grep`/`glob`/`ls`/`edit_file`/`api_call`; defeated by gate 2 —
+`bash`/`python`/`read_file`/`write_file` (manual Agent mode only); defeated by gate 3 —
+the six session-class tools + `app_api` (which would additionally 404 against dropped
+verticals, A1 sub-note). Non-admin players: nothing optional works (gate 4, by design).
+
+**Fix spec:** (a) gate 2 per A1; (b) gate 3 — union the explicit opt-ins into the candidate
+set alongside the pinned game tools (one line at the `pinned_tools` merge,
+`agent_loop.py:1626`): an admin grant is not something retrieval should have to guess;
+(c) gate 4 — admin UI copy: "optional tools apply to admin accounts only," and gray the
+toggles when viewing as non-admin-relevant.
+**Test spec:** schema-assembly test — game turn, `game_tools_enabled=["chat_with_model"]`,
+assert the schema array handed to the API call contains `chat_with_model` (and the A1
+composition cases); pytest for the gate-4 UI copy.
+
+## A3 [MED · UX/System] The settings pane has no shared layout primitives — stray dividers and margin defects are the symptom
+
+**User-reported (2026-06-10):** stray dividers and margin problems in the settings pane (on
+top of the ruling-16 crowding report). **Root cause verified:** `frontend/static/js/settings.js`
+contains **219 inline `style="…"` attributes** and the settings markup defines **zero** shared
+section/divider classes (no `.settings-section`, no `.settings-divider`, no `<hr>` — section
+breaks are improvised per tab, e.g. `<div style="font-size:11px;font-weight:600;opacity:0.6;
+margin:8px 0 2px">` pseudo-headers). With no spacing scale or section component, every tab
+accumulates its own margins/borders independently — orphaned separators and uneven gutters
+are the inevitable result, and no single fix can hold.
+
+**Fix spec (folds into the S-stream mechanism — ruling #16):** a small settings layout kit in
+`style.css` — `.settings-section` (titled group with one consistent top rule + spacing-token
+margins), `.settings-divider`, `.settings-row` variants on a shared spacing scale — then a
+mechanical sweep of `settings.js` replacing inline layout styles with the kit (non-layout
+inline styles like the spinner can stay). Add a regression gate: a pytest/source check that
+caps inline `style=` attributes in `settings.js` (ratchet from 219 down as the sweep
+proceeds) so the pane can't silently re-accrete ad-hoc layout.
+
+---
+
+# Stream S — responsiveness & installed-app audit (ruling #16; live-measured)
+
+**Method:** static analysis of `style.css` (36,494 lines) + all injected panel styles, plus a
+**live boot** driven with Playwright at 1366×768, 1024×768 (the ~125%-scaling proxy), 960×900
+(half-snap), and 390×844 — measuring real modal/panel geometry, scrollWidth vs clientWidth,
+computed font sizes, and touch targets, with per-tab settings screenshots. Round-4 and
+E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12.
+
+## Findings
+
+- **S1 [HIGH · Bug/UX] The settings modal cannot de-crowd at normal desktop sizes —
+  root-caused.** Measured: at 1366×768, 1024×768, and 960×900 the modal renders
+  **byte-identically** (720px wide, 160px rail, 30px rows, 10px hints, 12px labels).
+  Causes: (1) `width: min(720px, 92vw)` (`style.css:21349`) — `min()` only shrinks, never
+  grows; at 125% scaling the same 720px eats 66% of a ~1093px viewport while `85vh`
+  collapses to ~522px ⇒ less room, same density; (2) the whole modal is fixed sub-13px px
+  type (`21415` 9px, `22488` 12px labels, `5664` 10px hints…); (3) **the density feature is
+  dead on arrival** — `:root.density-compact/spacious` set root font-size (`152–156`) but
+  the stylesheet has **1,135 px font-sizes vs 70 rem and 0 clamp()**; the user's only
+  "bigger text" lever does nothing to the surface they complain about; (4) fixed chrome
+  (160px rail, fixed paddings/gaps) absorbs nothing; (5) dozens of inline px styles are
+  unreachable by any future rule (S12). *Fix:* width `clamp(560px, 58cqw, 880px)` against
+  the overlay container; rem scale per the mechanism; rail `clamp(140px, 18cqw, 200px)`.
+  *Acceptance:* hints ≥12px-equivalent at 1366×768; density toggle visibly scales the modal.
+- **S2 [MED · UX]** No short-viewport tier for settings: `min-height: 400px` +
+  `max-height: calc(85vh - 60px)` (`21379–21380`) with `margin-top: 7vh` nearly touches the
+  viewport bottom at 614px CSS height. Use `min(85dvh, 720px)`; drop the min-height under a
+  height breakpoint.
+- **S3 [MED · UX/Bug]** The narrow settings tab rail hides 476px of tabs with zero
+  affordance (`scrollWidth 866` vs `clientWidth 390`, `scrollbar-width:none` at `21595`) —
+  Appearance/Shortcuts/Account/admin tabs are invisible on phones; and the layout switch
+  exists as two diverging copies (`@media 600` at `21561` vs `@container 620` at `21582`).
+  Keep only the container query; add an edge-fade affordance or two-row wrap.
+- **S4 [MED · System]** Container-query adoption is half-finished: six surfaces use it
+  (settings, tool modals, doc panes); every other modal/panel responds to the *viewport* —
+  wrong by definition for draggable/snappable windows (the settings rule's own comment says
+  so, `21579–21581`). Make `@container` the rule for all windows.
+- **S5 [HIGH · System] Breakpoint anarchy: ~20 distinct thresholds across three idioms.**
+  `@media` widths 768(×71)/600/820/640/520/540/480/460/700/720/769/821; container
+  620/460/360/340/260; **JS `innerWidth` vs 768 written four different ways (44 sites)** —
+  at exactly 768px, modules disagree which mode they're in. Plus near-duplicate tiers
+  (820/821, 600/620). *Fix:* the token set + lint gate in the mechanism.
+- **S6 [HIGH · System] Every floating panel sizes itself differently; four have no narrow
+  handling at all.** Inventory: status/social = fixed top offsets + 220px + a ≤768 sheet
+  rule; **finale (240px floater, zero @media), presence, retrospective — no narrow tier**;
+  the engine banner overlays at `top:0` (covered the mobile sheet grab-handle in
+  screenshots); the DR modal re-implements none of the shared sheet system. The hard-coded
+  `top:64px`/`top:210px` offsets encode assumptions about *each other's heights* — the
+  structural cause of the R2/R4 overlap family. *Fix:* the anchor-slot contract below.
+- **S7 [HIGH · Bug] PWA installability is broken: both manifest icons 404.**
+  `manifest.json:12–13` → `/static/icon-192.png`/`icon-512.png` — neither exists (verified
+  live); `apple-touch-icon` points at the same hole; the per-route manifest swap explicitly
+  skips the root path. No valid icon ⇒ **no install prompt** — for a product whose mandate
+  is "functions as an installed app." *Fix:* ship maskable 192/512 PNGs + 180px apple icon,
+  precache, smoke-assert 200s.
+- **S8 [MED · Bug/UX] Standalone-mode gaps:** no `@media (display-mode: standalone)`
+  anywhere; no `text-size-adjust: 100%` (iOS landscape autoinflation of the fixed-px
+  panels); JS-injected panels never use `env(safe-area-inset-*)` (presence `bottom:84px` /
+  retro `bottom:96px` sit in the home-indicator band; the `top:0` banner collides with the
+  notch under `viewport-fit=cover`).
+- **S9 [MED · UX/Bug] Touch-target floor violations beyond round 4's HUD chrome
+  (measured):** settings nav tabs 32px at every viewport; slash-menu rows ≈22px;
+  shortcut-action 24×24; fallback-remove 22×22; color swatches 24×24. The composer's
+  coarse-pointer bump (28×32 → 44×44, `style.css:3036`) proves the mechanism — it was never
+  swept. *Fix:* one `(pointer: coarse)` floor rule on a `--tap-min` token.
+- **S10 [HIGH · System] There is no typography system** — 1,135 px font-sizes, 70 rem,
+  0 clamp(); each surface invents its own 9–14px micro-scale. Ironically the orwell game
+  panels use rem and would scale for free under a root-size mechanism the inherited
+  workspace defeats.
+- **S11 [MED · Bug] Saved panel positions restore unclamped on a different-sized viewport**
+  (`orwellStatusPanel.js:68–73` et al.; `windowDrag.js`'s clamp runs only on `resize`) — a
+  position saved at 2560px restores fully off-screen at 1366px. `windowResize.js:223`
+  already clamps restored *sizes* — unify the pattern at restore (cross-device half of E91).
+- **S12 [MED · System]** Sizing-in-markup: dozens of inline `font-size`/`width` styles in
+  the settings tree (`index.html:1794–1810`, `settings.js` builders) escape any central
+  refactor — sweep into classes + the A3 ratchet gate.
+- **S13 [LOW · Bug latent]** Modal width clamps use `vw` against a viewport the modal
+  doesn't occupy (overlays are narrowed by the sidebar; `92vw` is inert at 1024px with the
+  sidebar open) — use `cqw` against the overlay container they already have.
+
+## The coherent mechanism (implementation-ready — the spine of the UI track)
+
+One new `frontend/static/css/responsive-tokens.css` loaded before `style.css` + a contract
+section in `INTEGRATION.md`:
+
+1. **One breakpoint token set** — `--bp-compact: 480px / --bp-narrow: 768px / --bp-medium:
+   1024px / --bp-wide: 1440px` (container tiers {360, 620}); enforced by a pytest lint gate
+   that fails any `@media`/`innerWidth` threshold outside the set; JS normalized to a single
+   `isNarrow()` via `matchMedia` (kills the 768 off-by-one written four ways). **Viewport
+   queries are for page chrome only; anything draggable/dockable responds to `@container`.**
+2. **The modal & floating-panel sizing contract** — every modal: `width: clamp(min,
+   preferred-cqw, max)` (never bare fixed, never plain `min()`), `max-height: min(85dvh,
+   cap)` with internal body scroll, mandatory `container-type`, and ≤768 becomes the shared
+   bottom sheet (DR modal + onboarding move onto the shared classes). Every floating panel:
+   **anchor slots, not coordinates** — a slot registry (`top-right`, `top-left`,
+   `bottom-center`, `banner`) owned by `modalManager` stacks panels by measured height,
+   deleting the `top:64/210px` constants and making the D2 collision rule structural; drag
+   is a persisted offset-from-slot, clamped at restore (S11/E91); safe-area-inset offsets
+   everywhere fixed positioning exists (S8).
+3. **Fluid type on a rem scale** — fluid root via clamp(), token scale `--fs-2xs … --fs-xl`,
+   floor `--fs-2xs` (~11px) for all UI text, density classes revived for free; migration is
+   mechanical px→rem starting with the settings tree; add `text-size-adjust: 100%`.
+4. **The PWA baseline** — real maskable icons (S7), a `display-mode: standalone` tier
+   (status-bar-safe banner), the one coarse-pointer `--tap-min` floor rule (S9), and
+   codifying the already-correct meta/dvh/overscroll/SW posture in INTEGRATION.md so a
+   vendored update can't regress it.
+5. **The responsive matrix gate** — promote the round-4 Playwright harness into
+   `frontend/scripts/responsive_matrix.py` (FE pytest lane): ~10 staged surfaces × 6
+   viewports + one standalone emulation + one 200% root-font pass; measurable assertions
+   for overflow (`scrollWidth ≤ clientWidth+1` unless declared + affordance), overlap (no
+   registered surface intersects another or the composer — D2, executable), **crowding**
+   (no unellipsized text overflow; computed font ≥ `--fs-2xs`; label/control collision
+   check; line-box overflow on nowrap elements), and touch (≥36px boxes at coarse-pointer).
+   The full matrix ran in <2 minutes in the audit environment.
+
+## Sound (keep-list)
+
+The mobile sheet system (`6504–6660`: dvh, safe-area, grab pills, overscroll-contain) is
+genuinely good — just not universal; the settings container query is the right template;
+viewport meta is correct and zoom is not disabled; the SW caching strategy is tiered and
+versioned; `body{height:100dvh}` + `overscroll-behavior:none` already handle the
+keyboard/pull-to-refresh classes; `windowResize.js` clamps restored sizes (the pattern to
+unify); the composer's coarse-pointer bump works; and the decision card is the one game
+surface already on the correct sizing idiom — the model for the rest.
