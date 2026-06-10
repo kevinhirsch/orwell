@@ -26,6 +26,11 @@ export interface GameEvent {
   /** Off-screen flag. Invariant: an event the player witnessed is NEVER hidden. */
   hidden: boolean;
   content: string;
+  /**
+   * A houseguest's hidden element surfaced in this scene (B50's rare-reveal loop). STRUCTURAL —
+   * the production richness gate (B54) counts reveals from the store instead of parsing content.
+   */
+  reveal?: boolean;
 }
 
 export type Visibility = "VISIBLE" | "HIDDEN";
