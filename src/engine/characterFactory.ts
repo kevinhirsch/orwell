@@ -70,9 +70,11 @@ export interface Character {
   archetype: Archetype;
   strategyStyle: StrategyStyle;
   stats: { physical: number; mental: number; social: number };
+  // --- Curated PUBLIC persona facets (0004 amendment + B61 cast voices) ---
+  // Seed-stable, Vault-free: the things any houseguest can see/hear across the kitchen
+  // counter — projected on the houseguest card as the narrator's voice anchor.
+  // NOT aptitudes, NOT hidden attributes (those live in `hiddenElements`), NOT Soul content.
   background: string;
-  // --- Public appearance/identity facets (0004 amendment, for 0020 portraits) ---
-  // Seed-stable, Vault-free: NOT aptitudes, NOT hidden attributes, NOT Soul content.
   appearance: string;
   age: number;
   presentation: string;
