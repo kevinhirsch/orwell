@@ -60,10 +60,17 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   echo "==> orwell lives in LXC ${CTID}; running the doctor inside the container"
   TMP_DOC="$(mktemp /tmp/orwell-doctor-XXXXXX.sh)"
   if [[ -n "${BASH_SOURCE[0]:-}" && -r "${BASH_SOURCE[0]:-}" ]]; then
-    cp "${BASH_SOURCE[0]}" "$TMP_DOC"
+    cp "${BASH_SOURCE[0]}" "$TMP_DOC"          # ran from a file → push that exact file
+  elif [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then
+    # Ran via `bash -c "$(curl ...)"`: there is no file, but bash holds the full script text in
+    # BASH_EXECUTION_STRING — push exactly what is running (branch-accurate, no re-fetch; a
+    # re-fetch from ${BRANCH} 404s when testing a branch that main doesn't have yet).
+    printf '%s\n' "$BASH_EXECUTION_STRING" > "$TMP_DOC"
   else
+    # Last resort (e.g. `curl | bash`): fetch from ${BRANCH}. Set BRANCH=<name> when testing
+    # an unmerged branch.
     curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-doctor.sh" -o "$TMP_DOC" \
-      || die "could not fetch orwell-doctor.sh from branch '${BRANCH}'"
+      || die "could not fetch orwell-doctor.sh from branch '${BRANCH}' (set BRANCH=<name> for an unmerged branch)"
   fi
   pct push "$CTID" "$TMP_DOC" /tmp/orwell-doctor.sh || die "pct push into LXC ${CTID} failed"
   rm -f "$TMP_DOC"
