@@ -802,7 +802,21 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 > the soul drifts; no emotional number on any player surface (extend the 0001 canary). Add to `cucumber.cjs`.
 > Open a PR.
 
-### B31 — 0042 competition library
+### B31 — 0042 competition library  ·  **✅ DONE 2026-06-10**
+
+> **Built to green.** New `src/engine/competitionLibrary.ts`: a curated, tunable `COMPETITION_LIBRARY`
+> (12 `CompetitionDef`s — 6 HOH + 6 veto: name, phase, the existing resolution `type` with its `governing`
+> aptitude pinned to `RELEVANT[type]` by test, optional secondary flavor, format, and a Vault-free narrative
+> scaffold `{premise, beats, winReads}`) + the deterministic `drawCompetition(phase, week, rng, recent)`
+> (seeded; avoids the last `NO_REPEAT_WINDOW` per phase). `liveSeason.ts` replaced the hardcoded
+> `HOH_TYPES`/`VETO_TYPES` week-index rotation: the comp is drawn FIRST on the beat rng (so `advance` and
+> `peekCompetition` replay identically), resolved draws are recorded into the persisted `compHistory` (0030),
+> and a Houseguest's-Choice pause stores the drawn def id (`vetoComp`) so the resume runs the SAME comp.
+> Resolution math untouched (0006/0028 — the engine still decides; favorite calibrated, player unprotected).
+> `CompetitionResultView` gained optional `name`/`format`/`narrative` (no stat/score — the 0001 canary
+> extended to the enriched view); the 0034 deep-game BDD fixtures repointed to seed 5 (the reshuffle moved
+> which seeds run deep). `tests/unit/competitionLibrary.test.ts` (11) + all 6 BDD scenarios in `cucumber.cjs`.
+> Original prompt below.
 
 > Implement `docs/features/0042-competition-library.{md,feature}`. A seeded, tunable `COMPETITION_LIBRARY` of
 > `CompetitionDef`s (name, governing/secondary stat, format, Vault-free narrative scaffold) + a deterministic

@@ -26,6 +26,8 @@ import { MANNER_THRESHOLDS } from "./juryConstants";
 import { RELATIONSHIP_CONSTANTS } from "./relationshipConstants";
 import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
+import { drawCompetition, competitionById } from "./competitionLibrary";
+import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -164,6 +166,10 @@ export interface LiveSeasonState {
   twist?: { kind: TwistKind; phase: "pending" | "running" };
   /** Twists that actually fired (exactly-once bookkeeping + the 0048 unsealing payoff). */
   firedTwists?: TwistEvent[];
+  /** The drawn competitions so far, per phase (0042) — feeds the no-immediate-repeat draw; persisted (0030). */
+  compHistory?: { hoh: string[]; veto: string[] };
+  /** This week's drawn veto comp (def id) — held across a Houseguest's-Choice pause so the resume runs the SAME comp. */
+  vetoComp?: string;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */
@@ -220,46 +226,54 @@ export type DecisionInput =
   | { kind: "finale-answer"; appeal: FinaleAppeal }
   | { kind: "juror-vote"; vote: EntityId };
 
-const HOH_TYPES: readonly CompetitionType[] = ["endurance", "mental", "physical"];
-const VETO_TYPES: readonly CompetitionType[] = ["puzzle", "social", "memory"];
+/** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
+const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource): CompetitionDef =>
+  drawCompetition(phase, s.week, rng, s.compHistory?.[phase] ?? []);
 
-const hohType = (week: number): CompetitionType => HOH_TYPES[(week - 1) % HOH_TYPES.length]!;
-const vetoType = (week: number): CompetitionType => VETO_TYPES[(week - 1) % VETO_TYPES.length]!;
+/** Record a resolved draw into the persisted history (0030) — what the NEXT draw must avoid. */
+function recordDraw(s: LiveSeasonState, phase: CompetitionPhase, def: CompetitionDef): void {
+  (s.compHistory ??= { hoh: [], veto: [] })[phase].push(def.id);
+}
 
 /**
  * Resolve the HOH competition (no state mutation): the eligible field + the engine-decided winner.
  * The SOLE place HOH outcomes are computed — `advance` commits it, `peekCompetition` previews it,
  * both with the same seeded rng, so a narrator's `runCompetition` can never disagree with the loop.
  */
-function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { field: EntityId[]; winner: EntityId } {
+function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { def: CompetitionDef; field: EntityId[]; winner: EntityId } {
+  // The comp is drawn FIRST (one rng draw) so `advance` and `peekCompetition` replay identically.
+  const def = drawFor(s, "hoh", rng);
   // Final 3 (0045): the final-HOH competition lifts the outgoing-HOH restriction — everyone plays.
   const finalThree = s.active.length === 3;
   const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
-  return { field, winner: winnerOf(field, hohType(s.week), ctx, rng, s.compIntent ?? "compete") };
+  return { def, field, winner: winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete") };
 }
 
 /** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
 /** The veto draw resolves to a winner — UNLESS the player drew Houseguest's Choice, which DEFERS (B45). */
 type VetoResolution =
-  | { field: EntityId[]; winner: EntityId }
-  | { deferred: true; field: EntityId[]; candidates: EntityId[] };
+  | { def: CompetitionDef; field: EntityId[]; winner: EntityId }
+  | { deferred: true; def: CompetitionDef; field: EntityId[]; candidates: EntityId[] };
 
 function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): VetoResolution {
+  // The comp is drawn FIRST (one rng draw) so `advance` and `peekCompetition` replay identically.
+  const def = drawFor(s, "veto", rng);
   const draw = vetoParticipants(weekState(s, ctx), rng, {
     houseguestsChoiceChip: true,
     choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
     playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
   });
   if (draw.houseguestsChoice && draw.houseguestsChoice.picked === undefined) {
-    return { deferred: true, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
+    return { deferred: true, def, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
   }
-  return { field: draw.participants, winner: winnerOf(draw.participants, vetoType(s.week), ctx, rng, s.compIntent ?? "compete") };
+  return { def, field: draw.participants, winner: winnerOf(draw.participants, def.type, ctx, rng, s.compIntent ?? "compete") };
 }
 
 /** Resolve the HOH competition beat (used by `advance` and the comp-intent resume); consumes the intent. */
 function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
   const finalThree = s.active.length === 3;
-  const { winner: hoh } = resolveHoh(s, ctx, rng);
+  const { def, winner: hoh } = resolveHoh(s, ctx, rng);
+  recordDraw(s, "hoh", def); // the comp resolved — the next hoh draw avoids it (0042)
   s.compIntent = undefined; // declared intent consumed (locks: it can't be re-declared after the result)
   s.hoh = hoh;
   s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
@@ -275,11 +289,13 @@ function resolveVetoBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
   const r = resolveVeto(s, ctx, rng);
   if ("deferred" in r) {
     // The player drew Houseguest's Choice (B45): pause for THEM to pick the sixth player. The declared
-    // intent stays set; the houseguests-choice resume runs the comp with it.
+    // intent stays set; the houseguests-choice resume runs the SAME drawn comp (0042) with it.
+    s.vetoComp = r.def.id;
     s.vetoField = r.field;
     s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
     return null;
   }
+  recordDraw(s, "veto", r.def); // the comp resolved — the next veto draw avoids it (0042)
   s.compIntent = undefined; // consumed
   s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
   return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
@@ -291,16 +307,18 @@ function resolveVetoBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
 export interface CompetitionPeek {
   beat: "hoh-competition" | "veto-competition";
   type: CompetitionType;
+  /** The drawn library definition (0042): name, format, and the Vault-free narrative scaffold. */
+  def: CompetitionDef;
   field: EntityId[];
   winner: EntityId;
 }
 export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionPeek | null {
   if (s.pending || s.finished) return null;
-  if (s.beat === "hoh-competition") { const { field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: hohType(s.week), field, winner }; }
+  if (s.beat === "hoh-competition") { const { def, field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: def.type, def, field, winner }; }
   if (s.beat === "veto-competition") {
     const r = resolveVeto(s, ctx, rng);
     if ("deferred" in r) return null; // the player must pick the sixth player first — no preview yet
-    return { beat: s.beat, type: vetoType(s.week), field: r.field, winner: r.winner };
+    return { beat: s.beat, type: r.def.type, def: r.def, field: r.field, winner: r.winner };
   }
   return null;
 }
@@ -451,7 +469,7 @@ function rollWeek(s: LiveSeasonState): void {
   s.outgoingHoh = s.hoh;
   s.hoh = undefined; s.nominees = undefined; s.vetoField = undefined;
   s.vetoHolder = undefined; s.vetoUsed = false; s.saved = undefined;
-  s.replacement = undefined; s.finalNominees = undefined;
+  s.replacement = undefined; s.finalNominees = undefined; s.vetoComp = undefined;
   if (s.active.length <= 2) {
     s.beat = "finale";
     return;
@@ -959,7 +977,10 @@ export function applyDecision(
       if (!options.includes(input.pick)) throw new Error("the Houseguest's Choice must pick an eligible candidate");
       s.pending = undefined;
       const field = [...s.vetoField!, input.pick]; // the player's pick completes the field
-      const holder = winnerOf(field, vetoType(s.week), ctx, rng, s.compIntent ?? "compete");
+      // The SAME comp drawn at the deferral (0042) — looked up, never re-drawn (restart-safe, 0030).
+      const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
+      const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
+      recordDraw(s, "veto", def);
       s.compIntent = undefined; // the declared intent is consumed
       s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
       return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };

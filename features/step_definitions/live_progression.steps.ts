@@ -7,7 +7,7 @@ import { assertNoSentinels } from "../../tests/support/assertions";
 import { npc } from "../../src/domain/ids";
 
 // Feature 0034 — codifies the live weekly loop + decision seam, driven only through the MCP player
-// channel (createCharacter → advanceGame/submitDecision). Seed 2: the player survives deep and faces
+// channel (createCharacter → advanceGame/submitDecision). Seed 5: the player survives deep and faces
 // the full range of decisions (a thorough wiring proof, mirroring tests/integration/liveProgression).
 
 type Player = import("../../src/adapters/mcp/McpServer").McpServer;
@@ -61,9 +61,9 @@ const newLive = (user: string, seed: number): { reg: GameSessionRegistry; player
 // --- S1: auto-resolve + stop ---------------------------------------------------
 
 Given("a live game started for the player", async function (this: BbWorld) {
-  const { reg, player } = newLive("u1", 2);
+  const { reg, player } = newLive("u1", 5);
   this.registry = reg; this.livePlayer = player;
-  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  await player.callTool("createCharacter", { playerName: "Player", seed: 5 });
 });
 
 When("the game is advanced to the player's first binding decision", async function (this: BbWorld) {
@@ -92,9 +92,9 @@ Then("advancing again does not skip the pending decision", async function (this:
 // --- S2: validated apply -------------------------------------------------------
 
 Given("a live game advanced to the player's first binding decision", async function (this: BbWorld) {
-  const { reg, player } = newLive("u1", 2);
+  const { reg, player } = newLive("u1", 5);
   this.registry = reg; this.livePlayer = player;
-  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  await player.callTool("createCharacter", { playerName: "Player", seed: 5 });
   this.lastAdvance = (await driveToPending(player)).view;
 });
 
@@ -121,9 +121,9 @@ Then("the beats are recorded as player-witnessed events", function (this: BbWorl
 // --- S3: illegal refused -------------------------------------------------------
 
 Given("a live game advanced to a nomination decision", async function (this: BbWorld) {
-  const { reg, player } = newLive("u1", 2);
+  const { reg, player } = newLive("u1", 5);
   this.registry = reg; this.livePlayer = player;
-  await player.callTool("createCharacter", { playerName: "Player", seed: 2 });
+  await player.callTool("createCharacter", { playerName: "Player", seed: 5 });
   this.lastAdvance = await driveToKind(player, "nominations");
 });
 

@@ -422,6 +422,14 @@ export class BbWorld extends World {
   sdTrailA?: string[];
   sdTrailB?: string[];
 
+  // Competition library (0042) scratch state.
+  clRun?: { history: { hoh: string[]; veto: string[] }; vetoFieldSizes: number[]; compViews: string };
+  clTrail?: string[];
+  clDef?: import("../../src/engine/competitionLibrary").CompetitionDef;
+  clWinRate?: number;
+  clPlayerRate?: number;
+  clViews?: string;
+
   // The casting interview (0050) scratch state.
   castSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
   castView?: import("../../src/ports/GameSession").GameStateView;
