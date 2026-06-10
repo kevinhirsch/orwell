@@ -91,6 +91,12 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
   // God Mode can SEE sandbox health (B58/audit E5+E6): integrity, faults, the circuit state.
   registry.setHealthProvider((user) => orchestrator.sandboxHealth(user));
+  // Preload saved users at boot (B60/audit E11): without this, every deploy froze each house until
+  // that user's NEXT request — resume them now so the watcher/turn loop can see them immediately.
+  // A user whose save fails to resolve is skipped (B35's tolerant-load handles the quarantine).
+  for (const user of saveStore?.listUsers?.() ?? []) {
+    try { registry.sandboxFor(user); } catch { /* skip an unresumable save; the rest still boot */ }
+  }
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {
     registry,

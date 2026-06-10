@@ -5,6 +5,8 @@ import { classify, validateEvent } from "../../domain/event";
 export class InMemoryEventStore implements EventStore {
   private readonly events: GameEvent[] = [];
   private readonly ids = new Set<string>();
+  /** The sandbox's ONE monotonic tick (B60/audit E12): event `ts` always sorts coherently. */
+  private lastTs = 0;
 
   record(event: GameEvent): void {
     validateEvent(event); // reject any mislabeled (e.g. player-witnessed-but-hidden) event
@@ -12,6 +14,21 @@ export class InMemoryEventStore implements EventStore {
     // silently corrupt the id-keyed superset checkpoint (0031) — fail loud instead of accepting it.
     if (this.ids.has(event.id)) throw new Error(`duplicate event id: ${event.id}`);
     this.ids.add(event.id);
+    // One monotonic per-sandbox tick (B60/E12): producers used to stamp ts with their OWN semantics
+    // (loop indices, wall clocks, store sizes), so ordering by ts was meaningless. The store is now
+    // the tick authority: a ts that would go backwards is normalized to last+1; a larger ts advances
+    // the tick. (`restoreRecord` bypasses this so a restored history round-trips exactly.)
+    const ts = event.ts > this.lastTs ? event.ts : this.lastTs + 1;
+    this.lastTs = ts;
+    this.events.push({ ...event, ts });
+  }
+
+  /** Restore a persisted event EXACTLY (id/ts/hidden byte-identical) — the 0030 resume path. */
+  restoreRecord(event: GameEvent): void {
+    validateEvent(event);
+    if (this.ids.has(event.id)) throw new Error(`duplicate event id: ${event.id}`);
+    this.ids.add(event.id);
+    this.lastTs = Math.max(this.lastTs, event.ts);
     this.events.push(event);
   }
 

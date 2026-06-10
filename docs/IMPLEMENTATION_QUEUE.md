@@ -1577,7 +1577,18 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > no-op. **Acceptance:** `vaultBoundaryViolations()` fails when a surfaces/services/mcp/**narrative** module type-imports
 > any engine-only module; the constants grep gate passes; the duplicate fold is one implementation. Open a PR.
 
-### B60 — transport robustness + determinism  ·  Claude Code  ·  **continuous · audit E9–E12**
+### B60 — transport robustness + determinism  ·  Claude Code  ·  **continuous · audit E9–E12 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E9) 256KB body cap (413 + socket destroy), a 30s request timeout, basic name/args
+> validation, and honest error mapping — a DELIBERATE engine refusal (plain `Error`) is 400; any other throw
+> (TypeError etc. = an engine bug) is 500. (E10) calls are SERIALIZED PER USER via a promise queue (a player
+> action can never race a sandbox swap/reset; different users stay concurrent); the sandbox resolves inside the
+> queued job. (E11) `UserSaveStore.listUsers?()` + `FileSaveStore` impl + `composeRuntime` preloads every saved
+> user at boot — a deploy no longer freezes each house until that user's next request. (E12) the per-moment rng
+> keys off the PERSISTED game seed (`SessionCore.seed`; legacy saves fall back to the old name key), the command
+> seam gets a per-user rng, and the EventStore is the ONE monotonic ts authority (`record` normalizes backwards
+> ts; the new `restoreRecord` round-trips a restored history exactly). `tests/unit/transportHardening.test.ts`.
+> Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), harden the HTTP transport and the RNG/ts hygiene. (E9) Add a request **body-size
 > cap** (256KB), a request **timeout**, basic per-tool **arg validation**, and map non-validation throws to **500** (today

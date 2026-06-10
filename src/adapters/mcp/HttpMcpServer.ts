@@ -47,6 +47,10 @@ export interface HttpMcpOptions {
 
 /** The front-end (trusted loopback auth tier, 0021) asserts the user via this header. */
 const USER_HEADER = "x-orwell-user";
+/** Request body cap (B60/audit E9): no tool call legitimately needs more than this. */
+const MAX_BODY_BYTES = 256 * 1024;
+/** Per-request timeout (B60/E9): a wedged request must release its socket. */
+const REQUEST_TIMEOUT_MS = 30_000;
 /** Tools that may run for a user with no existing game (i.e. may mint a fresh sandbox). */
 // 0050: the casting interview happens BEFORE a game exists, so its tools must be able to mint the
 // user's sandbox — updateCasting records the first answers; getMomentPrompt serves the interview
@@ -75,7 +79,19 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
   const pick = (channel: "player" | "admin", user: string): McpServer =>
     isResolver(deps) ? deps.resolve(channel, user) : (channel === "player" ? deps.player : deps.admin);
 
-  return createServer((req, res) => {
+  // Per-user serialization (B60/audit E10): two in-flight calls for the SAME user run in order —
+  // closing the sandbox-swap race (a reset racing a player action) and future-proofing an async
+  // narrator. Different users still run fully concurrently (isolation, 0021).
+  const queues = new Map<string, Promise<void>>();
+  const enqueue = (user: string, job: () => Promise<void>): void => {
+    const tail = (queues.get(user) ?? Promise.resolve()).then(job, job);
+    queues.set(user, tail);
+    void tail.finally(() => {
+      if (queues.get(user) === tail) queues.delete(user); // drop drained queues (no unbounded map)
+    });
+  };
+
+  const server = createServer((req, res) => {
     const send = (code: number, body: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
@@ -109,21 +125,38 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
 
       if (req.method === "POST" && match[2] === "call") {
         let body = "";
-        req.on("data", (chunk) => (body += chunk));
+        let oversize = false;
+        req.on("data", (chunk) => {
+          body += chunk;
+          // E9: cap the request body — no tool call legitimately needs more; drop the rest.
+          if (!oversize && body.length > MAX_BODY_BYTES) {
+            oversize = true;
+            send(413, { error: "request body too large" });
+            req.destroy();
+          }
+        });
         req.on("end", () => {
-          void (async () => {
-            let name: string, args: Record<string, unknown> | undefined;
+          if (oversize) return;
+          // E10: serialize per user — a player action can never race a sandbox swap/reset.
+          enqueue(user, async () => {
+            let name: unknown, args: unknown;
             try {
-              ({ name, args } = JSON.parse(body || "{}") as { name: string; args?: Record<string, unknown> });
+              ({ name, args } = JSON.parse(body || "{}") as { name?: unknown; args?: unknown });
             } catch {
               return send(400, { error: "invalid JSON body" });
+            }
+            // E9: basic arg validation before anything touches the engine.
+            if (typeof name !== "string" || name.length === 0) return send(400, { error: "a tool name is required" });
+            if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) {
+              return send(400, { error: "args must be an object" });
             }
             // (4) Don't mint a sandbox for an unknown user unless they are starting a game.
             if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
               return send(404, { error: "no active game for this user" });
             }
-            // Resolving the sandbox can fail (e.g. an unreadable save) — that's a server error (500),
-            // distinct from a bad tool/args (400). Either way the process stays up.
+            // E10: the sandbox is resolved HERE, inside the serialized job — never at request start.
+            // Resolving can fail (e.g. an unreadable save) — a server error (500), distinct from a
+            // bad tool/args (400). Either way the process stays up.
             let server: McpServer;
             try {
               server = pick(channel, user);
@@ -131,11 +164,17 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
               return send(500, { error: "internal error" });
             }
             try {
-              send(200, { result: await server.callTool(name, args ?? {}) });
+              send(200, { result: await server.callTool(name, (args as Record<string, unknown>) ?? {}) });
             } catch (e) {
-              send(400, { error: (e as Error).message });
+              // E9: a DELIBERATE refusal (a plain Error thrown by the engine's validation —
+              // illegal nominee, unknown tool) is the caller's fault (400). Anything else
+              // (TypeError, RangeError, a subclass) is an engine bug and must read as 500,
+              // not masquerade as a client error.
+              const deliberate = e instanceof Error && e.constructor === Error;
+              if (deliberate) send(400, { error: (e as Error).message });
+              else send(500, { error: "internal error" });
             }
-          })();
+          });
         });
         return;
       }
@@ -144,6 +183,9 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
       return send(500, { error: "internal error" });
     }
   });
+  // E9: a wedged request must release its socket (the default Node timeout is far too generous).
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  return server;
 }
 
 /**
