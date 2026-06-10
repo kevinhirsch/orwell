@@ -23,10 +23,29 @@ _TIMEOUT = float(
 )
 
 
+def _engine_token() -> str | None:
+    """The shared secret the engine enforces when ORWELL_ENGINE_TOKEN is set (B67/ops A1).
+    Read at call time (not import time) so tests and live env changes take effect."""
+    return os.environ.get("ORWELL_ENGINE_TOKEN") or os.environ.get("BBAI_ENGINE_TOKEN") or None
+
+
 def _user_headers(user: str | None) -> dict:
     # The front-end is the trusted auth tier (0021): it ASSERTS the authenticated user, and the
-    # engine routes the call into that user's isolated sandbox. Default keeps single-tenant working.
-    return {"X-Orwell-User": user or "default"}
+    # engine routes the call into that user's isolated sandbox.
+    #
+    # B67/ops A2: an ANONYMOUS caller sends NO user header. Single-tenant engines default the
+    # missing header to "default" server-side (behavior unchanged); under ORWELL_ENGINE_MULTIUSER
+    # the engine refuses it (400) instead of silently collapsing anonymous sessions into one
+    # shared sandbox. The authenticated-user path is untouched.
+    headers: dict = {}
+    if user:
+        headers["X-Orwell-User"] = user
+    token = _engine_token()
+    if token:
+        # B67/ops A1: the engine enforces this token on every tool route; without sending it the
+        # documented auth-on config 401'd every call and bricked the game.
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 class EngineToolError(RuntimeError):

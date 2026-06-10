@@ -2002,7 +2002,17 @@ PR per item).
 > live** (real production callers) but its competition modifier is **unverified for fairness** (→ B69).
 > Resume that pass before closing prior items as done.
 
-### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3**
+### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (A1) the FE now SENDS the token: `_user_headers` attaches `Authorization: Bearer <token>`
+> from `ORWELL_ENGINE_TOKEN` (`BBAI_ENGINE_TOKEN` legacy fallback), read at call time — both channels share
+> `_post_tool`, so player AND admin calls carry it. The installer GENERATES a token into `data/.env`
+> (`openssl rand -hex 32`, `/dev/urandom` fallback) — both systemd units read the same EnvironmentFile, so
+> engine auth is ON by default even co-located. (A2) an ANONYMOUS caller now sends NO `x-orwell-user` header:
+> single-tenant engines default it server-side (unchanged); `ORWELL_ENGINE_MULTIUSER=1` refuses it (400) instead
+> of collapsing anonymous sessions into one shared sandbox — the authenticated path is untouched.
+> `docs/INSTALL.md` updated. `frontend/tests/test_b67_engine_auth.py`; the engine-side 401/400 behavior was
+> already pinned by `tests/integration/httpBoundary.test.ts` (B34).
 
 > In `kevinhirsch/orwell`, close the engine-auth footgun. The engine **enforces**
 > `ORWELL_ENGINE_TOKEN` on every route (`src/adapters/mcp/HttpMcpServer.ts:92`), but the front-end has
