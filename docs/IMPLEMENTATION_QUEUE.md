@@ -3,11 +3,14 @@
 Dispatch these to implementer agents **in order** (respecting `depends on`). Items on different
 tracks can run **in parallel** once their deps are met.
 
-> 🎯 **The CURRENT dispatch point is the audit batches at the BOTTOM of this file** — the
-> [full product-audit batch (B34–B60 / C12–C18)](#full-product-audit-batch-b34b60--c12c18--2026-06-09),
-> the front-end & experience batch (B61+ / C19+), and the operations/security batch (B67+ / C29+).
-> Every earlier "NOW" / "start here" block in this file is **historical** (kept as the work record);
-> do not dispatch from them.
+> 🎯 **THE QUEUE IS DRAINED (2026-06-10).** Every item in this file — through the product-audit
+> batch (B34–B60 / C12–C18), the front-end & experience batch (B61–B66 / C19–C28), the
+> operations/security/test-integrity batch (B67–B72 / C29–C33), the casting interview (B73), and
+> the pre-audit feature drafts (0042/B31 · 0043/B32 · 0044/B33) — is **✅ DONE**, each marked with
+> its verifying artifact. The whole file is now the work record. **New work starts as a new spec
+> in `docs/features/` + a new item appended here**; the only known deferrals are listed in
+> `CLAUDE.md` → "Remaining work" (0022 MVP-2, the Proxmox host smoke, the real relational/vector
+> adapters, full MCP/JSON-RPC).
 
 **Agent split (suggested, not strict):**
 - **Claude Code → the TypeScript engine** (`src/`) — it has built the hexagonal core.
