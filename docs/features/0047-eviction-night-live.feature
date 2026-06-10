@@ -23,6 +23,17 @@ Feature: Eviction night live
     And it does not name the evictee until the final vote lands
     And no Vault sentinel value appears on the eviction surface
 
+  # Amended 2026-06-10 (E12 + T2): eviction votes are SECRET BALLOTS, as on the real show — the
+  # staged reveal reads anonymized ballots ("a vote to evict …"), never the voter; rogue votes,
+  # scapegoating, and vote paranoia become possible again. The attribution is recorded
+  # engine-only and unseals exclusively in the post-season retrospective (0048). T2 also
+  # replaced the self-referential tally assertions with electorate-derived bounds.
+  Scenario: Vote secrecy — ballots are anonymous until the season ends
+    Given a started game at an eviction with a decided vote
+    When the eviction is advanced through the seam
+    Then every revealed ballot is anonymized
+    And the post-season retrospective unseals the season's ballots
+
   Scenario: The evicted houseguest gets a goodbye beat
     Given an eviction whose result has landed
     When the staging continues

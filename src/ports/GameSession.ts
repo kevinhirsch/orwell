@@ -274,14 +274,16 @@ export interface FinaleView {
  * The Vault-free projection of an in-progress weekly eviction (0047). The two nominees by name, the
  * current stage, and the votes REVEALED SO FAR only — NEVER the unread votes, never a pre-reveal tally,
  * never the evictee before the last vote lands. A vote appears here only once read in the seeded order.
+ * E12: eviction votes are SECRET BALLOTS — the reveal carries the ballot ("a vote to evict X"), never
+ * the voter; attributions unseal only in the post-season retrospective (0048).
  */
 export interface EvictionView {
   /** Which stage the eviction is in: votes | goodbye | result. */
   stage: string;
   /** The two nominees by name. */
   nominees: NamedRef[];
-  /** The votes revealed so far, in reveal order — each a (voter → the nominee they voted to evict) by name. */
-  votesRevealed: Array<{ voter: NamedRef; votedFor: NamedRef }>;
+  /** The anonymized ballots revealed so far, in reveal order — the nominee each vote names, never the voter. */
+  votesRevealed: Array<{ votedFor: NamedRef }>;
 }
 
 /** The Vault-free result of advancing the game or resolving a decision. */
@@ -388,6 +390,15 @@ export interface RetrospectiveView {
   hiddenStory: Array<{ type: string; content: string }>;
   /** The producer's sealed reserve twists: each kind + the week it fired (null = never fired). */
   twists: Array<{ kind: string; firedWeek: number | null }>;
+  /**
+   * The UNSEALED weekly eviction ballots (E12): who really voted to evict whom, week by week.
+   * Secret all season (the live reveal is anonymized); tellable only here, post-season.
+   */
+  evictionVotes?: Array<{
+    week: number;
+    evictee: NamedRef;
+    votes: Array<{ voter: NamedRef; votedFor: NamedRef }>;
+  }>;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */

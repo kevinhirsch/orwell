@@ -311,7 +311,16 @@ export class GameSessionAdapter implements GameSession {
       kind: t.kind as string,
       firedWeek: fired.get(t.kind) ?? null,
     }));
-    return { winner: this.named(this.live.winner), hiddenStory, twists };
+    // E12: the weekly secret ballots unseal HERE — and only here, behind the same terminal gate.
+    const evictionVotes = (this.live.voteRecord ?? []).map((r) => ({
+      week: r.week,
+      evictee: { id: r.evictee, name: this.nameOf(r.evictee) },
+      votes: Object.entries(r.voteOf).map(([voter, votedFor]) => ({
+        voter: { id: voter as EntityId, name: this.nameOf(voter as EntityId) },
+        votedFor: { id: votedFor, name: this.nameOf(votedFor) },
+      })),
+    }));
+    return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -1063,8 +1072,10 @@ export class GameSessionAdapter implements GameSession {
     return {
       stage: e.stage,
       nominees: e.nominees.map(ref),
+      // E12: secret ballots — the projection carries the anonymized ballots read so far, never
+      // the voter; the attribution unseals only in the post-season retrospective (0048).
       votesRevealed: e.revealOrder.slice(0, e.revealIx).map((voter) => ({
-        voter: ref(voter), votedFor: ref(e.voteOf[voter]!),
+        votedFor: ref(e.voteOf[voter]!),
       })),
     };
   }

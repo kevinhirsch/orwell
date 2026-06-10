@@ -152,6 +152,13 @@ export interface LiveSeasonState {
    * management has genuine effect at the finale. ENGINE-ONLY: never crosses the wall.
    */
   mannerByEvictee?: Record<EntityId, Record<EntityId, EvictionManner>>;
+  /**
+   * The per-week eviction ballot record (E12): who voted to evict whom, kept ENGINE-ONLY for
+   * manner/deal reconciliation and for the 0048 retrospective UNSEALING. Eviction votes are
+   * secret ballots in Big Brother — no projection attributes a weekly vote to its voter while
+   * the season lives; the attribution surfaces only through the post-season retrospective.
+   */
+  voteRecord?: Array<{ week: number; evictee: EntityId; voteOf: Record<EntityId, EntityId> }>;
   /** The in-progress live finale sub-loop (0037); set when the finale begins. */
   finale?: FinaleProgress;
   /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
@@ -603,7 +610,10 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
         const voter = e.revealOrder[e.revealIx]!;
         const votedFor = e.voteOf[voter]!;
         e.revealIx += 1;
-        return { beat: "eviction-reveal", content: `${voter} votes to evict ${votedFor}`, participants: [voter, votedFor] };
+        // E12: eviction votes are SECRET BALLOTS — the reveal reads the ballot, never the voter
+        // ("a vote to evict X…"). `voteOf` stays engine-internal (manner/deal reconciliation);
+        // attributions unseal only in the 0048 post-season retrospective.
+        return { beat: "eviction-reveal", content: `a vote to evict ${votedFor}`, participants: [votedFor] };
       }
       // The last vote is read: the tally decides (HOH breaks a tie — the player HOH pauses, B44).
       const tally = revealedTally(e);
@@ -642,6 +652,9 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
 function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: EntityId, rng: RandomnessSource): BeatEvent {
   const e = s.eviction!;
   e.evictee = evictee;
+  // E12: the ballots are recorded ENGINE-ONLY for the 0048 retrospective unsealing — the week's
+  // secret votes become tellable only once the season is over.
+  (s.voteRecord ??= []).push({ week: s.week, evictee, voteOf: { ...e.voteOf } });
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
   recordEvictionManner(s, evictee, [s.hoh!, ...votesToEvict], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public

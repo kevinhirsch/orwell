@@ -304,6 +304,8 @@ export class BbWorld extends World {
   enSentinel?: string;
   enWarmLean?: number;
   enColdLean?: number;
+  /** T2: the staged eviction's electorate size, read from the engine's own state. */
+  enElectorate?: number;
   enResumedEvictee?: string;
   enOriginalEvictee?: string;
 
