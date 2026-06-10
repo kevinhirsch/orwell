@@ -39,6 +39,10 @@ Then("the prompt frames the producer conducting a casting interview", function (
   assert.match(this.castPrompt!, /casting interview/i);
 });
 
+Then("the prompt instructs the model to record answers as they land", function (this: BbWorld) {
+  assert.match(this.castPrompt!, /updateCasting/);
+});
+
 Then("the prompt instructs the model to end the interview through character creation", function (this: BbWorld) {
   assert.match(this.castPrompt!, /createCharacter/);
 });
@@ -120,13 +124,79 @@ Then("the player's private strategy is held as player-only material", function (
   assert.ok(!JSON.stringify(this.castView).includes(INTERVIEW_REQ.privateStrategy));
 });
 
+// --- The incremental intake (the engine decides the next step) -------------------
+
+When("the producer records the player's name through casting", function (this: BbWorld) {
+  this.castStatus = this.castSession!.updateCasting({ playerName: INTERVIEW_REQ.playerName });
+});
+
+Then("the casting status lists the name as on file", function (this: BbWorld) {
+  assert.equal(this.castStatus!.known["playerName"], INTERVIEW_REQ.playerName);
+});
+
+Then("the casting status is ready to finalize", function (this: BbWorld) {
+  assert.equal(this.castStatus!.ready, true);
+});
+
+Then("the engine names the next step of the interview", function (this: BbWorld) {
+  assert.ok(typeof this.castStatus!.next === "string" && this.castStatus!.next.length > 0);
+});
+
+Given("the producer records the full interview through casting", function (this: BbWorld) {
+  this.castStatus = this.castSession!.updateCasting(INTERVIEW_REQ);
+});
+
+When("character creation is finalized without arguments", function (this: BbWorld) {
+  try {
+    this.castView = this.castSession!.createCharacter({});
+    delete this.castError;
+  } catch (e) {
+    this.castError = e as Error;
+  }
+});
+
+Then("the season starts with the recorded name, backstory, and interview memories", function (this: BbWorld) {
+  assert.equal(this.castError, undefined);
+  assert.equal(this.castView!.started, true);
+  const p = this.castSession!.snapshot().house!.player;
+  assert.equal(p.name, INTERVIEW_REQ.playerName);
+  assert.equal(p.character.background, INTERVIEW_REQ.backstory);
+  for (const note of INTERVIEW_REQ.interviewNotes) {
+    assert.ok(p.soul.memory.some((m) => m.includes(note)), note);
+  }
+});
+
+Then("casting is rejected for the missing name", function (this: BbWorld) {
+  assert.ok(this.castError, "creation should have been rejected");
+  assert.match(this.castError!.message, /name/i);
+});
+
+Then("no game has been started", function (this: BbWorld) {
+  assert.equal(this.castSession!.getGameState().started, false);
+});
+
 // --- Restart non-degradation ----------------------------------------------------
 
 When("the game is snapshotted and restored", function (this: BbWorld) {
   const snap = cloneSession(this.castSession!.snapshot());
   const resumed = new GameSessionAdapter();
   resumed.restore(snap);
-  this.castRestoredPlayer = resumed.snapshot().house!.player;
+  this.castResumed = resumed;
+  // The started-game scenario reads the restored player; pre-game restores have no house yet.
+  const house = resumed.snapshot().house;
+  if (house) this.castRestoredPlayer = house.player;
+});
+
+Then("the restored casting status still lists the name as on file", function (this: BbWorld) {
+  const casting = this.castResumed!.getGameState().casting!;
+  assert.equal(casting.known["playerName"], INTERVIEW_REQ.playerName);
+  assert.equal(casting.ready, true);
+});
+
+Then("the restored pre-game prompt carries what is already on file", function (this: BbWorld) {
+  const prompt = this.castResumed!.getMomentPrompt({}).systemPrompt;
+  assert.match(prompt, /already on file/i);
+  assert.ok(prompt.includes(INTERVIEW_REQ.playerName));
 });
 
 Then("the restored player retains the backstory, motivation, and interview memories", function (this: BbWorld) {

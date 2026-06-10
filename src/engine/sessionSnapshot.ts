@@ -1,4 +1,5 @@
 import type { GameHouse } from "./characterFactory";
+import type { CastingIntake } from "./castingIntake";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
@@ -46,6 +47,8 @@ export interface SessionCore {
   live?: LiveSeasonState | null;
   /** Tracked promises the player is party to (0039), so deals survive a restart (0030). */
   deals?: Deal[];
+  /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
+  casting?: CastingIntake;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

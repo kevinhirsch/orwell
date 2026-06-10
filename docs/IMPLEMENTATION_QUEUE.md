@@ -2187,3 +2187,22 @@ PR per item).
 > all hold (balanced bounds, OOC/no-witness, B36 no-wipe). 7 BDD scenarios + 12 unit + 8 pytest.
 > **Evolving mechanic** — anticipated next steps in 0050 §9 (richer derived signals, NPC casting
 > tapes, producer follow-ups rereading the interview).
+
+### B73b — 0050 v2: incremental intake — the modal is GONE; the chat acquires everything  ·  Claude Code (engine + FE)  ·  **product ruling 2026-06-10 — ✅ DONE**
+
+> **DONE.** Ruling: the authoring data must be "acquired through the actual chat with Orwell instead of
+> being a modal popup", and "OOBE can be half done … the status of which determines what the next step
+> is within the game engine." Engine: a new `updateCasting` player tool records answers AS THEY LAND
+> (any subset; notes append) into a durable pre-game intake (`SessionCore.casting` — a half-done
+> interview survives a restart, 0030); `castingStatusOf` (pure, `src/engine/castingIntake.ts`) computes
+> { known, missing, next, ready } in the engine's ask-order — **the engine, not the model, owns the next
+> step**; the pre-game `GameStateView`/moment prompt carry the live status ("already on file — do not
+> re-ask"); `createCharacter` finalizes FROM the intake (`playerName` now optional; rejected if no name
+> anywhere); the casting tools (`createCharacter`/`updateCasting`/`getMomentPrompt`) may mint a fresh
+> user's sandbox (HttpMcpServer allowlist). Front-end: `apply_game_framing` fetches the interview moment
+> pre-game (fallback: a producer-voiced static steer); the C23 authoring form is **deleted** —
+> `orwellOnboarding.js` keeps only the J4 model-gate + F5 dark-house holding cards and the seat hand-off
+> (fresh chat session per interview = the F7 fence, then prefill "I take my seat for the casting
+> interview." — never auto-send); `updateCasting` wired through schemas/agent allowlists/executor with
+> the C13-style enum drift tests now covering both casting tools. 4 new BDD scenarios (11 total) +
+> 8 new unit (20) + FE pytest green.

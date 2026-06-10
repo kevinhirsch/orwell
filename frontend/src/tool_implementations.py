@@ -4615,9 +4615,9 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         args = _parse_tool_args(content)
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
-    player_name = (args.get("playerName") or "").strip()
-    if not player_name:
-        return {"error": "playerName is required", "exit_code": 1}
+    # 0050: the name may already be on file from the interview (updateCasting) — the engine
+    # finalizes from its intake and rejects with a clear message if no name exists anywhere.
+    player_name = (args.get("playerName") or "").strip() or None
     try:
         res = await orwell_engine.create_character(
             player_name,
@@ -4634,6 +4634,20 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             seed=args.get("seed"),
             user=owner,
         )
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_update_casting(content: str, owner: Optional[str] = None) -> Dict:
+    """0050: record casting-interview answers as they land; the engine returns the status."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    try:
+        res = await orwell_engine.update_casting(args, user=owner)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

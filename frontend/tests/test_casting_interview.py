@@ -52,6 +52,22 @@ def test_pre_game_turn_is_framed_as_the_interview_under_the_game_build(monkeypat
     assert preface[0]["content"].startswith("CASTING-INTERVIEW-PROMPT")
 
 
+def test_pre_game_falls_back_to_the_static_steer_when_the_moment_fetch_fails(monkeypatch):
+    _pre_game(monkeypatch)
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+
+    async def broken_mp(moment=None, user=None):
+        raise RuntimeError("hiccup")
+
+    monkeypatch.setattr(orwell_engine, "get_moment_prompt", broken_mp)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
+    assert (ea, ga, fd) == (True, False, False)
+    # Never a generic assistant: the static producer steer frames the turn instead.
+    assert preface[0]["content"] == chat_helpers.PRE_GAME_PROMPT
+    assert "updateCasting" in chat_helpers.PRE_GAME_PROMPT
+
+
 def test_pre_game_turn_stays_plain_when_the_game_build_is_off(monkeypatch):
     _pre_game(monkeypatch)
     monkeypatch.setenv("ORWELL_GAME_BUILD", "0")  # full debug workspace: normal chat
@@ -131,6 +147,51 @@ def test_do_create_character_forwards_the_deepeners(monkeypatch):
     assert received["interview_notes"] == DEEPENERS["interviewNotes"]
 
 
+def test_do_create_character_allows_a_missing_name(monkeypatch):
+    # 0050: the name may already be on file from the interview — the ENGINE validates.
+    received = {}
+
+    async def fake_create(player_name, **kwargs):
+        received["playerName"] = player_name
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    import json
+    res = _run(tool_impl.do_create_character(json.dumps({}), owner="u"))
+    assert res["exit_code"] == 0
+    assert received["playerName"] is None
+
+
+def test_update_casting_client_filters_and_normalizes(monkeypatch):
+    sent = {}
+
+    async def fake_call(tool, args, user=None):
+        sent["tool"] = tool
+        sent["args"] = args
+        return {"known": {}, "missing": [], "next": None, "ready": False}
+
+    monkeypatch.setattr(orwell_engine, "_call", fake_call)
+    _run(orwell_engine.update_casting({
+        "playerName": "P", "interviewNotes": "a lone note",  # bare string → one note
+        "unknownField": "dropped", "backstory": "  ", "motivation": None,
+    }, user="u"))
+    assert sent["tool"] == "updateCasting"
+    assert sent["args"] == {"playerName": "P", "interviewNotes": ["a lone note"]}
+
+
+def test_do_update_casting_returns_the_engine_status(monkeypatch):
+    async def fake_update(fields, user=None):
+        return {"known": {"playerName": "P"}, "missing": ["backstory"],
+                "next": "their life outside the house, in their words", "ready": True}
+
+    monkeypatch.setattr(orwell_engine, "update_casting", fake_update)
+    import json
+    res = _run(tool_impl.do_update_casting(json.dumps({"playerName": "P"}), owner="u"))
+    assert res["exit_code"] == 0
+    out = json.loads(res["output"])
+    assert out["ready"] is True and out["missing"] == ["backstory"]
+
+
 # --- 3. the casting sheet cannot drift -------------------------------------------------
 
 def _engine_casting_sheet() -> tuple[set, set]:
@@ -147,31 +208,42 @@ def _engine_casting_sheet() -> tuple[set, set]:
     return archetypes, styles
 
 
-def _create_character_schema() -> dict:
+def _tool_schema(name: str) -> dict:
     for t in tool_schemas.FUNCTION_TOOL_SCHEMAS:
-        if isinstance(t, dict) and t.get("function", {}).get("name") == "createCharacter":
+        if isinstance(t, dict) and t.get("function", {}).get("name") == name:
             return t["function"]
-    raise AssertionError("createCharacter schema missing")
+    raise AssertionError(f"{name} schema missing")
 
 
-def test_schema_archetype_enum_matches_the_engine():
+def test_schema_archetype_enums_match_the_engine():
     archetypes, _ = _engine_casting_sheet()
     assert archetypes, "failed to parse the engine's ARCHETYPES — parser or table changed shape"
-    schema = _create_character_schema()
-    enum = set(schema["parameters"]["properties"]["archetype"]["enum"])
-    assert enum == archetypes
+    for tool in ("createCharacter", "updateCasting"):
+        enum = set(_tool_schema(tool)["parameters"]["properties"]["archetype"]["enum"])
+        assert enum == archetypes, tool
 
 
-def test_schema_strategy_style_enum_matches_the_engine():
+def test_schema_strategy_style_enums_match_the_engine():
     _, styles = _engine_casting_sheet()
     assert styles, "failed to parse the engine's strategy styles"
-    schema = _create_character_schema()
-    enum = set(schema["parameters"]["properties"]["strategyStyle"]["enum"])
-    assert enum == styles
+    for tool in ("createCharacter", "updateCasting"):
+        enum = set(_tool_schema(tool)["parameters"]["properties"]["strategyStyle"]["enum"])
+        assert enum == styles, tool
 
 
-def test_schema_carries_every_interview_deepener():
-    props = _create_character_schema()["parameters"]["properties"]
-    for field in ("personaArchetype", "personaStrategyStyle", "backstory",
-                  "motivation", "privateStrategy", "interviewNotes"):
-        assert field in props, field
+def test_schemas_carry_every_interview_deepener():
+    for tool in ("createCharacter", "updateCasting"):
+        props = _tool_schema(tool)["parameters"]["properties"]
+        for field in ("playerName", "personaArchetype", "personaStrategyStyle", "backstory",
+                      "motivation", "privateStrategy", "interviewNotes"):
+            assert field in props, f"{tool}.{field}"
+
+
+def test_create_character_no_longer_hard_requires_a_name():
+    # 0050: finalization may rely on the interview's recorded name; the ENGINE gates it.
+    assert _tool_schema("createCharacter")["parameters"]["required"] == []
+
+
+def test_update_casting_is_pinned_and_agent_callable():
+    assert "updateCasting" in tool_schemas.ORWELL_GAME_TOOLS
+    assert "updateCasting" in agent_tools.GAME_TOOL_KEEP

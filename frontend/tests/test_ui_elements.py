@@ -69,61 +69,46 @@ def _raise(exc_factory):
 
 class TestOnboardingOverlay:
     """
-    The casting-interview gate (orwellOnboarding.js, feature 0050):
-      - Mounts only when the game has not started (/api/orwell/state → {started:false})
-      - Primary path: dissolves into the chat and PREFILLS the composer (never auto-sends) —
-        the producer-led interview runs in the chat and ends via createCharacter
-      - A mid-interview reload does not re-block the chat (sessionStorage seat marker)
-      - Quick-start fallback: name-only form → POST /api/orwell/new-game (no-model escape hatch)
-      - On quick-start success: removes itself and fires orwell:gamechanged
+    Onboarding with NO data-entry modal (orwellOnboarding.js, feature 0050):
+      - Character creation is acquired through the CHAT (the producer's casting interview);
+        this module never collects fields and never posts to /api/orwell/new-game
+      - Pre-game + model ready: PREFILLS the composer (never auto-sends) and opens a fresh
+        chat session ONCE per interview (F7 fence; sessionStorage seat marker)
+      - J4 model gate + F5 dark-house holding cards remain (blocking notices, not forms)
     """
 
     # -- JS source (D-level) --------------------------------------------------
 
-    def test_onboarding_mounts_on_state_check(self):
+    def test_onboarding_routes_on_state_check(self):
         assert "/api/orwell/state" in JS_ONBOARDING
 
-    def test_gate_is_interview_framed(self):
-        assert "casting interview" in JS_ONBOARDING.lower()
+    def test_no_data_entry_form_remains(self):
+        # The interview owns data acquisition (0050): no name/archetype inputs, no form post.
+        for gone in ("ob-name", "ob-arche", "ob-style", "ob-form", "/api/orwell/new-game"):
+            assert gone not in JS_ONBOARDING, gone
 
-    def test_gate_has_interview_button(self):
-        assert "ob-interview" in JS_ONBOARDING
-
-    def test_gate_prefills_composer_and_never_autosends(self):
+    def test_seat_taking_prefills_composer_and_never_autosends(self):
         # The house rule (ADR 0003): prefill + focus; the player sends the first line themselves.
         assert 'getElementById("message")' in JS_ONBOARDING
         assert "box.focus()" in JS_ONBOARDING
+        assert "casting interview" in JS_ONBOARDING
         assert "sendMessage" not in JS_ONBOARDING
 
-    def test_gate_marks_seat_taken_for_reloads(self):
+    def test_seat_taking_runs_once_per_interview(self):
         assert "sessionStorage" in JS_ONBOARDING
 
-    def test_quickstart_reads_ob_name(self):
-        assert "ob-name" in JS_ONBOARDING
+    def test_new_interview_gets_a_fresh_chat_session(self):
+        # F7: a finished/reset season's transcript never rides along as narrator context.
+        assert "sidebar-new-chat-btn" in JS_ONBOARDING
 
-    def test_quickstart_references_submit_button(self):
-        assert "ob-submit" in JS_ONBOARDING
+    def test_holding_cards_remain(self):
+        assert "Production needs a feed source" in JS_ONBOARDING  # J4 model gate
+        assert "The house is dark" in JS_ONBOARDING               # F5 engine down
 
-    def test_quickstart_references_error_element(self):
-        assert "ob-err" in JS_ONBOARDING
-
-    def test_onboarding_references_overlay_root(self):
+    def test_holding_card_is_a_real_modal(self):
         assert "orwell-onboarding" in JS_ONBOARDING
-
-    def test_quickstart_guards_empty_name(self):
-        assert "trim()" in JS_ONBOARDING or ".trim" in JS_ONBOARDING
-
-    def test_quickstart_disables_button_during_submit(self):
-        assert "disabled" in JS_ONBOARDING
-
-    def test_onboarding_removes_itself_on_success(self):
-        assert ".remove()" in JS_ONBOARDING
-
-    def test_quickstart_fires_gamechanged_on_success(self):
-        assert "orwell:gamechanged" in JS_ONBOARDING
-
-    def test_quickstart_posts_to_new_game(self):
-        assert "/api/orwell/new-game" in JS_ONBOARDING
+        assert "inertBackground" in JS_ONBOARDING
+        assert "trapFocus" in JS_ONBOARDING
 
     # -- Route contracts (C-level) -------------------------------------------
 

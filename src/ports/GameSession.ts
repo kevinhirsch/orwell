@@ -74,6 +74,46 @@ export interface GameStateView {
   house: HouseguestCard[];
   /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
   deals?: DealView[];
+  /** Pre-game only (0050): where the casting interview stands — what's captured, what's next. */
+  casting?: CastingStatusView;
+}
+
+/**
+ * The casting interview's incremental intake (0050). OOBE is no longer one atomic call: the
+ * producer records each answer AS IT LANDS, the engine tracks which building blocks are in,
+ * and that status determines the interview's next step. All fields are the player's own
+ * authored material; the intake lives pre-game and is durable (a half-done interview survives
+ * a restart, 0030). `createCharacter` finalizes from it.
+ */
+export interface UpdateCastingReq {
+  /** The player's display name — the one REQUIRED field before casting can finalize. */
+  playerName?: string;
+  /** The producer's canonical casting-sheet mapping (drives balanced hidden stats). */
+  archetype?: string;
+  strategyStyle?: string;
+  /** The player's OWN words for who they are / how they'll play (display & narrative only). */
+  personaArchetype?: string;
+  personaStrategyStyle?: string;
+  /** Their life outside the house, in their words. */
+  backstory?: string;
+  /** Why they came to play — player-only material. */
+  motivation?: string;
+  /** How they ACTUALLY plan to play — player-only (NO_NPC_PATHWAY, 0013/0015). */
+  privateStrategy?: string;
+  /** Get-to-know notes — APPENDED to what's already recorded (never replaced). */
+  interviewNotes?: string[];
+}
+
+/** Where the casting interview stands (0050) — Vault-free; it echoes only the player's own words. */
+export interface CastingStatusView {
+  /** Fields already captured, echoing the recorded value (notes echo as a count). */
+  known: Record<string, string>;
+  /** Coverage still to acquire, in the engine's interview order. */
+  missing: string[];
+  /** The engine-picked next step of the interview (null when coverage is complete). */
+  next: string | null;
+  /** True once the required minimum (a name) is in — createCharacter may finalize. */
+  ready: boolean;
 }
 
 /** The player makes a deal WITH a houseguest (player↔NPC). NPC↔NPC deals are off-screen/Vault-held. */
@@ -84,8 +124,12 @@ export interface MakeDealReq {
 }
 
 export interface CreateCharacterReq {
-  /** The player's authored display name (the only human-authored profile). */
-  playerName: string;
+  /**
+   * The player's authored display name (the only human-authored profile). Optional since 0050:
+   * when omitted, finalization uses the name the casting interview recorded via `updateCasting`
+   * (a name from SOMEWHERE is still required — creation is rejected without one).
+   */
+  playerName?: string;
   archetype?: string;
   strategyStyle?: string;
   // --- Casting-interview deepeners (0050): the producer's distillation of the interview. ---
@@ -272,6 +316,12 @@ export interface SubmitDecisionReq {
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
+  /**
+   * Record casting-interview answers as they land (0050) — any subset of fields, callable any
+   * number of times pre-game. Returns where the interview stands (known / missing / next / ready);
+   * the engine, not the model, decides the next step. No-op (current status) once a game started.
+   */
+  updateCasting(req: UpdateCastingReq): CastingStatusView;
   /** Vault-free public status (week/phase/HOH/nominees/veto) for the status panel. */
   gameStatus(): PublicGameStatus;
   /** The current Vault-free game state (phase, the player's card, the house roster). */

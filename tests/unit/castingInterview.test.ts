@@ -3,6 +3,9 @@ import {
   ARCHETYPES, ALL_STRATEGY_STYLES, runPlayerOOBE, strengthTier,
   playerAptitudesWithinNpcBounds,
 } from "../../src/engine/characterFactory";
+import {
+  CASTING_COVERAGE, castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate,
+} from "../../src/engine/castingIntake";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 
 // Feature 0050 — the casting interview. Roles only (no houseguest names).
@@ -124,5 +127,111 @@ describe("the casting card through the live session (0050 §5)", () => {
     // The card shows the canonical fallback the engine accepted; the persona keeps their words.
     expect(ARCHETYPES.some((s) => s.archetype === view.player!.castingCard!.characterType)).toBe(true);
     expect(view.player!.archetype).toBe("a galaxy-brain anomaly");
+  });
+});
+
+describe("the incremental casting intake (0050 — OOBE can be half-done)", () => {
+  it("scalars overwrite; notes append, trim, and dedupe", () => {
+    let intake = mergeCastingUpdate(emptyIntake(), {
+      playerName: "  The Interviewee  ", interviewNotes: [" first ", "first", ""],
+    });
+    expect(intake.playerName).toBe("The Interviewee");
+    expect(intake.interviewNotes).toEqual(["first"]);
+    intake = mergeCastingUpdate(intake, { playerName: "The Interviewee Revised", interviewNotes: ["second"] });
+    expect(intake.playerName).toBe("The Interviewee Revised");
+    expect(intake.interviewNotes).toEqual(["first", "second"]);
+  });
+
+  it("status: ready gates on the name; next follows the engine's coverage order", () => {
+    const fresh = castingStatusOf(emptyIntake());
+    expect(fresh.ready).toBe(false);
+    expect(fresh.missing[0]).toBe("playerName");
+    expect(fresh.next).toBe(CASTING_COVERAGE[0]!.ask);
+
+    const named = castingStatusOf(mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee" }));
+    expect(named.ready).toBe(true);
+    expect(named.known["playerName"]).toBe("The Interviewee");
+    expect(named.missing).not.toContain("playerName");
+    expect(named.next).toBe(CASTING_COVERAGE[1]!.ask);
+  });
+
+  it("a fully covered intake has no next step", () => {
+    let intake = emptyIntake();
+    intake = mergeCastingUpdate(intake, {
+      playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
+      personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
+      archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
+    });
+    const st = castingStatusOf(intake);
+    expect(st.missing).toEqual([]);
+    expect(st.next).toBeNull();
+    expect(intakeIsEmpty(intake)).toBe(false);
+  });
+
+  it("the session records answers as they land, persists each change, and resumes after restart", () => {
+    const s = new GameSessionAdapter();
+    let saves = 0;
+    s.setOnPersist(() => { saves += 1; });
+    const st1 = s.updateCasting({ playerName: "The Interviewee" });
+    expect(st1.ready).toBe(true);
+    expect(saves).toBe(1);
+    s.updateCasting({}); // nothing new → no save
+    expect(saves).toBe(1);
+    s.updateCasting({ motivation: "to win" });
+    expect(saves).toBe(2);
+
+    // The half-done interview is durable state: a fresh session resumes it.
+    const resumed = new GameSessionAdapter();
+    resumed.restore(JSON.parse(JSON.stringify(s.snapshot())));
+    const casting = resumed.getGameState().casting!;
+    expect(casting.known["playerName"]).toBe("The Interviewee");
+    expect(casting.known["motivation"]).toBe("to win");
+    // …and the pre-game prompt tells the producer what's on file + the next step.
+    const prompt = resumed.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toMatch(/already on file/i);
+    expect(prompt).toContain("The Interviewee");
+    expect(prompt).toMatch(/NEXT STEP/);
+  });
+
+  it("finalizing without arguments uses everything recorded; args override field-by-field", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({
+      playerName: "The Interviewee", backstory: "a recorded life",
+      motivation: "to win quietly", interviewNotes: ["reads rooms"],
+      archetype: ARCHETYPES[1]!.archetype,
+    });
+    const view = s.createCharacter({ motivation: "to win loudly" }); // override one field
+    expect(view.started).toBe(true);
+    expect(view.player!.name).toBe("The Interviewee");
+    const p = s.snapshot().house!.player;
+    expect(p.character.background).toBe("a recorded life");
+    expect(p.motivation).toBe("to win loudly");
+    expect(p.soul.memory.some((m) => m.includes("reads rooms"))).toBe(true);
+    // The intake is cleared once the season starts (its material lives on the player).
+    expect(s.snapshot().casting).toBeUndefined();
+  });
+
+  it("the season cannot start before a name is recorded — and the failure changes nothing", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({ motivation: "to win" });
+    expect(() => s.createCharacter({})).toThrow(/name/i);
+    expect(s.getGameState().started).toBe(false);
+    expect(s.getGameState().casting!.known["motivation"]).toBe("to win");
+  });
+
+  it("after the season starts, updateCasting records nothing and reports done", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Interviewee", seed: 5 });
+    const st = s.updateCasting({ playerName: "Somebody Else" });
+    expect(st).toEqual({ known: {}, missing: [], next: null, ready: true });
+    expect(s.getGameState().player!.name).toBe("The Interviewee");
+  });
+
+  it("the pre-game view carries the casting status (the engine, not the model, owns next)", () => {
+    const s = new GameSessionAdapter();
+    const view = s.getGameState();
+    expect(view.started).toBe(false);
+    expect(view.casting).toBeDefined();
+    expect(view.casting!.ready).toBe(false);
   });
 });

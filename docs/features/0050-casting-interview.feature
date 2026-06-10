@@ -13,9 +13,36 @@ Feature: The casting interview — producer-led character creation that seeds th
     Given no game has started
     When the moment prompt is requested
     Then the prompt frames the producer conducting a casting interview
+    And the prompt instructs the model to record answers as they land
     And the prompt instructs the model to end the interview through character creation
     And the prompt carries every canonical archetype in its manifest
     And the prompt carries every canonical strategy style in its manifest
+
+  Scenario: The interview records answers as they land and the engine names the next step
+    Given no game has started
+    When the producer records the player's name through casting
+    Then the casting status lists the name as on file
+    And the casting status is ready to finalize
+    And the engine names the next step of the interview
+
+  Scenario: A half-done interview survives a restart and resumes where it left off
+    Given no game has started
+    And the producer records the player's name through casting
+    When the game is snapshotted and restored
+    Then the restored casting status still lists the name as on file
+    And the restored pre-game prompt carries what is already on file
+
+  Scenario: Finalizing casting uses everything the interview recorded
+    Given no game has started
+    And the producer records the full interview through casting
+    When character creation is finalized without arguments
+    Then the season starts with the recorded name, backstory, and interview memories
+
+  Scenario: The season cannot start before a name is recorded
+    Given no game has started
+    When character creation is finalized without arguments
+    Then casting is rejected for the missing name
+    And no game has been started
 
   Scenario: The producer's distillation creates the player from their own words
     When character creation is submitted with a canonical mapping and the player's own words

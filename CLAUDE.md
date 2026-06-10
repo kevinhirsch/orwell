@@ -400,10 +400,13 @@ ceremonies-as-broadcast only), and **0047** eviction night live (staged vote rev
 messages). **0048** (season retrospective & the Vault unsealing — B56, then C17 for its UI) and
 **0049** (house presence & lingering play — B64, per ADR 0003) are **drafted specs, not yet
 built**. **0050 — the casting interview — is green** (BDD-gated): character creation is the
-game's first scene — pre-game, the chat is a producer-led "get to know the cast" interview
-(the `character-creation` moment prompt carries the canonical casting-sheet manifest,
-drift-tested); `createCharacter` distills the player's own words (persona, backstory,
-motivation, private strategy, interview notes) into the Character/Soul datastore and returns a
+game's first scene, acquired **through the chat, no modal** — pre-game, the chat is a
+producer-led "get to know the cast" interview (the `character-creation` moment prompt carries
+the canonical casting-sheet manifest, drift-tested, plus the live casting status). The intake
+is **incremental**: `updateCasting` records answers as they land into a durable pre-game intake
+(half-done OOBE survives a restart and resumes), the **engine** computes what's captured /
+missing / the next step, and `createCharacter` finalizes from it (persona, backstory,
+motivation, private strategy, interview notes seed the Character/Soul datastore) returning a
 **casting card** (character type, strategy, per-aptitude tier words — qualitative only, no
 number crosses). The product-audit waves are landing continuously beyond these (e.g. live hidden
 elements, the live emotional modifier on competitions, evictee filtering, front-end immersion

@@ -328,6 +328,9 @@ export class BbWorld extends World {
   castView?: import("../../src/ports/GameSession").GameStateView;
   castPrompt?: string;
   castRestoredPlayer?: import("../../src/engine/characterFactory").PlayerCharacter;
+  castStatus?: import("../../src/ports/GameSession").CastingStatusView;
+  castResumed?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  castError?: Error;
 
   constructor(options: IWorldOptions) {
     super(options);

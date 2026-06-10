@@ -3,7 +3,10 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView,
+  UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import type { CastingIntake } from "../../engine/castingIntake";
+import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { involvedConfessionals } from "../../engine/confessionals";
@@ -78,6 +81,13 @@ export class GameSessionAdapter implements GameSession {
   private house: GameHouse | null = null;
   private week = 0;
   private phase = "setup";
+  /**
+   * The casting interview's incremental intake (0050). OOBE is no longer atomic: the producer
+   * records answers as they land (`updateCasting`), this accumulates them pre-game, and
+   * `createCharacter` finalizes FROM it. Snapshot-durable so a half-done interview survives a
+   * restart (0030); cleared once the season starts.
+   */
+  private intake: CastingIntake = emptyIntake();
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
   private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
   // The incremental weekly-loop state (0011); null until a game starts.
@@ -145,6 +155,8 @@ export class GameSessionAdapter implements GameSession {
       house: this.house ? cloneSession(this.house) : null,
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
+      // A half-done casting interview is durable state too (0050/0030).
+      ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
     };
   }
 
@@ -156,6 +168,7 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
   }
 
@@ -263,25 +276,39 @@ export class GameSessionAdapter implements GameSession {
     // call, a network caller) is a no-op returning the current state — the prior save is left intact. A
     // real restart goes through the admin reset path (registry.resetUser), not this tool.
     if (this.house && !req.confirmRestart) return this.view();
-    const seed = req.seed ?? hashSeed(req.playerName);
-    const archetype = req.archetype && isPlausibleArchetype(req.archetype) ? req.archetype : undefined;
-    const strategyStyle = req.strategyStyle as StrategyStyle | undefined;
+    // Finalize FROM the interview's incremental intake (0050): everything updateCasting recorded
+    // is the base; explicit args override field-by-field. OOBE can arrive half-done or fully done —
+    // the one hard requirement is a name from SOMEWHERE.
+    const merged = mergeCastingUpdate(this.intake, {
+      ...req,
+      ...(req.interviewNotes ? { interviewNotes: req.interviewNotes } : {}),
+    });
+    const playerName = merged.playerName;
+    if (!playerName) {
+      throw new Error(
+        "casting needs a name before the season can start — ask the player and record it with updateCasting",
+      );
+    }
+    const seed = req.seed ?? hashSeed(playerName);
+    const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
+    const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
     // don't match a canonical archetype/style — so the game master voices them as they described
     // themselves. The canonical `archetype`/`strategyStyle` above still drive hidden stats (0006).
-    // The casting interview (0050) sends both halves explicitly: the canonical mapping in
+    // The casting interview (0050) carries both halves: the canonical mapping in
     // `archetype`/`strategyStyle` and the player's OWN words in `personaArchetype`/`personaStrategyStyle`.
     this.house = startNewGame({
-      seed, playerName: req.playerName, archetype, strategyStyle,
-      ...(req.personaArchetype?.trim() ? { personaArchetype: req.personaArchetype.trim() }
-        : req.archetype ? { personaArchetype: req.archetype } : {}),
-      ...(req.personaStrategyStyle?.trim() ? { personaStrategyStyle: req.personaStrategyStyle.trim() }
-        : req.strategyStyle ? { personaStrategyStyle: req.strategyStyle } : {}),
-      ...(req.backstory?.trim() ? { backstory: req.backstory.trim() } : {}),
-      ...(req.privateStrategy?.trim() ? { privateStrategy: req.privateStrategy.trim() } : {}),
-      ...(req.motivation?.trim() ? { motivation: req.motivation.trim() } : {}),
-      ...(req.interviewNotes?.length ? { interviewNotes: req.interviewNotes } : {}),
+      seed, playerName, archetype, strategyStyle,
+      ...(merged.personaArchetype ? { personaArchetype: merged.personaArchetype }
+        : merged.archetype ? { personaArchetype: merged.archetype } : {}),
+      ...(merged.personaStrategyStyle ? { personaStrategyStyle: merged.personaStrategyStyle }
+        : merged.strategyStyle ? { personaStrategyStyle: merged.strategyStyle } : {}),
+      ...(merged.backstory ? { backstory: merged.backstory } : {}),
+      ...(merged.privateStrategy ? { privateStrategy: merged.privateStrategy } : {}),
+      ...(merged.motivation ? { motivation: merged.motivation } : {}),
+      ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
     });
+    this.intake = emptyIntake(); // the interview is over — its material lives on the player now
     this.week = 1;
     this.phase = "premiere";
     // Start the incremental weekly loop over the live house (player + NPCs).
@@ -292,6 +319,23 @@ export class GameSessionAdapter implements GameSession {
     this.seedFirstImpressions(seed);
     this.onPersist?.(); // durable save (0030): a started game must survive a restart
     return this.view();
+  }
+
+  /**
+   * Record casting-interview answers as they land (0050). Any subset of fields, any number of
+   * times pre-game; notes append, scalars overwrite. Persisted on every update so a half-done
+   * interview survives a restart (0030). Once a season is running this is a no-op that returns
+   * the (complete) status — a stray call can never disturb a live game.
+   */
+  updateCasting(req: UpdateCastingReq): CastingStatusView {
+    // Season already running: casting is over; a stray call records nothing and reports done.
+    if (this.house) return { known: {}, missing: [], next: null, ready: true };
+    const before = this.intake;
+    this.intake = mergeCastingUpdate(this.intake, req);
+    if (JSON.stringify(before) !== JSON.stringify(this.intake)) {
+      this.onPersist?.(); // a half-done interview is durable state (0030)
+    }
+    return castingStatusOf(this.intake);
   }
 
   /** Give every ordered pair a seeded baseline trust/affinity/threat (deterministic per game). */
@@ -810,7 +854,12 @@ export class GameSessionAdapter implements GameSession {
   /** The Vault-free projection. Player card = authored persona (no numeric stats); NPCs = name + status only. */
   private view(): GameStateView {
     if (!this.house) {
-      return { started: false, week: 0, phase: this.phase, moment: "character-creation", player: null, house: [] };
+      // Pre-game, the view carries the interview's status (0050): the engine — not the model —
+      // says which building blocks are in and what the next step is.
+      return {
+        started: false, week: 0, phase: this.phase, moment: "character-creation",
+        player: null, house: [], casting: castingStatusOf(this.intake),
+      };
     }
     const p = this.house.player;
     const status = this.playerStatus();

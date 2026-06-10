@@ -13,8 +13,10 @@ Character creation **is the game's first scene** (ADR 0003 — the conversation 
 a player exists but no game has started, the chat itself becomes the **pre-season casting
 interview**: Orwell speaks as the **producer** conducting a warm, fun, reality-TV intake — who
 are you, what's your life outside, why Big Brother, how do you think you'll come across, how do
-you actually plan to play. The interview **ends** when the producer distills the player's own
-words into a structured `createCharacter` call; the **engine** (never the model) derives the
+you actually plan to play. The producer **records each answer as it lands** (`updateCasting`);
+the engine tracks which building blocks are in — OOBE can be none, half, or fully populated —
+and that status determines the interview's **next step**. The interview **ends** with a
+finalizing `createCharacter` call; the **engine** (never the model) derives the
 canonical archetype-driven, balanced P/M/S aptitudes (0015 §5A unchanged) and returns a
 **casting card** — character type, strategy style, and a producer's *qualitative* read of their
 strengths. **No number ever crosses the wall.**
@@ -27,25 +29,39 @@ master voices all season).
 ## 2. Scope
 
 **In:** the engine-managed **casting-interview moment prompt** (producer persona + interview
-coverage + the canonical archetype/style **manifest** + the ending protocol); the extended
-`createCharacter` request (interview deepeners); soul-memory seeding; the **casting card**
-projection; the front-end pre-game framing (inject the interview prompt when the engine is up
-and no game is started) and the onboarding gate that hands the player to the producer.
+coverage + the canonical archetype/style **manifest** + the ending protocol + the live casting
+status); the **incremental intake** (`updateCasting` + the engine-computed status that picks
+the next step; durable pre-game state); the extended, finalize-from-intake `createCharacter`;
+soul-memory seeding; the **casting card** projection; the front-end pre-game framing (inject
+the interview prompt when the engine is up and no game is started) and the no-modal hand-off
+(holding cards for genuine blockers only; the composer prefill seats the player).
 
 **Out (unchanged):** stat derivation and the anti-sycophancy bound (**0015 §5A** — derived &
 balanced, never allocated); NPC generation (**0004**); how NPCs learn about the player
 (**0002**); the no-wipe restart guard (B36 — `createCharacter` on a started game stays a no-op).
 
-## 3. The flow
+## 3. The flow (incremental — OOBE can be half-done)
+
+OOBE is **not one atomic call**. The producer records each answer **as it lands**; the engine
+accumulates the building blocks, and its captured/missing status **determines the interview's
+next step**. A half-done interview is durable state: it survives a restart and resumes where it
+left off (the producer never re-asks what's on file).
 
 ```
 no game started
-  → the chat's system prompt IS the casting-interview moment (producer persona, OOC)
-  → the producer interviews the player, a question or two at a time (their words, their pace)
-  → the producer distills the answers into createCharacter:
-       playerName, archetype (canonical, mapped from the player's words),
-       strategyStyle (canonical), personaArchetype/personaStrategyStyle (their OWN words),
-       backstory, motivation, privateStrategy, interviewNotes[]
+  → the chat's system prompt IS the casting-interview moment (producer persona, OOC),
+    carrying the live CASTING STATUS: what's on file, what's missing, the engine's next step
+  → the producer interviews the player, a question or two at a time (their words, their pace),
+    and files each answer the moment it lands:
+       updateCasting({ any subset of: playerName, backstory, motivation,
+                       personaArchetype/personaStrategyStyle (their OWN words),
+                       privateStrategy, interviewNotes[] (append-only),
+                       archetype/strategyStyle (the producer's canonical mapping) })
+         → returns { known, missing, next, ready }   # the ENGINE picks the next step
+  → … the interview may pause here, half-done — the intake persists (0030) and the next
+    session's prompt shows what's already on file …
+  → when ready (a name is on file) and the picture is complete, the producer finalizes:
+       createCharacter()        # uses everything recorded; args may fill gaps or override
   → the ENGINE validates, derives balanced stats from the canonical archetype (0015 §5A),
     seeds the Soul memory with the interview, casts the house around the player (0004)
   → the creation return carries the CASTING CARD: character type, strategy style,
@@ -53,6 +69,11 @@ no game started
   → the producer reveals the card in voice — "here's who walked into the house" — and the
     premiere begins.
 ```
+
+A `createCharacter` before any name is recorded is **rejected** (the engine, not the model,
+gates the start); an `updateCasting` after the season starts records nothing and reports done.
+There is **no separate data-entry surface**: every building block arrives through the
+conversation (ADR 0003 — UI may augment the chat, never replace the interaction).
 
 **OOC, witnessed by no one (0015 invariant kept):** the interview happens before the house is
 cast. It produces **no witnessed event**; no NPC starts the game knowing anything said in it.
@@ -93,7 +114,19 @@ time; it carries nothing about any NPC.
 ## 7. Contracts (delta over 0015/0019)
 
 ```
-CreateCharacterReq +=
+updateCasting(req) -> CastingStatusView          # NEW (incremental intake)
+  # req: any subset of { playerName, archetype, strategyStyle, personaArchetype,
+  #                      personaStrategyStyle, backstory, motivation, privateStrategy,
+  #                      interviewNotes[] (append-only) }
+  # -> { known: {field: value}, missing: [field…], next: string|null, ready: bool }
+  # callable any number of times pre-game; durable (SessionCore.casting, 0030);
+  # no-op reporting done once the season starts
+
+GameStateView (pre-game) +=
+  casting: CastingStatusView                     # the prompt renders it (resume, next step)
+
+CreateCharacterReq:                              # finalizes FROM the intake
+  playerName?: string           # now optional — the recorded name suffices; one is REQUIRED
   backstory?: string            # → Character.background
   motivation?: string           # why they came — player-only, seeds Soul memory
   privateStrategy?: string      # how they actually plan to play — player-only (0013)
