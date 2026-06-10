@@ -280,7 +280,7 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 - `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order). It is the canonical list of what is wired into the BDD gate.
 - **Test setup:** `tests/support/sandbox.ts` is the canonical test-environment factory — use it (not manual wiring) when adding new unit or integration tests. BDD step definitions use `features/support/world.ts`.
 - **UAT lane:** `tests/uat/fullGameUat.test.ts` plays a full game to completion (bypasses HTTP to avoid CI stale-loop flakes); it runs as part of `vitest run`.
-- **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it); `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` tune the live off-screen watcher (`TICK_MS=0` disables it → pure turn-driven).
+- **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it). **Pure turn-driven is the DEFAULT** (`ORWELL_WATCHER_TICK_MS=0` — ruling 2026-06-10: the game clock is the player's play-clock; the house lives between the player's own turns via one bounded off-screen tick per turn and does **not** exist while the player is away — NPCs can't leave the house, the player can, so background advances during an absence are a structural disadvantage). `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` opt in to the wall-clock watcher — never the default.
 - **Front-end tests:** `cd frontend && python3 -m pytest tests/` (its own pytest gate, quarantined — never touches `cucumber.cjs` / `npm test`); `frontend/scripts/browser_smoke.py` is the headless-browser keep-set gate. The reduced game surface is controlled by `ORWELL_GAME_BUILD` (default **on**; `=0` restores the full inherited workspace).
 - **Deploy** (`deploy/`): `orwell-install.sh` / `orwell-update.sh` (host-aware, legacy-aware) provision the engine + front-end as systemd units (`deploy/systemd/`); `deploy/smoke.sh` is the post-deploy check; `orwell-factory-reset.sh` scrubs all data (incl. the engine's `.orwell-data`) back to OOBE. Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
@@ -365,9 +365,10 @@ per-sandbox game orchestrator & integrity watcher. **0022** (player experience M
 **Live loop batch (0032–0037) — built:** **0034** (live weekly progression & decision seam) and
 **0037** (the interactive finale / jury-vote choreography: appeal scorer + staged statements →
 per-juror questions → ordered vote reveal, through the 0034 seam) are BDD-gated in `cucumber.cjs`.
-**0033** (`playerTagline`), **0035** (the off-screen watcher actually started in the runtime —
-`SystemClock` + `composeRuntime`; the house lives between turns), and **0036** (`socialInitiatives`
-+ `diaryRoom` live tools) shipped unit-gated. **0032** (front-end surface reduction / the game
+**0033** (`playerTagline`), **0035** (the off-screen watcher wired into the runtime — `SystemClock`
++ `composeRuntime`; since the 2026-06-10 ruling it is **opt-in, not the default**: the house lives
+between the player's own turns via per-turn ticks and does not exist while the player is away), and
+**0036** (`socialInitiatives` + `diaryRoom` live tools) shipped unit-gated. **0032** (front-end surface reduction / the game
 build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`.
 The 0037 **finale UI** is still pending (B26 `finaleView` read tool → C11 `orwellFinale.js`).
 
