@@ -169,6 +169,9 @@ if AUTH_ENABLED:
         "/api/auth/settings",
         "/api/auth/integrations/presets",
         "/api/health",
+        # Engine-reachability probe (doctor script, monitoring, the engine-status banner pre-login).
+        # Vault-free and user-free: engine up/down + a connection-error string — no game state.
+        "/api/orwell/health",
         "/api/version",
         "/login",
     }

@@ -82,6 +82,23 @@ def test_health_reports_engine_up(client, monkeypatch):
     assert r.json()["engine"] is True and r.json().get("error") is None
 
 
+def test_status_pre_game_is_an_honest_200_not_a_fake_outage(client, monkeypatch):
+    # Field bug: the status panel's poll logged a 502 per refresh on a healthy, game-less box —
+    # the engine's "no active game" refusal was translated into "engine unreachable".
+    async def no_game(user=None):
+        raise orwell_engine.EngineToolError("no active game for this user", status=404)
+    monkeypatch.setattr(orwell_engine, "game_status", no_game)
+    r = client.get("/api/orwell/status")
+    assert r.status_code == 200
+    assert r.json() == {"started": False}
+
+
+def test_status_still_502s_on_a_real_engine_outage(client, monkeypatch):
+    monkeypatch.setattr(orwell_engine, "game_status", _raise)
+    r = client.get("/api/orwell/status")
+    assert r.status_code == 502
+
+
 def test_health_reports_a_recent_tool_error_while_up(client, monkeypatch):
     # Engine process is up, but a recent call failed — the banner's amber "degraded" state.
     async def fake_detail():
