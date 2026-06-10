@@ -61,3 +61,16 @@
 [data-settings-tab="reminders"] {
   display: none !important;
 }
+
+/* C31/S5: the game build has no memory/skills/notes/tasks/documents/gallery/calendar —
+   their Danger-Zone wipe rows are dead surface. Scoped on the server-injected body flag,
+   so the debug build keeps the full list even though this stylesheet loads unconditionally. */
+body[data-game-build] div:has(> button[data-wipe-kind="memory"]),
+body[data-game-build] div:has(> button[data-wipe-kind="skills"]),
+body[data-game-build] div:has(> button[data-wipe-kind="notes"]),
+body[data-game-build] div:has(> button[data-wipe-kind="tasks"]),
+body[data-game-build] div:has(> button[data-wipe-kind="documents"]),
+body[data-game-build] div:has(> button[data-wipe-kind="gallery"]),
+body[data-game-build] div:has(> button[data-wipe-kind="calendar"]) {
+  display: none !important;
+}

@@ -2092,11 +2092,15 @@ function initAll() {
   initAppearance();
   initShortcuts();
   initAccount();
-  initIntegrations();
-  initEmailSettings();
-  initEmailAccountsSettings();
-  initReminderSettings();
-  initUnifiedIntegrations();
+  // C31/S3: these verticals are dropped under the game build — their routers 404, so
+  // initializing them just binds controls to dead endpoints (and fires doomed requests).
+  if (!(document.body && document.body.hasAttribute("data-game-build"))) {
+    initIntegrations();
+    initEmailSettings();
+    initEmailAccountsSettings();
+    initReminderSettings();
+    initUnifiedIntegrations();
+  }
 }
 
 function notifyIntegrationsChanged() {
