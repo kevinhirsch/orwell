@@ -2162,3 +2162,28 @@ PR per item).
 > down it falls through curated → "The house is waiting." without blocking; cached per moment; `pytest`
 > green; engine gate unaffected. Read `docs/features/0033-dynamic-player-tagline.md` + ADR 0003 first.
 > Open a PR.
+
+## The casting interview (feature 0050) · 2026-06-10 — ✅ DONE
+
+### B73 — 0050 the casting interview: producer-led character creation  ·  Claude Code (engine + FE)  ·  **product ruling 2026-06-10 · ADR 0003 · evolves 0015 — ✅ DONE**
+
+> **DONE** (spec `docs/features/0050-casting-interview.{md,feature}`; in `cucumber.cjs`). Character
+> creation is now the game's first SCENE, not a form: pre-game, the chat is the producer's "get to
+> know the cast" interview. Engine: the `character-creation` moment prompt is the full interview
+> operating manual (producer persona, coverage list, the canonical archetype/style **manifest
+> generated from `ARCHETYPES`** — drift-tested, ending protocol); `CreateCharacterReq` carries the
+> distillation (`personaArchetype`/`personaStrategyStyle`, `backstory`, `motivation`,
+> `privateStrategy`, `interviewNotes[]`); the deepeners seed `Character.background` + the player's
+> `Soul.memory` (pre-game memories, snapshot-durable per 0030) and the player-only fields; the
+> creation return carries the **casting card** (`characterType`, `strategyStyle`, per-aptitude
+> **tier words** standout/solid/scrappy, story, motivation) — qualitative only, no number crosses
+> (the persona sentinel test now proves the card carries words and the payload no floats).
+> Front-end: `apply_game_framing` injects the interview moment **pre-game under the game build**
+> (the missing seam — pre-game chat had no game framing at all); the `createCharacter` FE schema's
+> archetype enum was DRIFTED (five stale labels) — replaced with the canonical 12 + the deepener
+> params, with a C13-style drift test parsing `characterFactory.ts`; `orwellOnboarding.js` is now
+> the interview **gate** ("the producers will see you now" → prefill the composer, never auto-send;
+> quick-start name-only fallback kept as the no-model escape hatch, audit J4). 0015's invariants
+> all hold (balanced bounds, OOC/no-witness, B36 no-wipe). 7 BDD scenarios + 12 unit + 8 pytest.
+> **Evolving mechanic** — anticipated next steps in 0050 §9 (richer derived signals, NPC casting
+> tapes, producer follow-ups rereading the interview).

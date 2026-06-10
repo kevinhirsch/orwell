@@ -4623,6 +4623,14 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             player_name,
             archetype=args.get("archetype"),
             strategy_style=args.get("strategyStyle"),
+            # Casting-interview deepeners (0050): the producer's distillation of the
+            # player's own answers — they seed the engine's Character/Soul datastore.
+            persona_archetype=args.get("personaArchetype"),
+            persona_strategy_style=args.get("personaStrategyStyle"),
+            backstory=args.get("backstory"),
+            motivation=args.get("motivation"),
+            private_strategy=args.get("privateStrategy"),
+            interview_notes=args.get("interviewNotes"),
             seed=args.get("seed"),
             user=owner,
         )

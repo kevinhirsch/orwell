@@ -12,6 +12,22 @@ import type { EntityId } from "../domain/ids";
  * mechanism (the Vault Wall stays structural).
  */
 
+/**
+ * The casting card (0050) — the interview's payoff: the player's character type, strategy, and the
+ * producer's QUALITATIVE read of their strengths. Tier WORDS derived from the hidden balanced stats;
+ * the numbers themselves never cross the wall (mandate #2/#3). Carries nothing about any NPC.
+ */
+export interface CastingCard {
+  /** The canonical archetype the engine accepted (their own words live on the PlayerCard persona). */
+  characterType: string;
+  strategyStyle: string;
+  /** Per-aptitude tier words (e.g. standout / solid / scrappy) — never numeric values. */
+  strengths: { physical: string; mental: string; social: string };
+  /** The player's own authored material, played back. */
+  story?: string;
+  motivation?: string;
+}
+
 /** The player's own authored card. They authored it, so persona is theirs — but NO numeric stats cross the wall. */
 export interface PlayerCard {
   id: EntityId;
@@ -24,6 +40,8 @@ export interface PlayerCard {
    * pre-jury — their season is over). Public, Vault-free: it says nothing about anyone's hidden state.
    */
   status: "active" | "jury" | "evicted";
+  /** The casting interview's distilled card (0050) — qualitative only; re-showable all season. */
+  castingCard?: CastingCard;
 }
 
 /** A public houseguest card: name + status only. No stats, no soul, no archetype, no hidden attributes. */
@@ -70,6 +88,18 @@ export interface CreateCharacterReq {
   playerName: string;
   archetype?: string;
   strategyStyle?: string;
+  // --- Casting-interview deepeners (0050): the producer's distillation of the interview. ---
+  /** The player's OWN words for who they are / how they'll play (display & narrative only). */
+  personaArchetype?: string;
+  personaStrategyStyle?: string;
+  /** Their life outside the house, in their words → the static Character's background. */
+  backstory?: string;
+  /** Why they came to play — player-only material; seeds the Soul memory. */
+  motivation?: string;
+  /** How they ACTUALLY plan to play — player-only (NO_NPC_PATHWAY, 0013/0015). */
+  privateStrategy?: string;
+  /** Distilled get-to-know answers — seed the Soul memory as the player's pre-game memories. */
+  interviewNotes?: string[];
   /** Optional seed for a reproducible house; the front-end may send a random one for variety. */
   seed?: number;
   /**

@@ -54,7 +54,7 @@ export const ENSEMBLE = {
 } as const;
 
 /**
- * A typed HIDDEN element of an NPC (feature 0050/B50) — "tons of hidden elements" per the mandate.
+ * A typed HIDDEN element of an NPC (queue item B50) — "tons of hidden elements" per the mandate.
  * Engine-side ONLY (it lives on the NPC's static Character, which the player projection never carries);
  * it surfaces RARELY into off-screen scene content (gated by `hiddenSurfaces`) and reaches the player
  * only if an in-game pathway later carries it (gossip / being told). Seed-stable (part of the static
@@ -118,6 +118,8 @@ export interface PlayerCharacter {
   persona?: { archetype?: string; strategyStyle?: string };
   /** Authored private material (secret strategy/targets) — DR-tagged NO_NPC_PATHWAY at game start. */
   privateStrategy?: string;
+  /** Why they came to play (casting interview, 0050) — player-only authored material, never an NPC pathway. */
+  motivation?: string;
 }
 
 export interface GameHouse {
@@ -292,6 +294,10 @@ export interface OobeInput {
    */
   personaArchetype?: string;
   personaStrategyStyle?: string;
+  /** Why they came to play (casting interview, 0050) — player-only; also seeds the Soul memory. */
+  motivation?: string;
+  /** Distilled get-to-know answers from the casting interview (0050) — seed the Soul memory. */
+  interviewNotes?: string[];
 }
 
 /** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
@@ -308,6 +314,15 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
     ? input.strategyStyle : spec.styles[0]!;
   // The player's public appearance is seed-stable per authored name (the player has no NPC rng).
   const appearanceRng = new SeededRandom(hashSeed(input.name.trim()));
+  // The casting interview seeds the Soul memory (0050): the house's long-term memory starts with
+  // who the player said they were. These are the player's OWN pre-game memories — recallable and
+  // persisted (0007/0030), never an NPC pathway (the interview is OOC; no one witnessed it).
+  const interviewMemory = [
+    ...(input.motivation?.trim() ? [`casting interview — why I came: ${input.motivation.trim()}`] : []),
+    ...(input.interviewNotes ?? [])
+      .map((n) => n.trim()).filter((n) => n.length > 0)
+      .map((n) => `casting interview — ${n}`),
+  ];
   return {
     id: PLAYER,
     name: input.name.trim(),
@@ -324,7 +339,7 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       // is for generated NPCs only, so the player's stays empty.
       hiddenElements: [],
     },
-    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: [] },
+    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: interviewMemory },
     // The player's self-described persona (their words), kept for the narrative voice even when it
     // diverges from the canonical archetype/style that drive the hidden stats. Falls back to the
     // canonical labels so the view always has something to show.
@@ -333,6 +348,7 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       strategyStyle: input.personaStrategyStyle?.trim() || strategyStyle,
     },
     ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
+    ...(input.motivation?.trim() ? { motivation: input.motivation.trim() } : {}),
   };
 }
 
@@ -342,6 +358,8 @@ export function startNewGame(
     archetype?: Archetype; strategyStyle?: StrategyStyle;
     /** The player's free-text persona words (display only; preserved even if not canonical). */
     personaArchetype?: string; personaStrategyStyle?: string;
+    /** Casting-interview deepeners (0050): authored material that seeds Character/Soul. */
+    backstory?: string; privateStrategy?: string; motivation?: string; interviewNotes?: string[];
   },
 ): GameHouse {
   const rng = new SeededRandom(opts.seed);
@@ -352,6 +370,10 @@ export function startNewGame(
     ...(opts.strategyStyle ? { strategyStyle: opts.strategyStyle } : {}),
     ...(opts.personaArchetype ? { personaArchetype: opts.personaArchetype } : {}),
     ...(opts.personaStrategyStyle ? { personaStrategyStyle: opts.personaStrategyStyle } : {}),
+    ...(opts.backstory ? { backstory: opts.backstory } : {}),
+    ...(opts.privateStrategy ? { privateStrategy: opts.privateStrategy } : {}),
+    ...(opts.motivation ? { motivation: opts.motivation } : {}),
+    ...(opts.interviewNotes ? { interviewNotes: opts.interviewNotes } : {}),
   });
   return { player, npcs };
 }
@@ -386,6 +408,19 @@ export const NPC_STAT_RANGE: { min: number; max: number } = (() => {
 export function playerAptitudesWithinNpcBounds(p: PlayerCharacter): boolean {
   const { physical, mental, social } = p.character.stats;
   return [physical, mental, social].every((v) => v >= NPC_STAT_RANGE.min && v <= NPC_STAT_RANGE.max);
+}
+
+// --- The casting card (0050): qualitative reads only — words cross the wall, numbers never do ---
+
+/** Every canonical strategy style, derived from the single source of truth (no hand-copied list). */
+export const ALL_STRATEGY_STYLES: readonly StrategyStyle[] =
+  [...new Set(ARCHETYPES.flatMap((s) => s.styles))];
+
+export type StrengthTier = "standout" | "solid" | "scrappy";
+
+/** The producer's read of one aptitude — a tier WORD derived from the hidden stat (0050 §5). */
+export function strengthTier(v: number): StrengthTier {
+  return v >= 0.7 ? "standout" : v >= 0.55 ? "solid" : "scrappy";
 }
 
 /** A Vault-free portrait descriptor (0020): PUBLIC facets only — never aptitudes, hidden, or Soul. */

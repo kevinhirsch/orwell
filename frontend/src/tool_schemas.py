@@ -1433,12 +1433,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "function": {
             "name": "createCharacter",
             "description": (
-                "Run the OOBE (first-run character creation) and start a new Big Brother game. "
-                "Call this ONCE when no game is in progress to create the player's persona and "
-                "populate the house. Returns the Vault-free game state. "
-                "Required: playerName. Optional: archetype (one of: mastermind, social-butterfly, "
-                "competitor, under-the-radar, chaos-agent), strategyStyle (a short phrase like "
-                "'competition beast' or 'social floater'), seed (integer for reproducibility)."
+                "End the casting interview and start a new Big Brother game (0050). Call this ONCE, "
+                "when the interview has given you the picture: distill the player's OWN answers into "
+                "it. The engine derives balanced hidden stats from the canonical archetype and returns "
+                "the Vault-free game state with the player's casting card (character type, strategy, "
+                "qualitative strengths) — reveal the card in the producer's voice, never any number. "
+                "Required: playerName. The canonical archetype/strategyStyle are YOUR mapping of who "
+                "they are; personaArchetype/personaStrategyStyle keep their own words."
             ),
             "parameters": {
                 "type": "object",
@@ -1446,10 +1447,29 @@ FUNCTION_TOOL_SCHEMAS = [
                     "playerName": {"type": "string", "description": "The houseguest's display name."},
                     "archetype": {
                         "type": "string",
-                        "enum": ["mastermind", "social-butterfly", "competitor", "under-the-radar", "chaos-agent"],
-                        "description": "Optional player archetype.",
+                        # Keep in sync with the engine's canonical casting sheet
+                        # (ARCHETYPES in src/engine/characterFactory.ts) — drift-tested.
+                        "enum": [
+                            "comp-beast", "mastermind", "social-butterfly", "floater",
+                            "villain", "underdog", "flirt", "loyalist", "wildcard",
+                            "analyst", "hothead", "peacemaker",
+                        ],
+                        "description": "Your canonical mapping of the player onto the casting sheet (drives balanced hidden stats).",
                     },
-                    "strategyStyle": {"type": "string", "description": "Optional short strategy descriptor."},
+                    "strategyStyle": {
+                        "type": "string",
+                        "enum": ["aggressive", "social", "strategic", "under-the-radar", "emotional", "loyal"],
+                        "description": "Your canonical mapping of how they plan to play.",
+                    },
+                    "personaArchetype": {"type": "string", "description": "The player's OWN words for who they are / how they'll come across."},
+                    "personaStrategyStyle": {"type": "string", "description": "The player's OWN words for how they'll play."},
+                    "backstory": {"type": "string", "description": "Their life outside the house, as they told it."},
+                    "motivation": {"type": "string", "description": "Why they came to play (player-only; no houseguest ever learns it)."},
+                    "privateStrategy": {"type": "string", "description": "How they ACTUALLY plan to play (private — stays between the player and production)."},
+                    "interviewNotes": {
+                        "type": "array", "items": {"type": "string"},
+                        "description": "3-8 short notes of the best get-to-know material from the interview.",
+                    },
                     "seed": {"type": "integer", "description": "Optional RNG seed for reproducibility."},
                 },
                 "required": ["playerName"],

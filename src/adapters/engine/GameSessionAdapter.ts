@@ -37,7 +37,7 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
-import { startNewGame, hashSeed, isPlausibleArchetype } from "../../engine/characterFactory";
+import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
@@ -269,10 +269,18 @@ export class GameSessionAdapter implements GameSession {
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
     // don't match a canonical archetype/style — so the game master voices them as they described
     // themselves. The canonical `archetype`/`strategyStyle` above still drive hidden stats (0006).
+    // The casting interview (0050) sends both halves explicitly: the canonical mapping in
+    // `archetype`/`strategyStyle` and the player's OWN words in `personaArchetype`/`personaStrategyStyle`.
     this.house = startNewGame({
       seed, playerName: req.playerName, archetype, strategyStyle,
-      ...(req.archetype ? { personaArchetype: req.archetype } : {}),
-      ...(req.strategyStyle ? { personaStrategyStyle: req.strategyStyle } : {}),
+      ...(req.personaArchetype?.trim() ? { personaArchetype: req.personaArchetype.trim() }
+        : req.archetype ? { personaArchetype: req.archetype } : {}),
+      ...(req.personaStrategyStyle?.trim() ? { personaStrategyStyle: req.personaStrategyStyle.trim() }
+        : req.strategyStyle ? { personaStrategyStyle: req.strategyStyle } : {}),
+      ...(req.backstory?.trim() ? { backstory: req.backstory.trim() } : {}),
+      ...(req.privateStrategy?.trim() ? { privateStrategy: req.privateStrategy.trim() } : {}),
+      ...(req.motivation?.trim() ? { motivation: req.motivation.trim() } : {}),
+      ...(req.interviewNotes?.length ? { interviewNotes: req.interviewNotes } : {}),
     });
     this.week = 1;
     this.phase = "premiere";
@@ -822,6 +830,19 @@ export class GameSessionAdapter implements GameSession {
         archetype: p.persona?.archetype ?? p.character.archetype,
         strategyStyle: p.persona?.strategyStyle ?? p.character.strategyStyle,
         status,
+        // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
+        // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
+        castingCard: {
+          characterType: p.character.archetype,
+          strategyStyle: p.character.strategyStyle,
+          strengths: {
+            physical: strengthTier(p.character.stats.physical),
+            mental: strengthTier(p.character.stats.mental),
+            social: strengthTier(p.character.stats.social),
+          },
+          ...(p.character.background ? { story: p.character.background } : {}),
+          ...(p.motivation ? { motivation: p.motivation } : {}),
+        },
       },
       house: this.house.npcs.map((n) => ({
         id: n.id, name: n.name,

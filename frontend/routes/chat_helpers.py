@@ -47,7 +47,8 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
       engine_available — engine answered get_game_state (game or no game); triggers game-tool
         pinning so the model can always call createCharacter / getGameState.
       game_active — a game is started; the per-moment system prompt was prepended so the turn
-        speaks in-character, and the agent route auto-escalates.
+        speaks in-character, and the agent route auto-escalates. (Pre-game under the game
+        build, the casting-interview moment prompt is prepended instead — feature 0050.)
       feed_down — this user HAD a started game but the engine is unreachable: the turn was
         framed fail-CLOSED for game content (audit F2 / queue C12) instead of letting the model
         narrate a season the engine never decided.
@@ -75,6 +76,19 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
                         preface.insert(0, {"role": "system", "content": gm_prompt})
             else:
                 _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+                # No game yet: under the game build, the chat IS the casting interview (0050) —
+                # inject the producer-interview moment so the model conducts it and ends it with
+                # createCharacter. Gated to the game build so the full debug workspace keeps a
+                # normal assistant chat. Fail-open: any error leaves the turn unframed.
+                from src.settings import game_build_enabled
+                if game_build_enabled():
+                    mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
+                    gm_prompt = (mp or {}).get("systemPrompt")
+                    if gm_prompt:
+                        if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
+                            preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
+                        else:
+                            preface.insert(0, {"role": "system", "content": gm_prompt})
     except Exception as e:
         logger.warning("[orwell] game framing skipped: %s", e)
         if _gkey in _GAME_WAS_ACTIVE:

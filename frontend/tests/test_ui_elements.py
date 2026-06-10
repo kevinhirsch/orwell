@@ -69,13 +69,13 @@ def _raise(exc_factory):
 
 class TestOnboardingOverlay:
     """
-    The first-run onboarding overlay (orwellOnboarding.js):
+    The casting-interview gate (orwellOnboarding.js, feature 0050):
       - Mounts only when the game has not started (/api/orwell/state → {started:false})
-      - Collects player name, archetype, and play style
-      - Validates non-empty name before submitting
-      - Disables the submit button during the request
-      - On success: removes itself and fires orwell:gamechanged
-      - On failure: re-enables the button and shows an error
+      - Primary path: dissolves into the chat and PREFILLS the composer (never auto-sends) —
+        the producer-led interview runs in the chat and ends via createCharacter
+      - A mid-interview reload does not re-block the chat (sessionStorage seat marker)
+      - Quick-start fallback: name-only form → POST /api/orwell/new-game (no-model escape hatch)
+      - On quick-start success: removes itself and fires orwell:gamechanged
     """
 
     # -- JS source (D-level) --------------------------------------------------
@@ -83,37 +83,46 @@ class TestOnboardingOverlay:
     def test_onboarding_mounts_on_state_check(self):
         assert "/api/orwell/state" in JS_ONBOARDING
 
-    def test_onboarding_reads_ob_name(self):
+    def test_gate_is_interview_framed(self):
+        assert "casting interview" in JS_ONBOARDING.lower()
+
+    def test_gate_has_interview_button(self):
+        assert "ob-interview" in JS_ONBOARDING
+
+    def test_gate_prefills_composer_and_never_autosends(self):
+        # The house rule (ADR 0003): prefill + focus; the player sends the first line themselves.
+        assert 'getElementById("message")' in JS_ONBOARDING
+        assert "box.focus()" in JS_ONBOARDING
+        assert "sendMessage" not in JS_ONBOARDING
+
+    def test_gate_marks_seat_taken_for_reloads(self):
+        assert "sessionStorage" in JS_ONBOARDING
+
+    def test_quickstart_reads_ob_name(self):
         assert "ob-name" in JS_ONBOARDING
 
-    def test_onboarding_reads_ob_arche(self):
-        assert "ob-arche" in JS_ONBOARDING
-
-    def test_onboarding_reads_ob_style(self):
-        assert "ob-style" in JS_ONBOARDING
-
-    def test_onboarding_references_submit_button(self):
+    def test_quickstart_references_submit_button(self):
         assert "ob-submit" in JS_ONBOARDING
 
-    def test_onboarding_references_error_element(self):
+    def test_quickstart_references_error_element(self):
         assert "ob-err" in JS_ONBOARDING
 
     def test_onboarding_references_overlay_root(self):
-        assert "orwell-onboarding" in JS_ONBOARDING or "ob-form" in JS_ONBOARDING
+        assert "orwell-onboarding" in JS_ONBOARDING
 
-    def test_onboarding_guards_empty_name(self):
+    def test_quickstart_guards_empty_name(self):
         assert "trim()" in JS_ONBOARDING or ".trim" in JS_ONBOARDING
 
-    def test_onboarding_disables_button_during_submit(self):
+    def test_quickstart_disables_button_during_submit(self):
         assert "disabled" in JS_ONBOARDING
 
     def test_onboarding_removes_itself_on_success(self):
         assert ".remove()" in JS_ONBOARDING
 
-    def test_onboarding_fires_gamechanged_on_success(self):
+    def test_quickstart_fires_gamechanged_on_success(self):
         assert "orwell:gamechanged" in JS_ONBOARDING
 
-    def test_onboarding_posts_to_new_game(self):
+    def test_quickstart_posts_to_new_game(self):
         assert "/api/orwell/new-game" in JS_ONBOARDING
 
     # -- Route contracts (C-level) -------------------------------------------

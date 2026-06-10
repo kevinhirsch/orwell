@@ -21,7 +21,7 @@ batch (Final 5 → Final 2 structure, player eviction & the juror's seat, evicti
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0049**). **Active work — start
+(now through **0050**). **Active work — start
 here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` (the full product-audit
 batch B34–B60 / C12–C18, the front-end & experience batch B61–B63 / C19–C27, and the operations,
 security & test-integrity batch B67–B72 / C29–C33) — the live, wave-ordered
@@ -399,7 +399,13 @@ jury ⇒ the player serves as a juror under a defined **juror knowledge model**:
 ceremonies-as-broadcast only), and **0047** eviction night live (staged vote reveal + goodbye
 messages). **0048** (season retrospective & the Vault unsealing — B56, then C17 for its UI) and
 **0049** (house presence & lingering play — B64, per ADR 0003) are **drafted specs, not yet
-built**. The product-audit waves are landing continuously beyond these (e.g. live hidden
+built**. **0050 — the casting interview — is green** (BDD-gated): character creation is the
+game's first scene — pre-game, the chat is a producer-led "get to know the cast" interview
+(the `character-creation` moment prompt carries the canonical casting-sheet manifest,
+drift-tested); `createCharacter` distills the player's own words (persona, backstory,
+motivation, private strategy, interview notes) into the Character/Soul datastore and returns a
+**casting card** (character type, strategy, per-aptitude tier words — qualitative only, no
+number crosses). The product-audit waves are landing continuously beyond these (e.g. live hidden
 elements, the live emotional modifier on competitions, evictee filtering, front-end immersion
 fixes) — the queue marks each item ✅ as it merges; trust it over this paragraph.
 
