@@ -49,8 +49,11 @@ describe("0045 — the veto field degrades to the remaining house", () => {
 describe("0045 — Final 3 is a final-HOH personal eviction", () => {
   it("skips nominations and the veto after the final-HOH competition", () => {
     const s = newLiveSeason([PLAYER, npc(1), npc(2)]); // three active ⇒ opens on the final HOH comp
-    const ev = advance(s, ctxOf(new RelationshipModel(0.5)), new SeededRandom(1));
-    expect(ev!.beat).toBe("hoh-competition");
+    const ctx = ctxOf(new RelationshipModel(0.5));
+    const rng = new SeededRandom(1);
+    advance(s, ctx, rng); // B46: the player plays the final HOH comp ⇒ declares intent first
+    const ev = applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
+    expect(ev.beat).toBe("hoh-competition");
     expect(s.beat).toBe("final-eviction"); // straight to the eviction — no nominations/veto
   });
 

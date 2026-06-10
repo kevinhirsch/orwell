@@ -45,7 +45,8 @@ describe("runCompetition — single outcome authority (B37)", () => {
   it("PREVIEWS exactly the winner advanceGame then crowns (no second roll)", () => {
     const s = started(2); // a fresh game opens on the HOH competition beat
     const preview = s.runCompetition({ type: "physical" });
-    const adv = s.advanceGame(); // the loop RESOLVES the HOH competition
+    s.advanceGame(); // B46: the player declares competition intent first
+    const adv = s.submitDecision({ kind: "comp-intent", intent: "compete" }); // then the loop RESOLVES the HOH comp
     expect(adv.event!.beat).toBe("hoh-competition");
     expect(adv.status.hoh!.id).toBe(preview.winner!.id); // the same houseguest — one authority
   });
@@ -93,7 +94,8 @@ describe("runCompetition — single outcome authority (B37)", () => {
     const sb = reg.sandboxFor("u");
     sb.session.createCharacter({ playerName: PLAYER_NAME, seed: 2 });
     const preview = sb.session.runCompetition({ type: "physical" });
-    sb.session.advanceGame(); // crown the HOH — recorded via the registry's event sink
+    sb.session.advanceGame(); // B46: comp-intent pause
+    sb.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // crown the HOH — recorded via the registry's event sink
     const winName = preview.winner!.name;
     const hasWin = (r: GameSessionRegistry): boolean =>
       r.sandboxFor("u").engine.events.query().some((e) => !e.hidden && e.content.includes(winName) && /Head of Household/.test(e.content));

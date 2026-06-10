@@ -33,7 +33,8 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
       const s = r.sandboxFor("u");
       s.session.createCharacter({ playerName: "P", seed });
       if (s.session.runCompetition({}).winner!.id !== PLAYER) continue; // player must win HOH
-      s.session.advanceGame();                       // resolve the HOH comp (player wins)
+      s.session.advanceGame();                       // B46: comp-intent pause
+      s.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // resolve the HOH comp (player wins)
       const adv = s.session.advanceGame();           // reach the player's nomination decision
       if (adv.pending?.kind !== "nominations") continue;
       // Pick a nominee whose hidden edge toward the player still has headroom (the HOH-win fold already
@@ -80,7 +81,8 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
     const onlooker = sb.session.getGameState().house.find((h) => h.id !== winner)!.id;
     const before = rel.edge(onlooker, winner).threat;
 
-    const adv = sb.session.advanceGame();
+    sb.session.advanceGame(); // B46: comp-intent pause
+    const adv = sb.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // resolve the HOH comp
     expect(adv.event!.beat).toBe("hoh-competition");
     expect(rel.edge(onlooker, winner).threat).toBeGreaterThan(before); // they read the new HOH as dangerous
   });

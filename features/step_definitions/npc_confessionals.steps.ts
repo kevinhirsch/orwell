@@ -39,9 +39,10 @@ Given("a started game that reaches a nomination ceremony", function (this: BbWor
   const session = reg.sandboxFor("conf-live").session;
   session.createCharacter({ playerName: "P", seed: 7 });
   // Advance until a nomination ceremony resolves; submit the player's noms if it is their turn.
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 16; i++) {
     const v = session.advanceGame();
-    if (v.pending?.kind === "nominations") {
+    if (v.pending?.kind === "comp-intent") session.submitDecision({ kind: "comp-intent", intent: "compete" }); // B46
+    else if (v.pending?.kind === "nominations") {
       const opts = v.pending.options.map((o) => o.id);
       session.submitDecision({ kind: "nominations", choice: [opts[0]!, opts[1]!] });
     }

@@ -46,14 +46,14 @@ import type { InteractionType } from "../../engine/relationships";
 import { CEREMONY_IMPACTS } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
-import type { CompetitionType } from "../../domain/competitionOutcome";
+import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
 import { RelationshipModel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
   type FinaleProgress,
 } from "../../engine/liveSeason";
@@ -582,6 +582,11 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
+      case "comp-intent": { // B46: the player declares compete/throw/play-safe (via `intent` or `vote`).
+        const intent = (req.intent ?? req.vote) as Intent | undefined;
+        if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
+        return { kind: "comp-intent", intent };
+      }
       case "houseguests-choice": // B45: the player picks the sixth veto player; `vote` carries the pick.
         if (!req.vote) throw new Error("a Houseguest's Choice pick is required");
         return { kind: "houseguests-choice", pick: req.vote };
@@ -626,6 +631,10 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
       case "veto-decision":
         return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+      case "comp-intent":
+        // The "options" ARE the three intents (id = the intent value), so the generic decision path
+        // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
+        return { kind: p.kind, by, prompt: "Declare your approach to this competition: compete, throw, or play it safe.", options: COMP_INTENTS.map((i) => ({ id: i, name: i })), pick: 1 };
       case "houseguests-choice":
         return { kind: p.kind, by, prompt: "You drew Houseguest's Choice — pick the sixth houseguest to play in the veto competition.", options: refs(p.options), pick: 1 };
       case "replacement":

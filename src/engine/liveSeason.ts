@@ -2,7 +2,10 @@ import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { resolveCompetition, CompetitionIntents } from "../domain/competitionOutcome";
-import type { CompetitionType } from "../domain/competitionOutcome";
+import type { CompetitionType, Intent } from "../domain/competitionOutcome";
+
+/** The competition intents the player may declare (Bible: compete / throw / play-safe), 0006/0034. */
+export const COMP_INTENTS: readonly Intent[] = ["compete", "throw", "play-safe"];
 import {
   eligibleForHOH, vetoParticipants, selectableReplacements, evictionVoters,
 } from "../domain/eligibility";
@@ -35,6 +38,8 @@ export type Beat =
 export type PendingDecision =
   | { kind: "nominations"; by: EntityId; options: EntityId[]; pick: 2 }
   | { kind: "veto-decision"; by: EntityId; nominees: [EntityId, EntityId]; saveable: EntityId[] }
+  // --- competition intent (B46/audit B5): the player declares compete/throw/play-safe before a comp ---
+  | { kind: "comp-intent"; by: EntityId; comp: "hoh-competition" | "veto-competition" }
   // --- "Houseguest's Choice" (0046/B45): the player drew the chip and picks the sixth veto player ---
   | { kind: "houseguests-choice"; by: EntityId; options: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
@@ -78,6 +83,8 @@ export interface LiveSeasonState {
   week: number;                 // 1-based HOH reign
   beat: Beat;                   // the next beat to resolve
   active: EntityId[];
+  /** The player's declared intent for the upcoming competition (B46); consumed when it resolves. */
+  compIntent?: Intent;
   hoh?: EntityId;
   nominees?: [EntityId, EntityId];
   vetoField?: EntityId[];
@@ -128,6 +135,7 @@ export interface BeatEvent {
 export type DecisionInput =
   | { kind: "nominations"; choice: [EntityId, EntityId] }
   | { kind: "veto-decision"; use: boolean; save?: EntityId }
+  | { kind: "comp-intent"; intent: Intent }
   | { kind: "houseguests-choice"; pick: EntityId }
   | { kind: "replacement"; replacement: EntityId }
   | { kind: "eviction-vote"; vote: EntityId }
@@ -153,7 +161,7 @@ function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): 
   // Final 3 (0045): the final-HOH competition lifts the outgoing-HOH restriction — everyone plays.
   const finalThree = s.active.length === 3;
   const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
-  return { field, winner: winnerOf(field, hohType(s.week), ctx, rng) };
+  return { field, winner: winnerOf(field, hohType(s.week), ctx, rng, s.compIntent ?? "compete") };
 }
 
 /** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
@@ -171,7 +179,36 @@ function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource):
   if (draw.houseguestsChoice && draw.houseguestsChoice.picked === undefined) {
     return { deferred: true, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
   }
-  return { field: draw.participants, winner: winnerOf(draw.participants, vetoType(s.week), ctx, rng) };
+  return { field: draw.participants, winner: winnerOf(draw.participants, vetoType(s.week), ctx, rng, s.compIntent ?? "compete") };
+}
+
+/** Resolve the HOH competition beat (used by `advance` and the comp-intent resume); consumes the intent. */
+function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  const finalThree = s.active.length === 3;
+  const { winner: hoh } = resolveHoh(s, ctx, rng);
+  s.compIntent = undefined; // declared intent consumed (locks: it can't be re-declared after the result)
+  s.hoh = hoh;
+  s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
+  return {
+    beat: "hoh-competition",
+    content: `${hoh} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
+    participants: [hoh],
+  };
+}
+
+/** Resolve the Power of Veto beat — may pause for a Houseguest's Choice pick (B45); consumes the intent. */
+function resolveVetoBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
+  const r = resolveVeto(s, ctx, rng);
+  if ("deferred" in r) {
+    // The player drew Houseguest's Choice (B45): pause for THEM to pick the sixth player. The declared
+    // intent stays set; the houseguests-choice resume runs the comp with it.
+    s.vetoField = r.field;
+    s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
+    return null;
+  }
+  s.compIntent = undefined; // consumed
+  s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
+  return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
 }
 
 /** The current competition beat's deterministic outcome (single authority, B37) — or null if the
@@ -201,11 +238,15 @@ export function newLiveSeason(active: EntityId[]): LiveSeasonState {
   };
 }
 
-function winnerOf(ids: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource): EntityId {
+function winnerOf(ids: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource, playerIntent: Intent = "compete"): EntityId {
   // The LIVE emotional state (0041) feeds the competition emotional modifier (0006/0028): a rattled
   // houseguest competes differently. Defaults to the calm baseline so pure tests stay byte-stable.
   const competitors = ids.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
-  return resolveCompetition(competitors, type, new CompetitionIntents(), rng).winner;
+  // The player's declared intent (B46/audit B5): throw/play-safe carry the 0028 penalties. NPCs stay
+  // compete for now. The CompetitionIntents lock fires inside resolveCompetition once the result is given.
+  const intents = new CompetitionIntents();
+  intents.declare(ctx.player, playerIntent);
+  return resolveCompetition(competitors, type, intents, rng).winner;
 }
 
 /** A throwaway WeekState for the legality helpers (they only read the fields they need). */
@@ -459,16 +500,14 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
 
   switch (s.beat) {
     case "hoh-competition": {
+      // B46: if the player plays this comp and hasn't declared intent, pause for compete/throw/play-safe.
       const finalThree = s.active.length === 3;
-      const { winner: hoh } = resolveHoh(s, ctx, rng);
-      s.hoh = hoh;
-      // Final 3 (0045): no nominations or veto — the final HOH goes straight to personally evicting.
-      s.beat = finalThree ? "final-eviction" : "nominations";
-      return {
-        beat: "hoh-competition",
-        content: `${hoh} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
-        participants: [hoh],
-      };
+      const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
+      if (s.compIntent === undefined && field.includes(ctx.player)) {
+        s.pending = { kind: "comp-intent", by: ctx.player, comp: "hoh-competition" };
+        return null;
+      }
+      return resolveHohBeat(s, ctx, rng);
     }
     case "final-eviction": {
       // Final 3 (0045): the final HOH evicts one of the other two; the survivor + HOH are the Final 2.
@@ -495,16 +534,13 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
-      const r = resolveVeto(s, ctx, rng);
-      if ("deferred" in r) {
-        // The player drew Houseguest's Choice (B45/audit B4): pause for THEM to pick the sixth player —
-        // the engine never chooses it from the player's hidden bonds. The field is completed on resume.
-        s.vetoField = r.field;
-        s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
+      // B46: the player plays the veto if they're a puller (HOH or a nominee) — pause for intent first.
+      const pullers = [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id);
+      if (s.compIntent === undefined && pullers.includes(ctx.player)) {
+        s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
         return null;
       }
-      s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
-      return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
+      return resolveVetoBeat(s, ctx, rng);
     }
     case "veto-ceremony": {
       const nominees = s.nominees!;
@@ -596,13 +632,23 @@ export function applyDecision(
       const ev = resolveReplacement(s, ctx);
       return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${save}`, participants: [ctx.player, save] };
     }
+    case "comp-intent": {
+      // B46/audit B5: the player declares compete/throw/play-safe; the comp then resolves with it.
+      s.compIntent = input.intent;
+      s.pending = undefined;
+      if (s.beat === "hoh-competition") return resolveHohBeat(s, ctx, rng);
+      const veto = resolveVetoBeat(s, ctx, rng);
+      // The veto may have deferred to a Houseguest's Choice pick (B45) — surface the declaration as the beat.
+      return veto ?? { beat: "veto-competition", content: `${ctx.player} sets their competition strategy`, participants: [ctx.player] };
+    }
     case "houseguests-choice": {
       // The player drew Houseguest's Choice and picks the sixth veto player (B45/audit B4).
       const options = (s.pending as { options: EntityId[] }).options;
       if (!options.includes(input.pick)) throw new Error("the Houseguest's Choice must pick an eligible candidate");
       s.pending = undefined;
       const field = [...s.vetoField!, input.pick]; // the player's pick completes the field
-      const holder = winnerOf(field, vetoType(s.week), ctx, rng);
+      const holder = winnerOf(field, vetoType(s.week), ctx, rng, s.compIntent ?? "compete");
+      s.compIntent = undefined; // the declared intent is consumed
       s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
       return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
     }

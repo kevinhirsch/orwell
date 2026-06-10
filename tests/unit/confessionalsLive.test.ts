@@ -26,10 +26,11 @@ describe("0040 — confessionals at the live nomination ceremony", () => {
     });
     s.createCharacter({ playerName: "P", seed: 7 });
     // Advance until a nomination ceremony resolves (auto if an NPC is HOH; else submit the player's noms).
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
       const v = s.advanceGame();
       const pending = v.pending;
-      if (pending?.kind === "nominations") {
+      if (pending?.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" }); // B46
+      else if (pending?.kind === "nominations") {
         const opts = pending.options.map((o) => o.id);
         s.submitDecision({ kind: "nominations", choice: [opts[0]!, opts[1]!] });
       }

@@ -64,8 +64,9 @@ describe("B45 — the live loop pauses for the player's Houseguest's Choice", ()
       const s = newLiveSeason(sixHouse);
       s.beat = "veto-competition"; s.hoh = PLAYER; s.nominees = [npc(1), npc(2)];
       const rng = new SeededRandom(seed);
-      const ev = advance(s, ctx, rng);
-      if (ev === null && s.pending?.kind === "houseguests-choice") return { s, ctx, rng: new SeededRandom(seed) };
+      advance(s, ctx, rng); // B46: the player is a puller ⇒ a comp-intent pause comes first
+      if (s.pending?.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
+      if (s.pending?.kind === "houseguests-choice") return { s, ctx, rng: new SeededRandom(seed) };
     }
     throw new Error("no seed produced a player Houseguest's Choice draw");
   }
