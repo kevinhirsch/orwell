@@ -107,12 +107,18 @@ describe("0047 — eviction night live", () => {
       for (let g = 0; g < 100 && s.eviction?.stage !== "goodbye"; g++) advance(s, ctx, rng);
       const senders = [...s.eviction!.goodbyeFrom];
       // Play out the goodbye messages (each folds its tone into the evictee's manner) and roll on.
-      for (let g = 0; g < 100 && s.beat === "eviction"; g++) advance(s, ctx, rng);
+      // E34: the PLAYER (a surviving sender) chooses their own tone — matched to the case here.
+      const playerTone = affinityToEvictee >= 0.6 ? "warm" as const : "cold" as const;
+      for (let g = 0; g < 100 && s.beat === "eviction"; g++) {
+        if (s.pending?.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: playerTone }, ctx);
+        else advance(s, ctx, rng);
+      }
       return { s, senders };
     };
     const warm = drive(0.85); // warm goodbyes
     const cold = drive(0.2);  // cold goodbyes
     expect(warm.senders.length).toBeGreaterThan(0);
+    expect(warm.senders).toContain(PLAYER); // E34: the surviving player always gets the lever
     // Every houseguest who left a goodbye now reads the evictee's manner with the tone they sent.
     for (const sender of warm.senders) expect(warm.s.mannerByEvictee![npc(2)]![sender]!.respected).toBe(true);
     for (const sender of cold.senders) expect(cold.s.mannerByEvictee![npc(2)]![sender]!.disrespected).toBe(true);

@@ -306,6 +306,12 @@ export class BbWorld extends World {
   enColdLean?: number;
   /** T2: the staged eviction's electorate size, read from the engine's own state. */
   enElectorate?: number;
+  // --- E34/E37 player-agency beats (player_agency.steps.ts) ---
+  agS?: import("../../src/engine/liveSeason").LiveSeasonState;
+  agCtx?: import("../../src/engine/liveSeason").SeasonCtx;
+  agBeats?: import("../../src/engine/liveSeason").BeatEvent[];
+  agFinalists?: Eid[];
+  agQuestioned?: Eid[];
   enResumedEvictee?: string;
   enOriginalEvictee?: string;
 

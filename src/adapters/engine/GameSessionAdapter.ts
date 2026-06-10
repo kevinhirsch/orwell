@@ -63,8 +63,8 @@ import type { EntityId } from "../../domain/ids";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
-  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -984,9 +984,18 @@ export class GameSessionAdapter implements GameSession {
       case "final-eviction": // Final 3 (0045): the final HOH evicts; `vote` carries the evictee.
         if (!req.vote) throw new Error("a final-eviction target is required");
         return { kind: "final-eviction", evict: req.vote };
+      case "goodbye-message": { // E34: the tone rides `vote` (like comp-intent's `intent ?? vote` seam).
+        const tone = req.vote as GoodbyeTone | undefined;
+        if (!tone || !(GOODBYE_TONES as readonly string[]).includes(tone)) {
+          throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
+        }
+        return { kind: "goodbye-message", tone, ...(req.statement ? { message: req.statement } : {}) };
+      }
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: "finale-statement", statement: req.statement ?? "" };
+      case "juror-question": // E37: scoreless free text — nothing here can sway the tally.
+        return { kind: "juror-question", question: req.statement ?? "" };
       case "finale-answer": {
         if (!req.appeal || !(FINALE_APPEALS as readonly string[]).includes(req.appeal)) {
           throw new Error("a legal finale appeal is required");
@@ -1032,6 +1041,14 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: "The eviction vote is tied — as Head of Household you cast the deciding vote.", options: refs(p.nominees), pick: 1 };
       case "final-eviction":
         return { kind: p.kind, by, prompt: "You are the final Head of Household — evict one houseguest; the other sits beside you at the Final 2.", options: refs(p.options), pick: 1 };
+      // --- eviction night (E34): the player's own goodbye — tone is THEIR choice, never engine-read ---
+      case "goodbye-message":
+        return {
+          kind: p.kind, by,
+          prompt: `${this.nameOf(p.evictee)} has been evicted — record your goodbye message. Choose its tone; your own words carry it.`,
+          options: p.tones.map((t) => ({ id: t, name: t })),
+          evictee: this.named(p.evictee)!, pick: 1,
+        };
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: p.kind, by, prompt: "You are a finalist — give your opening statement to the jury.", options: [], pick: 0 };
@@ -1040,6 +1057,13 @@ export class GameSessionAdapter implements GameSession {
           kind: p.kind, by,
           prompt: `${this.nameOf(p.juror)} asks you a question — choose how you make your case.`,
           options: [], appeals: [...p.appeals], juror: this.named(p.juror)!, pick: 1,
+        };
+      // --- finale (E37): the player-juror's own question (scoreless free text) ---
+      case "juror-question":
+        return {
+          kind: p.kind, by,
+          prompt: `You sit on the jury — ask ${this.nameOf(p.finalist)} your question. It sways nothing by itself; their answer is theirs.`,
+          options: refs([p.finalist]), finalist: this.named(p.finalist)!, pick: 0,
         };
       case "juror-vote":
         return { kind: p.kind, by, prompt: "You sit on the jury — cast your vote for the winner.", options: refs(p.finalists), pick: 1 };

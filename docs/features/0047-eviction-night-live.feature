@@ -49,3 +49,14 @@ Feature: Eviction night live
     Given an eviction staged through the advance seam
     When the engine restarts mid-reveal
     Then the eviction resumes from where it left off
+
+  # Amended 2026-06-10 (E34): the engine never authors the PLAYER's goodbye message. A surviving
+  # player records their own — a real pending decision through the 0034 seam (the tone is the
+  # player's choice; the prose is the model's to voice) — folded into the evictee's manner
+  # exactly as NPC tones are. Jury management's signature lever belongs to the player.
+  Scenario: The player's goodbye message is their own decision
+    Given an eviction whose result has landed with the player surviving
+    When the goodbye stage reaches the player
+    Then the loop pauses for the player's goodbye message
+    And no player goodbye beat exists before the decision is resolved
+    And the player's chosen tone folds into the evictee's manner toward the player

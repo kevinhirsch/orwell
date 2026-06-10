@@ -66,9 +66,13 @@ export type PendingDecision =
   | { kind: "tie-break"; by: EntityId; nominees: [EntityId, EntityId] }
   // --- Final 3 (0045): the final HOH personally evicts one of the other two ---
   | { kind: "final-eviction"; by: EntityId; options: [EntityId, EntityId] }
+  // --- eviction night (0047/E34): the player's own goodbye message to the evictee ---
+  | { kind: "goodbye-message"; by: EntityId; evictee: EntityId; tones: GoodbyeTone[] }
   // --- finale (0037) ---
   | { kind: "finale-statement"; by: EntityId }
   | { kind: "finale-answer"; by: EntityId; juror: EntityId; appeals: FinaleAppeal[] }
+  // --- finale (0037/E37): the player-JUROR's own question to a finalist (scoreless free text) ---
+  | { kind: "juror-question"; by: EntityId; finalist: EntityId }
   | { kind: "juror-vote"; by: EntityId; finalists: [EntityId, EntityId] };
 
 /** Which stage of the live finale sub-loop (0037) we are advancing. */
@@ -231,9 +235,13 @@ export type DecisionInput =
   | { kind: "eviction-vote"; vote: EntityId }
   | { kind: "tie-break"; evict: EntityId }
   | { kind: "final-eviction"; evict: EntityId }
+  // --- eviction night (E34): the tone is the player's CHOICE; the prose is the model's to voice ---
+  | { kind: "goodbye-message"; tone: GoodbyeTone; message?: string }
   // --- finale (0037) ---
   | { kind: "finale-statement"; statement: string }
   | { kind: "finale-answer"; appeal: FinaleAppeal }
+  // --- finale (E37): scoreless free text — the juror's moment, never a tally input ---
+  | { kind: "juror-question"; question?: string }
   | { kind: "juror-vote"; vote: EntityId };
 
 /** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
@@ -556,6 +564,9 @@ function seededShuffle<T>(items: readonly T[], rng: RandomnessSource): T[] {
  */
 export type GoodbyeTone = "warm" | "respectful" | "cold";
 
+/** The legal goodbye tones the PLAYER may choose for their own message (E34). */
+export const GOODBYE_TONES: readonly GoodbyeTone[] = ["warm", "respectful", "cold"];
+
 function goodbyeTone(sender: EntityId, evictee: EntityId, ctx: SeasonCtx): GoodbyeTone {
   const e = ctx.rel.edge(sender, evictee);
   if (e.affinity >= 0.6) return "warm";
@@ -569,9 +580,14 @@ export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
   return { disrespected: true }; // a cold send-off stings — the evictee weighs it against them
 }
 
-/** The seeded houseguests who leave a goodbye message (from the house remaining after the eviction). */
-function selectGoodbyeSenders(s: LiveSeasonState, evictee: EntityId, rng: RandomnessSource): EntityId[] {
-  const remaining = s.active.filter((h) => h !== evictee);
+/**
+ * The seeded houseguests who leave a goodbye message (from the house remaining after the eviction).
+ * E34: the PLAYER is never engine-selected here — the engine must not author the player's goodbye
+ * or assert a tone computed from their hidden edge. A surviving player is appended as the LAST
+ * sender by `commitStagedEviction`, where the goodbye stage pauses for their own decision.
+ */
+function selectGoodbyeSenders(s: LiveSeasonState, evictee: EntityId, player: EntityId, rng: RandomnessSource): EntityId[] {
+  const remaining = s.active.filter((h) => h !== evictee && h !== player);
   return seededShuffle(remaining, rng).slice(0, Math.min(GOODBYE_MESSAGE_COUNT, remaining.length));
 }
 
@@ -629,6 +645,12 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     case "goodbye": {
       if (e.goodbyeIx < e.goodbyeFrom.length) {
         const sender = e.goodbyeFrom[e.goodbyeIx]!;
+        if (sender === ctx.player) {
+          // E34: the engine NEVER authors the player's goodbye — no beat fires until the player
+          // chooses their own tone (the prose is the model's to voice from that choice).
+          s.pending = { kind: "goodbye-message", by: ctx.player, evictee: e.evictee!, tones: [...GOODBYE_TONES] };
+          return null;
+        }
         e.goodbyeIx += 1;
         const tone = goodbyeTone(sender, e.evictee!, ctx);
         // The tone folds into the evictee's manner toward the sender (merged — a goodbye is the last word).
@@ -658,7 +680,10 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
   recordEvictionManner(s, evictee, [s.hoh!, ...votesToEvict], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
-  e.goodbyeFrom = selectGoodbyeSenders(s, evictee, rng);
+  e.goodbyeFrom = selectGoodbyeSenders(s, evictee, ctx.player, rng);
+  // E34: a SURVIVING player always gets jury management's signature lever — their own goodbye
+  // message, last, as a real pending decision (never engine-authored, never engine-toned).
+  if (s.active.includes(ctx.player)) e.goodbyeFrom.push(ctx.player);
   e.stage = "goodbye";
   return { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
 }
@@ -746,6 +771,12 @@ function advanceFinale(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource
       const q = f.script.questions[f.questionIx]!;
       if (q.finalist === ctx.player) {
         s.pending = { kind: "finale-answer", by: ctx.player, juror: q.juror, appeals: [...FINALE_APPEALS] };
+        return null;
+      }
+      if (q.juror === ctx.player) {
+        // E37: the player-JUROR asks their own question (scoreless free text) — their seat at the
+        // finale is a real beat, not a spectator slot the engine auto-fills.
+        s.pending = { kind: "juror-question", by: ctx.player, finalist: q.finalist };
         return null;
       }
       // NPC finalist answers optimally for this juror (deterministic argmax), recorded for the tally.
@@ -960,10 +991,15 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       return { kind: "tie-break", evict: voteChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "final-eviction":
       return { kind: "final-eviction", evict: byThreat(p.by, p.options) };
+    case "goodbye-message":
+      // The same relationship-derived tone an NPC sender would use (no second rulebook).
+      return { kind: "goodbye-message", tone: goodbyeTone(p.by, p.evictee, ctx) };
     case "finale-statement":
       return { kind: "finale-statement", statement: "" };
     case "finale-answer":
       return { kind: "finale-answer", appeal: bestAppeal(edgeAsJuryRel(p.juror, p.by, ctx), mannerFor(s, p.juror, p.by)) };
+    case "juror-question":
+      return { kind: "juror-question", question: "" };
     case "juror-vote": {
       const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(p.by, fin, ctx), mannerFor(s, p.by, fin));
       return { kind: "juror-vote", vote: lean(p.finalists[0]) >= lean(p.finalists[1]) ? p.finalists[0] : p.finalists[1] };
@@ -1071,6 +1107,23 @@ export function applyDecision(
       applyEviction(s, input.evict, ctx, [s.hoh!]);
       return ev;
     }
+    case "goodbye-message": {
+      // E34: the player's OWN goodbye — the tone is their choice (the engine never computes it
+      // from their hidden edge), folded into the evictee's manner EXACTLY as NPC tones are.
+      const p = s.pending;
+      if (!p || p.kind !== "goodbye-message") throw new Error("no pending goodbye message");
+      if (!GOODBYE_TONES.includes(input.tone)) throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
+      const e = s.eviction!;
+      s.pending = undefined;
+      e.goodbyeIx += 1;
+      const row = (s.mannerByEvictee![e.evictee!] ??= {});
+      row[p.by] = { ...(row[p.by] ?? {}), ...goodbyeMannerFor(input.tone) };
+      return {
+        beat: "eviction-goodbye",
+        content: `${p.by} leaves ${e.evictee} a ${input.tone} goodbye message`,
+        participants: [p.by, e.evictee!],
+      };
+    }
     // --- finale (0037) ---------------------------------------------------------
     case "finale-statement": {
       const f = s.finale!;
@@ -1091,6 +1144,18 @@ export function applyDecision(
       s.pending = undefined;
       f.questionIx += 1;
       return { beat: "finale", content: `${p.by} answers ${p.juror}`, participants: [p.by, p.juror] };
+    }
+    case "juror-question": {
+      // E37: the player-juror's question is SCORELESS flavor — recording it changes no tally;
+      // the NPC finalist's answer is still engine-chosen exactly as for any juror.
+      const f = s.finale!;
+      const p = s.pending;
+      if (!p || p.kind !== "juror-question") throw new Error("no pending juror question");
+      s.pending = undefined;
+      const appeal = bestAppeal(edgeAsJuryRel(p.by, p.finalist, ctx), mannerFor(s, p.by, p.finalist));
+      recordAppeal(f, p.finalist, p.by, appeal);
+      f.questionIx += 1;
+      return { beat: "finale", content: `${p.by} questions ${p.finalist}; ${p.finalist} answers`, participants: [p.finalist, p.by] };
     }
     case "juror-vote": {
       const f = s.finale!;

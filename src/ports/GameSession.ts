@@ -234,7 +234,7 @@ export interface BeatEventView {
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "finale-statement" | "finale-answer" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -250,7 +250,11 @@ export interface PendingDecisionView {
   appeals?: string[];
   /** The juror asking, for a `finale-answer` (Vault-free name only); absent otherwise. */
   juror?: NamedRef;
-  /** How many to pick (nominations = 2; others = 1; finale-statement = 0). */
+  /** The finalist being questioned, for a `juror-question` (E37); absent otherwise. */
+  finalist?: NamedRef;
+  /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
+  evictee?: NamedRef;
+  /** How many to pick (nominations = 2; others = 1; finale-statement / juror-question = 0). */
   pick: number;
 }
 
@@ -404,7 +408,7 @@ export interface RetrospectiveView {
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "finale-statement" | "finale-answer" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   /** nominations: exactly two houseguest ids. */
   choice?: EntityId[];
   /** veto-decision: whether to use the veto. */
@@ -413,9 +417,11 @@ export interface SubmitDecisionReq {
   save?: EntityId;
   /** replacement: the replacement nominee the HOH names. */
   replacement?: EntityId;
-  /** eviction-vote / juror-vote: the finalist/nominee the player votes for. */
+  /** eviction-vote / juror-vote: the finalist/nominee the player votes for.
+   *  goodbye-message: the chosen tone ("warm" | "respectful" | "cold") rides here (E34). */
   vote?: EntityId;
-  /** finale-statement: the player's free-text opening statement (flavor; carries no score). */
+  /** finale-statement / juror-question: the player's free text (flavor; carries no score).
+   *  goodbye-message: the optional message text accompanying the chosen tone. */
   statement?: string;
   /** finale-answer: the structured appeal the player makes (engine-scored; never the prose). */
   appeal?: string;
