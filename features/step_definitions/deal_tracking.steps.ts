@@ -61,8 +61,14 @@ Given("an open safety deal between the player and a houseguest", function (this:
 });
 
 When("the player takes a binding action that honors it", function (this: BbWorld) {
-  // The player is HOH and nominates SOMEONE ELSE — they could have targeted the partner but didn't.
+  // The player nominates SOMEONE ELSE — sparing the partner builds trust but keeps the promise
+  // binding (E43) — then votes at the week's eviction where the partner sat on the block: the
+  // safety deal's HORIZON, where it resolves kept.
   this.ledger!.reconcile({ actor: PLAYER, kind: "nominate", targets: [SOMEONE_ELSE, NPC_A] }, sink(this));
+  this.ledger!.reconcile(
+    { actor: PLAYER, kind: "vote-evict", targets: [SOMEONE_ELSE], alternatives: [SOMEONE_ELSE, PARTNER] },
+    sink(this),
+  );
 });
 
 Then("the engine marks the deal kept", function (this: BbWorld) {
@@ -70,8 +76,10 @@ Then("the engine marks the deal kept", function (this: BbWorld) {
 });
 
 Then("no betrayal consequence is applied", function (this: BbWorld) {
-  assert.equal(this.dealRel!.edge(PARTNER, PLAYER).trust, this.dealTrustBefore);
-  assert.equal(this.dealRel!.edge(PARTNER, PLAYER).threat, this.dealThreatBefore);
+  // A kept promise BUILDS trust (E43) — what must never happen here is the betrayal fallout:
+  // no trust drop, no threat spike, no jury demerit.
+  assert.ok(this.dealRel!.edge(PARTNER, PLAYER).trust >= this.dealTrustBefore!, "trust never drops on an honored deal");
+  assert.ok(this.dealRel!.edge(PARTNER, PLAYER).threat <= this.dealThreatBefore!, "no threat spike on an honored deal");
   assert.equal(this.dealJuryDemerits!.length, 0);
 });
 

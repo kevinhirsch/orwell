@@ -1,5 +1,6 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
+import { TEMPERATURE_CONSTANTS } from "../domain/temperatureConstants";
 import type { RelationshipModel } from "./relationships";
 
 /**
@@ -41,13 +42,16 @@ export function rankApproaches(
   npcs: EntityId[],
   rel: RelationshipModel,
   rng: RandomnessSource,
+  /** The 0028 per-variable INITIATIVE weight (audit E53): the bounded ordering-variance band. */
+  initiativeWeight: number = TEMPERATURE_CONSTANTS.variableWeights.initiative,
 ): Approach[] {
   return npcs
     .filter((n) => n !== player)
     .map((n) => {
       const e = rel.edge(n, player);
       const agenda = Math.max((e.trust + e.affinity) / 2, e.threat);
-      const temper = 0.9 + 0.2 * rng.next(); // bounded: never flips a clear gap
+      // Bounded: 1 ± initiative/2 — modulates intensity, never flips a clear gap at the default.
+      const temper = 1 + (rng.next() - 0.5) * initiativeWeight;
       return { npc: n, drive: agenda * temper };
     })
     .sort((a, b) => b.drive - a.drive);

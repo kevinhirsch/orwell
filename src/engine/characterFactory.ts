@@ -198,7 +198,7 @@ function generateAppearance(rng: RandomnessSource): { appearance: string; age: n
 }
 
 // --- Hidden-element generation (B50): typed secrets, engine-side, surfacing rarely ---
-const HIDDEN_ELEMENT_POOLS: Record<HiddenElementKind, readonly string[]> = {
+const HIDDEN_ELEMENT_POOLS: Record<Exclude<HiddenElementKind, "concealed-aptitude">, readonly string[]> = {
   "secret-motive": [
     "is secretly playing to win money for someone back home",
     "is here for redemption after a public failure",
@@ -213,13 +213,6 @@ const HIDDEN_ELEMENT_POOLS: Record<HiddenElementKind, readonly string[]> = {
     "once crossed paths with a houseguest years ago",
     "made a quiet pre-show pact they intend to honor",
   ],
-  "concealed-aptitude": [
-    "is far sharper at puzzles than they pretend",
-    "is a hidden endurance machine",
-    "has a near-photographic memory",
-    "is a closet strategist playing the fool",
-    "is physically stronger than their frame suggests",
-  ],
   "divergent-persona": [
     "plays sweet but keeps a private target list",
     "acts like a harmless floater while reading the whole house",
@@ -228,7 +221,38 @@ const HIDDEN_ELEMENT_POOLS: Record<HiddenElementKind, readonly string[]> = {
     "looks fiercely loyal but will cut first when it counts",
   ],
 };
-const HIDDEN_KINDS = Object.keys(HIDDEN_ELEMENT_POOLS) as HiddenElementKind[];
+
+/** Each concealed aptitude names the STAT that must back it (audit C9 — no unbackable flavor). */
+export const CONCEALED_APTITUDES: ReadonlyArray<{ detail: string; stat: keyof StatProfile }> = [
+  { detail: "is far sharper at puzzles than they pretend", stat: "mental" },
+  { detail: "is a hidden endurance machine", stat: "physical" },
+  { detail: "has a near-photographic memory", stat: "mental" },
+  { detail: "is a closet strategist playing the fool", stat: "mental" },
+  { detail: "is physically stronger than their frame suggests", stat: "physical" },
+];
+
+type StatProfile = { physical: number; mental: number; social: number };
+
+/** The fit an NPC's secrets must respect (audit C9): their real stats + their PUBLIC archetype bias. */
+export interface HiddenElementFit {
+  stats: StatProfile;
+  /** The public archetype's stat bias — what the house already EXPECTS of them across the counter. */
+  publicBias: StatProfile;
+}
+
+/**
+ * Internal-consistency gates for hidden elements (audit C9). A concealed aptitude must be REAL
+ * (the actual hidden stat clears `statFloor`) and actually CONCEALED (the public archetype does
+ * not already advertise that stat — its bias sits under `publicBiasCeiling`). At most ONE
+ * secret-motive per NPC: a character cannot be simultaneously playing for redemption AND fame.
+ */
+export const HIDDEN_ELEMENT_GATES = {
+  statFloor: 0.6,
+  publicBiasCeiling: 0.65,
+  maxSecretMotives: 1,
+} as const;
+
+const HIDDEN_KINDS: readonly HiddenElementKind[] = ["secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona"];
 
 /** How many hidden elements each NPC carries (the mandate's "tons", bounded for a season). */
 export const HIDDEN_ELEMENT_RANGE = { min: 3, max: 6 } as const;
@@ -236,16 +260,33 @@ export const HIDDEN_ELEMENT_RANGE = { min: 3, max: 6 } as const;
 /**
  * Mint 3–6 DISTINCT, seeded, typed hidden elements for one NPC (B50). Driven by a SIDE rng (hashed off
  * the name) at generation so it never perturbs the main house stream (stats/names stay byte-stable, 0007).
+ * With a `fit` (audit C9), the secrets are internally CONSISTENT: at most one secret-motive, and a
+ * concealed aptitude only where the hidden stats genuinely back it AND the public persona conceals it.
  */
-export function generateHiddenElements(rng: RandomnessSource): HiddenElement[] {
+export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElementFit): HiddenElement[] {
   const count = HIDDEN_ELEMENT_RANGE.min + rng.int(HIDDEN_ELEMENT_RANGE.max - HIDDEN_ELEMENT_RANGE.min + 1); // 3..6
+  const G = HIDDEN_ELEMENT_GATES;
+  const aptitudes = CONCEALED_APTITUDES.filter((a) =>
+    !fit || (fit.stats[a.stat] >= G.statFloor && fit.publicBias[a.stat] <= G.publicBiasCeiling));
   const out: HiddenElement[] = [];
   const seen = new Set<string>();
+  let motives = 0;
   for (let attempts = 0; out.length < count && attempts < 200; attempts++) {
     const kind = rng.pick(HIDDEN_KINDS);
-    const detail = rng.pick(HIDDEN_ELEMENT_POOLS[kind]);
+    let detail: string;
+    if (kind === "concealed-aptitude") {
+      if (aptitudes.length === 0) continue; // nothing backable/concealable — never mint flavor (C9)
+      detail = aptitudes[rng.int(aptitudes.length)]!.detail;
+    } else {
+      if (kind === "secret-motive" && fit && motives >= G.maxSecretMotives) continue; // one motive max (C9)
+      detail = rng.pick(HIDDEN_ELEMENT_POOLS[kind]);
+    }
     const key = `${kind}::${detail}`;
-    if (!seen.has(key)) { seen.add(key); out.push({ kind, detail }); }
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ kind, detail });
+      if (kind === "secret-motive") motives++;
+    }
   }
   return out;
 }
@@ -273,7 +314,11 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
         background,
         ...generateAppearance(new SeededRandom(hashSeed(`${name}:${i}`))),
         // B50: minted off a SEPARATE side rng so the main stream stays byte-stable (engine-side secrets).
-        hiddenElements: generateHiddenElements(new SeededRandom(hashSeed(`${name}:hidden:${i}`))),
+        // C9: minted against the NPC's REAL stats + PUBLIC archetype bias, so secrets stay consistent.
+        hiddenElements: generateHiddenElements(
+          new SeededRandom(hashSeed(`${name}:hidden:${i}`)),
+          { stats, publicBias: spec.bias },
+        ),
       },
       soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, emotionalHistory: [], memory: [] },
     };
