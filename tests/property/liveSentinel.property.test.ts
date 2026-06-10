@@ -53,6 +53,9 @@ const args = (name: string): Record<string, unknown> => {
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
     case "diaryRoom": return { entry: "my private read" };
     case "makeDeal": return { with: npc(1), kind: "safety", terms: "we ride together" };
+    // B65: voice the NPC who HOLDS adjacent secrets — their soul/hidden-element/Vault sentinels and
+    // every OTHER houseguest's knowledge sentinel must still never cross (the per-NPC bound).
+    case "npcVoice": return { id: npc(1) };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels

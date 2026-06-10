@@ -76,6 +76,8 @@ export class McpServer {
         return this.deps.session.seasonRecap();
       case "seasonRetrospective":
         return this.deps.session.seasonRetrospective();
+      case "npcVoice":
+        return this.deps.session.npcVoice(args["id"] as EntityId);
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":

@@ -61,6 +61,12 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // Per-NPC voicing (B65 / ADR 0003 §8): the session projects ONE houseguest's legitimate
+  // knowledge + hunches so the narrator can voice them without inventing or omnisciently leaking.
+  session.setNpcKnowledgeProviders({
+    known: (id) => engine.knowledge.knownTo(id),
+    suspicions: (id) => engine.knowledge.suspicionsOf(id),
+  });
   // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
   // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).
   session.setRecordProviders({

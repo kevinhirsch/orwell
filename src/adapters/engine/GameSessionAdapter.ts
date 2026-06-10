@@ -3,7 +3,7 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
-  SeasonRecapView, RetrospectiveView,
+  SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
 import type { GameEvent } from "../../domain/event";
@@ -59,7 +59,7 @@ import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import { RelationshipModel } from "../../engine/relationships";
+import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
@@ -193,6 +193,70 @@ export class GameSessionAdapter implements GameSession {
     hidden: () => ReadonlyArray<{ kind: string; content: string }>;
   }): void {
     this.record = p;
+  }
+
+  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
+  private npcKnowledge?: {
+    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
+  };
+
+  setNpcKnowledgeProviders(p: {
+    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
+  }): void {
+    this.npcKnowledge = p;
+  }
+
+  /** Caps so a long season's voicing context stays tight (prefer removing context — ADR 0003). */
+  private static readonly VOICE_KNOWS_CAP = 20;
+  private static readonly VOICE_SUSPECTS_CAP = 8;
+
+  /**
+   * The knowledge-bounded voicing projection for ONE active houseguest (B65 / ADR 0003 §8). The
+   * model is HANDED a bounded person: their stable public persona (byte-stable, B61), their room +
+   * co-presence (0049), what THEY legitimately know (0002 — which they may, in character, choose
+   * to reveal: that is the game), their hunches, and ORGANIC stances (labels through their own
+   * disposition — never a number). Everything any OTHER houseguest privately knows, the Vault,
+   * and the souls stay out by construction — the model cannot voice what this NPC never learned.
+   */
+  npcVoice(id: EntityId): NpcVoiceView | null {
+    if (!this.house) return null;
+    const npc = this.house.npcs.find((n) => n.id === id);
+    if (!npc || this.seatOf(id) !== "active") return null; // only the living are voiced from inside
+
+    const room = this.presence?.get(id) ?? null;
+    const present: NamedRef[] = [];
+    if (room && this.presence) {
+      for (const [other, where] of this.presence) {
+        if (where === room && other !== id) present.push({ id: other, name: this.nameOf(other) });
+      }
+    }
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const others = [this.house.player.id, ...this.house.npcs.map((n) => n.id)]
+      .filter((h) => h !== id && !evicted.has(h));
+    return {
+      houseguest: { id, name: npc.name },
+      persona: {
+        archetype: npc.character.archetype,
+        strategyStyle: npc.character.strategyStyle,
+        background: npc.character.background,
+        age: npc.character.age,
+        appearance: npc.character.appearance,
+        presentation: npc.character.presentation,
+      },
+      whereabouts: room ? { room, present } : null,
+      knows: (this.npcKnowledge?.known(id) ?? [])
+        .slice(-GameSessionAdapter.VOICE_KNOWS_CAP)
+        .map((f) => this.humanize(f.content)),
+      suspects: (this.npcKnowledge?.suspicions(id) ?? [])
+        .slice(-GameSessionAdapter.VOICE_SUSPECTS_CAP)
+        .map((f) => this.humanize(f.content)),
+      stances: others.map((other) => ({
+        toward: { id: other, name: this.nameOf(other) },
+        stance: relationshipLabel(this.rel.edge(id, other), dispositionOf(npc.character.archetype)),
+      })),
+    };
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
