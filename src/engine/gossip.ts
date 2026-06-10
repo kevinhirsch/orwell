@@ -27,6 +27,44 @@ export function makeSocialGraph(edges: ReadonlyArray<readonly [EntityId, EntityI
   };
 }
 
+/**
+ * Live-diffusion tunables (B27b — the 0028 constants pattern). A rumor RISES from a scene only
+ * occasionally, travels with a LOW transmit probability over the affinity graph, and decays —
+ * partial, distorted spread that reaches the player rarely, as a belief with source+confidence.
+ * Volume is also a cost bound: every retelling is a recorded event (the B54/UAT lesson).
+ */
+export const GOSSIP = {
+  /** Chance per off-screen tick that one of the night's scenes becomes a rumor. */
+  riseProb: 0.15,
+  /** Per-edge chance a holder retells the rumor each round. */
+  transmitProb: 0.25,
+  /** Diffusion rounds per rumor (one hop per round). */
+  rounds: 2,
+  /** Confidence decay per hop. */
+  decay: 0.7,
+  /** Affinity above this makes a social-graph edge (who actually talks to whom). */
+  affinityEdge: 0.35,
+} as const;
+
+/** The vague gloss a scene's nature gets when it becomes a rumor — NEVER the verbatim scene. */
+export const RUMOR_GLOSS: Record<string, string> = {
+  alliance: "getting awfully close",
+  gossip: "talking about everyone behind their backs",
+  conflict: "at each other's throats",
+  bonding: "thick as thieves lately",
+  strategy: "plotting something",
+  showmance: "more than friends",
+  betrayal: "about to turn on someone",
+};
+
+/**
+ * The rumor a hidden scene gives rise to (B27b): a vague PARAPHRASE of who-with-whom and the vibe —
+ * never the verbatim hidden content, so the 0031 leak sweep can stay strict about exact strings.
+ */
+export function rumorFrom(initiator: EntityId, partner: EntityId, type: string): string {
+  return `word around the house is that ${initiator} and ${partner} are ${RUMOR_GLOSS[type] ?? "up to something"}`;
+}
+
 /** Each retelling drifts the message — that's how second-hand facts become wrong. */
 function distort(content: string, rng: RandomnessSource): string {
   const drift = ["roughly", "or so I heard", "supposedly", "more or less", "the way I heard it"];

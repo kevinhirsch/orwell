@@ -15,7 +15,8 @@ import type { SaveStore, SaveRef } from "../../src/ports/SaveStore";
 import type { RandomnessSource } from "../../src/ports/RandomnessSource";
 import type { Day } from "../../src/engine/schedule";
 import type { McpServer } from "../../src/adapters/mcp/McpServer";
-import type { SeasonOutcome, SeasonHouseguest } from "../../src/engine/season";
+import type { SeasonHouseguest } from "../../src/engine/season";
+import type { SeasonOutcome } from "../../src/engine/calibration";
 import type { EntityId as Eid } from "../../src/domain/ids";
 
 // dependency-cruiser (architecture step) can take a few seconds on a cold cache.
@@ -92,6 +93,12 @@ export class BbWorld extends World {
   outcome2?: SeasonOutcome;
   chosenReplacement?: Eid;
   playerState?: { active: Eid[]; hoh: Eid };
+  /** B55: the LIVE-loop pending-nomination fixture (the one weekly rulebook). */
+  liveNom?: {
+    s: import("../../src/engine/liveSeason").LiveSeasonState;
+    ctx: import("../../src/engine/liveSeason").SeasonCtx;
+    rng: import("../../src/adapters/random/SeededRandom").SeededRandom;
+  };
 
   // Conversation & scene system (0012) scratch state.
   approaches?: Eid[];
@@ -342,6 +349,32 @@ export class BbWorld extends World {
     preRevealSweeps: string[];
   };
   twistFinal?: import("../../src/ports/GameSession").AdvanceView;
+
+  // Season retrospective & the Vault unsealing (0048) scratch state.
+  rtRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  rtUser?: string;
+  rtSandbox?: import("../../src/composition/registry").UserSandbox;
+  rtSandboxB?: import("../../src/composition/registry").UserSandbox;
+  rtRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
+  rtRetroB?: import("../../src/ports/GameSession").RetrospectiveView | null;
+  rtRecap?: import("../../src/ports/GameSession").SeasonRecapView;
+  rtArchive?: import("../../src/engine/sessionSnapshot").SessionSnapshot;
+
+  // Live off-screen society (0038) + running watcher (0035) scratch state.
+  osRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  osUser?: string;
+  osSandbox?: import("../../src/composition/registry").UserSandbox;
+  osOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  osSandboxA?: import("../../src/composition/registry").UserSandbox;
+  osOrchA?: import("../../src/composition/orchestrator").Orchestrator;
+  osUserA?: string;
+  osFactOrigin?: Eid;
+  osFactId?: string;
+  osPlayerRumor?: import("../../src/domain/knowledge").KnowledgeFact;
+  osRuntime?: import("../../src/composition/runtime").Runtime;
+  osRuntime2?: import("../../src/composition/runtime").Runtime;
+  osClock?: import("../../src/adapters/time/FakeClock").FakeClock;
+  osHiddenBefore?: number;
 
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;

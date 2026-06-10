@@ -109,6 +109,18 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] initiatives failed: {e}")
             return {"initiatives": []}
 
+    @router.get("/whereabouts")
+    async def orwell_whereabouts(request: Request):
+        """The Vault-free presence read (0049/C28): the player's room, who is in it, and who is in
+        each ADJACENT room — the AMBIENT ground for lingering play (ADR 0003 §4/§7: it augments the
+        chat; moving/milling/talking stay prose). Fails OPEN: {whereabouts: null} on any error or
+        pre-game, so the page never blocks on it."""
+        try:
+            return {"whereabouts": await orwell_engine.whereabouts(user=_current_user(request))}
+        except Exception as e:
+            logger.warning(f"[orwell] whereabouts failed: {e}")
+            return {"whereabouts": None}
+
     @router.get("/finale")
     async def orwell_finale(request: Request):
         """The Vault-free in-progress finale projection for the finale panel (0037 §8.2): finalists,

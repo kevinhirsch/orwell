@@ -5,8 +5,11 @@ import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameSt
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
 import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
 import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledgeService";
+import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
+import { SeededRandom } from "../adapters/random/SeededRandom";
+import { hashSeed } from "../engine/characterFactory";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -33,15 +36,21 @@ export interface UserSandbox {
   session: GameSessionAdapter;
   commands: EngineCommandsAdapter;
   mcp: { player: McpServer; admin: McpServer };
+  /** Project the live session's PUBLIC facts onto the admin state (B58/audit E5) — roles only. */
+  syncAdmin: () => void;
 }
 
-function buildUserSandbox(): UserSandbox {
+function buildUserSandbox(user = "default"): UserSandbox {
   const engine = buildEngineCore();
   const adminState = new InMemoryGameStateRepository({ week: 1, phase: "setup", houseguests: [] });
   const outward = buildOutwardChannels({
     player: PLAYER, events: engine.events, knowledge: engine.knowledge, adminState,
   });
-  const commands = new EngineCommandsAdapter(engine.events, engine.knowledge, engine.relationships);
+  // A PER-USER rng (B60/audit E12): the command seam's folds/overhears were identical across every
+  // sandbox (a shared SeededRandom(1)) — now each user's stream is their own.
+  const commands = new EngineCommandsAdapter(
+    engine.events, engine.knowledge, engine.relationships, new SeededRandom(hashSeed(`commands:${user}`)),
+  );
   const session = new GameSessionAdapter(engine.relationships);
   // Wire the engine-only soul store (0024) into the live session so consequential beats + off-screen
   // scenes deepen each NPC's arc and ground their later voice (the 0041 linchpin).
@@ -52,6 +61,18 @@ function buildUserSandbox(): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // Per-NPC voicing (B65 / ADR 0003 §8): the session projects ONE houseguest's legitimate
+  // knowledge + hunches so the narrator can voice them without inventing or omnisciently leaking.
+  session.setNpcKnowledgeProviders({
+    known: (id) => engine.knowledge.knownTo(id),
+    suspicions: (id) => engine.knowledge.suspicionsOf(id),
+  });
+  // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
+  // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).
+  session.setRecordProviders({
+    events: () => engine.events.query(),
+    hidden: () => engine.vault.readHidden(),
+  });
   // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
   // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
   session.setOnSeal((reserve) => {
@@ -86,6 +107,24 @@ function buildUserSandbox(): UserSandbox {
     return id;
   });
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
+  // B58/audit E5: the admin's inspectable state mirrors the LIVE session's public facts (week,
+  // phase, roles-only roster) — refreshed on every persisted mutation, never a never-updated stub.
+  const syncAdmin = (): void => {
+    const core = session.snapshot();
+    const prev = adminState.getAdminVisibleState();
+    const seat = (id: string): string => (core.live?.evictionOrder ?? []).includes(id) ? "evicted" : "active";
+    adminState.setAdminVisibleState({
+      ...prev,
+      week: core.week,
+      phase: core.phase,
+      houseguests: core.house
+        ? [
+            { role: "player", status: seat(core.house.player.id) },
+            ...core.house.npcs.map((n) => ({ role: "npc", status: seat(n.id) })),
+          ]
+        : [],
+    });
+  };
   return {
     engine,
     player: outward.player,
@@ -94,6 +133,7 @@ function buildUserSandbox(): UserSandbox {
     session,
     commands,
     mcp: { player: new McpServer("player", deps), admin: new McpServer("admin/God Mode", deps) },
+    syncAdmin,
   };
 }
 
@@ -119,7 +159,7 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
 function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   if (!snapshotCompatible(snap)) throw new Error(`incompatible snapshot version: ${snap.snapshotVersion}`);
   sb.session.restore(snap);
-  for (const e of snap.events) sb.engine.events.record(e); // ids/ts/hidden preserved exactly
+  for (const e of snap.events) (sb.engine.events as InMemoryEventStore).restoreRecord(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
   if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
@@ -135,11 +175,29 @@ export class GameSessionRegistry {
    */
   constructor(private readonly saveStore?: UserSaveStore) {}
 
+  /**
+   * Wire the per-user hooks every sandbox needs (B41/B58): the commit hook (checkpoint-then-save),
+   * the live admin mirror, the REAL admin reset delegate, and the Vault-free health provider.
+   */
+  private wireHooks(user: string, sb: UserSandbox): void {
+    const persist = (): void => {
+      sb.syncAdmin(); // the admin's inspectable state tracks the live game (B58/E5)
+      this.commit(user);
+    };
+    sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
+    sb.commands.setOnPersist(persist);
+    sb.admin.setResetDelegate(() => {
+      this.resetUser(user); // the admin reset re-onboards the REAL game (B58/E5; B36/C12 route here)
+    });
+    sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
+    sb.syncAdmin();
+  }
+
   /** The user's isolated sandbox — created on first use, RESUMED from durable storage on return. */
   sandboxFor(user: string): UserSandbox {
     let sb = this.sandboxes.get(user);
     if (!sb) {
-      sb = buildUserSandbox();
+      sb = buildUserSandbox(user);
       if (this.saveStore?.hasSave(user)) {
         const snap = this.saveStore.loadLatest(user);
         // Resume from the durable save — but an incompatible/corrupt snapshot must REJECT into a fresh
@@ -148,16 +206,11 @@ export class GameSessionRegistry {
           try {
             importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
           } catch {
-            sb = buildUserSandbox();
+            sb = buildUserSandbox(user);
           }
         }
       }
-      // Always wire the commit hook (B41): even without a durable store, a player mutation must run
-      // the integrity checkpoint (+ touch + health) when the orchestrator is the spine. `commit`
-      // falls back to a no-op save when there is neither a store nor a delegate.
-      const persist = (): void => this.commit(user);
-      sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
-      sb.commands.setOnPersist(persist);
+      this.wireHooks(user, sb);
       this.sandboxes.set(user, sb);
     }
     return sb;
@@ -198,11 +251,9 @@ export class GameSessionRegistry {
    * advance's events behind. The durable save is untouched by this call.
    */
   restore(user: string, snap: SessionSnapshot): UserSandbox {
-    const sb = buildUserSandbox();
+    const sb = buildUserSandbox(user);
     importSnapshot(sb, snap);
-    const persist = (): void => this.commit(user);
-    sb.session.setOnPersist(persist);
-    sb.commands.setOnPersist(persist);
+    this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;
   }
@@ -219,12 +270,17 @@ export class GameSessionRegistry {
 
   /** Start a fresh game for the user — replaces ONLY their own sandbox (others untouched). */
   resetUser(user: string): UserSandbox {
-    const sb = buildUserSandbox();
-    const persist = (): void => this.commit(user);
-    sb.session.setOnPersist(persist);
-    sb.commands.setOnPersist(persist);
+    const sb = buildUserSandbox(user);
+    this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
     return sb;
+  }
+
+  /** Vault-free per-user health (B58/E5+E6) — composed by the runtime over the orchestrator. */
+  private healthProvider?: (user: string) => unknown;
+
+  setHealthProvider(fn: (user: string) => unknown): void {
+    this.healthProvider = fn;
   }
 
   /** A Vault-free channel resolver for the HTTP transport (keeps the outward layer Vault-free). */

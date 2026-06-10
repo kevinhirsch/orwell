@@ -2,6 +2,7 @@ import { GameSessionRegistry } from "./registry";
 import { Orchestrator } from "./orchestrator";
 import { GameWatcher, type WatcherConfig } from "./gameWatcher";
 import { SystemClock } from "../adapters/time/SystemClock";
+import { FileSaveStore } from "../adapters/engine/FileSaveStore";
 import type { Clock, Scheduler } from "../ports/Clock";
 import type { UserSaveStore } from "../ports/UserSaveStore";
 
@@ -19,6 +20,12 @@ import type { UserSaveStore } from "../ports/UserSaveStore";
 export interface RuntimeOptions {
   /** Durable store (0030). Omit for a purely in-memory runtime. */
   saveStore?: UserSaveStore;
+  /**
+   * Compose the default disk-backed store (B59/audit E7): the entrypoint asks for durability and
+   * the COMPOSITION layer constructs it, so `main.ts` never imports an engine-only adapter (it now
+   * sits inside the dependency-cruiser OUTWARD set). Ignored when `saveStore` is given.
+   */
+  durable?: boolean;
   /** Clock+Scheduler the watcher runs behind. Default: real-timer `SystemClock`. */
   clock?: Clock & Scheduler;
   /** Watcher cadence overrides (merged over env/defaults). */
@@ -32,6 +39,8 @@ export interface Runtime {
   orchestrator: Orchestrator;
   watcher: GameWatcher;
   clock: Clock & Scheduler;
+  /** Is this a KNOWN user (live sandbox or durable save)? The network boundary's gate (B34). */
+  knownUser(user: string): boolean;
   /** Start the background watcher (no-op when cadence is 0). */
   start(): void;
   /** Tear the watcher down (cancels its timer). */
@@ -69,7 +78,8 @@ export function watcherConfigFromEnv(env: Record<string, string | undefined> = p
 
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
-  const registry = new GameSessionRegistry(opts.saveStore);
+  const saveStore = opts.saveStore ?? (opts.durable ? new FileSaveStore() : undefined);
+  const registry = new GameSessionRegistry(saveStore);
   const cfg: WatcherConfig = { ...watcherConfigFromEnv(), ...opts.watcher };
   // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
   const orchestrator = new Orchestrator(registry, clock, {
@@ -79,12 +89,21 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
   // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
   registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
+  // God Mode can SEE sandbox health (B58/audit E5+E6): integrity, faults, the circuit state.
+  registry.setHealthProvider((user) => orchestrator.sandboxHealth(user));
+  // Preload saved users at boot (B60/audit E11): without this, every deploy froze each house until
+  // that user's NEXT request — resume them now so the watcher/turn loop can see them immediately.
+  // A user whose save fails to resolve is skipped (B35's tolerant-load handles the quarantine).
+  for (const user of saveStore?.listUsers?.() ?? []) {
+    try { registry.sandboxFor(user); } catch { /* skip an unresumable save; the rest still boot */ }
+  }
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {
     registry,
     orchestrator,
     watcher,
     clock,
+    knownUser: (user) => registry.usernames().includes(user) || (saveStore?.hasSave(user) ?? false),
     start: () => watcher.start(),
     stop: () => watcher.stop(),
   };

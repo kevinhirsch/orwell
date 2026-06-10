@@ -40,6 +40,25 @@ export interface MemorySnapshot {
   tick: number;
 }
 
+/**
+ * THE hidden-impact fold (0023 — B59 collapsed the duplicate): the initiator's action moves how
+ * the OTHERS feel about the initiator. The engine owns the magnitude (anti-sycophancy); callers
+ * may propose the interaction's nature and a bounded `cap` (B39's flood guard). Used by BOTH the
+ * 0023 ConsequenceEngine and the live `recordInteraction` seam — one implementation, zero drift.
+ */
+export function foldHiddenImpact(
+  rel: RelationshipModel,
+  rng: RandomnessSource,
+  initiator: EntityId,
+  witnessSet: readonly EntityId[],
+  kind: InteractionType,
+  toward?: readonly EntityId[],
+  cap = Number.POSITIVE_INFINITY,
+): void {
+  const others = (toward ?? witnessSet.filter((w) => w !== initiator)).slice(0, cap);
+  for (const o of others) rel.applyDirected(o, initiator, kind, rng);
+}
+
 export class ConsequenceEngine {
   private seq = 0;
   private tick = 0;
@@ -64,11 +83,7 @@ export class ConsequenceEngine {
       initiator: h.initiator, witnessSet: h.witnessSet,
       hidden: !h.witnessSet.includes(PLAYER), content: h.content,
     });
-    if (h.kind) {
-      // The initiator's action moves how the OTHERS feel about the initiator.
-      const others = h.toward ?? h.witnessSet.filter((w) => w !== h.initiator);
-      for (const o of others) this.rel.applyDirected(o, h.initiator, h.kind, this.rng);
-    }
+    if (h.kind) foldHiddenImpact(this.rel, this.rng, h.initiator, h.witnessSet, h.kind, h.toward);
     return { eventId };
   }
 

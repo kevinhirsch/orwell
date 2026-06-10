@@ -207,7 +207,7 @@ When("God Mode reads that sandbox's health", function (this: BbWorld) {
 Then("it returns only metadata \\(phase, counts, last advance, integrity status, faults)", function (this: BbWorld) {
   assert.deepEqual(
     Object.keys(this.health!).sort(),
-    ["eventCount", "faults", "lastAdvanceAt", "lastIntegrity", "lastTrigger", "phase", "started", "user", "week"],
+    ["circuitOpen", "eventCount", "faults", "lastAdvanceAt", "lastIntegrity", "lastTrigger", "phase", "started", "user", "week"],
   );
 });
 

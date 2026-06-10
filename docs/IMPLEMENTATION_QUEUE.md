@@ -734,7 +734,16 @@ A behavioral-fidelity / anti-sycophancy audit (transcript) found several capabil
 and two genuine gaps. These specs close them. Build priority: **0038 first** (biggest "feels flat" risk,
 pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 
-### B27 — 0038 live off-screen society  ·  **B27a DONE; B27b remaining**
+### B27 — 0038 live off-screen society  ·  **✅ DONE (B27a + B27b, 2026-06-10)**
+
+> **B27b shipped with B70's PR.** `diffuseGossip` is wired into the live off-screen tick: a rumor RISES from a
+> scene occasionally (`GOSSIP.riseProb`), travels the AFFINITY graph (who actually talks to whom; the player is
+> a node) with low per-edge transmission, decaying confidence and per-telling drift, and lands on the player —
+> when a chain terminates there — as a belief with source+confidence. The rumor is a vague PARAPHRASE
+> (`rumorFrom` + `RUMOR_GLOSS`), never the verbatim hidden scene; retelling events are recipient-specific (the
+> B64 twin-content lesson). The 0031 leak heuristic is PATHWAY-AWARE: hidden content covered by the player's
+> legitimate pathway-borne facts is not a leak — the checkpoint commits legal propagation; the 0001 canary stays
+> the precise guard. 0035 + 0038 are now in `cucumber.cjs` (11 new scenarios). `tests/unit/liveGossip.test.ts`.
 
 > **B27a (DONE):** the orchestrator's live off-screen tick (`Orchestrator.defaultApply`) now runs
 > `richOffscreenStretch` — **seven varied interaction types** folded into the relationship layer by their true
@@ -1377,7 +1386,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > diversity / surfacing thresholds hold across ≥20 seeds; the test **fails** if `defaultApply` stops recording typed
 > scenes. Read `docs/features/0003` first. Open a PR.
 
-### B55 — unify the season loop; ground relationship reads  ·  Claude Code  ·  **Wave 3 · audit D12 + C5 + C6**
+### B55 — unify the season loop; ground relationship reads  ·  Claude Code  ·  **Wave 3 · audit D12 + C5 + C6 · ✅ DONE 2026-06-10**
+
+> **Built to green.** ONE weekly-loop rulebook: `playSeason` is now a DRIVER over `newLiveSeason`/`advance`
+> (new `src/engine/calibration.ts`), auto-answering player pendings with the loop's own NPC policy — the new
+> exported `autoDecision` in `liveSeason.ts` (threat-ranked picks, trusted-save veto, bestAppeal finale answers).
+> The duplicated `WEEK_PHASES`/`pendingNominationDecision`/`validateNominations` are DELETED from `season.ts`
+> (now just the shared reads: chooseNominations(+WithMood), tallyJury); their BDD/unit consumers re-point at the
+> live loop (the canonical-phase-order step now DRIVES a live week and asserts the observed beat order — it was a
+> constant-equals-itself tautology). Seed realism (C5/C6): move-in reads start near BASELINE with seeded scatter,
+> the threat prior leans on the PUBLIC archetype menace (`archetypeMenace`), confidence starts BELOW the knowledge
+> threshold (a day-one read is a HUNCH), and `dispositionOf(archetype)` is finally WIRED into the live model at
+> create + restore (derived from the persisted Character — no extra serialization). Constants in
+> `RELATIONSHIP_CONSTANTS.MOVE_IN`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the calibration sim (`season.ts`) **diverges in rules** from the live loop —
 > `vetoParticipants` without the Houseguest's-Choice chip, different comp types, no manner/appeals, and dead duplicate
@@ -1391,7 +1412,17 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > B51). **Acceptance:** one source of weekly-loop truth; the calibration property green against the live `advance`; move-in
 > reads are **suspicions**, threat priors correlate with public archetype. Open a PR.
 
-### B56 — 0048 season retrospective & the Vault unsealing  ·  Claude Code  ·  **Wave 4 · audit G4 · NEEDS SPEC FIRST · highest fun-per-effort**
+### B56 — 0048 season retrospective & the Vault unsealing  ·  Claude Code  ·  **Wave 4 · audit G4 · ✅ DONE 2026-06-10**
+
+> **Built to green** (spec was already drafted). `seasonRecap()` — the public arc assembled from the EVENT RECORD
+> (`season:`/deal/betrayal events; stores, never narrator memory; Vault-free, any time) — and `seasonRetrospective()`
+> — the ONE sanctioned Vault read, gated IN CODE on `live.finished` (null while live): every hidden event (off-screen
+> scheming, confessionals, gossip) humanized + the sealed twists with fired/unfired weeks. Both on the `GameSession`
+> port (Vault-free types), wired via `setRecordProviders` from the registry; player tools + manifest bullets + the
+> `post-season` moment (the reunion special) + FE wiring (schemas/tags/keep/dispatch/client per the C13 drift test).
+> Lifecycle: the finished snapshot archives intact; `resetUser` + the B36 guard start a new season cleanly. Canary
+> scoping proven: sealed-while-live sweeps + unsealed-post-finale + cross-user isolation (unit + 5 BDD scenarios;
+> 0048 added to `cucumber.cjs`). Pairs with **C17** (the FE surface). Original prompt below.
 
 > Draft and implement **feature 0048** (`docs/features/0048-season-retrospective-and-unsealing.{md,feature}`) — the
 > biggest *fun* payoff the corpus never discusses, and the finished-season lifecycle (0021's archive deferral was never
@@ -1504,7 +1535,17 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `executeDecision`/`advancePhase`; (H3) pin 0033's "standing" to public ceremony facts; (H4) pin admin save/load vs the
 > 0007 ratchet + account-deletion→sandbox-data; (H5–H9) the smaller notes. Docs-only; no gate impact. Open a PR.
 
-### B58 — ops: save pruning, live admin state, fault surfacing  ·  Claude Code  ·  **continuous · audit E4 + E5 + E6**
+### B58 — ops: save pruning, live admin state, fault surfacing  ·  Claude Code  ·  **continuous · audit E4 + E5 + E6 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E4) `FileSaveStore` retention is BOUNDED: newest 5 versions + newest 3 periodic
+> checkpoints (every 50th), pruned on save — a 500-save soak keeps ≤8 files and the latest superset intact
+> (0007 lives in the snapshot's CONTENT). (E5) the admin surface is LIVE: every persisted mutation mirrors
+> week/phase/a roles-only roster onto `adminState` (`UserSandbox.syncAdmin`); `manageSandbox("reset")` routes
+> to the REAL `registry.resetUser` via `AdminPort.setResetDelegate`; new Vault-free **`sandboxHealth`** admin
+> tool (orchestrator health through `registry.setHealthProvider`, wired in `composeRuntime`). (E6) faults are
+> LOUD and bounded: stderr log with user+kinds, stored faults capped at 20, and a circuit breaker — after 3
+> consecutive faults off-screen ticks SKIP the sandbox (`HealthRecord.circuitOpen`); a clean player turn closes
+> it. `tests/unit/opsHardening.test.ts`. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), three operational gaps. (1) **Unbounded disk** (E4): a full snapshot file per
 > mutation, never pruned, snapshot size linear in events ⇒ O(n²) disk — retain a bounded window (last K + periodic
@@ -1519,7 +1560,21 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > `advanceGame`; `manageSandbox reset` re-onboards; a forced-leak apply ⇒ stderr log + health fault over `/admin/call` +
 > sandbox skipped after K. Read `docs/features/0007`, `0016`, `0031` first. Open a PR.
 
-### B59 — close the boundary gaps + the engine cleanup catalog  ·  Claude Code  ·  **continuous · audit E7 + I**
+### B59 — close the boundary gaps + the engine cleanup catalog  ·  Claude Code  ·  **continuous · audit E7 + I · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E7) the dependency-cruiser OUTWARD set now covers `src/adapters/narrative/**` and
+> `src/main.ts` (the entrypoint no longer imports `FileSaveStore` — `composeRuntime({durable:true})` owns the
+> default store and exposes `knownUser`), and VAULT now names the hidden-logic engine modules
+> (`relationships|confessionals|offscreen|gossip|liveSeason`) — type-only imports included; `test:arch` runs in CI
+> via the unit lane (`tests/architecture/vault-boundary.test.ts` reuses the same config). (I) bug fixes: the
+> veto-decision arm validates BEFORE consuming `pending` (an illegal save used to strand the loop) and the
+> `nominees.filter(()=>true)` no-op is gone. Tunables consolidated: `thresholds.vetoSave` (was 0.6 ×3 inline),
+> `TWIST_LOAD_PROB`, and `offscreenInteractions` is finally a REAL orchestrator knob (passed through to the apply
+> step; was dead config + a hard-coded 3). The duplicate consequence fold is ONE implementation
+> (`foldHiddenImpact` in `consequence.ts`, shared by `ConsequenceEngine` + `EngineCommandsAdapter`). New
+> `tests/unit/constantsGate.test.ts` = the grep gate + the retune (knob-turn) test. *Deferred from the catalog
+> (test-consumed seams, no production callers — not worth churn now):* the 0019 `decisions.ts` seam,
+> `producerPrompt`/`deriveNpcKnowledge` routing, approach jitter, goodbye-tone 0.6. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), (1) **dependency-cruiser rule gaps** (E7): OUTWARD omits
 > `src/adapters/narrative/**` and `src/main.ts` (the most leak-sensitive outward consumers); VAULT omits
@@ -1536,7 +1591,18 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > no-op. **Acceptance:** `vaultBoundaryViolations()` fails when a surfaces/services/mcp/**narrative** module type-imports
 > any engine-only module; the constants grep gate passes; the duplicate fold is one implementation. Open a PR.
 
-### B60 — transport robustness + determinism  ·  Claude Code  ·  **continuous · audit E9–E12**
+### B60 — transport robustness + determinism  ·  Claude Code  ·  **continuous · audit E9–E12 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (E9) 256KB body cap (413 + socket destroy), a 30s request timeout, basic name/args
+> validation, and honest error mapping — a DELIBERATE engine refusal (plain `Error`) is 400; any other throw
+> (TypeError etc. = an engine bug) is 500. (E10) calls are SERIALIZED PER USER via a promise queue (a player
+> action can never race a sandbox swap/reset; different users stay concurrent); the sandbox resolves inside the
+> queued job. (E11) `UserSaveStore.listUsers?()` + `FileSaveStore` impl + `composeRuntime` preloads every saved
+> user at boot — a deploy no longer freezes each house until that user's next request. (E12) the per-moment rng
+> keys off the PERSISTED game seed (`SessionCore.seed`; legacy saves fall back to the old name key), the command
+> seam gets a per-user rng, and the EventStore is the ONE monotonic ts authority (`record` normalizes backwards
+> ts; the new `restoreRecord` round-trips a restored history exactly). `tests/unit/transportHardening.test.ts`.
+> Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), harden the HTTP transport and the RNG/ts hygiene. (E9) Add a request **body-size
 > cap** (256KB), a request **timeout**, basic per-tool **arg validation**, and map non-validation throws to **500** (today
@@ -1643,7 +1709,13 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > correct week/phase and only witnessed events; outputs are sentinel-clean. Pairs with **C22**. Read ADR 0003,
 > `docs/features/0018`, `0030`, `0002` (witness model) first. Open a PR.
 
-### B63 — Vault-free jury-status & player-standing facts for the memory wall  ·  Claude Code  ·  **FE-3 · audit U3 (engine half)**
+### B63 — Vault-free jury-status & player-standing facts for the memory wall  ·  Claude Code  ·  **FE-3 · audit U3 (engine half) · ✅ DONE (by prior work; verified 2026-06-10)**
+
+> **Already satisfied** by B48 (`player.status` active/jury/evicted) + B61 (`seatOf` marks every houseguest's
+> card active/**jury**/evicted) + 0020 (`gameStatus` carries hoh/nominees/veto-holder ids, so the player's
+> ceremony role is derivable from public facts alone). Verified by a dedicated test in
+> `tests/unit/lifecycleMoments.test.ts` (roster seats distinct; role computable; no hidden-layer key on either
+> projection). No standing read ("safe"/"target") was added — that stays forbidden (0020).
 
 > In `kevinhirsch/orwell` (TS engine), the roster the FE wants to render (C21) needs two tiny **public-fact**
 > additions: (1) mark evictees who are **jurors** (a `status:"juror"` once jury forms, or expose a public `juryStart`
@@ -1829,7 +1901,18 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > (no idle fast-forward). Read ADR 0003 (§7 + Testability), `docs/features/0002`, `0008`, `0035` first.
 > Open a PR.
 
-### B65 — NPC coherence: knowledge-scoped narration context (people must make sense)  ·  Claude Code  ·  **FE-0/FE-1 · ADR 0003 §8 · the structural guard**
+### B65 — NPC coherence: knowledge-scoped narration context (people must make sense)  ·  Claude Code  ·  **FE-0/FE-1 · ADR 0003 §8 · ✅ DONE 2026-06-10**
+
+> **Built to green.** New **`npcVoice(id)`** on the `GameSession` port (+ player tool + manifest bullet + FE
+> wiring): the knowledge-BOUNDED voicing projection for one ACTIVE houseguest — byte-stable persona facets (B61),
+> room + co-presence (0049), what THEY legitimately know (0002 `knownTo`, humanized, capped) + their hunches
+> (`suspicionsOf` — voiced as suspicion, never certainty), and ORGANIC stances (`relationshipLabel` through their
+> own archetype disposition — labels, never numbers). The sanctioned per-NPC-bounded seam: what it carries of the
+> hidden layer is exactly what THIS houseguest knows (which they may, in character, share/shade/lie about — that
+> is the game); other houseguests' knowledge, the Vault, souls, hidden elements, and every number stay out by
+> construction. Canary: a sentinel outside the NPC's knowledge set never appears in their voice (per-NPC axis);
+> the B42 live sweep now exercises `npcVoice` against the secret-holding NPC; persona byte-stable across turns;
+> no co-presence fact crosses rooms; the departed return null. `tests/unit/npcVoice.test.ts`.
 
 > In `kevinhirsch/orwell` (TS engine), make "people must make sense" (ADR 0003 §8) **structural**, the
 > Vault way: an NPC can only speak from what it legitimately knows, so enforce it on the *context the
@@ -1846,7 +1929,18 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > fact for a scene in another room. Read ADR 0003 (§8 + Testability), `docs/features/0002`, `0001`, and
 > B61 first. Open a PR.
 
-### B66 — the ADR-0003 testability harness (reusable structural assertions)  ·  Claude Code  ·  **FE-2 · ADR 0003 Testability section**
+### B66 — the ADR-0003 testability harness (reusable structural assertions)  ·  Claude Code  ·  **FE-2 · ADR 0003 Testability · ✅ DONE 2026-06-10**
+
+> **Built to green.** `tests/support/adr0003.ts` — the REUSABLE helpers, each returning named violations over a
+> production-wired fixture (`adrFixture`: registry + turn-driven orchestrator as commit delegate):
+> `presenceCoherenceViolations` (one room each, adjacency-only, seeded — B64), `knowledgeScopeViolations`
+> (a unique terminated sentinel per NPC: each voices their OWN and no one else's — B65),
+> `personaDriftViolations` (byte-identical narrator facets across turns — B61), `lingeringViolations`
+> (N mill/talk turns ⇒ week/phase/pending untouched + milling counts as watcher activity — B64).
+> Wired into `npm run test:unit` via `tests/unit/adr0003Harness.test.ts`. The FE half:
+> `frontend/tests/test_b66_augment_guard.py` — the augment-not-replace guard as a SOURCE/REGISTRY assertion
+> (game-progressing engine calls reach routes ONLY through the two sanctioned confirm paths — the C20 decision
+> route and the 409-guarded new-game route; static JS never bypasses the FE routes to the engine transport).
 
 > In `kevinhirsch/orwell`, build the reusable test scaffolding the ADR's Testability section promises,
 > so these principles are enforced, not aspirational, and stay green as the game grows. Add helpers +
@@ -1862,7 +1956,15 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > the suite fails if presence/ knowledge-scope/persona-stability/lingering invariants regress. Read ADR
 > 0003 (Testability) first. Open a PR.
 
-### C28 — augment the chat with presence, never replace it (whereabouts surface)  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · ADR 0003 §4/§7 (depends B64)**
+### C28 — augment the chat with presence, never replace it (whereabouts surface)  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · ✅ DONE 2026-06-10**
+
+> **Built to green** (B64 unblocked it). GET `/api/orwell/whereabouts` (read-only, fail-open: `{whereabouts:null}`
+> on any error/pre-game) + `orwellPresence.js` — a LIGHT, dismissible AMBIENT strip ("📍 Backyard — with A, B ·
+> nearby: Kitchen (C)"): no click-to-move, no scene buttons, the ONLY control is dismiss (which hides until the
+> player's ROOM changes); game-build gated; hidden-tab + backoff poll hygiene (C18). Moving/milling/talking stay
+> PROSE; the engine grounds the narration. `tests/test_c28_presence.py` pins route passthrough/fail-open + the
+> ambient contract (no POST, one control); the B66 augment guard covers it structurally. pytest 275 + boot smoke
+> + the local headless browser smoke all green.
 
 > In `kevinhirsch/orwell` `frontend/`, surface presence so milling is legible **without** moving play
 > out of the chat (ADR 0003 §4: augment, never replace). Render `whereabouts()` (B64) as an **ambient**
@@ -1914,7 +2016,17 @@ PR per item).
 > live** (real production callers) but its competition modifier is **unverified for fairness** (→ B69).
 > Resume that pass before closing prior items as done.
 
-### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3**
+### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (A1) the FE now SENDS the token: `_user_headers` attaches `Authorization: Bearer <token>`
+> from `ORWELL_ENGINE_TOKEN` (`BBAI_ENGINE_TOKEN` legacy fallback), read at call time — both channels share
+> `_post_tool`, so player AND admin calls carry it. The installer GENERATES a token into `data/.env`
+> (`openssl rand -hex 32`, `/dev/urandom` fallback) — both systemd units read the same EnvironmentFile, so
+> engine auth is ON by default even co-located. (A2) an ANONYMOUS caller now sends NO `x-orwell-user` header:
+> single-tenant engines default it server-side (unchanged); `ORWELL_ENGINE_MULTIUSER=1` refuses it (400) instead
+> of collapsing anonymous sessions into one shared sandbox — the authenticated path is untouched.
+> `docs/INSTALL.md` updated. `frontend/tests/test_b67_engine_auth.py`; the engine-side 401/400 behavior was
+> already pinned by `tests/integration/httpBoundary.test.ts` (B34).
 
 > In `kevinhirsch/orwell`, close the engine-auth footgun. The engine **enforces**
 > `ORWELL_ENGINE_TOKEN` on every route (`src/adapters/mcp/HttpMcpServer.ts:92`), but the front-end has
@@ -1934,7 +2046,15 @@ PR per item).
 > tokenless `curl /player/call` 401s; with it unset, behavior is unchanged; under multi-user an anonymous
 > FE call is refused, not routed to `default`. Read `docs/features/0021`, `0009` first. Open a PR.
 
-### B68 — stop dropping the player's knowledge layer on save (live non-degradation)  ·  Claude Code (engine)  ·  **R-0 · CRITICAL · test C1 (= product-audit C2)**
+### B68 — stop dropping the player's knowledge layer on save (live non-degradation)  ·  Claude Code (engine)  ·  **R-0 · CRITICAL · test C1 · ✅ DONE 2026-06-10 (fix shipped with B40; the missing test added now)**
+
+> The snapshot fix itself shipped with **B40** (`SessionSnapshot.knowledge` carries facts + suspicions + the
+> id/ts counters; `InMemoryKnowledgeService.serialize/load`; `toGameState().knowledge` feeds the 0031
+> checkpoint). What this audit item still lacked was the LIVE-PATH test: new
+> `tests/unit/knowledgeSurvivesRestart.test.ts` surfaces a real anchored fact + a suspicion to the player,
+> saves through `FileSaveStore`, boots a NEW registry over the same dir (a process restart), and asserts the
+> factId + pathway + suspicion survive, `counts().knowledge` is non-decreasing, `isSuperset` holds over the
+> live path, and the resumed counters mint fresh ids (audit C3). Memory thinning stays impossible.
 
 > In `kevinhirsch/orwell` (TS engine), a real **non-degradation regression ships today**: the live
 > durable snapshot hardcodes `knowledge: []` (`src/engine/sessionSnapshot.ts:79`) and `SessionSnapshot`
@@ -1952,7 +2072,18 @@ PR per item).
 > test fails before the snapshot fix and passes after; `isSuperset` over the live path includes
 > knowledge. Read `docs/features/0007`, `0030`, `0002` first. Open a PR.
 
-### B69 — re-point the mandate gates at the production loop (richness · fairness · sentinel)  ·  Claude Code (tests + engine)  ·  **R-1 · MAJOR · test C2 + C3 + C6**
+### B69 — re-point the mandate gates at the production loop (richness · fairness · sentinel)  ·  Claude Code (tests + engine)  ·  **R-1 · MAJOR · test C2 + C3 + C6 · ✅ DONE 2026-06-10**
+
+> **Built to green** (richness-on-production largely landed with **B54**; this finishes the batch). (C2) the
+> `reveals=1` backstop was deleted in B54 and the production gate is `liveRichness.property.test.ts`;
+> `simulation.ts` is now QUARANTINED (calibration-only header + a source-scan test: nothing in `src/` imports it
+> beyond `richness.ts`'s type-only import). (C3) new `tests/property/liveFairness.property.test.ts`: 150 seeded
+> seasons through the LIVE loop (the B55 driver) with 16 IDENTICAL houseguests — the player's HOH-reign share
+> sits in a band around the exchangeable 1/16 (a hidden +0.1 favor more than doubles it) and season wins stay
+> in the fair band; the live emotional-modifier SIGN is pinned for the player (rattled hurts, composed helps);
+> the favorite band tightened 65–80% → 67–77% (toward the documented ~72%). (C6) the GENERATED-content sweep:
+> every confessional/scene the live loop itself generates (not planted) is verbatim-swept against every player
+> surface incl. `getMomentPrompt` (`re-entry` too) across seeds — clean.
 
 > In `kevinhirsch/orwell` (TS engine), three "green" gates measure the wrong thing — the headline
 > invariants run against fixtures disconnected from `liveSeason.ts`. Per remediation principle #7 (gates
@@ -1978,7 +2109,16 @@ PR per item).
 > confessional sentinel on a player surface fails the canary. Read `docs/features/0003`, `0006`, `0001`
 > first. Open a PR.
 
-### B70 — close the structural test & CI gaps (boundary · 0038 · coverage)  ·  Claude Code (tests + CI)  ·  **R-1 · MAJOR · test C4 + C7 + C8 + C9**
+### B70 — close the structural test & CI gaps (boundary · 0038 · coverage)  ·  Claude Code (tests + CI)  ·  **R-1 · MAJOR · test C4 + C7 + C8 + C9 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (C4) done by B59 — `adapters/narrative/` + `main.ts` joined the depcruise OUTWARD set.
+> (C7) 0038 is now genuinely gated: B27b built (see B27 above) and BOTH 0035 and 0038 run in `cucumber.cjs`
+> with real step definitions (`offscreen_society.steps.ts` — reusing the 0031 watcher steps where the phrases
+> are shared). (C8) CI gains a `coverage` job; per-directory BRANCH thresholds live in `vitest.config.ts`
+> (engine 90 · composition 88 · adapters/engine 82 — floors at today's real levels so coverage can only
+> ratchet up; engine/composition meet the audit's ≥90). (C9) `tests/unit/failClosed.test.ts`: a leaking apply
+> ⇒ fault + ROLLBACK + zero saves (a counting store proves no persist) + no aborted event left behind; the
+> finale-answer rejection path covered (illegal appeal refused, the pending question survives, legal proceeds).
 
 > In `kevinhirsch/orwell`, four gaps let mandate-violating regressions through a green gate:
 > 1. **C4 — the narrative adapter is outside the Vault boundary.** `.dependency-cruiser.cjs` OUTWARD
@@ -2001,7 +2141,19 @@ PR per item).
 >    reject path.
 > **Acceptance:** all four above; dropping a covered branch below threshold fails CI. Open a PR.
 
-### B71 — production-grade deploy: atomic/rollback updates, boot preload, real smoke  ·  Claude Code (deploy + engine runtime)  ·  **R-2 · MAJOR · ops A4 + A6 + A7**
+### B71 — production-grade deploy: atomic/rollback updates, boot preload, real smoke  ·  Claude Code (deploy + engine runtime)  ·  **R-2 · MAJOR · ops A4 + A6 + A7 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (A4) `orwell-update.sh` builds BEFORE committing to the swap: a failed build reverts to the
+> previous SHA + the preserved `dist.prev` and does NOT restart (clear message + hints); `REF=<sha|tag>` pins the
+> target; `--rollback` returns to the recorded previous SHA/dist (`data/.update-prev`). (A6) done by **B60**
+> (`composeRuntime` preloads every saved user at boot via `listUsers`). (A7) `deploy/smoke.sh` gained a real
+> END-TO-END stage: a TOKEN-ENFORCING engine (tokenless 401 proven), the REAL front-end booted against it, and one
+> full create→advance→decision turn driven through the FE's guarded routes (`deploy/smoke_turn.py`) — proving B67
+> end-to-end; a stale-port pre-flight stops false positives; CI's smoke job installs the FE deps. The new stage
+> immediately CAUGHT a real restart bug: off-screen/confessional event ids were index+rng-keyed, so a restarted
+> process re-minted identical ids against a restored store and the duplicate-id guard killed the tick — ids are
+> now store-size-keyed (the B40 pattern). Note: `advanceGame` is deliberately agent-path-only, so the smoke turn
+> advances on the engine's authed channel and binds the decision through the FE's sanctioned `/decision` route.
 
 > In `kevinhirsch/orwell` `deploy/` (+ a small `src/` runtime change), make the deploy lifecycle safe:
 > 1. **A4 — atomic, pinned, rollback-able updates.** `orwell-update.sh:66-72` does

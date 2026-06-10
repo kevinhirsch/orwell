@@ -81,10 +81,10 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
 | 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Done |
 | 0034 | [Live weekly progression & binding-decision seam](./0034-live-weekly-progression-and-decision-seam.md) | Gameplay (as-built) | Done |
-| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | Done |
+| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | **Done — BDD-gated (B70)**: the running watcher's five scenarios in `cucumber.cjs` (FakeClock; pure turn-driven default per the 2026-06-10 ruling) |
 | 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done |
 | 0037 | [Live jury-vote choreography (the interactive finale)](./0037-live-jury-vote-choreography.md) | Gameplay | **Done** — engine + finale UI (B26 `finaleView` read · C11 `orwellFinale.js`) |
-| 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | Varied society + live soul-deepening (via 0041) · *gossip→player (B27b) pending* |
+| 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | **Done — B27a varied society · 0041 live souls · B27b gossip→player diffusion (pathway-aware 0031 heuristic) · all six scenarios BDD-gated (B70)** |
 | 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | Done |
 | 0040 | [NPC Diary Room confessionals (Vault-only interiority)](./0040-npc-confessionals.md) | Behavioral fidelity | Done · soul-recall feedback live (0041) |
 | 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | **Done — linchpin: SoulStore live; souls evolve + modulate behavior + recall** |
@@ -94,7 +94,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | Gameplay / correctness | **Done** — veto field degrades · F4 sole vote · F3 final-HOH eviction |
 | 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | Gameplay / player UX | **Done** — player.status active/jury/evicted · ceremonies-as-broadcast juror knowledge · B48 |
 | 0047 | [Eviction night live (reveal + goodbyes)](./0047-eviction-night-live.md) | Gameplay | **Done** — staged one-at-a-time vote reveal · goodbye→manner · Vault-free EvictionView · B49 |
-| 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Ready (DoR §8)** · B56 |
+| 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Done** — `seasonRecap` (the record, not memory) · `seasonRetrospective` gated in code on the finished state (the one sanctioned Vault read) · post-season reunion moment · B56 (C17 = the FE surface) |
 | 0049 | [House presence & lingering play (rooms, occupancy, overhearing)](./0049-house-presence-and-lingering.md) | **Behavioral fidelity / ADR 0003** | **Done** — rooms+adjacency in the pure core · seeded one-room occupancy · `whereabouts` lever · co-presence⇒witness, adjacency⇒rare bidirectional `overheard:` pathways · lingering zero-beat · B64 |
 | 0050 | [The casting interview (producer-led character creation)](./0050-casting-interview.md) | Player UX / ADR 0003 | **Done** — interview-in-chat (no modal) · incremental `updateCasting` intake (engine owns the next step; half-done survives restart) · casting card (qualitative) · Soul-memory seeding |
 

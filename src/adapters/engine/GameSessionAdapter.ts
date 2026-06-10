@@ -3,8 +3,10 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
+  SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { HOUSE_ADJACENCY } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
@@ -44,20 +46,20 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
-import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier } from "../../engine/characterFactory";
+import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
-import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS } from "../../engine/relationshipConstants";
+import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS, clamp01 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
-import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import { RelationshipModel } from "../../engine/relationships";
+import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
@@ -126,6 +128,8 @@ export class GameSessionAdapter implements GameSession {
    * witnessing, overhearing, and the player's `whereabouts()` read.
    */
   private presence: Map<EntityId, Room> | null = null;
+  /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
+  private gameSeed: number | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -174,6 +178,130 @@ export class GameSessionAdapter implements GameSession {
     this.onSeal = fn;
   }
 
+  /**
+   * The season record providers (0048/B56): the full event record + the Vault's hidden records,
+   * wired by the registry. The recap reads only the PUBLIC record; the retrospective reads the
+   * hidden side and is gated on the finished terminal state in `seasonRetrospective`.
+   */
+  private record?: {
+    events: () => GameEvent[];
+    hidden: () => ReadonlyArray<{ kind: string; content: string }>;
+  };
+
+  setRecordProviders(p: {
+    events: () => GameEvent[];
+    hidden: () => ReadonlyArray<{ kind: string; content: string }>;
+  }): void {
+    this.record = p;
+  }
+
+  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
+  private npcKnowledge?: {
+    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
+  };
+
+  setNpcKnowledgeProviders(p: {
+    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
+  }): void {
+    this.npcKnowledge = p;
+  }
+
+  /** Caps so a long season's voicing context stays tight (prefer removing context — ADR 0003). */
+  private static readonly VOICE_KNOWS_CAP = 20;
+  private static readonly VOICE_SUSPECTS_CAP = 8;
+
+  /**
+   * The knowledge-bounded voicing projection for ONE active houseguest (B65 / ADR 0003 §8). The
+   * model is HANDED a bounded person: their stable public persona (byte-stable, B61), their room +
+   * co-presence (0049), what THEY legitimately know (0002 — which they may, in character, choose
+   * to reveal: that is the game), their hunches, and ORGANIC stances (labels through their own
+   * disposition — never a number). Everything any OTHER houseguest privately knows, the Vault,
+   * and the souls stay out by construction — the model cannot voice what this NPC never learned.
+   */
+  npcVoice(id: EntityId): NpcVoiceView | null {
+    if (!this.house) return null;
+    const npc = this.house.npcs.find((n) => n.id === id);
+    if (!npc || this.seatOf(id) !== "active") return null; // only the living are voiced from inside
+
+    const room = this.presence?.get(id) ?? null;
+    const present: NamedRef[] = [];
+    if (room && this.presence) {
+      for (const [other, where] of this.presence) {
+        if (where === room && other !== id) present.push({ id: other, name: this.nameOf(other) });
+      }
+    }
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const others = [this.house.player.id, ...this.house.npcs.map((n) => n.id)]
+      .filter((h) => h !== id && !evicted.has(h));
+    return {
+      houseguest: { id, name: npc.name },
+      persona: {
+        archetype: npc.character.archetype,
+        strategyStyle: npc.character.strategyStyle,
+        background: npc.character.background,
+        age: npc.character.age,
+        appearance: npc.character.appearance,
+        presentation: npc.character.presentation,
+      },
+      whereabouts: room ? { room, present } : null,
+      knows: (this.npcKnowledge?.known(id) ?? [])
+        .slice(-GameSessionAdapter.VOICE_KNOWS_CAP)
+        .map((f) => this.humanize(f.content)),
+      suspects: (this.npcKnowledge?.suspicions(id) ?? [])
+        .slice(-GameSessionAdapter.VOICE_SUSPECTS_CAP)
+        .map((f) => this.humanize(f.content)),
+      stances: others.map((other) => ({
+        toward: { id: other, name: this.nameOf(other) },
+        stance: relationshipLabel(this.rel.edge(id, other), dispositionOf(npc.character.archetype)),
+      })),
+    };
+  }
+
+  /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
+  seasonRecap(): SeasonRecapView {
+    const events = this.record?.events() ?? [];
+    // The structural filter: ceremony beats land as `season:` events; deals/betrayal reveals are
+    // their own recorded types. All player-witnessed by construction — this is the public record.
+    const highlights = events
+      .filter((e) => !e.hidden && (e.id.startsWith("season:") || e.type === "deal" || e.type === "betrayal"))
+      .map((e) => e.content);
+    return {
+      started: this.house !== null,
+      finished: !!this.live?.finished,
+      winner: this.named(this.live?.winner),
+      weeksPlayed: this.week,
+      highlights,
+      evicted: (this.live?.evictionOrder ?? []).map((id) => ({ id, name: this.nameOf(id) })),
+      deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+    };
+  }
+
+  /**
+   * The Vault unsealing (0048 §1) — the Wall's ONE sanctioned exception, and THE GATE lives here:
+   * a live (or unstarted) season returns null, enforced by the terminal state in code, never by
+   * prompt. Post-season it returns the real story: every hidden event (off-screen scheming, NPC
+   * confessionals, gossip) plus the producer's sealed twists — fired and unfired alike.
+   */
+  seasonRetrospective(): RetrospectiveView | null {
+    if (!this.live?.finished) return null; // the structural gate: no finished season, no unsealing
+    const events = this.record?.events() ?? [];
+    const hiddenStory = events
+      .filter((e) => e.hidden)
+      .map((e) => ({ type: e.type, content: this.humanize(e.content) }));
+    for (const r of this.record?.hidden() ?? []) {
+      if (r.kind === "reserved-twist") continue; // surfaced structurally via `twists` below
+      hiddenStory.push({ type: r.kind, content: this.humanize(r.content) });
+    }
+    const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
+    const twists = (this.live.reserve ?? []).map((t) => ({
+      kind: t.kind as string,
+      firedWeek: fired.get(t.kind) ?? null,
+    }));
+    return { winner: this.named(this.live.winner), hiddenStory, twists };
+  }
+
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
   snapshot(): SessionCore {
     return {
@@ -185,6 +313,7 @@ export class GameSessionAdapter implements GameSession {
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
+      ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
     };
@@ -200,8 +329,10 @@ export class GameSessionAdapter implements GameSession {
     this.deals.load(core.deals ?? []);
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
+    this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
+    this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
   }
 
   /**
@@ -316,7 +447,7 @@ export class GameSessionAdapter implements GameSession {
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
     // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
     // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
-    const rng = new SeededRandom(hashSeed(`approaches:${this.week}:${this.phase}`));
+    const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${this.week}:${this.phase}`));
     return npcInitiatedApproaches(player, npcIds, this.rel, rng, 3).map((id) => ({
       houseguest: { id, name: this.nameOf(id) },
       pretext: "wants a word with you",
@@ -379,6 +510,7 @@ export class GameSessionAdapter implements GameSession {
       );
     }
     const seed = req.seed ?? hashSeed(playerName);
+    this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
@@ -416,6 +548,7 @@ export class GameSessionAdapter implements GameSession {
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
     this.seedFirstImpressions(seed);
+    this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
     this.presence = assignRooms(
       this.presenceActive(), null,
@@ -442,14 +575,37 @@ export class GameSessionAdapter implements GameSession {
     return castingStatusOf(this.intake);
   }
 
-  /** Give every ordered pair a seeded baseline trust/affinity/threat (deterministic per game). */
+  /**
+   * Realistic move-in reads (B55/audit C5+C6). Day one nobody KNOWS anyone: signals start near the
+   * relationship BASELINE with a small seeded scatter (not uniform noise), the threat read leans on
+   * the target's PUBLIC archetype menace (a comp-beast looks dangerous across the kitchen counter —
+   * never their hidden numbers), and confidence sits BELOW the knowledge threshold, so every
+   * day-one read is a HUNCH the season then firms or breaks. Deterministic per game.
+   */
   private seedFirstImpressions(seed: number): void {
     const all = this.house ? [this.house.player, ...this.house.npcs] : [];
     const rng = new SeededRandom(hashSeed(`${seed}:relationships`));
+    const { baseline, MOVE_IN } = RELATIONSHIP_CONSTANTS;
+    const scatter = (): number => (rng.next() - 0.5) * 2 * MOVE_IN.spread;
     for (const a of all) for (const b of all) {
       if (a.id === b.id) continue;
       const e = this.rel.edge(a.id, b.id);
-      e.trust = rng.next(); e.affinity = rng.next(); e.threat = rng.next(); e.confidence = 0.5;
+      e.trust = clamp01(baseline.trust + scatter());
+      e.affinity = clamp01(baseline.affinity + scatter());
+      e.threat = clamp01(baseline.threat + MOVE_IN.threatWeight * archetypeMenace(b.character.archetype) + scatter());
+      e.confidence = MOVE_IN.confidence;
+    }
+  }
+
+  /**
+   * Wire each houseguest's relationship DISPOSITION from their public archetype (B55/audit C5): a
+   * villain holds grudges (clash, sticky), a loyalist forgives (bond). Derived from the persisted
+   * static Character, so a restore re-derives it — no extra serialization needed.
+   */
+  private wireDispositions(): void {
+    if (!this.house) return;
+    for (const hg of [this.house.player, ...this.house.npcs]) {
+      this.rel.setDisposition(hg.id, dispositionOf(hg.character.archetype));
     }
   }
 
@@ -600,11 +756,15 @@ export class GameSessionAdapter implements GameSession {
 
   /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
   private beatRng(): SeededRandom {
+    // B60/audit E12: key off the GAME's seed (persisted), not the player's display name — two
+    // same-named games get distinct streams; a restored game keeps its own. Legacy saves (no seed)
+    // fall back to the old name key so their in-flight moments still resolve identically.
     const name = this.house?.player.name ?? "season";
+    const root = this.gameSeed ?? name;
     // A double-eviction night (0025/B53) repeats the week's beats in its compressed second cycle —
     // disambiguate so the second HOH comp / eviction don't replay the first cycle's rolls.
     const cycle = this.live?.twist?.phase === "running" ? ":2" : "";
-    return new SeededRandom(hashSeed(`${name}:${this.live?.week}:${this.live?.beat}${cycle}`));
+    return new SeededRandom(hashSeed(`${root}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
   advanceGame(): AdvanceView {
@@ -908,7 +1068,27 @@ export class GameSessionAdapter implements GameSession {
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
     const view = this.view();
     const moment = req.moment ?? view.moment;
-    return { moment, systemPrompt: buildSystemPrompt(moment, view) };
+    return { moment, systemPrompt: buildSystemPrompt(moment, view, this.storyFacts(moment)) };
+  }
+
+  /** How many recorded witnessed events ground a server-initiated lifecycle beat (B62). */
+  private static readonly STORY_FACT_EVENTS = 8;
+
+  /**
+   * The story-so-far facts for a server-initiated lifecycle beat (B62/audit J1+J7+J2): the most
+   * recent WITNESSED events from the record — the store recalled, never the chat remembered
+   * (ADR 0003) — plus the result for a finished season. Vault-free by construction: hidden
+   * events never enter, and the winner/week are public ceremony facts. Other moments get none
+   * (the per-turn prompt stays tight — prefer removing context to adding it).
+   */
+  private storyFacts(moment: string): string | undefined {
+    if (moment !== "re-entry" && moment !== "post-season") return undefined;
+    const recent = (this.record?.events() ?? [])
+      .filter((e) => !e.hidden)
+      .slice(-GameSessionAdapter.STORY_FACT_EVENTS)
+      .map((e) => ({ content: this.humanize(e.content) }));
+    const winner = this.live?.finished ? this.named(this.live.winner) : null;
+    return renderStoryFacts(recent, winner ? { winner: winner.name, week: this.week } : null);
   }
 
   /**
@@ -978,7 +1158,10 @@ export class GameSessionAdapter implements GameSession {
     const status = this.playerStatus();
     // Once the player is out, the moment frames their new seat (closure / the jury spectator box, 0046)
     // rather than the ceremony phase they can no longer act in. An active player keeps the phase moment.
-    const moment = status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
+    // The finished terminal state (0048) trumps every seat: the season is over, the reunion begins.
+    const moment = this.live?.finished
+      ? "post-season"
+      : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
       week: this.week,

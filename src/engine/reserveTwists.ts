@@ -16,6 +16,9 @@ export type TwistKind = "secret-power" | "double-eviction" | "battle-back";
 /** Curated, format-preserving pool. */
 export const RESERVE_POOL: readonly TwistKind[] = ["secret-power", "double-eviction", "battle-back"];
 
+/** Chance an enabled reserve slot actually loads a twist (B59 — tunable, often none fire). */
+export const TWIST_LOAD_PROB = 0.5;
+
 /** A loaded-but-SEALED reserve twist: what it is and the (hidden) beat it fires at. */
 export interface ReserveTwist {
   kind: TwistKind;
@@ -41,7 +44,7 @@ export function loadReserveTwists(count: number, rng: RandomnessSource, totalBea
   const slots = Math.max(0, Math.min(count, RESERVE_POOL.length));
   const out: ReserveTwist[] = [];
   for (let i = 0; i < slots; i++) {
-    if (rng.next() < 0.5) continue; // often none, even when enabled
+    if (rng.next() < 1 - TWIST_LOAD_PROB) continue; // often none, even when enabled
     const kind = RESERVE_POOL[rng.int(RESERVE_POOL.length)]!;
     // A dramatic mid-season beat (never the premiere, never the finale week).
     const fireAtBeat = 2 + rng.int(Math.max(1, totalBeats - 3));

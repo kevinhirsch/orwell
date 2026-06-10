@@ -24,8 +24,10 @@ describe("outcomes by stats + temperature", () => {
       ...[2, 3, 4, 5, 6].map((i) => ({ id: npc(i), stats: flat(0.5) })),
     ];
     const rate = winRate(field, "endurance", npc(1));
-    expect(rate).toBeGreaterThanOrEqual(0.65); // strong majority (target band ~65–80%)
-    expect(rate).toBeLessThanOrEqual(0.8);
+    // B69: tightened toward the documented ~72% calibration (was a loose 65–80% that could
+    // hide a drifted favorite weighting). RUNS=800 ⇒ sd≈1.6%, so ±5pp is noise-safe.
+    expect(rate).toBeGreaterThanOrEqual(0.67);
+    expect(rate).toBeLessThanOrEqual(0.77);
     expect(1 - rate).toBeGreaterThanOrEqual(0.1); // real, uncommon upsets
   });
 

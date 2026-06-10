@@ -4741,6 +4741,44 @@ async def do_social_initiatives(content: str, owner: Optional[str] = None) -> Di
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_season_recap(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.season_recap(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_season_retrospective(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.season_retrospective(user=owner)
+        if res is None:
+            return {"output": "The Vault stays sealed: the season is still live. It opens only after a winner is crowned.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_npc_voice(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    npc_id = (args.get("id") or "").strip()
+    if not npc_id:
+        return {"error": "id (the houseguest id to voice) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.npc_voice(npc_id, user=owner)
+        if res is None:
+            return {"output": "No such active houseguest — the departed are voiced from the public record only.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_whereabouts(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

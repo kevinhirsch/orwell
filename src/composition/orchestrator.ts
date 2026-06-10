@@ -5,6 +5,7 @@ import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
 import { rollOverhears } from "../engine/presence";
+import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
@@ -42,6 +43,12 @@ export interface HealthRecord {
   eventCount: number;
   lastIntegrity: "ok" | "fault";
   faults: Fault[];
+  /**
+   * The circuit breaker (B58/audit E6): true after `BREAKER_THRESHOLD` consecutive faults — the
+   * watcher's off-screen ticks SKIP this sandbox (no identical blind retries) until a successful
+   * player-turn commit closes the circuit again.
+   */
+  circuitOpen: boolean;
 }
 
 export interface AdvanceResult {
@@ -52,9 +59,10 @@ export interface AdvanceResult {
 
 export interface OrchestratorConfig {
   seed?: number;
+  /** Off-screen scenes per tick (B59 — finally a REAL knob; previously hard-coded in the apply step). */
   offscreenInteractions?: number;
   /** Test seam: override the state-mutating step (off-screen + day). Default = the real one. */
-  apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number) => number;
+  apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions?: number) => number;
   /**
    * Pure turn-driven mode (the watcher is disabled, `tickEveryMs:0`): the house can't live between
    * wakes, so every player turn fires ONE bounded off-screen tick (B41/audit D4/M6). Default false.
@@ -63,6 +71,11 @@ export interface OrchestratorConfig {
 }
 
 export class Orchestrator {
+  /** Consecutive faults that OPEN the circuit (off-screen ticks skip the sandbox). B58/E6. */
+  private static readonly BREAKER_THRESHOLD = 3;
+  /** Stored-fault cap per sandbox — health keeps the most recent, never an unbounded log. */
+  private static readonly MAX_STORED_FAULTS = 20;
+
   private readonly seed: number;
   private readonly offscreenInteractions: number;
   private readonly applyFn: NonNullable<OrchestratorConfig["apply"]>;
@@ -70,6 +83,8 @@ export class Orchestrator {
   private readonly rngs = new Map<string, SeededRandom>();
   private readonly health = new Map<string, HealthRecord>();
   private readonly lastActivity = new Map<string, number>();
+  /** Consecutive integrity faults per user (any success resets it). B58/E6. */
+  private readonly consecutiveFaults = new Map<string, number>();
   /** The last GOOD persisted state per user — the baseline a player-turn commit checks against (B41). */
   private readonly baselines = new Map<string, SessionSnapshot>();
   private seq = 0;
@@ -80,7 +95,7 @@ export class Orchestrator {
     cfg: OrchestratorConfig = {},
   ) {
     this.seed = cfg.seed ?? 1;
-    this.offscreenInteractions = cfg.offscreenInteractions ?? 2;
+    this.offscreenInteractions = cfg.offscreenInteractions ?? 3; // matches the long-standing live cadence
     this.applyFn = cfg.apply ?? defaultApply;
     this.turnDriven = cfg.turnDriven ?? false;
   }
@@ -110,14 +125,32 @@ export class Orchestrator {
     return this.lastActivity.has(user) ? this.lastActivity.get(user)! : Infinity;
   }
 
+  /** Is the user's circuit open (B58/E6)? Off-screen ticks skip; a good player turn closes it. */
+  private circuitOpen(user: string): boolean {
+    return (this.consecutiveFaults.get(user) ?? 0) >= Orchestrator.BREAKER_THRESHOLD;
+  }
+
+  /** Surface a fault where an operator can see it (B58/E6) — stderr, with user + kinds. */
+  private logFaults(user: string, trigger: Trigger, faults: Fault[]): void {
+    console.error(
+      `[orwell] integrity fault user=${user} trigger=${trigger} kinds=${faults.map((f) => f.kind).join(",")}` +
+      (this.circuitOpen(user) ? " circuit=OPEN" : ""),
+    );
+  }
+
   /** The one advance spine. `audit` verifies only (no progression). */
   advance(user: string, trigger: Trigger): AdvanceResult {
+    // The circuit breaker (B58/E6): after repeated identical faults, off-screen ticks SKIP this
+    // sandbox instead of blindly retrying — the flag shows in health; a good player turn resets it.
+    if (trigger === "offscreen-tick" && this.circuitOpen(user)) {
+      return { events: 0, integrity: "fault", faults: this.health.get(user)?.faults.slice(-1) ?? [] };
+    }
     const sandbox = this.registry.sandboxFor(user);
     const baseline = this.registry.snapshot(user);
 
     let produced = 0;
     if (trigger !== "audit") {
-      produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now());
+      produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now(), this.offscreenInteractions);
     }
 
     const candidate = this.registry.snapshot(user);
@@ -125,6 +158,7 @@ export class Orchestrator {
     const when = this.clock.now();
 
     if (faults.length === 0) {
+      this.consecutiveFaults.set(user, 0); // any clean advance closes the circuit
       if (trigger !== "audit") { this.registry.saveUser(user); this.baselines.set(user, candidate); }
       if (trigger === "player-turn") this.touch(user);
       this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "ok");
@@ -134,8 +168,10 @@ export class Orchestrator {
     // Fail-closed: roll the in-memory sandbox back to the baseline (clean rebuild,
     // no aborted events left behind) and DO NOT persist. The prior save is intact.
     if (trigger !== "audit") this.registry.restore(user, baseline);
+    this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
+    this.logFaults(user, trigger, faults);
     const prior = this.health.get(user);
-    const allFaults = [...(prior?.faults ?? []), ...faults];
+    const allFaults = [...(prior?.faults ?? []), ...faults].slice(-Orchestrator.MAX_STORED_FAULTS);
     this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "fault", allFaults);
     return { events: 0, integrity: "fault", faults };
   }
@@ -159,6 +195,7 @@ export class Orchestrator {
     const faults = baseline ? this.checkpoint(baseline, candidate, sandbox, "player-turn", { requireDailyEvent: false }) : [];
 
     if (faults.length === 0) {
+      this.consecutiveFaults.set(user, 0); // a good player turn closes the circuit (B58/E6)
       this.registry.saveUser(user);
       this.baselines.set(user, candidate);
       this.touch(user);
@@ -168,8 +205,11 @@ export class Orchestrator {
     }
     // Fail-closed: roll the in-memory sandbox back to the last good state and DO NOT persist.
     this.registry.restore(user, baseline!);
+    this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
+    this.logFaults(user, "player-turn", faults);
     const prior = this.health.get(user);
-    this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "fault", [...(prior?.faults ?? []), ...faults]);
+    this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "fault",
+      [...(prior?.faults ?? []), ...faults].slice(-Orchestrator.MAX_STORED_FAULTS));
   }
 
   /** In pure turn-driven mode, advance one bounded off-screen tick so the house lives between turns (B41). */
@@ -200,11 +240,18 @@ export class Orchestrator {
     if (requireDailyEvent && counts(gsCand).events <= counts(gsBase).events) {
       faults.push({ when, kind: "no-daily-event" });
     }
-    // Vault Wall (0001): no hidden event's content may appear in the player projection.
+    // Vault Wall (0001): no hidden event's content may appear in the player projection — UNLESS the
+    // player legitimately holds it through a real pathway (B27b: gossip/overhears/tellings surface
+    // sanctioned, traceable beliefs; flagging those would refuse every legal propagation). The 0001
+    // sentinel canary remains the precise guard for content with NO pathway to the player.
     const hidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
     if (hidden.length > 0) {
       const view = playerSweep(sandbox);
-      if (hidden.some((c) => c && view.includes(c))) faults.push({ when, kind: "vault-leak" });
+      const playerFacts = (candidate.knowledge?.knowledge?.[PLAYER] ?? [])
+        .filter((f) => /^(told-by:|overheard:|gossip|surfaced)/.test(f.pathway))
+        .map((f) => f.content);
+      const sanctioned = (c: string): boolean => playerFacts.some((f) => f.includes(c));
+      if (hidden.some((c) => c && view.includes(c) && !sanctioned(c))) faults.push({ when, kind: "vault-leak" });
     }
     return faults;
   }
@@ -228,6 +275,7 @@ export class Orchestrator {
       eventCount: sandbox.engine.events.query().length,
       lastIntegrity: integrity,
       faults,
+      circuitOpen: this.circuitOpen(user),
     });
   }
 
@@ -251,12 +299,13 @@ export class Orchestrator {
       eventCount: this.registry.sandboxFor(user).engine.events.query().length,
       lastIntegrity: "ok",
       faults: [],
+      circuitOpen: false,
     };
   }
 }
 
 /** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
-function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number): number {
+function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions = 3): number {
   const core = sandbox.session.snapshot();
   // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment they
   // go (no more scheming/confessing weeks after eviction). A real house ⇒ only the LIVING NPCs; with no
@@ -277,7 +326,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
   const scenes = ids.length >= 2
     ? richOffscreenStretch({
-        events: sandbox.engine.events, rng, npcs: ids, interactions: 3,
+        events: sandbox.engine.events, rng, npcs: ids, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
@@ -294,6 +343,36 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       rollOverhears({
         eventId: s.event.id, room, content: s.event.content, participants: s.event.witnessSet,
         occupancy, knowledge: sandbox.engine.knowledge, rng,
+      });
+    }
+  }
+
+  // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
+  // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
+  // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
+  // them lands the belief — a vague paraphrase with source+confidence, never the verbatim hidden
+  // scene and never a number. Every retelling is a recorded, traceable event (0002).
+  if (core.house && scenes.length > 0 && rng.next() < GOSSIP.riseProb) {
+    const scene = scenes[rng.int(scenes.length)]!;
+    const everyone: EntityId[] = [core.house.player.id, ...activeNpcs];
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < everyone.length; i++) {
+      for (let j = i + 1; j < everyone.length; j++) {
+        if (sandbox.engine.relationships.edge(everyone[i]!, everyone[j]!).affinity > GOSSIP.affinityEdge) {
+          edges.push([everyone[i]!, everyone[j]!] as const);
+        }
+      }
+    }
+    if (edges.length > 0) {
+      diffuseGossip({
+        knowledge: sandbox.engine.knowledge,
+        graph: makeSocialGraph(edges),
+        rng,
+        origin: scene.initiator,
+        fact: { content: rumorFrom(scene.initiator, scene.partner, scene.type) },
+        rounds: GOSSIP.rounds,
+        transmitProb: GOSSIP.transmitProb,
+        decay: GOSSIP.decay,
       });
     }
   }

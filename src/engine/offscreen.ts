@@ -29,7 +29,7 @@ export function simulateOffscreenStretch(deps: {
     while (b === a && guard++ < 16) b = rng.pick(npcs);
 
     const event: GameEvent = {
-      id: `offscreen:${i}:${rng.int(1_000_000_000)}`,
+      id: `offscreen:${events.query().length}:${rng.int(1_000_000_000)}`,
       ts: i,
       type: "conversation",
       initiator: a,
@@ -93,7 +93,10 @@ export function richOffscreenStretch(deps: {
     const type = rng.pick(RICH_TYPES);
 
     const event: GameEvent = {
-      id: `offscreen:${type}:${i}:${rng.int(1_000_000_000)}`,
+      // Store-size-keyed id (the B40 lesson, found live by the B71 smoke): a restarted process
+      // re-seeds the per-user rng, so an index+rng id REGENERATES identically against a restored
+      // store and the duplicate-id guard kills the tick. The store size is restart-monotonic.
+      id: `offscreen:${type}:${events.query().length}:${rng.int(1_000_000_000)}`,
       ts: i,
       type,
       initiator: a,

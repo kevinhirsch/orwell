@@ -1,13 +1,19 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { UserSaveStore } from "../../ports/UserSaveStore";
 import type { SessionSnapshot } from "../../engine/sessionSnapshot";
 
 /**
  * Disk-backed, per-user durable `UserSaveStore` (feature 0030). Each save is a NEW
- * versioned file under `<dataDir>/<user>/vNNNNNN.json`; prior versions are never
- * overwritten (non-degradation, 0007) and `loadLatest` reads the highest version.
- * Survives a process restart: a fresh registry over the same dir recalls the game.
+ * versioned file under `<dataDir>/<user>/vNNNNNN.json` (never overwritten in place);
+ * `loadLatest` reads the highest version. Survives a process restart: a fresh
+ * registry over the same dir recalls the game.
+ *
+ * Retention is BOUNDED (B58/audit E4): a snapshot is a FULL superset of everything
+ * before it (0007's non-degradation lives in the snapshot's content, not in keeping
+ * every historical file), and an unbounded file-per-mutation history is O(n²) disk.
+ * We keep the newest `RETAIN_RECENT` versions plus the newest `RETAIN_CHECKPOINTS`
+ * periodic checkpoints (every `CHECKPOINT_EVERY`th version) and prune the rest.
  *
  * Per-user directories are keyed by a hex encoding of the user id, so one user can
  * never read another's saves and no user-controlled string ever becomes a path
@@ -15,6 +21,13 @@ import type { SessionSnapshot } from "../../engine/sessionSnapshot";
  * layer).
  */
 export class FileSaveStore implements UserSaveStore {
+  /** Newest versions always retained (the working window incl. crash-recovery slack). */
+  private static readonly RETAIN_RECENT = 5;
+  /** Every Nth version is a periodic checkpoint... */
+  private static readonly CHECKPOINT_EVERY = 50;
+  /** ...of which only the newest few are retained (the long-tail archive stays bounded). */
+  private static readonly RETAIN_CHECKPOINTS = 3;
+
   private readonly dataDir: string;
 
   constructor(dataDir?: string) {
@@ -54,10 +67,41 @@ export class FileSaveStore implements UserSaveStore {
     const tmp = `${file}.tmp`;
     writeFileSync(tmp, JSON.stringify(snapshot), "utf8");
     renameSync(tmp, file);
+    this.prune(dir, this.latestVersion(dir));
+  }
+
+  /** Bounded retention (B58/audit E4): keep the recent window + the newest periodic checkpoints. */
+  private prune(dir: string, latest: number): void {
+    const keep = new Set<number>();
+    for (let v = latest; v > latest - FileSaveStore.RETAIN_RECENT && v > 0; v--) keep.add(v);
+    let checkpoints = 0;
+    for (let v = latest - (latest % FileSaveStore.CHECKPOINT_EVERY);
+      v > 0 && checkpoints < FileSaveStore.RETAIN_CHECKPOINTS;
+      v -= FileSaveStore.CHECKPOINT_EVERY) {
+      keep.add(v);
+      checkpoints++;
+    }
+    for (const v of this.versionsDescending(dir)) {
+      if (!keep.has(v)) {
+        try { unlinkSync(this.fileFor(dir, v)); } catch { /* best-effort: already pruned */ }
+      }
+    }
   }
 
   hasSave(user: string): boolean {
     return this.latestVersion(this.userDir(user)) > 0;
+  }
+
+  /** The users with at least one durable save (B60/E11) — dir names are hex-encoded user ids. */
+  listUsers(): string[] {
+    if (!existsSync(this.dataDir)) return [];
+    const users: string[] = [];
+    for (const entry of readdirSync(this.dataDir)) {
+      if (!/^([0-9a-f]{2})+$/i.test(entry)) continue; // not a user dir (e.g. stray files)
+      const user = Buffer.from(entry, "hex").toString("utf8");
+      if (this.hasSave(user)) users.push(user);
+    }
+    return users;
   }
 
   /**

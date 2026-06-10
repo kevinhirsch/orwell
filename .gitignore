@@ -9,3 +9,4 @@ coverage/
 # Durable game saves (feature 0030) — runtime data, never committed.
 .orwell-data/
 data/
+.claude/worktrees/

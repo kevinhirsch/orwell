@@ -77,6 +77,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    the house remembers it. Use it whenever the player engages a houseguest.",
   "  • socialRead — an honest read of the room or a houseguest; it may hint at unease but never names",
   "    off-screen events.",
+  "  • npcVoice — BEFORE voicing a houseguest in a scene, fetch their bounded person: their persona,",
+  "    where they are and who is with them, what THEY actually know and suspect, and their stances.",
+  "    Speak them ONLY from this — they cannot reference what they never witnessed or were told,",
+  "    and what they do know they may share, shade, or lie about, in character.",
   "  • socialInitiatives — which houseguests want to approach the player right now, so scenes start",
   "    from EITHER side (allies scheme, rivals probe) — not only when the player reaches out.",
   "  • whereabouts — the player's room, who is in it, and who is one room over. Call it when the",
@@ -86,6 +90,11 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    move that fact into the player's knowledge along the pathway it travelled.",
   "  • diaryRoom — record the player's private, out-of-character confessional. Nothing here reaches any",
   "    houseguest; it is the player's own space, never an in-game pathway.",
+  "  • seasonRecap — the season's public arc straight from the recorded events (reigns, ceremonies,",
+  "    evictions, deals). Use it for any recap or reunion beat — it is the record, never memory.",
+  "  • seasonRetrospective — POST-SEASON ONLY: opens the Producer's Vault for the FINISHED season —",
+  "    the off-screen scheming, the confessionals, the twist that never fired. It returns nothing",
+  "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
   "  • renderScene — narrate the current moment from the visible projection.",
 ].join("\n");
@@ -181,6 +190,18 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
     "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
     "they want to watch, but they hold no power and cast no vote. Do not invent a path back in.",
+  "re-entry":
+    "MOMENT — Re-entry. The player has RETURNED to a season in progress (a new session; the chat may " +
+    "be empty — the STORE remembers, the chat does not). Open with a fresh in-fiction morning scene in " +
+    "the house, grounded in the CURRENT week/phase and the recorded events below — never an " +
+    "out-of-fiction recap dump, never an apology about absence, never invented happenings. Pick up the " +
+    "live thread (a pending ceremony, a simmering rivalry) and put the player back IN the room.",
+  "post-season":
+    "MOMENT — The season is OVER: a winner is crowned and there is no game left to spoil. Host the " +
+    "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
+    "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
+    "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
+    "moment. A new season starts only from their explicit, confirmed request — never by surprise.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
@@ -260,7 +281,20 @@ export function renderGameContext(view: GameStateView): string {
   ].join("\n");
 }
 
+/**
+ * The story-so-far facts for a server-initiated lifecycle beat (B62/audit J1+J7+J2): RECORDED,
+ * WITNESSED events only — the store recalled, never the chat remembered (ADR 0003). The caller
+ * (the engine adapter) selects the events; this only renders them as facts the model voices.
+ */
+export function renderStoryFacts(recentWitnessed: ReadonlyArray<{ content: string }>, finale?: { winner: string; week: number } | null): string {
+  const lines: string[] = ["THE RECORD (witnessed events — voice these, never invent others):"];
+  for (const e of recentWitnessed) lines.push(`  - ${e.content}`);
+  if (recentWitnessed.length === 0) lines.push("  - (the season has just begun — nothing has happened yet)");
+  if (finale) lines.push(`THE RESULT: ${finale.winner} won the season in week ${finale.week}.`);
+  return lines.join("\n");
+}
+
 /** Compose the full system prompt to inject for a moment: base persona + beat fragment + Vault-free context. */
-export function buildSystemPrompt(moment: string, view: GameStateView): string {
-  return [BASE_GAME_MASTER_PROMPT, momentFragment(moment), renderGameContext(view)].join("\n\n");
+export function buildSystemPrompt(moment: string, view: GameStateView, storyFacts?: string): string {
+  return [BASE_GAME_MASTER_PROMPT, momentFragment(moment), renderGameContext(view), ...(storyFacts ? [storyFacts] : [])].join("\n\n");
 }

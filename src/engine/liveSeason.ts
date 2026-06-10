@@ -18,6 +18,7 @@ import {
   FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
 import { MANNER_THRESHOLDS } from "./juryConstants";
+import { RELATIONSHIP_CONSTANTS } from "./relationshipConstants";
 import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 
@@ -724,14 +725,14 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     case "veto-ceremony": {
       const nominees = s.nominees!;
       if (s.vetoHolder === ctx.player) {
-        const saveable = nominees.filter(() => true); // the holder may save either nominee (incl. self if nominated)
-        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable };
+        // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable.
+        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable: [...nominees] };
         return null;
       }
       // NPC veto holder: save self if nominated, else a strongly-trusted nominee.
       const saved = nominees.includes(s.vetoHolder!)
         ? s.vetoHolder!
-        : nominees.find((n) => ctx.rel.edge(s.vetoHolder!, n).trust > 0.6);
+        : nominees.find((n) => ctx.rel.edge(s.vetoHolder!, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
       if (!saved) {
         s.vetoUsed = false; s.finalNominees = [nominees[0], nominees[1]]; s.beat = "eviction";
         return { beat: "veto-ceremony", content: `${s.vetoHolder} does not use the veto`, participants: [s.vetoHolder!] };
@@ -791,6 +792,52 @@ function resolveReplacement(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   };
 }
 
+/**
+ * The NPC policy for ANY pending player decision (B55/audit D12): what an NPC sitting in the
+ * player's seat would do, by the SAME relationship-driven reads the loop's own NPC paths use.
+ * Lets the calibration driver (`playSeason`) and tests auto-answer pendings so the one live
+ * loop plays unattended — there is no second rulebook to drift.
+ */
+export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): DecisionInput {
+  const p = s.pending;
+  if (!p) throw new Error("no pending decision to auto-resolve");
+  const byThreat = (holder: EntityId, cands: readonly EntityId[]): EntityId =>
+    [...cands].sort((a, b) => ctx.rel.edge(holder, b).threat - ctx.rel.edge(holder, a).threat)[0]!;
+  switch (p.kind) {
+    case "comp-intent":
+      return { kind: "comp-intent", intent: "compete" };
+    case "nominations": {
+      const [a, b] = chooseNominationsWithMood(p.by, s.active, ctx.rel, ctx.emotionalOf?.(p.by) ?? 0.5);
+      return { kind: "nominations", choice: [a, b] };
+    }
+    case "veto-decision": {
+      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee.
+      const saved = p.nominees.includes(p.by)
+        ? p.by
+        : p.nominees.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
+      return saved ? { kind: "veto-decision", use: true, save: saved } : { kind: "veto-decision", use: false };
+    }
+    case "houseguests-choice":
+      return { kind: "houseguests-choice", pick: ctx.rel.chooseStrongestBond(p.by, p.options, rng) };
+    case "replacement":
+      return { kind: "replacement", replacement: byThreat(p.by, p.options) };
+    case "eviction-vote":
+      return { kind: "eviction-vote", vote: npcEvictChoice(p.by, p.nominees, ctx) };
+    case "tie-break":
+      return { kind: "tie-break", evict: npcEvictChoice(p.by, p.nominees, ctx) };
+    case "final-eviction":
+      return { kind: "final-eviction", evict: byThreat(p.by, p.options) };
+    case "finale-statement":
+      return { kind: "finale-statement", statement: "" };
+    case "finale-answer":
+      return { kind: "finale-answer", appeal: bestAppeal(edgeAsJuryRel(p.juror, p.by, ctx), mannerFor(s, p.juror, p.by)) };
+    case "juror-vote": {
+      const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(p.by, fin, ctx), mannerFor(s, p.by, fin));
+      return { kind: "juror-vote", vote: lean(p.finalists[0]) >= lean(p.finalists[1]) ? p.finalists[0] : p.finalists[1] };
+    }
+  }
+}
+
 /** Apply the player's decision for the current `pending`, then continue to the next beat. */
 export function applyDecision(
   s: LiveSeasonState, input: DecisionInput, ctx: SeasonCtx,
@@ -812,17 +859,19 @@ export function applyDecision(
     }
     case "veto-decision": {
       const nominees = s.nominees!;
+      // Validate BEFORE consuming the pending decision (B59/audit I): an illegal save must refuse
+      // and leave the decision standing — the old order cleared `pending` first and stranded the loop.
+      const save = input.use ? input.save : undefined;
+      if (input.use && (!save || !nominees.includes(save))) throw new Error("can only veto a current nominee");
       s.pending = undefined;
       if (!input.use) {
         s.vetoUsed = false; s.finalNominees = [nominees[0], nominees[1]]; s.beat = "eviction";
         return { beat: "veto-ceremony", content: `${ctx.player} does not use the veto`, participants: [ctx.player] };
       }
-      const save = input.save;
-      if (!save || !nominees.includes(save)) throw new Error("can only veto a current nominee");
-      s.vetoUsed = true; s.saved = save;
+      s.vetoUsed = true; s.saved = save!;
       // The HOH names the replacement. If the player is ALSO HOH, that's the next decision.
       const ev = resolveReplacement(s, ctx);
-      return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${save}`, participants: [ctx.player, save] };
+      return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${save}`, participants: [ctx.player, save!] };
     }
     case "comp-intent": {
       // B46/audit B5: the player declares compete/throw/play-safe; the comp then resolves with it.

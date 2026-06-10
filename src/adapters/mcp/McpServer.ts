@@ -72,6 +72,12 @@ export class McpServer {
         return this.deps.session.socialInitiatives();
       case "whereabouts":
         return this.deps.session.whereabouts();
+      case "seasonRecap":
+        return this.deps.session.seasonRecap();
+      case "seasonRetrospective":
+        return this.deps.session.seasonRetrospective();
+      case "npcVoice":
+        return this.deps.session.npcVoice(args["id"] as EntityId);
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":
@@ -92,6 +98,8 @@ export class McpServer {
         return this.deps.admin.configure(args as Record<string, unknown>);
       case "manageSandbox":
         return this.deps.admin.manageSandbox(args["op"] as "create" | "reset" | "save" | "load" | undefined);
+      case "sandboxHealth":
+        return this.deps.admin.health();
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

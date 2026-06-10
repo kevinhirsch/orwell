@@ -1,6 +1,6 @@
 # 0048 — Season retrospective & the Vault unsealing
 
-> **Status:** Draft (queue **B56**, "NEEDS SPEC FIRST" · highest fun-per-effort). The **biggest fun payoff**
+> **Status:** **Built** (queue **B56**, green 2026-06-10). The **biggest fun payoff**
 > the corpus never discusses: when the season is over, **open the Vault** and tell the player the *real*
 > story they could never see — the off-screen scheming, the confessionals, the twist that never fired —
 > plus an arc **recap** built from the event record, and a clean **finished → new-season** lifecycle

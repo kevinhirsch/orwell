@@ -12,6 +12,33 @@ import type {
 export class AdminPort {
   constructor(private readonly state: GameStateRepository) {}
 
+  /**
+   * The REAL sandbox-reset delegate (B58/audit E5): the composition layer wires this to
+   * `registry.resetUser`, so the admin's `manageSandbox("reset")` actually re-onboards the game
+   * instead of mutating a stub nothing reads. Vault-free: the delegate is a void closure.
+   */
+  private onReset?: () => void;
+
+  setResetDelegate(fn: () => void): void {
+    this.onReset = fn;
+  }
+
+  /**
+   * Vault-free sandbox health (B58/audit E5+E6): the composition layer wires this to the
+   * orchestrator's `sandboxHealth` so God Mode can SEE integrity faults and the circuit state.
+   * Returns null when no orchestrator is composed (standalone sandboxes).
+   */
+  private healthProvider?: () => unknown;
+
+  setHealthProvider(fn: () => unknown): void {
+    this.healthProvider = fn;
+  }
+
+  /** Vault-free health metadata (week/phase/integrity/faults) — never game content. */
+  health(): unknown {
+    return this.healthProvider?.() ?? null;
+  }
+
   /** Inspect non-Vault state (week, phase, public roster, config). */
   inspect(): AdminVisibleState {
     return this.state.getAdminVisibleState();
@@ -27,8 +54,10 @@ export class AdminPort {
     return this.state.configure(knobs);
   }
 
-  /** Manage this sandbox only (create | reset | save | load). */
+  /** Manage this sandbox only (create | reset | save | load). A reset re-onboards the REAL game. */
   manageSandbox(op?: SandboxOp): AdminVisibleState {
-    return this.state.manageSandbox(op);
+    const out = this.state.manageSandbox(op);
+    if (op === "reset") this.onReset?.(); // B58/E5: the reset reaches the registry, not just the stub
+    return out;
   }
 }
