@@ -103,6 +103,13 @@ def main() -> int:
             check(page.evaluate("document.getElementById('chat-history').getAttribute('aria-live')") == "polite",
                   "chat log is a polite live region (aria-busy gates it during streams)")
 
+            # C27: the game build ships no third-party CDN deps (KaTeX/Mermaid — no math or
+            # diagrams in BB) and no workspace tour. Asserted on the SERVED page.
+            served = page.content()
+            check("cdn.jsdelivr.net" not in served, "game build: no jsdelivr CDN dependency")
+            check("tourHints.js" not in served and "tourAutoplay.js" not in served,
+                  "game build: workspace tour not shipped")
+
             # C23/C15: the game build marks the body, and the engine-down landing is a DARK
             # HOUSE holding card (game-framed), never the silent generic-workspace welcome.
             # (The smoke runs with the engine down, so this is the real F5 path.)
