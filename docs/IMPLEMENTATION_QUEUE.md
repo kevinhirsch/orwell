@@ -1351,7 +1351,16 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > admin until fired; 0005 eligibility holds within the compressed cycle; the jury-9 / final-2 arc is preserved. Read
 > `docs/features/0025`, `0005`, `0016` first. Open a PR.
 
-### B54 — measure richness on the production path  ·  Claude Code  ·  **Wave 3 · audit D3**
+### B54 — measure richness on the production path  ·  Claude Code  ·  **Wave 3 · audit D3 · ✅ DONE 2026-06-10**
+
+> **Built to green.** `tests/property/liveRichness.property.test.ts` drives the REAL spine — a registry wired
+> exactly like production (turn-driven `Orchestrator` as the commit delegate, so every player mutation runs the
+> checkpoint + one off-screen tick) — across 20 seeds × 3 weeks and computes `liveRichnessMetrics` (new, in
+> `src/engine/richness.ts`) from the sandbox's real `EventStore`: off-screen share ≥ 0.6, type diversity, typed-scene
+> floor (FAILS if `defaultApply` stops recording scenes), alliance+churn life, hidden-layer movement, and a bounded
+> reveal share counted STRUCTURALLY (`GameEvent.reveal` — set by `richOffscreenStretch`, no content parsing). The
+> sim's `reveals = 1` back-stop is **deleted** (it asserted its own input); the 0003 sim gate stays green without it.
+> Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), the 0003 richness property tests run `simulateSeason` (`simulation.ts`, **no
 > production callers**) which force-sets `reveals = 1` if none surfaced (`:113-115`) and whose `offscreenProb` is both the
