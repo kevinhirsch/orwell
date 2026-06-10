@@ -762,6 +762,11 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         # Let client JS/CSS branch on the build honestly (game-framed copy, tips, holding
         # states) instead of guessing from engine reachability.
         html = html.replace("<body", '<body data-game-build="1"', 1)
+        # D6/W8: the game build is self-contained — no third-party CDN. KaTeX/Mermaid
+        # render workspace math/diagrams the game's narration never produces; the only
+        # jsdelivr references die here (and with them the whole origin).
+        import re as _re2
+        html = _re2.sub(r'^.*cdn\.jsdelivr\.net.*\n?', "", html, flags=_re2.MULTILINE)
     else:
         # C18/audit F8: the game-trim stylesheet hides workspace chrome — with the build OFF
         # (ORWELL_GAME_BUILD=0 debugging) the full workspace must come back, so strip the link.

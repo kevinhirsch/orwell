@@ -117,6 +117,15 @@ function initializeEventListeners() {
 
   // File attachments (inside overflow menu)
   const _overflowAttach = el('overflow-attach-btn');
+  // E94: the first-class composer paperclip (game build) drives the same file-input flow.
+  const _composerAttach = el('composer-attach-btn');
+  if (_composerAttach) {
+    if (document.body.hasAttribute('data-game-build')) _composerAttach.style.display = '';
+    _composerAttach.addEventListener('click', () => {
+      const fi = el('file-input');
+      if (fi) fi.click();
+    });
+  }
   if (_overflowAttach) _overflowAttach.addEventListener('click', fileHandlerModule.openPicker);
   el('file-input').addEventListener('change', (e)=>{
     for (const f of e.target.files) fileHandlerModule.addFiles([f]);

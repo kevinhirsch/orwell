@@ -89,3 +89,76 @@ def test_d3_status_route_live(monkeypatch):
     assert body.get("pending", {}).get("kind") == "nominations"
     oe.remember_pending({"pending": None}, user=None)
     assert client.get("/api/orwell/status").json().get("pending") is None
+
+
+# ── D6/W8: the game build is self-contained (no third-party CDN) ─────────────
+
+def test_d6_game_build_serves_no_jsdelivr():
+    import importlib
+    from fastapi.testclient import TestClient
+    app_mod = importlib.import_module("app")
+    client = TestClient(app_mod.app)
+    r = client.get("/", headers={"host": "127.0.0.1"})
+    # The index may require auth in some configs; only assert when it serves.
+    if r.status_code == 200 and "<html" in r.text.lower():
+        assert "cdn.jsdelivr.net" not in r.text, "the game build must not reference a CDN (D6/W8)"
+
+
+# ── E94 (FE half): first-class attach + attachments ride game turns ──────────
+
+def test_e94_composer_paperclip_is_first_class_under_game_build():
+    html = (FE / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="composer-attach-btn"' in html, "the paperclip must live IN the composer row (E94)"
+    app_js = (FE / "static" / "app.js").read_text(encoding="utf-8")
+    assert "composer-attach-btn" in app_js and "file-input" in app_js, \
+        "the paperclip drives the same file-input flow"
+
+
+def test_e94_game_framing_does_not_strip_attachments(monkeypatch):
+    """A game-active turn keeps BOTH the GM framing and the attachment: the
+    framing only prepends to the preface; the attachment rides the user
+    message's content + metadata untouched."""
+    import asyncio
+    import importlib
+    ch = importlib.import_module("routes.chat_helpers")
+    oe = importlib.import_module("src.orwell_engine")
+
+    async def fake_state(user=None, retry=None, timeout=None):
+        return {"started": True, "week": 2, "phase": "nominations", "moment": "scene"}
+
+    async def fake_moment(moment, user=None, timeout=None):
+        return {"systemPrompt": "GM-FRAMING-SENTINEL: you are the house"}
+
+    monkeypatch.setattr(ch, "_fetch_game_state", fake_state, raising=True)
+    monkeypatch.setattr(oe, "get_moment_prompt", fake_moment, raising=False)
+
+    preface = []
+    engine_available, game_active, feed_down = asyncio.get_event_loop().run_until_complete(
+        ch.apply_game_framing(preface, user="e94"))
+    assert game_active is True and feed_down is False
+    framed = " ".join(str(p) for p in preface)
+    assert "GM-FRAMING-SENTINEL" in framed, "the GM moment prompt frames the turn"
+
+    # The attachment pipeline is independent of the framing: metadata survives.
+    pm = ch.PreprocessedMessage(
+        enhanced_message="look at this photo from home",
+        user_content=[{"type": "text", "text": "look at this photo from home"},
+                      {"type": "image_url", "image_url": {"url": "data:image/png;base64,xx"}}],
+        text_for_context="look at this photo from home",
+        youtube_transcripts=[],
+        attachment_meta=[{"name": "home.png", "kind": "image"}],
+    )
+
+    class _Sess:
+        def __init__(self): self.msgs = []
+        def add_message(self, m): self.msgs.append(m)
+
+    class _Handler:
+        def update_session_name_if_needed(self, *a, **k): pass
+
+    sess = _Sess()
+    ch.add_user_message(sess, _Handler(), pm)
+    msg = sess.msgs[0]
+    assert msg.metadata == {"attachments": [{"name": "home.png", "kind": "image"}]}
+    assert any(isinstance(c, dict) and c.get("type") == "image_url" for c in msg.content), \
+        "the image content block rides the game turn"
