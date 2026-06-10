@@ -1230,3 +1230,53 @@ result; the liveSentinel/liveFairness lanes are the cross-lane regression net.
 5. **Wave E-POLISH/OPS/DOCS:** the LOW clusters (E8, E13, E14, E26, E32, E37, E40, E41,
    E59–E63, E67–E75, E79–E82, E85, E90, E92, E96, E97), E76–E78, E83/E84, E86/E87. Then the
    0051 future spec.
+
+---
+
+# Post-merge addenda (2026-06-10, after the round-5/6 merge to main)
+
+## A1 [MED-HIGH · Bug + Vacuous-test] Admin-enabled optional agent tools are silently re-disabled on every default game turn
+
+**The ruling/request (2026-06-10):** the Settings → Admin → Agent tools page lists the
+optional "power" tools (off by default); when an admin ENABLES one, it must actually work
+when the LLM pulls it as a lever.
+
+**The bug:** it doesn't, for exactly the four most likely candidates. Every Chat-mode turn
+auto-escalates to the agent loop whenever the engine is reachable — the *default* player path
+(`frontend/routes/chat_routes.py:565-567`, `auto_escalated = True`; the comment even
+documents the intent: "the heavy shell/code/file tools stay withheld by the auto_escalated
+block"). The withhold block at `:710-713` then updates `disabled_tools` with
+`{"bash","python","read_file","write_file","builtin_browser"}` **unconditionally — after**
+the game-build chokepoint at `:699-703` honored
+`game_build_disabled_additions(get_setting("game_tools_enabled"))`. Net effect: the admin's
+opt-in for `bash`/`python`/`read_file`/`write_file` is silently ignored on every
+chat-originated game turn and honored only when the player manually selects Agent mode.
+The rest of `GAME_TOOL_OPTIONAL` (`grep`/`glob`/`ls`/`edit_file`/`api_call`/
+`chat_with_model`/session tools, `agent_tools.py:116-123`) is NOT in the withhold set and
+works when enabled — so the admin panel behaves inconsistently per tool, which reads as
+random breakage.
+
+**The vacuous claimer (T-stream pattern):** `frontend/tests/test_game_tools_gating.py:161-162`
+asserts `game_build_disabled_additions(["bash"])` excludes bash — true in isolation, never
+composed with the auto-escalation override, so the suite "proves" the toggle while the
+production path defeats it.
+
+**Sub-note:** `app_api`/`api_call`, when enabled under the game build, will 404 against
+dropped verticals (their routes are unmounted by design) — the admin UI copy should say so
+rather than letting an enabled tool look broken.
+
+**Fix spec:** distinguish the two escalation reasons. The intent escalation
+(`chat_routes.py:453-457`, notes/email in plain chat) keeps the withhold as designed; the
+game escalation (`:565-567`) must not re-disable explicitly opted-in tools — subtract the
+opt-ins: `withheld - set(get_setting("game_tools_enabled", []))` (or skip the block entirely
+on the game path, since the game-build chokepoint at `:699-703` is already the single source
+of truth for that turn class). Keep `builtin_browser` withheld unconditionally (not in
+`GAME_TOOL_OPTIONAL` — there is no sanctioned opt-in).
+
+**Test spec:** (a) chat-path composition test in `test_game_tools_gating.py`: game build on,
+`game_tools_enabled=["bash"]`, drive the chat route with `engine_available` true and
+`chat_mode="chat"`; capture the disabled set handed to the agent loop; assert `bash` is NOT
+in it — mirror case (no opt-in) asserts it IS; (b) the same pair for a non-withheld optional
+(`grep`) to pin the consistency; (c) optional E2E: a scripted model calls `bash` on a
+game turn and the tool executes. This closes the gap the existing test's isolation
+assertion papers over.
