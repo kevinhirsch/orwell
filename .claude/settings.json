@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "mcp__github__pull_request_read"
+    ]
+  }
+}
