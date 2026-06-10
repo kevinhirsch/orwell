@@ -170,6 +170,10 @@ async def _down(*_a, **_k):
     raise RuntimeError("engine unreachable")
 
 
+async def _async_noop(*_a, **_k):
+    return None
+
+
 def test_game_turn_prepends_moment_prompt(monkeypatch):
     chat_helpers._GAME_WAS_ACTIVE.clear()
 
@@ -257,6 +261,54 @@ def test_game_build_engine_down_fails_closed_even_for_a_fresh_user(monkeypatch):
     ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "fresh-user"))
     assert (ea, ga, fd) == (False, False, True)
     assert preface[0]["content"] == chat_helpers.FEED_DOWN_PROMPT
+
+
+def test_started_game_with_moment_prompt_failure_stays_in_character_not_feeds_down(monkeypatch):
+    # The latent flaw in the first cut: one try/except wrapped BOTH engine calls, so a started
+    # season whose moment-prompt fetch hiccupped collapsed to a feeds-down message. get_game_state
+    # already proved the season is live, so the turn must stay in character (fallback frame).
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+    chat_helpers._GAME_WAS_ACTIVE.clear()
+
+    async def started(user=None):
+        return {"started": True, "moment": "social"}
+
+    async def mp_down(moment=None, user=None):
+        raise RuntimeError("moment prompt boom")
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", started)
+    monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_down)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
+    assert (ea, ga, fd) == (True, True, False)  # live game, in-character, NOT feeds-down
+    assert preface[0]["content"].startswith(chat_helpers.FALLBACK_GM_PROMPT)
+    assert preface[0]["content"].endswith("base")  # the fallback frames the existing system prompt
+
+
+def test_game_build_retries_state_once_so_a_brief_engine_blip_recovers(monkeypatch):
+    # A momentary engine restart between turns should recover to a normal in-character turn under
+    # the game build (one short retry), not surface a feeds-down message.
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+    monkeypatch.setattr(chat_helpers.asyncio, "sleep", _async_noop)
+    chat_helpers._GAME_WAS_ACTIVE.clear()
+    calls = {"n": 0}
+
+    async def flaky(user=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("connection refused (restarting)")
+        return {"started": True, "moment": "social"}
+
+    async def fake_mp(moment=None, user=None):
+        return {"systemPrompt": "GM-PROMPT"}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", flaky)
+    monkeypatch.setattr(orwell_engine, "get_moment_prompt", fake_mp)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
+    assert (ea, ga, fd) == (True, True, False)
+    assert calls["n"] == 2  # retried once and recovered
+    assert preface[0]["content"].startswith("GM-PROMPT")
 
 
 def test_game_build_no_started_game_gets_the_pre_game_casting_voice(monkeypatch):
