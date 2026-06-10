@@ -2058,7 +2058,18 @@ PR per item).
 > test fails before the snapshot fix and passes after; `isSuperset` over the live path includes
 > knowledge. Read `docs/features/0007`, `0030`, `0002` first. Open a PR.
 
-### B69 — re-point the mandate gates at the production loop (richness · fairness · sentinel)  ·  Claude Code (tests + engine)  ·  **R-1 · MAJOR · test C2 + C3 + C6**
+### B69 — re-point the mandate gates at the production loop (richness · fairness · sentinel)  ·  Claude Code (tests + engine)  ·  **R-1 · MAJOR · test C2 + C3 + C6 · ✅ DONE 2026-06-10**
+
+> **Built to green** (richness-on-production largely landed with **B54**; this finishes the batch). (C2) the
+> `reveals=1` backstop was deleted in B54 and the production gate is `liveRichness.property.test.ts`;
+> `simulation.ts` is now QUARANTINED (calibration-only header + a source-scan test: nothing in `src/` imports it
+> beyond `richness.ts`'s type-only import). (C3) new `tests/property/liveFairness.property.test.ts`: 150 seeded
+> seasons through the LIVE loop (the B55 driver) with 16 IDENTICAL houseguests — the player's HOH-reign share
+> sits in a band around the exchangeable 1/16 (a hidden +0.1 favor more than doubles it) and season wins stay
+> in the fair band; the live emotional-modifier SIGN is pinned for the player (rattled hurts, composed helps);
+> the favorite band tightened 65–80% → 67–77% (toward the documented ~72%). (C6) the GENERATED-content sweep:
+> every confessional/scene the live loop itself generates (not planted) is verbatim-swept against every player
+> surface incl. `getMomentPrompt` (`re-entry` too) across seeds — clean.
 
 > In `kevinhirsch/orwell` (TS engine), three "green" gates measure the wrong thing — the headline
 > invariants run against fixtures disconnected from `liveSeason.ts`. Per remediation principle #7 (gates
