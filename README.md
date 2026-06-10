@@ -304,7 +304,9 @@ survives even if the people don't. (Formal, evolving records live in
 - **Decision.** Both the player and the NPCs initiate. NPCs hold goals from their profiles
   that make them seek the player out (for alliances, confrontations, reassurance, strategy),
   and the player can approach anyone. Neither side drives everything — and the house keeps
-  living **between** the player's turns via a bounded off-screen watcher.
+  living **between the player's own turns** (one bounded off-screen tick per turn). The game
+  clock is the player's play-clock: when the player steps away, the house suspends — it never
+  schemes while the player can't react (the real-estate constraint cuts both ways).
 - **Why.** If the player were the only engine moving the social game, the house would feel
   inert and the fidelity mandate would fail.
 

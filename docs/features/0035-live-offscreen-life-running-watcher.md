@@ -60,6 +60,13 @@ the off-screen-sim **content** (0003); multi-process/distributed scheduling (sin
   stays inside one sandbox (**0021 isolation**); the player sees **no opinion numbers** — only later
   behavior (**0001 Vault Wall**); each advance is **bounded/rate-limited** so a long absence can't
   fast-forward the season; integrity stays **fail-closed**.
+- **The house does not exist when the player leaves (ruling 2026-06-10).** `DEFAULT_WATCHER.tickEveryMs`
+  is `0` — pure turn-driven is the default. The game clock runs only when the player acts. Between the
+  player's own turns the house gets one bounded off-screen tick (`maybeTurnDrivenTick`), keeping the
+  house alive *while the player is playing*. When the player steps away, nothing fires. The watcher
+  (`tickEveryMs>0`) is an opt-in operator knob, never the default: background wall-clock activity
+  during player absence creates a structural disadvantage (the house schemes; the player cannot react)
+  that contradicts the real-estate constraint at the core of the game.
 - **Determinism:** production uses real time; **tests use `FakeClock`** (no real timers) — unchanged.
 
 ## 5. Contracts (stack-agnostic)

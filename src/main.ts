@@ -23,10 +23,11 @@ const port = parsePort(
 );
 // The live runtime (0035): one long-lived per-user registry (0021) — each authenticated user
 // (asserted over the x-orwell-user header) gets an isolated sandbox, recalled from a disk-backed
-// save store (0030) so a started game survives an engine restart — PLUS the background watcher
-// (0031) behind a real-timer clock, so the house keeps scheming/drifting between player turns.
-// Cadence comes from ORWELL_WATCHER_* env (ORWELL_WATCHER_TICK_MS=0 disables it → pure turn-driven);
-// data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
+// save store (0030) so a started game survives an engine restart. The game clock is the player's
+// play-clock (ruling 2026-06-10): the DEFAULT is pure turn-driven (ORWELL_WATCHER_TICK_MS=0) — the
+// house lives between the player's own turns (one bounded off-screen tick per turn) and does NOT
+// exist while the player is away. The wall-clock watcher (0031/0035) is an opt-in operator knob
+// (ORWELL_WATCHER_* env); data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
 const saveStore = new FileSaveStore();
 const runtime = composeRuntime({ saveStore });
 
