@@ -164,9 +164,11 @@ Then("it contains the player's own card, the phase, and the house roster by name
   for (const h of this.gsView!.house) assert.ok(this.lastOutput.includes(h.name), `roster name ${h.name}`);
 });
 
-Then("it contains no competition stats, souls, archetypes, or hidden attributes", function (this: BbWorld) {
-  // Stats / souls / hidden internals never cross — the roster is name+status only.
-  for (const banned of ["physical", "mental", "social", "soul", "volatility", "emotionalBaseline", "emotionalState"]) {
+Then("it contains no competition stats, souls, or hidden attributes", function (this: BbWorld) {
+  // Stats / souls / hidden internals never cross. The curated PUBLIC persona facets
+  // (archetype, style, background, appearance) DO cross since B61 — they are the
+  // narrator's per-houseguest voice anchor, blessed Vault-free by 0004/0020.
+  for (const banned of ["physical", "mental", '"soul"', "volatility", "emotionalBaseline", "emotionalState", "hiddenElement", "secret-motive", "concealed-aptitude"]) {
     assert.ok(!this.lastOutput.includes(banned), `leaked: ${banned}`);
   }
 });

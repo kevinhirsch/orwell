@@ -44,11 +44,23 @@ export interface PlayerCard {
   castingCard?: CastingCard;
 }
 
-/** A public houseguest card: name + status only. No stats, no soul, no archetype, no hidden attributes. */
+/**
+ * A public houseguest card (B61): name + status + the CURATED PUBLIC persona facets — the
+ * things any houseguest can see across the kitchen counter (and the narrator needs to give
+ * each person a consistent voice). NEVER stats, the soul, relationship values, or hidden
+ * elements; those stay engine-side (the live sentinel sweep guards this projection).
+ */
 export interface HouseguestCard {
   id: EntityId;
   name: string;
+  /** active | jury (evicted into the last-9) | evicted (pre-jury). Public ceremony fact. */
   status: string;
+  archetype?: string;
+  strategyStyle?: string;
+  background?: string;
+  age?: number;
+  appearance?: string;
+  presentation?: string;
 }
 
 /**

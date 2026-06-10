@@ -49,7 +49,7 @@ Feature: Narrative & moment orchestration — the engine frames the narrator, pe
     Given a started game
     When the system prompt's game context is built
     Then it contains the player's own card, the phase, and the house roster by name
-    And it contains no competition stats, souls, archetypes, or hidden attributes
+    And it contains no competition stats, souls, or hidden attributes
 
   Scenario: Editing a moment's fragment changes only that moment's injection
     Given the managed per-moment prompt registry

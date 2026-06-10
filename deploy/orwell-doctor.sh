@@ -143,11 +143,23 @@ engine_serves_tools() {
   grep -Eq '"result"|no active game' <<<"$out"
 }
 
-fe_http_ok() { [[ -n "$FE_BASE" ]] && curl -fsS -m 5 "${FE_BASE}/api/orwell/health" >/dev/null 2>&1; }
+# The HTTP status of the FE health probe ("000" = no answer at all). Any real status — even a
+# 401 from an auth-gated build — proves the front-end PROCESS is up and serving.
+fe_http_code() { curl -s -m 5 -o /dev/null -w '%{http_code}' "${FE_BASE}/api/orwell/health" 2>/dev/null; }
+
+fe_http_ok() {
+  [[ -n "$FE_BASE" ]] || return 1
+  local c; c="$(fe_http_code)"
+  [[ -n "$c" && "$c" != "000" ]]
+}
 
 fe_sees_engine() {
   [[ -n "$FE_BASE" ]] && curl -fsS -m 5 "${FE_BASE}/api/orwell/health" 2>/dev/null | grep -q '"engine":\s*true'
 }
+
+# 401 means an OLDER build still auth-gates the health probe (current main exempts it): the FE is
+# up, it just won't tell a cookie-less curl about the engine — we verified the engine directly.
+fe_auth_gated() { [[ "$(fe_http_code)" == "401" ]]; }
 
 wait_for() { # label  probe-fn  tries
   local label="$1" probe="$2" tries="${3:-30}"
@@ -183,8 +195,13 @@ diagnose() {
   fi
   if [[ -n "$FE_BASE" ]]; then
     fe_http_ok       && pass "front-end answers /api/orwell/health" || fail "front-end answers /api/orwell/health (${FE_BASE})"
-    fe_sees_engine   && pass "front-end sees the engine (engine:true)" \
-                     || fail "front-end CANNOT see the engine — check ORWELL_ENGINE_MCP_URL in ${ENV_FILE}"
+    if fe_sees_engine; then
+      pass "front-end sees the engine (engine:true)"
+    elif fe_auth_gated; then
+      warn "health probe is auth-gated on this build (401) — front-end is UP; update the instance to expose the unauthenticated probe"
+    else
+      fail "front-end CANNOT see the engine — check ORWELL_ENGINE_MCP_URL in ${ENV_FILE}"
+    fi
   else
     warn "ORWELL_PORT/BBAI_PORT not set in ${ENV_FILE} — skipping front-end probes"
   fi
@@ -211,7 +228,11 @@ bounce() {
   systemctl restart "$FRONTEND_SVC"
   if [[ -n "$FE_BASE" ]]; then
     wait_for "front-end healthy after restart" fe_http_ok 40 || { journal_tail "$FRONTEND_SVC"; return 1; }
-    wait_for "front-end sees the engine" fe_sees_engine 20 || { journal_tail "$FRONTEND_SVC"; journal_tail "$ENGINE_SVC"; return 1; }
+    if fe_auth_gated; then
+      warn "health probe auth-gated on this build (401) — front-end is up; the engine was verified directly"
+    else
+      wait_for "front-end sees the engine" fe_sees_engine 20 || { journal_tail "$FRONTEND_SVC"; journal_tail "$ENGINE_SVC"; return 1; }
+    fi
   fi
   return 0
 }

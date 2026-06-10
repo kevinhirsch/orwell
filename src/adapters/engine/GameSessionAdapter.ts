@@ -843,8 +843,13 @@ export class GameSessionAdapter implements GameSession {
    * Vault-free: nothing here reads a hidden number.
    */
   private playerStatus(): "active" | "jury" | "evicted" {
+    return this.seatOf(PLAYER);
+  }
+
+  /** Any houseguest's public seat (B61): still playing, on the last-9 jury, or out pre-jury. */
+  private seatOf(id: EntityId): "active" | "jury" | "evicted" {
     const order = this.live?.evictionOrder ?? [];
-    const idx = order.indexOf(PLAYER);
+    const idx = order.indexOf(id);
     if (idx < 0) return "active";
     const cast = this.house ? this.house.npcs.length + 1 : 16;
     const preJury = Math.max(0, cast - 2 - 9); // evictions before the last-9 jury forms
@@ -895,7 +900,16 @@ export class GameSessionAdapter implements GameSession {
       },
       house: this.house.npcs.map((n) => ({
         id: n.id, name: n.name,
-        status: this.live?.evictionOrder.includes(n.id) ? "evicted" : "active",
+        status: this.seatOf(n.id),
+        // B61: the curated PUBLIC persona facets — the narrator's per-person voice anchor
+        // (seed-stable, so a houseguest sounds the same in week 8 as week 1). Stats, the
+        // soul, and hiddenElements are deliberately NOT selected here.
+        archetype: n.character.archetype,
+        strategyStyle: n.character.strategyStyle,
+        background: n.character.background,
+        age: n.character.age,
+        appearance: n.character.appearance,
+        presentation: n.character.presentation,
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

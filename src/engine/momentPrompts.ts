@@ -44,6 +44,13 @@ export const BASE_GAME_MASTER_PROMPT = [
   "internet: a houseguest can know the movie, not this week's box office. If search is unavailable,",
   "just improvise in character.",
   "",
+  "THE HOUSE. Each houseguest in the GAME CONTEXT is a distinct PERSON — voice them from their",
+  "public vibe (their archetype, how they play, their background, how they carry themselves). A",
+  "villain needles; a peacemaker smooths; a comp-beast struts. Keep each person's voice CONSISTENT",
+  "for the whole season — they sound the same in week 8 as in week 1. Never invent biography beyond",
+  "what the context or a tool result gives you: a houseguest knows only what they witnessed or were",
+  "told, and their life story is only what their card says.",
+  "",
   "YOUR LEVERS — call the one that fits the moment, let the engine decide, then narrate what it",
   "returns. Never skip the engine; never reveal stats or scores.",
   "  • updateCasting — during the pre-game casting interview only: record the player's answers as",
@@ -223,7 +230,18 @@ export function renderGameContext(view: GameStateView): string {
     }
     return lines.join("\n");
   }
-  const roster = view.house.map((h) => `  - ${h.name} (${h.status})`).join("\n");
+  // B61: each ACTIVE houseguest's curated public facets ride along — the voice anchor the
+  // model narrates from (seed-stable, so voices stay consistent across the whole season).
+  // The departed are name + seat only; their voices return at the finale via the jury.
+  const roster = view.house.map((h) => {
+    if (h.status !== "active" || !h.archetype) return `  - ${h.name} (${h.status})`;
+    const vibe = [
+      `${h.archetype}, plays ${h.strategyStyle}`,
+      h.background,
+      [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
+    ].filter(Boolean).join("; ");
+    return `  - ${h.name} — ${vibe}`;
+  }).join("\n");
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
