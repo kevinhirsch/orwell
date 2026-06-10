@@ -25,6 +25,26 @@ Feature: Emergent multi-party bloc behavior
     Then bloc-mates shield each other from nomination and vote together
     And they lean toward targeting their shared enemy
 
+  Scenario: A bloc is only as loyal as its members
+    Given two blocs under the same outside pressure
+    And one bloc's members are dispositionally loyal while the other's include a free agent
+    When nominations and eviction votes resolve across the following weeks
+    Then the loyal bloc holds together and coordinates measurably longer
+    And the low-loyalty bloc's coordination is overridden by individual incentives sooner
+
+  Scenario: A low-loyalty member defects without a formal betrayal
+    Given a bloc containing a member with low derived loyalty
+    And that member holds a stronger bond outside the bloc
+    When the next decisions are read
+    Then that member peels away from the bloc's coordination before any betrayal event
+    And no stored membership existed to update
+
+  Scenario: Loyalty is derived from character and soul, never stored per bloc
+    Given a bloc whose member suffers a consequential event that shifts their soul state
+    When blocs are next detected
+    Then the bloc's loyalty strength reflects the member's current soul state
+    And the serialized save contains no bloc loyalty value
+
   Scenario: A betrayal fractures the bloc
     Given a bloc of houseguests
     When one member betrays another and their bond drops
