@@ -208,7 +208,10 @@ def test_engine_down_mid_season_fails_closed(monkeypatch):
     assert preface[0]["content"] == chat_helpers.FEED_DOWN_PROMPT
 
 
-def test_engine_down_with_no_game_history_stays_plain(monkeypatch):
+def test_engine_down_with_no_game_history_stays_plain_on_NON_game_build(monkeypatch):
+    # Legacy mixed-use behavior: only when the game build is OFF is plain chat a legitimate
+    # surface, so an engine outage for a never-framed user fails open to the normal assistant.
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
     chat_helpers._GAME_WAS_ACTIVE.clear()
     monkeypatch.setattr(orwell_engine, "get_game_state", _down)
     preface = [{"role": "system", "content": "base"}]
@@ -218,6 +221,7 @@ def test_engine_down_with_no_game_history_stays_plain(monkeypatch):
 
 
 def test_game_end_clears_the_marker(monkeypatch):
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")  # marker semantics belong to the non-game build
     chat_helpers._GAME_WAS_ACTIVE.clear()
 
     async def started(user=None):
@@ -238,3 +242,49 @@ def test_game_end_clears_the_marker(monkeypatch):
     preface = []
     _, _, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
     assert fd is False and preface == []
+
+
+# --- the game build never serves a vanilla turn (user-reported: "vanilla assistant is
+# unplayable" — a fresh player said "hi" and met a generic chatbot) -------------------
+
+def test_game_build_engine_down_fails_closed_even_for_a_fresh_user(monkeypatch):
+    # The exact reported shape: brand-new player, fresh FE process (empty marker set),
+    # engine unreachable at the FIRST frame → must be the feeds-down voice, never vanilla.
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)  # default = game build ON
+    chat_helpers._GAME_WAS_ACTIVE.clear()
+    monkeypatch.setattr(orwell_engine, "get_game_state", _down)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "fresh-user"))
+    assert (ea, ga, fd) == (False, False, True)
+    assert preface[0]["content"] == chat_helpers.FEED_DOWN_PROMPT
+
+
+def test_game_build_no_started_game_gets_the_pre_game_casting_voice(monkeypatch):
+    # Engine up but this sandbox has no season (new player / reset / lost save): the turn is
+    # framed as production steering into casting — never a generic assistant.
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+    chat_helpers._GAME_WAS_ACTIVE.clear()
+
+    async def no_game(user=None):
+        return {"started": False}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", no_game)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
+    assert (ea, ga, fd) == (True, False, False)
+    assert preface[0]["content"] == chat_helpers.PRE_GAME_PROMPT
+    assert preface[1]["content"] == "base"
+
+
+def test_non_game_build_no_started_game_stays_plain(monkeypatch):
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
+    chat_helpers._GAME_WAS_ACTIVE.clear()
+
+    async def no_game(user=None):
+        return {"started": False}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", no_game)
+    preface = [{"role": "system", "content": "base"}]
+    ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
+    assert (ea, ga, fd) == (True, False, False)
+    assert preface == [{"role": "system", "content": "base"}]

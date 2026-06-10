@@ -39,24 +39,44 @@ FEED_DOWN_PROMPT = (
     "anything unrelated to the game."
 )
 
+PRE_GAME_PROMPT = (
+    "OUT OF CHARACTER — NO SEASON IS RUNNING. This app IS the Big Brother game, but this player "
+    "has no started game in their sandbox (a new player, or their season was reset). Do NOT "
+    "improvise a game, invent houseguests, or narrate any scene. In a warm production voice, tell "
+    "the player the house is dark and walk them into casting: they can start a season from the "
+    "onboarding panel, or you may call the createCharacter tool with their chosen name (plus an "
+    "optional archetype / strategy style) once they tell you how they want to enter the house. "
+    "You may help with anything unrelated to the game."
+)
+
 
 async def apply_game_framing(preface: list, user, incognito: bool = False):
     """Big Brother game framing for one turn. Vault-free; mutates `preface` in place.
+
+    Under the GAME BUILD (0032 — the default for this product) every turn gets HONEST framing;
+    a silent vanilla-assistant turn is impossible (the game is the product, so an unframed turn
+    is always wrong — the bug class where a fresh player says "hi" and meets a generic chatbot):
+      • game started        → the engine's per-moment game-master prompt (in-character);
+      • engine up, no game  → PRE_GAME_PROMPT (production voice, steers into casting/OOBE);
+      • engine unreachable  → FEED_DOWN_PROMPT, fail-CLOSED — regardless of `_GAME_WAS_ACTIVE`
+        (that marker only narrows the non-game build, where plain chat is a legitimate surface).
 
     Returns (engine_available, game_active, feed_down):
       engine_available — engine answered get_game_state (game or no game); triggers game-tool
         pinning so the model can always call createCharacter / getGameState.
       game_active — a game is started; the per-moment system prompt was prepended so the turn
         speaks in-character, and the agent route auto-escalates.
-      feed_down — this user HAD a started game but the engine is unreachable: the turn was
-        framed fail-CLOSED for game content (audit F2 / queue C12) instead of letting the model
-        narrate a season the engine never decided.
+      feed_down — the engine is unreachable and the turn was framed fail-CLOSED for game
+        content (audit F2 / queue C12) instead of letting the model narrate a season the
+        engine never decided.
     """
     engine_available = False
     game_active = False
     feed_down = False
     if incognito:
         return engine_available, game_active, feed_down
+    from src.settings import game_build_enabled
+    game_build = game_build_enabled()
     _gkey = user or "__anon__"
     try:
         from src import orwell_engine
@@ -75,12 +95,20 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
                         preface.insert(0, {"role": "system", "content": gm_prompt})
             else:
                 _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+                if game_build:
+                    # The game IS the product but this sandbox has no season: say so and steer
+                    # into casting — never improvise as a generic assistant.
+                    preface.insert(0, {"role": "system", "content": PRE_GAME_PROMPT})
     except Exception as e:
-        logger.warning("[orwell] game framing skipped: %s", e)
-        if _gkey in _GAME_WAS_ACTIVE:
-            # Engine down MID-SEASON: fail CLOSED for game content (audit F2/C12). The whole
-            # transcript is in-character, so without this the model becomes a confident impostor
-            # narrating a season the engine never decided — the named #1 failure state.
+        from src import orwell_engine
+        logger.warning("[orwell] game framing failed for user=%s engine=%s: %s",
+                       _gkey, getattr(orwell_engine, "ENGINE_URL", "?"), e)
+        if game_build or _gkey in _GAME_WAS_ACTIVE:
+            # Engine down: fail CLOSED for game content (audit F2/C12). Under the game build this
+            # holds for EVERY user — including a brand-new player whose first frame fails (a fresh
+            # front-end process has an empty marker set, which used to mean a silent vanilla turn).
+            # The in-character transcript may be in context, so an unframed turn would keep
+            # "narrating" a season the engine never decided — the named #1 failure state.
             feed_down = True
             preface.insert(0, {"role": "system", "content": FEED_DOWN_PROMPT})
     return engine_available, game_active, feed_down
