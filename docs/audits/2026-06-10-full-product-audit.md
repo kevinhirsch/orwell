@@ -797,6 +797,326 @@ the factory-reset script's three-generation path resolution (now shared by the g
 script); FE XSS discipline (`textContent`/`esc()`/fixpoint sanitizer) and the
 browser-never-reaches-engine guarantee (B66 + loopback bind).
 
+---
+
+# Round 6 — the deep-seam streams (same day)
+
+Five further streams over the seams round 5 read past: the **GM prompt content** itself (P),
+the **inherited-workspace attack surface** under the game build (W), the **pure domain core +
+soul pipeline** (C — two findings confirmed by executing the real modules), a **full
+test-quality sweep** (T — every BDD step file classified production-path vs. fixture), and a
+**live runtime & performance audit** (R — the real engine built, booted, and driven through
+three full seasons over HTTP, with measurements). Native stream numbering is kept for
+traceability; E-batch cross-references inline.
+
+## Round-6 headlines
+
+1. **Two execution-confirmed knowledge-fabrication channels on the player-facing allowlist**
+   (C2/C3): `told-by:<npc>` anchors any invented content if the teller knows *anything about
+   the same subject*, and `overheard:<id>` anchors any content against any unrelated event id
+   (C3 confirms E9 live). The narrator model can mint fabricated full-confidence player
+   knowledge with a clean provenance trail.
+2. **A hard eligibility rule breaks in normal play** (C1, execution-confirmed): the player
+   deferring Houseguest's Choice gets a candidate list snapshotted mid-draw; picking an
+   already-drawn name yields a 6-slot veto field with a duplicate competitor.
+3. **The model can drive the player out of the game** (W1): `ui_control` in the game-build
+   keep-set honors `set_mode`, `switch_model`, and `toggle incognito` with no game-build guard
+   — a prompt-injected NPC line can strip the GM framing mid-scene.
+4. **Several flagship promises are guarded by tests that cannot fail** (T1/T2/T7/T13): vote
+   secrecy's Then is a tautology; live deal reconciliation has zero coverage; the 0019 gate
+   asserts a world slot nothing writes; the UAT never asserts its own header claims.
+5. **The re-entry beat is engine-complete but never requested** (P2): a fresh context
+   mid-season gets no recorded history — the direct ADR-0003 §6 violation — and the B61
+   finality-language line marked DONE never landed (P1).
+6. **E33 is corrected by live play** (R11): with an active compete-and-save-self policy the
+   player reached jury (seed 2002) and Final 2 (seed 1001). E33 downgrades from "the player
+   never reaches the jury" to "pre-jury eviction is near-certain under passive play" — D4
+   becomes a calibration-and-gate task, not a broken-ladder fix.
+7. **The engine scales O(n²) per season** (R3): per-call latency grows ~20× week 1 → week 14
+   (6ms → 118ms) from ~4 full snapshot serializations per mutation; sandboxes are never
+   evicted from memory (R4); the per-mutation off-screen tick is confirmed at 4 ticks / 22
+   events / 8 save versions for 4 calls in 28ms (R5 = E57 measured).
+
+## Stream P — GM prompt & narrative context (P1–P11)
+
+- **P1 [HIGH · Bug]** The B61 "finality language" line never landed though B61 is ✅ in the
+  queue (`IMPLEMENTATION_QUEUE.md:1755–1758`): nothing in `momentPrompts.ts` or
+  `agent_loop.py` forbids voicing unresolved outcomes as settled ("X is going home") — the
+  exact v1 §3.9 failure. *Fix:* one line in `BASE_GAME_MASTER_PROMPT` after AUTHORITY
+  ("unresolved outcomes are READS… never results until the engine resolves and reveals") +
+  a `leverManifest.test.ts` regex pin.
+- **P2 [HIGH · Bug]** The re-entry moment is never requested: `storyFacts`/THE RECORD attach
+  only to `re-entry`/`post-season` (`GameSessionAdapter.ts:1104–1105`), `view.moment` can
+  never *be* `re-entry` (`:1195–1197`), and the FE always passes the phase moment
+  (`chat_helpers.py:135,156`). A player resuming in a fresh session mid-season gets zero
+  recorded history (ADR 0003 §6). C22's DONE note verified only the premiere slice. *Fix:*
+  FE requests `re-entry` on the first game turn of a (re)opened session; pytest pins the
+  requested moment.
+- **P3 [HIGH · Change]** Casting-interview turns stack the producer persona ("never a generic
+  assistant", `momentPrompts.ts:115–116`) on top of the full generic-assistant preamble +
+  rulebook + skills index, because substitution keys on `game_active` (false pre-game)
+  (`chat_routes.py:1142`, `agent_loop.py:86–135, 911`) — and `test_c14_immersion.py:56–59`
+  pins the violation in place. *Fix:* key substitution on a `framed` flag from
+  `apply_game_framing`; small casting-mode tool contract.
+- **P4 [MED · Change]** The fourth-wall gap is prompt-compliant: nothing says levers are
+  silent, and the generic `ask_user` description ("get a decision or clarification…",
+  `tool_schemas.py:454`) invites "Record this interaction?". *Fix:* "levers are silent
+  production machinery — never ask permission to use one; ask_user is ONLY for pending
+  binding decisions" engine- and FE-side, both pinned.
+- **P5 [MED · Improvement]** THE RECORD's blind `slice(-8)` degenerates exactly when re-entry
+  matters: at the finale all eight slots are near-identical vote lines (measured). *Fix:*
+  per-type fact selection (latest ceremony beat per kind + recent social/deal events).
+- **P6 [MED · Bug]** `runCompetition`'s BASE manifest bullet says "resolve… you announce ONLY
+  the winner" (`momentPrompts.ts:66–67`); the preview semantics live only in the HOH fragment
+  — on other turns the model can announce a never-committed winner. *Fix:* reword BASE + FE
+  schema to "previews… resolves only via advanceGame"; manifest test pin.
+- **P7 [MED · Bug]** Incognito strips all game framing while the in-character transcript rides
+  along — ungrounded, consequence-free continuation (mechanism behind E24). *Fix:* disable
+  under the game build or substitute a FEED_DOWN-style non-narration frame.
+- **P8 [LOW]** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
+  policy referencing memories/skills the game build disables (ADR 0003 §1).
+- **P9 [LOW]** The casting-sheet *field* manifest isn't drift-pinned against
+  `CASTING_COVERAGE` (the archetype table is; the nine field names aren't).
+- **P10 [LOW]** `submitDecision`'s manifest line enumerates 4 of 11 pending kinds — say
+  "answer the engine's pending decision (its kind + legal options)" instead.
+- **P11 [LOW]** Two quoted example lines flirt with scripts-to-recite (`momentPrompts.ts:40–42,
+  147–148`) — cut to descriptions.
+- *Held up:* every woven block Vault-free under sentinels; lever manifest drift-pinned both
+  directions; casting sheet generated + dually pinned; `npcVoice` genuinely knowledge-scoped
+  with byte-stable personas; C14 substitution clean on started-game turns; fail-states honest;
+  prompt flat at ~8–9 KB all season (P-measured and independently R10-measured).
+
+## Stream W — inherited-workspace bleed & attack surface (W1–W8)
+
+- **W1 [HIGH · Security]** `ui_control` is in `GAME_TOOL_KEEP` (`agent_tools.py:112`) and
+  honors `set_mode`, `switch_model`, `set_theme`, `toggle <web|bash|rag|research|incognito|…>`,
+  `open_panel` (`ai_interaction.py:1314–1515`) with no game-build guard (`chatStream.js:46–141`)
+  — the model (or a prompt-injected houseguest line) can flip the player to Chat mode, swap
+  the narrating LLM mid-scene, or toggle incognito (which strips all framing — P7/E24).
+  *Fix:* game-build allowlist of safe actions (highlight only); reject
+  mode/model/incognito/panel actions on game turns; pytest + JS guards.
+- **W2 [MED · Security]** `GET /api/chat/events/{session_id}` is the only session endpoint
+  missing `_verify_session_owner` (`chat_routes.py:1297–1303` vs `:1311+`) — any
+  authenticated user can subscribe to another user's activity stream (metadata side-channel +
+  unbounded subscriber slot). *Fix:* one line, same guard as `chat_resume`.
+- **W3 [MED · Change]** The Bitwarden vault vertical mounts unconditionally
+  (`app.py:739–740`, not in `GAME_DROP_SET`) — an admin-gated, password-handling,
+  subprocess-spawning surface (`vault_routes.py:157–226`, env-inheriting `_run_bw`) the game
+  build claims to remove. *Fix:* `mount_optional` + add to the drop set.
+- **W4 [MED · Change]** Zero game-build gating on ~40 inherited slash commands: `/sh` (shell
+  exec), `/toggle bash|web|research`, `/setup <provider> <api-key>`, `/email /gallery
+  /cookbook /notes /memory /rag`, the `/tour-*` set (`slashCommands.js:5464–5842, 5960–6023`)
+  — a parallel ungated UI into every dropped vertical. *Fix:* dispatch-time keep-set under the
+  game build with a game-framed "not available" reply.
+- **W5 [MED · Change]** The `ui_control` prompt manifest teaches the model to open
+  email/gallery/cookbook/documents panels on game turns (`agent_loop.py:154–157, 368`) —
+  lever-manifest bleed through a kept tool; calls silently no-op (narrated-but-dead). *Fix:*
+  game-only `ui_control` description (pairs with W1's allowlist).
+- **W6 [LOW · UX]** Beat-map omissions confirmed for `whereabouts`/`seasonRecap`/
+  `seasonRetrospective`/`npcVoice` + `ui_control` renders an expandable raw-JSON node
+  (extends E11/D5 with the kept-meta-tool case; the proving test should iterate
+  `GAME_TOOL_KEEP`).
+- **W7 [LOW · Security]** `/backgrounds` — a dev prototype page shipping in the game build
+  (`app.py:787–790`). Gate or remove.
+- **W8 [LOW · Change]** The CSP still allowlists `cdn.jsdelivr.net` for script/style/font
+  (`core/middleware.py:143–153`) — the policy half of D6 (vendor/drop KaTeX+Mermaid): drop
+  the origin from the game-build CSP too.
+- *Held up:* auth lifecycle (rate-limited login/signup, bcrypt'd bearer tokens), MCP admin
+  routes, B66 (no browser→engine path; no arbitrary-tool passthrough), `/api/orwell/*` auth
+  coverage, workspace browse, gallery ownership, fail-closed optional-tool computation,
+  markdown/tool-output XSS discipline.
+
+## Stream C — pure domain core + souls (C1–C17; C1–C3 execution-confirmed)
+
+- **C1 [HIGH · Bug · confirmed]** Houseguest's-Choice deferral hands the player a stale
+  candidate list: candidates snapshot mid-draw (`eligibility.ts:91–101`) while later pullers
+  keep drawing; resume validates only membership in the stale list
+  (`liveSeason.ts:976–978`) and appends blindly. Confirmed: field
+  `[player, n1, n2, p1, p5, p1]` — six slots, five distinct, a duplicate competitor in the
+  recorded beat and persisted `vetoField`. *Fix:* re-derive legality at resume
+  (`candidates − vetoField`), reject already-drawn picks, snapshot deferred candidates after
+  the full draw. *Test:* property over seeds × house sizes 5–16 + a live submit loop
+  asserting no duplicates and correct field size.
+- **C2 [HIGH · Bug · confirmed]** `pathwayAnchored`'s `told-by:` check passes on
+  subject-match alone (`k.content === fact.content || k.subject === fact.subject`) —
+  seeding an NPC with "npc:9 likes to cook breakfast" anchors the invented "npc:9 has a
+  final-two deal against you and is throwing comps" as real player knowledge. On the
+  player-channel allowlist. *Fix:* anchor on content lineage (`factId`/fuzzy content match);
+  subject-only ⇒ suspicion with capped confidence. (Sister of E9; both close together.)
+- **C3 [HIGH · confirmed]** E9's `overheard:` hole verified by execution ("totally fabricated
+  secret" surfaced as knowledge against an unrelated event id). The legitimate engine caller
+  always passes a strict content fragment — make the anchor require it.
+- **C4 [MED · Bug]** `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
+  (content/witness truncation passes), knowledge by id, `emotionalHistory`/
+  `relationshipBeliefs` by length, `characters` never compared, and `toGameState` drops
+  suspicions + the Vault entirely — the fail-closed 0031 checkpoint cannot see whole classes
+  of degradation. *Fix:* field-equality on shared ids, prefix-compare histories, byte-compare
+  characters, add suspicion/vault terms to `counts()`. *Test:* property — any single
+  mutated/dropped persisted item ⇒ `degradation` fault.
+- **C5 [MED · Bug]** NaN handling: a NaN stat makes `resolveCompetition` silently crown
+  `competitors[0]` (`competitionOutcome.ts:79–92`); empty field throws TypeError; `serialize`
+  silently converts NaN → null ("lossless" becomes a type lie). *Fix:* finiteness asserts +
+  empty-field throw; fast-check property.
+- **C6 [MED · Bug]** A missing/typo'd archetype silently grants the player **comp-beast**
+  stats — `SPEC_OF.get(...) || ARCHETYPES[0]` (`characterFactory.ts:314`), and the
+  archetype/style steps aren't part of the casting `ready` gate, so early finalization is
+  normal. Anti-sycophancy via fallback. *Fix:* default to a median spec (floater), surface
+  "defaulted" on the casting card. *Test:* default-stats ≠ global max.
+- **C7 [MED]** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
+  elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
+  replays a season whose secrets they know).
+- **C8 [MED · Bug]** Casting intake: no length caps, exact-string note dedupe only, scalars
+  silently overwritable by any later `updateCasting`, and every captured value is echoed
+  verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
+  `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
+  (e.g. 500 chars/scalar, bounded notes), neutralize structure when echoing, overwrite flag.
+- **C9 [MED-LOW]** Hidden elements can contradict each other (multiple `secret-motive`s) and
+  the character's stats ("hidden endurance machine" on a 0.45-physical floater — unbackable
+  flavor; "sharper at puzzles" on a public mastermind — not concealed). *Fix:* one
+  secret-motive max; gate `concealed-aptitude` on actual stat ≥ threshold with a non-matching
+  public archetype (or grant a small hidden bonus so it's mechanically true). Property test.
+- **C10 [LOW]** Diary-room privacy is one engine filter, not "impossible by data" as
+  `house.ts:21–23` claims — `HOUSE_ADJACENCY` adjoins it to the living room; only
+  `assignRooms`' exclusion protects it. Latent until a player-move lever lands (which ADR
+  0003 promises). *Fix:* remove the adjacency or hard-exclude in `rollOverhears` + test.
+- **C11 [LOW]** `tallyJury` evaluates `votesFor(j)` up to 3× per juror and silently drops
+  votes for non-finalists (`season.ts:127,131`) — latent (live caller precomputes). *Fix:*
+  evaluate once, throw on non-finalist.
+- **C12 [LOW]** `recordConfessionalToSoul` has no production caller — 0040's
+  "live soul-recall" half is unwired: confessional content never reaches `SoulStore`, an NPC
+  can't recall their own past confessionals. *Fix:* call it at both live record sites,
+  mirrored into `hg.soul.memory` (see C13).
+- **C13 [LOW]** Soul durability is an implicit contract: `SoulStore` is memory-only; restart
+  fidelity exists solely because every current writer mirrors into `hg.soul.memory` and
+  `rebuildSoulIndex` replays it — any future direct `recordToSoul` writer is silently lost on
+  restart and invisible to the checkpoint (C4). *Fix:* make the durable mirror the API
+  (`deepenSoul(id, note)`); property test through public seams.
+- **C14 [LOW]** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
+  or −3 persists and feeds prompts. `clamp01` at `pushKnown`.
+- **C15 [LOW]** `vetoParticipants` doesn't validate the `choose` callback's return (could
+  insert the HOH/a nominee/a duplicate); `chooseStrongestBond([])` returns `undefined`.
+  Throw on both.
+- **C16 [Info]** `emotionalModifier` (`temperatureConstants.ts:79–87`) applies mean reversion
+  on every call (not "when things calm" as documented), never reaches the documented [0,1]
+  extremes — and is dead in production (parallel formula to `evolveEmotion`; retuning one
+  won't move the other; adjacent to E52).
+- **C17 [Info]** Vault/Journal co-versioning is vestigial at runtime: `toGameState` hardcodes
+  both versions to 1; only the unused `InMemorySaveStore` bumps them. Assert equality in the
+  checkpoint or remove the fields.
+- *Held up:* the witness/hidden store invariant is exhaustive; adjacency symmetric/connected;
+  veto-field degrade at F5/F4/F3 correct; no matchup ever deterministic (stat gap < max
+  swing); gossip/relationship math bounded and asymmetric with sane decay; jury math and the
+  18-pair Q&A correct; vector recall genuinely content-ranked; casting resume exact.
+
+## Stream T — test-quality sweep (T1–T20)
+
+Production-vs-fixture: 17 step files drive the LIVE registry/adapter spine (strong); the
+pure-core features legitimately test the pure core; the gaps are where a live promise is
+proven only on a fixture:
+
+- **T1 [HIGH · Fixture-gap]** Live deal reconciliation has zero coverage — the 0039 BDD steps
+  assert their own stubs (`deal_tracking.steps.ts:17–30, 122–127`); `reconcileDeals`,
+  `bindingActionFor`, jury demerits, and the reveal event are untested on the production
+  path. (The missing gate for E42/E43.) Full live-test spec recorded.
+- **T2 [HIGH · Vacuous]** Vote secrecy's Then is `x ≤ max(xs)` — true by definition
+  (`eviction_night.steps.ts:91–101`); the "no pre-reveal tally/unread vote" Then guards
+  itself behind an `if` that can skip all assertions. Replacement: electorate-derived bounds
+  + mid-stage surface sweeps. (The engine-side twin of E12.)
+- **T3/T4 [MED]** `assert.ok(recalled.length >= 0)` (offscreen recall) and `assert.ok(true)`
+  (CHARACTER-unchanged) — direct replacements specced.
+- **T5/T6 [MED]** "Narration can't change outcomes" proven against a pure local function
+  called twice; "narrator cannot advance the game" proven against a hand-built constant —
+  both re-pointed at live sandboxes (the house-presence lingering steps are the pattern).
+- **T7 [MED]** The 0019 agent-play-loop gate asserts world slots nothing writes, accepts any
+  winner (`typeof winner.name === "string"`), and its fixture omits the relationship model —
+  the fold it "verifies" is impossible there. Re-point at the live seam (B55 pattern).
+- **T8 [MED]** Reserve-twist scenarios pre-filter to exactly-one-fired seeds then assert
+  ≤1 fired; the witnessed-reveal step records the event itself then asserts it. Un-filtered
+  seed loops + a second live twist-kind trace specced.
+- **T9 [MED]** Emergent-bloc steps re-write bloc edges to 0.95 every tick (overwriting live
+  folds) and never compute the "more than chance" baseline; the temporal "sooner" claim is a
+  single static call. Matched-seed lift test specced.
+- **T10 [LOW]** `readsVault === false` asserts a literal type — decorative (dep-cruiser is
+  the real proof).
+- **T11 [MED]** Off-screen isolation Thens prove disjoint id-sets that are disjoint by
+  construction (no content/knowledge cross-leak check); the per-wake cap hides a ×10 fudge;
+  one Then ends `assert.ok(true)`.
+- **T12 [MED]** Live-progression determinism asserts only final week/phase after 60 advances
+  — two diverged games typically still agree; compare full event trails (the
+  strategic_decisions pattern).
+- **T13 [MED]** The UAT's header claims are unasserted (no player-role coverage, no survival
+  distribution — the vacuous claimer for E33), no restart leg, no pending double-advance
+  check, the eviction reveal isn't in its result type, leak checks are shape-regexes with no
+  sentinel, and "over the deployed HTTP transport" is true for 1 of 3 legs.
+- **T14 [MED · Missing-gate]** The B71 restart→offscreen-tick duplicate-id kill (found live by
+  a smoke) has no regression test — no test restores a save into a fresh registry and ticks.
+  Spec: save mid-game → new registry on same dir → 5 ticks → integrity ok + unique ids.
+- **T15 [MED]** The deal-rumor pathway Then surfaces canned fixture gossip unrelated to the
+  broken deal and asserts `length > 0`.
+- **T16/T17 [LOW]** Duplicate byte-identical sweeps in god_mode/moment_orchestration; the
+  orchestrator "same clock ticks" When is an empty step.
+- **T18 [LOW]** fast-check is used in 1 of 11 "property" files; the fixed-seed loops are
+  mostly adequate — fix the lane description (CLAUDE.md overstates).
+- **T19 [MED · FE]** `test_c12_finale_relay.py` hand-mirrors the engine decision kinds — the
+  exact drift class C12 exists to kill; parse them from `GameSession.ts` like c13 does.
+- **T20 [MED · FE]** Source-grep tests (`"modalManager.register(" in src`) counted as behavior
+  coverage. Plus the ten most important untested FE behaviors, led by: **deleting `user=`
+  from any orwell route passes all 244 FE tests** (identity propagation never asserted — the
+  test-side twin of E29).
+- *Patterns to preserve:* liveSentinel's self-auditing sweep, liveFairness' exchangeability
+  band, jury_choreography's manner-share A/B, the B53 live twist trace, house_presence's
+  per-tick invariants, the c13 cross-language manifest parser, the UAT's anomaly-model design.
+
+## Stream R — live runtime & performance (R1–R12, measured on the real engine)
+
+- **R1/R2 [HIGH · Confirmed-live]** E1 reproduced end-to-end: reset → new game → `integrity
+  fault kinds=degradation` → the old game zombie-resurrects; reset never scrubs disk, so
+  process restart resurrects the pre-reset season too. (Durable resume itself: verified-pass
+  — season 2 resumed exactly at week 14/finale.) Fix spec confirmed: `Orchestrator.forgetUser`
+  + save-dir rotation on reset.
+- **R3 [MED · Perf]** Per-call latency grows ~20× over a season (6.1ms wk1 → 118.5ms wk14,
+  identical curve across seeds): every mutation runs ~4 full O(events) snapshot
+  serializations + 2 save versions (`orchestrator.ts:204–236`) — O(n²) per season (~460KB
+  snapshots at endgame). *Fix:* reuse the just-exported snapshot between checkpoint/save/tick;
+  incremental counts.
+- **R4 [MED · Perf]** No idle-sandbox eviction, ever (`registry.ts:169`): +1.6MB RSS per
+  sandbox, permanent (60MB boot → 123MB after 3 seasons; ~250–450MB at 100 users). Sandboxes
+  provably rebuild from disk — add an idle LRU unload using the existing touch timestamps.
+- **R5 [Confirmed-live]** E57 measured: 4 `recordInteraction` calls in 28ms ⇒ 4 ticks, 22 new
+  events (16 hidden), 8 save versions — 4.5× amplification per mutation.
+- **R6 [Confirmed-live]** E31/D10 exact behavior: malformed `recordInteraction`/
+  `resolveCompetition` ⇒ 500 "internal error"; everything else clean 400/404/413; **no path
+  or stack leakage anywhere** (verified-pass). Bonus: a string `witnessSet` is iterated
+  char-by-char ("non-living houseguest: p").
+- **R7 [LOW · Perf]** Single Node thread: cross-user requests serialize (135 req/s early-game
+  ⇒ ~8 req/s when any user is at endgame per R3). Capacity-planning note.
+- **R8/R9/R10 [Verified-pass]** Same-user concurrency serializes with zero corruption;
+  pruning works exactly per policy (3.2–3.5MB/user retained, ~350MB @ 100 users; transient
+  write amplification ~120MB/season — R3's fix shrinks it); moment prompt flat 7.8–9.2KB all
+  season.
+- **R11 [Correction to E33]** Player reached **Final 2** (seed 1001: statement + 6 jury
+  answers) and **jury** (seed 2002) under a trivial active policy; pre-jury eviction only on
+  seed 33333. All terminal states reachable; E33/D4 is recalibrated as "passive play is
+  near-certain pre-jury eviction" — keep the property gate, reframe the target.
+- **R12 [Verified-pass]** The finale/retrospective seam: recap contains no hidden content;
+  the retrospective unseals only post-finish (null at week 2); no relationship-number keys in
+  any player-facing payload; `finaleView` null outside staging.
+
+## Round-6 amendments to the E-batch & wave order
+
+- **E33/D4 reframed** per R11 (calibration + property gate, not a broken ladder).
+- **E9 closes together with C2/C3** (two anchoring loopholes, one fix site:
+  `pathwayAnchored`).
+- **E31/D10 closes with R6's exact repro list** + the McpServer shape-validation spec.
+- **Wave 1 (E-CRIT)** gains C1 (veto-field duplicate) and adopts R1's confirmed fix shape.
+- **Wave 2 (E-SEC)** gains W1, W2, C2/C3, C8 (intake injection), C14; W3–W5 join the
+  game-build trim work.
+- **Wave 3 (E-SOCIAL)** gains C6, C9, C12 (and T1's live deal gate ships *with* E42/E43 as
+  its proof).
+- **Wave 4 (E-PLAYER)** gains P1, P2, P3, P4 (the prompt-integrity set) and P5–P7.
+- **Wave 5** gains the T-batch test repairs (T2 ships with E12's vote-secrecy change), R3/R4
+  perf work, C4/C5 checkpoint hardening, and the P8–P11/W6–W8/C10–C17 polish.
+
 ## Recommended wave order
 
 1. **Wave E-CRIT — make seasons restartable and reachable:** E1+D1 (one restart door, baseline
