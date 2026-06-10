@@ -62,9 +62,8 @@ echo "==> checkout orwell -> ${APP_DIR}"
 if [[ ! -d "${APP_DIR}/.git" ]]; then
   mkdir -p "$APP_DIR"
   git -C "$APP_DIR" init -q
-  git -C "$APP_DIR" remote add origin "$REPO"
 fi
-git -C "$APP_DIR" remote set-url origin "$REPO"
+git -C "$APP_DIR" remote set-url origin "$REPO" 2>/dev/null || git -C "$APP_DIR" remote add origin "$REPO"
 git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
 git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
 mkdir -p "$DATA_DIR"
