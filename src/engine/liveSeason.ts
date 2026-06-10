@@ -15,7 +15,8 @@ import { chooseNominationsWithMood, tallyJury } from "./season";
 import type { RelationshipModel } from "./relationships";
 import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
-  FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
+  FINALE_APPEALS, NEUTRAL_APPEAL_EFFECT,
+  type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
 
 /**
@@ -340,12 +341,17 @@ function mannerToward(evictee: EntityId, responsible: EntityId, ctx: SeasonCtx):
   return { respected: true }; // a clean, expected move from a known rival — no grievance
 }
 
-/** Record the evictee's manner read toward every responsible houseguest (HOH + evict-voters). */
+/**
+ * Record the evictee's manner read toward every responsible houseguest (HOH + evict-voters).
+ * Jury management cuts BOTH ways: the player is recorded like any other responsible houseguest
+ * (audit A5 — no exemption), so a juror the player blindsided/betrayed on the way out weighs that
+ * against them at the player's own finale (0037 §4.2). ENGINE-ONLY: the number never crosses the wall.
+ */
 function recordEvictionManner(s: LiveSeasonState, evictee: EntityId, responsible: EntityId[], ctx: SeasonCtx): void {
   const map = (s.mannerByEvictee ??= {});
   const row = (map[evictee] ??= {});
   for (const r of responsible) {
-    if (r === evictee || r === ctx.player) continue; // the player's manner is read at their own finale, not here
+    if (r === evictee) continue; // a houseguest is never "responsible" for their own eviction
     row[r] = mannerToward(evictee, r, ctx);
   }
 }
@@ -396,14 +402,14 @@ function recordAppeal(f: FinaleProgress, finalist: EntityId, juror: EntityId, ap
   (f.appeals[finalist] ??= {})[juror] = appeal;
 }
 
-/** The appeal a finalist made to a juror — the player's recorded choice, or the NPC's `bestAppeal`. */
-function appealMade(
-  f: FinaleProgress, finalist: EntityId, juror: EntityId, ctx: SeasonCtx, s: LiveSeasonState,
-): FinaleAppeal {
-  const recorded = f.appeals[finalist]?.[juror];
-  if (recorded) return recorded;
-  // An NPC finalist (or any unanswered slot) plays optimally for that juror — deterministic.
-  return bestAppeal(edgeAsJuryRel(juror, finalist, ctx), mannerFor(s, juror, finalist));
+/**
+ * The appeal a finalist ACTUALLY made to a juror — their recorded choice — or `null` if that juror
+ * never questioned them (audit A6). A null is scored as `NEUTRAL_APPEAL_EFFECT`, the SAME for a player
+ * or NPC finalist: the engine no longer back-fills an unanswered slot with the optimal `bestAppeal`
+ * (which silently played a finalist's finale for them and, before the fix, did so only for the player).
+ */
+function appealMade(f: FinaleProgress, finalist: EntityId, juror: EntityId): FinaleAppeal | null {
+  return f.appeals[finalist]?.[juror] ?? null;
 }
 
 /** Begin the live finale: lock the Final 2, the last-9 jury, and the engine choreography. */
@@ -428,7 +434,14 @@ function precomputeVotes(s: LiveSeasonState, ctx: SeasonCtx, f: FinaleProgress, 
   for (const juror of f.jury) {
     if (votes[juror]) continue; // the player's own vote (recorded interactively) is kept
     const leanFor = (fin: EntityId): number => juryLean(edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
-    const perfFor = (fin: EntityId): number => appealEffect(appealMade(f, fin, juror, ctx, s), edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
+    // The finale performance: the appeal the finalist actually made to THIS juror (their recorded
+    // choice), or a NEUTRAL term when this juror never questioned them — symmetric for player + NPC (A6).
+    const perfFor = (fin: EntityId): number => {
+      const made = appealMade(f, fin, juror);
+      return made === null
+        ? NEUTRAL_APPEAL_EFFECT
+        : appealEffect(made, edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
+    };
     votes[juror] = castJuryVote(f.finalists, leanFor, perfFor, rng);
   }
   return votes;

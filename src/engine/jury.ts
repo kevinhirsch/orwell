@@ -94,6 +94,16 @@ export function appealEffect(appeal: FinaleAppeal, rel: JuryRel, manner: Evictio
 }
 
 /**
+ * The finale performance a finalist contributes to a juror who NEVER questioned them (audit A6).
+ * A NEUTRAL 0.5 — neither the optimal `bestAppeal` (which would let the engine silently play an
+ * unanswered finalist's finale for them — sycophancy, and asymmetric when only the player was
+ * back-filled optimally) nor a penalty. Applied SYMMETRICALLY to the player and NPC finalists, so an
+ * unasked (finalist, juror) slot sways that juror neither way; a finalist only earns finale sway
+ * from the jurors who actually questioned them.
+ */
+export const NEUTRAL_APPEAL_EFFECT = 0.5;
+
+/**
  * The strongest appeal a finalist can make to a given juror — used to let an NPC finalist play the
  * finale optimally (deterministic argmax over `FINALE_APPEALS`, ties broken by declaration order), so
  * the player's own appeals have to be at least as good to gain ground.

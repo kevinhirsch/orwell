@@ -1127,7 +1127,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > seeds; intent submitted **after** the beat resolves is refused (lock); NPC intents may stay `compete` for now. Read
 > `docs/features/0006`, `0034` first. Open a PR.
 
-### B47 — jury manner applies to the player; symmetric finale appeals  ·  Claude Code  ·  **Wave 2 · audit A5 + A6**
+### B47 — jury manner applies to the player; symmetric finale appeals  ·  Claude Code  ·  **Wave 2 · audit A5 + A6** — ✅ DONE
+
+> **DONE.** Two finale asymmetries closed in `liveSeason.ts`. **A5:** `recordEvictionManner` no longer
+> exempts the player — when the player is a responsible houseguest (HOH/evict-voter), the evictee records
+> their manner toward the player like any NPC, so jury management cuts both ways (and the evictee→player
+> resentment now folds into the hidden layer at eviction, 0023). **A6:** `appealMade` returns the recorded
+> appeal or **null**; an unanswered (finalist, juror) pair now scores `NEUTRAL_APPEAL_EFFECT` (0.5,
+> `jury.ts`) instead of the optimal `bestAppeal` back-fill — the SAME for the player and NPC finalists, so
+> a finalist earns finale sway only from jurors who questioned them. **Canon resolved as 9** (one question
+> per juror — code + Bible + 0014/0037; supersedes the stray "18" in CLAUDE.md). Tests (`liveSeason`/`jury`,
+> both fail-before/pass-after): the player records manner toward a juror they evicted; a juror the player
+> blindsided votes for them measurably less; questioned-finalist favoured / unanswered-slot neutral +
+> symmetric. 0014/0037 amended. Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), jury management — the signature mechanic — is **inert against the player**:
 > `liveSeason.ts:209` skips recording eviction **manner** toward the player, so `juryLean`'s second-largest term
