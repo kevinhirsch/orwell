@@ -20,7 +20,8 @@ export interface Competitor {
   emotionalState?: number;
 }
 
-const RELEVANT: Record<CompetitionType, "physical" | "mental" | "social"> = {
+/** The governing aptitude per competition type — exported so the 0042 library can pin to it. */
+export const RELEVANT: Record<CompetitionType, "physical" | "mental" | "social"> = {
   endurance: "physical", physical: "physical",
   puzzle: "mental", quiz: "mental", memory: "mental", mental: "mental",
   social: "social",

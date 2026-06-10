@@ -1135,7 +1135,20 @@ export class GameSessionAdapter implements GameSession {
     // stats/souls (caller stats ignored). The evicted are never in an eligibility pool by construction.
     if (this.live) {
       const peek = peekCompetition(this.live, this.ctx(), this.beatRng());
-      if (peek) return { started: true, type: peek.type, week: this.week, phase: this.phase, winner: this.named(peek.winner) };
+      if (peek) {
+        // The drawn library def (0042): name + format + the Vault-free narrative scaffold — the
+        // narrator dresses THIS competition. Flavor only; no stat, score, or ranking crosses.
+        return {
+          started: true, type: peek.type, week: this.week, phase: this.phase,
+          winner: this.named(peek.winner),
+          name: peek.def.name, format: peek.def.format,
+          narrative: {
+            premise: peek.def.narrative.premise,
+            beats: [...peek.def.narrative.beats],
+            winReads: peek.def.narrative.winReads,
+          },
+        };
+      }
       // Between competitions: report the most recently crowned comp from public ceremony state — no re-roll.
       const last = this.ceremony.vetoHolder ?? this.ceremony.hoh;
       return { started: true, type: fallbackType, week: this.week, phase: this.phase, winner: last ? this.named(last) : null };

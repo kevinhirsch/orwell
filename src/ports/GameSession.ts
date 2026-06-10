@@ -196,6 +196,12 @@ export interface CompetitionResultView {
   week: number;
   phase: string;
   winner: { id: EntityId; name: string } | null;
+  /** The drawn competition's name (0042) — set while a comp beat is live. */
+  name?: string;
+  /** The drawn competition's narrative format (endurance / puzzle / quiz / skill / crapshoot / social). */
+  format?: string;
+  /** The Vault-free narrative scaffold (0042/0018): premise + beats + how a win reads — flavor only, never a stat or score. */
+  narrative?: { premise: string; beats: string[]; winReads: string };
 }
 
 /** Vault-free public status for the status panel (0020): ceremony-level facts only. */
