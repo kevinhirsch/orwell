@@ -93,6 +93,10 @@ GAME_TOOL_KEEP = frozenset({
     "createCharacter", "advanceGame", "submitDecision",
     # God Mode (0016): admin-gated non-Vault levers.
     "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
+    # In-fiction real-world lookups (C32, amends 0032): the model quietly searches when the
+    # player references something real and replies in the houseguest's voice. Flavor only —
+    # never game truth (the engine tools above stay the sole authority on game facts).
+    "web_search",
     # Core UI / account tools whose backends survive the game build.
     "ask_user", "update_plan", "ui_control", "generate_image", "search_chats",
     "manage_settings", "manage_endpoints", "manage_tokens", "manage_mcp", "list_models",

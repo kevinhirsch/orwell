@@ -55,7 +55,7 @@ def _by_id(tools):
 
 
 # Representative dropped ids (scrapped/dead verticals) that must never reach the agent.
-_DROPPED_SAMPLE = ("web_search", "send_email", "serve_model", "trigger_research", "manage_memory")
+_DROPPED_SAMPLE = ("web_fetch", "send_email", "serve_model", "trigger_research", "manage_memory")
 
 
 # ── Scenario: GET /api/tools hides the drop-set, keeps KEEP + OPTIONAL ─────────
@@ -149,17 +149,18 @@ def test_post_tools_persists_disabled_and_enabled_optional(monkeypatch):
 def test_additions_force_off_drop_and_unopted_optional():
     off = game_build_disabled_additions([])
     # Dropped verticals AND un-opted optional tools are forced off.
-    for forced in ("web_search", "bash", "send_email", "trigger_research", "manage_memory"):
+    for forced in ("web_fetch", "bash", "send_email", "trigger_research", "manage_memory"):
         assert forced in off, forced
     # KEEP tools are NEVER forced off (they stay on unless disabled separately).
-    for keep in ("getGameState", "ask_user", "generate_image", "submitDecision"):
+    # web_search joined the keep-set (C32 ruling: in-fiction real-world lookups).
+    for keep in ("getGameState", "ask_user", "generate_image", "submitDecision", "web_search"):
         assert keep not in off, keep
 
 
 def test_additions_optin_excludes_only_that_tool():
     off = game_build_disabled_additions(["bash"])
     assert "bash" not in off            # opted in → no longer forced off
-    assert "web_search" in off          # an un-opted dropped/other tool still off
+    assert "web_fetch" in off           # an un-opted dropped/other tool still off
     assert "python" in off              # a different optional tool stays off
 
 
