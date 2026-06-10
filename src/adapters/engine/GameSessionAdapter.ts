@@ -43,7 +43,7 @@ import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotional
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
-import { CEREMONY_IMPACTS } from "../../engine/relationshipConstants";
+import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase } from "../../engine/momentPrompts";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -347,9 +347,21 @@ export class GameSessionAdapter implements GameSession {
         if (winner) this.inflect(winner, "comp-win");
         break;
       }
+      case "nominations": {
+        // B51: going on the block rattles a houseguest — distress ▲ — so they carry it INTO the veto
+        // comp (their odds dip below their calm baseline). The Luck-replacement modifier, finally live.
+        for (const nom of this.live?.nominees ?? []) this.inflect(nom, "nominated");
+        break;
+      }
       case "veto-competition": {
         const holder = this.live?.vetoHolder;
         if (holder) this.inflect(holder, "comp-win");
+        break;
+      }
+      case "veto-ceremony": {
+        // A replacement nominee is newly on the block — same rattle (they don't play the veto, but the
+        // arc is honest). The original saved nominee's relief isn't modeled here (kept minimal).
+        if (this.live?.replacement) this.inflect(this.live.replacement, "nominated");
         break;
       }
       case "eviction": {
@@ -532,6 +544,10 @@ export class GameSessionAdapter implements GameSession {
     // HIDDEN relationship layer — the player's action changes how the house feels about them (and each
     // other). Engine-owned, magnitudes from constants, never surfaced (the Vault Wall, 0001).
     if (ev) this.foldCeremonyConsequence(ev);
+    // B51/audit C5: on the WEEK ROLLOVER (the eviction's result lands → a new week begins) untended
+    // relationships decay slowly toward baseline — grudges and bonds fade if not refreshed, so the house
+    // doesn't pin to extremes over a season. Slow (`DECAY_RATE`), disposition-scaled, threat lingers.
+    if (ev && ev.beat === "eviction-result") this.rel.decay(RELATIONSHIP_CONSTANTS.DECAY_RATE);
     this.syncProjection();
     this.onPersist?.();
   }
