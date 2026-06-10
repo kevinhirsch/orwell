@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "./McpServer";
+import { EngineRefusal, TurnRefusedError, PersistFailureError } from "../../domain/errors";
 
 /**
  * A minimal HTTP transport over the permissioned `McpServer` routers — the
@@ -190,11 +191,17 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
             try {
               send(200, { result: await server.callTool(name, (args as Record<string, unknown>) ?? {}) });
             } catch (e) {
-              // E9: a DELIBERATE refusal (a plain Error thrown by the engine's validation —
-              // illegal nominee, unknown tool) is the caller's fault (400). Anything else
-              // (TypeError, RangeError, a subclass) is an engine bug and must read as 500,
-              // not masquerade as a client error.
-              const deliberate = e instanceof Error && e.constructor === Error;
+              // Typed engine errors first (audit E3/E7): a commit refused by the fail-closed
+              // integrity checkpoint FAILS THE REQUEST — 409, state unchanged, never a 200 whose
+              // view narrates a rolled-back beat. A durable-save failure is a 500 with a sanitized
+              // message (its own class — never misread as the caller's fault, no data-dir path).
+              if (e instanceof TurnRefusedError) return send(409, { error: e.message });
+              if (e instanceof PersistFailureError) return send(500, { error: e.message });
+              // E9/E7: a DELIBERATE refusal — `EngineRefusal`, or (back-compat) a plain Error
+              // thrown by the engine's validation (illegal nominee, unknown tool) — is the
+              // caller's fault (400). Anything else (TypeError, RangeError, a subclass) is an
+              // engine bug and must read as 500, not masquerade as a client error.
+              const deliberate = e instanceof EngineRefusal || (e instanceof Error && e.constructor === Error);
               if (deliberate) send(400, { error: (e as Error).message });
               else send(500, { error: "internal error" });
             }

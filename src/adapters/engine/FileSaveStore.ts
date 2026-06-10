@@ -108,6 +108,20 @@ export class FileSaveStore implements UserSaveStore {
     return this.latestVersion(this.userDir(user)) > 0;
   }
 
+  /**
+   * Season restart (audit E1/R1): ROTATE the user's save dir off the live path — `hasSave` goes
+   * false, the new season's `v000001` starts clean, and an engine restart resumes season 2 instead
+   * of resurrecting the dead one. The retired dir keeps the old season's record on disk (suffixed,
+   * so `listUsers`' hex filter never resumes it); the factory-reset script scrubs the whole tree.
+   */
+  resetUser(user: string): void {
+    const dir = this.userDir(user);
+    if (!existsSync(dir)) return;
+    let target = `${dir}.retired-${Date.now()}`;
+    for (let i = 1; existsSync(target); i++) target = `${dir}.retired-${Date.now()}-${i}`;
+    renameSync(dir, target);
+  }
+
   /** The users with at least one durable save (B60/E11) — dir names are hex-encoded user ids. */
   listUsers(): string[] {
     if (!existsSync(this.dataDir)) return [];

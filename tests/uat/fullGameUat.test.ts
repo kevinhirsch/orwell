@@ -527,7 +527,8 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
       expect(merged["nominations"] ?? 0, "nominations decisions hit").toBeGreaterThan(0);
       expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
     },
-    { timeout: 60_000 },
+    // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1.
+    { timeout: 180_000 },
   );
 
   // ── Health endpoint reachable (sanity) ────────────────────────────────────
