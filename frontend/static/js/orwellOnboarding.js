@@ -181,6 +181,18 @@
         } catch (_) {}
         // Nudge the status HUD to pick up the freshly-started game immediately.
         window.dispatchEvent(new Event("orwell:gamechanged"));
+        // C22/J1 (slice): tee up the premiere — prefill (NEVER auto-send) so the player's
+        // very next Enter walks them into the house and the model opens the season from
+        // the engine's premiere moment prompt. The curtain is one keypress away, and the
+        // player still owns the keypress.
+        setTimeout(() => {
+          const box = document.getElementById("message");
+          if (box && !box.value.trim()) {
+            box.value = "I take a breath, pick up my bag, and walk into the house.";
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+            box.focus();
+          }
+        }, 400); // after the fresh-session click settles
       } catch (e2) {
         err.textContent = "Couldn't start the game: " + e2.message;
         btn.disabled = false;
