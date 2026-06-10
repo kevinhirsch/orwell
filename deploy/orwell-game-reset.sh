@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 #
-# orwell — factory reset. Scrubs ALL game + user data back to a fresh-install (OOBE) state:
-# every per-user game sandbox (saves, souls, the hidden Vault layer), the front-end database
-# (accounts, sessions, settings) and its data files — then restarts the services so the next
-# visit begins at first-run onboarding, exactly as after a fresh install.
+# orwell — game reset. Clears ALL game progression — every per-user engine sandbox
+# (saves, souls, the hidden Vault layer, in-flight casting intake) — and NOTHING else.
 #
-# Install-time CONFIG is PRESERVED: the engine data/.env (ports, engine URL, LLM keys) stays,
-# so the box still boots and can still reach your LLM. Only DATA is removed.
+# CONFIG IS PRESERVED, all of it: the engine data/.env (ports, tokens, LLM keys) AND the
+# entire front-end store (accounts, sessions, settings — including the LLM endpoint config).
+# Players keep their logins and the box keeps its LLM setup; the next visit simply starts a
+# brand-new game at the casting interview. (Old chat transcripts are kept too — a fresh game
+# session begins on the next visit. For a full wipe back to OOBE use orwell-factory-reset.sh.)
 #
 # Run on the Proxmox HOST or inside the container as root:
-#   bash /path/to/orwell-factory-reset.sh             # prompts to confirm
-#   bash /path/to/orwell-factory-reset.sh --yes       # no prompt (automation)
-#   bash /path/to/orwell-factory-reset.sh --dry-run   # show what WOULD be removed
-#   bash /path/to/orwell-factory-reset.sh --no-restart # scrub but leave services down
+#   bash /path/to/orwell-game-reset.sh             # prompts to confirm
+#   bash /path/to/orwell-game-reset.sh --yes       # no prompt (automation)
+#   bash /path/to/orwell-game-reset.sh --dry-run   # show what WOULD be removed
+#   bash /path/to/orwell-game-reset.sh --no-restart # scrub but leave services down
 #
 # On the Proxmox host the script locates the orwell LXC (by hostname "orwell"; override with
-# CTID=<id> or CT_HOSTNAME=<name>) and re-runs itself inside it — same bridge as orwell-update.sh.
+# CTID=<id> or CT_HOSTNAME=<name>) and re-runs itself inside it — same bridge as
+# orwell-update.sh / orwell-factory-reset.sh.
 #
-# Paths/services are overridable via env: APP_DIR, ORWELL_DATA_DIR, ORWELL_FE_DATA_DIR,
-# ORWELL_ENGINE_SVC, ORWELL_FRONTEND_SVC (handy for a dev checkout).
+# Paths/services are overridable via env: APP_DIR, ORWELL_DATA_DIR, ORWELL_ENGINE_SVC,
+# ORWELL_FRONTEND_SVC (handy for a dev checkout).
 set -euo pipefail
 
 BRANCH="${BRANCH:-main}"
@@ -37,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     -y|--yes)        ASSUME_YES=1; EXTRA_FLAGS+=("--yes") ;;
     -n|--dry-run)    DRY_RUN=1;    EXTRA_FLAGS+=("--dry-run") ;;
     --no-restart)    RESTART=0;    EXTRA_FLAGS+=("--no-restart") ;;
-    -h|--help)       sed -n '3,22p' "${BASH_SOURCE[0]:-/dev/null}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)       sed -n '3,24p' "${BASH_SOURCE[0]:-/dev/null}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)               die "unknown option: $1 (try --help)" ;;
   esac
   shift
@@ -64,13 +66,13 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   [[ "$(printf '%s' "$CTID" | wc -w)" -eq 1 ]] || die "multiple containers named '${CT_HOSTNAME}' (${CTID//$'\n'/ }). Set CTID=<id>."
   [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || die "LXC ${CTID} is not running — start it first: pct start ${CTID}"
 
-  msg "orwell lives in LXC ${CTID}; running factory reset inside the container"
-  TMP_RESET="$(mktemp /tmp/orwell-factory-reset-XXXXXX.sh)"
-  curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-factory-reset.sh" -o "$TMP_RESET"
-  pct push "$CTID" "$TMP_RESET" /tmp/orwell-factory-reset.sh
+  msg "orwell lives in LXC ${CTID}; running game reset inside the container"
+  TMP_RESET="$(mktemp /tmp/orwell-game-reset-XXXXXX.sh)"
+  curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-game-reset.sh" -o "$TMP_RESET"
+  pct push "$CTID" "$TMP_RESET" /tmp/orwell-game-reset.sh
   rm -f "$TMP_RESET"
   # --yes is forwarded; --dry-run is forwarded; --no-restart is forwarded.
-  pct exec "$CTID" -- bash /tmp/orwell-factory-reset.sh "${EXTRA_FLAGS[@]:-}"
+  pct exec "$CTID" -- bash /tmp/orwell-game-reset.sh "${EXTRA_FLAGS[@]:-}"
   exit 0
 fi
 
@@ -83,13 +85,10 @@ ENV_FILE="${CONFIG_DIR}/.env"
 ENV_KEEP=".env"
 
 # ENGINE SAVE dir: where the game actually persists (saves + the hidden Vault layer).
-# This is the crux of an earlier bug — the engine (src/adapters/engine/FileSaveStore.ts)
-# writes per-user saves to ORWELL_DATA_DIR / BBAI_DATA_DIR, FALLING BACK to ./.orwell-data
-# (relative to its WorkingDirectory = APP_DIR). Modern installs SET ORWELL_DATA_DIR — since
-# B72 to <app>/data/saves (saves in their own subdir, distinct from the preserved .env);
-# pre-B72 installs pointed it at <app>/data, and ancient ones never set it (./.orwell-data).
-# Resolve exactly as the engine does: explicit env override, then .env, then the fallback —
-# all three generations scrub correctly (the ENV_KEEP guard protects .env in the shared-dir case).
+# Resolve exactly as the engine does (src/adapters/engine/FileSaveStore.ts): explicit env
+# override, then .env, then the ./.orwell-data fallback — same three generations as
+# orwell-factory-reset.sh (modern installs set ORWELL_DATA_DIR=<app>/data/saves since B72;
+# pre-B72 pointed it at <app>/data; ancient ones never set it).
 env_val() { [[ -f "$ENV_FILE" ]] && grep -E "^[[:space:]]*${1}=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'\'']//;s/["'\'']$//;s/\r$//'; }
 ENGINE_SAVE_DIR="${ORWELL_DATA_DIR:-}"
 [[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="$(env_val ORWELL_DATA_DIR || true)"
@@ -97,8 +96,6 @@ ENGINE_SAVE_DIR="${ORWELL_DATA_DIR:-}"
 [[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="${APP_DIR}/.orwell-data"
 # A relative ORWELL_DATA_DIR (e.g. ./.orwell-data) resolves against the engine CWD = APP_DIR.
 [[ "$ENGINE_SAVE_DIR" == /* ]] || ENGINE_SAVE_DIR="${APP_DIR%/}/${ENGINE_SAVE_DIR#./}"
-
-FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
 
 # Service names follow the install: prefer orwell-*, fall back to legacy bbai-* units.
 unit_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
@@ -124,7 +121,6 @@ sanity_path() {
 }
 sanity_path "$CONFIG_DIR"      "engine CONFIG_DIR"
 sanity_path "$ENGINE_SAVE_DIR" "engine SAVE dir"
-sanity_path "$FE_DATA_DIR"     "front-end FE_DATA_DIR"
 
 # ── Environment detection ─────────────────────────────────────────────────────────────────────
 have_systemd=0
@@ -132,8 +128,8 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then ha
 svc_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
 
 if [[ "$DRY_RUN" -eq 0 && "$(id -u)" -ne 0 ]]; then
-  if [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$FE_DATA_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
-    die "run as root (sudo): needs to stop services and remove the game data under ${APP_DIR}."
+  if [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
+    die "run as root (sudo): needs to stop services and remove the game saves under ${APP_DIR}."
   fi
 fi
 
@@ -146,11 +142,12 @@ SANDBOXES="$(count_dirs "$ENGINE_SAVE_DIR")"
 # ── Confirmation (skipped by --yes / --dry-run) ───────────────────────────────────────────────
 if [[ "$DRY_RUN" -eq 0 && "$ASSUME_YES" -eq 0 ]]; then
   cat <<EOF
-This PERMANENTLY DELETES all orwell game + user data:
+This PERMANENTLY DELETES all game progression (every season, finished or live):
   • ${SANDBOXES} game sandbox(es)  under ${ENGINE_SAVE_DIR}/<user>/   (saves, souls, hidden Vault layer)
-  • the entire front-end store     ${FE_DATA_DIR}/                    (database, settings, uploads, app key)
-Preserved (config only):           ${CONFIG_DIR}/${ENV_KEEP}
-The next visit will start at first-run onboarding (OOBE).
+Preserved (everything else):
+  • ${CONFIG_DIR}/${ENV_KEEP}  (ports, tokens, LLM keys)
+  • the entire front-end store  (accounts, sessions, settings — incl. LLM endpoint config)
+The next visit starts a brand-new game at the casting interview.
 EOF
   read -r -p "Type 'RESET' to proceed: " ans
   [[ "$ans" == "RESET" ]] || die "aborted — no changes made."
@@ -170,9 +167,8 @@ else
   warn "systemctl not present — skipping service stop (dev mode). Stop the app yourself first."
 fi
 
-# ── 2a. Scrub the engine SAVE dir — the real per-user games (saves + hidden Vault layer). ─────
-#       This is the dir the engine actually writes to (./.orwell-data by default); the earlier
-#       version missed it entirely, which is why a "reset" left the game intact.
+# ── 2a. Scrub the engine SAVE dir — the per-user games (saves + hidden Vault layer), ──────────
+#       always KEEPING .env in case the save dir and the config dir are the same.
 msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
 if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
@@ -191,15 +187,7 @@ if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   fi
 fi
 
-# ── 3. Scrub the front-end store (DB + key + settings + all data files); recreate empty ──────
-msg "scrubbing front-end data store ${FE_DATA_DIR}"
-if [[ -d "$FE_DATA_DIR" ]]; then
-  while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-    < <(find "$FE_DATA_DIR" -mindepth 1 -maxdepth 1 -print0)
-fi
-[[ "$DRY_RUN" -eq 1 ]] || mkdir -p "$FE_DATA_DIR"
-
-# ── 4. Restart so the app re-initialises a fresh DB and lands at OOBE ─────────────────────────
+# ── 3. Restart so the engine reloads with no saves; the front-end keeps its config ────────────
 if [[ "$RESTART" -eq 1 && "$have_systemd" -eq 1 ]]; then
   msg "restarting services"
   for svc in "$ENGINE_SVC" "$FRONTEND_SVC"; do svc_exists "$svc" && do_svc start "$svc"; done
@@ -210,5 +198,5 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   msg "dry run complete — nothing was removed."
 else
-  msg "factory reset complete. Open the UI: it will begin at first-run onboarding (OOBE)."
+  msg "game reset complete. Accounts and LLM config kept; the next visit starts a new game at the casting interview."
 fi

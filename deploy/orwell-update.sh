@@ -20,6 +20,7 @@ BRANCH="${BRANCH:-main}"
 REF="${REF:-}"
 ROLLBACK=0
 [[ "${1:-}" == "--rollback" ]] && ROLLBACK=1
+CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-name fallback
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
 # First install dir found here: an explicit override, then the current path, then the legacy one.
@@ -38,7 +39,9 @@ find_app() {
 # update runs directly. Override the target with CTID=<id> or CT_HOSTNAME=<name>.
 if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   CTID="${CTID:-$(pct list 2>/dev/null | awk -v n="$CT_HOSTNAME" 'NR>1 && $NF==n {print $1}' || true)}"
-  [[ -n "$CTID" ]] || { echo "ERROR: no orwell LXC found (hostname '${CT_HOSTNAME}'). Set CTID=<id> and retry." >&2; exit 1; }
+  # Legacy-aware: a pre-rename box may still run an LXC literally named "bbai".
+  [[ -n "$CTID" || -n "$CT_HOSTNAME_SET" ]] || CTID="$(pct list 2>/dev/null | awk 'NR>1 && $NF=="bbai" {print $1}' || true)"
+  [[ -n "$CTID" ]] || { echo "ERROR: no orwell LXC found (hostname '${CT_HOSTNAME}' or legacy 'bbai'). Set CTID=<id> and retry." >&2; exit 1; }
   [[ "$(printf '%s' "$CTID" | wc -w)" -eq 1 ]] || { echo "ERROR: multiple containers named '${CT_HOSTNAME}' (${CTID//$'\n'/ }). Set CTID=<id>." >&2; exit 1; }
   [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || { echo "ERROR: LXC ${CTID} is not running — start it first: pct start ${CTID}" >&2; exit 1; }
 

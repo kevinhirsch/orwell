@@ -31,6 +31,7 @@ set -uo pipefail
 
 MODE="${1:---fix}"
 BRANCH="${BRANCH:-main}"
+CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-name fallback
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -53,7 +54,9 @@ find_app() {
 # `bash -c "$(curl ...)"` there is no file, so fetch the script from ${BRANCH}.
 if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   CTID="${CTID:-$(pct list 2>/dev/null | awk -v n="$CT_HOSTNAME" 'NR>1 && $NF==n {print $1}' || true)}"
-  [[ -n "$CTID" ]] || die "no orwell LXC found (hostname '${CT_HOSTNAME}'). Set CTID=<id> and retry."
+  # Legacy-aware: a pre-rename box may still run an LXC literally named "bbai".
+  [[ -n "$CTID" || -n "$CT_HOSTNAME_SET" ]] || CTID="$(pct list 2>/dev/null | awk 'NR>1 && $NF=="bbai" {print $1}' || true)"
+  [[ -n "$CTID" ]] || die "no orwell LXC found (hostname '${CT_HOSTNAME}' or legacy 'bbai'). Set CTID=<id> and retry."
   [[ "$(printf '%s' "$CTID" | wc -w)" -eq 1 ]] || die "multiple containers named '${CT_HOSTNAME}' (${CTID//$'\n'/ }). Set CTID=<id>."
   [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || die "LXC ${CTID} is not running — start it first: pct start ${CTID}"
 
