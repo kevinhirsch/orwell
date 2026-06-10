@@ -56,6 +56,17 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
    ("non-intrusive but intuitive… it doesn't need to be spelled out"; full spec at E90).
 8. **Window positions must persist across refresh** — today a refresh resets floating panels to
    "wrong looking and random" placements (full spec at E91).
+9. **Image attach must be streamlined and actually work in-character** — attaching an image
+   (or file) is the one analysis input the game wants ("an image to chat about with a
+   houseguest"), and today it's one icon hidden behind another; it must be first-class and
+   wired so the model analyzes the attachment and responds **in character for the moment**
+   (full spec at E94). *Image generation by the model is a future spec, not an audit finding —
+   see "Future specs" below.*
+10. **Minimized windows must not park at the top of the chatbox.** The chip dock there doesn't
+    stay centered as sidebar/viewport width changes — and the placement itself is rejected;
+    minimized windows go somewhere sensible (the sidebar) instead (full spec at E95).
+11. **The "Save to Documents" export item is removed** under the game build (full spec at E96).
+12. **Windows animate on open, close, and minimize** (full spec at E97).
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
@@ -563,6 +574,44 @@ consequence.*
   under the game build, on `game_active` sessions: hide edit/delete/regenerate on all
   messages after game start (keep copy); pre-game OOC sessions unaffected. *Test:* pytest/
   browser smoke asserts no edit/delete affordances render on a started game's transcript.
+- **E94 [MED · UX/Bug · ruling] Image attach: promote it out of the overflow menu and make it
+  work in character.** Today "Attach files" is an overflow-menu item behind the `+` button
+  (`index.html` `#overflow-attach-btn`) — one icon hidden behind another — and nothing
+  guarantees an attached image reaches the model with game framing intact. *Fix spec:* (a) a
+  first-class paperclip button directly in the composer row under the game build (the
+  drag-and-drop path stays); (b) verify/wire the attachment pipeline on **game turns**: the
+  image rides the agent-stream request to a vision-capable model alongside the GM moment
+  prompt, with a one-line framing addition (the player is *showing something* to whoever is
+  present in the scene — a photo from home, a found object) so the model analyzes it and
+  responds **in character for the moment**, and the beat is recorded via `recordInteraction`
+  like any scene (the E22 guard applies); (c) graceful in-fiction refusal when the configured
+  model has no vision capability ("the feeds can't read that"). *Tests:* pytest asserting a
+  game-turn payload with an attachment keeps the GM framing and the attachment; browser smoke
+  asserts the composer-level attach button exists under the game build.
+- **E95 [MED · UX · ruling] Relocate the minimized-window dock to the sidebar.** Minimized
+  panels currently park as chips at the top of the chatbox; the chip strip doesn't re-center
+  when the sidebar toggles or the viewport resizes (stale absolute centering), and the
+  placement itself is rejected by ruling. *Fix spec:* dock minimized panels as compact rows in
+  a "Windows" cluster at the bottom of `#sidebar` (icon + name, click restores; consistent
+  with E64/E88/E90 making the sidebar the game's chrome home); kill the chatbox chip strip;
+  the existing `.hidden modal-minimized` pointer-events leak (R2/R4/D2) dies with it. On
+  mobile the dock rows live in the sidebar drawer. *Tests:* browser smoke minimizes each
+  surviving floating panel and asserts the chip renders inside `#sidebar`, restores on click,
+  and no dock element overlaps the composer at any width.
+- **E96 [LOW · UX · ruling] Remove "Save to Documents" from the export menu.** The export
+  dropdown (`#export-doc-btn`, `index.html` chat top bar) carries the inherited workspace's
+  "Save to Documents" — pointing at a Documents feature the game build doesn't surface.
+  *Fix spec:* remove/hide the item under the game build (keep Copy/PDF/Rename); if Documents
+  is off in the full build config too, delete the dead handler. *Test:* pytest asserts the
+  game-build DOM contains no `#export-doc-btn`.
+- **E97 [LOW · UX · ruling] Windows animate on open, close, and minimize.** Floating panels
+  currently appear/disappear instantly (display toggles; only incidental transitions exist).
+  *Fix spec:* one shared animation contract for all game panels — open: fade+scale-in from the
+  trigger (~150–200ms ease-out); close: the reverse; minimize: a translate+scale toward the
+  E95 sidebar dock row (so the motion *teaches* where the window went); honor
+  `prefers-reduced-motion: reduce` by disabling all three. Implement once in the shared panel
+  scaffolding rather than per-panel CSS. *Test:* browser smoke asserts the panel root carries
+  the transition class and that reduced-motion disables it.
 
 ### Theme 8 — Tests & gate integrity
 
@@ -638,6 +687,19 @@ consequence.*
 
 ---
 
+## Future specs (new features, not audit findings — start as new `NNNN` specs per the rule)
+
+- **0051 (proposed) — In-character image generation.** The model can *produce* images as part
+  of play (a houseguest's sketch, the memory-wall portrait, a "camera still" of a scene),
+  rendered inline in the chat. Per the 2026-06-10 ruling this is a feature spec, not a defect:
+  it needs its own design pass — which moments may generate (player-requested vs.
+  producer-beat), how generation stays Vault-free (prompts built only from the player's
+  visible state — the E11/E15 discipline applies to image prompts too), seed/style consistency
+  per season so the house looks like itself, cost/latency gating, and graceful absence when no
+  image-capable model is configured. Natural pairing: E94's attach flow (analyze in, generate
+  out) and D9/E64's portrait surfaces (a generated cast portrait set at season start is the
+  obvious first deliverable). Write as `docs/features/0051-in-character-images.{md,feature}`.
+
 ## Deferral specs (unchanged status, now concretely scoped)
 
 - **0022 MVP-2:** parked correctly; its §4/§8 "player read" cards violate ADR 0002's
@@ -678,7 +740,8 @@ browser-never-reaches-engine guarantee (B66 + loopback bind).
    E47, E48, E55, E46, E54, E56, E52, E53, E58.
 4. **Wave E-PLAYER — agency & first impressions:** E38 (names), E34 (goodbyes), E35, E36, E64
    (sidebar HUD), E88 (sidebar Diary Room), E89 (approach timing), E93 (no editing the record),
-   E91 (positions persist), E65, E66/D3, E22, E23, E39/D8, plus the D2/D5–D10 batch from
-   PR #200.
+   E91 (positions persist), E94 (image attach), E95 (sidebar dock), E65, E66/D3, E22, E23,
+   E39/D8, plus the D2/D5–D10 batch from PR #200.
 5. **Wave E-POLISH/OPS/DOCS:** the LOW clusters (E8, E13, E14, E26, E32, E37, E40, E41,
-   E59–E63, E67–E75, E79–E82, E85, E90, E92), E76–E78, E83/E84, E86/E87.
+   E59–E63, E67–E75, E79–E82, E85, E90, E92, E96, E97), E76–E78, E83/E84, E86/E87. Then the
+   0051 future spec.
