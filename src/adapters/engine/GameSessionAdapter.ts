@@ -62,12 +62,17 @@ import {
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
+import { loadReserveTwists } from "../../engine/reserveTwists";
+import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
 import { cloneSession } from "../../engine/sessionSnapshot";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
+const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
 
 /**
  * Engine-side implementation of the Vault-free game-session port. It runs the
@@ -143,6 +148,20 @@ export class GameSessionAdapter implements GameSession {
   /** Wire the engine-only soul store (0041) so the live loop deepens souls + can recall (0024). */
   setSoul(soul: SoulProvider): void {
     this.soul = soul;
+  }
+
+  /** Reserve-twist slots for a new game (0016 knob: the admin sets the COUNT, never the content). */
+  private twistCount = 2;
+
+  setTwistCount(n: number): void {
+    this.twistCount = Math.max(0, Math.floor(n));
+  }
+
+  /** Vault audit-copy hook (0025/B53): the registry seals the loaded twists into the engine's Vault. */
+  private onSeal?: (reserve: readonly ReserveTwist[]) => void;
+
+  setOnSeal(fn: (reserve: readonly ReserveTwist[]) => void): void {
+    this.onSeal = fn;
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -348,6 +367,16 @@ export class GameSessionAdapter implements GameSession {
     this.phase = "premiere";
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
+    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
+    // kinds the live loop implements. Engine-only: the schedule rides in the loop state (persisted,
+    // 0030) and the registry writes the Vault audit copy. Invisible to player AND admin until fired.
+    const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
+      .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
+      .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
+    if (reserve.length > 0) {
+      this.live.reserve = reserve;
+      this.onSeal?.(reserve);
+    }
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -520,7 +549,10 @@ export class GameSessionAdapter implements GameSession {
   /** A deterministic per-(week,beat) RNG so a given moment resolves the same way (and across restart). */
   private beatRng(): SeededRandom {
     const name = this.house?.player.name ?? "season";
-    return new SeededRandom(hashSeed(`${name}:${this.live?.week}:${this.live?.beat}`));
+    // A double-eviction night (0025/B53) repeats the week's beats in its compressed second cycle —
+    // disambiguate so the second HOH comp / eviction don't replay the first cycle's rolls.
+    const cycle = this.live?.twist?.phase === "running" ? ":2" : "";
+    return new SeededRandom(hashSeed(`${name}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
   advanceGame(): AdvanceView {

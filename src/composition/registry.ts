@@ -52,6 +52,17 @@ function buildUserSandbox(): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
+  // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
+  session.setOnSeal((reserve) => {
+    for (const t of reserve) {
+      engine.vault.writeHidden({
+        id: `twist:${engine.vault.readHidden({ kind: "reserved-twist" }).length}`,
+        kind: "reserved-twist",
+        content: `sealed reserve twist: ${t.kind}, fires week ${t.fireAtBeat}`,
+      });
+    }
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
@@ -95,6 +106,8 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
     relationships: sb.engine.relationships.serialize().edges,
     // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
     knowledge: (sb.engine.knowledge as InMemoryKnowledgeService).serialize(),
+    // The Vault's hidden records (B53/audit I7) — sealed twists et al. survive a restart too.
+    vault: sb.engine.vault.readHidden(),
   };
 }
 
@@ -109,6 +122,7 @@ function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   for (const e of snap.events) sb.engine.events.record(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
   if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
+  for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
 }
 
 export class GameSessionRegistry {

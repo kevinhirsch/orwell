@@ -18,6 +18,8 @@ import {
   FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
 import { MANNER_THRESHOLDS } from "./juryConstants";
+import { maybeFireTwist } from "./reserveTwists";
+import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -32,6 +34,8 @@ import { MANNER_THRESHOLDS } from "./juryConstants";
 export type Beat =
   | "hoh-competition" | "nominations" | "veto-competition"
   | "veto-ceremony" | "eviction" | "final-eviction" | "finale" | "complete"
+  // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
+  | "twist-reveal"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
   | "finale-reveal" | "finale-result"
   // eviction sub-loop events (0047) — emitted on BeatEvent only; the staged reveal/goodbye/result.
@@ -141,6 +145,19 @@ export interface LiveSeasonState {
   finale?: FinaleProgress;
   /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
   eviction?: EvictionProgress;
+  /**
+   * The SEALED reserve twists (0025/B53): what may fire and at which week. ENGINE-ONLY Vault
+   * content carried in the loop state so it persists with the season (0030) — no projection
+   * ever selects it, and the Vault store holds the audit copy. Often empty (rare by construction).
+   */
+  reserve?: ReserveTwist[];
+  /**
+   * The active twist night: `pending` = sealed for THIS week's eviction (still invisible);
+   * `running` = the compressed second cycle is live (revealed). Cleared when the night completes.
+   */
+  twist?: { kind: TwistKind; phase: "pending" | "running" };
+  /** Twists that actually fired (exactly-once bookkeeping + the 0048 unsealing payoff). */
+  firedTwists?: TwistEvent[];
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */
@@ -382,9 +399,28 @@ function rollWeek(s: LiveSeasonState): void {
   s.replacement = undefined; s.finalNominees = undefined;
   if (s.active.length <= 2) {
     s.beat = "finale";
-  } else {
-    s.week += 1; s.beat = "hoh-competition";
+    return;
   }
+  // 0025/B53 — a SEALED double eviction fires NOW: the same night runs a compressed second cycle
+  // (HOH → noms → veto → vote, the hard rules verbatim — the outgoing HOH just set above cannot
+  // play the second crown). Same week number: one twist night, two eviction ceremonies. Needs a
+  // big-enough house (> 3 after the first eviction) to run a meaningful cycle; otherwise the
+  // sealed twist simply never fires (0048's "the twist that never fired").
+  if (s.twist?.phase === "pending" && s.twist.kind === "double-eviction" && s.active.length > 3) {
+    s.twist = { kind: s.twist.kind, phase: "running" };
+    s.beat = "twist-reveal";
+    return;
+  }
+  if (s.twist?.phase === "running") {
+    // The second evictee just walked out — the twist night is complete (exactly once).
+    (s.firedTwists ??= []).push({ kind: s.twist.kind, beat: s.week });
+    s.twist = undefined;
+  }
+  s.week += 1; s.beat = "hoh-competition";
+  // Arm a sealed twist scheduled for the week we just rolled into; it stays invisible until the
+  // night's eviction lands (the reveal IS the firing — there is no "a twist is coming" tell).
+  const due = maybeFireTwist(s.week, s.reserve ?? []);
+  if (due && !s.twist) s.twist = { kind: due.kind, phase: "pending" };
 }
 
 /** Atomic eviction (record manner + remove + roll) — used by the non-staged paths (Final-3 0045). */
@@ -714,6 +750,17 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       // The player is HOH or a nominee: NPC votes are decided; stage the one-at-a-time reveal (0047).
       beginEviction(s, ctx, rng, undefined);
       return advanceEviction(s, ctx, rng);
+    }
+    case "twist-reveal": {
+      // The sealed twist FIRES (0025): a dramatic, witnessed production reveal — only now is it
+      // known to anyone. The compressed second cycle opens at a fresh HOH competition.
+      s.beat = "hoh-competition";
+      return {
+        beat: "twist-reveal",
+        content: "But the night is not over — this is a DOUBLE EVICTION. A new Head of Household " +
+          "will be crowned and a second houseguest will walk out that door tonight.",
+        participants: [...s.active],
+      };
     }
     case "finale":
       return advanceFinale(s, ctx, rng);

@@ -111,6 +111,11 @@ export const MOMENT_PROMPTS: Record<string, string> = {
   eviction:
     "MOMENT — Eviction. The house votes and someone walks; the ENGINE decides the vote (HOH breaks " +
     "ties) and you voice it. Play the live tension and the goodbyes; record them with recordInteraction.",
+  "twist-reveal":
+    "MOMENT — A production twist fires. Big Brother interrupts the house with a reveal the engine " +
+    "just handed you (e.g. a DOUBLE EVICTION: the night is not over — a new HOH, a fast ceremony, a " +
+    "second walk out the door). Maximum live-show drama; voice ONLY the twist the engine fired, and " +
+    "never hint at any twist that has not fired.",
   social:
     "MOMENT — Social play. A quieter beat: conversations, bonding, paranoia, off-screen scheming the " +
     "player half-glimpses. Use recordInteraction for scenes; surfaceInformationTo when a houseguest " +

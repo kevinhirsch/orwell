@@ -330,6 +330,19 @@ export class BbWorld extends World {
   hpBefore?: { week: number; phase: string; kind: string };
   hpEventsBefore?: number;
 
+  // Live reserve twists (0025/B53) scratch state.
+  twistRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  twistUser?: string;
+  twistSandbox?: import("../../src/composition/registry").UserSandbox;
+  twistSentinel?: string;
+  twistTrace?: {
+    reveals: number[];
+    hohWinsByWeek: Map<number, string[]>;
+    evictionsByWeek: Map<number, number>;
+    preRevealSweeps: string[];
+  };
+  twistFinal?: import("../../src/ports/GameSession").AdvanceView;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };
