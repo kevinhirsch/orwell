@@ -32,11 +32,14 @@ persisted never**. The bloc is an emergent property of the edges, not a thing th
 
 **In:** an **emergent bloc detector** `detectBlocs(rel, active)` that clusters houseguests by **mutual bond
 crossing a threshold** at decision time (bounded to plausible BB bloc sizes), returning **transient** blocs
-each carrying derived `{ members, sharedTarget (top aggregate threat outside the bloc), cohesion }`; a **bloc
+each carrying derived `{ members, sharedTarget (top aggregate threat outside the bloc), cohesion,
+loyaltyStrength }`; a per-character **loyalty read** (dispositional, from the static `CHARACTER`, modulated
+by the evolving soul — 0041) whose member-wise aggregate is the bloc's **loyalty strength** (§4); a **bloc
 term** added to NPC decision leanings (vote with bloc-mates, shield bloc-mates from nomination, target the
-shared enemy); automatic **fracture** (a betrayal / large trust drop simply yields a smaller/split bloc on
-the **next** detection — nothing to update); all **read through each holder's own framing** and **recomputed
-every time**.
+shared enemy) **scaled by loyalty strength**; automatic **fracture** (a betrayal / large trust drop simply
+yields a smaller/split bloc on the **next** detection — nothing to update), with **per-member defection
+susceptibility** read from that member's own loyalty; all **read through each holder's own framing** and
+**recomputed every time**.
 
 **Out:** any **stored** alliance/bloc object or ally/enemy label (forbidden — 0002; the serialized soul must
 contain **no** bloc); a formal "join alliance" player action; persisting membership; the pairwise relationship
@@ -48,6 +51,19 @@ math itself (reused — 0017/0026).
   directions' bond ≥ threshold) and greedily forms clusters bounded to size ~2–5 (BB-plausible). Each bloc
   derives a **shared target** = the highest **aggregate threat** the members hold toward someone outside the
   bloc, and a **cohesion** = the weakest internal bond. Pure, seeded, **stateless** — same edges ⇒ same blocs.
+- **Loyalty (the ethereal↔static dial — product feedback 2026-06-10).** Without a loyalty dimension every
+  bloc is equally sticky: either all blocs dissolve on any edge wobble (too ethereal) or all hold until a
+  formal betrayal (too static). Each houseguest carries an independent **loyalty read** — derived from their
+  static `CHARACTER` disposition (a loyalist vs. a free agent, the 0026 disposition-factor family) and
+  modulated by their **current soul state** (0041 — a freshly-betrayed loyalist's effective loyalty dips).
+  A bloc's **`loyaltyStrength`** is the member-wise aggregate (weakest-member-weighted: a bloc is only as
+  loyal as its flightiest member matters more than its average). Loyalty strength **scales the bloc term**:
+  a high-loyalty bloc votes together near-deterministically and shields hard; a low-loyalty bloc is a loose
+  read that individual incentives (a better outside bond, self-preservation on the block) override easily.
+  **Per-member defection** is read the same way — a low-loyalty member with a tempting outside bond peels
+  off first, *before* any formal betrayal event. Like everything else here it is **derived per read, never
+  stored** (0002): loyalty lives in `CHARACTER`/soul (already persisted), the bloc's strength is recomputed
+  from it every detection.
 - **Behavior.** NPC decision leanings (nominations/eviction votes/initiative, 0011/0014) gain a **bloc term**:
   an NPC nudges toward **voting with** bloc-mates, **not nominating** bloc-mates, and **targeting the bloc's
   shared enemy** — bounded, layered on the existing threat/trust read (never overriding hard rules 0005). The
@@ -64,8 +80,11 @@ math itself (reused — 0017/0026).
 ## 5. Contracts (stack-agnostic)
 
 ```
-detectBlocs(rel, active): Bloc[]        // Bloc = { members[], sharedTarget, cohesion }; PURE, stateless, seeded
-decisionLeaning(npc, ctx) += blocTerm   // vote-with / shield bloc-mates; target sharedTarget (bounded; layered)
+detectBlocs(rel, active): Bloc[]        // Bloc = { members[], sharedTarget, cohesion, loyaltyStrength }; PURE, stateless, seeded
+loyaltyOf(member): number               // derived: CHARACTER disposition × current soul state (0041); never stored per-bloc
+loyaltyStrength = aggregate(loyaltyOf(members), weakest-weighted)   // the bloc is as loyal as its flightiest member
+decisionLeaning(npc, ctx) += blocTerm × loyaltyStrength             // vote-with / shield / target sharedTarget (bounded; layered)
+defection: a low-loyalty member with a stronger outside bond peels off BEFORE any formal betrayal
 fracture: implicit — a dropped edge (betrayal) yields a smaller/split bloc on the NEXT detectBlocs (nothing stored)
 invariants: NO bloc/label persisted (0002/0007); blocs hidden; player sees behavior only; never overrides 0005
 ```
@@ -79,6 +98,10 @@ invariants: NO bloc/label persisted (0002/0007); blocs hidden; player sees behav
       than chance, and **target the shared enemy** — over the existing pairwise read.
 - [ ] **Fracture:** a betrayal that drops a bond **fractures** the bloc on recomputation (a smaller/split bloc,
       or none) — no stored state.
+- [ ] **Loyalty spreads the feel:** a high-loyalty bloc holds together **measurably** longer/tighter than a
+      low-loyalty bloc under the same pressure (seeded assertion); a low-loyalty member **defects** to a
+      stronger outside bond without a formal betrayal event; the same bloc's strength **shifts** when a
+      member's soul state shifts (0041) — neither ethereal nor static.
 - [ ] **Vault-free + deterministic:** no bloc roster on any player surface (extend the 0001 canary); same
       edges/seed ⇒ same blocs; name-agnostic; added to `cucumber.cjs`; `npm test` + `npm run test:arch` green.
 
@@ -96,7 +119,10 @@ real bloc politics — coordinated targeting and dramatic collapses — without 
   mutual-bond graph from `RelationshipModel.edge(a,b)` (`relationships.ts` L81; `EdgeSignals
   {trust,affinity,threat}`) — an undirected edge iff both directions' bond `(trust+affinity)/2` ≥ the
   `allianceThreshold` (already a model field, L63; reuse it). Greedy-cluster to size ~2–5. Each `Bloc`
-  derives `{ members, sharedTarget (max aggregate threat outside the bloc), cohesion (weakest internal bond) }`.
+  derives `{ members, sharedTarget (max aggregate threat outside the bloc), cohesion (weakest internal bond),
+  loyaltyStrength (weakest-weighted aggregate of the members' derived loyalty — CHARACTER disposition ×
+  soul state, §4) }`. Loyalty + defection constants live as named constants in `blocs.ts` alongside the
+  bloc-size bound.
 - Wire a **bloc term** into the decision reads: `season.ts` `chooseNominations` (L72) and `liveSeason.ts`
   `npcChoice` (~L169) — shield bloc-mates, target the shared enemy. (0044 enriches further; 0043 lands the
   basic term so blocs *do something*.)
@@ -107,8 +133,10 @@ nomination/vote strategy consumes — land `detectBlocs` + a basic decision term
 **Test targets:** `tests/unit/blocs.test.ts` + `docs/features/0043-*.feature` → add to `cucumber.cjs`.
 Assert §6: blocs **derived not stored** (serialize `SessionSnapshot` — `sessionSnapshot.ts` — and confirm
 **no bloc/label**, cross-check 0007), a shared target, bloc-mates coordinate > chance, **fracture on
-betrayal** (drop a bond via `applyDirected(...,"betrayal")`, recompute → smaller/split bloc), Vault-free
-(no roster on any player surface — extend the 0001 canary), seed-deterministic.
+betrayal** (drop a bond via `applyDirected(...,"betrayal")`, recompute → smaller/split bloc), **loyalty
+spread** (high- vs low-loyalty bloc under the same pressure; a low-loyalty member defects to a stronger
+outside bond pre-betrayal), Vault-free (no roster on any player surface — extend the 0001 canary),
+seed-deterministic.
 
 **No open decisions.** Crux is **ADR 0002**: never store an alliance/ally/enemy label — `detectBlocs` runs
 every read and persists nothing. Bloc-size bound + thresholds live as named constants in `blocs.ts`.
