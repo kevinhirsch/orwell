@@ -29,8 +29,13 @@ def test_onboarding_sequences_model_before_character():
 
 
 def test_onboarding_communicates_balanced_stats():
-    js = _read("static", "js", "orwellOnboarding.js")
-    assert "balanced" in js and "never" in js              # J6: the anti-sycophancy stance
+    # J6 moved with the intake (0050): creation happens in the CHAT, so the anti-sycophancy
+    # stance lives in the engine's casting-interview moment prompt, not a form blurb.
+    import os
+    repo = os.path.dirname(FRONTEND)
+    with open(os.path.join(repo, "src", "engine", "momentPrompts.ts"), encoding="utf-8") as f:
+        prompt = f.read()
+    assert "balanced" in prompt and "nobody is invincible" in prompt
 
 
 def test_new_season_gets_a_fresh_chat_session():

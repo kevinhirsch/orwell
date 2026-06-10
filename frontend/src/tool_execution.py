@@ -1165,7 +1165,7 @@ async def execute_tool_block(
         do_render_scene, do_end_of_session_summary,
         do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
         do_manage_sandbox,
-        do_create_character, do_advance_game, do_submit_decision,
+        do_create_character, do_update_casting, do_advance_game, do_submit_decision,
         do_social_initiatives, do_diary_room, do_make_deal, do_whereabouts,
         do_app_api,
     )
@@ -1532,6 +1532,9 @@ async def execute_tool_block(
     elif tool == "createCharacter":
         desc = "createCharacter"
         result = await do_create_character(content, owner=owner)
+    elif tool == "updateCasting":
+        desc = "updateCasting"
+        result = await do_update_casting(content, owner=owner)
     elif tool == "advanceGame":
         desc = "advanceGame"
         result = await do_advance_game(content, owner=owner)

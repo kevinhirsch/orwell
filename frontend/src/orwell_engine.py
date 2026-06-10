@@ -117,18 +117,63 @@ async def _call(name: str, args: dict | None = None, user: str | None = None) ->
     return await _post_tool("/player/call", name, args, user)
 
 
-async def create_character(player_name: str, *, archetype=None, strategy_style=None, seed=None,
-                           confirm_restart: bool = False, user: str | None = None) -> dict:
-    """Run OOBE and start a new game in this user's sandbox. Returns the Vault-free game state.
+async def update_casting(fields: dict | None = None, user: str | None = None) -> dict:
+    """Record casting-interview answers as they land (0050) — any subset of fields, any number
+    of times pre-game (interviewNotes accumulate). Returns the engine's casting status:
+    { known, missing, next, ready } — the ENGINE picks the interview's next step. A call after
+    the season starts records nothing and reports done."""
+    allowed = {"playerName", "archetype", "strategyStyle", "personaArchetype",
+               "personaStrategyStyle", "backstory", "motivation", "privateStrategy",
+               "interviewNotes"}
+    args: dict = {}
+    for key, value in (fields or {}).items():
+        if key not in allowed or value is None:
+            continue
+        if key == "interviewNotes":
+            notes = [value] if isinstance(value, str) else list(value)
+            notes = [str(n) for n in notes if str(n).strip()]
+            if notes:
+                args[key] = notes
+        elif str(value).strip():
+            args[key] = str(value)
+    return await _call("updateCasting", args, user=user)
 
-    Over a STARTED game the engine no-ops unless `confirm_restart` is set (B36 guard); the
-    /new-game route additionally 409s so the UI gets an honest signal instead of a silent no-op.
+
+async def create_character(player_name: str | None = None, *, archetype=None, strategy_style=None,
+                           seed=None, confirm_restart: bool = False, user: str | None = None,
+                           persona_archetype=None, persona_strategy_style=None,
+                           backstory=None, motivation=None, private_strategy=None,
+                           interview_notes=None) -> dict:
+    """Finalize the casting interview (0050) and start a new game in this user's sandbox.
+    Returns the Vault-free game state (with the player's casting card).
+
+    The engine finalizes FROM everything `update_casting` recorded; arguments here fill gaps
+    or override field-by-field — so `player_name` is optional when the interview already
+    recorded one (the engine rejects creation when no name exists anywhere). Over a STARTED
+    game the engine no-ops unless `confirm_restart` is set (B36 guard); the /new-game route
+    additionally 409s so the UI gets an honest signal instead of a silent no-op.
     """
-    args: dict = {"playerName": player_name}
+    args: dict = {}
+    if player_name and str(player_name).strip():
+        args["playerName"] = str(player_name).strip()
     if archetype:
         args["archetype"] = archetype
     if strategy_style:
         args["strategyStyle"] = strategy_style
+    if persona_archetype:
+        args["personaArchetype"] = persona_archetype
+    if persona_strategy_style:
+        args["personaStrategyStyle"] = persona_strategy_style
+    if backstory:
+        args["backstory"] = backstory
+    if motivation:
+        args["motivation"] = motivation
+    if private_strategy:
+        args["privateStrategy"] = private_strategy
+    if interview_notes:
+        if isinstance(interview_notes, str):  # a lone note arrives as a bare string sometimes
+            interview_notes = [interview_notes]
+        args["interviewNotes"] = [str(n) for n in interview_notes if str(n).strip()]
     if seed is not None:
         args["seed"] = seed
     if confirm_restart:

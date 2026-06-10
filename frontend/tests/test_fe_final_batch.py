@@ -53,8 +53,18 @@ def test_c18_polling_pauses_hidden_and_backs_off():
 
 
 def test_c22_premiere_is_one_keypress_away_never_auto_sent():
+    # 0050 evolved C22: creation runs IN the chat, so the one-keypress hand-off is the
+    # casting-interview opener (prefilled, never auto-sent); the premiere then flows from
+    # the conversation itself (the engine's interview prompt rolls the producer straight
+    # into the premiere after the casting-card reveal).
     js = _read("static", "js", "orwellOnboarding.js")
-    assert "walk into the house" in js
-    block = js[js.index("C22/J1"): js.index("C22/J1") + 700]
-    assert "NEVER auto-send" in block
+    assert "I take my seat for the casting interview." in js
+    block = js[js.index("function takeASeat"): js.index("function takeASeat") + 900]
+    assert "box.focus()" in block
     assert ".click()" not in block.split("box.focus()")[0].replace("nb.click()", "")  # no send click
+    import os
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo = os.path.dirname(repo)
+    with open(os.path.join(repo, "src", "engine", "momentPrompts.ts"), encoding="utf-8") as f:
+        prompt = f.read()
+    assert "roll straight into the premiere" in prompt

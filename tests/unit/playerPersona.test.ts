@@ -49,10 +49,21 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
   it("the free-text persona never leaks engine stats into the projection (Vault-free)", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Player", archetype: "schemer", strategyStyle: "ruthless", seed: 3 });
-    const blob = JSON.stringify(s.getGameState());
-    // "social" is a public strategy-style word (B61); the hidden layer stays banned.
+    const view = s.getGameState();
+    // The casting card (0050) is the ONE sanctioned qualitative read of the player's own
+    // aptitudes: per-aptitude tier WORDS. Verify it carries words, then exclude it from the
+    // banned-substring scan (its keys legitimately name the aptitudes; its values never do).
+    const card = view.player!.castingCard!;
+    for (const tier of [card.strengths.physical, card.strengths.mental, card.strengths.social]) {
+      expect(["standout", "solid", "scrappy"]).toContain(tier);
+    }
+    const { castingCard: _card, ...playerSansCard } = view.player!;
+    const blob = JSON.stringify({ ...view, player: playerSansCard });
+    // "social"/"emotional" are public strategy-style words (B61); the hidden layer stays banned.
     for (const banned of ["physical", "mental", '"stats"', '"soul"', "emotionalState", "volatility", "hiddenElement"]) {
       expect(blob.includes(banned)).toBe(false);
     }
+    // And no numeric value ever rides along anywhere — the card included (engine stats are floats).
+    expect(JSON.stringify(view)).not.toMatch(/\d\.\d/);
   });
 });
