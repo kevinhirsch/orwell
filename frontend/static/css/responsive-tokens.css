@@ -69,7 +69,7 @@ html {
   select:not(.tap-exempt),
   .settings-nav-item:not(.tap-exempt) {
     min-height: var(--tap-min);
-    min-width: 2.25rem;
+    min-width: max(36px, 2.25rem);
   }
   input[type="checkbox"]:not(.tap-exempt),
   input[type="radio"]:not(.tap-exempt) {

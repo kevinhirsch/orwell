@@ -2535,6 +2535,16 @@ PR per item).
 > (`scripts/responsive_matrix.py`, in CI: 6 viewports + settings passes + 200% font; overflow/
 > overlap/crowding/touch; XFAIL registry by finding ID — ratchets as U2–U4 land).
 
-### U2 — settings repair (S1 S2 S3 S12 A3)  ·  next
+### U2 — settings repair (S1 S2 S3 S12 A3)  ·  **✅ DONE (PR #204)**
+
+> The modal sizes with `clamp(560px, 58cqw, 880px)` against its overlay container (S13's cqw fix) +
+> `max-height: min(85dvh, 720px)` with the S2 short-viewport tier; the rail is fluid
+> (`clamp(140px, 18cqw, 200px)`); the WHOLE settings type tree is on the --fs-* rem scale (45 region
+> rules + 99 settings.js + 49 index.html inline sizes — zero px font-sizes remain, enforced; the
+> density lever works again); ONE narrow-layout switch (the @container 620 query — the @media-600
+> dup is deleted and the lint-gate exception registry is EMPTY); tab-rail edge-fade affordance; the
+> A3 layout kit (.settings-section/-title/-divider/-hint/row variants/gap utilities) with the
+> inline-style ratchet (219 → 212, capped). Matrix gate: S1 + S9 flipped from xfail to hard passes
+> (37 pass · 0 xfail · 0 fail).
 ### U3 — chrome & windows (rulings #3/#4/#7/#8/#10/#12; E64 E88 E95 E90 E91+S11 E97 E92 E67–E71, D2)
 ### U4 — transcript surface + trims + 0052 themes (E65 E93 D3/E66 D5/W6 E94-FE E72 E96 D7 D6/W8 · 0052)
