@@ -29,10 +29,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - run: npm ci
+      # The end-to-end smoke stage (B71/ops A7) boots the REAL front-end against a
+      # token-enforcing engine and drives a full turn — it needs the FE deps.
+      - run: pip install -r frontend/requirements.txt
       - name: deploy scripts parse
         run: for s in deploy/*.sh; do bash -n "$s"; done
-      - name: engine deploy smoke
+      - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
 
   # Front-end (vendored Python app) is outside the TS tooling. Compile-check it, run its

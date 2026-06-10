@@ -62,7 +62,7 @@ export function confessionalFor(
  */
 export function recordConfessional(events: EventStore, conf: Confessional, rng: RandomnessSource, ts: number): void {
   events.record({
-    id: `confessional:${conf.npc}:${ts}:${rng.int(1_000_000_000)}`,
+    id: `confessional:${conf.npc}:${events.query().length}:${rng.int(1_000_000_000)}`, // store-size-keyed: restart-safe (B71)
     ts,
     type: "confessional",
     initiator: conf.npc,

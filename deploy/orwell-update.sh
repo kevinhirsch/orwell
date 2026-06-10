@@ -14,6 +14,12 @@ set -euo pipefail
 
 APP_DIR_EXPLICIT="${APP_DIR:-}"     # honor an explicit override; otherwise auto-detect below
 BRANCH="${BRANCH:-main}"
+# B71/ops A4 — pin + rollback:
+#   REF=<sha|tag>          update to a PINNED ref instead of the branch tip
+#   orwell-update.sh --rollback   return to the previous build (SHA + dist) recorded by the last update
+REF="${REF:-}"
+ROLLBACK=0
+[[ "${1:-}" == "--rollback" ]] && ROLLBACK=1
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
 # First install dir found here: an explicit override, then the current path, then the legacy one.
@@ -44,7 +50,7 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   pct push "$CTID" "$TMP_UPDATE" /tmp/orwell-update.sh
   rm -f "$TMP_UPDATE"
   # Forward only an explicit APP_DIR override; let auto-detect run inside the container otherwise.
-  pct exec "$CTID" -- bash -c "export ${APP_DIR_EXPLICIT:+APP_DIR='${APP_DIR_EXPLICIT}' }BRANCH='${BRANCH}'; bash /tmp/orwell-update.sh"
+  pct exec "$CTID" -- bash -c "export ${APP_DIR_EXPLICIT:+APP_DIR='${APP_DIR_EXPLICIT}' }BRANCH='${BRANCH}' REF='${REF}'; bash /tmp/orwell-update.sh $([[ $ROLLBACK -eq 1 ]] && echo --rollback)"
   exit 0
 fi
 
@@ -62,19 +68,64 @@ else
   ENGINE_SVC="orwell-engine"; FRONTEND_SVC="orwell-frontend"
 fi
 
-echo "==> updating orwell in ${APP_DIR} (save in ${APP_DIR}/data is preserved)"
-git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
-git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
+PREV_FILE="${APP_DIR}/data/.update-prev"      # the last good SHA (data/ survives updates)
+PREV_DIST="${APP_DIR}/dist.prev"              # the last good build output
 
-echo "==> rebuild engine"
+# ── Rollback (B71/ops A4): return to the recorded previous SHA + its dist, then restart. ──────
+if [[ "$ROLLBACK" -eq 1 ]]; then
+  [[ -f "$PREV_FILE" ]] || { echo "ERROR: no previous update recorded (${PREV_FILE} missing) — nothing to roll back to." >&2; exit 1; }
+  PREV_SHA="$(cat "$PREV_FILE")"
+  echo "==> rolling back to ${PREV_SHA}"
+  git -C "$APP_DIR" reset --hard "$PREV_SHA"
+  if [[ -d "$PREV_DIST" ]]; then
+    rm -rf "${APP_DIR}/dist"
+    cp -a "$PREV_DIST" "${APP_DIR}/dist"
+  else
+    ( cd "$APP_DIR" && npm ci && npm run build )
+  fi
+  systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
+  echo "==> rollback complete (now on ${PREV_SHA})."
+  exit 0
+fi
+
+echo "==> updating orwell in ${APP_DIR} (save in ${APP_DIR}/data is preserved)"
+PREV_SHA="$(git -C "$APP_DIR" rev-parse HEAD)"
+# Keep the running build so a failed update (or a later --rollback) can restore it untouched.
+if [[ -d "${APP_DIR}/dist" ]]; then
+  rm -rf "$PREV_DIST"
+  cp -a "${APP_DIR}/dist" "$PREV_DIST"
+fi
+
+# Fetch + check out the TARGET (a pinned REF wins over the branch tip).
+if [[ -n "$REF" ]]; then
+  git -C "$APP_DIR" fetch origin "$REF" || git -C "$APP_DIR" fetch --tags origin
+  TARGET="$REF"
+else
+  git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
+  TARGET="origin/${BRANCH}"
+fi
+git -C "$APP_DIR" reset --hard "$TARGET"
+
+# Build BEFORE committing to the swap (B71/ops A4): a failed build must leave the services on the
+# PREVIOUS checkout + build — never a new tree with a stale dist, never a restart into a broken build.
+echo "==> rebuild engine (the update commits only if this succeeds)"
 cd "$APP_DIR"
-npm ci
-npm run build
+if ! (npm ci && npm run build); then
+  echo "ERROR: build FAILED on ${TARGET} — reverting to ${PREV_SHA}; services were NOT restarted." >&2
+  git -C "$APP_DIR" reset --hard "$PREV_SHA"
+  if [[ -d "$PREV_DIST" ]]; then rm -rf "${APP_DIR}/dist"; cp -a "$PREV_DIST" "${APP_DIR}/dist"; fi
+  echo "Hint: retry with REF=<known-good sha|tag>, or run 'orwell-update.sh --rollback' later." >&2
+  exit 1
+fi
 
 echo "==> refresh front-end deps"
 cd "${APP_DIR}/frontend"
 ./.venv/bin/pip install -q -r requirements.txt
 
+# Record the rollback point only once the new build is in place.
+mkdir -p "${APP_DIR}/data"
+printf '%s' "$PREV_SHA" > "$PREV_FILE"
+
 echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
 systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
-echo "==> update complete."
+echo "==> update complete ($(git -C "$APP_DIR" rev-parse --short HEAD)); previous build kept for --rollback."

@@ -29,8 +29,8 @@ refute() { # label  haystack  needle-that-must-be-absent
   if have "$2" "$3"; then fail "$1 (leaked: $3)"; else pass "$1"; fi
 }
 
-start_engine() {
-  ORWELL_ENGINE_PORT="$PORT" node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
+start_engine() { # optional $1 = a shared token to enforce (B67/B71)
+  env ORWELL_ENGINE_PORT="$PORT" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
   ENGINE_PID=$!
   for _ in $(seq 1 30); do
     if curl -fsS "${BASE}/health" >/dev/null 2>&1; then return 0; fi
@@ -85,10 +85,56 @@ stop_engine
 npm run build >/tmp/orwell-smoke-build2.log 2>&1 && pass "rebuild (update) succeeds" || fail "rebuild"
 start_engine && pass "engine healthy after update" || fail "engine unhealthy after update"
 # Data safety: the update script must never delete the save directory.
-if grep -qE 'rm[[:space:]].*data|rm -rf' deploy/orwell-update.sh; then
+if grep -E '\brm\b' deploy/orwell-update.sh | grep -q 'data'; then
   fail "orwell-update.sh appears to delete data/"
 else
   pass "orwell-update.sh never deletes data/ (save preserved)"
+fi
+
+# ── [4/4] the SYSTEM works (B71/ops A7): engine auth ON + the real front-end + a real turn ──────
+# A green engine alone is compatible with a broken FE; this stage boots the actual app against a
+# token-enforcing engine (proving B67 end-to-end) and drives create → advance → decision.
+echo "==> [4/4] end-to-end: token-enforcing engine + the real front-end + one full turn"
+if python3 -c "import uvicorn, httpx, fastapi" >/dev/null 2>&1; then
+  SMOKE_TOKEN="smoke-$(date +%s)"
+  FE_PORT="${ORWELL_PORT:-8798}"
+  # Pre-flight: the FE port must be FREE — a stale process would answer our probes and make this
+  # stage "verify" the wrong build (exactly the false-positive this stage exists to kill).
+  if curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:${FE_PORT}/openapi.json" 2>/dev/null; then
+    fail "port ${FE_PORT} is already in use — refusing to smoke against a stale front-end"
+    echo; echo "SMOKE FAILED ($fails)"; exit 1
+  fi
+  stop_engine
+  start_engine "$SMOKE_TOKEN" || exit 1
+  # Without the token the engine refuses; with it, it serves (the B67 contract).
+  no_auth="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/player/call" -H 'content-type: application/json' -d '{"name":"getGameState"}')"
+  [ "$no_auth" = "401" ] && pass "tokenless call is refused (401)" || fail "tokenless call returned ${no_auth}, wanted 401"
+
+  mkdir -p frontend/data  # a fresh checkout has none
+  # AUTH_ENABLED=false + LOCALHOST_BYPASS=true (the boot_smoke convention): this stage proves the
+  # FE<->engine seam under engine auth — the FE's own account system has its own tests.
+  ( cd frontend && env ORWELL_ENGINE_MCP_URL="$BASE" ORWELL_ENGINE_TOKEN="$SMOKE_TOKEN" \
+      AUTH_ENABLED=false LOCALHOST_BYPASS=true \
+      python3 -m uvicorn app:app --host 127.0.0.1 --port "$FE_PORT" >/tmp/orwell-smoke-fe.log 2>&1 & echo $! > /tmp/orwell-smoke-fe.pid )
+  FE_PID="$(cat /tmp/orwell-smoke-fe.pid)"
+  fe_up=0
+  for _ in $(seq 1 40); do
+    curl -fsS "http://127.0.0.1:${FE_PORT}/openapi.json" >/dev/null 2>&1 && { fe_up=1; break; }
+    kill -0 "$FE_PID" 2>/dev/null || break
+    sleep 0.5
+  done
+  if [ "$fe_up" = "1" ]; then
+    pass "front-end boots on :${FE_PORT}"
+    turn="$(ORWELL_SMOKE_FE="http://127.0.0.1:${FE_PORT}" ORWELL_SMOKE_ENGINE="$BASE" ORWELL_SMOKE_TOKEN="$SMOKE_TOKEN" python3 deploy/smoke_turn.py 2>&1)"
+    echo "$turn" | sed 's/^/    /'
+    have "$turn" "TURN OK" && pass "create → advance → decision completes through the system" \
+      || fail "the full turn did not complete"
+  else
+    fail "front-end did not boot (see /tmp/orwell-smoke-fe.log)"
+  fi
+  kill "$FE_PID" 2>/dev/null; wait "$FE_PID" 2>/dev/null
+else
+  echo "  skip — front-end deps (uvicorn/httpx/fastapi) not importable here; CI installs them"
 fi
 
 echo
