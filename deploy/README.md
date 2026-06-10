@@ -61,6 +61,23 @@ one script that deliberately **does**.
 > `.env` and handles both layouts** — an earlier version only scrubbed `data/` and so left the
 > game intact on default installs.
 
+### Doctor / bounce (when the game misbehaves)
+
+When the chat says **"the live feeds are down"**, the engine banner shows, or things just look
+wrong, run the doctor **inside the container** (legacy `bbai-*` units auto-detected):
+
+```bash
+bash /opt/orwell/deploy/orwell-doctor.sh             # diagnose; restart whatever is unhealthy; verify
+bash /opt/orwell/deploy/orwell-doctor.sh --status    # diagnose only — no restarts
+sudo bash /opt/orwell/deploy/orwell-doctor.sh --bounce  # force-restart engine + front-end; verify
+```
+
+It checks the full chain — units active → engine `/health` → the engine actually **serves tools**
+→ the front-end's `/api/orwell/health` reports `engine:true` (the two tiers agree) — flags the
+classic `ORWELL_ENGINE_MCP_URL` ↔ `ORWELL_ENGINE_PORT` mismatch in `data/.env`, restarts in
+dependency order (engine first), and prints the failing unit's recent journal when a restart
+doesn't cure it. Exit `0` means healthy.
+
 ## Config UX (community-scripts style)
 
 On a TTY the installer shows a **whiptail menu** with every field pre-populated:
