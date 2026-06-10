@@ -1,6 +1,7 @@
 import type { Soul } from "./characterFactory";
 import type { InteractionType } from "./relationships";
-import { TEMPERATURE_CONSTANTS } from "../domain/temperatureConstants";
+import type { RandomnessSource } from "../ports/RandomnessSource";
+import { TEMPERATURE_CONSTANTS, emotionalModifier, temperatureRoll } from "../domain/temperatureConstants";
 import type { TemperatureConstants } from "../domain/temperatureConstants";
 
 /**
@@ -46,42 +47,68 @@ const IMPACT: Record<EmotionalEvent, Impact> = {
   "comp-win":      { valence: +0.45, arousal: +0.05 },
 };
 
-/** How an off-screen scene's nature (0038) colors the initiator's mood. */
-const OFFSCREEN_EMOTION: Record<InteractionType, EmotionalEvent> = {
-  alliance: "bond",
-  bonding: "bond",
-  showmance: "bond",
-  gossip: "scheme",
-  strategy: "scheme",
-  conflict: "scheme",
-  betrayal: "betrayed",
+/** Which side of an off-screen scene a soul stood on (audit E50): roles feel DIFFERENT things. */
+export type SceneRole = "initiator" | "partner";
+
+/**
+ * How an off-screen scene's nature (0038) colors each PARTICIPANT's mood, per role (audit E50).
+ * The pre-E50 bug gave the BETRAYER the betrayed emotion while the victim's soul never moved:
+ * the initiator of a betrayal is scheming (low-grade agitation); the PARTNER is the one betrayed.
+ */
+const OFFSCREEN_EMOTION: Record<SceneRole, Record<InteractionType, EmotionalEvent>> = {
+  initiator: {
+    alliance: "bond",
+    bonding: "bond",
+    showmance: "bond",
+    gossip: "scheme",
+    strategy: "scheme",
+    conflict: "scheme",
+    betrayal: "scheme", // the one doing the turning is plotting, not wounded (E50)
+  },
+  partner: {
+    alliance: "bond",
+    bonding: "bond",
+    showmance: "bond",
+    gossip: "scheme",
+    strategy: "scheme",
+    conflict: "scheme",
+    betrayal: "betrayed", // the victim's soul finally moves (E50)
+  },
 };
 
-export function offscreenEmotion(type: InteractionType): EmotionalEvent {
-  return OFFSCREEN_EMOTION[type];
+export function offscreenEmotion(type: InteractionType, role: SceneRole = "initiator"): EmotionalEvent {
+  return OFFSCREEN_EMOTION[role][type];
 }
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 
 /**
  * Evolve a soul's `emotionalState` + `volatility` from one live event, in place. Bounded,
- * mean-reverting toward the soul's emotional baseline (the 0028 family). A more volatile soul
- * swings harder. Appends the new level to `emotionalHistory` so the trajectory persists and
- * never degrades (0007/0030). Deterministic — no randomness.
+ * mean-reverting toward the soul's emotional baseline. A more volatile soul swings harder.
+ * Appends the new level to `emotionalHistory` so the trajectory persists and never degrades
+ * (0007/0030).
+ *
+ * Audit E52: the state nudge now DELEGATES to the canonical 0028 `emotionalModifier` (one formula,
+ * one tunables home — no dead parallel math), and an optional seeded `rng` adds ADR 0001's bounded
+ * per-moment temperature roll (weighted by `emotional.swingTemperatureWeight`). Without an rng the
+ * evolution is deterministic and byte-identical to the pre-E52 behavior — pure tests stay stable.
  */
 export function evolveEmotion(
   soul: Soul,
   event: EmotionalEvent,
   c: TemperatureConstants = TEMPERATURE_CONSTANTS,
+  rng?: RandomnessSource,
 ): void {
   const { valence, arousal } = IMPACT[event];
   const k = c.emotional.volatilityScale;
-  const r = c.emotional.meanReversionRate;
 
-  // emotionalState: nudge by valence (scaled by current volatility), then mean-revert toward baseline.
-  const swing = valence * k * (0.5 + soul.volatility);
-  const nudged = clamp01(soul.emotionalState + swing);
-  soul.emotionalState = clamp01(nudged + (soul.emotionalBaseline - nudged) * r);
+  // emotionalState: nudge by valence (scaled by current volatility) + the bounded temperature
+  // roll, then mean-revert toward the SOUL's own baseline — all via the canonical 0028 formula.
+  const circumstance = valence * (0.5 + soul.volatility);
+  const temperature = rng ? temperatureRoll(rng, c) * c.emotional.swingTemperatureWeight : 0;
+  soul.emotionalState = clamp01(
+    emotionalModifier(soul.emotionalState, circumstance, temperature, c, soul.emotionalBaseline),
+  );
 
   // volatility: shocks raise it; calm/bonding settle it. Bounded.
   soul.volatility = clamp01(soul.volatility + arousal * k);

@@ -29,16 +29,23 @@ export interface EmotionalConstants {
   volatilityScale: number;
   /** How fast it settles back toward baseline when things calm (per calm moment). */
   meanReversionRate: number;
+  /** How much of ADR 0001's per-moment roll enters a LIVE emotional swing (`evolveEmotion`, E52). */
+  swingTemperatureWeight: number;
 }
 
-/** Per-variable weighting: temperature is NOT one global multiplier (0028 §4). */
+/**
+ * Per-variable weighting: temperature is NOT one global multiplier (0028 §4). Every field here has
+ * a REAL consumer (audit E53 — the decorative fields were deleted; a weight that drives nothing is
+ * a lie in the config):
+ *   - `initiative`    → the approach-ordering variance band (`conversation.ts` `rankApproaches`)
+ *   - `allianceShift` → the near-tie wobble in bond-motivated picks (`RelationshipModel.chooseStrongestBond`)
+ * Outcome temperature lives in `outcome.temperature`; secret surfacing in `hiddenSurfacingRate`;
+ * relationship-fold variance in the 0026 `TEMPERATURE_JITTER`; emotional swing in
+ * `emotional.swingTemperatureWeight`.
+ */
 export interface VariableWeights {
-  outcome: number;
-  expression: number;
   initiative: number;
-  secretSurface: number;
   allianceShift: number;
-  volatility: number;
 }
 
 export interface TemperatureConstants {
@@ -52,10 +59,12 @@ export interface TemperatureConstants {
 
 export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   bound: { min: -1, max: 1 },
-  variableWeights: { outcome: 0.36, expression: 0.5, initiative: 0.4, secretSurface: 0.2, allianceShift: 0.3, volatility: 0.4 },
+  // Values preserve the long-standing live behavior at the moment of wiring (E53): the approach
+  // band was 1 ± 0.1 (= initiative/2) and the bond-pick wobble was ±0.05 (= allianceShift/2).
+  variableWeights: { initiative: 0.2, allianceShift: 0.1 },
   // Calibrated so a clear stat favorite wins a strong majority but loses a real minority (0006).
   outcome: { stat: 1.0, temperature: 0.36, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2 },
-  emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3 },
+  emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3, swingTemperatureWeight: 0.25 },
   hiddenSurfacingRate: 0.05,
 };
 
@@ -75,15 +84,20 @@ export function withinTemperatureBounds(value: number, c: TemperatureConstants =
  * circumstance + temperature and MEAN-REVERTS toward baseline when calm. Passing
  * `circumstance = 0, temperature ≈ 0` is a calm moment — it settles toward
  * baseline. It is a competition input, never a fourth stat.
+ *
+ * Audit E52: this is now the ONE live swing formula — `evolveEmotion` (0041) delegates here, so
+ * retuning `emotional.*` moves the whole game. `baseline` defaults to the global calm point but a
+ * soul passes its OWN `emotionalBaseline` (every houseguest settles toward who they are).
  */
 export function emotionalModifier(
   current: number,
   circumstance: number,
   temperature: number,
   c: TemperatureConstants = TEMPERATURE_CONSTANTS,
+  baseline: number = c.emotional.baseline,
 ): number {
   const swung = clamp01(current + (circumstance + temperature) * c.emotional.volatilityScale);
-  return swung + (c.emotional.baseline - swung) * c.emotional.meanReversionRate;
+  return swung + (baseline - swung) * c.emotional.meanReversionRate;
 }
 
 /** Whether a hidden element surfaces this moment — true RARELY (bounded by `hiddenSurfacingRate`). */
