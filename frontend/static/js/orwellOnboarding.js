@@ -163,6 +163,18 @@
     }, 400); // after the fresh-session click settles
   }
 
+  // E65: a season restart (createCharacter success mid-session) opens a FRESH chat
+  // session so the dead season's transcript never rides as narrator context (F7's
+  // page-load-only fence, now event-driven too). The seat marker resets so a future
+  // pre-game state runs the casting flow again.
+  window._orwellFreshSession = () => {
+    try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
+    try {
+      const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
+      if (nb) nb.click();
+    } catch (_) {}
+  };
+
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     try {

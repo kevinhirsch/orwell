@@ -2221,6 +2221,13 @@ import { isNarrow } from './platform.js';
                     try {
                       const _adv = JSON.parse(json.output || '{}');
                       window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _adv && _adv.pending ? _adv.pending : null } }));
+                      // E65: a game lifecycle change (new season / reset) refreshes every
+                      // panel and clears per-game client state — the event finally has a
+                      // dispatcher to match its four listeners.
+                      if (json.tool === 'createCharacter' || json.tool === 'manageSandbox') {
+                        window.dispatchEvent(new CustomEvent('orwell:gamechanged'));
+                        if (window._orwellFreshSession && json.tool === 'createCharacter') window._orwellFreshSession();
+                      }
                     } catch (_) {}
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';

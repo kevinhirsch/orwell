@@ -78,7 +78,14 @@ def setup_orwell_routes() -> APIRouter:
         Pre-game ("no active game") is an honest 200 {started:false} — NOT a fake 502 outage
         (field bug: the panel's poll logged a 502 per refresh on a healthy, game-less box)."""
         try:
-            return await orwell_engine.game_status(user=_current_user(request))
+            st = await orwell_engine.game_status(user=_current_user(request))
+            # D3/E66: the last-seen pending decision rides along so the decision card
+            # can re-arm after a reload — the engine's own Vault-free legal-options
+            # view, cached at the AdvanceView chokepoints. A status poll NEVER
+            # advances the game (ADR 0003: progressing is always an explicit act).
+            if isinstance(st, dict):
+                st["pending"] = orwell_engine.last_pending(_current_user(request))
+            return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
                 return {"started": False}
@@ -197,7 +204,9 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": f"unknown decision kind: {body.kind}"})
         decision = {k: v for k, v in body.model_dump().items() if v is not None}
         try:
-            return await orwell_engine.submit_decision(decision, user=_current_user(request))
+            res = await orwell_engine.submit_decision(decision, user=_current_user(request))
+            orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            return res
         except Exception as e:
             logger.warning(f"[orwell] decision failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
