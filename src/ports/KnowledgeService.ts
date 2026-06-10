@@ -30,7 +30,7 @@ export interface KnowledgeService {
    */
   surfaceInformationTo(
     entity: EntityId,
-    fact: { content: string; subject?: EntityId },
+    fact: { content: string; subject?: EntityId; confidence?: number },
     pathway: string,
   ): KnowledgeFact | null;
 

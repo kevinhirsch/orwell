@@ -2,9 +2,13 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView, EvictionView, MakeDealReq, DealView,
+  FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import { assignRooms } from "../../engine/presence";
+import { HOUSE_ADJACENCY } from "../../domain/house";
+import type { Room, Occupancy } from "../../domain/house";
+import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
@@ -111,6 +115,12 @@ export class GameSessionAdapter implements GameSession {
   private soul?: SoulProvider;
   /** Per-moment tagline cache (regenerate when week/phase/standing changes, not per page load). */
   private readonly taglineCache = new Map<string, string>();
+  /**
+   * Who is in which room (0049) — every ACTIVE houseguest, exactly one room; the evicted are
+   * NOWHERE. Seeded at game start, re-assigned by the off-screen tick (`presenceTick`); grounds
+   * witnessing, overhearing, and the player's `whereabouts()` read.
+   */
+  private presence: Map<EntityId, Room> | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -155,6 +165,7 @@ export class GameSessionAdapter implements GameSession {
       house: this.house ? cloneSession(this.house) : null,
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
+      ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
     };
@@ -168,6 +179,8 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
+    this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
   }
@@ -216,6 +229,63 @@ export class GameSessionAdapter implements GameSession {
     if (!this.house) return [];
     const evicted = new Set(this.live?.evictionOrder ?? []);
     return [this.house.player.id, ...this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id)];
+  }
+
+  /** The houseguests presence tracks: the living, MINUS an evicted player (the evicted are nowhere). */
+  private presenceActive(): EntityId[] {
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    return this.livingIds().filter((id) => !evicted.has(id));
+  }
+
+  /** The shared room-assignment deps: live affinity (allies drift together) + the HOH-room pull. */
+  private presenceDeps(rng: RandomnessSource): Parameters<typeof assignRooms>[2] {
+    return {
+      rng,
+      affinity: (a, b) => this.rel.edge(a, b).affinity,
+      hoh: this.ceremony.hoh ?? null,
+    };
+  }
+
+  /**
+   * Re-seat the house for a new off-screen tick (0049): every active houseguest stays put or moves
+   * to an ADJACENT room, clustered by affinity, through the caller's seeded rng. The orchestrator
+   * calls this once per tick; lingering player turns never move the week — only the rooms.
+   */
+  presenceTick(rng: RandomnessSource): void {
+    if (!this.house) return;
+    this.presence = assignRooms(this.presenceActive(), this.presence, this.presenceDeps(rng));
+  }
+
+  /** The live occupancy ground truth (engine/registry wiring — never projected raw to the player). */
+  occupancy(): Occupancy | null {
+    return this.presence;
+  }
+
+  /** Drop anyone presence still seats who is no longer active (the just-evicted are nowhere). */
+  private prunePresence(): void {
+    if (!this.presence) return;
+    const active = new Set(this.presenceActive());
+    for (const id of [...this.presence.keys()]) if (!active.has(id)) this.presence.delete(id);
+  }
+
+  whereabouts(): WhereaboutsView | null {
+    if (!this.house || !this.presence) return null;
+    const me = this.house.player.id;
+    const room = this.presence.get(me);
+    if (!room) return null; // the player is nowhere (out of the house)
+    const inRoom = (r: Room): NamedRef[] => {
+      const out: NamedRef[] = [];
+      for (const [id, where] of this.presence!) {
+        if (where === r && id !== me) out.push({ id, name: this.nameOf(id) });
+      }
+      return out;
+    };
+    // The player's room + each ADJACENT room only — what they could see or hear themselves.
+    return {
+      room,
+      present: inRoom(room),
+      nearby: (HOUSE_ADJACENCY.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
+    };
   }
 
   socialInitiatives(): SocialInitiative[] {
@@ -317,6 +387,11 @@ export class GameSessionAdapter implements GameSession {
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
     this.seedFirstImpressions(seed);
+    // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
+    this.presence = assignRooms(
+      this.presenceActive(), null,
+      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`))),
+    );
     this.onPersist?.(); // durable save (0030): a started game must survive a restart
     return this.view();
   }
@@ -603,6 +678,7 @@ export class GameSessionAdapter implements GameSession {
     // doesn't pin to extremes over a season. Slow (`DECAY_RATE`), disposition-scaled, threat lingers.
     if (ev && ev.beat === "eviction-result") this.rel.decay(RELATIONSHIP_CONSTANTS.DECAY_RATE);
     this.syncProjection();
+    this.prunePresence(); // the just-evicted occupy no room (0049)
     this.onPersist?.();
   }
 

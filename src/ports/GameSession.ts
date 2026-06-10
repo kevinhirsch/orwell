@@ -303,6 +303,21 @@ export interface PlayerTaglineView {
   text: string;
 }
 
+/**
+ * Where the player stands in the house RIGHT NOW (0049) — the Vault-free presence read. Who is in
+ * the player's room and who is one room over: facts a houseguest could see or hear themselves.
+ * NEVER motives, numbers, hidden state, or the occupancy of non-adjacent rooms (you can't see
+ * through walls — fog of war is gameplay).
+ */
+export interface WhereaboutsView {
+  /** The room the player is in. */
+  room: string;
+  /** Who else is in the player's room (names only). */
+  present: NamedRef[];
+  /** Each ADJACENT room and who is in it (names only). Non-adjacent rooms never appear. */
+  nearby: Array<{ room: string; present: NamedRef[] }>;
+}
+
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
@@ -381,4 +396,11 @@ export interface GameSession {
    * Infra (like `gameStatus`/`playerTagline`), not a game-driving lever.
    */
   finaleView(): FinaleView | null;
+
+  /**
+   * The Vault-free presence read (0049): the player's room, who is in it, and who is in each
+   * ADJACENT room. Grounds lingering play — "who's here? who's nearby?" has an engine answer the
+   * narrator queries instead of inventing. `null` before a game starts (or once the player is out).
+   */
+  whereabouts(): WhereaboutsView | null;
 }

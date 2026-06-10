@@ -843,7 +843,7 @@ order/deps, test targets, no open decisions):**
 - **0022 — MVP-2 (the rich game UI)** — the one deferred feature (no DoR yet).
 - **The audit batches below** — the **full product-audit batch (B34–B60 / C12–C18)** and the **front-end &
   experience batch (B61–B66 / C19–C28)**, both wave-ordered, governed by ADR 0003; audit specs
-  **0045–0048 are drafted**, **0049** (B64) still to draft.
+  **0045–0048 are drafted**, **0049** (B64) is drafted **and built**.
 
 **Suggested build order for the implementer agents:** ~~0041 (linchpin)~~ **done** → 0039 (done) / 0043 → 0044
 (consumes 0043 + 0041) → 0042 → B27b → 0037 UI — interleaved with the audit batches' waves (**Wave 0 hotfixes
@@ -1768,7 +1768,19 @@ play** (mill around rooms, learn who's present/adjacent, talk to anyone while NP
 knowledge-scoped speech, stable persona); and each principle must be **testable structurally** where
 possible — that section is the contract these items must satisfy. Read ADR 0003 before any of them.
 
-### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · spec drafted 2026-06-10**
+### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · ✅ DONE 2026-06-10**
+
+> **Built to green** (engine + FE wiring in one PR): `src/domain/house.ts` (rooms + adjacency, pure
+> core, `occupancyViolations` invariant) · `src/engine/presence.ts` + `presenceConstants.ts` (seeded
+> affinity-clustered `assignRooms`; `rollOverhears` — ONE gate per scene, ONE ear, player-priority,
+> partial fragment + reduced confidence via real `overheard:<eventId>` pathways) · `whereabouts()`
+> (port + adapter + player tool + manifest bullet + FE schema/tags/dispatch per the C13 drift test) ·
+> occupancy persisted in the snapshot · orchestrator tick seats the house + rolls player-direction
+> overhears; `recordInteraction` grounds witnesses in co-presence + rolls NPC-direction overhears ·
+> lingering proven zero-beat (BDD) and milling counts as watcher activity. Note: overhears are
+> deliberately RARE (`overhearProb 0.1`, one listener) — both for drama and because every overhear is
+> a recorded propagation event the per-commit snapshot pays for (UAT-measured). 8 BDD scenarios in
+> `cucumber.cjs`; `tests/unit/presence.test.ts`.
 
 > **Spec is drafted** (`docs/features/0049-house-presence-and-lingering.{md,feature}`, per the v1-transcript
 > audit ruling — `docs/audits/2026-06-10-v1-transcript-meta-feedback-audit.md` §3.7: note overhearing is

@@ -1,6 +1,6 @@
 # 0049 — House presence & lingering play (rooms, occupancy, overhearing)
 
-> **Status:** Draft (queue **B64**, was "NEEDS SPEC FIRST" — spec drafted 2026-06-10 per the v1-transcript
+> **Status:** **Built** (queue **B64**, green 2026-06-10 — spec drafted the same day per the v1-transcript
 > audit ruling). ADR 0003 promises **lingering is play** (§7) and **people must make sense** (§8), and the
 > v1 transcripts show the game's best beat — an NPC quoting the player's own private phrase back at him,
 > because he was close enough to hear it — is **illegal** under today's strict witness sets: nothing models

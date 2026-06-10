@@ -6,6 +6,7 @@ import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
+import type { Room } from "../domain/house";
 
 /**
  * The current durable-snapshot schema version (B40/audit C4). Bump when the shape changes; a save
@@ -47,6 +48,8 @@ export interface SessionCore {
   live?: LiveSeasonState | null;
   /** Tracked promises the player is party to (0039), so deals survive a restart (0030). */
   deals?: Deal[];
+  /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
+  presence?: Record<EntityId, Room>;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
   casting?: CastingIntake;
 }

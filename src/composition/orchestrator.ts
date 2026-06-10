@@ -4,6 +4,7 @@ import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
+import { rollOverhears } from "../engine/presence";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
@@ -265,6 +266,11 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   const ids = core.house ? activeNpcs : [npc(1), npc(2), npc(3), npc(4)];
   const before = sandbox.engine.events.query().length;
 
+  // House presence (0049): the tick re-seats the house FIRST (seeded, affinity-clustered, adjacent
+  // moves only), so this stretch's scenes happen somewhere and overhears have ground truth.
+  sandbox.session.presenceTick(rng);
+  const occupancy = sandbox.session.occupancy();
+
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
   // houseguest's hidden element (B50) rarely slips into a scene's hidden content (rare-reveal loop).
@@ -280,6 +286,16 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
     // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
     sandbox.session.recordOffscreenSoul(s.initiator, s.type);
+    // 0049: the scene happens WHERE its initiator is; anyone one room over — INCLUDING the player —
+    // may catch a piece of it. A successful roll is a real, traceable `overheard:` pathway (0002),
+    // partial and lower-confidence: eavesdropping is information-gathering, never narrative vibes.
+    const room = occupancy?.get(s.initiator);
+    if (occupancy && room) {
+      rollOverhears({
+        eventId: s.event.id, room, content: s.event.content, participants: s.event.witnessSet,
+        occupancy, knowledge: sandbox.engine.knowledge, rng,
+      });
+    }
   }
 
   // NPC interiority (0040): an involved houseguest privately confesses their REAL read — Vault-only
