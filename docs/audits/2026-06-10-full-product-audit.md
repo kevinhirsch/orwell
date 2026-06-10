@@ -76,6 +76,14 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 15. **The UI enhancements track is prioritized** (2026-06-10): the chrome/windows and
     transcript-surface lanes are first in dispatch order — see the priority note in the
     parallel execution plan.
+16. **Responsiveness is a system, not a per-panel fix** (2026-06-10): the settings window
+    must work at normal desktop scaling (text currently crowds on a standard PC); **all**
+    windows need one coherent mechanism for internal responsiveness across devices and
+    viewport widths; and the product is held to the bar of **a mobile web app that functions
+    as if it's an installed app — integration and perfection with every placement**. A
+    dedicated responsiveness & installed-app audit stream (S) is commissioned under this
+    ruling; its system-level mechanism spec becomes the spine of the prioritized UI track
+    (ruling #15).
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
