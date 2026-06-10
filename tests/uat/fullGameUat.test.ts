@@ -527,10 +527,9 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
       expect(merged["nominations"] ?? 0, "nominations decisions hit").toBeGreaterThan(0);
       expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
     },
-    // 5 HTTP seasons ran at ~57s before the E42–E55 consequence folds landed; the same transport
-    // overhead that moved tests 1–2 to the direct driver makes 60s a flake budget here. The
-    // assertions are unchanged — only the wall-clock allowance grew with the richer per-beat work.
-    { timeout: 120_000 },
+    // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1
+    // (and the E42–E55 consequence folds added real per-beat work on top of the transport cost).
+    { timeout: 180_000 },
   );
 
   // ── Health endpoint reachable (sanity) ────────────────────────────────────

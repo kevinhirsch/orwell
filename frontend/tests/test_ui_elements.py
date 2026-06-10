@@ -48,6 +48,11 @@ def _build_client(monkeypatch, overrides: dict):
     for name, fn in overrides.items():
         monkeypatch.setattr(orwell_engine, name, fn)
 
+    # E70: /new-game is admin-gated; these tests exercise route LOGIC under the documented
+    # smoke configuration (AUTH_ENABLED=false — the same bypass deploy/smoke.sh runs with).
+    # The gate itself is proven in test_e70_new_game_gate.py.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
     # Force reload so closures in setup_orwell_routes() see the patched engine.
     orwell_routes = importlib.import_module("routes.orwell_routes")
     importlib.reload(orwell_routes)

@@ -108,7 +108,7 @@ File references are to `main` @ 87687c0.
 
 ### Theme 1 — Restart & persistence integrity (the season-2 family)
 
-- **E1 [CRIT · Bug] Even the *admin* reset resurrects the old season — the orchestrator baseline
+- **E1 [CRIT · Bug] ✅ PR #215 — Even the *admin* reset resurrects the old season — the orchestrator baseline
   is never invalidated.** `orchestrator.ts:89` (`baselines` map, never cleared), `:209–229`
   (fault ⇒ `registry.restore(user, baseline!)`); `registry.ts:271–277` (`resetUser` builds a
   fresh sandbox, never notifies the orchestrator). After any reset, the next mutation reads as a
@@ -121,7 +121,7 @@ File references are to `main` @ 87687c0.
   runtime, play, reset, play season 2, simulate engine restart ⇒ season 2 persists
   (`lastIntegrity:"ok"`). (Today `opsHardening.test.ts:70` tests reset without `setCommit`
   wired — the production spine is exactly what's untested.)
-- **E2 [HIGH · Bug] Pre-game off-screen ticks fabricate hidden history with synthetic NPCs.**
+- **E2 [HIGH · Bug] ✅ PR #215 — Pre-game off-screen ticks fabricate hidden history with synthetic NPCs.**
   `orchestrator.ts:233–235` ticks on every commit; `:332` falls back to `npc(1..4)` when no
   house exists; `:162` returns `Infinity` pool size pre-game — so each casting-interview answer
   records hidden scenes + Vault confessionals **before the season exists**, later humanized into
@@ -129,7 +129,7 @@ File references are to `main` @ 87687c0.
   forbids deleting it). *Fix:* no-op the tick when `!session.snapshot().started` (as
   `gameWatcher.ts:56` already does); delete the synthetic pool from `defaultApply`. *Test:*
   two `updateCasting` calls ⇒ zero hidden events pre-`createCharacter`.
-- **E3 [HIGH · Bug] A faulted commit returns 200 with a view of rolled-back state.**
+- **E3 [HIGH · Bug] ✅ PR #215 — A faulted commit returns 200 with a view of rolled-back state.**
   `orchestrator.ts:222–229` (fault path returns void), `registry.ts:183–188` (fire-and-forget),
   `GameSessionAdapter.ts:853` (mid-method `onPersist`). The sandbox is swapped while the old
   one's method is still executing; the FE narrates a beat that officially never happened — the
@@ -153,12 +153,12 @@ File references are to `main` @ 87687c0.
   *Fix:* quarantine the user dir (`<dir>.incompatible-<ts>`) or refuse service with a clean
   "save needs a newer engine" health fault; never prune what you couldn't validate; document
   rollback-vs-saves. *Test:* `snapshotVersion+1` save → boot → 6 saves ⇒ original still on disk.
-- **E6 [MED · Improvement] The first commit after an engine restart is checkpoint-blind.**
+- **E6 [MED · Improvement] ✅ PR #215 — The first commit after an engine restart is checkpoint-blind.**
   `orchestrator.ts:210–212` accepts the no-baseline commit; boot preload (`runtime.ts:97–99`)
   never seeds baselines — the non-degradation guard has a hole exactly at resume-from-disk,
   where the historical thinning bug lived. *Fix:* `Orchestrator.seedBaseline(user)` from the
   loaded snapshot during preload. *Test:* resumed sandbox dropping a fact ⇒ first commit faults.
-- **E7 [MED · Bug] Save failures are fail-open and misclassified.** `registry.ts:238–241` +
+- **E7 [MED · Bug] ✅ PR #215 — Save failures are fail-open and misclassified.** `registry.ts:238–241` +
   `orchestrator.ts:179/216` (uncaught ⇒ turn proceeds unsaved, no health fault);
   `HttpMcpServer.ts:173–175` classifies any plain `Error` as deliberate ⇒ an `ENOSPC` returns
   **400** and leaks the data-dir path. *Fix:* catch around `saveUser` ⇒ `persist-failure` fault
@@ -171,7 +171,7 @@ File references are to `main` @ 87687c0.
 
 ### Theme 2 — Vault Wall & knowledge integrity
 
-- **E9 [HIGH · Bug] `surfaceInformationTo` launders invented facts into full-confidence
+- **E9 [HIGH · Bug] ✅ PR #212 — `surfaceInformationTo` launders invented facts into full-confidence
   knowledge.** `InMemoryKnowledgeService.ts:110–111` — `overheard:<id>` anchoring checks only
   that *some* event with that id exists; the fact's content is never compared. Any caller with
   one legitimate event id can mint arbitrary "anchored" player knowledge with clean provenance.
@@ -232,12 +232,12 @@ File references are to `main` @ 87687c0.
 
 ### Theme 3 — Anti-sycophancy & "recorded or it didn't happen"
 
-- **E20 [MED · Bug] `resolveCompetition` is a seed-shopping oracle on the player channel.**
+- **E20 [MED · Bug] ✅ PR #212 — `resolveCompetition` is a seed-shopping oracle on the player channel.**
   `surfaces/tools/registry.ts:36` + `EngineCommandsAdapter.ts:112–117` — caller supplies
   participants **with stats** and the seed; nothing recorded, no folds. *Fix:* remove from
   `PLAYER_TOOLS` (keep the pure fn for tests) or delegate to the live loop's already-resolved
   result (remediation principle #1). *Test:* absent from `listTools()`, refused by `callTool`.
-- **E21 [MED · Bug] `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
+- **E21 [MED · Bug] ✅ PR #212 — `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
   edges without bound.** `EngineCommandsAdapter.ts:88–92` (player-channel witness set excluding
   the player ⇒ off-screen "ground truth" indistinguishable from engine scenes), `:105–107`
   (caller picks kind/direction; `MAX_FOLDS_PER_INTERACTION` caps per call, not per beat).
@@ -436,7 +436,7 @@ consequence.*
   NPC ever uses. *Fix:* derive NPC intent from disposition/strategy-style + state,
   constants-gated (nominees never throw their own veto). *Test:* bounded nonzero NPC throw rate
   respecting gates.
-- **E57 [MED · Bug] "One bounded off-screen tick per turn" actually fires per *mutation*.**
+- **E57 [MED · Bug] ✅ PR #215 — "One bounded off-screen tick per turn" actually fires per *mutation*.**
   `registry.ts:183–188` + `orchestrator.ts:219,233–235` — a 4-tool-call turn runs 4 ticks
   (12 hidden scenes, 4 reshuffles, 4 rumors/confessionals), force-marching the house and
   flooding the record. *Fix:* debounce to the turn boundary. *Test:*
@@ -515,7 +515,7 @@ consequence.*
   2-minute refresh after one blip). *Fix:* reset on success like `orwellSocial.js:408`.
 - **E69 [LOW · Bug] ✅ PR #206 — "11st out / 12nd out / 13rd out"** — `orwellStatusPanel.js:298` ordinal
   logic; reachable every endgame. *Fix:* standard ordinal helper (11–13 ⇒ "th").
-- **E70 [LOW · Change] `POST /api/orwell/new-game` bypasses the 0050 casting interview**
+- **E70 [LOW · Change] ✅ PR #215 — `POST /api/orwell/new-game` bypasses the 0050 casting interview**
   (`orwell_routes.py:205–232` — a soul-shallow character one curl away; no UI consumes it).
   *Fix:* admin-gate or delete in favor of the chat tools (folds into D1's one-door work).
 - **E71 [LOW · UX] ✅ PR #206 — Panel client state isn't keyed per user/game** (bare `localStorage` keys —
@@ -952,13 +952,13 @@ traceability; E-batch cross-references inline.
   (`candidates − vetoField`), reject already-drawn picks, snapshot deferred candidates after
   the full draw. *Test:* property over seeds × house sizes 5–16 + a live submit loop
   asserting no duplicates and correct field size.
-- **C2 [HIGH · Bug · confirmed]** `pathwayAnchored`'s `told-by:` check passes on
+- **C2 [HIGH · Bug · confirmed] ✅ PR #212 —** `pathwayAnchored`'s `told-by:` check passes on
   subject-match alone (`k.content === fact.content || k.subject === fact.subject`) —
   seeding an NPC with "npc:9 likes to cook breakfast" anchors the invented "npc:9 has a
   final-two deal against you and is throwing comps" as real player knowledge. On the
   player-channel allowlist. *Fix:* anchor on content lineage (`factId`/fuzzy content match);
   subject-only ⇒ suspicion with capped confidence. (Sister of E9; both close together.)
-- **C3 [HIGH · confirmed]** E9's `overheard:` hole verified by execution ("totally fabricated
+- **C3 [HIGH · confirmed] ✅ PR #212 —** E9's `overheard:` hole verified by execution ("totally fabricated
   secret" surfaced as knowledge against an unrelated event id). The legitimate engine caller
   always passes a strict content fragment — make the anchor require it.
 - **C4 [MED · Bug]** `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
@@ -1006,7 +1006,7 @@ traceability; E-batch cross-references inline.
   `rebuildSoulIndex` replays it — any future direct `recordToSoul` writer is silently lost on
   restart and invisible to the checkpoint (C4). *Fix:* make the durable mirror the API
   (`deepenSoul(id, note)`); property test through public seams.
-- **C14 [LOW]** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
+- **C14 [LOW] ✅ PR #212 —** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
   or −3 persists and feeds prompts. `clamp01` at `pushKnown`.
 - **C15 [LOW]** `vetoParticipants` doesn't validate the `choose` callback's return (could
   insert the HOH/a nominee/a duplicate); `chooseStrongestBond([])` returns `undefined`.
@@ -1063,7 +1063,7 @@ proven only on a fixture:
   distribution — the vacuous claimer for E33), no restart leg, no pending double-advance
   check, the eviction reveal isn't in its result type, leak checks are shape-regexes with no
   sentinel, and "over the deployed HTTP transport" is true for 1 of 3 legs.
-- **T14 [MED · Missing-gate]** The B71 restart→offscreen-tick duplicate-id kill (found live by
+- **T14 [MED · Missing-gate] ✅ PR #215 —** The B71 restart→offscreen-tick duplicate-id kill (found live by
   a smoke) has no regression test — no test restores a save into a fresh registry and ticks.
   Spec: save mid-game → new registry on same dir → 5 ticks → integrity ok + unique ids.
 - **T15 [MED]** The deal-rumor pathway Then surfaces canned fixture gossip unrelated to the
@@ -1084,20 +1084,20 @@ proven only on a fixture:
 
 ## Stream R — live runtime & performance (R1–R12, measured on the real engine)
 
-- **R1/R2 [HIGH · Confirmed-live]** E1 reproduced end-to-end: reset → new game → `integrity
+- **R1/R2 [HIGH · Confirmed-live] ✅ PR #215 —** E1 reproduced end-to-end: reset → new game → `integrity
   fault kinds=degradation` → the old game zombie-resurrects; reset never scrubs disk, so
   process restart resurrects the pre-reset season too. (Durable resume itself: verified-pass
   — season 2 resumed exactly at week 14/finale.) Fix spec confirmed: `Orchestrator.forgetUser`
   + save-dir rotation on reset.
-- **R3 [MED · Perf]** Per-call latency grows ~20× over a season (6.1ms wk1 → 118.5ms wk14,
+- **R3 [MED · Perf] ✅ PR #215 —** Per-call latency grows ~20× over a season (6.1ms wk1 → 118.5ms wk14,
   identical curve across seeds): every mutation runs ~4 full O(events) snapshot
   serializations + 2 save versions (`orchestrator.ts:204–236`) — O(n²) per season (~460KB
   snapshots at endgame). *Fix:* reuse the just-exported snapshot between checkpoint/save/tick;
   incremental counts.
-- **R4 [MED · Perf]** No idle-sandbox eviction, ever (`registry.ts:169`): +1.6MB RSS per
+- **R4 [MED · Perf] ✅ PR #215 —** No idle-sandbox eviction, ever (`registry.ts:169`): +1.6MB RSS per
   sandbox, permanent (60MB boot → 123MB after 3 seasons; ~250–450MB at 100 users). Sandboxes
   provably rebuild from disk — add an idle LRU unload using the existing touch timestamps.
-- **R5 [Confirmed-live]** E57 measured: 4 `recordInteraction` calls in 28ms ⇒ 4 ticks, 22 new
+- **R5 [Confirmed-live] ✅ PR #215 (with E57) —** E57 measured: 4 `recordInteraction` calls in 28ms ⇒ 4 ticks, 22 new
   events (16 hidden), 8 save versions — 4.5× amplification per mutation.
 - **R6 [Confirmed-live]** E31/D10 exact behavior: malformed `recordInteraction`/
   `resolveCompetition` ⇒ 500 "internal error"; everything else clean 400/404/413; **no path

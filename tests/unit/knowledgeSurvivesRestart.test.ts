@@ -32,8 +32,9 @@ describe("B68 — the player's knowledge layer survives a real restart (live pat
         initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true,
         content: "two houseguests planned the week's votes",
       });
+      // E9: an overheard surfacing must carry a real fragment of THAT event's content (lineage).
       const fact = sb.engine.knowledge.surfaceInformationTo(
-        PLAYER, { content: "you overheard pieces of a plan" }, "overheard:b68:scene",
+        PLAYER, { content: "(overheard, muffled) two houseguests planned…" }, "overheard:b68:scene",
       );
       expect(fact).not.toBeNull();
       const suspicion = sb.engine.knowledge.addSuspicion(PLAYER, { content: "someone is lying about their vote" });
@@ -62,7 +63,7 @@ describe("B68 — the player's knowledge layer survives a real restart (live pat
 
       // The id/ts counters resumed too (product-audit C3): a post-restart surfacing mints a FRESH id.
       const fresh = restored.engine.knowledge.surfaceInformationTo(
-        PLAYER, { content: "a second overheard fragment" }, "overheard:b68:scene",
+        PLAYER, { content: "(overheard, muffled) planned the week's votes…" }, "overheard:b68:scene",
       );
       expect(fresh).not.toBeNull();
       expect(known.some((k) => k.id === fresh!.id), "no duplicate knowledge id after restart").toBe(false);

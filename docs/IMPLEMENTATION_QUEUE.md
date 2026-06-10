@@ -2573,6 +2573,49 @@ PR per item).
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
 
+## The round-5/6 parallel lanes · 2026-06-10
+
+### L1 — restart & spine (E1+D1+R1 · E2 · E3 · E6 · E7 · E57/R5 · R3 · R4 · E70 · T14)  ·  **✅ DONE (PR #215)**
+
+> The ONE sanctioned restart door: `Orchestrator.forgetUser` + save-dir rotation
+> (`UserSaveStore.resetUser`/`FileSaveStore`) wired into `registry.resetUser`, and the player
+> channel's confirmed `createCharacter` restart now delegates through that same hinge
+> (`GameSessionAdapter.setOnRestart`) — season 2 commits clean, persists, and survives an engine
+> restart (the headline R1 production bug; proven end-to-end in
+> `tests/integration/restartSpine.test.ts`, the audit's named missing test). E3: a refused commit
+> THROWS typed (`TurnRefusedError` ⇒ 409; never 200-then-rollback) with one `onPersist` per beat
+> (`inOneCommit`); E7: persist failures are their own fault class (`PersistFailureError` ⇒
+> sanitized 500, fail-closed rollback) + `EngineRefusal` typing; E2: pre-game ticks gated and the
+> synthetic npc pool deleted; E6: boot preload seeds baselines (`seedBaseline`); E57/R5: the
+> turn-driven tick debounced to the turn boundary (beat commits always tick; aux tool calls share
+> one); R3: the exported snapshot reused across checkpoint/save/tick (≤2 serializations per
+> mutation, save by reference); R4: idle-sandbox LRU unload (`maxResident`, rebuilds from disk);
+> E70: `POST /api/orwell/new-game` admin-gated (the chat tools are the player door; smoke/matrix
+> configs keep working); T14: the restore-into-fresh-registry tick regression test. Unit gates:
+> `restartDoor.test.ts` + `spineHardening.test.ts` + `test_e70_new_game_gate.py`.
+
+### U-L2 — Lane 2: knowledge integrity (engine) — E9+C2+C3 · C14 · E20 · E21  ·  **✅ DONE (PR #212)**
+
+> **E9/C2/C3 (one fix site — `InMemoryKnowledgeService.pathwayAnchored`):** anchoring now requires
+> **content lineage** — `told-by:` must derive from what the teller actually holds (content or its
+> undistorted gossip origin) or witnessed (subject-only match no longer anchors, the C2 exploit);
+> `overheard:<id>` must derive from THAT event's content (a strict normalized fragment, the shape
+> `rollOverhears` produces — a real id no longer anchors unrelated invented content, the E9/C3
+> exploit). Anchored knowledge is by construction a fragment of something real; everything else
+> downgrades to a suspicion with **capped** confidence. **C14:** `clamp01` on confidence at every
+> knowledge write seam (`pushKnown` — surfacing/seeding/gossip — and `addSuspicion`, which also caps
+> at 0.5: a hunch is never knowledge-grade). **E20:** `resolveCompetition` is **gone from the player
+> channel** (registry descriptor, McpServer dispatch, the `EngineCommands` port method) —
+> `runCompetition` is the single outcome authority (B37); the pure domain fn stays; smoke + the 0009
+> `.feature` now assert absence + refusal. **E21:** `recordInteraction` requires the **player in the
+> witness set** (the player initiating counts; off-screen scenes are the engine's to mint) and folds
+> are budgeted **per beat per directed edge** (`MAX_FOLDS_PER_PAIR_PER_BEAT`, window keyed off the
+> latest `season:` beat) on top of the B39 per-call cap. Verified by:
+> `tests/unit/knowledgeIntegrity.test.ts` (lineage + clamp), `tests/unit/playerChannelGuards.test.ts`
+> (E20 absence/refusal both channels; E21 throw/auto-seat/budget/budget-reopen), the amended
+> `docs/features/0009-mcp-tool-boundary.feature` scenarios, `tests/integration/httpServer.test.ts`
+> (HTTP 400 refusal), and `deploy/smoke.sh` (refusal probed on a live deploy).
+
 ## Wave E-SOCIAL — Lane 3: social-sim consequence (E42–E55 · C9 · C12 · T1) · 2026-06-10 — ✅ DONE (PR #216)
 
 > **"Make the simulation matter":** deals, gossip, and the emotional arc stop being flavor.

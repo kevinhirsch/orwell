@@ -64,6 +64,7 @@ import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
+import { EngineRefusal } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
@@ -148,6 +149,52 @@ export class GameSessionAdapter implements GameSession {
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
     this.onPersist = fn;
+  }
+
+  /**
+   * The ONE restart door (audit E1/D1/R1): when composed in the registry, a CONFIRMED
+   * `createCharacter` over a started game is delegated here — the registry routes it through the
+   * same `resetUser` the admin reset uses (orchestrator baseline forgotten, dead season's saves
+   * rotated, a clean sandbox) and season 2 is created in the fresh sandbox. Standalone adapters
+   * (tests/onboarding fixtures with no registry) keep the legacy in-place restart.
+   */
+  private onRestart?: (req: CreateCharacterReq) => GameStateView;
+
+  setOnRestart(fn: (req: CreateCharacterReq) => GameStateView): void {
+    this.onRestart = fn;
+  }
+
+  /**
+   * One persisted commit per player mutation (audit E3): a beat used to fire `onPersist` mid-method
+   * (a broken deal inside the tally) and again at the end — and since the commit hook can SWAP the
+   * sandbox on a fault, the old instance kept executing against rolled-back state. Mutations run
+   * inside `inOneCommit`, which defers every interior `persist()` to a single hook call at the end;
+   * a refused commit then throws OUT of the mutation (nothing narrates a beat that never happened).
+   */
+  private persistDepth = 0;
+  private persistDeferred = false;
+
+  private persist(): void {
+    if (this.persistDepth > 0) {
+      this.persistDeferred = true;
+      return;
+    }
+    this.onPersist?.();
+  }
+
+  private inOneCommit<T>(fn: () => T): T {
+    this.persistDepth++;
+    let out: T;
+    try {
+      out = fn();
+    } finally {
+      this.persistDepth--;
+    }
+    if (this.persistDepth === 0 && this.persistDeferred) {
+      this.persistDeferred = false;
+      this.onPersist?.(); // may throw (a refused/failed commit) — AFTER all state mutation (E3)
+    }
+    return out;
   }
 
   /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
@@ -356,7 +403,7 @@ export class GameSessionAdapter implements GameSession {
   /** Engine/loop-internal: record the public ceremony facts the status panel projects. */
   updateCeremony(partial: Partial<CeremonyState>): void {
     this.ceremony = { ...this.ceremony, ...partial };
-    this.onPersist?.();
+    this.persist();
   }
 
   private nameOf(id: EntityId): string {
@@ -499,9 +546,17 @@ export class GameSessionAdapter implements GameSession {
   createCharacter(req: CreateCharacterReq): GameStateView {
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
-    // call, a network caller) is a no-op returning the current state — the prior save is left intact. A
-    // real restart goes through the admin reset path (registry.resetUser), not this tool.
-    if (this.house && !req.confirmRestart) return this.view();
+    // call, a network caller) is a no-op returning the current state — the prior save is left intact.
+    if (this.house) {
+      if (!req.confirmRestart) return this.view();
+      // A CONFIRMED restart routes through the ONE sanctioned door (audit E1/D1/R1): the registry's
+      // reset delegate — the SAME hinge the admin reset uses — forgets the orchestrator baseline,
+      // rotates the dead season's saves, and creates season 2 in a clean sandbox. Without that the
+      // fresh week-1 snapshot read as a count regression against the finished season ⇒ a degradation
+      // fault on every commit, nothing persisted, and the dead season resurrected on engine restart.
+      if (this.onRestart) return this.onRestart({ ...req, confirmRestart: false });
+      // Standalone (no registry composed — tests/onboarding fixtures): legacy in-place restart.
+    }
     // Finalize FROM the interview's incremental intake (0050): everything updateCasting recorded
     // is the base; explicit args override field-by-field. OOBE can arrive half-done or fully done —
     // the one hard requirement is a name from SOMEWHERE.
@@ -511,7 +566,7 @@ export class GameSessionAdapter implements GameSession {
     });
     const playerName = merged.playerName;
     if (!playerName) {
-      throw new Error(
+      throw new EngineRefusal(
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
@@ -560,7 +615,7 @@ export class GameSessionAdapter implements GameSession {
       this.presenceActive(), null,
       this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`))),
     );
-    this.onPersist?.(); // durable save (0030): a started game must survive a restart
+    this.persist(); // durable save (0030): a started game must survive a restart
     return this.view();
   }
 
@@ -576,7 +631,7 @@ export class GameSessionAdapter implements GameSession {
     const before = this.intake;
     this.intake = mergeCastingUpdate(this.intake, req);
     if (JSON.stringify(before) !== JSON.stringify(this.intake)) {
-      this.onPersist?.(); // a half-done interview is durable state (0030)
+      this.persist(); // a half-done interview is durable state (0030)
     }
     return castingStatusOf(this.intake);
   }
@@ -847,14 +902,18 @@ export class GameSessionAdapter implements GameSession {
 
   advanceGame(): AdvanceView {
     if (!this.house || !this.live) return this.advanceView(null);
-    let ev: BeatEvent | null = null;
-    if (!this.live.pending && !this.live.finished) {
-      ev = advanceBeat(this.live, this.ctx(), this.beatRng());
-      this.commit(ev);
-    }
-    // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
-    // and every ceremony beat are visible in the view, not only recorded to the event store.
-    return this.advanceView(ev);
+    // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
+    // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
+    return this.inOneCommit(() => {
+      let ev: BeatEvent | null = null;
+      if (!this.live!.pending && !this.live!.finished) {
+        ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
+        this.commit(ev);
+      }
+      // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
+      // and every ceremony beat are visible in the view, not only recorded to the event store.
+      return this.advanceView(ev);
+    });
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
@@ -863,10 +922,12 @@ export class GameSessionAdapter implements GameSession {
     if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
-    // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
-    const ev = applyDecision(this.live, this.toDecisionInput(req), this.ctx(), this.beatRng());
-    this.commit(ev);
-    return this.advanceView(ev);
+    return this.inOneCommit(() => {
+      // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
+      const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
+      this.commit(ev);
+      return this.advanceView(ev);
+    });
   }
 
   /**
@@ -888,7 +949,7 @@ export class GameSessionAdapter implements GameSession {
     );
     // `madeWeek` (E43) anchors the horizon: a safety/vote promise binds through THIS week's eviction.
     const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
-    this.onPersist?.();
+    this.persist();
     return this.dealView(deal);
   }
 
@@ -906,7 +967,7 @@ export class GameSessionAdapter implements GameSession {
         [wronged, breaker], "betrayal",
       ),
     });
-    if (broken.length > 0) this.onPersist?.();
+    if (broken.length > 0) this.persist(); // deferred into the beat's ONE commit (E3)
   }
 
   /**
@@ -988,7 +1049,7 @@ export class GameSessionAdapter implements GameSession {
     }
     this.syncProjection();
     this.prunePresence(); // the just-evicted occupy no room (0049)
-    this.onPersist?.();
+    this.persist();
   }
 
   /** The beats whose directly-involved houseguests confess (E55: noms, the veto ceremony, eviction). */
