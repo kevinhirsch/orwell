@@ -73,9 +73,13 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 14. **Admins can retrieve old chat transcripts for debugging** — quiet, not loudly exposed:
     an admin-gated API plus a small entry in the existing admin section of Settings (shape
     chosen 2026-06-10; specced as "Future specs" — 0053).
-15. **The UI enhancements track is prioritized** (2026-06-10): the chrome/windows and
-    transcript-surface lanes are first in dispatch order — see the priority note in the
-    parallel execution plan.
+15. **The UI enhancements track is prioritized** (2026-06-10, reaffirmed same day:
+    "high-impact UI changes should be prioritized first whenever possible"): the
+    chrome/windows and transcript-surface lanes are first in dispatch order — and when any
+    scheduling trade-off arises between a UI lane and a non-CRIT lane, the UI lane wins.
+    The S-stream's responsive-mechanism spec (ruling #16) slots at the top of the track,
+    since every other window change builds on it. See the priority note in the parallel
+    execution plan.
 16. **Responsiveness is a system, not a per-panel fix** (2026-06-10): the settings window
     must work at normal desktop scaling (text currently crowds on a standard PC); **all**
     windows need one coherent mechanism for internal responsiveness across devices and
