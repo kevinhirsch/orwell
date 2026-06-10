@@ -721,13 +721,27 @@ consequence.*
      "evicted" muted text.
   5. **Sequester** — the jury house: low-contrast wine/maroon depths, brass-gold accent,
      velvet-dark panels; cozy with an undertone of waiting.
+  **Frosted glass + delightful animation are critical to these themes** *(ruling addendum,
+  2026-06-10)*: house themes ship with translucent, backdrop-blurred surfaces — sidebar,
+  floating panels, modals, the minimize dock — (`backdrop-filter: blur(…)` + a translucent
+  panel token over the theme background) so the house is always faintly visible through the
+  chrome, and with delightful micro-motion as part of the theme identity: the E97 open/close/
+  minimize animations tuned per-theme (e.g. The Feed's REC dot pulses; Telescreen powers
+  panels on with a brief CRT bloom; Memory Wall backlights swatches on hover), plus soft
+  eased hovers on swatches and buttons. Constraints: `prefers-reduced-motion` disables motion
+  (never the frost); a no-`backdrop-filter` fallback (solid panel at higher opacity) keeps
+  low-end/unsupported browsers legible; frost stays off the chat text column itself
+  (readability first); contrast measured against the *effective* blurred composite, not the
+  raw token.
   Placement/behavior: house themes appear before `dark/original` and all inherited presets;
   the default theme for fresh game-build installs may switch to **The Feed** (decide at
   implementation — record as its own mini-ruling); custom-theme machinery untouched.
   *Tests:* pytest/browser smoke assert the first five `themeGrid` swatches are the house set,
-  each applies (body computed background matches token), and a contrast check on fg/bg pairs
-  passes AA. Write as `docs/features/0052-house-themes.{md,feature}` (FE pytest-validated,
-  honest 0029-style header — not cucumber-gated).
+  each applies (body computed background matches token), frosted surfaces carry the
+  backdrop-filter (or the fallback class when unsupported), reduced-motion strips the
+  animation classes, and a contrast check on fg/bg pairs passes AA. Write as
+  `docs/features/0052-house-themes.{md,feature}` (FE pytest-validated, honest 0029-style
+  header — not cucumber-gated).
 
 ## Deferral specs (unchanged status, now concretely scoped)
 
