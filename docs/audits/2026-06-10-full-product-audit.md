@@ -70,6 +70,9 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 13. **The theme picker leads with 3–6 house themes** — Big Brother / creepy / Orwellian palettes
     on par with the game's identity, placed as the *first* entries in the picker. Specced as a
     feature, not a finding (see "Future specs" — 0052).
+14. **Admins can retrieve old chat transcripts for debugging** — quiet, not loudly exposed:
+    an admin-gated API plus a small entry in the existing admin section of Settings (shape
+    chosen 2026-06-10; specced as "Future specs" — 0053).
 
 **Live-transcript corroboration.** A real premiere-night session transcript supplied during this
 audit independently confirms, on screen: the gibberish cast names (E38), approaches firing at
@@ -742,6 +745,29 @@ consequence.*
   animation classes, and a contrast check on fg/bg pairs passes AA. Write as
   `docs/features/0052-house-themes.{md,feature}` (FE pytest-validated, honest 0029-style
   header — not cucumber-gated).
+
+- **0053 (proposed) — Admin transcript retrieval** *(ruling #14, 2026-06-10: "Admin API +
+  settings entry")*. Debug access to any user's chat transcripts, invisible to players:
+  - **API** (all behind the existing `require_admin` middleware, same pattern as
+    `admin_wipe_routes.py` / `api_token_routes.py`): `GET /api/admin/transcripts` — list
+    sessions across all users (session id, owner, title, created/updated, message count,
+    game-session marker), with `?user=` / `?since=` filters and pagination;
+    `GET /api/admin/transcripts/{session_id}?format=json|md` — the full transcript export:
+    messages with roles/timestamps **plus the agent-thread tool-call nodes (names, args,
+    outputs)** — the tool nodes are where the debug value lives (what the GM actually called
+    vs. what it narrated).
+  - **UI:** one quiet "Transcripts" row inside the already-admin-only section of Settings
+    (renders only for admins, nothing in the game chrome): session list with owner filter +
+    per-session download. No new nav surface.
+  - **Boundaries recorded:** transcripts contain only player-visible content, so there is no
+    Vault risk by construction; they DO include the player's Diary-Room entries (player-level
+    OOC — an accepted operator capability for a self-hosted box; note it in the admin UI
+    copy). Retrieval is read-only — no edit/delete (E93's no-rewriting rule applies to admins
+    too). Transcripts survive the game reset (by design) and die with the factory reset.
+  - *Tests:* pytest — non-admin GET ⇒ 403/404; admin list + export shape (incl. tool nodes);
+    the settings row absent for non-admin DOM. Write as
+    `docs/features/0053-admin-transcripts.{md,feature}` (FE pytest-validated, 0029-style
+    header).
 
 ## Deferral specs (unchanged status, now concretely scoped)
 
