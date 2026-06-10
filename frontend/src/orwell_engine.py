@@ -312,6 +312,12 @@ async def season_retrospective(user: str | None = None):
     return await _call("seasonRetrospective", {}, user=user)
 
 
+async def npc_voice(npc_id: str, user: str | None = None):
+    """The knowledge-bounded voicing projection for one active houseguest (B65) — persona,
+    room/co-presence, what THEY know/suspect, organic stances. ``None`` for unknown/departed."""
+    return await _call("npcVoice", {"id": npc_id}, user=user)
+
+
 async def whereabouts(user: str | None = None):
     """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
     ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""

@@ -319,6 +319,35 @@ export interface WhereaboutsView {
 }
 
 /**
+ * The per-NPC voicing projection (B65 / ADR 0003 §8 — "people must make sense", structurally).
+ * Everything the narrator may draw on to voice ONE houseguest: their stable public persona, where
+ * they are and who is with them, what THEY legitimately know (witnessed / told / overheard), their
+ * hunches, and their organic stances (labels through their own disposition — NEVER numbers).
+ *
+ * The sanctioned, PER-NPC-BOUNDED voicing seam: the model is handed a knowledge-bounded houseguest
+ * and structurally cannot voice what that houseguest never learned. What it contains of the hidden
+ * layer is exactly what THIS houseguest knows — which they may, in character, choose to reveal
+ * (that is the game); other houseguests' private knowledge, the Vault, souls, and every number
+ * stay out by construction.
+ */
+export interface NpcVoiceView {
+  houseguest: NamedRef;
+  /** The stable public persona facets (B61) — byte-stable across the whole season. */
+  persona: {
+    archetype?: string; strategyStyle?: string; background?: string;
+    age?: number; appearance?: string; presentation?: string;
+  };
+  /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
+  whereabouts: { room: string; present: NamedRef[] } | null;
+  /** What THIS houseguest legitimately knows — content only, most recent first-capped. */
+  knows: string[];
+  /** Their hunches (no pathway): they may voice suspicion, never certainty (0002). */
+  suspects: string[];
+  /** Organic stances toward the other ACTIVE houseguests — labels, never numbers (ADR 0002). */
+  stances: Array<{ toward: NamedRef; stance: string }>;
+}
+
+/**
  * The season's PUBLIC arc, assembled from the event record (0048 — principle #7: stores, not
  * narrator memory). Vault-free at any time: it is exactly what the player lived through.
  */
@@ -444,4 +473,11 @@ export interface GameSession {
    * by prompt. The one sanctioned Vault-reading seam, post-season only, player-triggered.
    */
   seasonRetrospective(): RetrospectiveView | null;
+
+  /**
+   * The knowledge-bounded voicing projection for ONE active houseguest (B65 / ADR 0003 §8) —
+   * everything the narrator may draw on to voice them, nothing they never learned. Null for an
+   * unknown or non-active houseguest (the departed are voiced from the public record only).
+   */
+  npcVoice(id: EntityId): NpcVoiceView | null;
 }

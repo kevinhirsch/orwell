@@ -1365,6 +1365,20 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "npcVoice",
+            "description": "BEFORE voicing a houseguest in a scene (B65): their bounded person — persona, room + who is with them, what THEY actually know and suspect, and their organic stances. Speak them ONLY from this; they cannot reference what they never witnessed or were told.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "The houseguest id to voice (e.g. npc:3)."},
+                },
+                "required": ["id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "whereabouts",
             "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
             "parameters": {"type": "object", "properties": {}},
@@ -1566,6 +1580,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "whereabouts",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
+    # B65: the knowledge-bounded per-NPC voicing projection.
+    "npcVoice",
 })
 
 

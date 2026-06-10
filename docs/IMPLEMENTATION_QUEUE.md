@@ -1878,7 +1878,18 @@ possible — that section is the contract these items must satisfy. Read ADR 000
 > (no idle fast-forward). Read ADR 0003 (§7 + Testability), `docs/features/0002`, `0008`, `0035` first.
 > Open a PR.
 
-### B65 — NPC coherence: knowledge-scoped narration context (people must make sense)  ·  Claude Code  ·  **FE-0/FE-1 · ADR 0003 §8 · the structural guard**
+### B65 — NPC coherence: knowledge-scoped narration context (people must make sense)  ·  Claude Code  ·  **FE-0/FE-1 · ADR 0003 §8 · ✅ DONE 2026-06-10**
+
+> **Built to green.** New **`npcVoice(id)`** on the `GameSession` port (+ player tool + manifest bullet + FE
+> wiring): the knowledge-BOUNDED voicing projection for one ACTIVE houseguest — byte-stable persona facets (B61),
+> room + co-presence (0049), what THEY legitimately know (0002 `knownTo`, humanized, capped) + their hunches
+> (`suspicionsOf` — voiced as suspicion, never certainty), and ORGANIC stances (`relationshipLabel` through their
+> own archetype disposition — labels, never numbers). The sanctioned per-NPC-bounded seam: what it carries of the
+> hidden layer is exactly what THIS houseguest knows (which they may, in character, share/shade/lie about — that
+> is the game); other houseguests' knowledge, the Vault, souls, hidden elements, and every number stay out by
+> construction. Canary: a sentinel outside the NPC's knowledge set never appears in their voice (per-NPC axis);
+> the B42 live sweep now exercises `npcVoice` against the secret-holding NPC; persona byte-stable across turns;
+> no co-presence fact crosses rooms; the departed return null. `tests/unit/npcVoice.test.ts`.
 
 > In `kevinhirsch/orwell` (TS engine), make "people must make sense" (ADR 0003 §8) **structural**, the
 > Vault way: an NPC can only speak from what it legitimately knows, so enforce it on the *context the
