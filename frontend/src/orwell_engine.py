@@ -21,6 +21,10 @@ _TIMEOUT = float(
     or os.environ.get("BBAI_ENGINE_TIMEOUT")
     or "30"
 )
+# C18/audit F8: the FRAMING reads (game state + the moment prompt) run on EVERY chat turn —
+# a hung engine must fail the frame in seconds (the fallback prompt takes over), never stall
+# the player's turn for the full default timeout.
+_FRAMING_TIMEOUT = float(os.environ.get("ORWELL_ENGINE_FRAMING_TIMEOUT") or "3")
 
 
 def _engine_token() -> str | None:
@@ -90,7 +94,23 @@ def last_engine_error() -> dict | None:
     return None
 
 
-async def _post_tool(path: str, name: str, args: dict | None, user: str | None) -> dict:
+# C18/audit F8: one shared AsyncClient (connection pooling) instead of a new client per call.
+# Rebuilt if the constructor identity changes (tests monkeypatch httpx.AsyncClient) or the
+# client was closed.
+_client = None
+_client_factory = None
+
+
+def _shared_client():
+    global _client, _client_factory
+    factory = httpx.AsyncClient
+    if _client is None or _client_factory is not factory or getattr(_client, "is_closed", False):
+        _client = factory(timeout=_TIMEOUT)
+        _client_factory = factory
+    return _client
+
+
+async def _post_tool(path: str, name: str, args: dict | None, user: str | None, timeout: float | None = None) -> dict:
     """POST one tool call to the engine; shared by the player and admin channels.
 
     Raises :class:`EngineToolError` when the engine answers with a structured ``{"error": ...}`` body
@@ -100,8 +120,10 @@ async def _post_tool(path: str, name: str, args: dict | None, user: str | None) 
     for the visible health banner (`last_engine_error`); a success clears the record."""
     url = ENGINE_URL.rstrip("/") + path
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
+        client = _shared_client()
+        if True:
+            r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user),
+                                  timeout=timeout if timeout is not None else _TIMEOUT)
             if r.status_code >= 400:
                 err = None
                 try:
@@ -131,9 +153,11 @@ async def _post_tool(path: str, name: str, args: dict | None, user: str | None) 
     return data["result"]
 
 
-async def _call(name: str, args: dict | None = None, user: str | None = None) -> dict:
-    """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
-    return await _post_tool("/player/call", name, args, user)
+async def _call(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
+    """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.
+    `timeout` overrides the default for latency-sensitive FRAMING calls (C18: a hung engine must
+    fail a turn's framing in ~2s, not stall it for the full default)."""
+    return await _post_tool("/player/call", name, args, user, timeout=timeout)
 
 
 async def update_casting(fields: dict | None = None, user: str | None = None) -> dict:
@@ -200,26 +224,26 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
     return await _call("createCharacter", args, user=user)
 
 
-async def get_game_state(user: str | None = None) -> dict:
+async def get_game_state(user: str | None = None, timeout: float | None = None) -> dict:
     """Current Vault-free game state for this user: phase, the player's card, the house roster.
 
     The engine refuses a no-game user with a 404 "no active game" (it won't mint a sandbox just to
     answer a probe). That is NOT an outage — it is the ordinary pre-game state, so map it to
     ``{"started": False}``. A genuine engine outage still raises, so callers fail closed only then."""
     try:
-        return await _call("getGameState", {}, user=user)
+        return await _call("getGameState", {}, user=user, timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
     except EngineToolError as e:
         if e.no_game:
             return {"started": False}
         raise
 
 
-async def get_moment_prompt(moment: str | None = None, user: str | None = None) -> dict:
+async def get_moment_prompt(moment: str | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """The managed system prompt to inject for this user's current (or given) moment."""
     args: dict = {}
     if moment:
         args["moment"] = moment
-    return await _call("getMomentPrompt", args, user=user)
+    return await _call("getMomentPrompt", args, user=user, timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
 
 
 async def run_competition(comp_type: str | None = None, participant_ids: list | None = None, user: str | None = None) -> dict:
@@ -401,8 +425,7 @@ async def engine_health_detail() -> dict:
     ``{tool, kind, error, ageSeconds}``. Never raises."""
     detail: dict
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(ENGINE_URL.rstrip("/") + "/health")
+        r = await _shared_client().get(ENGINE_URL.rstrip("/") + "/health", timeout=5.0)
         if r.status_code == 200:
             detail = {"ok": True, "engineUrl": ENGINE_URL}
         else:

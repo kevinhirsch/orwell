@@ -70,7 +70,7 @@ async def _fetch_game_state(user, *, retry: bool):
     from src import orwell_engine
     for attempt in (0, 1):
         try:
-            return await orwell_engine.get_game_state(user=user)
+            return await orwell_engine.get_game_state(user=user)  # C18: the client's framing timeout applies
         except Exception:
             if attempt == 0 and retry:
                 await asyncio.sleep(0.4)  # ride out a momentary engine blip; do not retry mixed-use

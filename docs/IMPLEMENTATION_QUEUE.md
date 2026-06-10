@@ -1493,7 +1493,13 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > engine is down (no tip names a dropped vertical); a test asserts the first post-restart turn carries **no** prior-season
 > messages in the LLM payload. `pytest` + the 0032 headless gate green. Open a PR.
 
-### C16 — 0022 first slice: roster, recap, decision cards  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F9 (unparks 0022)**
+### C16 — 0022 first slice: roster, recap, decision cards  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F9 · ✅ DONE (across C20/C21/B62/C17; closed 2026-06-10)**
+
+> All three pieces shipped under their natural homes: the **roster** is C21's memory wall (names + seats,
+> Vault-free); the **decision cards** are C20's confirm-on-binding surface (the engine's pending + LEGAL options,
+> bound ONLY via the validated `/decision` route — audit F4 fixed structurally, guarded by B66); the
+> **"previously on…" recap** is B62's `re-entry` moment (the store recalled through the narrator — the ADR-0003
+> preferred shape) plus C17's recap panel over `seasonRecap` (the record, queryable any time).
 
 > In `kevinhirsch/orwell` `frontend/`, ship the highest-value slice of the deferred **0022** rich UI, all from Vault-free
 > projections the engine already returns, in the self-contained/fail-open/game-gated pattern of
@@ -1508,7 +1514,14 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > round as the question; roster/recap render Vault-free; `pytest` + 0032 headless gate green. Read `docs/features/0020`,
 > `0022` first. Open a PR.
 
-### C17 — 0048 front-end: season recap & the unsealed story  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit G4 · depends on B56**
+### C17 — 0048 front-end: season recap & the unsealed story  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit G4 · ✅ DONE 2026-06-10**
+
+> **Built to green** (B56 unblocked it). GET `/api/orwell/recap` (fail-open `{recap:null}`; the record, any time)
+> + GET `/api/orwell/retrospective` — **404 while the season is live** (the engine's terminal-state gate surfaces
+> as a missing affordance; the Wall stays absolute pre-finale). `orwellRetrospective.js`: a render-only,
+> game-build-gated, dismissible post-season panel — the recap highlights + "Open the Producer's Vault" (the
+> unsealed hidden story incl. the twist that never fired). Nothing in it progresses the game (B66 guard).
+> `tests/test_c17_retrospective.py`; pytest 292 + boot + headless browser smokes green.
 
 > In `kevinhirsch/orwell` `frontend/`, build the **post-season** presentation for feature **0048** (B56): a recap surface
 > (arc highlights from the engine's Vault-free recap read) and — **only after the winner event** — a player-triggered
@@ -1616,7 +1629,14 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > a non-validation throw returns 500; two same-named games have distinct comp streams; events sort by a coherent ts. Open
 > a PR.
 
-### C18 — front-end minor cleanup  ·  Claude Code (front-end lane)  ·  **continuous · audit F8**
+### C18 — front-end minor cleanup  ·  Claude Code (front-end lane)  ·  **continuous · audit F8 · ✅ DONE (poll hygiene shipped earlier; the rest closed with C17's PR 2026-06-10)**
+
+> Polling backoff + hidden-tab pauses shipped in the FE final batch (#170); archetype suggestions are C23's
+> chips; the drift/injection tests are C13's suite. Closed now: `game-trim.css` is STRIPPED server-side when the
+> game build is OFF (the full workspace returns under `ORWELL_GAME_BUILD=0`); the engine client uses ONE shared
+> `httpx.AsyncClient` (patch-aware for tests; the health probe included); and the per-turn FRAMING reads default
+> to a 3s `_FRAMING_TIMEOUT` (`ORWELL_ENGINE_FRAMING_TIMEOUT`) so a hung engine fails a turn's framing fast —
+> the fallback prompt takes over instead of a ~60s stall. F8g noted: mitigated by B36/C12's reset guard.
 
 > In `kevinhirsch/orwell` `frontend/`, the small items from audit F8: gate the `game-trim.css` `<link>` behind the build
 > flag (today unconditional, so `ORWELL_GAME_BUILD=0` debug still hides workspace chrome); offer the five canonical
