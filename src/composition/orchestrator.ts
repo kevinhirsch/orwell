@@ -257,18 +257,24 @@ export class Orchestrator {
 /** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
 function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number): number {
   const core = sandbox.session.snapshot();
-  const npcs: EntityId[] = (core.house?.npcs ?? []).map((n) => n.id);
-  const ids = npcs.length >= 2 ? npcs : [npc(1), npc(2), npc(3), npc(4)];
+  // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment they
+  // go (no more scheming/confessing weeks after eviction). A real house ⇒ only the LIVING NPCs; with no
+  // live game (tests/edge) ⇒ a small synthetic pool. The fallback never resurrects a real evictee.
+  const evicted = new Set(core.live?.evictionOrder ?? []);
+  const activeNpcs = (core.house?.npcs ?? []).filter((n) => !evicted.has(n.id)).map((n) => n.id);
+  const ids = core.house ? activeNpcs : [npc(1), npc(2), npc(3), npc(4)];
   const before = sandbox.engine.events.query().length;
 
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
   // houseguest's hidden element (B50) rarely slips into a scene's hidden content (rare-reveal loop).
   const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
-  const scenes = richOffscreenStretch({
-    events: sandbox.engine.events, rng, npcs: ids, interactions: 3,
-    hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
-  });
+  const scenes = ids.length >= 2
+    ? richOffscreenStretch({
+        events: sandbox.engine.events, rng, npcs: ids, interactions: 3,
+        hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
+      })
+    : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
     sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
@@ -284,7 +290,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships), rng, clockNow);
   }
 
-  if (trigger === "player-turn") {
+  if (trigger === "player-turn" && ids.length > 0) {
     // A meaningful, player-witnessed day event (daily-event invariant, 0008).
     sandbox.engine.events.record({
       id: `orch:day:${clockNow}:${rng.int(1_000_000_000)}`,

@@ -208,7 +208,9 @@ export class GameSessionAdapter implements GameSession {
   socialInitiatives(): SocialInitiative[] {
     if (!this.house) return [];
     const player = this.house.player.id;
-    const npcIds = this.house.npcs.map((n) => n.id);
+    // B52/audit D5: an evicted houseguest can't pull you aside — only LIVING NPCs approach.
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const npcIds = this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id);
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
     // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
     // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
