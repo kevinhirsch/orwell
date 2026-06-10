@@ -215,6 +215,7 @@
   </script>
   <link rel="stylesheet" href="/static/css/responsive-tokens.css">  <!-- Stream S: the responsive mechanism — MUST precede style.css -->
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/css/orwellHouseThemes.css">  <!-- 0052: the house themes' frost + micro-motion -->
   <link rel="stylesheet" href="/static/css/game-trim.css?v=20260608">  <!-- Orwell: hide non-game tool surfaces -->
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
@@ -1017,6 +1018,12 @@
       <div id="pinned-tools-bar"></div>
       <div class="chat-input-bottom" style="visibility:hidden">
         <div class="chat-input-left">
+          <!-- E94 (ruling #9): attaching an image is the one analysis input the
+               game wants — first-class under the game build, not an icon behind
+               an icon. Hidden in the full workspace (the overflow entry remains). -->
+          <button type="button" class="input-icon-btn" id="composer-attach-btn" title="Attach an image or file" aria-label="Attach an image or file" style="display:none">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
           <!-- Overflow menu (+) — always first/left -->
           <div class="overflow-wrapper">
             <button type="button" class="input-icon-btn overflow-plus-btn" id="overflow-plus-btn" title="More tools" aria-label="More tools" aria-haspopup="true">

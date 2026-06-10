@@ -4657,6 +4657,7 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
         res = await orwell_engine.advance_game(user=owner)
+        orwell_engine.remember_pending(res, user=owner)  # D3/E66: the card survives a reload
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4684,6 +4685,7 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
             decision[k] = args[k]
     try:
         res = await orwell_engine.submit_decision(decision, user=owner)
+        orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

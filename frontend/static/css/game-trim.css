@@ -61,3 +61,18 @@
 [data-settings-tab="reminders"] {
   display: none !important;
 }
+
+/* ── E72: players never see raw model ids — the composer model picker is
+      admin-only under the game build (per-user default model resolution
+      already serves everyone else). Default-hidden until the auth probe
+      marks an admin, so a player never gets a flash of model ids. ── */
+body[data-game-build] #model-select { display: none; }
+body[data-game-build].is-admin #model-select { display: initial; }
+
+/* ── E96 (ruling #11): "Save to Documents" points at a vertical the game
+      build doesn't surface. (chat.js also removes the node outright.) ── */
+body[data-game-build] #export-doc-btn { display: none !important; }
+
+/* ── D7: game turns always act — the Agent|Chat mode toggle invites the
+      broken tool-less mode while a game is live. ── */
+body[data-game-build][data-game-active="1"] .mode-toggle { display: none !important; }

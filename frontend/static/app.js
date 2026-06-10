@@ -117,6 +117,15 @@ function initializeEventListeners() {
 
   // File attachments (inside overflow menu)
   const _overflowAttach = el('overflow-attach-btn');
+  // E94: the first-class composer paperclip (game build) drives the same file-input flow.
+  const _composerAttach = el('composer-attach-btn');
+  if (_composerAttach) {
+    if (document.body.hasAttribute('data-game-build')) _composerAttach.style.display = '';
+    _composerAttach.addEventListener('click', () => {
+      const fi = el('file-input');
+      if (fi) fi.click();
+    });
+  }
   if (_overflowAttach) _overflowAttach.addEventListener('click', fileHandlerModule.openPicker);
   el('file-input').addEventListener('change', (e)=>{
     for (const f of e.target.files) fileHandlerModule.addFiles([f]);
@@ -1135,6 +1144,7 @@ function initializeEventListeners() {
     .then(r => r.json())
     .then(d => {
       window._isAdmin = !!d.is_admin;
+      document.body.classList.toggle('is-admin', !!d.is_admin); // E72: CSS gates on it
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
       const userBarName = el('user-bar-name');
       const userBarAvatar = el('user-bar-avatar');
@@ -4008,7 +4018,10 @@ function startOrwellApp() {
     const hasModels = modelsBox && modelsBox.querySelector('.models-row');
     if (!hasModels) {
       const tip = document.getElementById('welcome-tip');
-      if (tip) tip.textContent = 'Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.';
+      // D7: under the game build the empty state stays in the fiction.
+      if (tip) tip.textContent = document.body.hasAttribute('data-game-build')
+        ? 'Production needs a feed source — connect a model in Settings and the house comes alive.'
+        : 'Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.';
     }
   }).catch(() => {});
   modelsModule.refreshProviders();

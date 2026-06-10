@@ -135,3 +135,19 @@ def test_make_deal_forwards_and_validates(monkeypatch):
     assert seen == {"with": "npc:2", "kind": "final-two", "terms": "to the end"}
     bad = _run(tool_impl.do_make_deal(json.dumps({"with": "npc:2", "kind": "coronation", "terms": "x"}), owner="p"))
     assert bad.get("exit_code") == 1
+
+
+def test_w6_every_keep_set_tool_has_a_diegetic_beat_label():
+    """D5/W6: a keep-set tool with no _orwellToolBeats entry renders its raw
+    camelCase name in the transcript — the C14/C19 immersion bleed. The drift
+    test iterates the REAL keep-set so a new tool can't ship unlabeled."""
+    import re
+    from pathlib import Path
+    fe = Path(__file__).resolve().parents[1]
+    chat = (fe / "static" / "js" / "chat.js").read_text(encoding="utf-8")
+    m = re.search(r"_orwellToolBeats = \{(.*?)\};", chat, re.S)
+    assert m, "_orwellToolBeats map missing from chat.js"
+    labeled = set(re.findall(r"'([A-Za-z_]+)':", m.group(1)))
+    from src.agent_tools import GAME_TOOL_KEEP
+    missing = sorted(set(GAME_TOOL_KEEP) - labeled)
+    assert not missing, f"keep-set tools with no diegetic beat label (D5/W6): {missing}"

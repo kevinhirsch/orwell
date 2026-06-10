@@ -9,6 +9,16 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
 export const THEMES = {
+  // ── 0052 (ruling #13): the HOUSE themes lead the picker — the game's identity,
+  //    first in insertion order. Each is a full token set in the preset shape; the
+  //    `house: true` flag drives the frosted-chrome + micro-motion treatment
+  //    (orwellHouseThemes.css) — frost never on the chat text column, motion gated
+  //    by prefers-reduced-motion (never the frost), AA contrast on fg/bg.
+  'the-feed':   { bg:'#050a05', fg:'#9fe8a8', panel:'#0a140b', border:'#1f4a26', red:'#ff3b30', house: true },
+  'telescreen': { bg:'#101418', fg:'#d7e9ee', panel:'#151c22', border:'#2a3e4a', red:'#56c8e8', house: true },
+  'room-101':   { bg:'#232823', fg:'#e8ece4', panel:'#2b302b', border:'#4a524a', red:'#d92e2e', house: true },
+  'memory-wall':{ bg:'#0b0f16', fg:'#c8d6ea', panel:'#111827', border:'#2c3a52', red:'#e8b35a', house: true },
+  'sequester':  { bg:'#170d10', fg:'#e6d3c4', panel:'#221318', border:'#4a2a33', red:'#c9a227', house: true },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -30,6 +40,9 @@ export const THEMES = {
   claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
+
+// 0052: each preset knows its own key (drives the per-theme house treatment class).
+for (const [k, v] of Object.entries(THEMES)) v._key = k;
 
 const DEFAULT_THEME = 'dark';
 const LS_KEY = 'orwell-theme';
@@ -286,6 +299,27 @@ export function applyColors(colors) {
 
   // Update favicon to match theme accent color
   _updateFavicon(colors.red || '#e06c75');
+
+  // 0052: the HOUSE treatment — frosted backdrop-blur chrome + per-theme
+  // micro-motion (orwellHouseThemes.css keys off these body classes). Frost
+  // never touches the chat text column; reduced-motion strips motion only.
+  try {
+    const body = document.body;
+    for (const c of [...body.classList]) {
+      if (c.startsWith('house-theme')) body.classList.remove(c);
+    }
+    if (colors.house) {
+      body.classList.add('house-theme');
+      if (colors._key) body.classList.add('house-theme--' + colors._key);
+      // A translucent panel over the theme bg — the house faintly visible
+      // through the chrome. Solid-at-higher-opacity fallback in the CSS.
+      const m = /^#?([0-9a-f]{6})$/i.exec(colors.panel || '');
+      if (m) {
+        const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+        document.documentElement.style.setProperty('--panel-frost', `rgba(${r}, ${g}, ${b}, 0.62)`);
+      }
+    }
+  } catch (_) {}
 }
 
 // Per-route SVG shape registry — kept in sync with the inline favicon

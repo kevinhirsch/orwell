@@ -266,6 +266,25 @@
   }
 
   // chat.js dispatches this from advanceGame/submitDecision tool results.
+  // D3/E66: a pending decision must survive a reload. The card is event-mounted
+  // on live turns; on boot (and on a game change) we re-arm it from the status
+  // route's cached `pending` — the engine's own legal-options view. Without this,
+  // refreshing mid-decision left the player with no card and no signal.
+  async function rearmFromStatus() {
+    try {
+      const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const st = await r.json();
+      if (st && st.pending && st.pending.kind) {
+        window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending: st.pending } }));
+      }
+    } catch (_) { /* fail open */ }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", rearmFromStatus, { once: true });
+  } else { rearmFromStatus(); }
+  window.addEventListener("orwell:gamechanged", rearmFromStatus);
+
   window.addEventListener("orwell:pending", (e) => {
     try {
       render(e.detail && e.detail.pending);

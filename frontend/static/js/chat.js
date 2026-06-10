@@ -1115,6 +1115,12 @@ import { isNarrow } from './platform.js';
       // C14 (immersion): the Big Brother engine tools render as quiet production
       // beats — a label, never raw camelCase names or JSON payloads in the player's
       // transcript. Applies wherever these names appear (they exist only in the game).
+      // E96 (ruling #11): the game build carries no Documents vertical — the
+      // export item is removed from the DOM, not just hidden.
+      if (document.body.hasAttribute('data-game-build')) {
+        const docBtn = document.getElementById('export-doc-btn');
+        if (docBtn) docBtn.remove();
+      }
       const _orwellToolBeats = {
         'createCharacter': '\ud83c\udfac Casting',
         'getGameState': '\ud83d\udccb Production notes',
@@ -1134,6 +1140,28 @@ import { isNarrow } from './platform.js';
         'renderScene': '\ud83d\udcfa Production',
         'endOfSessionSummary': '\ud83d\udcfc Tape check',
         'finaleView': '\ud83d\udc51 Finale',
+        // D5/W6: EVERY keep-set tool the agent can pull renders diegetically —
+        // raw camelCase names in the transcript are the C14/C19 immersion bleed.
+        'updateCasting': '\u{1F3AC} Casting notes',
+        'whereabouts': '\u{1F9ED} Around the house',
+        'seasonRecap': '\u{1F4DC} The season so far',
+        'seasonRetrospective': '\u{1F513} The producers\u2019 vault',
+        'npcVoice': '\u{1F3AD} In their head',
+        'inspectNonVaultState': '\u{1F50E} Control room',
+        'overrideMechanic': '\u{1F39B} Control room',
+        'configureGame': '\u{1F39B} Control room',
+        'manageSandbox': '\u{1F39B} Control room',
+        'web_search': '\u{1F4E1} Checking the feeds',
+        'ask_user': '\u{1F399} A question for you',
+        'update_plan': '\u{1F4CB} Production notes',
+        'ui_control': '\u{1F4FA} Camera direction',
+        'generate_image': '\u{1F4F8} Photo booth',
+        'search_chats': '\u{1F4DC} The archive',
+        'list_models': '\u{1F4E1} Checking the feeds',
+        'manage_settings': '\u{1F39B} Control room',
+        'manage_endpoints': '\u{1F39B} Control room',
+        'manage_tokens': '\u{1F39B} Control room',
+        'manage_mcp': '\u{1F39B} Control room',
       };
       const _toolLabels = {
         'web_search': _searchIcon + 'Searching',
@@ -2221,6 +2249,13 @@ import { isNarrow } from './platform.js';
                     try {
                       const _adv = JSON.parse(json.output || '{}');
                       window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _adv && _adv.pending ? _adv.pending : null } }));
+                      // E65: a game lifecycle change (new season / reset) refreshes every
+                      // panel and clears per-game client state — the event finally has a
+                      // dispatcher to match its four listeners.
+                      if (json.tool === 'createCharacter' || json.tool === 'manageSandbox') {
+                        window.dispatchEvent(new CustomEvent('orwell:gamechanged'));
+                        if (window._orwellFreshSession && json.tool === 'createCharacter') window._orwellFreshSession();
+                      }
                     } catch (_) {}
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';

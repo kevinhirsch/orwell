@@ -1312,8 +1312,18 @@ export function createMsgFooter(msgElement) {
     }},
   ];
 
+  // E93: the chat transcript of a LIVE game is the played record of events the
+  // engine has already recorded and folded — editing, deleting, or re-rolling it
+  // desyncs the visible story from the EventStore (and edit-then-regenerate is an
+  // anti-sycophancy hole). Under the game build with a game active, only
+  // non-record-altering actions survive (copy, fork). Pre-game OOC is unaffected.
+  const _gameRecord = document.body.hasAttribute('data-game-build')
+    && document.body.dataset.gameActive === '1';
+  const _RECORD_SAFE = new Set(['copy', 'fork']);
+  const actionPool = _gameRecord ? allActions.filter(a => _RECORD_SAFE.has(a.id)) : allActions;
+
   // Filter out unavailable actions (e.g. TTS when not enabled)
-  const availableActions = allActions.filter(a => !a.available || a.available());
+  const availableActions = actionPool.filter(a => !a.available || a.available());
 
   // Determine which 3 to show: use recent order, fallback to defaults
   const recent = _getRecentActions();
