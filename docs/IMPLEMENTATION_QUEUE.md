@@ -1129,17 +1129,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ### B47 — jury manner applies to the player; symmetric finale appeals  ·  Claude Code  ·  **Wave 2 · audit A5 + A6** — ✅ DONE
 
-> **DONE.** Two finale asymmetries closed in `liveSeason.ts`. **A5:** `recordEvictionManner` no longer
-> exempts the player — when the player is a responsible houseguest (HOH/evict-voter), the evictee records
-> their manner toward the player like any NPC, so jury management cuts both ways (and the evictee→player
-> resentment now folds into the hidden layer at eviction, 0023). **A6:** `appealMade` returns the recorded
-> appeal or **null**; an unanswered (finalist, juror) pair now scores `NEUTRAL_APPEAL_EFFECT` (0.5,
-> `jury.ts`) instead of the optimal `bestAppeal` back-fill — the SAME for the player and NPC finalists, so
-> a finalist earns finale sway only from jurors who questioned them. **Canon resolved as 9** (one question
-> per juror — code + Bible + 0014/0037; supersedes the stray "18" in CLAUDE.md). Tests (`liveSeason`/`jury`,
-> both fail-before/pass-after): the player records manner toward a juror they evicted; a juror the player
-> blindsided votes for them measurably less; questioned-finalist favoured / unanswered-slot neutral +
-> symmetric. 0014/0037 amended. Original prompt below.
+> **DONE** (built **per the RULING below**). **A5:** `recordEvictionManner` no longer exempts the player —
+> when the player is a responsible houseguest (HOH/evict-voter), the evictee records their manner toward the
+> player like any NPC, so jury management cuts both ways (and the evictee→player resentment folds into the
+> hidden layer at eviction, 0023). **A6 (ruling 1):** `runFinale` now has **every juror question BOTH
+> finalists** (9×2 = **18** Q&A) — the player-finalist answers all 9 themselves, the NPC uses `bestAppeal`
+> for all 9. No `(finalist, juror)` pair is ever unanswered, so the asymmetry vanishes at the root and the
+> `appealMade` back-fill is a never-hit safety guard; CLAUDE.md's per-finalist canon stands. **Ruling 2:**
+> the jury/finale magnitudes are extracted to **`src/engine/juryConstants.ts`** (`JURY_WEIGHTS`, signed
+> `MANNER_LEAN`, `MANNER_THRESHOLDS`, `APPEAL`) — extraction only, 0037 calibration unchanged. Tests:
+> the player records manner toward a juror they evicted + a juror they blindsided votes for them less (A5);
+> the 18-Q&A leaves no unanswered pair + identical reads ⇒ a coin flip (A6 symmetry); choreography asserts
+> 18 questions. 0014/0037 specs updated. *(An earlier build of this item shipped the pre-ruling 9-Q + neutral
+> approach in #142; this is the ruling-compliant correction.)* Original prompt below.
 
 > In `kevinhirsch/orwell` (TS engine), jury management — the signature mechanic — is **inert against the player**:
 > `liveSeason.ts:209` skips recording eviction **manner** toward the player, so `juryLean`'s second-largest term

@@ -15,9 +15,9 @@ import { chooseNominationsWithMood, tallyJury } from "./season";
 import type { RelationshipModel } from "./relationships";
 import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
-  FINALE_APPEALS, NEUTRAL_APPEAL_EFFECT,
-  type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
+  FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
+import { MANNER_THRESHOLDS } from "./juryConstants";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -331,13 +331,10 @@ function resolveEvictionBeat(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: En
  * coming (they read the houseguest as low-threat) ⇒ blindsided. ENGINE-ONLY (never crosses
  * the wall): it shapes the hidden jury lean, not any player-facing surface.
  */
-const TRUST_BETRAYAL = 0.5;   // trusted them this much, yet they moved against me
-const THREAT_BLINDSIDE = 0.4; // I read them as no threat, so I never saw it coming
-
 function mannerToward(evictee: EntityId, responsible: EntityId, ctx: SeasonCtx): EvictionManner {
   const e = ctx.rel.edge(evictee, responsible);
-  if (e.trust > TRUST_BETRAYAL) return { betrayed: true };
-  if (e.threat < THREAT_BLINDSIDE) return { blindsided: true };
+  if (e.trust > MANNER_THRESHOLDS.trustBetrayal) return { betrayed: true };   // trusted them, yet they moved against me
+  if (e.threat < MANNER_THRESHOLDS.threatBlindside) return { blindsided: true }; // read them as no threat — never saw it coming
   return { respected: true }; // a clean, expected move from a known rival — no grievance
 }
 
@@ -403,13 +400,15 @@ function recordAppeal(f: FinaleProgress, finalist: EntityId, juror: EntityId, ap
 }
 
 /**
- * The appeal a finalist ACTUALLY made to a juror — their recorded choice — or `null` if that juror
- * never questioned them (audit A6). A null is scored as `NEUTRAL_APPEAL_EFFECT`, the SAME for a player
- * or NPC finalist: the engine no longer back-fills an unanswered slot with the optimal `bestAppeal`
- * (which silently played a finalist's finale for them and, before the fix, did so only for the player).
+ * The appeal a finalist made to a juror — their recorded choice. With the 18-Q&A finale every juror
+ * questions BOTH finalists (audit A6 ruling), so every (finalist, juror) pair is answered and the
+ * `bestAppeal` fallback below is a NEVER-HIT safety guard (kept so a malformed script can't crash the
+ * tally). The player answers their own 9; the NPC's 9 are its `bestAppeal` — symmetric by construction.
  */
-function appealMade(f: FinaleProgress, finalist: EntityId, juror: EntityId): FinaleAppeal | null {
-  return f.appeals[finalist]?.[juror] ?? null;
+function appealMade(
+  f: FinaleProgress, finalist: EntityId, juror: EntityId, ctx: SeasonCtx, s: LiveSeasonState,
+): FinaleAppeal {
+  return f.appeals[finalist]?.[juror] ?? bestAppeal(edgeAsJuryRel(juror, finalist, ctx), mannerFor(s, juror, finalist));
 }
 
 /** Begin the live finale: lock the Final 2, the last-9 jury, and the engine choreography. */
@@ -434,22 +433,17 @@ function precomputeVotes(s: LiveSeasonState, ctx: SeasonCtx, f: FinaleProgress, 
   for (const juror of f.jury) {
     if (votes[juror]) continue; // the player's own vote (recorded interactively) is kept
     const leanFor = (fin: EntityId): number => juryLean(edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
-    // The finale performance: the appeal the finalist actually made to THIS juror (their recorded
-    // choice), or a NEUTRAL term when this juror never questioned them — symmetric for player + NPC (A6).
-    const perfFor = (fin: EntityId): number => {
-      const made = appealMade(f, fin, juror);
-      return made === null
-        ? NEUTRAL_APPEAL_EFFECT
-        : appealEffect(made, edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
-    };
+    // Each juror questioned BOTH finalists (18-Q&A), so each has a recorded appeal here — scored
+    // symmetrically by the same `appealEffect`; the player's own answers are exactly as weighted as the NPC's.
+    const perfFor = (fin: EntityId): number => appealEffect(appealMade(f, fin, juror, ctx, s), edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
     votes[juror] = castJuryVote(f.finalists, leanFor, perfFor, rng);
   }
   return votes;
 }
 
 /**
- * Advance the live finale ONE step (0037). Statements → one question per juror → the vote →
- * a one-at-a-time reveal → the winner. Pauses (returns null with `s.pending` set) for the
+ * Advance the live finale ONE step (0037). Statements → each juror questions both finalists → the
+ * vote → a one-at-a-time reveal → the winner. Pauses (returns null with `s.pending` set) for the
  * player's own statement / answers / juror vote; everything else resolves deterministically.
  */
 function advanceFinale(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {

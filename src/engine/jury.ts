@@ -1,6 +1,10 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { tallyJury } from "./season";
+import { JURY_WEIGHTS, MANNER_LEAN, APPEAL, type JuryWeights } from "./juryConstants";
+
+// Re-export the tunables so existing importers keep reading them from `jury` (the math lives here).
+export { JURY_WEIGHTS, type JuryWeights };
 
 /**
  * Jury & endgame (feature 0014) — the finale. PURE and engine-owned: the engine
@@ -28,27 +32,19 @@ export interface EvictionManner {
   disrespected?: boolean;
 }
 
-export interface JuryWeights {
-  relationship: number;
-  manner: number;
-  /** Deliberately small vs relationship+manner: the finale sways, it doesn't dominate. */
-  finale: number;
-}
-
-export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3 };
-
 /**
  * A juror's lean toward a finalist: relationship (trust+affinity, less threat) plus
  * the manner of eviction. Blindsided / betrayed / disrespected pulls the lean down
  * (less likely to vote for the responsible finalist); feeling respected lifts it.
+ * The signed manner shifts live in `juryConstants.MANNER_LEAN`.
  */
 export function juryLean(rel: JuryRel, manner: EvictionManner = {}, w: JuryWeights = JURY_WEIGHTS): number {
   const relationship = (rel.trust + rel.affinity) / 2 - 0.5 * rel.threat;
   const manners =
-    (manner.respected ? 0.4 : 0) -
-    (manner.blindsided ? 0.5 : 0) -
-    (manner.betrayed ? 0.6 : 0) -
-    (manner.disrespected ? 0.4 : 0);
+    (manner.respected ? MANNER_LEAN.respected : 0) +
+    (manner.blindsided ? MANNER_LEAN.blindsided : 0) +
+    (manner.betrayed ? MANNER_LEAN.betrayed : 0) +
+    (manner.disrespected ? MANNER_LEAN.disrespected : 0);
   return w.relationship * relationship + w.manner * manners;
 }
 
@@ -83,25 +79,15 @@ export function appealEffect(appeal: FinaleAppeal, rel: JuryRel, manner: Evictio
   const grievance = !!(manner.blindsided || manner.betrayed || manner.disrespected);
   switch (appeal) {
     case "mend":
-      return grievance ? 0.85 : 0.35;
+      return grievance ? APPEAL.mendGrievance : APPEAL.mendNoGrievance;
     case "connect":
-      return clamp01(0.4 + 0.4 * rel.affinity);
+      return clamp01(APPEAL.connectBase + APPEAL.connectAffinity * rel.affinity);
     case "own-game":
-      return manner.betrayed ? 0.3 : clamp01(0.55 + 0.2 * rel.threat);
+      return manner.betrayed ? APPEAL.ownGameBetrayed : clamp01(APPEAL.ownGameBase + APPEAL.ownGameThreat * rel.threat);
     case "discredit-rival":
-      return rel.affinity > 0.6 ? 0.35 : 0.55;
+      return rel.affinity > APPEAL.discreditLoyaltyThreshold ? APPEAL.discreditLoyalToRival : APPEAL.discreditBase;
   }
 }
-
-/**
- * The finale performance a finalist contributes to a juror who NEVER questioned them (audit A6).
- * A NEUTRAL 0.5 — neither the optimal `bestAppeal` (which would let the engine silently play an
- * unanswered finalist's finale for them — sycophancy, and asymmetric when only the player was
- * back-filled optimally) nor a penalty. Applied SYMMETRICALLY to the player and NPC finalists, so an
- * unasked (finalist, juror) slot sways that juror neither way; a finalist only earns finale sway
- * from the jurors who actually questioned them.
- */
-export const NEUTRAL_APPEAL_EFFECT = 0.5;
 
 /**
  * The strongest appeal a finalist can make to a given juror — used to let an NPC finalist play the
@@ -157,21 +143,24 @@ export function tallyJuryVote(
 export interface FinaleScript {
   /** One opening statement slot per finalist. */
   statements: EntityId[];
-  /** One question per juror, addressed to a finalist; the player answers (0012). */
+  /** A question for EACH finalist from EACH juror (the player answers their own, 0012/0037). */
   questions: Array<{ juror: EntityId; finalist: EntityId }>;
   /** The order votes are revealed in — one at a time, for drama. */
   revealOrder: EntityId[];
 }
 
 /**
- * The engine-produced finale choreography: a statement slot per finalist, one
- * question per juror (alternating which finalist is addressed), and a one-at-a-time
- * reveal order. The narrative layer voices each beat; it produces no decisions.
+ * The engine-produced finale choreography: a statement slot per finalist, then a question to
+ * BOTH finalists from EACH juror (9 jurors × 2 finalists = 18 Q&A), and a one-at-a-time reveal
+ * order. Every (finalist, juror) pair is answered — the player-finalist answers all 9 jurors and
+ * the NPC finalist answers all 9 with its best appeal — so the finale scoring is symmetric by
+ * construction (no "unasked" pair the engine has to fill, audit A6). The narrative layer voices
+ * each beat; it produces no decisions.
  */
 export function runFinale(finalists: [EntityId, EntityId], jury: EntityId[]): FinaleScript {
   return {
     statements: [finalists[0], finalists[1]],
-    questions: jury.map((juror, i) => ({ juror, finalist: finalists[i % 2]! })),
+    questions: jury.flatMap((juror) => finalists.map((finalist) => ({ juror, finalist }))),
     revealOrder: [...jury],
   };
 }
