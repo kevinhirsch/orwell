@@ -61,6 +61,30 @@ one script that deliberately **does**.
 > `.env` and handles both layouts** — an earlier version only scrubbed `data/` and so left the
 > game intact on default installs.
 
+### Game reset (new season, keep accounts + LLM config)
+
+The lighter sibling of the factory reset: it removes **only game progression** — every per-user
+engine sandbox (saves, souls, the hidden Vault layer, in-flight casting intake) — and preserves
+**everything else**: `data/.env` (ports, tokens, LLM keys) *and* the entire front-end store
+(accounts, sessions, settings, including the LLM endpoint config). Players keep their logins and
+the box keeps its LLM setup; the next visit starts a brand-new game at the casting interview.
+Same host-aware bridge and flags as the factory reset:
+
+```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)" -- --dry-run
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)" -- --yes
+
+# or directly inside the container
+bash /opt/orwell/deploy/orwell-game-reset.sh             # prompts: type RESET
+bash /opt/orwell/deploy/orwell-game-reset.sh --dry-run   # preview what would be removed
+```
+
+It resolves the engine save dir exactly the way the factory reset does (all three `ORWELL_DATA_DIR`
+generations), stops the services while it scrubs, and restarts them after. Use the **factory
+reset** instead when you also want accounts/settings gone (full OOBE).
+
 ### Doctor / bounce (when the game misbehaves)
 
 When the chat says **"the live feeds are down"**, the engine banner shows, or things just look
