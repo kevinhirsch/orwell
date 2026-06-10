@@ -1,4 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from "node:fs";
+import {
+  mkdirSync, readdirSync, readFileSync, renameSync, existsSync, unlinkSync,
+  openSync, writeSync, fsyncSync, closeSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { UserSaveStore } from "../../ports/UserSaveStore";
 import type { SessionSnapshot } from "../../engine/sessionSnapshot";
@@ -62,11 +65,24 @@ export class FileSaveStore implements UserSaveStore {
     const dir = this.userDir(user);
     mkdirSync(dir, { recursive: true });
     const file = this.fileFor(dir, this.latestVersion(dir) + 1);
-    // Atomic write (audit E2): a crash mid-write must never leave a truncated file as the "latest"
-    // version — write a temp then rename (atomic on the same filesystem), so a reader sees all-or-nothing.
+    // Atomic + DURABLE write (audit E2 + E8): a crash mid-write must never leave a truncated file
+    // as the "latest" version — write a temp, fsync the temp's CONTENT, rename (atomic on the same
+    // filesystem), then fsync the DIRECTORY so the rename itself survives power loss. Without the
+    // fsyncs, a power cut could quarantine the newest save (`.corrupt`) and silently step the game
+    // back several turns on the next boot (non-degradation, feature 0007/0030).
     const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(snapshot), "utf8");
+    const fd = openSync(tmp, "w");
+    try {
+      writeSync(fd, JSON.stringify(snapshot), null, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmp, file);
+    try {
+      const dirFd = openSync(dir, "r");
+      try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+    } catch { /* best-effort: some platforms refuse directory fsync — the data fsync above held */ }
     this.prune(dir, this.latestVersion(dir));
   }
 

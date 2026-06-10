@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "./McpServer";
 
 /**
@@ -73,6 +74,25 @@ function presentedToken(headers: Record<string, string | string[] | undefined>):
   return headerValue(headers["x-orwell-token"]);
 }
 
+/**
+ * Constant-time token compare (audit E32): `===` short-circuits on the first differing byte, a
+ * timing oracle that lets a network attacker recover the shared secret byte-by-byte. Comparing
+ * fixed-length SHA-256 digests makes the comparison time independent of both content and length.
+ */
+function tokenMatches(expected: string, presented: string | undefined): boolean {
+  if (!presented) return false;
+  const a = createHash("sha256").update(expected, "utf8").digest();
+  const b = createHash("sha256").update(presented, "utf8").digest();
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Asserted-user-id cap (audit E8): `FileSaveStore` hex-doubles the id into a directory name, so a
+ * >127-byte header becomes `ENAMETOOLONG` 500s deep in the save path. Refuse absurd ids at the
+ * edge with a deliberate 400 instead.
+ */
+const MAX_USER_ID_CHARS = 64;
+
 export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options: HttpMcpOptions = {}): Server {
   // A request's MCP server is resolved per (channel, asserted user). Single-tenant deps ignore the
   // user; the registry-backed resolver routes each call into that user's isolated sandbox.
@@ -108,14 +128,18 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
       const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
       if (!match) return send(404, { error: "not found" });
 
-      // (2) Shared-secret auth on every tool route, when a token is configured.
-      if (options.token && presentedToken(req.headers) !== options.token) {
+      // (2) Shared-secret auth on every tool route, when a token is configured (constant-time, E32).
+      if (options.token && !tokenMatches(options.token, presentedToken(req.headers))) {
         return send(401, { error: "unauthorized" });
       }
 
       // (3) Identity: in multi-user mode a missing/empty user header is refused, never routed to "default".
       const rawUser = headerValue(req.headers[USER_HEADER]);
       if (options.requireUser && !rawUser) return send(400, { error: "missing user identity" });
+      // E8: an oversize id would ENAMETOOLONG deep in the save path — refuse it deliberately here.
+      if (rawUser && rawUser.length > MAX_USER_ID_CHARS) {
+        return send(400, { error: `user identity too long (max ${MAX_USER_ID_CHARS} chars)` });
+      }
       const user = rawUser ?? "default";
       const channel = match[1] as "player" | "admin";
 
