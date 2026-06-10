@@ -89,6 +89,35 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # C25/A11Y-1: the onboarding overlay is a REAL modal — focus trapped inside the
+            # card, everything behind the scrim inert. Driven with actual Tab keypresses.
+            page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
+            page.wait_for_selector("#orwell-onboarding", timeout=3000)
+            in_card = page.evaluate("document.activeElement && document.activeElement.id === 'ob-name'")
+            check(in_card is True, "onboarding: initial focus lands in the card")
+            for _ in range(12):  # tab far past the card's focusables — must wrap, never escape
+                page.keyboard.press("Tab")
+            trapped = page.evaluate(
+                "document.getElementById('orwell-onboarding').contains(document.activeElement)")
+            check(trapped is True, "onboarding: Tab cycles INSIDE the card (focus trap)")
+            sidebar_inert = page.evaluate("(document.getElementById('sidebar')||{}).inert === true "
+                                          "|| document.querySelector('#sidebar') === null "
+                                          "|| !!document.querySelector('#sidebar').closest('[inert]')")
+            check(sidebar_inert is True, "onboarding: background is inert while mounted")
+            page.evaluate("document.getElementById('orwell-onboarding').remove();"
+                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+
+            # C25/A11Y-2: the Diary Room is a real dialog — Escape closes it and focus returns.
+            page.evaluate("window._orwellOpenDiaryRoom && window._orwellOpenDiaryRoom()")
+            page.wait_for_selector("#orwell-dr-modal", timeout=3000)
+            dr_open = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'flex'")
+            check(dr_open is True, "diary room: opens via the seam")
+            dr_focus = page.evaluate("document.activeElement && document.activeElement.id === 'osoc-dr-text'")
+            check(dr_focus is True, "diary room: focus lands in the entry box")
+            page.keyboard.press("Escape")
+            dr_closed = page.evaluate("document.getElementById('orwell-dr-modal').style.display === 'none'")
+            check(dr_closed is True, "diary room: Escape closes the dialog")
+
             # The theme picker must stay reachable under the game build. Its sidebar
             # Tools-section entry is hidden, so it's surfaced from Settings → Appearance.
             # Drive the REAL user flow (open Settings via the gear, switch to the

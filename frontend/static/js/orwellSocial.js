@@ -117,7 +117,10 @@ import * as modalManager from "./modalManager.js";
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
           border-radius: 8px; padding: .25rem .4rem;
         }
-        #orwell-social .osoc-chip .osoc-go { flex: 1; cursor: pointer; }
+        #orwell-social .osoc-chip .osoc-go {
+          flex: 1; cursor: pointer; text-align: left;
+          border: none; background: none; color: inherit; font: inherit; padding: 0;
+        }
         #orwell-social .osoc-chip .osoc-go b { color: var(--fg, #9cdef2); }
         #orwell-social .osoc-chip .osoc-x {
           cursor: pointer; opacity: .55; border: none; background: none; color: inherit;
@@ -134,7 +137,7 @@ import * as modalManager from "./modalManager.js";
           align-items: center; justify-content: center; background: rgba(0,0,0,.55);
         }
         #orwell-dr-modal .osoc-box {
-          width: 420px; max-width: 92vw; background: var(--panel, #111); color: var(--fg, #9cdef2);
+          width: 420px; max-width: 92vw; max-height: 90vh; overflow: auto; background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 12px; padding: 1rem;
           font-family: 'Fira Code', ui-monospace, monospace;
         }
@@ -218,21 +221,41 @@ import * as modalManager from "./modalManager.js";
 
   // --- Diary Room ---------------------------------------------------------------
 
+  let _drReturnFocus = null; // give focus back where the player was (A11Y-2)
+
   function openDR() {
     const m = document.getElementById("orwell-dr-modal");
     const t = document.getElementById("osoc-dr-text");
     if (!m) return;
+    _drReturnFocus = document.activeElement;
     t.value = "";
     document.getElementById("osoc-dr-send").disabled = false;
     // Re-center the dialog each open (a prior drag may have left it elsewhere).
     const box = m.querySelector(".osoc-box");
     if (box) { box.style.left = ""; box.style.top = ""; box.style.position = ""; box.style.transform = ""; box.style.margin = ""; }
     m.style.display = "flex";
+    // A11Y-2: a real dialog — Escape closes, Tab cycles inside the box.
+    if (!m._orwellA11yWired) {
+      m._orwellA11yWired = true;
+      m.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.preventDefault(); closeDR(); return; }
+        if (e.key !== "Tab") return;
+        const f = m.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
+    }
     t.focus();
   }
   function closeDR() {
     const m = document.getElementById("orwell-dr-modal");
     if (m) m.style.display = "none";
+    if (_drReturnFocus && typeof _drReturnFocus.focus === "function") {
+      try { _drReturnFocus.focus(); } catch (_) {}
+    }
+    _drReturnFocus = null;
   }
   async function submitDR() {
     const t = document.getElementById("osoc-dr-text");
@@ -324,9 +347,11 @@ import * as modalManager from "./modalManager.js";
       const chip = document.createElement("div");
       chip.className = "osoc-chip";
       if (id === pendingApproachId) chip.classList.add("osoc-chip-pending");
-      const go = document.createElement("span");
+      const go = document.createElement("button");
+      go.type = "button";
       go.className = "osoc-go";
-      go.title = "Pull them aside — prefills the composer";
+      go.title = "Hear them out — prefills the composer";
+      go.setAttribute("aria-label", "Hear " + name + " out");
       go.innerHTML = `<b></b> <span class="osoc-pre"></span>`;
       go.querySelector("b").textContent = name;
       go.querySelector(".osoc-pre").textContent = pretext;
@@ -346,6 +371,9 @@ import * as modalManager from "./modalManager.js";
       wrap.appendChild(chip);
     }
   }
+
+  // Seam for the headless browser gate (and future flows): open the Diary Room on demand.
+  window._orwellOpenDiaryRoom = () => { ensureUI(); openDR(); };
 
   // --- Poll loop ----------------------------------------------------------------
 
