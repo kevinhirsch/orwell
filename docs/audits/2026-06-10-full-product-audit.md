@@ -479,7 +479,7 @@ consequence.*
 
 ### Theme 7 — Front-end UI/UX & immersion (beyond the D-batch)
 
-- **E64 [HIGH · UX · ruling] The status HUD moves into the sidebar, permanently.** Today
+- **E64 [HIGH · UX · ruling] ✅ PR #206 — The status HUD moves into the sidebar, permanently.** Today
   `#orwell-status` is `position:fixed; top:64px; right:14px; z-index:9000`, draggable
   (`orwellStatusPanel.js:21–30, 93–94`) with minimize-to-dock — and it's one of the R2/R4
   colliders. *Ruling:* it is not a window. *Fix spec:* mount the panel as a docked section
@@ -504,21 +504,21 @@ consequence.*
   expose `pending` on `GET /api/orwell/status` (Vault-free legal-options view) and have
   `orwellDecision.js` render from it on load/poll, rather than only the live
   `orwell:pending` event.
-- **E67 [MED · UX] Finale panel parity.** It misses every sibling convention: 5s poll forever
+- **E67 [MED · UX] ✅ PR #206 — Finale panel parity.** It misses every sibling convention: 5s poll forever
   with no hidden-tab gate or backoff (`orwellFinale.js:19, 218–222`; C18), no mobile
   treatment (`:70–77`; C26/M1), no `role`/`aria-label` and a silent vote reveal (the game's
   most dramatic incremental update; the status HUD's polite announcer is the model). *Fix:*
   slow poll until finale-adjacent phase; sheet/dock-park on ≤768px; `role="complementary"` +
   `aria-live="polite"` reveal announcements.
-- **E68 [LOW · Bug] Status-panel poll backoff never recovers while a game is live**
+- **E68 [LOW · Bug] ✅ PR #206 — Status-panel poll backoff never recovers while a game is live**
   (`orwellStatusPanel.js:324–340`; success path never resets `_failures` — HUD degrades to
   2-minute refresh after one blip). *Fix:* reset on success like `orwellSocial.js:408`.
-- **E69 [LOW · Bug] "11st out / 12nd out / 13rd out"** — `orwellStatusPanel.js:298` ordinal
+- **E69 [LOW · Bug] ✅ PR #206 — "11st out / 12nd out / 13rd out"** — `orwellStatusPanel.js:298` ordinal
   logic; reachable every endgame. *Fix:* standard ordinal helper (11–13 ⇒ "th").
 - **E70 [LOW · Change] `POST /api/orwell/new-game` bypasses the 0050 casting interview**
   (`orwell_routes.py:205–232` — a soul-shallow character one curl away; no UI consumes it).
   *Fix:* admin-gate or delete in favor of the chat tools (folds into D1's one-door work).
-- **E71 [LOW · UX] Panel client state isn't keyed per user/game** (bare `localStorage` keys —
+- **E71 [LOW · UX] ✅ PR #206 — Panel client state isn't keyed per user/game** (bare `localStorage` keys —
   dismissals/positions shared across accounts and seasons). *Fix:* suffix with username +
   game/seed id.
 - **E72 [LOW · UX] The composer model picker shows raw model ids to every player under the
@@ -535,7 +535,7 @@ consequence.*
 - **E75 [LOW · UX] Up to ~9.4s of silent serial framing waits when the engine hangs**
   (`chat_helpers.py:66–78`: 3s + retry 0.4+3s + 3s before the LLM streams). *Fix:* early SSE
   keepalive ("checking the feeds…") or shorten the retry budget.
-- **E88 [HIGH · UX · ruling] The Diary Room becomes a persistent sidebar button — no floating
+- **E88 [HIGH · UX · ruling] ✅ PR #206 — The Diary Room becomes a persistent sidebar button — no floating
   dialog.** Today the DR is a button inside the social HUD that opens a draggable
   `aria-modal` dialog (`orwellSocial.js:176, 185–186, 236+`). *Ruling:* the entry point is a
   standing sidebar button like chat/theme — always present while a game is active — and the DR
@@ -558,14 +558,14 @@ consequence.*
   existing started-gate as the belt. Threshold lives in a constants module, not inline.
   *Test:* a fresh game pre-first-HOH ⇒ `socialInitiatives` empty across seeds; post-HOH ⇒
   approaches resume.
-- **E90 [LOW · UX · ruling] The theme button docks at the sidebar bottom, beside settings,
+- **E90 [LOW · UX · ruling] ✅ PR #206 — The theme button docks at the sidebar bottom, beside settings,
   icon-only.** The theme entry (opens `#theme-modal`, `index.html:444+`) currently sits in the
   main sidebar nav with a text label. *Fix spec:* move it into the sidebar's bottom cluster
   next to the settings icon as an icon-only button (the existing palette SVG from the modal
   header), `title`/`aria-label="Theme"` for tooltip + a11y — no visible text. Same treatment
   under the game build and the full workspace. *Test:* browser smoke asserts the trigger is in
   the bottom cluster, has an accessible name, and renders no text node.
-- **E91 [MED · Bug · ruling] Floating-panel positions don't survive a refresh.** Each panel
+- **E91 [MED · Bug · ruling] ✅ PR #206 — Floating-panel positions don't survive a refresh.** Each panel
   saves `{left, top}` on drag-end (`orwellStatusPanel.js:188`, `orwellSocial.js:226`) and has a
   `restorePosition` (`:66/:64`) — yet a refresh observably resets windows to wrong-looking,
   pseudo-random placements. Likely causes to verify: restore running before layout settles
@@ -577,7 +577,7 @@ consequence.*
   E88 Diary Room) this becomes moot; it must work for the survivors (social, presence,
   finale, retrospective, "wants a word"). *Test:* browser smoke drags a panel, reloads,
   asserts the rect is restored within tolerance and passes the overlap checks.
-- **E92 [MED · UX/Bug] The chat container is missing bottom padding — the composer touches the
+- **E92 [MED · UX/Bug] ✅ PR #206 — The chat container is missing bottom padding — the composer touches the
   viewport bottom edge** at any width (user-reported on desktop; `style.css:1931–1946` gives
   `.chat-input-bar` a bottom margin only in `welcome-active` mode, `margin-bottom:30vh`, and
   none in normal chat). *Fix spec:* a small constant bottom inset on the normal state (e.g.
@@ -609,7 +609,7 @@ consequence.*
   model has no vision capability ("the feeds can't read that"). *Tests:* pytest asserting a
   game-turn payload with an attachment keeps the GM framing and the attachment; browser smoke
   asserts the composer-level attach button exists under the game build.
-- **E95 [MED · UX · ruling] Relocate the minimized-window dock to the sidebar.** Minimized
+- **E95 [MED · UX · ruling] ✅ PR #206 — Relocate the minimized-window dock to the sidebar.** Minimized
   panels currently park as chips at the top of the chatbox; the chip strip doesn't re-center
   when the sidebar toggles or the viewport resizes (stale absolute centering), and the
   placement itself is rejected by ruling. *Fix spec:* dock minimized panels as compact rows in
@@ -625,7 +625,7 @@ consequence.*
   *Fix spec:* remove/hide the item under the game build (keep Copy/PDF/Rename); if Documents
   is off in the full build config too, delete the dead handler. *Test:* pytest asserts the
   game-build DOM contains no `#export-doc-btn`.
-- **E97 [LOW · UX · ruling] Windows animate on open, close, and minimize.** Floating panels
+- **E97 [LOW · UX · ruling] ✅ PR #206 — Windows animate on open, close, and minimize.** Floating panels
   currently appear/disappear instantly (display toggles; only incidental transitions exist).
   *Fix spec:* one shared animation contract for all game panels — open: fade+scale-in from the
   trigger (~150–200ms ease-out); close: the reverse; minimize: a translate+scale toward the
@@ -1394,7 +1394,7 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   620/460/360/340/260; **JS `innerWidth` vs 768 written four different ways (44 sites)** —
   at exactly 768px, modules disagree which mode they're in. Plus near-duplicate tiers
   (820/821, 600/620). *Fix:* the token set + lint gate in the mechanism.
-- **S6 [HIGH · System] Every floating panel sizes itself differently; four have no narrow
+- **S6 [HIGH · System] ✅ PR #206 (the anchor-slot contract) — Every floating panel sizes itself differently; four have no narrow
   handling at all.** Inventory: status/social = fixed top offsets + 220px + a ≤768 sheet
   rule; **finale (240px floater, zero @media), presence, retrospective — no narrow tier**;
   the engine banner overlays at `top:0` (covered the mobile sheet grab-handle in
@@ -1421,7 +1421,7 @@ E-batch items not re-reported; A3 (settings layout primitives) folds into S1/S12
   0 clamp(); each surface invents its own 9–14px micro-scale. Ironically the orwell game
   panels use rem and would scale for free under a root-size mechanism the inherited
   workspace defeats.
-- **S11 [MED · Bug] Saved panel positions restore unclamped on a different-sized viewport**
+- **S11 [MED · Bug] ✅ PR #206 — Saved panel positions restore unclamped on a different-sized viewport**
   (`orwellStatusPanel.js:68–73` et al.; `windowDrag.js`'s clamp runs only on `resize`) — a
   position saved at 2560px restores fully off-screen at 1366px. `windowResize.js:223`
   already clamps restored *sizes* — unify the pattern at restore (cross-device half of E91).

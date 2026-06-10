@@ -16,7 +16,8 @@ import * as modalManager from "./modalManager.js";
 (function () {
   "use strict";
 
-  const POLL_MS = 5000;            // the finale is live — poll briskly
+  const POLL_FAST_MS = 5000;       // a finale is staging — poll briskly
+  const POLL_SLOW_MS = 45000;      // no finale yet — a light heartbeat (E67/C18)
   const ID = "orwell-finale";
   const POS_KEY = "orwell-finale-pos";
   const PLAYER_ID = "player";
@@ -34,6 +35,12 @@ import * as modalManager from "./modalManager.js";
       : fn();
 
   let timer = null;
+  let _staging = false;            // a finale is currently live (drives the poll cadence)
+  let _failures = 0;               // C18-style backoff on consecutive errors
+  function _pollDelay() {
+    const base = _staging ? POLL_FAST_MS : POLL_SLOW_MS;
+    return Math.min(base * Math.pow(2, _failures), 120000);
+  }
 
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
@@ -65,10 +72,13 @@ import * as modalManager from "./modalManager.js";
     if (el) return el;
     el = document.createElement("div");
     el.id = ID;
+    el.setAttribute("role", "complementary");
+    el.setAttribute("aria-label", "The finale");
     el.innerHTML = `
       <style>
         #orwell-finale {
-          position: fixed; top: 210px; left: 14px; right: auto; z-index: 9000;
+          /* E91/S11: positioned by the top-left SLOT (orwellSlots.js). */
+          position: fixed; z-index: 9000;
           width: 240px; max-width: 64vw; display: none;
           background: var(--panel, #111); color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66); border-radius: 10px;
@@ -105,6 +115,15 @@ import * as modalManager from "./modalManager.js";
           font-family: inherit; font-size: .74rem; text-align: left;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
+        /* E67/C26: phones — the finale is a full-width top sheet, never a floating box. */
+        @media (max-width: 768px) {
+          #orwell-finale {
+            left: 0 !important; right: 0 !important; top: 44px !important;
+            width: auto !important; max-width: none !important;
+            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
+            max-height: 42vh; overflow: auto;
+          }
+        }
       </style>
       <div class="ofin-hdr" title="Drag to move">
         <span class="ofin-ttl">🏆 The Finale</span>
@@ -114,8 +133,10 @@ import * as modalManager from "./modalManager.js";
       <div class="ofin-final" id="ofin-final"></div>
       <div class="ofin-hd" id="ofin-reveal-hd" style="display:none">The votes</div>
       <div id="ofin-reveals"></div>
-      <div class="ofin-move" id="ofin-move"></div>`;
+      <div class="ofin-move" id="ofin-move"></div>
+      <div id="ofin-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
     document.body.appendChild(el);
+    if (window.OrwellSlots) window.OrwellSlots.register(el, "top-left", { key: "finale" });
 
     restorePosition(el);
     try {
@@ -149,6 +170,7 @@ import * as modalManager from "./modalManager.js";
   }
 
   function nameOf(ref) { return (ref && ref.name) || "A houseguest"; }
+  let _lastRevealCount = 0;
 
   function render(finale) {
     const el = ensureUI();
@@ -171,7 +193,15 @@ import * as modalManager from "./modalManager.js";
       card.appendChild(b); card.appendChild(t); finWrap.appendChild(card);
     }
 
-    // The reveal, in the order the engine read it (revealed votes only).
+    // The reveal, in the order the engine read it (revealed votes only). New reveals
+    // are ANNOUNCED politely (E67): the vote reading is the season's loudest moment.
+    const ann = document.getElementById("ofin-announce");
+    if (ann && reveals.length > _lastRevealCount) {
+      const fresh = reveals.slice(_lastRevealCount)
+        .map((r) => nameOf(r.juror) + " votes for " + nameOf(r.votedFor) + ".");
+      ann.textContent = fresh.join(" ");
+    }
+    _lastRevealCount = reveals.length;
     const revWrap = document.getElementById("ofin-reveals");
     document.getElementById("ofin-reveal-hd").style.display = reveals.length ? "block" : "none";
     revWrap.innerHTML = "";
@@ -208,17 +238,24 @@ import * as modalManager from "./modalManager.js";
     try {
       const data = await getJSON("/api/orwell/finale");
       finale = data && data.finale;
+      _failures = 0;
     } catch (_) {
-      finale = null; // engine down → fail open (hide)
+      _failures += 1; // engine down → fail open (hide) + back the poll off (E67)
+      finale = null;
     }
+    _staging = !!finale;
     if (!finale) { hidePanel(); return; }
     render(finale);
   }
 
   function start() {
     refresh();
-    if (timer) clearInterval(timer);
-    timer = setInterval(refresh, POLL_MS);
+    if (timer) clearTimeout(timer);
+    const tick = async () => {
+      if (!document.hidden) await refresh(); // E67/C18: a hidden tab polls nothing
+      timer = setTimeout(tick, _pollDelay());
+    };
+    timer = setTimeout(tick, _pollDelay());
   }
 
   window.orwellRefreshFinale = refresh;

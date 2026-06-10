@@ -905,18 +905,8 @@
           <span id="assistant-notif-dot" class="sidebar-notif-dot" style="display:none"></span>
         </div>
 
-        <div class="list-item" id="tool-theme-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/>
-            <circle cx="8" cy="9" r="1.5" fill="currentColor"/>
-            <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
-            <circle cx="9" cy="15" r="1.5" fill="currentColor"/>
-          </svg>
-          <span class="grow">Theme</span>
-        </div>
+        <!-- E90 (ruling #7): the theme trigger lives in the sidebar's bottom
+             cluster beside the settings gear — icon-only. -->
       </div>
     </div>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
@@ -925,6 +915,9 @@
         <span class="user-bar-name" id="user-bar-name">User</span>
       </div>
       <div class="user-bar-actions">
+        <button type="button" class="user-bar-btn" id="tool-theme-btn" title="Theme" aria-label="Theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="14" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>
+        </button>
         <button type="button" class="user-bar-btn" id="user-bar-settings" title="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -2222,8 +2215,10 @@
 <script type="module" src="/static/js/a11y.js"></script>
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: char creation before chat -->
+<script src="/static/js/orwellSlots.js"></script>  <!-- BB anchor slots: floaters position by slot, never coordinate (E91/S11) -->
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
-<script type="module" src="/static/js/orwellSocial.js"></script>  <!-- BB social: NPC approaches + Diary Room (Vault-free, 0036) -->
+<script type="module" src="/static/js/orwellSocial.js"></script>  <!-- BB social: NPC approaches (Vault-free, 0036) -->
+<script src="/static/js/orwellDiaryRoom.js"></script>  <!-- BB Diary Room: standing sidebar button + composer mode (E88, ruling #4) -->
 <script src="/static/js/orwellPresence.js"></script>  <!-- BB presence strip: room + co-presence + nearby (Vault-free, 0049/C28; ambient, never click-to-act) -->
 <script src="/static/js/orwellRetrospective.js"></script>  <!-- BB season retrospective: post-season recap + the unsealed Vault (0048/C17; render-only, 404-gated while live) -->
 <script type="module" src="/static/js/orwellFinale.js"></script>  <!-- BB finale: staged jury-vote reveal (Vault-free, 0037/C11) -->
