@@ -1117,6 +1117,84 @@ proven only on a fixture:
 - **Wave 5** gains the T-batch test repairs (T2 ships with E12's vote-secrecy change), R3/R4
   perf work, C4/C5 checkpoint hardening, and the P8–P11/W6–W8/C10–C17 polish.
 
+## Parallel execution plan (multi-agent)
+
+The findings parallelize well, but the limit is **file contention and a handful of semantic
+dependencies — not finding count**. Run each lane as a worktree-isolated agent with exclusive
+ownership of its hot files; merge lanes in the integration order given below. With the roster
+as drawn, **11–13 lanes can run concurrently from day one**.
+
+### The contention map (one owner per hot file — never two agents in these)
+
+| Hot file | Findings that touch it | Owner lane |
+|---|---|---|
+| `src/composition/orchestrator.ts` + `registry.ts` | E1–E3, E6, E7, E57/R5, R3, R4, E2, T14's fixture | **Lane 1** |
+| `src/adapters/engine/GameSessionAdapter.ts` | E4, E21, E34, E42/E43 folds, E49, C6, C12, E39/C7, npcVoice gating (E11) | **Lanes 1, 3, 4 — split by function, sequenced at merge** (Lane 1 owns commit/restart paths; Lane 3 owns fold/deal/confessional methods; Lane 4 owns createCharacter/views) |
+| `src/engine/liveSeason.ts` | E34, E35, E36, E12, E51, C1, E62 | **Lane 4** |
+| `src/adapters/inmemory/InMemoryKnowledgeService.ts` | E9, C2, C3, C14 | **Lane 2** |
+| `src/engine/momentPrompts.ts` | P1, P4, P6, P9–P11, C8's echo fix | **Lane 5** |
+| `frontend/routes/chat_helpers.py` + `src/agent_loop.py` | P2, P3, P7, P8, E16, E22, E23, E24 | **Lane 6** |
+| `frontend/static/js/chat.js` | E65, E93, D5/W6/E11 labels, E94's composer hook | **Lane 7** |
+| `frontend/src/settings.py` + `agent_tools.py` + `slashCommands.js` | W1, W3, W4, W5, E17, E72, E96 | **Lane 8** |
+| Sidebar/panel JS + CSS (`orwell*.js`, `style.css`, `index.html`) | E64, E88, E89(FE), E90, E91, E95, E97, E92, E67–E71, D2, 0052 | **Lane 9** |
+| `deploy/*` + systemd + CI | E83–E85, E80, E32's installer bits | **Lane 10** |
+| Docs (`CLAUDE.md`, queue, features, ADRs) | E86(b), E87, T18, status amendments | **Lane 11** |
+
+### The lanes (start all concurrently except where noted)
+
+- **Lane 1 — Restart & spine (CRIT, engine):** E1+D1+R1 (orchestrator `forgetUser`, one
+  restart door, 4xx on fault), E2 (pre-game tick gate), E3 (commit result propagation), E6,
+  E7, then E57/R5 (tick debounce) and R3/R4 (snapshot reuse + LRU eviction) in the same lane —
+  they all live in the same two files. *Blocks: the D4/E33 re-measurement (Lane 13) and T14's
+  restart regression test.*
+- **Lane 2 — Knowledge integrity (engine, small):** E9+C2+C3 (one function), C14, E20, E21.
+  No overlap with Lane 1.
+- **Lane 3 — Social-sim consequence (engine):** E42–E48, E50–E55, C9, C12 (deals/gossip/
+  offscreen/emotionalArc/relationshipConstants/confessionals are its own files; its
+  GameSessionAdapter fold methods are disjoint from Lane 1's commit path — coordinate the one
+  shared file at merge). T1's live deal gate ships here as the proof.
+- **Lane 4 — Player agency & ladder (engine):** E34–E36, E12 (+T2's honest test), C1, E51,
+  E37, E39/C7+E38 (names + seed entropy share `characterFactory`/`createCharacter`), C6.
+- **Lane 5 — Prompt content (engine):** P1, P4, P6, P9–P11, E58's varied house events, E60,
+  plus C8's intake caps/echo neutralization. Tiny diffs, fast lane.
+- **Lane 6 — FE framing & turn integrity (Python):** P2, P3, P7, P8, E16, E22, E23, E24, E25,
+  E29, W2 (one-line), E15.
+- **Lane 7 — Transcript surface (JS):** E65, E93, D5/W6 beat labels, E94, D3/E66.
+- **Lane 8 — Game-build trim (Python+JS):** W1, W3, W4, W5, E17, E72, E96, W7, W8, D6, D7.
+- **Lane 9 — Chrome & windows (JS/CSS):** sequenced *within* the lane: E64+E88+E95 (sidebar
+  moves) → E90 → E91 (positions, against the new dock) → E97 (animations) → D2 (collision rule
+  over the surviving floaters) → E92, E67–E71, then 0052 (themes ride the new chrome).
+- **Lane 10 — Ops & supply chain:** E83, E84, E85, E80, E8, E32. Touches nothing the others do.
+- **Lane 11 — Docs & status hygiene:** E87, E86(b) if the ADR-amendment path is chosen
+  (E86(a) — actually building the fastembed adapter — is its own small engine lane, Lane 12,
+  touching only `src/adapters/embedding/` + deploy fetch).
+- **Lane 12 — Checkpoint & math hardening (engine, small):** C4, C5, C11, C15, C16, C17, E18
+  (dep-cruiser default-deny), E19 (sentinel sweep extension). `saveState.ts`/
+  `competitionOutcome.ts`/test files — no overlap with Lanes 1–4.
+- **Lane 13 — Test repairs (blocked only where noted):** T3–T12, T15–T17, T19, T20, E76–E79,
+  E81, E82 are independent step/test files — split among as many agents as desired (each owns
+  whole files). T1 lands with Lane 3; T2 with Lane 4; T14 and the D4/E33 calibration gate
+  **after Lane 1 merges**.
+- **Lane 14 — Feature specs (docs only):** 0051, 0052 spec docs, 0053 — fully independent;
+  0053's *implementation* (routes + settings row) is also independent of every lane above.
+
+### Semantic dependencies (the only true sequencing)
+
+1. **Lane 1 → D4/E33 re-measurement** (can't measure survival calibration while restarts
+   corrupt sandboxes) **→ any nomination/vote calibration changes** that measurement motivates
+   (which would then touch Lane 3/4 files — schedule as a follow-up, not concurrent).
+2. **Lane 9 internal order** as listed (the dock must exist before positions/animations are
+   tested against it; D2 shrinks after the sidebar moves).
+3. **E12 (vote secrecy) before/with T2** — the honest test asserts the new anonymized surface.
+4. **E18's default-deny rule lands after Lanes 1–4 merge** (it will police their new imports;
+   landing it first creates merge friction for no benefit).
+5. **Integration order at merge:** Lane 1 first (everything downstream re-tests against the
+   fixed spine), then 2/3/4 (engine), then 5, then the FE lanes 6–9 (which call the new engine
+   behavior), with 10/11/14 mergeable at any time.
+
+Full-gate (`npm test` + FE pytest + smokes) runs per lane pre-merge and once on the integrated
+result; the liveSentinel/liveFairness lanes are the cross-lane regression net.
+
 ## Recommended wave order
 
 1. **Wave E-CRIT — make seasons restartable and reachable:** E1+D1 (one restart door, baseline
