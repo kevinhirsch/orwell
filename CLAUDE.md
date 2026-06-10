@@ -19,7 +19,7 @@ off-screen watcher, social surface, interactive finale — the 0037 finale *UI* 
 The game is **folded into the main chat**: the player-facing tier is the vendored **Orwell**
 front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in `docs/features/`
-(now through **0048**, plus **0049** to be drafted). **Active work — start
+(now through **0049**). **Active work — start
 here:** the audit batches at the bottom of `docs/IMPLEMENTATION_QUEUE.md` ("Full product-audit batch
 (B34–B60 / C12–C18)" + the front-end & experience batch B61–B66 / C19–C28) — the live, wave-ordered
 dispatch lists, backed by `docs/audits/2026-06-09-product-audit.md` (read its **"Remediation
@@ -414,5 +414,6 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    signal set, update rule, recency/decay, betrayal-shock, thresholds (promotes `docs/decisions/0002`).
 3. ✅ **Jury choreography** — **resolved** by **feature 0037** (the live interactive finale: statements →
    per-juror questions → ordered vote reveal). Reserve twists stay Vault-held (0025).
-4. **Embedding provider** — which model backs `EmbeddingProvider` at runtime (a deterministic
-   fake covers seeded tests). *(The one genuinely-open item.)*
+4. ✅ **Embedding provider** — **resolved** (ADR `docs/decisions/0004`, ruling 2026-06-10):
+   **fastembed, local ONNX** (the JS port, version-pinned) backs `EmbeddingProvider` at runtime;
+   the deterministic fake remains the test adapter. *(No genuinely-open decisions remain.)*

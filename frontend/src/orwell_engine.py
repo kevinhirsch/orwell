@@ -169,6 +169,13 @@ async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None
     return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
 
 
+async def finale_view(user: str | None = None):
+    """The Vault-free in-progress finale projection (0037 §8.1): finalists, the current stage, and the
+    votes revealed SO FAR — or ``None`` when no finale is staging. Never a lean/tally/manner or the
+    pre-reveal winner. Used by the finale panel; the chat agent still drives the binding decisions."""
+    return await _call("finaleView", {}, user=user)
+
+
 async def diary_room(entry: str, user: str | None = None) -> dict:
     """Record the player's out-of-character Diary-Room entry (0036). The player's own knowledge,
     with no in-game pathway to any houseguest — never reaches the house."""

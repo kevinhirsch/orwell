@@ -676,7 +676,12 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > with no broken modules; verify on a **running instance** (per `frontend/INTEGRATION.md`). Engine gate
 > unaffected (front-end quarantined). Open a PR.
 
-### B26 — 0037 engine: expose a Vault-free `finaleView` read  ·  Claude Code  ·  **small; unblocks C11**
+### B26 — 0037 engine: expose a Vault-free `finaleView` read  ·  Claude Code  ·  **small; unblocks C11** — ✅ DONE
+
+> **DONE.** `GameSessionAdapter.finaleView()` is public + on the `GameSession` port; `finaleView` added to
+> `PLAYER_TOOLS` + `McpServer` dispatch + `INFRA_LEVERS` (so the lever-manifest drift guard doesn't name it).
+> The B42 sentinel sweep now calls it at every beat (incl. the live finale); a behavioral test proves it is
+> null off-finale and mirrors `AdvanceView.finale` during one (no votes/script/tally/lean). arch + gate green.
 
 > In `kevinhirsch/orwell` (TS engine), promote the existing private `GameSessionAdapter.finaleView()` to a
 > **read tool** `finaleView(): FinaleView | null` on the `GameSession` port + `PLAYER_TOOLS` + `McpServer`
@@ -686,7 +691,17 @@ B10 lands, then C4 once B11 lands. **B5/B6/B7 prompts are above; the new ones (B
 > stage + the reveals SO FAR only, **never** a lean/tally/eviction-manner/pre-reveal winner. Extend the 0001
 > sentinel canary to `finaleView`; `npm run test:arch` + `npm test` green. Open a PR.
 
-### C11 — 0037 front-end: render the interactive finale  ·  OpenHands  ·  **depends on B26**
+### C11 — 0037 front-end: render the interactive finale  ·  Claude Code  ·  **depends on B26** — ✅ DONE
+
+> **DONE** (built in the Claude Code lane). `GET /api/orwell/finale` → `{ finale: FinaleView | null }`
+> (fail-open) + an `orwell_engine.finale_view` client over the B26 tool. `static/js/orwellFinale.js` — a
+> self-contained, fail-open, draggable/minimizable polling panel (sibling of `orwellSocial.js`, no new module
+> deps, script-tagged after the social panel): shown only while a finale stages, it renders the finalists, the
+> stage, and the vote reveal IN ORDER with a tally of the revealed votes only (never a pre-reveal winner). The
+> player's turn is surfaced as composer-prefill shortcuts (player-finalist → statement/appeals; player-juror →
+> finalist vote); binding submission flows through the chat-agent `submitDecision` seam. `tests/test_orwell_finale.py`
+> (3, fail-open) + 184 pytest green; the 0032 headless-browser keep-set gate stays green (`orwellFinale.js`
+> loads cleanly). No new `submitDecision` kind ⇒ no C12 relay change.
 
 > In `kevinhirsch/orwell` `frontend/`, build the finale **presentation UI** for feature **0037** per its design
 > note **§8** — the direct parallel to 0036's C10, in the same self-contained, fail-open, game-gated patterns as
@@ -1553,8 +1568,10 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > stays hidden (0041). **Acceptance:** the started-game prompt lists each active NPC's public vibe; two
 > different-archetype NPCs get demonstrably different descriptors; a sentinel-embedded soul/stat string never appears
 > in `cast`/`renderGameContext` output over a **registry-built** sandbox (extends E8/B42); a drift test asserts the
-> prompt names the cast fields + the consistency rule and no longer names `resolveCompetition`. Read ADR 0003,
-> `docs/features/0018`, `0004` first. Open a PR.
+> prompt names the cast fields + the consistency rule and no longer names `resolveCompetition`. **Also (ruling
+> 2026-06-10, v1-audit §3.9 — "finality language"):** add one line to the prompt — voice unresolved outcomes as
+> *reads* ("the house looks like…"), never as settled results; results exist only when the engine resolves/reveals
+> them. Read ADR 0003, `docs/features/0018`, `0004` first. Open a PR.
 
 ### B62 — server-initiated lifecycle moments (premiere / re-entry / terminal), recap from the store  ·  Claude Code  ·  **FE-1 · audit J1+J7+J2 (engine half)**
 
@@ -1718,9 +1735,11 @@ play** (mill around rooms, learn who's present/adjacent, talk to anyone while NP
 knowledge-scoped speech, stable persona); and each principle must be **testable structurally** where
 possible — that section is the contract these items must satisfy. Read ADR 0003 before any of them.
 
-### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · NEEDS SPEC FIRST**
+### B64 — 0049 house presence & lingering play  ·  Claude Code  ·  **FE-1/FE-3 · ADR 0003 §4/§7 · spec drafted 2026-06-10**
 
-> Draft and implement **feature 0049** (`docs/features/0049-house-presence-and-lingering.{md,feature}`):
+> **Spec is drafted** (`docs/features/0049-house-presence-and-lingering.{md,feature}`, per the v1-transcript
+> audit ruling — `docs/audits/2026-06-10-v1-transcript-meta-feedback-audit.md` §3.7: note overhearing is
+> **bidirectional**, NPCs overhearing the player included). Implement **feature 0049** to green:
 > a **light** spatial model that makes unhurried, information-gathering play real (ADR 0003 §7). Keep it
 > minimal — this is *facts the narrator queries*, not a simulation the player operates. (1) **Rooms +
 > adjacency** — the canonical BB house spaces (kitchen, living room, backyard, bedrooms, HOH room,
