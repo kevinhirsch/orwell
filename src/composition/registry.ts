@@ -49,6 +49,9 @@ function buildUserSandbox(): UserSandbox {
   // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
   // knows who's still in the house (player + non-evicted NPCs).
   commands.setLivingProvider(() => session.livingIds());
+  // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
+  // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
+  commands.setPresenceProvider(() => session.occupancy());
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({

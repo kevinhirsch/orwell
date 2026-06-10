@@ -24,6 +24,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "socialRead", channel: "player", readsVault: false, description: "Honest, Vault-free read of the room or a houseguest; may hint, never names off-screen events." },
   { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a neutral pretext only — no hidden motive)." },
+  { name: "whereabouts", channel: "player", readsVault: false, description: "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only, never motives, numbers, or non-adjacent rooms." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
   // Action tools (0009): request in, Vault-free result out (engine performs them).

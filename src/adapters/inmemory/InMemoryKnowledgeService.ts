@@ -61,7 +61,7 @@ export class InMemoryKnowledgeService implements KnowledgeService {
 
   surfaceInformationTo(
     entity: EntityId,
-    fact: { content: string; subject?: EntityId },
+    fact: { content: string; subject?: EntityId; confidence?: number },
     pathway: string,
   ): KnowledgeFact | null {
     // Anti-sycophancy anchor (A4): a surfacing must trace to a REAL source. An unanchored "fact" —
@@ -76,9 +76,18 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     this.events.record({
       id: sourceEventId, ts, type: "surfacing",
       initiator: entity, witnessSet, hidden: !witnessSet.includes(PLAYER),
-      content: `surfaced via ${pathway}`,
+      // Entity-specific content: when SEVERAL entities gain the same pathway (e.g. two rooms
+      // overhear one scene, 0049), each surfacing is a distinct happening — a shared string would
+      // make the player's visible copy textually identical to another NPC's hidden one and trip
+      // the vault-leak checkpoint's substring sweep (0031) on a non-leak.
+      content: `surfaced to ${entity} via ${pathway}`,
     });
-    return this.pushKnown(entity, { content: fact.content, pathway, sourceEventId, ts, subject: fact.subject });
+    // A surfaced fact may carry reduced confidence (0049: an overhear is partial — heard through a
+    // wall, not witnessed). Witnessed/told facts omit it (full confidence by default).
+    return this.pushKnown(entity, {
+      content: fact.content, pathway, sourceEventId, ts, subject: fact.subject,
+      ...(fact.confidence !== undefined ? { confidence: fact.confidence } : {}),
+    });
   }
 
   /**

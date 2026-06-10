@@ -309,6 +309,27 @@ export class BbWorld extends World {
   peSentinel?: string;
   peSawJurorVote?: boolean;
 
+  // House presence & lingering play (0049) scratch state.
+  hpRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  hpUser?: string;
+  hpSandbox?: import("../../src/composition/registry").UserSandbox;
+  hpRegistryA?: import("../../src/composition/registry").GameSessionRegistry;
+  hpUserA?: string;
+  hpSandboxA?: import("../../src/composition/registry").UserSandbox;
+  hpViolations?: string[];
+  hpTrailA?: string[];
+  hpTrailB?: string[];
+  hpWhereabouts?: import("../../src/ports/GameSession").WhereaboutsView;
+  hpSentinel?: string;
+  hpEventId?: string;
+  hpOverheardFact?: import("../../src/domain/knowledge").KnowledgeFact;
+  hpGateSamples?: number;
+  hpGateHits?: number;
+  hpClock?: { t: number };
+  hpOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  hpBefore?: { week: number; phase: string; kind: string };
+  hpEventsBefore?: number;
+
   // Character evolution & season arc (0041) scratch state.
   evoSoul?: import("../../src/engine/characterFactory").Soul;
   evoStart?: { state: number; volatility: number };

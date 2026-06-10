@@ -68,6 +68,8 @@ export class McpServer {
         return this.deps.player.socialRead(args["target"] as EntityId | undefined);
       case "socialInitiatives":
         return this.deps.session.socialInitiatives();
+      case "whereabouts":
+        return this.deps.session.whereabouts();
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":

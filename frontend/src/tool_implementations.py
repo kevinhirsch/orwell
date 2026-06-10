@@ -4719,6 +4719,17 @@ async def do_social_initiatives(content: str, owner: Optional[str] = None) -> Di
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_whereabouts(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.whereabouts(user=owner)
+        if res is None:
+            return {"output": "No game is running yet — the house is empty until a game starts.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_diary_room(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

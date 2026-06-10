@@ -9,6 +9,8 @@ import { PLAYER } from "../../domain/ids";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
+import { rollOverhears } from "../../engine/presence";
+import type { Occupancy } from "../../domain/house";
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
   "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
@@ -32,6 +34,8 @@ export class EngineCommandsAdapter implements EngineCommands {
   private onPersist?: () => void;
   /** The living houseguests an interaction may name (B39); when unset, validation is skipped (standalone). */
   private livingProvider?: () => Iterable<EntityId>;
+  /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
+  private presenceProvider?: () => Occupancy | null;
 
   constructor(
     private readonly events: EventStore,
@@ -50,6 +54,11 @@ export class EngineCommandsAdapter implements EngineCommands {
     this.livingProvider = fn;
   }
 
+  /** Wire the house occupancy (0049) so recorded scenes gain co-present witnesses + adjacent overhears. */
+  setPresenceProvider(fn: () => Occupancy | null): void {
+    this.presenceProvider = fn;
+  }
+
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
     // Validated references (B39/audit A4): an interaction may only name LIVING houseguests — never an
     // evicted or invented one. The player is always living. Skipped when no roster is wired (standalone).
@@ -59,6 +68,17 @@ export class EngineCommandsAdapter implements EngineCommands {
         if (!living.has(id)) throw new Error(`recordInteraction names a non-living houseguest: ${id}`);
       }
     }
+    // Presence grounds the scene (0049): everyone in the initiator's ROOM is a witness — being in
+    // the room means you saw it (co-presence ⇒ witness; ADR 0003 §8). Caller-named witnesses are
+    // kept (presence only ADDS, never drops). Placeless (no provider / no room) keeps prior behavior.
+    const occupancy = this.presenceProvider?.() ?? null;
+    const room = occupancy?.get(req.initiator);
+    const witnessSet = [...req.witnessSet];
+    if (occupancy && room) {
+      for (const [id, where] of occupancy) {
+        if (where === room && !witnessSet.includes(id)) witnessSet.push(id);
+      }
+    }
     // Derive the id + ts from the store's current size (B40/audit C2): monotonic and restart-safe —
     // after a restore the count resumes high, so a post-restart interaction never collides with a
     // pre-restart one (the old `++this.seq` restarted at 0, minting duplicate ids).
@@ -66,14 +86,23 @@ export class EngineCommandsAdapter implements EngineCommands {
     const eventId = `evt:mcp:${n}`;
     this.events.record({
       id: eventId, ts: n, type: "conversation",
-      initiator: req.initiator, witnessSet: req.witnessSet,
-      hidden: !req.witnessSet.includes(PLAYER), content: req.content,
+      initiator: req.initiator, witnessSet,
+      hidden: !witnessSet.includes(PLAYER), content: req.content,
     });
+    // Adjacency overhears (0049): occupants of the rooms NEXT DOOR may catch a piece of the scene —
+    // an NPC overhearing the player's conversation, exactly as the player overhears NPCs. Gated,
+    // recorded, traceable (`overheard:<eventId>`), partial and lower-confidence.
+    if (occupancy && room) {
+      rollOverhears({
+        eventId, room, content: req.content, participants: witnessSet,
+        occupancy, knowledge: this.knowledge, rng: this.rng,
+      });
+    }
     // Consequence (0023): the initiator's action moves how the OTHERS feel about them — a real,
     // recorded, HIDDEN shift (the engine owns the magnitude; the player never sees the numbers).
     // Bounded per call (B39) so a single interaction can't flood the relationship layer.
     if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
-      const others = (req.toward ?? req.witnessSet.filter((w) => w !== req.initiator)).slice(0, MAX_FOLDS_PER_INTERACTION);
+      const others = (req.toward ?? witnessSet.filter((w) => w !== req.initiator)).slice(0, MAX_FOLDS_PER_INTERACTION);
       for (const o of others) this.rel.applyDirected(o, req.initiator, req.kind as InteractionType, this.rng);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart

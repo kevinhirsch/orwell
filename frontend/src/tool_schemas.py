@@ -1349,6 +1349,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "whereabouts",
+            "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "diaryRoom",
             "description": "Record the player's private, out-of-character Diary Room confessional. Nothing here ever reaches any houseguest — it is the player's own space, never an in-game pathway. Use whenever the player speaks in the Diary Room.",
             "parameters": {
@@ -1471,6 +1479,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
     # C13: the prompt-advertised levers that were missing from the FE surface.
     "socialInitiatives", "diaryRoom", "makeDeal",
+    # B64/0049: the Vault-free presence read (who's here, who's one room over).
+    "whereabouts",
 })
 
 

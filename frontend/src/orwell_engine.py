@@ -256,6 +256,12 @@ async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None
     return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
 
 
+async def whereabouts(user: str | None = None):
+    """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
+    ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""
+    return await _call("whereabouts", {}, user=user)
+
+
 async def finale_view(user: str | None = None):
     """The Vault-free in-progress finale projection (0037 §8.1): finalists, the current stage, and the
     votes revealed SO FAR — or ``None`` when no finale is staging. Never a lean/tally/manner or the
