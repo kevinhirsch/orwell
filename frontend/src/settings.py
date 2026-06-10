@@ -385,6 +385,10 @@ _PER_USER_KEYS = {
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
+    # Keyboard shortcuts are a genuine PER-PROFILE preference, not global config
+    # (C30 / settings ruling): a non-admin can change their own keybinds, and the
+    # global `keybinds` default still applies until they do. Saved via /api/prefs.
+    "keybinds",
 }
 
 

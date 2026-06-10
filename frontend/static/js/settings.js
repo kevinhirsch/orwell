@@ -1693,12 +1693,21 @@ async function initShortcuts() {
   const resetBtn = el('shortcuts-reset-btn');
   if (!listEl) return;
 
-  // Load saved keybinds
+  // Load saved keybinds: global default (admin) first, then this profile's own
+  // override (C30) layered on top — so a non-admin sees the house default until
+  // they personalize it, and their override survives reload.
   let keybinds = { ...SHORTCUT_DEFAULTS };
   try {
     const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await res.json();
     if (settings.keybinds) keybinds = { ...keybinds, ...settings.keybinds };
+  } catch (e) {}
+  try {
+    const pr = await fetch('/api/prefs/keybinds', { credentials: 'same-origin' });
+    if (pr.ok) {
+      const { value } = await pr.json();
+      if (value && typeof value === 'object') keybinds = { ...keybinds, ...value };
+    }
   } catch (e) {}
 
   function _findConflicts() {
@@ -1853,17 +1862,22 @@ async function initShortcuts() {
   }
 
   async function saveKeybinds() {
+    // Keybinds are a PER-PROFILE preference (C30): persist via /api/prefs so a
+    // non-admin's change actually saves (the old /api/auth/settings POST is
+    // admin-only — it 403'd silently while still toasting "saved").
     try {
-      await fetch('/api/auth/settings', {
-        method: 'POST', credentials: 'same-origin',
+      const res = await fetch('/api/prefs/keybinds', {
+        method: 'PUT', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keybinds }),
+        body: JSON.stringify({ value: keybinds }),
       });
+      if (!res.ok) throw new Error(`prefs save failed: ${res.status}`);
       // Update global keybinds so they take effect immediately
       window._orwellKeybinds = keybinds;
       if (uiModule && uiModule.showToast) uiModule.showToast('Shortcut saved');
     } catch (e) {
       console.error('Failed to save keybinds:', e);
+      if (uiModule && uiModule.showToast) uiModule.showToast('Could not save shortcut');
     }
   }
 
@@ -5074,12 +5088,21 @@ export function open(tab) {
   modalEl.classList.remove('hidden');
   syncAdminVisibility();
   const content = modalEl.querySelector('.settings-modal-content');
-  if (tab) {
-    modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
-    modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
-  }
-  // Auto-init admin data if showing an admin tab
-  const activeTab = tab || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab || 'services';
+  // Resolve which tab to show, respecting admin visibility (C30 / settings ruling):
+  // LLM config (services/ai) and the admin tabs are .admin-only, so a non-admin must
+  // never LAND on one — its panel would only 403. They default to `account` instead.
+  const _tabVisible = (t) => {
+    const b = modalEl.querySelector(`[data-settings-tab="${t}"]`);
+    return !!b && !(b.classList.contains('admin-only') && !window._isAdmin);
+  };
+  let activeTab = tab
+    || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab
+    || (window._isAdmin ? 'services' : 'account');
+  if (!_tabVisible(activeTab)) activeTab = 'account';
+  // Always apply the selection so the matching panel shows (the markup default is
+  // `services`, which a non-admin must not see).
+  modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === activeTab));
+  modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== activeTab));
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
