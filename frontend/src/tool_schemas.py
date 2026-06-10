@@ -1338,6 +1338,44 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "socialInitiatives",
+            "description": "Which houseguests want to approach the player RIGHT NOW (name + a public pretext only). Call at quiet moments so scenes start from EITHER side — allies scheme, rivals probe — not only when the player reaches out.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "diaryRoom",
+            "description": "Record the player's private, out-of-character Diary Room confessional. Nothing here ever reaches any houseguest — it is the player's own space, never an in-game pathway. Use whenever the player speaks in the Diary Room.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entry": {"type": "string", "description": "The player's confessional, verbatim or lightly condensed."},
+                },
+                "required": ["entry"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "makeDeal",
+            "description": "Record a promise the player strikes WITH a houseguest. The engine tracks it as a first-class deal and adjudicates it against later binding actions: keeping it builds trust, breaking it deals a betrayal blow the house and jury remember. Call when a handshake actually happens in the scene.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "with": {"type": "string", "description": "The houseguest id the deal is made with (from the roster)."},
+                    "kind": {"type": "string", "enum": ["safety", "vote", "final-two", "target-other"], "description": "The deal's nature."},
+                    "terms": {"type": "string", "description": "The terms as spoken in the scene, briefly."},
+                },
+                "required": ["with", "kind", "terms"],
+            },
+        },
+    },
     # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
     {
         "type": "function",
@@ -1431,6 +1469,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
     "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
     "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
+    # C13: the prompt-advertised levers that were missing from the FE surface.
+    "socialInitiatives", "diaryRoom", "makeDeal",
 })
 
 

@@ -1166,6 +1166,7 @@ async def execute_tool_block(
         do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
         do_manage_sandbox,
         do_create_character, do_advance_game, do_submit_decision,
+        do_social_initiatives, do_diary_room, do_make_deal,
         do_app_api,
     )
 
@@ -1516,6 +1517,15 @@ async def execute_tool_block(
     elif tool == "manageSandbox":
         desc = "manageSandbox"
         result = await do_manage_sandbox(content, owner=owner)
+    elif tool == "socialInitiatives":
+        desc = "socialInitiatives"
+        result = await do_social_initiatives(content, owner=owner)
+    elif tool == "diaryRoom":
+        desc = "diaryRoom"
+        result = await do_diary_room(content, owner=owner)
+    elif tool == "makeDeal":
+        desc = "makeDeal"
+        result = await do_make_deal(content, owner=owner)
     elif tool == "createCharacter":
         desc = "createCharacter"
         result = await do_create_character(content, owner=owner)

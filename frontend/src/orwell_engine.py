@@ -164,6 +164,11 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
+async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None) -> dict:
+    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it."""
+    return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
+
+
 async def diary_room(entry: str, user: str | None = None) -> dict:
     """Record the player's out-of-character Diary-Room entry (0036). The player's own knowledge,
     with no in-game pathway to any houseguest — never reaches the house."""
