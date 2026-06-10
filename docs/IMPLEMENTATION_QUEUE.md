@@ -1140,6 +1140,25 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > 9 — pick one in `docs/features/0014`/`0037`). **Acceptance:** unit (mirroring the existing manner test with the player
 > as the responsible finalist) — a juror the player blindsided votes for them measurably less; player and NPC finalists
 > are scored symmetrically. Read `docs/features/0014`, `0037` first. Open a PR.
+>
+> **RULING (2026-06-10, supersedes the open choices above — build exactly this):**
+> 1. **A6 = each juror questions BOTH finalists** (9×2 = **18** Q&A): `runFinale`'s `questions`
+>    becomes every juror × every finalist (today `jury.ts:164` alternates `finalists[i % 2]`). The
+>    **player-finalist answers all 9 themselves** (pend `finale-answer` per question); the NPC
+>    finalist uses `bestAppeal` for all 9. No "unasked" pairs exist ⇒ the asymmetry vanishes at the
+>    root; CLAUDE.md's "one question per juror" *per finalist* canon stands (no doc change needed).
+>    Keep the `appealMade` back-fill (`liveSeason.ts:313-320`) as a never-hit safety guard.
+> 2. **Extract `src/engine/juryConstants.ts`** (mirror `relationshipConstants.ts`): the manner
+>    weights (betrayed −0.6 / blindsided −0.5 / respected +0.4 / disrespected −0.4, `jury.ts:48-51`),
+>    `JURY_WEIGHTS` (`jury.ts:38`), the manner thresholds `TRUST_BETRAYAL`/`THREAT_BLINDSIDE`
+>    (`liveSeason.ts:246-247`), and the appeal magnitudes (`jury.ts:82-93`). Extraction only — no
+>    number changes; keeps the 0037 calibration green.
+> *Current anchors (audit line numbers drifted):* the A5 player exemption is now
+> `liveSeason.ts:261` (`if (r === evictee || r === ctx.player) continue;` in `recordEvictionManner`,
+> called from `applyEviction:279` — covers the 0045 final-eviction too). *Test deltas:* the
+> finale-count test (`liveSeason.test.ts:246-261`) now expects **9** player `finale-answer` stops
+> (was even-indexed ~5); add the A5 test mirroring the manner-effect pattern at
+> `liveSeason.test.ts:276-296` with the **player** as the responsible finalist.
 
 ### B48 — 0046 player eviction & the juror's seat  ·  Claude Code  ·  **Wave 2 · audit B6 · NEEDS SPEC FIRST**
 
