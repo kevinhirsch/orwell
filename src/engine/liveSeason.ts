@@ -33,7 +33,9 @@ export type Beat =
   | "hoh-competition" | "nominations" | "veto-competition"
   | "veto-ceremony" | "eviction" | "final-eviction" | "finale" | "complete"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
-  | "finale-reveal" | "finale-result";
+  | "finale-reveal" | "finale-result"
+  // eviction sub-loop events (0047) — emitted on BeatEvent only; the staged reveal/goodbye/result.
+  | "eviction-reveal" | "eviction-goodbye" | "eviction-result";
 
 /** A player decision the live loop is blocked on until `applyDecision` resolves it. */
 export type PendingDecision =
@@ -80,6 +82,33 @@ export interface FinaleProgress {
   revealIx: number;
 }
 
+/** Which stage of the live eviction sub-loop (0047) we are advancing. */
+export type EvictionStage = "votes" | "goodbye" | "result";
+
+/**
+ * The live eviction sub-state machine (0047): the weekly eviction staged like the finale (0037) —
+ * the votes are revealed ONE AT A TIME in a seeded order (revealed-only tally), then an evictee
+ * goodbye + goodbye messages whose tone folds into the evictee's manner (jury management, 0014).
+ * The engine already decided the tally; this only choreographs the reveal. Vault-free by construction
+ * (ids only; the evictee is not named until the last vote lands). Persisted + restart-safe (0030).
+ */
+export interface EvictionProgress {
+  stage: EvictionStage;
+  nominees: [EntityId, EntityId];
+  /** The voters in the seeded order their votes are read. */
+  revealOrder: EntityId[];
+  /** Each voter's already-decided vote (voter → the nominee they voted to evict). */
+  voteOf: Record<EntityId, EntityId>;
+  /** Cursor into `revealOrder` (votes stage). */
+  revealIx: number;
+  /** The evicted houseguest — set only once the LAST vote is read (the tally + any HOH tie-break). */
+  evictee?: EntityId;
+  /** The seeded houseguests who leave a goodbye message, in order. */
+  goodbyeFrom: EntityId[];
+  /** Cursor into `goodbyeFrom` (goodbye stage). */
+  goodbyeIx: number;
+}
+
 export interface LiveSeasonState {
   week: number;                 // 1-based HOH reign
   beat: Beat;                   // the next beat to resolve
@@ -110,6 +139,8 @@ export interface LiveSeasonState {
   mannerByEvictee?: Record<EntityId, Record<EntityId, EvictionManner>>;
   /** The in-progress live finale sub-loop (0037); set when the finale begins. */
   finale?: FinaleProgress;
+  /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
+  eviction?: EvictionProgress;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */
@@ -296,34 +327,6 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
   return { fn, votes, voteOf };
 }
 
-/** Apply an eviction once the evictee is known: record the responsible voters' manner, remove, advance. */
-function commitEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: EntityId, voteOf: Map<EntityId, EntityId>): BeatEvent {
-  const votesToEvict = [...voteOf].filter(([, t]) => t === evictee).map(([v]) => v);
-  const ev: BeatEvent = { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
-  applyEviction(s, evictee, ctx, [s.hoh!, ...votesToEvict]);
-  return ev;
-}
-
-/**
- * Resolve the eviction from the tally, applying it. On a TIE the HOH breaks it — but if the HOH is the
- * PLAYER, the loop PAUSES on a `tie-break` decision (B44/audit B2): the single most dramatic HOH power
- * must be the player's, never silently decided from hidden player→NPC edges. Returns null when it pends.
- */
-function resolveEvictionBeat(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: EntityId): BeatEvent | null {
-  const { fn, votes, voteOf } = countEvictionVotes(s, ctx, playerVote);
-  let evictee: EntityId;
-  if (votes[fn[0]]! > votes[fn[1]]!) evictee = fn[0];
-  else if (votes[fn[1]]! > votes[fn[0]]!) evictee = fn[1];
-  else {
-    if (s.hoh === ctx.player) {
-      s.pending = { kind: "tie-break", by: ctx.player, nominees: fn };
-      return null; // the player Head of Household casts the deciding vote
-    }
-    evictee = npcEvictChoice(s.hoh!, fn, ctx); // an NPC HOH breaks the tie
-  }
-  return commitEviction(s, ctx, evictee, voteOf);
-}
-
 /**
  * How an evictee reads being moved against by a responsible houseguest (0037). Simple,
  * documented, defensible — the BDD only asserts the directional property. A houseguest the
@@ -364,12 +367,15 @@ export function recordDealBetrayal(s: LiveSeasonState, wronged: EntityId, breake
   row[breaker] = { ...(row[breaker] ?? {}), betrayed: true };
 }
 
-/** Remove the evictee and roll into the next week (or the finale at Final 3 → 2). */
-function applyEviction(s: LiveSeasonState, evictee: EntityId, ctx: SeasonCtx, responsible: EntityId[]): void {
-  recordEvictionManner(s, evictee, responsible, ctx);
+/** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
+function removeEvictee(s: LiveSeasonState, evictee: EntityId): void {
   s.evictee = evictee;
   s.evictionOrder.push(evictee);
   s.active = s.active.filter((h) => h !== evictee);
+}
+
+/** Roll into the next week (or the finale at Final 3 → 2): clear the week's ceremony state. */
+function rollWeek(s: LiveSeasonState): void {
   s.outgoingHoh = s.hoh;
   s.hoh = undefined; s.nominees = undefined; s.vetoField = undefined;
   s.vetoHolder = undefined; s.vetoUsed = false; s.saved = undefined;
@@ -379,6 +385,136 @@ function applyEviction(s: LiveSeasonState, evictee: EntityId, ctx: SeasonCtx, re
   } else {
     s.week += 1; s.beat = "hoh-competition";
   }
+}
+
+/** Atomic eviction (record manner + remove + roll) — used by the non-staged paths (Final-3 0045). */
+function applyEviction(s: LiveSeasonState, evictee: EntityId, ctx: SeasonCtx, responsible: EntityId[]): void {
+  recordEvictionManner(s, evictee, responsible, ctx);
+  removeEvictee(s, evictee);
+  rollWeek(s);
+}
+
+// --- Live eviction sub-loop (0047) --------------------------------------------
+
+/** How many houseguests leave a goodbye message (bounded; seeded selection of the remaining house). */
+const GOODBYE_MESSAGE_COUNT = 3;
+
+/** A seeded Fisher–Yates shuffle (does not mutate the input) — the engine-decided reveal order. */
+function seededShuffle<T>(items: readonly T[], rng: RandomnessSource): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+/**
+ * The tone of a houseguest's goodbye message to the evictee — DERIVED from real relationship state
+ * (anti-sycophancy: never narration). A houseguest who liked the evictee sends a warm one; a cold read
+ * sends a cold one; otherwise a respectful nod. (0047 §4.)
+ */
+export type GoodbyeTone = "warm" | "respectful" | "cold";
+
+function goodbyeTone(sender: EntityId, evictee: EntityId, ctx: SeasonCtx): GoodbyeTone {
+  const e = ctx.rel.edge(sender, evictee);
+  if (e.affinity >= 0.6) return "warm";
+  if (e.affinity <= 0.35) return "cold";
+  return "respectful";
+}
+
+/** How a goodbye tone folds into the evictee's read of the sender (feeds jury lean, 0014/0037 §4.2). */
+export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
+  if (tone === "warm" || tone === "respectful") return { respected: true };
+  return { disrespected: true }; // a cold send-off stings — the evictee weighs it against them
+}
+
+/** The seeded houseguests who leave a goodbye message (from the house remaining after the eviction). */
+function selectGoodbyeSenders(s: LiveSeasonState, evictee: EntityId, rng: RandomnessSource): EntityId[] {
+  const remaining = s.active.filter((h) => h !== evictee);
+  return seededShuffle(remaining, rng).slice(0, Math.min(GOODBYE_MESSAGE_COUNT, remaining.length));
+}
+
+/** The revealed-only tally of an in-progress reveal: votes read so far for each nominee. */
+function revealedTally(e: EvictionProgress): Record<EntityId, number> {
+  const tally: Record<EntityId, number> = { [e.nominees[0]]: 0, [e.nominees[1]]: 0 };
+  for (let i = 0; i < e.revealIx; i++) tally[e.voteOf[e.revealOrder[i]!]!]! += 1;
+  return tally;
+}
+
+/** Begin the staged eviction: precompute the (already-decided) votes + the seeded reveal order. */
+function beginEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource, playerVote: EntityId | undefined): void {
+  const { fn, voteOf } = countEvictionVotes(s, ctx, playerVote);
+  s.eviction = {
+    stage: "votes",
+    nominees: fn,
+    revealOrder: seededShuffle([...voteOf.keys()], rng),
+    voteOf: Object.fromEntries(voteOf),
+    revealIx: 0,
+    goodbyeFrom: [],
+    goodbyeIx: 0,
+  };
+}
+
+/**
+ * Advance the live eviction ONE step (0047). votes (reveal one at a time, seeded) → the result lands
+ * on the LAST vote (tally + HOH tie-break) → goodbye (an evictee goodbye + goodbye messages whose tone
+ * folds into manner) → the house rolls into the next week. Pauses (returns null with `s.pending` set)
+ * only for the player-HOH tie-break; everything else resolves deterministically.
+ */
+function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
+  const e = s.eviction!;
+  switch (e.stage) {
+    case "votes": {
+      if (e.revealIx < e.revealOrder.length) {
+        const voter = e.revealOrder[e.revealIx]!;
+        const votedFor = e.voteOf[voter]!;
+        e.revealIx += 1;
+        return { beat: "eviction-reveal", content: `${voter} votes to evict ${votedFor}`, participants: [voter, votedFor] };
+      }
+      // The last vote is read: the tally decides (HOH breaks a tie — the player HOH pauses, B44).
+      const tally = revealedTally(e);
+      let evictee: EntityId;
+      if (tally[e.nominees[0]]! > tally[e.nominees[1]]!) evictee = e.nominees[0];
+      else if (tally[e.nominees[1]]! > tally[e.nominees[0]]!) evictee = e.nominees[1];
+      else {
+        if (s.hoh === ctx.player) { s.pending = { kind: "tie-break", by: ctx.player, nominees: e.nominees }; return null; }
+        evictee = npcEvictChoice(s.hoh!, e.nominees, ctx);
+      }
+      return commitStagedEviction(s, ctx, evictee, rng);
+    }
+    case "goodbye": {
+      if (e.goodbyeIx < e.goodbyeFrom.length) {
+        const sender = e.goodbyeFrom[e.goodbyeIx]!;
+        e.goodbyeIx += 1;
+        const tone = goodbyeTone(sender, e.evictee!, ctx);
+        // The tone folds into the evictee's manner toward the sender (merged — a goodbye is the last word).
+        const row = (s.mannerByEvictee![e.evictee!] ??= {});
+        row[sender] = { ...(row[sender] ?? {}), ...goodbyeMannerFor(tone) };
+        return { beat: "eviction-goodbye", content: `${sender} leaves ${e.evictee} a ${tone} goodbye message`, participants: [sender, e.evictee!] };
+      }
+      e.stage = "result";
+      return advanceEviction(s, ctx, rng);
+    }
+    case "result": {
+      const evictee = e.evictee!;
+      s.eviction = undefined;
+      rollWeek(s); // the week's ceremony state clears and the house rolls on (or into the finale)
+      return { beat: "eviction-result", content: `${evictee} leaves the house`, participants: [evictee] };
+    }
+  }
+}
+
+/** Once the evictee is known: record responsible manner, remove them, seed the goodbyes, open that stage. */
+function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: EntityId, rng: RandomnessSource): BeatEvent {
+  const e = s.eviction!;
+  e.evictee = evictee;
+  const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
+  recordEvictionManner(s, evictee, [s.hoh!, ...votesToEvict], ctx);
+  removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
+  e.goodbyeFrom = selectGoodbyeSenders(s, evictee, rng);
+  e.stage = "goodbye";
+  return { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
 }
 
 // --- Live finale sub-loop (0037) ----------------------------------------------
@@ -568,14 +704,16 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return resolveReplacement(s, ctx); // either pends on the player-HOH or NPC-picks, then → eviction
     }
     case "eviction": {
+      if (s.eviction) return advanceEviction(s, ctx, rng); // a reveal is already staging — step it
       const fn = s.finalNominees!;
       const voters = evictionVoters({ ...weekState(s, ctx), nominees: fn });
       if (voters.includes(ctx.player)) {
         s.pending = { kind: "eviction-vote", by: ctx.player, nominees: fn };
         return null;
       }
-      // The player is HOH or a nominee here; resolveEvictionBeat pauses on a tie-break iff player-HOH.
-      return resolveEvictionBeat(s, ctx, undefined);
+      // The player is HOH or a nominee: NPC votes are decided; stage the one-at-a-time reveal (0047).
+      beginEviction(s, ctx, rng, undefined);
+      return advanceEviction(s, ctx, rng);
     }
     case "finale":
       return advanceFinale(s, ctx, rng);
@@ -670,16 +808,16 @@ export function applyDecision(
       const fn = s.finalNominees!;
       if (!fn.includes(input.vote)) throw new Error("can only vote to evict a final nominee");
       s.pending = undefined;
-      // The player is a voter here ⇒ the HOH is an NPC ⇒ a tie auto-resolves; this never pends.
-      return resolveEvictionBeat(s, ctx, input.vote)!;
+      // The player is a voter ⇒ the HOH is an NPC ⇒ no player tie-break; stage the reveal with their vote (0047).
+      beginEviction(s, ctx, rng, input.vote);
+      return advanceEviction(s, ctx, rng)!; // the first vote reveal — never pends (the player is not the HOH)
     }
     case "tie-break": {
-      // The player Head of Household breaks a tied eviction vote (B44/audit B2).
-      const fn = s.finalNominees!;
-      if (!fn.includes(input.evict)) throw new Error("the tie-break must choose a current nominee");
+      // The player Head of Household breaks a tied eviction vote, after the reveal (B44/audit B2 · 0047).
+      const e = s.eviction!;
+      if (!e.nominees.includes(input.evict)) throw new Error("the tie-break must choose a current nominee");
       s.pending = undefined;
-      const { voteOf } = countEvictionVotes(s, ctx, undefined); // recover who voted where (the HOH didn't vote)
-      return commitEviction(s, ctx, input.evict, voteOf);
+      return commitStagedEviction(s, ctx, input.evict, rng);
     }
     case "final-eviction": {
       // Final 3 (0045): the player IS the final HOH and personally evicts one of the other two.

@@ -1199,7 +1199,19 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > the defined-pathway facts; the Vault Wall holds throughout; the post-eviction view marks the player and
 > `momentForPhase` selects the jury framing. Read `docs/features/0002`, `0014`, `0037` first. Open a PR.
 
-### B49 — 0047 eviction night live (reveal + goodbye messages)  ·  Claude Code  ·  **Wave 2 · audit B7 · NEEDS SPEC FIRST**
+### B49 — 0047 eviction night live (reveal + goodbye messages)  ·  Claude Code  ·  **Wave 2 · audit B7** — ✅ DONE
+
+> **DONE** (the 0047 spec already existed — built straight from its §8; the "NEEDS SPEC FIRST" tag was
+> stale). The weekly eviction is staged through the 0034 seam like the finale: a new `EvictionProgress`
+> sub-state machine in `liveSeason.ts` reveals the (engine-decided) votes ONE AT A TIME in a seeded order
+> (`applyEviction` split into `recordEvictionManner` + `removeEvictee` + `rollWeek` so the week-roll defers
+> past the goodbyes), then an evictee goodbye + goodbye messages from a seeded selection whose
+> relationship-derived tone (warm/respectful/cold) folds into the evictee's manner (jury lean, 0014). A
+> Vault-free `EvictionView` (`{stage, nominees, votesRevealed}`) lands on `AdvanceView` — names + the votes
+> read so far only, never a pre-reveal tally or the evictee before the last vote. **No new pending decision
+> kind** (eviction-vote / tie-break unchanged) ⇒ no FE relay mirror needed. `tests/unit/evictionNight.test.ts`
+> (6) + the name-agnostic `.feature`; the tie-break/eviction unit tests updated to drive through the reveal.
+> Original prompt below.
 
 > Draft and implement **feature 0047** (`docs/features/0047-eviction-night-live.{md,feature}`). The weekly eviction —
 > the show's defining beat, ~13×/season — emits one line (`liveSeason.ts:403`); the finale got staged choreography (0037)

@@ -2,7 +2,7 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView, MakeDealReq, DealView,
+  FinaleView, EvictionView, MakeDealReq, DealView,
 } from "../../ports/GameSession";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
@@ -55,7 +55,7 @@ import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
-  type FinaleProgress,
+  type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
@@ -669,6 +669,25 @@ export class GameSessionAdapter implements GameSession {
       finished: !!s?.finished,
       winner: this.named(s?.winner),
       finale: this.finaleView(),
+      eviction: this.evictionView(),
+    };
+  }
+
+  /**
+   * Vault-free projection of an in-progress weekly eviction (0047): the two nominees, the stage, and
+   * the votes REVEALED SO FAR (`revealIx`) only — never an unread vote, never a pre-reveal tally, never
+   * the evictee before the last vote lands. Null unless an eviction is actively staging.
+   */
+  private evictionView(): EvictionView | null {
+    const e: EvictionProgress | undefined = this.live?.eviction;
+    if (!e || this.live?.finished) return null;
+    const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
+    return {
+      stage: e.stage,
+      nominees: e.nominees.map(ref),
+      votesRevealed: e.revealOrder.slice(0, e.revealIx).map((voter) => ({
+        voter: ref(voter), votedFor: ref(e.voteOf[voter]!),
+      })),
     };
   }
 

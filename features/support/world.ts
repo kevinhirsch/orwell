@@ -287,6 +287,19 @@ export class BbWorld extends World {
   egIllegalRefused?: boolean;
   egEvictee?: Eid;
 
+  // Eviction night live (0047) scratch state.
+  enRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  enUser?: string;
+  enSandbox?: import("../../src/composition/registry").UserSandbox;
+  enViews?: import("../../src/ports/GameSession").AdvanceView[];
+  enRevealOrderA?: string;
+  enRevealOrderB?: string;
+  enSentinel?: string;
+  enWarmLean?: number;
+  enColdLean?: number;
+  enResumedEvictee?: string;
+  enOriginalEvictee?: string;
+
   // Player eviction & the juror's seat (0046) scratch state.
   peRegistry?: import("../../src/composition/registry").GameSessionRegistry;
   peUser?: string;
