@@ -223,7 +223,7 @@ const HIDDEN_ELEMENT_POOLS: Record<Exclude<HiddenElementKind, "concealed-aptitud
 };
 
 /** Each concealed aptitude names the STAT that must back it (audit C9 — no unbackable flavor). */
-const CONCEALED_APTITUDES: ReadonlyArray<{ detail: string; stat: keyof StatProfile }> = [
+export const CONCEALED_APTITUDES: ReadonlyArray<{ detail: string; stat: keyof StatProfile }> = [
   { detail: "is far sharper at puzzles than they pretend", stat: "mental" },
   { detail: "is a hidden endurance machine", stat: "physical" },
   { detail: "has a near-photographic memory", stat: "mental" },
