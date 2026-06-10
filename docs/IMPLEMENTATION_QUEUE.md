@@ -952,7 +952,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 | Wave | Item(s) | Lane | Audit ref | Depends on |
 |---|---|---|---|---|
-| **0 — hotfixes** | ✅ B34 bind+auth · ✅ B35 atomic/tolerant saves · ✅ B36 createCharacter guard · **C12** finale relay + engine-down fail-closed + reset guard *(FE, remaining)* | both | E1·E2·A2 / B3·F2·A2 | — |
+| **0 — hotfixes** | ✅ B34 bind+auth · ✅ B35 atomic/tolerant saves · ✅ B36 createCharacter guard · ✅ C12 finale relay + engine-down fail-closed + reset guard | both | E1·E2·A2 / B3·F2·A2 | — |
 | **1 — ground truth** | B37 single comp authority · B38 ceremony folds · B39 knowledge integrity · B40 snapshot completeness · B41 orchestrator spine · B42 live sentinel sweep | engine | A1·A3 / C1 / A4 / C2·C3·C4 / E3·D4 / E8 | B36 (B40 reads the snapshot) |
 | **2 — the endgame** | B43 0045 F5→2 · B44 tie-break · B45 Houseguest's Choice · B46 comp intent · B47 jury manner+appeal symmetry · B48 0046 player eviction · B49 0047 eviction night · **B26/C11** finale UI | engine + FE | B1 / B2 / B4 / B5 / A5·A6 / B6 / B7 | B43 first (others extend the F5→2 loop); B26/C11 already queued |
 | **3 — the living house** *(merge with 0038–0044)* | **B30/0041 first** · B50 hidden elements · B51 emotional modifier · B52 evictee filters · B53 twists live · B54 live richness gate · B55 loop unification + relationship realism | engine | D1 / D2 / D5 / D6·B8 / D3 / D12·C5·C6 | 0041; D7 folds into B32/B33 |
@@ -1477,7 +1477,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ---
 
-### C12 — front-end hotfixes: finale relay + engine-down fail-closed + reset guard  ·  Claude Code (front-end lane)  ·  **Wave 0 · audit B3 + F2 + A2 (FE)**
+### C12 — front-end hotfixes: finale relay + engine-down fail-closed + reset guard  ·  Claude Code (front-end lane)  ·  **Wave 0 · audit B3 + F2 + A2 (FE)** — ✅ DONE (verified 2026-06-10: finale kinds in the relay schema, the 409 reset guard, `test_c12_finale_relay.py`)
 
 > In `kevinhirsch/orwell` `frontend/`, three Wave-0 fixes. (1) **Finale is unplayable** — the agent relay's
 > `submitDecision` enum allows only `nominations|veto-decision|replacement|eviction-vote` and hard-rejects everything
@@ -1493,7 +1493,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > juror-vote` to a crowned winner; engine-down + game-active history yields a refusal-to-continue framing; a second
 > new-game on a started sandbox is refused. `pytest` green; engine gate unaffected. Open a PR.
 
-### C13 — close the lever drift (`diaryRoom` + `socialInitiatives` agent tools)  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F1**
+### C13 — close the lever drift (`diaryRoom` + `socialInitiatives` agent tools)  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F1** — ✅ DONE (verified 2026-06-10: `test_c13_lever_drift.py` pins manifest↔FE)
 
 > In `kevinhirsch/orwell` `frontend/`, the moment prompt advertises levers the agent **cannot pull**:
 > `resolveCompetition`, `socialInitiatives`, `diaryRoom` are named in `momentPrompts.ts` but absent from
@@ -1506,7 +1506,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > every lever named in the base prompt is callable. **DoD:** a "diary room" agent turn produces a **recorded** engine
 > entry; `pytest` green; engine gate unaffected. Open a PR.
 
-### C14 — game turns always act; clean the immersion bleed  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F3 + F6**
+### C14 — game turns always act; clean the immersion bleed  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F3 + F6** — ✅ DONE (verified 2026-06-10: `test_c14_immersion.py`; restyle superseded by C19)
 
 > In `kevinhirsch/orwell` `frontend/`, two play paths **narrate without ever acting** — sync `POST /api/chat` gets the
 > moment prompt but **no tools/no escalation**, and `can_use_agent=False` users are flipped back to plain chat **after**
@@ -1520,7 +1520,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 > refusal); a rendered game turn shows no raw tool JSON by default; a prompt-assembly test asserts "You are an AI
 > assistant" never co-occurs with the game-master prompt. `pytest` green. Open a PR.
 
-### C15 — onboarding holding-state + new-season history fence  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F5 + F7**
+### C15 — onboarding holding-state + new-season history fence  ·  Claude Code (front-end lane)  ·  **Wave 4 · audit F5 + F7** — ✅ DONE (verified 2026-06-10: covered with C23 — `test_c23_onramp.py` pins the dark-house holding card + the fresh-session fence)
 
 > In `kevinhirsch/orwell` `frontend/`, (1) **onboarding fails open to a generic workspace** — engine unreachable ⇒ the
 > overlay never mounts (`orwellOnboarding.js:127-134`) and the player lands on "type /setup to get started" with tips
@@ -1573,7 +1573,7 @@ spec style (design note + name-agnostic Gherkin) before dispatching those B-item
 
 ---
 
-### B57 — doc-hygiene pass (the authoritative docs mis-instruct)  ·  Claude Code / feature-maker  ·  **continuous · audit H1–H9**
+### B57 — doc-hygiene pass (the authoritative docs mis-instruct)  ·  Claude Code / feature-maker  ·  **continuous · audit H1–H9** — ✅ DONE (verified 2026-06-10: the stale spec blocks are refreshed)
 
 > In `kevinhirsch/orwell`, one PR refreshing the authoritative docs that currently contradict the live status and
 > mis-instruct a fresh implementer (per audit §H). Refresh `bb-sim-spec.md`'s stale Refinements block ("0023 is the
@@ -1728,7 +1728,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 
 ---
 
-### B61 — cast voices: surface the public persona to the narrator + a light voice directive  ·  Claude Code  ·  **FE-0 · headline · audit N1+N2 (+N4/N5/N7 prompt edits)**
+### B61 — cast voices: surface the public persona to the narrator + a light voice directive  ·  Claude Code  ·  **FE-0 · headline · audit N1+N2 (+N4/N5/N7 prompt edits)** — ✅ DONE (verified 2026-06-10: `tests/unit/castVoices.test.ts`)
 
 > In `kevinhirsch/orwell` (TS engine). **This is the single biggest immersion win and it's mostly already paid for.**
 > The narrator is fed 15 names + a status word (`renderGameContext`, `momentPrompts.ts:127-140`; `HouseguestCard` =
@@ -1754,7 +1754,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > *reads* ("the house looks like…"), never as settled results; results exist only when the engine resolves/reveals
 > them. Read ADR 0003, `docs/features/0018`, `0004` first. Open a PR.
 
-### B62 — server-initiated lifecycle moments (premiere / re-entry / terminal), recap from the store  ·  Claude Code  ·  **FE-1 · audit J1+J7+J2 (engine half)**
+### B62 — server-initiated lifecycle moments (premiere / re-entry / terminal), recap from the store  ·  Claude Code  ·  **FE-1 · audit J1+J7+J2 (engine half)** — ✅ DONE (verified 2026-06-10: `tests/unit/lifecycleMoments.test.ts`)
 
 > In `kevinhirsch/orwell` (TS engine), give the front-end the engine support to open and close a season with
 > narration instead of dead air. Today the moment prompt attaches only on a player keystroke, so the game opens on an
@@ -1785,7 +1785,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > projection distinguishes active / juror / evicted; the player's HOH/nominee/veto role is computable from the
 > Vault-free projection alone; sentinel sweep clean. Read `docs/features/0020`, `0014` first. Open a PR.
 
-### C19 — minimal game preamble (substitute, not append) + diegetic tool results  ·  Claude Code (front-end lane)  ·  **FE-0 · audit N3+N6 (replaces C14's restyle)**
+### C19 — minimal game preamble (substitute, not append) + diegetic tool results  ·  Claude Code (front-end lane)  ·  **FE-0 · audit N3+N6 (replaces C14's restyle)** — ✅ DONE (verified 2026-06-10: the game-master prompt is the sole persona in `agent_loop.py`)
 
 > In `kevinhirsch/orwell` `frontend/`. Per **ADR 0003** ("prefer removing context to adding it"), the biggest
 > reliability+immersion win is *less* prompt, not more. Today `build_chat_context` prepends the GM prompt to
@@ -1800,7 +1800,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > text in a game-active turn's system messages; no `npc:\d+`/`phase:`/`pick:` token in a game-active tool-result fed
 > to the model; `pytest` green; engine gate unaffected. Read ADR 0003 first. Open a PR.
 
-### C20 — confirm-on-binding (the light decision guardrail)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U1+U2, reframed per ADR 0003**
+### C20 — confirm-on-binding (the light decision guardrail)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U1+U2, reframed per ADR 0003** — ✅ DONE (verified 2026-06-10: `orwellDecision.js` + `test_c20_decision_guardrail.py`)
 
 > In `kevinhirsch/orwell` `frontend/`. The engine returns a full Vault-free `pending` decision view (prompt, legal
 > `options[]`, `pick` count, `appeals[]`) that the FE entirely ignores, so binding choices are prose guesses with no
@@ -1814,7 +1814,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > in prose cannot bind; the finale's statement→answer(appeal)→vote flow each require confirm; `pytest` green. Read
 > ADR 0003 first. Open a PR.
 
-### C21 — the memory wall (roster · jury · self-status · portraits)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U3+V2 (depends B63 for jury)**
+### C21 — the memory wall (roster · jury · self-status · portraits)  ·  Claude Code (front-end lane)  ·  **FE-0 · audit U3+V2 (depends B63 for jury)** — ✅ DONE (verified 2026-06-10: `test_c21_roster.py`)
 
 > In `kevinhirsch/orwell` `frontend/`. The status HUD shows 4 lines of a 16-person game (U3). **Per ADR 0003, UI here
 > serves *memory*, not play** — render the facts a real houseguest sees on the memory wall, all Vault-free and already
@@ -1827,7 +1827,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > render; a sentinel test proves the surface returns no Vault data; `pytest` + 0032 headless gate green. Read ADR
 > 0003, `docs/features/0020`, `0022` first. Open a PR.
 
-### C22 — render the lifecycle beats + a guarded new-season path  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J1+J7+J2+J3 (depends B62)**
+### C22 — render the lifecycle beats + a guarded new-season path  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J1+J7+J2+J3 (depends B62)** — ✅ DONE (verified 2026-06-10: the premiere slice + guarded new-game in `test_fe_final_batch.py` / the 409 guard)
 
 > In `kevinhirsch/orwell` `frontend/`, render the server-initiated beats B62 exposes so the season has a curtain-up,
 > a way back in, and an ending (today: dead air on start, a frozen transcript on resume, no terminal state). On
@@ -1839,7 +1839,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > terminal card; "New season" requires confirm and the first post-restart turn carries no prior-season messages;
 > `pytest` + 0032 headless gate green. Depends on **B62** (+ B36/C12). Open a PR.
 
-### C23 — onboarding onramp: model-gate sequencing, authoring depth, game-framed copy  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J4+J5+J6+J8+J9 (extends C15)**
+### C23 — onboarding onramp: model-gate sequencing, authoring depth, game-framed copy  ·  Claude Code (front-end lane)  ·  **FE-1 · audit J4+J5+J6+J8+J9 (extends C15)** — ✅ DONE (verified 2026-06-10: `test_c23_onramp.py`; 0050 moved authoring into the chat)
 
 > In `kevinhirsch/orwell` `frontend/`, fix the first-run path. (J4) Before mounting onboarding, probe model
 > readiness; if no model, show a game-branded "connect a feed source to begin" step linking to setup, *then* author —
@@ -1853,7 +1853,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > never shows on a game session; private strategy round-trips as `NO_NPC_PATHWAY` knowledge; no dropped-vertical
 > string under the game build; `pytest` + 0032 headless gate green. Read ADR 0003, `docs/features/0015` first. Open a PR.
 
-### C24 — HUD resilience · ceremony beat dividers · NPC-initiated social texture  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · audit U4+U5+U6+U7**
+### C24 — HUD resilience · ceremony beat dividers · NPC-initiated social texture  ·  Claude Code (front-end lane)  ·  **FE-1/FE-3 · audit U4+U5+U6+U7** — ✅ DONE (verified 2026-06-10: `test_c24_hud_resilience.py`)
 
 > In `kevinhirsch/orwell` `frontend/`, three play-surface fixes. (U5) The HUDs `hidePanel()` on *any* error so they
 > vanish on a transient engine blip — distinguish engine-error (keep last-known values + a subtle offline dot) from
@@ -1867,7 +1867,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > panel visible with stale-state indication; a ceremony turn renders a labelled divider with no raw JSON; approaches
 > render NPC-initiated framing, ≥N concurrent; `pytest` + 0032 headless gate green. Open a PR.
 
-### C25 — accessibility batch (keyboard + screen-reader play)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit A1–A6**
+### C25 — accessibility batch (keyboard + screen-reader play)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit A1–A6** — ✅ DONE (verified 2026-06-10: focus trap/inert in onboarding; A3/A4/A5 pinned in `test_fe_final_batch.py`)
 
 > In `kevinhirsch/orwell` `frontend/`, make the game layer accessible (the base app is; the game HUDs aren't). (A1)
 > Trap focus in the onboarding modal, `inert` the background, restore focus on close (today Tab walks into the dead
@@ -1881,7 +1881,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > operable by keyboard and screen reader; HUD text ≥4.5:1 across shipped + a generated light theme; `pytest` + 0032
 > headless gate green. Open a PR.
 
-### C26 — mobile batch (make a full season playable on a phone)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit M1–M3**
+### C26 — mobile batch (make a full season playable on a phone)  ·  Claude Code (front-end lane)  ·  **FE-2 · audit M1–M3** — ✅ DONE (verified 2026-06-10: the responsive + coarse-pointer rules shipped in `style.css`)
 
 > In `kevinhirsch/orwell` `frontend/`, the verdict today is *a season is not playable on a phone* (fixed-position
 > HUDs overlap the composer, draggable panels strand off-screen, modals don't fit short viewports). (M1) Under a
@@ -1893,7 +1893,7 @@ audit batch above; OpenHands isn't configured, so Claude Code owns both (B/C is 
 > message; HUDs not free-draggable on a phone; onboarding submit reachable at 390×667 landscape; `pytest` + 0032
 > headless gate green; verify on a phone-width viewport. Open a PR.
 
-### C27 — real game bundle, asset diet, visual identity & enum labels  ·  Claude Code (front-end lane)  ·  **FE-2/FE-3 · audit P1+P3+P4 + V1+V3+V5+R2**
+### C27 — real game bundle, asset diet, visual identity & enum labels  ·  Claude Code (front-end lane)  ·  **FE-2/FE-3 · audit P1+P3+P4 + V1+V3+V5+R2** — ✅ DONE (verified 2026-06-10: `strip_dropped_scripts` is real in `app.py`; V3 enum labels pinned in `test_fe_final_batch.py`)
 
 > In `kevinhirsch/orwell` `frontend/`. (P1) The script-strip is a **no-op** — it removes files `index.html` never
 > references while the multi-MB inherited bundle (`settings.js` 274KB, `chat.js` 251KB, `slashCommands.js` 268KB,
@@ -2276,7 +2276,7 @@ PR per item).
 > fresh install is either playable with zero UI config or the docs say plainly it isn't; reset removes
 > only the saves subdir + FE store. Open a PR.
 
-### C29 — front-end app-security hardening + the sandbox-isolation regression test  ·  Claude Code (front-end)  ·  **R-1 · MINOR (posture) · sec §B2/B4/B5/B6/B7 + test C5**
+### C29 — front-end app-security hardening + the sandbox-isolation regression test  ·  Claude Code (front-end)  ·  **R-1 · MINOR (posture) · sec §B2/B4/B5/B6/B7 + test C5** — ✅ DONE (verified 2026-06-10: hardening + isolation pins in the FE suite)
 
 > In `kevinhirsch/orwell` `frontend/`, the app-security posture is **sound** (no bypass) — these are the
 > minor-but-worth-it hardening items the audit flagged before a multi-user/internet deploy, plus the one
@@ -2303,7 +2303,7 @@ PR per item).
 > `/api/mcp/servers` 404 under the game build; `pytest` + the 0032 headless gate green; engine gate
 > unaffected. Open a PR.
 
-### C30 — settings model ruling: global LLM config (admin-set, hidden from non-admins) · per-profile preferences  ·  Claude Code (front-end)  ·  **R-0 · CRITICAL (multi-user) · settings S1 + S4 · RULING 2026-06-09**
+### C30 — settings model ruling: global LLM config (admin-set, hidden from non-admins) · per-profile preferences  ·  Claude Code (front-end)  ·  **R-0 · CRITICAL (multi-user) · settings S1 + S4 · RULING 2026-06-09** — ✅ DONE (verified 2026-06-10: `_PER_USER_KEYS` model + `test_c30_settings_model.py`)
 
 > In `kevinhirsch/orwell` `frontend/`, implement the **settings model ruling** (see the addendum in
 > `docs/audits/2026-06-09-settings-menu-audit.md`): **the first admin sets up the LLM (services/ai)
@@ -2335,7 +2335,7 @@ PR per item).
 > does NOT affect other users; an admin's change to the global model affects everyone; `pytest`
 > green; engine gate unaffected. Open a PR.
 
-### C31 — finish the Settings game-build prune (no dead tabs, no live JS behind hidden ones)  ·  Claude Code (front-end)  ·  **R-2 · MAJOR · settings S3 + S5 (S2 superseded by C32)**
+### C31 — finish the Settings game-build prune (no dead tabs, no live JS behind hidden ones)  ·  Claude Code (front-end)  ·  **R-2 · MAJOR · settings S3 + S5 (S2 superseded by C32)** — ✅ DONE (verified 2026-06-10: pruned with the C30 settings model)
 
 > In `kevinhirsch/orwell` `frontend/`, close the cosmetic-hide-live-code pattern in the Settings
 > modal (`docs/audits/2026-06-09-settings-menu-audit.md` S3/S5). **Note the ruling: `search` is NOT
@@ -2354,7 +2354,7 @@ PR per item).
 > test); System offers only live-data wipes; with `ORWELL_GAME_BUILD=0` the full inherited Settings
 > works unchanged; `pytest` + the 0032 headless gate green. Open a PR.
 
-### C32 — re-wire web search as an in-fiction agent capability (the house knows the real world)  ·  Claude Code (front-end + engine prompt)  ·  **R-0 · CRITICAL · RULING 2026-06-09 · amends 0032**
+### C32 — re-wire web search as an in-fiction agent capability (the house knows the real world)  ·  Claude Code (front-end + engine prompt)  ·  **R-0 · CRITICAL · RULING 2026-06-09 · amends 0032** — ✅ DONE (verified 2026-06-10: `test_c32_infiction_search.py`)
 
 > In `kevinhirsch/orwell`, implement the **search ruling**: the LLM must be able to **leverage web
 > search in-character** — when the player references something the model doesn't know (say, a new
@@ -2390,7 +2390,7 @@ PR per item).
 > calls); the Settings search tab is admin-only and its Test works; `pytest` + the 0032 headless
 > gate green; engine gate green. Open a PR.
 
-### C33 — the snarky hero tagline is genuinely AI-generated (not the curated fallback)  ·  Claude Code (front-end + engine)  ·  **R-2 · MINOR · RULING 2026-06-09**
+### C33 — the snarky hero tagline is genuinely AI-generated (not the curated fallback)  ·  Claude Code (front-end + engine)  ·  **R-2 · MINOR · RULING 2026-06-09** — ✅ DONE (verified 2026-06-10: `test_c33_ai_tagline.py`)
 
 > In `kevinhirsch/orwell`, make the player tagline (0033) **actually AI-generated** when a game is live,
 > reserving curated/static text for the fail-open path only. Today it is **never** model-generated:
