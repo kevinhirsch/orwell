@@ -45,8 +45,10 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/health")
     async def orwell_health():
-        ok = await orwell_engine.engine_health()
-        return {"engine": ok, "engineUrl": orwell_engine.ENGINE_URL}
+        """Engine reachability for the visible status banner. `engine` (bool) is kept for back-compat;
+        `error` carries the concrete reason (refused / timeout / wrong URL) when it is down."""
+        detail = await orwell_engine.engine_health_detail()
+        return {"engine": bool(detail.get("ok")), "engineUrl": detail.get("engineUrl"), "error": detail.get("error")}
 
     @router.get("/state")
     async def orwell_state(request: Request):

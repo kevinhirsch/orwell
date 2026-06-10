@@ -58,3 +58,25 @@ def test_finale_fails_open_to_null(client, monkeypatch):
     r = client.get("/api/orwell/finale")
     assert r.status_code == 200
     assert r.json() == {"finale": None}  # never blocks the page on an engine error
+
+
+# --- /health carries the concrete failure reason for the visible engine-status banner ---
+
+def test_health_reports_engine_down_with_a_reason(client, monkeypatch):
+    async def fake_detail():
+        return {"ok": False, "engineUrl": "http://127.0.0.1:8765", "error": "ConnectError: refused"}
+    monkeypatch.setattr(orwell_engine, "engine_health_detail", fake_detail)
+    r = client.get("/api/orwell/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["engine"] is False
+    assert body["error"] == "ConnectError: refused"  # surfaced so the banner can name it
+    assert body["engineUrl"] == "http://127.0.0.1:8765"
+
+
+def test_health_reports_engine_up(client, monkeypatch):
+    async def fake_detail():
+        return {"ok": True, "engineUrl": "http://127.0.0.1:8765"}
+    monkeypatch.setattr(orwell_engine, "engine_health_detail", fake_detail)
+    r = client.get("/api/orwell/health")
+    assert r.json()["engine"] is True and r.json().get("error") is None

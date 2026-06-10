@@ -49,6 +49,32 @@ PRE_GAME_PROMPT = (
     "You may help with anything unrelated to the game."
 )
 
+# Used ONLY when the game is confirmed started but the per-moment prompt fetch hiccups: the game is
+# real, so we must stay in character and never claim the feeds are down — but we lack the precise
+# moment context, so we forbid inventing specific outcomes (the Vault Wall / anti-fabrication line).
+FALLBACK_GM_PROMPT = (
+    "You are Big Brother: the host, narrator, and the voice of every houseguest in this player's "
+    "ongoing season. Stay fully in character. The detailed moment context is briefly unavailable, "
+    "so keep to general house conversation and the player's own situation — do NOT announce or "
+    "invent any specific competition result, nomination, vote, eviction, or twist. Keep the player "
+    "engaged in the house until the next beat resolves."
+)
+
+
+async def _fetch_game_state(user, *, retry: bool):
+    """get_game_state for `user`, with ONE short retry when `retry` (game build) — so a brief engine
+    restart between turns recovers to a normal in-character turn instead of a feeds-down message.
+    Returns the state dict, or None when the engine is genuinely unreachable."""
+    from src import orwell_engine
+    for attempt in (0, 1):
+        try:
+            return await orwell_engine.get_game_state(user=user)
+        except Exception:
+            if attempt == 0 and retry:
+                await asyncio.sleep(0.4)  # ride out a momentary engine blip; do not retry mixed-use
+                continue
+            raise
+
 
 async def apply_game_framing(preface: list, user, incognito: bool = False):
     """Big Brother game framing for one turn. Vault-free; mutates `preface` in place.
@@ -56,7 +82,9 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
     Under the GAME BUILD (0032 — the default for this product) every turn gets HONEST framing;
     a silent vanilla-assistant turn is impossible (the game is the product, so an unframed turn
     is always wrong — the bug class where a fresh player says "hi" and meets a generic chatbot):
-      • game started        → the engine's per-moment game-master prompt (in-character);
+      • game started        → the engine's per-moment game-master prompt (in-character); if only
+        that prompt fetch fails, a generic in-character fallback — NEVER a feeds-down message,
+        because get_game_state already proved the season is live;
       • engine up, no game  → PRE_GAME_PROMPT (production voice, steers into casting/OOBE);
       • engine unreachable  → FEED_DOWN_PROMPT, fail-CLOSED — regardless of `_GAME_WAS_ACTIVE`
         (that marker only narrows the non-game build, where plain chat is a legitimate surface).
@@ -64,11 +92,10 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
     Returns (engine_available, game_active, feed_down):
       engine_available — engine answered get_game_state (game or no game); triggers game-tool
         pinning so the model can always call createCharacter / getGameState.
-      game_active — a game is started; the per-moment system prompt was prepended so the turn
+      game_active — a game is started; an in-character system prompt was prepended so the turn
         speaks in-character, and the agent route auto-escalates.
-      feed_down — the engine is unreachable and the turn was framed fail-CLOSED for game
-        content (audit F2 / queue C12) instead of letting the model narrate a season the
-        engine never decided.
+      feed_down — get_game_state itself was unreachable and the turn was framed fail-CLOSED for
+        game content (audit F2 / queue C12) instead of narrating a season the engine never decided.
     """
     engine_available = False
     game_active = False
@@ -76,41 +103,50 @@ async def apply_game_framing(preface: list, user, incognito: bool = False):
     if incognito:
         return engine_available, game_active, feed_down
     from src.settings import game_build_enabled
+    from src import orwell_engine
     game_build = game_build_enabled()
     _gkey = user or "__anon__"
+
+    # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
-        from src import orwell_engine
-        game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
-        if isinstance(game_state, dict):
-            engine_available = True  # engine is up; pin game tools regardless of game state
-            if game_state.get("started"):
-                game_active = True
-                _GAME_WAS_ACTIVE.add(_gkey)
-                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
-                gm_prompt = (mp or {}).get("systemPrompt")
-                if gm_prompt:
-                    if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
-                        preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
-                    else:
-                        preface.insert(0, {"role": "system", "content": gm_prompt})
-            else:
-                _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
-                if game_build:
-                    # The game IS the product but this sandbox has no season: say so and steer
-                    # into casting — never improvise as a generic assistant.
-                    preface.insert(0, {"role": "system", "content": PRE_GAME_PROMPT})
+        game_state = await _fetch_game_state(user, retry=game_build)
     except Exception as e:
-        from src import orwell_engine
-        logger.warning("[orwell] game framing failed for user=%s engine=%s: %s",
+        logger.warning("[orwell] engine unreachable for user=%s engine=%s: %s",
                        _gkey, getattr(orwell_engine, "ENGINE_URL", "?"), e)
         if game_build or _gkey in _GAME_WAS_ACTIVE:
             # Engine down: fail CLOSED for game content (audit F2/C12). Under the game build this
             # holds for EVERY user — including a brand-new player whose first frame fails (a fresh
             # front-end process has an empty marker set, which used to mean a silent vanilla turn).
-            # The in-character transcript may be in context, so an unframed turn would keep
-            # "narrating" a season the engine never decided — the named #1 failure state.
             feed_down = True
             preface.insert(0, {"role": "system", "content": FEED_DOWN_PROMPT})
+        return engine_available, game_active, feed_down
+
+    if not isinstance(game_state, dict):
+        return engine_available, game_active, feed_down  # unexpected shape — treat as no framing
+    engine_available = True  # engine answered; pin game tools regardless of game state
+
+    # 2) The engine answered. Frame by whether a season is actually running.
+    if game_state.get("started"):
+        game_active = True
+        _GAME_WAS_ACTIVE.add(_gkey)
+        try:
+            mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
+            gm_prompt = (mp or {}).get("systemPrompt") or FALLBACK_GM_PROMPT
+        except Exception as e:
+            # The season IS live (state proved it) — a moment-prompt hiccup must not become a
+            # feeds-down message. Stay in character with a generic, non-fabricating frame.
+            logger.warning("[orwell] moment-prompt fetch failed (game live) for user=%s: %s", _gkey, e)
+            gm_prompt = FALLBACK_GM_PROMPT
+        if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
+            preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
+        else:
+            preface.insert(0, {"role": "system", "content": gm_prompt})
+    else:
+        _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+        if game_build:
+            # The game IS the product but this sandbox has no season: say so and steer into
+            # casting — never improvise as a generic assistant.
+            preface.insert(0, {"role": "system", "content": PRE_GAME_PROMPT})
     return engine_available, game_active, feed_down
 
 

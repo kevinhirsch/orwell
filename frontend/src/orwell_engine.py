@@ -27,15 +27,41 @@ def _user_headers(user: str | None) -> dict:
     return {"X-Orwell-User": user or "default"}
 
 
+class EngineToolError(RuntimeError):
+    """The engine RESPONDED with a structured error — it is reachable and answered. Distinct from a
+    transport outage (connection refused / timeout / proxy 5xx), which propagates as httpx's own
+    ``RequestError``/``HTTPStatusError`` so callers can tell "the engine said no" apart from "the
+    engine is down". ``no_game`` flags the engine's intentional "no active game for this user" reply
+    (the knownUser guard) — a NORMAL pre-game state the caller should treat as ``started: False``."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+        self.no_game = "no active game" in (message or "").lower()
+
+
 async def _call(name: str, args: dict | None = None, user: str | None = None) -> dict:
-    """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox."""
+    """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.
+
+    Raises :class:`EngineToolError` when the engine answers with a structured ``{"error": ...}`` body
+    (it is UP — e.g. bad args, or no active game). A genuine outage (no JSON error body, refused
+    connection, timeout) propagates as httpx's own exception, so the framing layer can fail CLOSED
+    on outages while treating "no active game" as an ordinary pre-game state."""
     url = ENGINE_URL.rstrip("/") + "/player/call"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user))
-        r.raise_for_status()
+        if r.status_code >= 400:
+            err = None
+            try:
+                err = r.json().get("error")
+            except Exception:
+                err = None
+            if err is not None:
+                raise EngineToolError(err, status=r.status_code)  # engine answered with a reason
+            r.raise_for_status()  # no structured body → a transport/proxy failure (engine down)
         data = r.json()
     if "result" not in data:
-        raise RuntimeError(data.get("error", "engine call failed"))
+        raise EngineToolError(data.get("error", "engine call failed"))
     return data["result"]
 
 
@@ -59,8 +85,17 @@ async def create_character(player_name: str, *, archetype=None, strategy_style=N
 
 
 async def get_game_state(user: str | None = None) -> dict:
-    """Current Vault-free game state for this user: phase, the player's card, the house roster."""
-    return await _call("getGameState", {}, user=user)
+    """Current Vault-free game state for this user: phase, the player's card, the house roster.
+
+    The engine refuses a no-game user with a 404 "no active game" (it won't mint a sandbox just to
+    answer a probe). That is NOT an outage — it is the ordinary pre-game state, so map it to
+    ``{"started": False}``. A genuine engine outage still raises, so callers fail closed only then."""
+    try:
+        return await _call("getGameState", {}, user=user)
+    except EngineToolError as e:
+        if e.no_game:
+            return {"started": False}
+        raise
 
 
 async def get_moment_prompt(moment: str | None = None, user: str | None = None) -> dict:
@@ -224,11 +259,21 @@ async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict
     return await _admin_call("manageSandbox", args, user=user)
 
 
-async def engine_health() -> bool:
-    """True if the engine HTTP MCP server answers /health."""
+async def engine_health_detail() -> dict:
+    """Engine reachability plus a human-readable reason when it is down — for VISIBLE front-end
+    error reporting. ``{"ok": bool, "engineUrl": str, "error"?: str}``. Never raises."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(ENGINE_URL.rstrip("/") + "/health")
-            return r.status_code == 200
-    except Exception:
-        return False
+        if r.status_code == 200:
+            return {"ok": True, "engineUrl": ENGINE_URL}
+        return {"ok": False, "engineUrl": ENGINE_URL, "error": f"engine returned HTTP {r.status_code}"}
+    except Exception as e:
+        # Connection refused / DNS / timeout: the most common real failure (engine not running, or a
+        # wrong ORWELL_ENGINE_MCP_URL). Report the concrete reason so the operator can act on it.
+        return {"ok": False, "engineUrl": ENGINE_URL, "error": f"{type(e).__name__}: {e}"}
+
+
+async def engine_health() -> bool:
+    """True if the engine HTTP MCP server answers /health."""
+    return bool((await engine_health_detail()).get("ok"))
