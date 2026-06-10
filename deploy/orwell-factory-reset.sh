@@ -82,9 +82,11 @@ ENV_KEEP=".env"
 # ENGINE SAVE dir: where the game actually persists (saves + the hidden Vault layer).
 # This is the crux of an earlier bug — the engine (src/adapters/engine/FileSaveStore.ts)
 # writes per-user saves to ORWELL_DATA_DIR / BBAI_DATA_DIR, FALLING BACK to ./.orwell-data
-# (relative to its WorkingDirectory = APP_DIR). The install never sets ORWELL_DATA_DIR, so
-# the real save lives at <app>/.orwell-data — NOT <app>/data. Resolve it the same way the
-# engine does: an explicit env override, then the .env, then the ./.orwell-data fallback.
+# (relative to its WorkingDirectory = APP_DIR). Modern installs SET ORWELL_DATA_DIR — since
+# B72 to <app>/data/saves (saves in their own subdir, distinct from the preserved .env);
+# pre-B72 installs pointed it at <app>/data, and ancient ones never set it (./.orwell-data).
+# Resolve exactly as the engine does: explicit env override, then .env, then the fallback —
+# all three generations scrub correctly (the ENV_KEEP guard protects .env in the shared-dir case).
 env_val() { [[ -f "$ENV_FILE" ]] && grep -E "^[[:space:]]*${1}=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'\'']//;s/["'\'']$//;s/\r$//'; }
 ENGINE_SAVE_DIR="${ORWELL_DATA_DIR:-}"
 [[ -n "$ENGINE_SAVE_DIR" ]] || ENGINE_SAVE_DIR="$(env_val ORWELL_DATA_DIR || true)"

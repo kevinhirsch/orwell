@@ -4,12 +4,21 @@ After=network.target
 
 [Service]
 Type=simple
+# Least privilege (B72/ops A5): a dedicated system user + systemd sandboxing. The installer
+# creates `orwell` and chowns the app + data dirs.
+User=orwell
+Group=orwell
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/orwell/data
 WorkingDirectory=/opt/orwell
-EnvironmentFile=/opt/orwell/data/.env
-# Standard engine contract: `npm start` runs the built MCP server, listening on
-# ORWELL_ENGINE_PORT (loopback) for the front-end to call. (A direct `node dist/<entry>.js` is
-# equivalent once the implementer's build output path is fixed.)
-ExecStart=/usr/bin/npm start
+# Optional (B72/ops A10): a manual install that hasn't written .env yet must fail on the app's
+# own terms, not on a missing EnvironmentFile.
+EnvironmentFile=-/opt/orwell/data/.env
+# Run node directly (no npm wrapper): npm wants a writable $HOME cache, which the sandbox denies.
+ExecStart=/usr/bin/node dist/main.js
 Restart=on-failure
 RestartSec=3
 

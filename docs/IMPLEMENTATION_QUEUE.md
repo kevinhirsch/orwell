@@ -2170,7 +2170,19 @@ PR per item).
 > no prior request; smoke fails if the FE can't reach the engine or a turn can't complete. Read
 > `docs/features/0030`, `0035`, `0031` first. Open a PR.
 
-### B72 — deploy hardening & operability: drop root, backup/DR, dir split, hygiene  ·  Claude Code (deploy/systemd + docs)  ·  **R-2 · MAJOR · ops A5 + A8 + A9 + A3 + A10**
+### B72 — deploy hardening & operability: drop root, backup/DR, dir split, hygiene  ·  Claude Code (deploy/systemd + docs)  ·  **R-2 · MAJOR · ops A5 + A8 + A9 + A3 + A10 · ✅ DONE 2026-06-10**
+
+> **Built to green.** (A5) both units run as a dedicated `orwell` system user (installer creates + chowns) with
+> `NoNewPrivileges` / `ProtectSystem=strict` / `ProtectHome` / `PrivateTmp` and `ReadWritePaths` scoped to the two
+> data dirs; the engine unit runs `node dist/main.js` directly (npm wants a $HOME cache the sandbox denies).
+> (A8) `orwell-backup.sh` / `orwell-restore.sh` cover BOTH state dirs (engine `data/` + FE `frontend/data/`);
+> `orwell-ready.sh` = readiness, not liveness (engine + FE + an ONLINE model via `/api/models`); INSTALL.md
+> documents the real two-dir layout. (A3) the installer writes the names the FE actually consumes (`LLM_HOSTS`
+> for an OpenAI-compatible endpoint like Ollama's, `OPENAI_API_KEY`) — or honestly says "configure in Settings";
+> the never-read `ANTHROPIC_API_KEY` write is gone. (A9) saves live in `data/saves/` distinct from `data/.env`
+> (`ORWELL_DATA_DIR=${DATA_DIR}/saves` on new installs); the factory-reset's stale comment is fixed and all three
+> layout generations scrub correctly. (A10) `EnvironmentFile=-` (optional), the `Wants=` degraded mode documented
+> in the unit, REF/rollback documented in INSTALL.md.
 
 > In `kevinhirsch/orwell` `deploy/` + `docs/INSTALL.md`, make the box operable and least-privilege:
 > 1. **A5 — drop root + systemd hardening.** Neither unit sets `User=`; both run as **root** with an
