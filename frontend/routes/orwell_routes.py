@@ -20,6 +20,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from core.middleware import require_admin
 from src import orwell_engine
 
 logger = logging.getLogger(__name__)
@@ -213,6 +214,13 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest, request: Request):
+        # Audit E70 — ADMIN-GATED, coherent with the one-door restart design (E1/D1): players
+        # start and restart seasons through the chat tools (the 0050 casting interview →
+        # createCharacter; a confirmed restart routes through the engine's one sanctioned reset
+        # door). This route bypasses the interview (a soul-shallow character one curl away), so it
+        # survives only as a debug/ops door: the deploy smoke and the responsive-matrix harness use
+        # it (both run with AUTH_ENABLED=false, which require_admin honors). Raises 403 otherwise.
+        require_admin(request)
         if not body.playerName.strip():
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         user = _current_user(request)
