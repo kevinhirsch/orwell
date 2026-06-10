@@ -1,5 +1,4 @@
 import { composeRuntime } from "./composition/runtime";
-import { FileSaveStore } from "./adapters/engine/FileSaveStore";
 import { startHttpMcp } from "./adapters/mcp/HttpMcpServer";
 
 /**
@@ -28,8 +27,7 @@ const port = parsePort(
 // house lives between the player's own turns (one bounded off-screen tick per turn) and does NOT
 // exist while the player is away. The wall-clock watcher (0031/0035) is an opt-in operator knob
 // (ORWELL_WATCHER_* env); data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
-const saveStore = new FileSaveStore();
-const runtime = composeRuntime({ saveStore });
+const runtime = composeRuntime({ durable: true });
 
 // Network-edge guardrails (audit E1 / B34). Default to a trusted-loopback single-tenant deploy;
 // any of these can be turned on for an exposed / multi-user deployment:
@@ -41,8 +39,7 @@ const token = process.env["ORWELL_ENGINE_TOKEN"] || process.env["BBAI_ENGINE_TOK
 const requireUser = /^(1|true|yes|on)$/i.test(process.env["ORWELL_ENGINE_MULTIUSER"] ?? "");
 // A user is "known" once they have a live sandbox or a durable save — so an anonymous caller can't
 // spray ids to mint unlimited sandboxes (only createCharacter may start a fresh one).
-const knownUser = (user: string): boolean =>
-  runtime.registry.usernames().includes(user) || saveStore.hasSave(user);
+const knownUser = (user: string): boolean => runtime.knownUser(user);
 
 runtime.start();
 startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, requireUser, knownUser }, host);

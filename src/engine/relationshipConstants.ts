@@ -58,7 +58,11 @@ export interface RelationshipConstants {
   /** Bounded per-moment variance band (jitter ∈ [1−J/2, 1+J/2]); the temperature seam (0006). */
   TEMPERATURE_JITTER: number;
   dispositionFactors: Record<RelationshipDisposition, DispositionProfile>;
-  thresholds: { alliance: number; ally: number; enemy: number; knowledge: number };
+  thresholds: {
+    alliance: number; ally: number; enemy: number; knowledge: number;
+    /** An NPC veto holder saves a nominee they trust above this (B59 — one number, three call sites). */
+    vetoSave: number;
+  };
   /**
    * Move-in first impressions (B55/audit C5+C6): day-one reads start NEAR BASELINE (not uniform
    * noise), the threat read leans on the PUBLIC archetype's competitive menace, and confidence
@@ -92,7 +96,7 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
     bond: { adverseScale: 0.7, bondScale: 1.2, decayScale: 1.7 }, // loyalist / social — forgiving
     neutral: { adverseScale: 1.0, bondScale: 1.0, decayScale: 1.0 },
   },
-  thresholds: { alliance: 0.5, ally: 0.35, enemy: 0.3, knowledge: 0.3 },
+  thresholds: { alliance: 0.5, ally: 0.35, enemy: 0.3, knowledge: 0.3, vetoSave: 0.6 },
   MOVE_IN: { confidence: 0.15, spread: 0.15, threatWeight: 0.35 },
 };
 

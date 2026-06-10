@@ -9,6 +9,7 @@ import { PLAYER } from "../../domain/ids";
 import { resolveCompetition, CompetitionIntents } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
+import { foldHiddenImpact } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import type { Occupancy } from "../../domain/house";
 
@@ -100,10 +101,9 @@ export class EngineCommandsAdapter implements EngineCommands {
     }
     // Consequence (0023): the initiator's action moves how the OTHERS feel about them — a real,
     // recorded, HIDDEN shift (the engine owns the magnitude; the player never sees the numbers).
-    // Bounded per call (B39) so a single interaction can't flood the relationship layer.
+    // ONE fold implementation (B59): shared with the 0023 ConsequenceEngine; bounded per call (B39).
     if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
-      const others = (req.toward ?? witnessSet.filter((w) => w !== req.initiator)).slice(0, MAX_FOLDS_PER_INTERACTION);
-      for (const o of others) this.rel.applyDirected(o, req.initiator, req.kind as InteractionType, this.rng);
+      foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType, req.toward, MAX_FOLDS_PER_INTERACTION);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };

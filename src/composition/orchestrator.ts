@@ -58,9 +58,10 @@ export interface AdvanceResult {
 
 export interface OrchestratorConfig {
   seed?: number;
+  /** Off-screen scenes per tick (B59 — finally a REAL knob; previously hard-coded in the apply step). */
   offscreenInteractions?: number;
   /** Test seam: override the state-mutating step (off-screen + day). Default = the real one. */
-  apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number) => number;
+  apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions?: number) => number;
   /**
    * Pure turn-driven mode (the watcher is disabled, `tickEveryMs:0`): the house can't live between
    * wakes, so every player turn fires ONE bounded off-screen tick (B41/audit D4/M6). Default false.
@@ -93,7 +94,7 @@ export class Orchestrator {
     cfg: OrchestratorConfig = {},
   ) {
     this.seed = cfg.seed ?? 1;
-    this.offscreenInteractions = cfg.offscreenInteractions ?? 2;
+    this.offscreenInteractions = cfg.offscreenInteractions ?? 3; // matches the long-standing live cadence
     this.applyFn = cfg.apply ?? defaultApply;
     this.turnDriven = cfg.turnDriven ?? false;
   }
@@ -148,7 +149,7 @@ export class Orchestrator {
 
     let produced = 0;
     if (trigger !== "audit") {
-      produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now());
+      produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now(), this.offscreenInteractions);
     }
 
     const candidate = this.registry.snapshot(user);
@@ -296,7 +297,7 @@ export class Orchestrator {
 }
 
 /** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
-function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number): number {
+function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions = 3): number {
   const core = sandbox.session.snapshot();
   // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment they
   // go (no more scheming/confessing weeks after eviction). A real house ⇒ only the LIVING NPCs; with no
@@ -317,7 +318,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
   const scenes = ids.length >= 2
     ? richOffscreenStretch({
-        events: sandbox.engine.events, rng, npcs: ids, interactions: 3,
+        events: sandbox.engine.events, rng, npcs: ids, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
