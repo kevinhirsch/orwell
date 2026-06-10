@@ -186,6 +186,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
     "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
     "they want to watch, but they hold no power and cast no vote. Do not invent a path back in.",
+  "re-entry":
+    "MOMENT — Re-entry. The player has RETURNED to a season in progress (a new session; the chat may " +
+    "be empty — the STORE remembers, the chat does not). Open with a fresh in-fiction morning scene in " +
+    "the house, grounded in the CURRENT week/phase and the recorded events below — never an " +
+    "out-of-fiction recap dump, never an apology about absence, never invented happenings. Pick up the " +
+    "live thread (a pending ceremony, a simmering rivalry) and put the player back IN the room.",
   "post-season":
     "MOMENT — The season is OVER: a winner is crowned and there is no game left to spoil. Host the " +
     "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
@@ -271,7 +277,20 @@ export function renderGameContext(view: GameStateView): string {
   ].join("\n");
 }
 
+/**
+ * The story-so-far facts for a server-initiated lifecycle beat (B62/audit J1+J7+J2): RECORDED,
+ * WITNESSED events only — the store recalled, never the chat remembered (ADR 0003). The caller
+ * (the engine adapter) selects the events; this only renders them as facts the model voices.
+ */
+export function renderStoryFacts(recentWitnessed: ReadonlyArray<{ content: string }>, finale?: { winner: string; week: number } | null): string {
+  const lines: string[] = ["THE RECORD (witnessed events — voice these, never invent others):"];
+  for (const e of recentWitnessed) lines.push(`  - ${e.content}`);
+  if (recentWitnessed.length === 0) lines.push("  - (the season has just begun — nothing has happened yet)");
+  if (finale) lines.push(`THE RESULT: ${finale.winner} won the season in week ${finale.week}.`);
+  return lines.join("\n");
+}
+
 /** Compose the full system prompt to inject for a moment: base persona + beat fragment + Vault-free context. */
-export function buildSystemPrompt(moment: string, view: GameStateView): string {
-  return [BASE_GAME_MASTER_PROMPT, momentFragment(moment), renderGameContext(view)].join("\n\n");
+export function buildSystemPrompt(moment: string, view: GameStateView, storyFacts?: string): string {
+  return [BASE_GAME_MASTER_PROMPT, momentFragment(moment), renderGameContext(view), ...(storyFacts ? [storyFacts] : [])].join("\n\n");
 }
