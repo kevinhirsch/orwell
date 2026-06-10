@@ -2214,6 +2214,14 @@ import { createStreamRenderer } from './streamingRenderer.js';
                   // next to the diff, so hide it when we have a diff to show.
                   const _beatOut = _orwellToolBeats[json.tool];
                   if (_beatOut) { cmd = ''; outHtml = ''; }  // game beats: label + status only, no raw JSON
+                  // C20: surface the engine's pending decision (or clear it) to the confirm
+                  // guardrail. Vault-free AdvanceView only; fail-open on any parse trouble.
+                  if (json.tool === 'advanceGame' || json.tool === 'submitDecision') {
+                    try {
+                      const _adv = JSON.parse(json.output || '{}');
+                      window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _adv && _adv.pending ? _adv.pending : null } }));
+                    } catch (_) {}
+                  }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
                   // Preserve the user's .open choice across the innerHTML
                   // rewrite \u2014 otherwise expanding a running tool collapses
