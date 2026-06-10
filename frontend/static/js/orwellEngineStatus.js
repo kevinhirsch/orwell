@@ -1,9 +1,11 @@
 // Orwell engine-status banner — VISIBLE error reporting when the game engine has a problem.
 // The in-character "live feeds are down" chat line keeps players in the show, but the operator (and
 // a confused player) needs an honest, out-of-character signal that something is actually broken. This
-// is that signal: a small fixed banner that appears ONLY when /api/orwell/health reports the engine
-// unreachable, naming the concrete reason (connection refused / timeout / wrong URL) so it's
-// actionable. Self-contained, fail-open (if its own fetch fails, it simply shows the warning), no deps.
+// is that signal: a small fixed banner driven by /api/orwell/health with two severities:
+//   • RED   — the engine is unreachable (connection refused / timeout / wrong URL);
+//   • AMBER — the engine is up but a recent tool call FAILED (`lastError`: a technical problem like a
+//     corrupt-save 500 or a failing action), naming the tool + reason so it's actionable.
+// Self-contained, fail-open (if its own fetch fails, it shows the warning), no deps.
 (function () {
   "use strict";
 
@@ -15,6 +17,7 @@
       : fn();
 
   let timer = null;
+  let dismissedKey = null; // the exact message the user dismissed — reshow only if it changes
 
   function ensureBanner() {
     let el = document.getElementById(ID);
@@ -26,10 +29,12 @@
       <style>
         #${ID} {
           position: fixed; top: 0; left: 0; right: 0; z-index: 11000; display: none;
-          background: #7f1d1d; color: #fff; font-family: 'Fira Code', ui-monospace, monospace;
+          color: #fff; font-family: 'Fira Code', ui-monospace, monospace;
           font-size: .76rem; line-height: 1.4; padding: .5rem .8rem; text-align: center;
           box-shadow: 0 2px 10px rgba(0,0,0,.4);
         }
+        #${ID}.oes-down { background: #7f1d1d; }
+        #${ID}.oes-degraded { background: #92400e; }
         #${ID} b { letter-spacing: .03em; }
         #${ID} .oes-reason { opacity: .85; }
         #${ID} .oes-x {
@@ -38,21 +43,27 @@
         }
         #${ID} .oes-x:hover { opacity: 1; }
       </style>
-      <span><b>⚠ Big Brother engine unavailable.</b> <span class="oes-reason"></span></span>
+      <span><b class="oes-title"></b> <span class="oes-reason"></span></span>
       <button type="button" class="oes-x" title="Dismiss" aria-label="Dismiss">×</button>`;
     document.body.appendChild(el);
-    el.querySelector(".oes-x").addEventListener("click", () => { el.style.display = "none"; });
+    el.querySelector(".oes-x").addEventListener("click", () => {
+      dismissedKey = el.querySelector(".oes-reason").textContent || "";
+      el.style.display = "none";
+    });
     return el;
   }
 
-  function show(reason, url) {
+  function show(kind, title, reason) {
     const el = ensureBanner();
-    const detail = [reason, url ? `(${url})` : ""].filter(Boolean).join(" ");
-    el.querySelector(".oes-reason").textContent =
-      (detail || "The game engine isn't responding.") + " The show can't load until it's back.";
+    if (dismissedKey && dismissedKey === reason) return; // already waved off this exact problem
+    el.classList.toggle("oes-down", kind === "down");
+    el.classList.toggle("oes-degraded", kind === "degraded");
+    el.querySelector(".oes-title").textContent = title;
+    el.querySelector(".oes-reason").textContent = reason;
     el.style.display = "block";
   }
   function hide() {
+    dismissedKey = null; // healthy again — a future problem should always reshow
     const el = document.getElementById(ID);
     if (el) el.style.display = "none";
   }
@@ -60,13 +71,21 @@
   async function refresh() {
     try {
       const r = await fetch("/api/orwell/health", { credentials: "same-origin" });
-      if (!r.ok) { show("The app couldn't reach the game service.", ""); return; }
+      if (!r.ok) { show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service. The show can't load until it's back."); return; }
       const d = await r.json();
-      if (d && d.engine) hide();
-      else show(d && d.error ? "Reason: " + d.error : "", d && d.engineUrl);
+      if (!d || !d.engine) {
+        const reason = (d && d.error ? "Reason: " + d.error + " " : "") + (d && d.engineUrl ? "(" + d.engineUrl + ") " : "");
+        show("down", "⚠ Big Brother engine unavailable.", reason + "The show can't load until it's back.");
+      } else if (d.lastError && d.lastError.error) {
+        // Engine reachable, but a recent call failed — a technical problem worth reporting honestly.
+        const le = d.lastError;
+        show("degraded", "⚠ Big Brother engine reported a problem.", (le.tool ? le.tool + ": " : "") + le.error);
+      } else {
+        hide();
+      }
     } catch (_) {
       // The FE route itself failed — surface the most likely truth rather than going silent.
-      show("The app couldn't reach the game service.", "");
+      show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service.");
     }
   }
 

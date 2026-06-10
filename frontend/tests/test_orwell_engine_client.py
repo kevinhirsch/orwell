@@ -52,6 +52,13 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+@pytest.fixture(autouse=True)
+def _reset_last_error():
+    orwell_engine._clear_error()
+    yield
+    orwell_engine._clear_error()
+
+
 # --- "no active game" is a pre-game STATE, not an outage --------------------------------
 
 def test_get_game_state_maps_no_active_game_404_to_started_false(monkeypatch):
@@ -99,3 +106,59 @@ def test_health_detail_reports_the_concrete_reason_when_down(monkeypatch):
     assert d["ok"] is False
     assert "ConnectError" in d["error"] and "connection attempts failed" in d["error"]
     assert _run(orwell_engine.engine_health()) is False  # bool wrapper agrees
+
+
+# --- last-error tracking: "engine up but erroring" is reported, normal states are not ----
+
+def test_failed_tool_call_records_the_last_error_and_success_clears_it(monkeypatch):
+    _patch(monkeypatch, resp=_resp(500, payload={"error": "internal error"}))
+    with pytest.raises(orwell_engine.EngineToolError):
+        _run(orwell_engine._call("advanceGame", {}, user="x"))
+    le = orwell_engine.last_engine_error()
+    assert le and le["tool"] == "advanceGame" and le["kind"] == "tool-error"
+    assert "internal error" in le["error"]
+
+    _patch(monkeypatch, resp=_resp(200, payload={"result": {"ok": True}}))
+    _run(orwell_engine._call("gameStatus", {}, user="x"))
+    assert orwell_engine.last_engine_error() is None  # healthy again
+
+
+def test_transport_failure_records_kind_unreachable(monkeypatch):
+    _patch(monkeypatch, exc=httpx.ConnectError("refused"))
+    with pytest.raises(httpx.ConnectError):
+        _run(orwell_engine._call("gameStatus", {}, user="x"))
+    le = orwell_engine.last_engine_error()
+    assert le and le["kind"] == "unreachable" and "ConnectError" in le["error"]
+
+
+def test_the_pre_game_no_active_game_refusal_is_never_recorded_as_an_error(monkeypatch):
+    _patch(monkeypatch, resp=_resp(404, payload={"error": "no active game for this user"}))
+    assert _run(orwell_engine.get_game_state(user="fresh")) == {"started": False}
+    assert orwell_engine.last_engine_error() is None  # a normal state, not a technical problem
+
+
+def test_a_recorded_error_expires_after_the_ttl(monkeypatch):
+    _patch(monkeypatch, resp=_resp(500, payload={"error": "boom"}))
+    with pytest.raises(orwell_engine.EngineToolError):
+        _run(orwell_engine._call("advanceGame", {}, user="x"))
+    assert orwell_engine.last_engine_error() is not None
+    orwell_engine._LAST_ERROR["ts"] -= orwell_engine._LAST_ERROR_TTL_S + 1  # age it out
+    assert orwell_engine.last_engine_error() is None
+
+
+def test_health_detail_carries_a_recent_tool_error_while_the_engine_is_up(monkeypatch):
+    orwell_engine._record_error("advanceGame", "tool-error", "internal error (HTTP 500)")
+    _patch(monkeypatch, resp=_resp(200, payload={"ok": True}))
+    d = _run(orwell_engine.engine_health_detail())
+    assert d["ok"] is True  # the process answers /health …
+    assert d["lastError"]["tool"] == "advanceGame"  # … but the recent failure is reported
+    assert "internal error" in d["lastError"]["error"]
+    assert d["lastError"]["ageSeconds"] >= 0
+
+
+def test_admin_calls_share_the_same_error_semantics(monkeypatch):
+    _patch(monkeypatch, resp=_resp(400, payload={"error": "bad mechanic"}))
+    with pytest.raises(orwell_engine.EngineToolError):
+        _run(orwell_engine.inspect_non_vault_state(user="x"))
+    le = orwell_engine.last_engine_error()
+    assert le and le["tool"] == "inspectNonVaultState" and le["kind"] == "tool-error"

@@ -80,3 +80,16 @@ def test_health_reports_engine_up(client, monkeypatch):
     monkeypatch.setattr(orwell_engine, "engine_health_detail", fake_detail)
     r = client.get("/api/orwell/health")
     assert r.json()["engine"] is True and r.json().get("error") is None
+
+
+def test_health_reports_a_recent_tool_error_while_up(client, monkeypatch):
+    # Engine process is up, but a recent call failed — the banner's amber "degraded" state.
+    async def fake_detail():
+        return {"ok": True, "engineUrl": "http://127.0.0.1:8765",
+                "lastError": {"tool": "advanceGame", "kind": "tool-error",
+                              "error": "internal error (HTTP 500)", "ageSeconds": 4}}
+    monkeypatch.setattr(orwell_engine, "engine_health_detail", fake_detail)
+    body = client.get("/api/orwell/health").json()
+    assert body["engine"] is True
+    assert body["lastError"]["tool"] == "advanceGame"
+    assert "internal error" in body["lastError"]["error"]
