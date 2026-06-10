@@ -4710,6 +4710,51 @@ async def do_configure_game(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_social_initiatives(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.social_initiatives(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_diary_room(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    entry = (args.get("entry") or content or "").strip()
+    if not entry:
+        return {"error": "entry is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.diary_room(entry, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_make_deal(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    with_id = (args.get("with") or args.get("with_id") or "").strip()
+    kind = (args.get("kind") or "").strip()
+    terms = (args.get("terms") or "").strip()
+    if kind not in {"safety", "vote", "final-two", "target-other"}:
+        return {"error": "kind must be one of: safety, vote, final-two, target-other", "exit_code": 1}
+    if not with_id or not terms:
+        return {"error": "with (houseguest id) and terms are required", "exit_code": 1}
+    try:
+        res = await orwell_engine.make_deal(with_id, kind, terms, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

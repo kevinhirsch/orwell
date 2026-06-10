@@ -50,7 +50,7 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    house roster; gameStatus is the ceremony-level status: HOH, nominees, veto). Check at the",
   "    start of a turn and before narrating a beat.",
   "  • getVisibleStateFor — the player's witnessed events and what they know for certain.",
-  "  • runCompetition / resolveCompetition — resolve a competition. The engine picks the winner from",
+  "  • runCompetition — resolve a competition. The engine picks the winner from",
   "    the houseguests' real abilities; you announce ONLY the winner. Never choose the winner yourself.",
   "  • advanceGame — advance the weekly loop by one beat. NPC beats resolve automatically; the loop",
   "    STOPS and hands you the player's pending decision (with its legal options) when it's their turn.",

@@ -164,6 +164,11 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
+async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None) -> dict:
+    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it."""
+    return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
+
+
 async def finale_view(user: str | None = None):
     """The Vault-free in-progress finale projection (0037 §8.1): finalists, the current stage, and the
     votes revealed SO FAR — or ``None`` when no finale is staging. Never a lean/tally/manner or the

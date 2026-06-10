@@ -53,7 +53,9 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
  * manifest in the base game-master prompt (0018): `getMomentPrompt` supplies the
  * prompt itself, `endOfSessionSummary` just confirms a save exists.
  */
-const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView"]);
+// resolveCompetition stays callable but un-advertised: runCompetition is the single
+// advertised competition lever since B37 (one outcome authority); the manifest names one.
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "resolveCompetition", "finaleView"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

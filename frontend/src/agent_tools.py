@@ -60,6 +60,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # Big Brother game engine (Vault-free): the model drives the game by
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
+             "socialInitiatives", "diaryRoom", "makeDeal",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
@@ -88,6 +89,9 @@ GAME_TOOL_KEEP = frozenset({
     # Big Brother game engine (Vault-free).
     "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
     "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
+    # C13: the three prompt-advertised levers that were missing from the FE surface —
+    # NPC approaches, the player's recorded confessional, and first-class deals (0039).
+    "socialInitiatives", "diaryRoom", "makeDeal",
     "renderScene", "endOfSessionSummary",
     # Weekly loop (0011).
     "createCharacter", "advanceGame", "submitDecision",
