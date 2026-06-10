@@ -3,7 +3,8 @@
 Dispatch these to implementer agents **in order** (respecting `depends on`). Items on different
 tracks can run **in parallel** once their deps are met.
 
-> 🎯 **THE QUEUE IS DRAINED (2026-06-10).** Every item in this file — through the product-audit
+> 🎯 **CURRENT DISPATCH POINT: the [UI & runtime audit batch (D1–D11)](#ui--runtime-audit-batch-d1d11--2026-06-10-round-4--open) at the bottom — everything before it is ✅ DONE.**
+> *(Previous note, kept for the record:)* **The queue was drained (2026-06-10).** Every item in this file — through the product-audit
 > batch (B34–B60 / C12–C18), the front-end & experience batch (B61–B66 / C19–C28), the
 > operations/security/test-integrity batch (B67–B72 / C29–C33), the casting interview (B73), and
 > the pre-audit feature drafts (0042/B31 · 0043/B32 · 0044/B33) — is **✅ DONE**, each marked with
@@ -2467,3 +2468,56 @@ PR per item).
 > interview." — never auto-send); `updateCasting` wired through schemas/agent allowlists/executor with
 > the C13-style enum drift tests now covering both casting tools. 4 new BDD scenarios (11 total) +
 > 8 new unit (20) + FE pytest green.
+
+## UI & runtime audit batch (D1–D11) · 2026-06-10 (round 4) — OPEN
+
+> Source: `docs/audits/2026-06-10-ui-runtime-audit.md` (full UI runtime audit: tool→display map,
+> 121-claim verification, live Playwright across mobile/tablet/desktop and staged game states).
+> Wave order: D1→D4 are CRITICAL (D1 first — it unblocks re-measuring D4); D5–D10 MAJOR; D11 MINOR.
+
+### D1 — one sanctioned season-restart door (the headline)  ·  CRIT  ·  engine + FE route
+
+> The FE's `/api/orwell/new-game` restarts via player-channel `createCharacter+confirmRestart`;
+> the orchestrator's non-degradation baseline correctly reads the fresh season as catastrophic
+> loss ⇒ every post-restart player-turn commit faults and is never persisted; on engine restart
+> the finished season resurrects (verified live: after ~60 restarts the durable save still held
+> season 1). Route the FE reset through the admin reset delegate (`registry.resetUser`, where
+> `registry.ts:190` says B36/C12 belong) — or make `confirmRestart` reset the orchestrator
+> baseline + saves identically; a fault on the restart commit must fail the request (4xx), never
+> 200-then-rollback. **Add the missing test: play season 1 → FE-style restart → season 2's first
+> save survives an engine restart.** Also fixes the `recordInteraction` 500s and the new-game
+> state races observed on the faulted sandbox.
+
+### D2 — floating-panel placement: nothing may cover the composer or another panel's controls  ·  CRIT  ·  FE
+
+> At 390×844 the presence strip floats over the composer (play impossible on a phone); post-season
+> the retrospective panel does the same at mobile AND tablet; the status HUD covers the social
+> HUD's Diary button at ALL viewports (the DR modal cannot be opened by pointer anywhere). Also
+> fix the `.hidden modal-minimized` state that still intercepts pointer events. Add the harness's
+> overlap/interception checks to `browser_smoke.py`.
+
+### D3 — decision card survives reload  ·  CRIT  ·  FE
+
+> `orwellDecision.js` mounts only on the live agent-turn `orwell:pending` event; reloading
+> mid-decision leaves no card and no signal a decision is owed. On boot, read the pending from
+> `/api/orwell/state` and dispatch the same event.
+
+### D4 — player-survival calibration (the player has never reached the jury)  ·  CRIT  ·  engine
+
+> 62/62 seeded seasons end with the player out pre-jury (passive driver; self-saving veto answers
+> included; the one fault-free season matches). Move-in priors + threat-primary noms + ever-
+> deepening NPC↔NPC bonds make the player the standing consensus target. Investigate, calibrate,
+> and add a property gate (passive player reaches jury in ≥X% of seeds); re-measure the social
+> (recordInteraction-folding) path after D1.
+
+### D5 — diegetic labels for updateCasting/whereabouts/seasonRecap/seasonRetrospective/npcVoice  ·  MAJOR  ·  FE + test
+
+> The five tools render raw camelCase names in the transcript (`_orwellToolBeats` gaps); extend
+> the C13 drift test to require a display label (or INFRA exemption) per lever.
+
+### D6 — game build must not load KaTeX/Mermaid from a CDN  ·  MAJOR  ·  FE
+### D7 — in-game holding copy game-framed; hide the Agent/Chat toggle on game turns  ·  MAJOR  ·  FE
+### D8 — entropy default seed (same name must not replay the identical season; explicit seeds stay for tests)  ·  MAJOR  ·  engine
+### D9 — portraits on roster/status/decision surfaces (C21/V2 as stated)  ·  MAJOR  ·  FE
+### D10 — malformed tool args ⇒ 400 refusal, never 500 (schema-validate at the HTTP boundary)  ·  MAJOR  ·  engine
+### D11 — HUD chrome tap-target floor (–/× buttons); state cache-bust on new-game  ·  MINOR  ·  FE
