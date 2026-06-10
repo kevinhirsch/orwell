@@ -35,6 +35,9 @@ class NewGameRequest(BaseModel):
     archetype: Optional[str] = None
     strategyStyle: Optional[str] = None
     seed: Optional[int] = None
+    # Required to restart over a STARTED game (C12 / audit A2): without it the route 409s and
+    # the engine-side B36 guard would no-op anyway. UI must ask the player explicitly.
+    confirm: bool = False
 
 
 def setup_orwell_routes() -> APIRouter:
@@ -107,13 +110,26 @@ def setup_orwell_routes() -> APIRouter:
     async def orwell_new_game(body: NewGameRequest, request: Request):
         if not body.playerName.strip():
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
+        user = _current_user(request)
         try:
+            # Guard the season (C12, mirrors the engine's B36 no-op guard with an HONEST signal):
+            # a started game is never silently replaced — the caller must pass confirm=true.
+            state = await orwell_engine.get_game_state(user=user)
+            if isinstance(state, dict) and state.get("started") and not body.confirm:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "A game is already in progress. Pass confirm=true to end this season and start a new one.",
+                        "started": True,
+                    },
+                )
             return await orwell_engine.create_character(
                 body.playerName.strip(),
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
                 seed=body.seed,
-                user=_current_user(request),
+                confirm_restart=body.confirm,
+                user=user,
             )
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")

@@ -23,6 +23,68 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+# Users whose sandbox had a STARTED game this process-run. Lets a turn fail CLOSED for game
+# content when the engine goes down mid-season (audit F2 / queue C12): the in-character
+# transcript is still in context, so an unframed turn would keep "narrating" a season the
+# engine never decided. Process-local on purpose — cheap, no schema change; after a front-end
+# restart the first successful framing repopulates it.
+_GAME_WAS_ACTIVE: set = set()
+
+FEED_DOWN_PROMPT = (
+    "OUT OF CHARACTER — THE LIVE FEED IS DOWN. A Big Brother game is in progress for this "
+    "player, but the game engine is unreachable, so there is NO ground truth available. Do NOT "
+    "continue the game story, narrate any scene, speak as any houseguest, or invent any game "
+    "event, competition result, vote, or outcome. Briefly tell the player, in a production "
+    "voice, that the live feeds are down and the show will resume shortly. You may help with "
+    "anything unrelated to the game."
+)
+
+
+async def apply_game_framing(preface: list, user, incognito: bool = False):
+    """Big Brother game framing for one turn. Vault-free; mutates `preface` in place.
+
+    Returns (engine_available, game_active, feed_down):
+      engine_available — engine answered get_game_state (game or no game); triggers game-tool
+        pinning so the model can always call createCharacter / getGameState.
+      game_active — a game is started; the per-moment system prompt was prepended so the turn
+        speaks in-character, and the agent route auto-escalates.
+      feed_down — this user HAD a started game but the engine is unreachable: the turn was
+        framed fail-CLOSED for game content (audit F2 / queue C12) instead of letting the model
+        narrate a season the engine never decided.
+    """
+    engine_available = False
+    game_active = False
+    feed_down = False
+    if incognito:
+        return engine_available, game_active, feed_down
+    _gkey = user or "__anon__"
+    try:
+        from src import orwell_engine
+        game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
+        if isinstance(game_state, dict):
+            engine_available = True  # engine is up; pin game tools regardless of game state
+            if game_state.get("started"):
+                game_active = True
+                _GAME_WAS_ACTIVE.add(_gkey)
+                mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
+                gm_prompt = (mp or {}).get("systemPrompt")
+                if gm_prompt:
+                    if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
+                        preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
+                    else:
+                        preface.insert(0, {"role": "system", "content": gm_prompt})
+            else:
+                _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+    except Exception as e:
+        logger.warning("[orwell] game framing skipped: %s", e)
+        if _gkey in _GAME_WAS_ACTIVE:
+            # Engine down MID-SEASON: fail CLOSED for game content (audit F2/C12). The whole
+            # transcript is in-character, so without this the model becomes a confident impostor
+            # narrating a season the engine never decided — the named #1 failure state.
+            feed_down = True
+            preface.insert(0, {"role": "system", "content": FEED_DOWN_PROMPT})
+    return engine_available, game_active, feed_down
+
 
 # ── Data containers ────────────────────────────────────────────────────── #
 
@@ -70,6 +132,9 @@ class ChatContext:
     # True when a Big Brother game is in progress (started=True). The agent route
     # uses it to inject the per-moment system prompt and auto-escalate to agent mode.
     game_active: bool = False
+    # True when this user HAD a started game but the engine is now unreachable: the turn is
+    # framed fail-CLOSED for game content (no narration from stale context — audit F2/C12).
+    feed_down: bool = False
 
 
 # ── Helpers ────────────────────────────────────────────────────────────── #
@@ -542,31 +607,9 @@ async def build_chat_context(
         _preface_kwargs["use_rag"] = use_rag_val
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
-    # Big Brother game framing. Best-effort and Vault-free — any failure leaves normal
-    # chat untouched. Two flags come out:
-    #   engine_available — engine answered get_game_state (game or no game); triggers
-    #     game-tool pinning so the model can always call createCharacter / getGameState.
-    #   game_active — a game is actually started; triggers the per-moment system-prompt
-    #     injection and agent auto-escalation so every turn speaks in-character.
-    engine_available = False
-    game_active = False
-    if not incognito:
-        try:
-            from src import orwell_engine
-            game_state = await orwell_engine.get_game_state(user=user)  # this user's sandbox (0021)
-            if isinstance(game_state, dict):
-                engine_available = True  # engine is up; pin game tools regardless of game state
-                if game_state.get("started"):
-                    game_active = True
-                    mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
-                    gm_prompt = (mp or {}).get("systemPrompt")
-                    if gm_prompt:
-                        if preface and isinstance(preface[0], dict) and preface[0].get("role") == "system":
-                            preface[0]["content"] = gm_prompt + "\n\n" + preface[0]["content"]
-                        else:
-                            preface.insert(0, {"role": "system", "content": gm_prompt})
-        except Exception as e:  # engine down → plain chat, no disruption
-            logger.warning("[orwell] game framing skipped (LLM will be out-of-character): %s", e)
+    # Big Brother game framing (see apply_game_framing): in-character prompt when a game is
+    # live; fail-CLOSED feed-down framing when the engine drops mid-season (C12).
+    engine_available, game_active, feed_down = await apply_game_framing(preface, user, incognito)
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
@@ -609,6 +652,7 @@ async def build_chat_context(
         auto_opened_docs=auto_opened_docs,
         engine_available=engine_available,
         game_active=game_active,
+        feed_down=feed_down,
     )
 
 
