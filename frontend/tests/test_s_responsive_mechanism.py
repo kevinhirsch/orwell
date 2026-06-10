@@ -21,9 +21,8 @@ CONTAINER_TOKENS = {360, 620}
 # finding lands; the gate then enforces the token. Never add to this list without
 # a finding ID.
 MEDIA_EXCEPTIONS = {
-    # S3 / PR-2: the settings @media-600 layout copy is DELETED by the settings
-    # repair (single @container switch). Two occurrences until then.
-    600: ("S3: settings @media-600 duplicate — removed by the settings repair PR", 2),
+    # (empty — the settings repair removed the @media-600 duplicates; add ONLY
+    # with a finding ID and a count cap, and remove when the finding lands.)
 }
 CONTAINER_EXCEPTIONS = {
     # The chatbar micro-tier: a second collapse stage below the 360 tier for the

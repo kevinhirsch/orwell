@@ -49,8 +49,6 @@ FS_FLOOR_PX = 10.5  # the --fs-2xs floor (~11px) with sub-pixel slack
 # finding-ID → substring the failure line must contain. Remove an entry when its
 # finding lands; the failure then breaks the gate for real.
 XFAIL = {
-    "S1": "crowding:settings",          # settings px micro-type until the settings-repair PR
-    "S9": "touch:",                     # sub-36px controls beyond the floor rule's reach (swatches, slash rows)
     "R2": "overlap:orwell-presence",    # presence strip over the composer until the chrome PR's slots
     "R2b": "overlap:orwell-retro",      # retrospective over the composer (post-season) — chrome PR
     "R4": "overlap:orwell-status",      # status HUD over the social HUD until E64 moves it to the sidebar
