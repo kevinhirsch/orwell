@@ -277,9 +277,9 @@ describe("0037 — live finale sub-loop", () => {
       else advance(s, ctx, rng);
     }
     expect(statementStops).toBe(1);              // the player is a finalist → exactly one statement
-    // The player answers every juror question addressed to them (half the panel, by the alternating script).
-    const addressedToPlayer = jury.filter((_, i) => i % 2 === 0).length;
-    expect(answerStops).toBe(addressedToPlayer);
+    // The player-finalist answers EVERY juror themselves: each juror questions both finalists (18-Q&A),
+    // so a player-finalist owes one answer to all nine jurors (audit A6 ruling).
+    expect(answerStops).toBe(jury.length);
   });
 
   it("refuses a finale answer with no legal appeal; the pending decision stands", () => {
@@ -339,30 +339,32 @@ describe("0037 — live finale sub-loop", () => {
     expect(shareForA({ blindsided: true })).toBeLessThan(shareForA({ respected: true }));
   });
 
-  it("a finalist earns finale sway only from jurors who questioned them — unanswered slots are neutral and symmetric (A6)", () => {
-    // 2 jurors, identical jury reads for both finalists ⇒ the lean cancels and the finale term alone
-    // decides. By the alternating script juror[0] questions finalist A (the player) and juror[1]
-    // questions finalist B; so A is UNANSWERED by juror[1] and B is UNANSWERED by juror[0]. With A6
-    // each unanswered slot scores NEUTRAL (not the engine's optimal bestAppeal), SYMMETRICALLY — the
-    // questioned finalist is favoured by their own appeal; the unquestioned one is neither helped nor hurt.
-    const edge = (): { trust: number; affinity: number; threat: number } => ({ trust: 0.5, affinity: 0.5, threat: 0.5 });
-    const runs = 400;
-    let aFromJ0 = 0, aFromJ1 = 0;
-    for (let seed = 1; seed <= runs; seed++) {
-      const { s, ctx, A, jury } = finalTwoState({ jurors: 2, edgeToA: edge, edgeToB: edge });
-      // The player answers its one juror with the strong on-type appeal (own-game scores 0.65 here).
-      const events = driveFinale(s, ctx, new SeededRandom(seed), { appeal: "own-game" });
-      const votedFor = (j: EntityId): EntityId | undefined =>
-        events.find((e) => e.beat === "finale-reveal" && e.participants[0] === j)?.participants[1];
-      if (votedFor(jury[0]!) === A) aFromJ0++;
-      if (votedFor(jury[1]!) === A) aFromJ1++;
+  it("the 18-Q&A finale leaves NO unanswered (finalist, juror) pair for the engine to fill (A6)", () => {
+    // Each juror questions BOTH finalists, so after the finale every (finalist, juror) appeal is on record —
+    // the player answered all nine themselves; the NPC answered all nine. There is no slot the engine
+    // back-fills optimally for one side (the asymmetry the old A6 fix chased vanishes at the root).
+    const { s, ctx, A, B, jury } = finalTwoState({ jurors: 9 });
+    driveFinale(s, ctx, new SeededRandom(1), { appeal: "own-game" });
+    for (const j of jury) {
+      expect(s.finale!.appeals[A]?.[j]).toBeDefined();
+      expect(s.finale!.appeals[B]?.[j]).toBeDefined();
     }
-    const shareJ0 = aFromJ0 / runs; // juror[0] questioned A ⇒ A's own-game (0.65) beats B's neutral (0.5)
-    const shareJ1 = aFromJ1 / runs; // juror[1] questioned B ⇒ A is unanswered (neutral) ⇒ B is favoured
-    expect(shareJ0).toBeGreaterThan(0.56); // A EARNED this juror's sway (before A6, B's free bestAppeal tied it ⇒ ~0.5)
-    expect(shareJ1).toBeLessThan(0.44);    // A got NO free optimal here — neutral, so B's own appeal wins
-    // Player and NPC are scored symmetrically: A's edge on the juror it answered mirrors B's on the juror B answered.
-    expect(Math.abs(shareJ0 - (1 - shareJ1))).toBeLessThan(0.12);
+  });
+
+  it("player and NPC finalists are scored symmetrically: identical reads + identical appeals ⇒ a coin flip (A6)", () => {
+    // With 18-Q&A there is no asked/unasked asymmetry. Give the player (A) and the NPC (B) identical jury
+    // edges and have the player answer with the same on-type appeal the NPC plays (own-game = bestAppeal
+    // here) → the finale is a coin flip across seeds; the engine favours neither finalist.
+    let aWins = 0;
+    const runs = 300;
+    for (let seed = 1; seed <= runs; seed++) {
+      const { s, ctx, A } = finalTwoState({ jurors: 9 }); // default edges are identical for A and B
+      driveFinale(s, ctx, new SeededRandom(seed), { appeal: "own-game" });
+      if (s.winner === A) aWins++;
+    }
+    const share = aWins / runs;
+    expect(share).toBeGreaterThan(0.4);
+    expect(share).toBeLessThan(0.6);
   });
 
   it("jury management dominates: a finalist with strong relationships wins the clear majority of runs", () => {
@@ -374,8 +376,8 @@ describe("0037 — live finale sub-loop", () => {
         edgeToA: () => ({ trust: 0.85, affinity: 0.85, threat: 0.1 }),
         edgeToB: () => ({ trust: 0.3, affinity: 0.3, threat: 0.45 }),
       });
-      // The NPC finalist B answers its jurors optimally (auto bestAppeal); the player A makes its
-      // WEAKEST legal appeal every answer (and unanswered slots are now neutral, A6) — jury management
+      // Every juror questions both finalists (18-Q&A): the NPC finalist B answers all nine optimally
+      // (auto bestAppeal); the player A makes its WEAKEST legal appeal to all nine — jury management
       // must still carry A.
       const events = driveFinale(s, ctx, new SeededRandom(seed), { appeal: "discredit-rival" });
       if (s.winner === A) aWins++;

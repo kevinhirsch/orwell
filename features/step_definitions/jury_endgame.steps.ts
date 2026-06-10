@@ -94,9 +94,14 @@ Then("each finalist gives an opening statement", function (this: BbWorld) {
   assert.deepEqual(this.finaleScript.statements, [this.outcome!.finalTwo[0], this.outcome!.finalTwo[1]]);
 });
 
-Then("each juror asks one question that the player answers", function (this: BbWorld) {
-  assert.equal(this.finaleScript!.questions.length, this.outcome!.jury.length);
+Then("each juror asks a question of each finalist", function (this: BbWorld) {
+  // 18-Q&A (audit A6 ruling): every juror questions BOTH finalists, so the script holds jury × 2 questions.
+  assert.equal(this.finaleScript!.questions.length, this.outcome!.jury.length * 2);
   for (const q of this.finaleScript!.questions) assert.ok(this.outcome!.finalTwo.includes(q.finalist));
+  for (const juror of this.outcome!.jury) {
+    const asked = this.finaleScript!.questions.filter((q) => q.juror === juror).map((q) => q.finalist);
+    for (const finalist of this.outcome!.finalTwo) assert.ok(asked.includes(finalist), "each finalist is questioned by the juror");
+  }
 });
 
 Then("the votes are revealed one at a time", function (this: BbWorld) {

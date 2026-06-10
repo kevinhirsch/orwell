@@ -100,8 +100,8 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "MOMENT — Diary Room. A private, out-of-character producer aside. The player's own space — " +
     "nothing said here reaches any NPC, so do not let it change the house. Listen; read their game.",
   "jury-finale":
-    "MOMENT — Jury & finale. Final statements, one question per juror, and the engine's jury vote to " +
-    "crown the winner. Gravitas and payoff; you voice the engine's result.",
+    "MOMENT — Jury & finale. Final statements, each juror questioning both finalists, and the engine's " +
+    "jury vote to crown the winner. Gravitas and payoff; you voice the engine's result.",
   evicted:
     "MOMENT — Evicted (pre-jury). The player has been voted out before the jury formed; their season is " +
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +

@@ -19,13 +19,16 @@
 >   (§4.2). So a juror the player blindsided on the way out weighs that against them at the player's own
 >   finale — jury management, the signature mechanic, now cuts **both** ways. (It also folds the
 >   evictee→player resentment into the hidden relationship layer at eviction, per 0023.)
-> - **A6 — unanswered jurors are neutral, symmetrically.** **Canon: one question per juror (9 total)** —
->   each juror questions **one** finalist (the alternating script), *not* one-per-juror-per-finalist;
->   this supersedes the stray "18" wording in `CLAUDE.md`. The finale performance a finalist contributes
->   to a juror who **never questioned them** is now a **`NEUTRAL_APPEAL_EFFECT` (0.5)** — applied the
->   **same** to the player and NPC finalists. Previously the engine back-filled the **optimal** `bestAppeal`
->   for every unanswered slot, silently playing a finalist's finale for them; a finalist now earns finale
->   sway **only** from the jurors who actually questioned them.
+> - **A6 — each juror questions BOTH finalists (18 Q&A), so the symmetry is structural.** Per the
+>   queue ruling, `runFinale` no longer alternates which finalist a juror addresses: **every juror
+>   questions both finalists** (9 jurors × 2 finalists = 18), which keeps CLAUDE.md's "one question per
+>   juror *per finalist*" canon. The **player-finalist answers all 9 jurors themselves**; the NPC finalist
+>   answers all 9 with its `bestAppeal`. Because no `(finalist, juror)` pair is ever left unanswered, the
+>   engine never has to fill a slot for one side — the sycophantic/asymmetric back-fill **cannot fire**
+>   (the `appealMade` fallback is kept only as a never-hit safety guard), and player and NPC finalists are
+>   scored by the **same** `appealEffect`. The jury/finale magnitudes are extracted to
+>   `src/engine/juryConstants.ts` (`JURY_WEIGHTS`, the manner-lean shifts, the manner thresholds, the
+>   appeal magnitudes) — extraction only, no number change.
 
 ## 1. Summary
 

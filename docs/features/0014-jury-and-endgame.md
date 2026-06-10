@@ -8,7 +8,7 @@
 
 The last **9 evictees** form the **jury** (sequestered from the first juror's eviction; they
 observe the rest). At **Final 2**, each finalist gives a brief statement, each juror asks **one
-question**, and the jury votes — revealed one at a time. The winner has the **most votes**; a tie
+question of each finalist** (0037), and the jury votes — revealed one at a time. The winner has the **most votes**; a tie
 is broken by the **last-evicted juror**. **Jury management is real:** how the player treated each
 houseguest on the way out genuinely shapes their vote.
 
@@ -42,8 +42,8 @@ blindsided weighs that against them too.
 ## 5. Final 2 choreography
 
 1. Each finalist gives a **brief opening statement**.
-2. Each juror asks **one question**; the player answers in **free-text** (hybrid model, 0012);
-   the LLM voices each juror authentically from their history with each finalist.
+2. Each juror asks **one question of each finalist** (18 Q&A total, 0037); the player answers in
+   **free-text** (hybrid model, 0012); the LLM voices each juror authentically from their history with each finalist.
 3. Votes are cast **privately** and **revealed one at a time** for drama.
 
 ## 6. The vote model (engine-owned)

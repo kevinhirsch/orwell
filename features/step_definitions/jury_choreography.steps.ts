@@ -102,12 +102,13 @@ Then("an opening statement beat is surfaced for each finalist", function (this: 
   assert.equal(npcStatements + playerStatements, 2, "one opening statement per finalist");
 });
 
-Then("one question beat is surfaced for each of the nine jurors", function (this: BbWorld) {
-  // Every juror is addressed exactly once: NPC-addressed answers emit a beat; player-addressed
-  // ones surface as a pending finale-answer. Together they account for all nine jurors.
+Then("each of the nine jurors questions both finalists", function (this: BbWorld) {
+  // Each juror questions BOTH finalists (18-Q&A): NPC-addressed answers emit a beat; the nine the
+  // player-finalist owes surface as pending finale-answers. Together: 9 jurors × 2 finalists = 18.
   const npcAnswers = this.finaleViews!.filter((v) => v.event?.beat === "finale" && /answers/.test(v.event.content)).length;
   const playerAnswers = this.finaleViews!.filter((v) => v.pending?.kind === "finale-answer").length;
-  assert.equal(npcAnswers + playerAnswers, 9, "nine juror questions in total");
+  assert.equal(npcAnswers + playerAnswers, 18, "eighteen question beats (each juror questions both finalists)");
+  assert.equal(playerAnswers, 9, "the player-finalist answers all nine jurors themselves");
 });
 
 Then("the votes are revealed one juror at a time before the winner is named", function (this: BbWorld) {

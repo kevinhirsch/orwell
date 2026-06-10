@@ -4,7 +4,7 @@
 Feature: Jury & endgame — the jury vote decides the winner
 
   The last nine evictees form the jury; jury management shapes their votes; at Final 2 each
-  finalist gives a statement and takes one question per juror; the most-voted finalist wins,
+  finalist gives a statement and takes one question from each juror; the most-voted finalist wins,
   ties broken by the last-evicted juror.
 
   Scenario: The jury is the last nine evictees
@@ -26,7 +26,7 @@ Feature: Jury & endgame — the jury vote decides the winner
   Scenario: The Final 2 choreography plays out
     Given a Final 2 and a jury
     Then each finalist gives an opening statement
-    And each juror asks one question that the player answers
+    And each juror asks a question of each finalist
     And the votes are revealed one at a time
 
   Scenario: The winner is decided by jury vote with a last-juror tie-break
