@@ -2572,3 +2572,35 @@ PR per item).
 > Sequester) leading the picker — frosted backdrop-blur chrome with the @supports fallback,
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
+
+## Wave E-SOCIAL — Lane 3: social-sim consequence (E42–E55 · C9 · C12 · T1) · 2026-06-10 — ✅ DONE (PR #216)
+
+> **"Make the simulation matter":** deals, gossip, and the emotional arc stop being flavor.
+> **Deals (E42/E43/E46/T1):** `bindingActionsFor` reconciles EVERY binding actor in the live commit
+> path (NPC eviction votes from the staged `voteOf`, HOH tie-breaks, the Final-3 eviction); deals are
+> horizon-aware (`madeWeek` + `horizonOf`: safety/vote run through their week's eviction —
+> `expireWeekScoped` at the rollover — final-two/target-other bind until broken); honoring PAYS
+> (`DEAL_IMPACTS.honored` + `BindingAction.alternatives`); the tightest unbound NPC pair occasionally
+> seals a Vault-held NPC↔NPC pact at nominations (`DECISION.npcDeal`) that the same ledger
+> adjudicates. Live gate: `tests/integration/liveDealReconciliation.test.ts` (T1).
+> **Folds (E47/E48/E49):** `CEREMONY_IMPACTS` are named impact objects via `applyImpactDirected`;
+> comp-won is `{threat:+0.14}` only; the eviction fold scales by recorded manner
+> (`EVICTION_MANNER_SCALE`); the survivors' proven-threat read lands on THIS week's HOH.
+> **Arc (E50/E51/E52):** per-role scene emotions (betrayer schemes, victim is betrayed;
+> `recordOffscreenScene` evolves both); `survived-vote` fires for the surviving nominee and
+> `comp-loss` for contested losers; `evolveEmotion` delegates to the canonical `emotionalModifier`
+> with ADR 0001's seeded temperature roll (`swingTemperatureWeight`).
+> **Signals (E53/E54):** `variableWeights` wired-or-deleted (initiative → approach variance,
+> allianceShift → bond-pick wobble); ADR 0002's `reliability` evidence signal built (fed by honors/
+> saves/protective votes, torn down by betrayal, consumed by `bondStrength`, never decays, lossless).
+> **Interiority (E55/C12/C9):** structured confessionals (trigger/mood/seeded phrasing) at noms +
+> veto ceremony + eviction night, recorded to the SoulStore and the durable `soul.memory` mirror
+> (recall survives restart); hidden elements internally consistent (one secret-motive max,
+> stat-backed + genuinely concealed aptitudes — property-gated).
+> **Gossip (E44):** receipt folds (`GOSSIP_HEARD`, confidence-scaled, never the player's own edges)
+> make rumors move third-party reads — proven by the rumor→future-HOH nomination A/B.
+> **Left for the merge sequence (Lane 1 owns `orchestrator.ts`):** the ~6-line `defaultApply` wiring
+> that passes `edgeOf`/`occupancy` to `richOffscreenStretch` (E45 live), `rel`/`subjects`/`sceneType`
+> to `diffuseGossip` (E44 live), and swaps `recordOffscreenSoul` → `recordOffscreenScene` (E50's
+> both-souls half) — the exact diff is in PR #216's description. E54's `vetoSave`/`juryLean`
+> consumption is a 2-line post-merge follow-up in Lane 4's files.

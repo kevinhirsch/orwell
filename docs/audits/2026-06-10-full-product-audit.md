@@ -359,7 +359,7 @@ File references are to `main` @ 87687c0.
 all disconnected from decisions. E42+E43+E44 convert three shipped systems from flavor into
 consequence.*
 
-- **E42 [HIGH · Bug] NPC eviction votes are never reconciled against deals.** Reconciliation
+- **E42 [HIGH · Bug] ✅ PR #216 — NPC eviction votes are never reconciled against deals.** Reconciliation
   runs only for the player's vote and nominate/replace beats (`GameSessionAdapter.ts:808–809`,
   `:857–868`); NPC votes (`liveSeason.ts:404–418`) and NPC HOH tie-breaks (`:591`) bypass
   `DealLedger.reconcile` — though `voteChoice`'s own docstring (`:384–386`) promises the
@@ -367,7 +367,7 @@ consequence.*
   `{actor: voter, kind:"vote-evict", targets:[evictee]}` for every voter in `commitStagedEviction`.
   *Test:* an NPC with an open safety deal voting the player out ⇒ deal `broken`,
   `mannerByEvictee` betrayed, witnessed betrayal reveal.
-- **E43 [HIGH · Bug] Deals self-extinguish after one ceremony and keeping one never builds
+- **E43 [HIGH · Bug] ✅ PR #216 — Deals self-extinguish after one ceremony and keeping one never builds
   trust.** `deals.ts:101–104` (first adverse-action-missing-partner ⇒ terminal `kept` — a
   week-2 final-two deal stops binding at the week-3 noms); no positive fold exists for honoring
   (`:89–121`), contradicting the lever manifest ("keeping it builds trust",
@@ -375,57 +375,57 @@ consequence.*
   eviction; final-two ⇒ F2 or break) + a bounded positive fold per honoring action
   (constants-module magnitude). *Test:* final-two deal still `open()` after an unrelated week-3
   nom; honored safety deal raises trust.
-- **E44 [HIGH · Improvement] Gossip never changes anyone's mind.** Diffusion writes
+- **E44 [HIGH · Improvement] ✅ PR #216 (mechanism + receipt folds + tests; the 3-line tick wiring rides Lane 1's orchestrator merge) — Gossip never changes anyone's mind.** Diffusion writes
   `KnowledgeService` beliefs (`orchestrator.ts:372–395`, model correct in `gossip.ts:81–135`)
   but noms/votes/saves/blocs/confessionals read only relationship edges — a rumor never moves
   any third party's threat read; the only fold is the tellers bonding. *Fix:* on receipt, a
   small directed fold toward the rumor's subjects keyed by scene type × belief confidence
   (new `GOSSIP_HEARD` constants). *Test:* a betrayal-rumor chain to a future HOH raises the
   subject's nomination ranking vs. the no-rumor control at the same seed.
-- **E45 [HIGH · Improvement] Off-screen society is socially incoherent.** `offscreen.ts:88–94`
+- **E45 [HIGH · Improvement] ✅ PR #216 (motivated/co-present draw + tests behind `edgeOf`/`occupancy` deps; same tick-wiring note) — Off-screen society is socially incoherent.** `offscreen.ts:88–94`
   — uniform-random partner and nature (allies draw `betrayal` as often as `bonding`); scenes
   ignore the presence model (witness in a different room than the scene,
   `orchestrator.ts:357–364`). *Fix:* weight partner by edges (affinity→bonding,
   alignment→strategy, threat→conflict); gate `betrayal` on an existing bond + incentive;
   require co-presence. *Tests:* betrayal only over above-threshold prior bonds; every
   off-screen witness set co-located in `occupancy`.
-- **E46 [MED · Improvement] NPC↔NPC deals don't exist** though comments claim they live in the
+- **E46 [MED · Improvement] ✅ PR #216 (minted at the nomination ceremony, Vault-held, fully reconciled) — NPC↔NPC deals don't exist** though comments claim they live in the
   Vault (`GameSessionAdapter.ts:111, 819–820`; `DealLedger.npcOnly()` dead). *Fix:* off-screen
   high-mutual-trust scenes occasionally mint Vault-held NPC deals; reconcile against NPC
   actions (free with E42); breaks drive folds + rumor seeds. *Test:* seeded season produces ≥1
   NPC deal; nothing crosses outward (extend the sentinel).
-- **E47 [MED · Change] Winning a comp makes the whole house dislike you.**
+- **E47 [MED · Change] ✅ PR #216 — Winning a comp makes the whole house dislike you.**
   `CEREMONY_IMPACTS["comp-won"] = "conflict"` (affinity −0.16/trust −0.13 from *everyone*,
   `relationshipConstants.ts:120–126`) — allies cool on their own winner. *Fix:* dedicated
   `comp-won` impact `{threat:+0.14}` only (small affinity gain from bloc-mates optional).
-- **E48 [MED · Change] A fully-expected, "respected" eviction still folds full betrayal-shock**
+- **E48 [MED · Change] ✅ PR #216 — A fully-expected, "respected" eviction still folds full betrayal-shock**
   toward every responsible voter (`relationshipConstants.ts:124` + `GameSessionAdapter.ts:767–769`),
   disagreeing with the recorded manner. *Fix:* scale the fold by manner
   (betrayed/blindsided/respected).
-- **E49 [MED · Bug] The "departing HOH" eviction fold targets the wrong week's HOH.**
+- **E49 [MED · Bug] ✅ PR #216 — The "departing HOH" eviction fold targets the wrong week's HOH.**
   `GameSessionAdapter.ts:770–771` reads `s.outgoingHoh` before `rollWeek` runs ⇒ the previous
   week's HOH gets the proven-threat fold twice, the current one a week late. *Fix:* fold toward
   `s.hoh`.
-- **E50 [MED · Bug] Betrayal scenes give the *betrayer* the betrayed emotion; the victim's soul
+- **E50 [MED · Bug] ✅ PR #216 (initiator-side live; both-souls seam `recordOffscreenScene` awaits the same tick wiring) — Betrayal scenes give the *betrayer* the betrayed emotion; the victim's soul
   never moves.** `emotionalArc.ts:50–58` + `orchestrator.ts:354` (initiator-only evolution).
   *Fix:* per-role mapping (initiator→`scheme`, partner→`betrayed`); evolve both participants.
-- **E51 [MED · Bug] Half the arc vocabulary is dead.** `survived-vote`/`comp-loss` exist only
+- **E51 [MED · Bug] ✅ PR #216 (adapter-side — no liveSeason edit; comp-loss scoped to contested fields) — Half the arc vocabulary is dead.** `survived-vote`/`comp-loss` exist only
   inside `emotionalArc.ts` — the emboldened-survivor beat 0041 defines never fires. *Fix:*
   `inflect(survivingNominee,"survived-vote")` on eviction; `comp-loss` for contested losers.
-- **E52 [MED · Change] The live emotional swing omits ADR 0001's temperature roll, and the
+- **E52 [MED · Change] ✅ PR #216 (delegates to `emotionalModifier`; also retires C16's dead parallel) — The live emotional swing omits ADR 0001's temperature roll, and the
   canonical `emotionalModifier()` has no production caller** (`emotionalArc.ts:82–87`
   deterministic; `temperatureConstants.ts:79–87` dead) — two parallel formulas, one dead.
   *Fix:* seeded temperature into `evolveEmotion`; delete or delegate to `emotionalModifier`.
-- **E53 [MED · Bug] `variableWeights` — the "temperature is per-moment, per-variable" config —
+- **E53 [MED · Bug] ✅ PR #216 (initiative + allianceShift wired; the four consumer-less fields deleted) — `variableWeights` — the "temperature is per-moment, per-variable" config —
   is decorative** (zero consumers; subsystems roll ad-hoc variance:
   `conversation.ts:50`, `TEMPERATURE_JITTER`, `chooseStrongestBond` default). *Fix:* wire each
   weight to its subsystem or delete the struct. *Test:* changing `variableWeights.initiative`
   changes approach-ordering variance.
-- **E54 [MED · Change] ADR 0002's `reliability` signal was never built** — trust is pure
+- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`; vetoSave/juryLean consumption is a 2-line post-merge follow-up) — ADR 0002's `reliability` signal was never built** — trust is pure
   sentiment, never evidence; with E43, demonstrated loyalty has no representation. *Fix:* add
   `reliability` fed by protective votes/honored deals/veto saves; consume in `vetoSave`,
   `bondStrength`, `juryLean`.
-- **E55 [MED · Improvement] Confessionals are one canned template, never reach soul recall.**
+- **E55 [MED · Improvement] ✅ PR #216 — Confessionals are one canned template, never reach soul recall.**
   `confessionals.ts:53–55` (identical line all season — also the 0048 unsealing payoff);
   ceremony confessionals fire only at noms; `recordConfessionalToSoul` has zero callers (0040's
   recall half unwired). *Fix:* structured confessionals (trigger/target/mood/surfaced element)
@@ -985,7 +985,7 @@ traceability; E-batch cross-references inline.
   verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
   `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
   (e.g. 500 chars/scalar, bounded notes), neutralize structure when echoing, overwrite flag.
-- **C9 [MED-LOW]** Hidden elements can contradict each other (multiple `secret-motive`s) and
+- **C9 [MED-LOW] ✅ PR #216** — Hidden elements can contradict each other (multiple `secret-motive`s) and
   the character's stats ("hidden endurance machine" on a 0.45-physical floater — unbackable
   flavor; "sharper at puzzles" on a public mastermind — not concealed). *Fix:* one
   secret-motive max; gate `concealed-aptitude` on actual stat ≥ threshold with a non-matching
@@ -997,7 +997,7 @@ traceability; E-batch cross-references inline.
 - **C11 [LOW]** `tallyJury` evaluates `votesFor(j)` up to 3× per juror and silently drops
   votes for non-finalists (`season.ts:127,131`) — latent (live caller precomputes). *Fix:*
   evaluate once, throw on non-finalist.
-- **C12 [LOW]** `recordConfessionalToSoul` has no production caller — 0040's
+- **C12 [LOW] ✅ PR #216** — `recordConfessionalToSoul` has no production caller — 0040's
   "live soul-recall" half is unwired: confessional content never reaches `SoulStore`, an NPC
   can't recall their own past confessionals. *Fix:* call it at both live record sites,
   mirrored into `hg.soul.memory` (see C13).
@@ -1029,7 +1029,7 @@ Production-vs-fixture: 17 step files drive the LIVE registry/adapter spine (stro
 pure-core features legitimately test the pure core; the gaps are where a live promise is
 proven only on a fixture:
 
-- **T1 [HIGH · Fixture-gap]** Live deal reconciliation has zero coverage — the 0039 BDD steps
+- **T1 [HIGH · Fixture-gap] ✅ PR #216** (`tests/integration/liveDealReconciliation.test.ts`) — Live deal reconciliation has zero coverage — the 0039 BDD steps
   assert their own stubs (`deal_tracking.steps.ts:17–30, 122–127`); `reconcileDeals`,
   `bindingActionFor`, jury demerits, and the reveal event are untested on the production
   path. (The missing gate for E42/E43.) Full live-test spec recorded.
