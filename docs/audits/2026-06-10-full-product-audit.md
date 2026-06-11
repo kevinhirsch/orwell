@@ -1589,3 +1589,34 @@ transcripts).
 4. **E86(a)** fastembed adapter, or leave honestly deferred.
 5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
 6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
+
+---
+
+# Post-campaign UI follow-ups (rulings #18–#20, 2026-06-11 — playtest feedback)
+
+## A5 [Ruling #18 · 0052 follow-up] Every house theme ships a creative particles.js background
+The five house themes lack the particles.js background treatment the inherited themes have;
+each must get one, in-theme: **The Feed** — sparse night-vision dust with an occasional
+horizontal scanline sweep; **Telescreen** — faint phosphor flicker points; **Room 101** —
+slow dust motes under a fluorescent stutter; **Memory Wall** — drifting bokeh/ember points
+like gallery backlighting; **Sequester** — heavy slow velvet motes in brass. Constraints:
+reuse the app's existing particles machinery; behind the chat (z-index), perf-budgeted;
+`prefers-reduced-motion` ⇒ static or off; pause on `document.hidden`. *Test:* per-theme
+particles config present + reduced-motion disables; browser smoke asserts the canvas mounts
+behind the chat column.
+
+## A6 [Bug · 0052/frost] Frosted transparency breaks at the top of open windows
+User-observed: the frost visibly breaks at each window's top edge. Likely cause family: the
+backdrop-filter living on a child/::before that doesn't span the header strip, or
+border-radius clipping applied on a different element than the one carrying the filter.
+*Fix spec:* the window ROOT carries `backdrop-filter` + radius + `overflow:hidden` as one
+surface (header included); no separately-painted opaque header backgrounds over the frost.
+*Test:* matrix/browser smoke samples computed styles — the element with backdrop-filter is
+the panel root and the header's background is transparent over it.
+
+## A7 [Ruling #19 · E97 follow-up] Close/minimize get a Windows-7-style fly-out
+The E97 contract specced minimize motion toward the dock; the ruling sharpens it: a
+**fly-out** — scale-down + translate along the path to the sidebar dock row on minimize,
+and a scale+fade fly-away on close, with pronounced easing (the Win7 feel). Open stays
+fade+scale-in. `prefers-reduced-motion` strips all of it. *Test:* the shared animation
+contract exposes distinct minimize/close keyframes; reduced-motion removes them.
