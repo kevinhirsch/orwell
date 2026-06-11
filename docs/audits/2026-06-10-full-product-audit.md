@@ -1532,3 +1532,60 @@ local git remote (proves the credential helper path); a deploy-lint test asserti
 line); the existing secrets guard already covers "no token literal committed" — extend its
 scope per E78 so a pasted PAT in any tracked file fails CI; factory-reset test asserts
 `GIT_TOKEN` survives the scrub (it lives in the preserved `.env`).
+
+---
+
+# Campaign close-out ledger (2026-06-10, end of the parallel phase)
+
+The implementer's honest accounting, verified by the Audit Manager against final main where
+cheap to do so. This section is the authoritative open-items list going forward.
+
+## A — Findings never reached (no code, no PR)
+- **T3–T7, T10, T11, T19, T20** — nine T-stream test-integrity repairs (Lane 10 lost two
+  agents mid-work; only artifact-verified items shipped: T8/T9/T12/T15–T17). Open.
+- **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter. Lane 11 took the
+  honest path: ADR 0004 amended to "Accepted — adapter not yet built." Engine souls run on
+  the deterministic fake at runtime. Open (now truthfully documented).
+
+## B — Cross-lane tails that fell through (each verified absent on main)
+1. **E54 tail** — `reliability` is built, fed, and consumed by `bondStrength`, but
+   `vetoSave` and `juryLean` still don't read it (verified: zero hits in `liveSeason.ts`/
+   `jury.ts`).
+2. **E58 tail** — `dayOfWeek()` exists and feeds the prompt; `GameStatusView` never got the
+   `day` field (verified: absent from the port).
+3. **CLAUDE.md ruling-#1 wording** — the do-not at `CLAUDE.md:248` still reads "Don't
+   hard-code any … name" instead of the amended "no fixed cast" formulation (verified).
+   Documentation drift only — the ruling and the amended 0004 spec are authoritative.
+4. **C8's third sub-item** — the casting overwrite flag (surface when a later
+   `updateCasting` replaces a captured scalar). Scoped out as a casting-UX contract change;
+   unowned.
+5. **E60/E89 FE tail** — richer approach-chip variety/timing treatment beyond the shipped
+   motive fail-open mapping (the owning lane was repurposed to calibration).
+*Disposition: items 1–5 batch into one "cross-lane tails" PR with proving tests (~1 hr).*
+
+## C — Done differently than specced (deliberate, ruled)
+- **The calibration measurement** runs 20 seeds × one active variant (compete +
+  self-saving veto) as a permanent deterministic gate; the round-4 62-seed protocol and the
+  never-use-veto variant were not re-measured (the dead agent's runs died with it).
+- **The E33 ceiling (ruling):** passive jury-reach stays high (19/20) as emergent realism;
+  "purge the floater" house behavior was explicitly NOT built. Passive players coast to
+  Final 2 in ~half of seasons and lose there. **Revisit after real playtesting** — this is
+  the largest open game-feel question.
+- **`bondKeepWeight`** retained on realism grounds despite not moving the gate (ruled).
+
+## D — Pre-existing deferrals, untouched (never campaign scope)
+0022 (player-experience MVP-2) · 0010's container smoke on a real Proxmox host — which
+means **the A4 single-PAT deploy design has never been verified on a real deployed box**,
+only via simulated smoke probes; verify it during the private-repo flip · the real
+relational adapters (SQLite/Postgres, sqlite-vec/pgvector) · full MCP/JSON-RPC over the
+HTTP transport · the specced-not-built 0051 (in-character images) and 0053 (admin
+transcripts).
+
+## The remaining work, in dispatch order
+1. **The cross-lane tails PR** (B1–B5; one PR, proving tests included).
+2. **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20 — independent step/test files,
+   fan out freely).
+3. **0053 admin transcripts** (ruling #14 — the user wants this) and **0051** when ready.
+4. **E86(a)** fastembed adapter, or leave honestly deferred.
+5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
+6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
