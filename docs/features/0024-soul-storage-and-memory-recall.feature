@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0024 — Soul storage & memory recall. md narrative + engine-only vector; semantic recall.
 # HARD rule: roles only. The vector index is Vault-side; player-facing recall is sentinel-clean.
 

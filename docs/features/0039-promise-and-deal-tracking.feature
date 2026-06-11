@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0039 — Promise & deal tracking. The ENGINE decides kept/broken and makes a broken promise hurt.
 # HARD rule: roles only (promisor, promisee, wronged party, HOH, nominee). Add to cucumber.cjs when green.
 

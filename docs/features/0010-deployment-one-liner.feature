@@ -1,4 +1,5 @@
-# DRAFT executable spec — author: feature-maker.
+# Executable spec — IMPLEMENTED (scripts + deploy/smoke.sh); the real-Proxmox-host smoke is
+# still owed (long-acknowledged deferral — see the README index). Not in cucumber.cjs.
 # Priority: MVP-1 (blocking). One-liner Proxmox deploy + update, containerized.
 # These are acceptance criteria validated by an install SMOKE TEST (provision a container,
 # run the scripts, probe), not the unit/BDD harness. Roles/values only — no secrets.

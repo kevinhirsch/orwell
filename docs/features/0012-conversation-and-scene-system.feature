@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0012 — Conversation & scene system. Interaction model: hybrid (free-text social,
 # explicit validated decisions). HARD rule: roles only. Extends 0001/0002 guarantees.
 

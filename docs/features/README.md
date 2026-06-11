@@ -56,7 +56,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
 | 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
 | 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Done |
-| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Done |
+| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Done — scripts + `deploy/smoke.sh`; per its own spec **not done until host-validated**: the real-Proxmox-host smoke is still owed (deferral) |
 | 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Done |
 | 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
 | 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
@@ -79,10 +79,10 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0030 | [Durable game persistence (survive engine restart)](./0030-durable-game-persistence-survive-restart.md) | **MVP-1 / bugfix** | Done |
 | 0031 | [Game orchestrator & integrity watcher (per-sandbox)](./0031-game-orchestrator-and-integrity-watcher.md) | Foundational | Done |
 | 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
-| 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Done |
+| 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Done — **unit-gated**, not in `cucumber.cjs` (recorded deviation, E87a) |
 | 0034 | [Live weekly progression & binding-decision seam](./0034-live-weekly-progression-and-decision-seam.md) | Gameplay (as-built) | Done |
 | 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | **Done — BDD-gated (B70)**: the running watcher's five scenarios in `cucumber.cjs` (FakeClock; pure turn-driven default per the 2026-06-10 ruling) |
-| 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done |
+| 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done — **unit-gated**, not in `cucumber.cjs` (recorded deviation, E87a) |
 | 0037 | [Live jury-vote choreography (the interactive finale)](./0037-live-jury-vote-choreography.md) | Gameplay | **Done** — engine + finale UI (B26 `finaleView` read · C11 `orwellFinale.js`) |
 | 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | **Done — B27a varied society · 0041 live souls · B27b gossip→player diffusion (pathway-aware 0031 heuristic) · all six scenarios BDD-gated (B70)** |
 | 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | Done |
@@ -97,6 +97,8 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Done** — `seasonRecap` (the record, not memory) · `seasonRetrospective` gated in code on the finished state (the one sanctioned Vault read) · post-season reunion moment · B56 (C17 = the FE surface) |
 | 0049 | [House presence & lingering play (rooms, occupancy, overhearing)](./0049-house-presence-and-lingering.md) | **Behavioral fidelity / ADR 0003** | **Done** — rooms+adjacency in the pure core · seeded one-room occupancy · `whereabouts` lever · co-presence⇒witness, adjacency⇒rare bidirectional `overheard:` pathways · lingering zero-beat · B64 |
 | 0050 | [The casting interview (producer-led character creation)](./0050-casting-interview.md) | Player UX / ADR 0003 | **Done** — interview-in-chat (no modal) · incremental `updateCasting` intake (engine owns the next step; half-done survives restart) · casting card (qualitative) · Soul-memory seeding |
+| 0051 | [In-character images (analyze in, generate out)](./0051-in-character-images.md) | Player UX / immersion | **Specced — not built** (2026-06-10 audit "Future specs" + ruling #9; spec only, not in any gate) |
+| 0053 | [Admin transcript retrieval (debug, quiet)](./0053-admin-transcripts.md) | App / admin · ops | **Specced — not built** (ruling #14, 2026-06-10; FE pytest lane when built — never `cucumber.cjs`) |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

@@ -872,7 +872,12 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 
 ---
 
-## Still on the feature-maker (me)
+## Still on the feature-maker (me) — HISTORICAL (superseded 2026-06-10)
+
+> **HISTORICAL (E87d):** this block is a point-in-time snapshot from mid-build and contradicts the
+> drained-queue banner — everything it lists as "remaining" subsequently shipped (0037 UI/B26+C11,
+> B27b, 0039–0044, the audit batches) except **0022**, which stays the one deferred feature. Kept
+> verbatim below for the record; trust the per-item ✅ stamps and `cucumber.cjs`, not this prose.
 
 **0001–0036 are built** (0022 deferred). The "continue all wiring" batch shipped the engine + API wiring:
 **B24/0035** (SystemClock + `composeRuntime` start the off-screen watcher in `main.ts` — the house now lives
@@ -2074,11 +2079,17 @@ PR per item).
 | **R-2 — Settings prune** | C31 dead-JS gating + live-data wipes (search prune superseded by C32) | front-end | settings S3·S5 |
 | **R-2 — tagline** | C33 hero tagline genuinely AI-generated (curated/static only as fallback) | front-end + engine | ruling 2026-06-09 |
 
-> **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
+> **Reconciliation — RESOLVED / HISTORICAL (stamped 2026-06-10, E87d):** the owed 4th pass was
+> superseded by the round-5/6 full product audit (`docs/audits/2026-06-10-full-product-audit.md`),
+> which re-audited every prior finding from scratch. Of the confirmed fragments: **E3** (the
+> orchestrator commit seam) shipped with the L1 restart spine (PR #215); the **finale relay**
+> (product B3 / front-end C12) shipped (C12 ✅, finale UI B26+C11); 0041's competition-modifier
+> fairness gate landed with B69. Original note kept for the record:
+>
+> *(was)* a 4th audit pass (every prior finding → fixed/partial/open) was
 > started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
 > **finale relay** (product B3 / front-end C12) are **STILL OPEN**; **0041's emotional-arc is genuinely
 > live** (real production callers) but its competition modifier is **unverified for fairness** (→ B69).
-> Resume that pass before closing prior items as done.
 
 ### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3 · ✅ DONE 2026-06-10**
 
@@ -2197,7 +2208,9 @@ PR per item).
 >    repo stops implying coverage.
 > 3. **C8 — CI never runs coverage.** `.github/workflows/ci.yml` runs the functional gate but no
 >    `test:cov`/thresholds, so coverage can silently regress. Add a coverage job with per-directory branch
->    thresholds (`src/engine`, `src/composition`, `src/adapters/engine` ≥ 90%).
+>    thresholds (`src/engine`, `src/composition`, `src/adapters/engine` ≥ 90%). *(As built — see the DONE
+>    note above: engine 90 · composition 88 · adapters/engine 82, floors at the then-real levels so
+>    coverage only ratchets up; the audit's E87f records the deviation from the stated 90/90/90.)*
 > 4. **C9 — the 97.6% headline masks the orchestrator rollback path.** `src/composition/orchestrator.ts:
 >    184-200` (the fail-closed integrity checkpoint's rollback — what protects against persisting a
 >    degraded/leaky state) and `GameSessionAdapter` finale-answer rejection (81% branch) are uncovered.

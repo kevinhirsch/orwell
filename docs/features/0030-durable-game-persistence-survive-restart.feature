@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0030 — Durable per-user game persistence: a started game survives an engine restart,
 # so the onboarding overlay never re-fires for a player who already has a game.
 # HARD rule: roles only (player, NPC, HOH, nominee). "user A"/"user B" are account roles (0021).

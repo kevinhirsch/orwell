@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0048 — Season retrospective & the Vault unsealing. The Wall is ABSOLUTE during play; this is its
 # one sanctioned, structurally-gated exception — post-season only. HARD rule: roles only (player, winner,
 # evictee). Add to cucumber.cjs when green.

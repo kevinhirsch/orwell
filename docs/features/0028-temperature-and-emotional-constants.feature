@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0028 — Temperature & emotional-modifier constants. Shape fixed (0006); numbers tunable.
 # HARD rule: roles only; seeded.
 

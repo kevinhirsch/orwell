@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0040 — NPC Diary Room confessionals: Vault-only NPC interiority, grounded in the engine's truth,
 # walled from BOTH the player and admin/God Mode. HARD rule: roles only (NPC, HOH, nominee, juror).
 # Add to cucumber.cjs when green.

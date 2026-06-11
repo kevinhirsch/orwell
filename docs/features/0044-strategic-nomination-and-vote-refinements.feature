@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0044 — Strategic nomination & vote refinements: enrich the BUILT, engine-decided nomination/vote
 # functions with pawn/backdoor/bloc strategy and mood/bloc/deal-aware votes. Still engine-decided + seeded.
 # HARD rule: roles only (HOH, nominee, pawn, target, voter, bloc-mate). Add to cucumber.cjs when green.

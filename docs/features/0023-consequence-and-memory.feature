@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0023 — Consequence & memory. The live loop: act -> hidden opinion shift -> persist -> recall.
 # HARD rule: roles only. The opinion ledger is hidden; the player sees consequences, never numbers.
 

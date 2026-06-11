@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Milestone M5 — MCP tool boundary (the engine's outward tool API).
 # HARD rule: roles only. Extends the feature-0001 Vault-Wall guarantees to the tool surface.
 

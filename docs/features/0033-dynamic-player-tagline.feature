@@ -1,4 +1,5 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED; shipped UNIT-GATED (tests/unit/playerTagline.test.ts) + the FE
+# render in frontend/tests/ — never added to cucumber.cjs (recorded deviation, audit E87a).
 # Feature 0033 — Dynamic player tagline (the snarky, state-aware homepage hero line).
 # Engine GENERATES it (Vault-free, via NarrativePort 0027); the front-end RENDERS it at #welcome-sub.
 # HARD rule: roles only (player, HOH, nominee). "standing" = a PUBLIC facet only — never hidden state.

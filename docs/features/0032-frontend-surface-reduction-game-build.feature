@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED; validated by frontend pytest (frontend/tests/).
 # Feature 0032 — Front-end surface reduction (the "game build"). Front-end (Python) only; NO engine
 # change. Tested in frontend/tests/ (pytest, like 0029) — NOT added to cucumber.cjs (TS lane).
 # HARD rule: roles only (player, admin). Vertical names (email, shell, …) are app features, not

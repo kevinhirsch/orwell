@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0035 — Live off-screen life: start 0031's Orchestrator/GameWatcher in the RUNTIME (add the
 # missing real-timer Clock adapter + instantiation). Tests still use a FAKE clock (no real timers in
 # tests); "the clock advances" = a fake clock stepped explicitly. HARD rule: roles only (player, NPC).

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0038 — Live off-screen society. Tests use a FAKE clock (no real timers). Roles only.
 #
 # STATUS: BUILT + BDD-gated (B27a varied society · 0041 live souls · B27b gossip→player diffusion with the
