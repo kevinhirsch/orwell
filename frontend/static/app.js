@@ -1099,19 +1099,8 @@ function initializeEventListeners() {
     });
   }
 
-  // Settings → Appearance: open the theme picker. Under the game build the
-  // sidebar Tools section (which held the Theme entry) is hidden, so the
-  // picker is surfaced from the kept Appearance tab. Close Settings first so
-  // the picker isn't stacked behind it.
-  const appearanceThemeBtn = el('appearance-theme-btn');
-  if (appearanceThemeBtn) {
-    appearanceThemeBtn.addEventListener('click', () => {
-      const sm = document.getElementById('settings-modal');
-      if (sm) sm.classList.add('hidden');
-      const tm = document.getElementById('theme-modal');
-      if (tm) tm.classList.remove('hidden');
-    });
-  }
+  // H3: the Settings → Appearance theme launcher is gone — the theme picker's
+  // one home is the standing sidebar entry (#tool-theme-btn, wired above).
 
   // Sidebar toggle
   const toggleSidebarOption = el('toggle-sidebar-option');

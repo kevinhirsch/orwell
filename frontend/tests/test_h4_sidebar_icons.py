@@ -182,6 +182,8 @@ def test_browser_smoke_carries_the_h4_runtime_gate():
     assert "H4: every rail icon EQUALS its expanded row's icon" in smoke
     assert "H4: injected game chrome (Diary Room / Cast / status HUD) gets gated rail mirrors" in smoke
     # Anchored after the last pre-existing check block (F3), per the lane brief.
-    f3 = smoke.index("F3: sheets stay full-width")
+    # (H5 renamed the F3 label when The House folded into the sidebar — same
+    # repoint H5×H6 applied to H6's anchor.)
+    f3 = smoke.index("F3: the finale sheet stays full-width")
     h4 = smoke.index("H4 (sidebar icons)")
     assert h4 > f3, "the H4 smoke block sits after the F3 block (the prior last check)"

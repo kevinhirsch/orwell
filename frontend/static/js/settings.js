@@ -234,6 +234,28 @@ function _fillModelSelect(selectEl, models, selected, keepBlank) {
   }
 }
 
+/* H2 — the one shared model pool. Every flat "default <X> model" select
+ * (Image Generation, Vision, …) mirrors the options the Default Chat Model
+ * card can offer: the models of every enabled endpoint, with unavailable
+ * ones excluded (an offline endpoint exposes no usable models — the same
+ * availability rule the chat picker applies). Data-driven only — never a
+ * hardcoded model list. An optional per-card capability filter may narrow
+ * (never widen) the pool. */
+function _availableModelIds(endpoints, modelsFilter) {
+  const seen = new Set();
+  const out = [];
+  (endpoints || []).forEach(function(ep) {
+    if (!ep.is_enabled || !ep.online) return;
+    (ep.models || []).forEach(function(m) {
+      if (seen.has(m)) return;
+      if (modelsFilter && !modelsFilter(m, ep)) return;
+      seen.add(m);
+      out.push(m);
+    });
+  });
+  return out;
+}
+
 function _registerAiEndpointRefresh(fn) {
   _aiEndpointRefreshers.add(fn);
 }
@@ -574,39 +596,24 @@ async function initImageSettings() {
   const msg = el('set-imgSettingsMsg');
   const enabledToggle = el('set-imgEnabledToggle');
   const configWrap = modelSel ? modelSel.closest('div[style*="flex-direction"]') : null;
+  var _endpoints = [];
+  // H2: the options mirror the Default Chat Model card — same endpoint
+  // source, same availability filter, no hardcoded model list. The blank
+  // "Auto-detect" option is the sane fallback when the saved model is no
+  // longer available.
+  function refreshModels(selectedModel) {
+    _fillModelSelect(modelSel, _availableModelIds(_endpoints), selectedModel, true);
+  }
   try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    // Text-to-image model filter: include models that have generation capability
-    // (dall-e, gpt-image, stable-diffusion, imagen, flux, etc.) and exclude
-    // models that are embedding, TTS, audio, realtime, search, or inpaint-only.
-    const _imgExclude = ['embedding', 'tts', 'audio', 'realtime', 'whisper', 'search', 'inpaint'];
-    const _imgInclude = ['dall-e', 'gpt-image', 'stable-diffusion', 'sd-', 'imagen', 'flux', 'midjourney', 'playground', 'kandinsky'];
-    const _isImageGenModel = (mid) => {
-      const lower = String(mid || '').toLowerCase();
-      if (_imgExclude.some(kw => lower.includes(kw))) return false;
-      return _imgInclude.some(kw => lower.includes(kw));
-    };
-    const imageModels = [];
-    (modelsData.items || []).forEach(item => {
-      (item.models || []).forEach(mid => {
-        if (_isImageGenModel(mid)) imageModels.push(mid);
-      });
-    });
-    sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
-    // Hardcoded fallbacks shown as "(not detected)" so users know what to
-    // configure to enable image generation here.
-    ['dall-e-3', 'dall-e-2', 'gpt-image-1', 'stable-diffusion-3.5-large'].forEach(mid => {
-      if (!imageModels.includes(mid)) { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not detected)'; modelSel.appendChild(opt); }
-    });
+    _endpoints = await _fetchModelEndpoints();
   } catch (e) { console.warn('Failed to load models for image settings', e); }
   try {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await settingsRes.json();
-    if (settings.image_model) modelSel.value = settings.image_model;
+    refreshModels(settings.image_model || '');
     if (settings.image_quality) qualSel.value = settings.image_quality;
     if (enabledToggle) enabledToggle.checked = settings.image_gen_enabled !== false;
-  } catch (e) { console.warn('Failed to load settings', e); }
+  } catch (e) { console.warn('Failed to load settings', e); refreshModels(''); }
 
   function syncImgDisabled() {
     var off = enabledToggle && !enabledToggle.checked;
@@ -626,6 +633,11 @@ async function initImageSettings() {
   modelSel.addEventListener('change', saveSettings);
   qualSel.addEventListener('change', saveSettings);
   if (enabledToggle) enabledToggle.addEventListener('change', function() { syncImgDisabled(); saveSettings(); });
+
+  _registerAiEndpointRefresh(function(endpoints) {
+    _endpoints = endpoints;
+    refreshModels(modelSel.value);
+  });
 }
 
 /* ── Vision ── */
@@ -641,31 +653,19 @@ async function initVisionSettings() {
     var lower = String(mid || '').toLowerCase();
     return !_vlExclude.some(function(kw) { return lower.includes(kw); });
   }
-  try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    const visionModels = [];
-    (modelsData.items || []).forEach(item => {
-      if (item.offline) return;
-      (item.models || []).forEach(mid => {
-        if (_isVisionModel(mid)) {
-          visionModels.push(mid);
-        }
-      });
-    });
-    sortModelIds(visionModels).forEach(mid => {
-      var opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; vlSel.appendChild(opt);
-    });
-  } catch (e) { console.warn('Failed to load models for vision settings', e); }
-  // Also pull the raw endpoint list so the fallback widget can resolve
-  // endpoint-id → models the same way the other cards do.
+  // H2: the options mirror the Default Chat Model card — same endpoint
+  // source (also feeding the fallback widget below), same availability
+  // filter, narrowed by the vision-capability exclusion above.
+  function refreshModels(selectedModel) {
+    _fillModelSelect(vlSel, _availableModelIds(_visionEndpoints, function(mid) { return _isVisionModel(mid); }), selectedModel, true);
+  }
   try {
     _visionEndpoints = await _fetchModelEndpoints();
-  } catch (e) { console.warn('Failed to load endpoints for vision fallback', e); }
+  } catch (e) { console.warn('Failed to load models for vision settings', e); }
   try {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await settingsRes.json();
-    if (settings.vision_model) vlSel.value = settings.vision_model;
+    refreshModels(settings.vision_model || '');
     if (enabledToggle) enabledToggle.checked = settings.vision_enabled !== false;
     visionFallbackWidget = _bindFallbackWidget({
       containerId: 'set-visionFallbacks',
@@ -679,7 +679,7 @@ async function initVisionSettings() {
         ? settings.vision_model_fallbacks.map(function(f) { return { endpoint_id: (f && f.endpoint_id) || '', model: (f && f.model) || '' }; })
         : [],
     });
-  } catch (e) { console.warn('Failed to load vision settings', e); }
+  } catch (e) { console.warn('Failed to load vision settings', e); refreshModels(''); }
 
   function syncVisionDisabled() {
     var off = enabledToggle && !enabledToggle.checked;
@@ -701,6 +701,7 @@ async function initVisionSettings() {
 
   _registerAiEndpointRefresh(function(endpoints) {
     _visionEndpoints = endpoints;
+    refreshModels(vlSel.value);
     if (visionFallbackWidget && visionFallbackWidget.refresh) visionFallbackWidget.refresh();
   });
 }
@@ -741,12 +742,26 @@ async function initTtsSettings() {
   }
 
   var ttsKeywords = ['tts', 'audio'];
+  var _ttsEndpoints = [];
+  function _isTtsModel(mid) {
+    var lower = String(mid || '').toLowerCase();
+    return ttsKeywords.some(function(kw) { return lower.includes(kw); });
+  }
+  // H2: in endpoint mode the model options mirror that endpoint's available
+  // models (TTS-capable), from the same source the Default Chat Model card
+  // uses — the markup's default options are kept only as the no-data fallback.
+  var _ttsMarkupModels = Array.from((modelSelect && modelSelect.options) || []).map(function(o) { return o.value; });
+  function refreshTtsModels(selected) {
+    if (!isEndpoint()) return;
+    var epId = provSel.value.slice('endpoint:'.length);
+    var models = _availableModelIds(_ttsEndpoints.filter(function(e) { return e.id === epId; }), _isTtsModel);
+    _fillModelSelect(modelSelect, models.length ? models : _ttsMarkupModels, selected, false);
+  }
   try {
-    var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
-    var endpoints = await epRes.json();
-    endpoints.forEach(function(ep) {
+    _ttsEndpoints = await _fetchModelEndpoints();
+    _ttsEndpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
-      var hasTTS = (ep.models || []).some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
+      var hasTTS = (ep.models || []).some(_isTtsModel);
       if (!hasTTS) return;
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
     });
@@ -757,6 +772,7 @@ async function initTtsSettings() {
     var settings = await settingsRes.json();
     if (settings.tts_provider) provSel.value = settings.tts_provider;
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
+    refreshTtsModels(settings.tts_model || '');
     if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
@@ -788,7 +804,7 @@ async function initTtsSettings() {
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
     if (prov === 'local') voiceInput.value = 'af_heart';
-    else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
+    else if (isEndpoint()) { voiceSelect.value = 'alloy'; refreshTtsModels(''); }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
     updateVisibility();
     saveTTS();
