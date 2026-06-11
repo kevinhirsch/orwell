@@ -14,6 +14,7 @@ Name-agnostic — "admin"/"user" are ACCOUNT ROLES. Proves:
 
 import importlib
 import json
+import os
 
 import pytest
 from fastapi import FastAPI
@@ -23,9 +24,16 @@ ahr = importlib.import_module("routes.admin_health_routes")
 orwell_engine = importlib.import_module("src.orwell_engine")
 
 
+def _read_static(*parts):
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+    with open(os.path.join(base, *parts), encoding="utf-8") as f:
+        return f.read()
+
+
 def _app():
     app = FastAPI()
     app.include_router(ahr.setup_admin_health_routes())
+    app.include_router(ahr.setup_admin_status_page())  # G1b: the standalone ops page
     return app
 
 
@@ -247,23 +255,123 @@ def test_health_card_lives_in_the_system_panel_not_player_chrome():
 
 
 def test_health_card_has_live_rows_failure_log_and_bundle_button():
-    card = _INDEX.split('id="adm-health-card"')[1].split("admin-danger-card")[0]
-    assert 'id="adm-health-rows"' in card        # live health rows
-    assert 'id="adm-health-failures"' in card    # the failure log table mount
-    assert 'id="adm-health-bundle"' in card      # the download button
-    assert "/api/admin/debug-bundle" in card
-    assert 'id="adm-health-refresh"' in card
-
+    # Amended by G1b: the failure TABLE moved to the standalone /admin/status
+    # page; the card keeps the live summary rows + the page link + the bundle.
+    html = _read_static("index.html")
+    assert 'id="adm-health-card"' in html
+    assert 'id="adm-health-rows"' in html
+    assert "adm-health-failures" not in html          # offloaded to the page
+    assert 'id="adm-health-page"' in html and 'href="/admin/status"' in html
+    assert 'id="adm-health-bundle"' in html and "/api/admin/debug-bundle" in html
 
 def test_admin_js_wires_the_health_panel():
-    assert "initHealthLogs" in _ADMIN_JS
-    assert "/api/admin/health" in _ADMIN_JS
-    assert "recentFailures" in _ADMIN_JS  # renders the engine failure ring
-    assert "embeddings" in _ADMIN_JS      # provider + degrade badge
-    # registered in the init list like initTranscripts
-    assert "initTranscripts, initHealthLogs" in _ADMIN_JS
-
+    # Amended by G1b: the driver renders the summary rows only; the failure
+    # table renderer lives in the standalone page.
+    js = _read_static("js", "admin.js")
+    assert "initHealthLogs" in js
+    assert "/api/admin/health" in js
+    assert "adm-health-rows" in js
+    assert "adm-health-failures" not in js            # offloaded to the page
 
 def test_routes_are_registered_in_app():
     assert "admin_health_routes" in _APP_PY
     assert "setup_admin_health_routes" in _APP_PY
+
+
+
+# ── G1b: the standalone status page ─────────────────────────────────────────
+
+def test_g1b_status_page_is_admin_gated(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.get("/admin/status")
+    assert r.status_code == 403
+
+
+def test_g1b_status_page_serves_selfcontained_html(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")  # bypasses the gate (smoke posture)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.get("/admin/status")
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    body = r.text
+    assert "ORWELL · STATUS" in body
+    assert "/api/admin/health" in body            # polls the existing aggregate
+    assert "setInterval(load, 10000)" in body     # auto-refresh
+    assert "<link" not in body                    # zero external assets — must render
+    assert '<script src' not in body              #   even when the app shell is broken
+
+
+# ── G1b: the multi-source live log viewer ───────────────────────────────────
+
+def test_g1b_log_sources_lists_live_io_and_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    (tmp_path / "portrait-log.jsonl").write_text('{"ok": true}\n')
+    (tmp_path / "secrets.txt").write_text("not a log")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/logs/sources")
+    assert r.status_code == 200
+    ids = [s["id"] for s in r.json()["sources"]]
+    assert "live" in ids and "io" in ids
+    assert "file:portrait-log.jsonl" in ids
+    assert not any("secrets.txt" in i for i in ids)   # only .log/.jsonl are tailable
+
+
+def test_g1b_live_ring_and_cursor(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    import logging
+    from src import log_rings
+    logging.getLogger("g1b-test").info("g1b ring smoke line")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/logs?source=live&since=0")
+    assert r.status_code == 200
+    body = r.json()
+    assert any("g1b ring smoke line" in l["msg"] for l in body["lines"])
+    # cursor semantics: a follow-up read returns only entries newer than the
+    # cursor (the live ring keeps receiving the app's own lines — by design).
+    r2 = client.get(f"/api/admin/logs?source=live&since={body['next']}")
+    assert all(l["seq"] > body["next"] for l in r2.json()["lines"])
+
+
+def test_g1b_io_tap_records_calls_and_failures():
+    from src import log_rings
+    log_rings.record_io("getGameState", {"user": "u"}, True, 12, {"ok": True})
+    log_rings.record_io("advanceGame", None, False, 3401, "TimeoutError: boom")
+    _, lines = log_rings.IO.since(0)
+    tools = [l["tool"] for l in lines]
+    assert "getGameState" in tools and "advanceGame" in tools
+    failed = [l for l in lines if l["tool"] == "advanceGame"][-1]
+    assert failed["ok"] is False and "TimeoutError" in failed["result"]
+
+
+def test_g1b_io_tap_clips_large_payloads():
+    from src import log_rings
+    log_rings.record_io("bigTool", {"x": "y"}, True, 1, "z" * 10000)
+    _, lines = log_rings.IO.since(0)
+    big = [l for l in lines if l["tool"] == "bigTool"][-1]
+    assert len(big["result"]) < 3000 and "chars]" in big["result"]
+
+
+def test_g1b_file_tail_refuses_traversal(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    client = TestClient(_app(), raise_server_exceptions=False)
+    for evil in ("file:../app.py", "file:..%2Fapp.py", "file:/etc/passwd"):
+        r = client.get(f"/api/admin/logs?source={evil}")
+        assert r.status_code == 404, evil
+
+
+def test_g1b_engine_client_is_tapped():
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "src", "orwell_engine.py"), encoding="utf-8").read()
+    assert "record_io(" in src and "_call_inner(" in src
+
+
+def test_g1b_page_carries_the_sticky_tail_viewer(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    body = client.get("/admin/status").text
+    assert 'id="logpane"' in body and 'id="logsrc"' in body
+    assert "scrollHeight - pane.scrollTop" in body    # the at-bottom stickiness math
+    assert "paused" in body and "following" in body   # the follow pill states
