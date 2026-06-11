@@ -2647,3 +2647,37 @@ PR per item).
 > to `diffuseGossip` (E44 live), and swaps `recordOffscreenSoul` → `recordOffscreenScene` (E50's
 > both-souls half) — the exact diff is in PR #216's description. E54's `vetoSave`/`juryLean`
 > consumption is a 2-line post-merge follow-up in Lane 4's files.
+
+## Round-5/6 audit parallel phase — Lane 4 (player agency & ladder, engine) · 2026-06-10 — ✅ DONE (PR #217)
+
+> Source: `docs/audits/2026-06-10-full-product-audit.md` (lane plan: E34–E37, E12+T2, E38,
+> E39/C7, C1, C6; E51's eviction half coordinated to Lane 3). Every finding shipped with its
+> proving test in PR #217; the per-item stamps live on the audit doc's finding lines.
+
+### Lane 4 — E38 · E39/C7 · C6 · C1 · E35 · E36 · E12+T2 · E34 · E37  ·  Claude Code (engine)  ·  ✅ DONE 2026-06-10 (PR #217)
+
+> **DONE.** (E38 / ruling #1) NPC names are seeded samples from vendored real-name corpora
+> (`src/engine/data/givenNames.ts` + `surnames.ts`) — raw material only, "no fixed cast": no
+> full-name+persona pairing hard-coded (BDD-proven), the legacy Bible's names banned by corpus
+> exclusion, identity (never just a first name) carries across no two seeds; the inverse realism
+> gate (every part corpus-membered) finally exists. (E39/C7 = D8) `createCharacter` defaults to a
+> persisted ENTROPY seed — same name no longer replays the identical season (or its secrets);
+> explicit seeds stay for tests/replays. (C6) a missing/typo'd archetype defaults to the MEDIAN
+> floater spec, surfaced as `defaulted` on the casting card — never a silent comp-beast grant.
+> (C1, execution-confirmed) Houseguest's-Choice candidates snapshot AFTER the full draw and the
+> resume re-derives legality — a duplicate veto competitor is impossible (property over seeds ×
+> house sizes 5–16). (E35) the veto chip draw is a WITNESSED `veto-draw` beat (field + HC
+> holder/pick) preceding any winner, and ANY player in the drawn field — chip-drawn included —
+> declares compete/throw/play-safe. (E36) the F4 veto pending carries the honest legal set
+> (empty saveable + why); `{use:true}` is refused with the decision standing, never inverted.
+> (E12+T2) eviction votes are SECRET BALLOTS: anonymized reveal ("a vote to evict X"),
+> engine-only `voteRecord`, attribution unsealed exclusively in the 0048 retrospective
+> (`evictionVotes`); T2's vacuous secrecy Thens replaced with electorate-derived bounds + a new
+> 0047 scenario. (E34) the player's goodbye is a real `goodbye-message` pending (tone their
+> choice, folded via `goodbyeMannerFor` exactly as NPC tones; no engine-authored player goodbye
+> beat exists). (E37) the player-juror asks their own scoreless `juror-question` at the finale.
+> FE relay for both new kinds wired end-to-end (tool_schemas.py, orwellDecision.js,
+> orwell_routes.py, tool_implementations.py, c12 mirror) without touching Lane 6/7 files.
+> Gate: 516 unit/property/arch + 318 BDD + 334 FE pytest green. E51's eviction half
+> (`survived-vote` inflection) confirmed adapter-side — Lane 3's fold methods, no liveSeason
+> change forced.

@@ -2,15 +2,20 @@ import { PLAYER, npc } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
+import { GIVEN_NAMES } from "./data/givenNames";
+import { SURNAMES } from "./data/surnames";
 
 /**
  * CharacterFactory + OOBE (feature 0004). Generates a curated, randomly-named
  * house of NPCs within plausible Big Brother archetype bounds, and runs the
  * first-run OOBE that produces the ONLY human-authored profile (the player).
  *
- * Names are SYNTHESIZED from phonemes — never drawn from a hard-coded roster or
- * sample-save content. Each houseguest splits into a static `Character` (baseline)
- * and a dynamic `Soul` (evolving) per docs/decisions/0001 & 0002.
+ * Names are SEEDED SAMPLES from vendored real-name corpora (E38 / product ruling #1,
+ * 2026-06-10): the corpora are raw material only — no full-name+persona pairing is
+ * hard-coded ("no fixed cast", the amended 0004 do-not), the legacy Bible's names stay
+ * banned (excluded from the corpora, guarded by test), and identity never carries
+ * across seeds. Each houseguest splits into a static `Character` (baseline) and a
+ * dynamic `Soul` (evolving) per docs/decisions/0001 & 0002.
  */
 export type Archetype =
   | "comp-beast" | "mastermind" | "social-butterfly" | "floater" | "villain"
@@ -122,6 +127,12 @@ export interface PlayerCharacter {
   privateStrategy?: string;
   /** Why they came to play (casting interview, 0050) — player-only authored material, never an NPC pathway. */
   motivation?: string;
+  /**
+   * True when the player never supplied a recognizable archetype and the engine DEFAULTED them
+   * to the median spec (C6): surfaced on the casting card so an early/typo'd finalization is
+   * visible, never a silent stat grant.
+   */
+  archetypeDefaulted?: boolean;
 }
 
 export interface GameHouse {
@@ -129,32 +140,34 @@ export interface GameHouse {
   npcs: Houseguest[];
 }
 
-// --- Procedural, phoneme-based naming (NEVER a hard-coded name roster) --------
+// --- Real-name sampling from vendored corpora (E38 / ruling #1 — never a fixed cast) ---
 
-const ONSET = ["br", "k", "j", "m", "t", "sh", "r", "l", "d", "ka", "ne", "va", "z", "mi", "el", "ar", "be", "ca", "fa", "gi", "ho", "ju", "lo", "ma", "na", "pe", "sy", "tor"];
-const NUCLEUS = ["a", "e", "i", "o", "u", "ai", "ee", "ia", "ou", "ay"];
-const CODA = ["n", "l", "r", "s", "th", "ne", "ra", "den", "lyn", "son", "ka", "mir", "sa", ""];
+/** The vendored raw material (test seam): given names + surnames, never name+persona pairings. */
+export const NAME_CORPORA = { given: GIVEN_NAMES, surnames: SURNAMES } as const;
 
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+/** The inverse realism gate (E38): every part of a generated display name is corpus-membered. */
+export function isCorpusName(fullName: string): boolean {
+  const parts = fullName.split(" ");
+  if (parts.length !== 2) return false;
+  return GIVEN_NAMES.includes(parts[0]!) && SURNAMES.includes(parts[1]!);
 }
 
-function namePart(rng: RandomnessSource): string {
-  const syll = (): string => rng.pick(ONSET) + rng.pick(NUCLEUS) + rng.pick(CODA);
-  let s = syll();
-  if (rng.next() < 0.6) s += syll();
-  return cap(s);
-}
-
-function uniqueName(rng: RandomnessSource, used: Set<string>): string {
+/**
+ * Seeded sampling WITHOUT replacement per season: unique full names AND unique given names
+ * within a house (the show never casts two same-named houseguests in a season). The corpora
+ * are raw material — which name lands on which archetype is entirely the seed's draw.
+ */
+function uniqueName(rng: RandomnessSource, used: Set<string>, usedGiven: Set<string>): string {
   for (let guard = 0; guard < 1000; guard++) {
-    const name = `${namePart(rng)} ${namePart(rng)}`;
-    if (/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(name) && !used.has(name)) {
+    const given = rng.pick(GIVEN_NAMES);
+    const name = `${given} ${rng.pick(SURNAMES)}`;
+    if (!used.has(name) && !usedGiven.has(given)) {
       used.add(name);
+      usedGiven.add(given);
       return name;
     }
   }
-  throw new Error("could not synthesize a unique name");
+  throw new Error("could not sample a unique name");
 }
 
 // --- Generation ---------------------------------------------------------------
@@ -294,11 +307,14 @@ export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElemen
 export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
   const specs = curatedArchetypes(rng, NPC_COUNT);
   const used = new Set<string>();
+  const usedGiven = new Set<string>();
   // Draw order on the MAIN stream (name, style, stats, background, volatility) is preserved exactly;
   // appearance is generated off a SIDE rng (hashed off the name) so the cosmetic 0004 amendment
   // never perturbs competition-relevant generation (keeps seeded house composition byte-stable).
+  // (E38 re-baselined the seeded streams once — the name draw now consumes 2 picks, not phonemes —
+  // and the side streams hash off the new names and re-derive, exactly as the audit specified.)
   const npcs: Houseguest[] = specs.map((spec, i) => {
-    const name = uniqueName(rng, used);
+    const name = uniqueName(rng, used, usedGiven);
     const strategyStyle = rng.pick(spec.styles);
     const stats = jittered(spec.bias, rng);
     const background = `a ${rng.pick(OCCUPATIONS)} who plays as a ${spec.archetype}`;
@@ -350,13 +366,22 @@ export interface OobeInput {
 /** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
 const VOL_OF: Record<Disposition, number> = { clash: 0.7, bond: 0.3, neutral: 0.5 };
 
+/**
+ * The MEDIAN default spec for a player who never supplied a recognizable archetype (C6):
+ * the floater — balanced, unremarkable aptitudes. NEVER `ARCHETYPES[0]` (the comp-beast),
+ * which silently granted a typo'd or early finalization the strongest stats in the game
+ * (anti-sycophancy via fallback). Guarded by test: the default's stats are not the global max.
+ */
+export const DEFAULT_ARCHETYPE: Archetype = "floater";
+
 /** The ONLY human-authored profile, produced at first-run character creation. */
 export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
   // Validation: a profile can't be half-authored. `name` is the required field.
   if (!input || typeof input.name !== "string" || input.name.trim().length === 0) {
     throw new Error("character creation requires a name");
   }
-  const spec = (input.archetype && SPEC_OF.get(input.archetype)) || ARCHETYPES[0]!;
+  const defaulted = !(input.archetype && SPEC_OF.has(input.archetype));
+  const spec = defaulted ? SPEC_OF.get(DEFAULT_ARCHETYPE)! : SPEC_OF.get(input.archetype!)!;
   const strategyStyle = input.strategyStyle && spec.styles.includes(input.strategyStyle)
     ? input.strategyStyle : spec.styles[0]!;
   // The player's public appearance is seed-stable per authored name (the player has no NPC rng).
@@ -396,6 +421,7 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
     },
     ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
     ...(input.motivation?.trim() ? { motivation: input.motivation.trim() } : {}),
+    ...(defaulted ? { archetypeDefaulted: true } : {}),
   };
 }
 

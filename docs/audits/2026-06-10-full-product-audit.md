@@ -193,7 +193,7 @@ File references are to `main` @ 87687c0.
   five diegetic labels + C13 drift test iterating `ORWELL_GAME_TOOLS`; engine — gate
   `knows/suspects` to co-present/adjacent NPCs via the 0049 model, and cap stances to top-k
   polarized edges (see E59). *Test:* non-adjacent NPC returns persona+stances, no `knows`.
-- **E12 [MED · Change] Per-voter eviction attribution kills vote secrecy.** `liveSeason.ts:582`
+- **E12 [MED · Change] ✅ PR #217 — Per-voter eviction attribution kills vote secrecy.** `liveSeason.ts:582`
   reveals `voter → votedFor` pairs to the player beat-by-beat; real-BB ballot secrecy (rogue
   votes, scapegoating, paranoia) is impossible and blocs/deal-breaks are perfectly legible.
   *Fix:* anonymized running tally outward ("a vote to evict X…"); `voteOf` stays engine-internal
@@ -306,14 +306,14 @@ File references are to `main` @ 87687c0.
   deepening while a passive player's edges idle — E45/E57 are co-causes) + a permanent property
   gate ("across N passive seeds the player reaches jury in ≥X%"); re-measure social play after
   D1/E1.
-- **E34 [HIGH · Bug] The engine authors the player's goodbye messages.**
+- **E34 [HIGH · Bug] ✅ PR #217 — The engine authors the player's goodbye messages.**
   `liveSeason.ts:542–545` samples senders from `s.active` (player included) and `:597–603`
   asserts a tone computed from the hidden player→NPC edge — the engine deciding and narrating
   the player's own feelings, on jury management's signature lever. *Fix:* exclude `PLAYER` from
   `selectGoodbyeSenders`; add an optional `goodbye-message` pending decision (tone +
   model-voiced text) folded via `goodbyeMannerFor` exactly as NPC tones. *Test:* no
   player-sent goodbye beat without a resolved player decision.
-- **E35 [MED · Bug] A player drawn into the veto by chip never declares intent, and the chip
+- **E35 [MED · Bug] ✅ PR #217 — A player drawn into the veto by chip never declares intent, and the chip
   draw isn't a ceremony.** `liveSeason.ts:795–798` pauses for intent only pre-draw-resolution
   for pullers; the draw emits no witnessed BeatEvent (the field appears only on the winner
   event), so the player misses the canonical compete/throw/play-safe declaration and never
@@ -321,16 +321,16 @@ File references are to `main` @ 87687c0.
   naming the six + HC holder/pick; pause for `comp-intent` whenever the player is in the field)
   then `veto-competition`. *Test:* chip-drawn player gets a `comp-intent` pending; a
   `veto-draw` event precedes any winner.
-- **E36 [MED · Bug] The F4 veto decision offers "use" then silently inverts it.**
+- **E36 [MED · Bug] ✅ PR #217 — The F4 veto decision offers "use" then silently inverts it.**
   `liveSeason.ts:851–857/:960–963` — submitting `{use:true}` with no legal replacement resets
   `vetoUsed=false` and narrates "does not use the veto," contradicting the submitted choice and
   the 0034 legal-options contract. *Fix:* surface the F4 rule in the pending's legal set (or
   refuse with the decision standing). 
-- **E37 [LOW · Improvement] The player-juror has no question beat at the finale.**
+- **E37 [LOW · Improvement] ✅ PR #217 — The player-juror has no question beat at the finale.**
   `liveSeason.ts:710–712` pauses only for a player *finalist*; a juror watches their own
   question auto-answered. *Fix:* a scoreless `juror-question` pending (free text; NPC answer
   still engine-chosen) — the finale-statement precedent shows this is cheap.
-- **E38 [HIGH · Bug] NPC names are gobbledygook ("Sheehoaika Peokakith") — product ruling: real
+- **E38 [HIGH · Bug] ✅ PR #217 — NPC names are gobbledygook ("Sheehoaika Peokakith") — product ruling: real
   names.** `characterFactory.ts:134–147` glues random ONSET+NUCLEUS+CODA syllables; the only
   filter is a capitalization regex (`:152`). Violates 0004's own "plausible BB contestant"
   bound and ADR 0003 §8 on the game's first screen. *Fix:* vendored corpora (~300+ given names,
@@ -341,7 +341,7 @@ File references are to `main` @ 87687c0.
   `characterCreation.test.ts:50–53` from zero-name-overlap to no-*identity*-carryover; add the
   inverse realism gate (every generated part ∈ corpus — the check `0004:63–64` asked for and
   never got); roles-only rule untouched.
-- **E39 [MED · Change] Same name ⇒ byte-identical season** (= **D8**, endorsed; engine evidence
+- **E39 [MED · Change] ✅ PR #217 — Same name ⇒ byte-identical season** (= **D8**, endorsed; engine evidence
   `GameSessionAdapter.ts:513` `seed = req.seed ?? hashSeed(playerName)`). Entropy default
   (per-creation nonce persisted in the snapshot); explicit seeds remain for tests/replays.
 - **E40 [LOW · Change] Final 3 is a single comp** — the canonical three-part HOH
@@ -943,7 +943,7 @@ traceability; E-batch cross-references inline.
 
 ## Stream C — pure domain core + souls (C1–C17; C1–C3 execution-confirmed)
 
-- **C1 [HIGH · Bug · confirmed]** Houseguest's-Choice deferral hands the player a stale
+- **C1 [HIGH · Bug · confirmed] ✅ PR #217 —** Houseguest's-Choice deferral hands the player a stale
   candidate list: candidates snapshot mid-draw (`eligibility.ts:91–101`) while later pullers
   keep drawing; resume validates only membership in the stale list
   (`liveSeason.ts:976–978`) and appends blindly. Confirmed: field
@@ -972,12 +972,12 @@ traceability; E-batch cross-references inline.
   `competitors[0]` (`competitionOutcome.ts:79–92`); empty field throws TypeError; `serialize`
   silently converts NaN → null ("lossless" becomes a type lie). *Fix:* finiteness asserts +
   empty-field throw; fast-check property.
-- **C6 [MED · Bug]** A missing/typo'd archetype silently grants the player **comp-beast**
+- **C6 [MED · Bug] ✅ PR #217 —** A missing/typo'd archetype silently grants the player **comp-beast**
   stats — `SPEC_OF.get(...) || ARCHETYPES[0]` (`characterFactory.ts:314`), and the
   archetype/style steps aren't part of the casting `ready` gate, so early finalization is
   normal. Anti-sycophancy via fallback. *Fix:* default to a median spec (floater), surface
   "defaulted" on the casting card. *Test:* default-stats ≠ global max.
-- **C7 [MED]** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
+- **C7 [MED] ✅ PR #217 —** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
   elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
   replays a season whose secrets they know).
 - **C8 [MED · Bug]** Casting intake: no length caps, exact-string note dedupe only, scalars
@@ -1033,7 +1033,7 @@ proven only on a fixture:
   assert their own stubs (`deal_tracking.steps.ts:17–30, 122–127`); `reconcileDeals`,
   `bindingActionFor`, jury demerits, and the reveal event are untested on the production
   path. (The missing gate for E42/E43.) Full live-test spec recorded.
-- **T2 [HIGH · Vacuous]** Vote secrecy's Then is `x ≤ max(xs)` — true by definition
+- **T2 [HIGH · Vacuous] ✅ PR #217 —** Vote secrecy's Then is `x ≤ max(xs)` — true by definition
   (`eviction_night.steps.ts:91–101`); the "no pre-reveal tally/unread vote" Then guards
   itself behind an `if` that can skip all assertions. Replacement: electorate-derived bounds
   + mid-stage surface sweeps. (The engine-side twin of E12.)

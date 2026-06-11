@@ -263,6 +263,11 @@ When("the finale is advanced to the player's juror vote", async function (this: 
     const v = await adv(this.livePlayer!);
     this.lastAdvance = v;
     if (v.pending?.kind === "juror-vote") break;
+    if (v.pending?.kind === "juror-question") {
+      // E37: the player-juror's own question beats precede their vote — answer and continue.
+      await this.livePlayer!.callTool("submitDecision", { kind: "juror-question", statement: "what was your game?" });
+      continue;
+    }
     if (v.finished) break;
   }
 });

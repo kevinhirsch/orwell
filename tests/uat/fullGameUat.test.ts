@@ -37,7 +37,7 @@ interface NamedRef { id: string; name: string; }
 
 interface PendingDecision {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-      | "finale-statement" | "finale-answer" | "juror-vote";
+      | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   by: NamedRef;
   options: NamedRef[];
   pick: number;
@@ -117,11 +117,15 @@ function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<str
       return { kind: "tie-break", vote: p.options[0]!.id };
     case "final-eviction": // Final 3 (0045): the player is the final HOH — evict one of the other two.
       return { kind: "final-eviction", vote: p.options[0]!.id };
+    case "goodbye-message": // E34: the player's own goodbye — the tone rides `vote` (first legal tone).
+      return { kind: "goodbye-message", vote: p.options[0]!.id, statement: "Take care." };
     // --- 0037 interactive finale ---
     case "finale-statement":
       return { kind: "finale-statement", statement: "I played my own game." };
     case "finale-answer":
       return { kind: "finale-answer", appeal: p.appeals?.[0] ?? "own-game" };
+    case "juror-question": // E37: the player-juror's scoreless question.
+      return { kind: "juror-question", statement: "What was your biggest move?" };
     case "juror-vote":
       return { kind: "juror-vote", vote: p.options[0]!.id };
   }
@@ -528,7 +532,9 @@ describe("full-game UAT over the deployed HTTP transport path", () => {
       expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
     },
     // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1
-    // (and the E42–E55 consequence folds added real per-beat work on top of the transport cost).
+    // (measured at ~62s on an unmodified main in a shared-CPU environment — the old 60s budget
+    // was a hair-trigger env flake; and the E42–E55 consequence folds added real per-beat work
+    // on top of the transport cost; assertions unchanged, only the wall-clock budget breathes).
     { timeout: 180_000 },
   );
 

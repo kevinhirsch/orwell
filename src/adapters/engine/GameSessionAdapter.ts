@@ -6,6 +6,7 @@ import type {
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import { randomBytes } from "node:crypto";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { HOUSE_ADJACENCY } from "../../domain/house";
@@ -68,8 +69,8 @@ import { EngineRefusal } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
-  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -82,6 +83,16 @@ import { cloneSession } from "../../engine/sessionSnapshot";
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/**
+ * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
+ * `crypto` randomness, persisted in the snapshot (`gameSeed`) so the season stays reproducible
+ * AFTER creation. This is an adapter (not the pure core) — the one sanctioned place real
+ * entropy enters; everything downstream still flows through the seeded `RandomnessSource`.
+ */
+function entropySeed(): number {
+  return randomBytes(4).readUInt32LE(0);
+}
 
 /** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
 const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
@@ -352,7 +363,16 @@ export class GameSessionAdapter implements GameSession {
       kind: t.kind as string,
       firedWeek: fired.get(t.kind) ?? null,
     }));
-    return { winner: this.named(this.live.winner), hiddenStory, twists };
+    // E12: the weekly secret ballots unseal HERE — and only here, behind the same terminal gate.
+    const evictionVotes = (this.live.voteRecord ?? []).map((r) => ({
+      week: r.week,
+      evictee: { id: r.evictee, name: this.nameOf(r.evictee) },
+      votes: Object.entries(r.voteOf).map(([voter, votedFor]) => ({
+        voter: { id: voter as EntityId, name: this.nameOf(voter as EntityId) },
+        votedFor: { id: votedFor, name: this.nameOf(votedFor) },
+      })),
+    }));
+    return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -570,7 +590,11 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
-    const seed = req.seed ?? hashSeed(playerName);
+    // E39/C7/D8: the DEFAULT seed is real entropy, persisted with the snapshot — the same player
+    // name must never replay the byte-identical season (incl. its hidden elements and twist
+    // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
+    // first-class for tests and replays.
+    const seed = req.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
@@ -1198,9 +1222,18 @@ export class GameSessionAdapter implements GameSession {
       case "final-eviction": // Final 3 (0045): the final HOH evicts; `vote` carries the evictee.
         if (!req.vote) throw new Error("a final-eviction target is required");
         return { kind: "final-eviction", evict: req.vote };
+      case "goodbye-message": { // E34: the tone rides `vote` (like comp-intent's `intent ?? vote` seam).
+        const tone = req.vote as GoodbyeTone | undefined;
+        if (!tone || !(GOODBYE_TONES as readonly string[]).includes(tone)) {
+          throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
+        }
+        return { kind: "goodbye-message", tone, ...(req.statement ? { message: req.statement } : {}) };
+      }
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: "finale-statement", statement: req.statement ?? "" };
+      case "juror-question": // E37: scoreless free text — nothing here can sway the tally.
+        return { kind: "juror-question", question: req.statement ?? "" };
       case "finale-answer": {
         if (!req.appeal || !(FINALE_APPEALS as readonly string[]).includes(req.appeal)) {
           throw new Error("a legal finale appeal is required");
@@ -1226,7 +1259,12 @@ export class GameSessionAdapter implements GameSession {
       case "nominations":
         return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
       case "veto-decision":
-        return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+        // The 0034 legal-options contract (E36): the options ARE the legally saveable nominees.
+        // At Final 4 no replacement exists, so the set is EMPTY and the prompt says why — the
+        // engine never offers "use" only to silently invert it into "does not use the veto".
+        return p.saveable.length === 0
+          ? { kind: p.kind, by, prompt: "You hold the Power of Veto — but no replacement nominee exists at Final 4, so the veto cannot change the nominations. Confirm leaving them standing.", options: [], pick: 1 }
+          : { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.saveable), pick: 1 };
       case "comp-intent":
         // The "options" ARE the three intents (id = the intent value), so the generic decision path
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
@@ -1241,6 +1279,14 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: "The eviction vote is tied — as Head of Household you cast the deciding vote.", options: refs(p.nominees), pick: 1 };
       case "final-eviction":
         return { kind: p.kind, by, prompt: "You are the final Head of Household — evict one houseguest; the other sits beside you at the Final 2.", options: refs(p.options), pick: 1 };
+      // --- eviction night (E34): the player's own goodbye — tone is THEIR choice, never engine-read ---
+      case "goodbye-message":
+        return {
+          kind: p.kind, by,
+          prompt: `${this.nameOf(p.evictee)} has been evicted — record your goodbye message. Choose its tone; your own words carry it.`,
+          options: p.tones.map((t) => ({ id: t, name: t })),
+          evictee: this.named(p.evictee)!, pick: 1,
+        };
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: p.kind, by, prompt: "You are a finalist — give your opening statement to the jury.", options: [], pick: 0 };
@@ -1249,6 +1295,13 @@ export class GameSessionAdapter implements GameSession {
           kind: p.kind, by,
           prompt: `${this.nameOf(p.juror)} asks you a question — choose how you make your case.`,
           options: [], appeals: [...p.appeals], juror: this.named(p.juror)!, pick: 1,
+        };
+      // --- finale (E37): the player-juror's own question (scoreless free text) ---
+      case "juror-question":
+        return {
+          kind: p.kind, by,
+          prompt: `You sit on the jury — ask ${this.nameOf(p.finalist)} your question. It sways nothing by itself; their answer is theirs.`,
+          options: refs([p.finalist]), finalist: this.named(p.finalist)!, pick: 0,
         };
       case "juror-vote":
         return { kind: p.kind, by, prompt: "You sit on the jury — cast your vote for the winner.", options: refs(p.finalists), pick: 1 };
@@ -1281,8 +1334,10 @@ export class GameSessionAdapter implements GameSession {
     return {
       stage: e.stage,
       nominees: e.nominees.map(ref),
+      // E12: secret ballots — the projection carries the anonymized ballots read so far, never
+      // the voter; the attribution unseals only in the post-season retrospective (0048).
       votesRevealed: e.revealOrder.slice(0, e.revealIx).map((voter) => ({
-        voter: ref(voter), votedFor: ref(e.voteOf[voter]!),
+        votedFor: ref(e.voteOf[voter]!),
       })),
     };
   }
@@ -1458,6 +1513,8 @@ export class GameSessionAdapter implements GameSession {
           },
           ...(p.character.background ? { story: p.character.background } : {}),
           ...(p.motivation ? { motivation: p.motivation } : {}),
+          // C6: an engine-defaulted character type is SURFACED, never a silent grant.
+          ...(p.archetypeDefaulted ? { defaulted: true } : {}),
         },
       },
       house: this.house.npcs.map((n) => ({

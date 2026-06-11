@@ -39,7 +39,8 @@ def client(monkeypatch):
 ENGINE_KINDS = [
     "nominations", "veto-decision", "comp-intent", "houseguests-choice",
     "replacement", "eviction-vote", "tie-break", "final-eviction",
-    "finale-statement", "finale-answer", "juror-vote",
+    "goodbye-message", "finale-statement", "finale-answer",
+    "juror-question", "juror-vote",
 ]
 
 
