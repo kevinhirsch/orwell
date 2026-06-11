@@ -1195,6 +1195,12 @@ if (!window._odyEscExpandGuard) {
     if (cur === _zCounter) return;
     m.style.zIndex = String(++_zCounter);
   };
+  // G14 (DWE audit F9b): ONE z-authority. modalManager's _bringToFront defers
+  // to this promote on register/auto-stack/dock-restore instead of running a
+  // second, competing escalator (it used to stamp 300s with !important, which
+  // can outlive the plain re-promote and float a dock-restored window above
+  // every newer open while pickTopModal disagrees with the paint order).
+  window._owPromoteModal = _promote;
   // F8 (DWE audit / Lane F wave 3): closing a modal returns focus to its
   // opener — for the WHOLE .modal family, from this one observer. On the
   // hidden→visible transition we stash the element that had focus; on

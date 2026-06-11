@@ -57,14 +57,38 @@ function _applyRememberedDock(id) {
   try { applyEdgeDock(modal, side); } catch (e) { console.warn('apply remembered dock failed', e); }
 }
 
-// Monotonic stacking counter so the most-recently-surfaced tool window always
-// sits on top. Tool modals otherwise carry fixed CSS z-indexes (base .modal
-// = 250, cookbook/theme = 260, …), so restoring one from the dock could leave
-// it BEHIND an already-open tool with a higher static z-index. Start above
-// those statics and bump on every bring-to-front.
-let _modalTopZ = 300;
+// G14 (DWE audit F9b): ONE z-authority — ui.js's modal z-counter. Tool modals
+// carry fixed CSS z-indexes (base .modal = 250, cookbook/theme = 260, …), and
+// ui.js's visibility observer promotes any modal that becomes visible to the
+// top of its plain-inline ladder (1000+), so the most-recently-surfaced window
+// wins both visually AND for the Escape arbiter's pickTopModal (computed z).
+// This module used to run a SECOND escalator (its own 300s counter, stamped
+// with !important): the two counters raced on every open/restore, and the
+// !important stamp outlives the plain re-promote on engines whose CSSOM IDL
+// setter does not replace an !important inline declaration — leaving a
+// dock-restored window painted above every newer open while pickTopModal
+// disagreed with the paint order. One counter, plain values, no race: defer
+// to ui.js's promote (window._owPromoteModal). Kit windows (.ow-window, not
+// .modal) are untouched by the promote and keep raising themselves through
+// their own band — also one authority per band.
 function _bringToFront(modal) {
-  if (modal) modal.style.setProperty('z-index', String(++_modalTopZ), 'important');
+  if (!modal) return;
+  // Scrub any legacy !important stamp so the plain ladder takes effect.
+  try {
+    if (modal.style.getPropertyPriority('z-index') === 'important') {
+      modal.style.removeProperty('z-index');
+    }
+  } catch (_) {}
+  const promote = typeof window !== 'undefined' ? window._owPromoteModal : null;
+  if (typeof promote === 'function') { promote(modal); return; }
+  // Fallback (ui.js arbiter not booted yet): plain inline, one above every
+  // current .modal — never !important, so ui.js's counter can take over.
+  let top = 999;
+  document.querySelectorAll('.modal').forEach((m) => {
+    const z = parseInt(getComputedStyle(m).zIndex, 10);
+    if (Number.isFinite(z) && z > top) top = z;
+  });
+  modal.style.zIndex = String(top + 1);
 }
 
 function _emitModalOpened(id, modal) {
@@ -816,10 +840,13 @@ function _wireChipDrag(chip, dock) {
       }
       // !important needed because the chip's class-level transform/transition
       // (the FLIP reorder animation + spring transition) outranks plain
-      // inline styles set via .style on some Safari versions.
+      // inline styles set via .style on some Safari versions. z-index is
+      // plain on purpose (G14): no class rule fights it (the reorder branch
+      // below already uses the plain form), and this module carries no
+      // z-index !important anywhere.
       chip.style.setProperty('transition', 'none', 'important');
       chip.style.setProperty('transform', `translate(${tx}px, ${ty}px) scale(${inZone ? 1.12 : 1.05})`, 'important');
-      chip.style.setProperty('z-index', '10030', 'important');
+      chip.style.zIndex = '10030';
       chip.style.setProperty('position', 'fixed', 'important');
       chip.style.setProperty('left', `${chipStartLeft}px`, 'important');
       chip.style.setProperty('top', `${chipStartTop}px`, 'important');
