@@ -24,6 +24,22 @@ ahr = importlib.import_module("routes.admin_health_routes")
 orwell_engine = importlib.import_module("src.orwell_engine")
 
 
+_INDEX = None
+_APP_PY = None
+_SETTINGS_JS = None
+
+
+def _lazy_consts():
+    global _INDEX, _APP_PY, _SETTINGS_JS
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _INDEX is None:
+        _INDEX = open(os.path.join(base, "static", "index.html"), encoding="utf-8").read()
+    if _APP_PY is None:
+        _APP_PY = open(os.path.join(base, "app.py"), encoding="utf-8").read()
+    if _SETTINGS_JS is None:
+        _SETTINGS_JS = open(os.path.join(base, "static", "js", "settings.js"), encoding="utf-8").read()
+
+
 def _read_static(*parts):
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
     with open(os.path.join(base, *parts), encoding="utf-8") as f:
@@ -209,30 +225,21 @@ def test_redaction_helper_covers_secret_shapes_and_url_credentials():
 
 # ── Read-only: no mutating verb exists on the surface ─────────────────────────
 
-def test_surface_is_read_only(monkeypatch):
-    monkeypatch.setenv("AUTH_ENABLED", "false")
-    client = TestClient(_app(), raise_server_exceptions=False)
-    for verb in (client.post, client.delete, client.put, client.patch):
-        assert verb("/api/admin/health").status_code in (404, 405)
-        assert verb("/api/admin/debug-bundle").status_code in (404, 405)
-    import os
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "routes", "admin_health_routes.py"), encoding="utf-8").read()
-    assert ".post(" not in src and ".delete(" not in src and ".put(" not in src and ".patch(" not in src
-
-
-# ── UI: one admin-only Health & Logs card in the System panel ──────────────────
-
-import os as _os
-
-_FE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-_INDEX = open(_os.path.join(_FE, "static", "index.html"), encoding="utf-8").read()
-_ADMIN_JS = open(_os.path.join(_FE, "static", "js", "admin.js"), encoding="utf-8").read()
-_SETTINGS_JS = open(_os.path.join(_FE, "static", "js", "settings.js"), encoding="utf-8").read()
-_APP_PY = open(_os.path.join(_FE, "app.py"), encoding="utf-8").read()
-
+def test_surface_is_read_only():
+    # Amended by G19a: the HEALTH/LOG routes stay read-only (GET only); the ops
+    # subtree adds POST *triggers* by design — fixed-id allowlisted runs and the
+    # update flag — pinned separately in test_g19a_ops_page.py. No route here
+    # may ever mutate game or store state.
+    router = ahr.setup_admin_health_routes()
+    for r in router.routes:
+        methods = getattr(r, "methods", set()) or set()
+        if r.path.startswith("/api/admin/ops"):
+            assert methods <= {"GET", "POST", "HEAD"}, r.path
+        else:
+            assert methods <= {"GET", "HEAD"}, f"{r.path} must stay read-only"
 
 def test_health_card_is_admin_only():
+    _lazy_consts()
     import re
     m = re.search(r'id="adm-health-card"[^>]*class="([^"]*)"|'
                   r'class="([^"]*)"[^>]*id="adm-health-card"', _INDEX)
@@ -245,6 +252,7 @@ def test_health_card_is_admin_only():
 
 
 def test_health_card_lives_in_the_system_panel_not_player_chrome():
+    _lazy_consts()
     # inside the System panel region (after the panel marker, before the modal ends)
     system_panel = _INDEX.split('data-settings-panel="system"')[1]
     assert 'id="adm-health-card"' in system_panel
@@ -274,6 +282,7 @@ def test_admin_js_wires_the_health_panel():
     assert "adm-health-failures" not in js            # offloaded to the page
 
 def test_routes_are_registered_in_app():
+    _lazy_consts()
     assert "admin_health_routes" in _APP_PY
     assert "setup_admin_health_routes" in _APP_PY
 

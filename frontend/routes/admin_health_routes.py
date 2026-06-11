@@ -219,6 +219,38 @@ def setup_admin_health_routes() -> APIRouter:
                 return Response(status_code=404)
         return Response(status_code=400)
 
+    @router.get("/ops")
+    async def admin_ops(request: Request):
+        """G19a: the runnable allowlist + whether the update trigger is installed."""
+        require_admin(request)
+        return {
+            "scripts": [{"id": k, "label": v[0], "log": v[3]} for k, v in _OPS_SCRIPTS.items()],
+            "updateTrigger": {"installed": os.path.isdir(os.path.join(_data_dir(), "ops")),
+                              "log": "ops-update.log"},
+        }
+
+    @router.post("/ops/run/{sid}")
+    async def admin_ops_run(sid: str, request: Request):
+        require_admin(request)
+        if sid not in _OPS_SCRIPTS:   # fixed allowlist — the web tier picks an id, never a command
+            return Response(status_code=404)
+        return await _run_ops_script(sid)
+
+    @router.post("/ops/trigger-update")
+    async def admin_ops_update(request: Request):
+        """G19a: write the flag the root-side path unit (G19b) watches. Content ignored."""
+        require_admin(request)
+        ops_dir = os.path.join(_data_dir(), "ops")
+        if not os.path.isdir(ops_dir):
+            return {"triggered": False, "installed": False,
+                    "note": "update trigger not installed — run the deploy updater once to enable"}
+        import datetime as _dt
+        flag = os.path.join(ops_dir, "update-requested")
+        with open(flag, "w", encoding="utf-8") as fh:
+            fh.write(_dt.datetime.now(timezone.utc).isoformat() + "\n")
+        logger.info("[ops] admin triggered the updater (flag written)")
+        return {"triggered": True, "installed": True, "log": "ops-update.log"}
+
     @router.get("/debug-bundle")
     async def debug_bundle(request: Request):
         require_admin(request)
@@ -298,6 +330,10 @@ _STATUS_PAGE = """<!doctype html>
   <span id="follow" class="sub"></span>
 </div>
 <div id="logpane" style="height:380px;overflow:auto;border:1px solid #262a33;border-radius:8px;padding:8px 10px;background:#101218;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.45"></div>
+<h1 style="margin-top:26px">OPS</h1>
+<div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. Factory reset is deliberately not here.</div>
+<div class="actions" id="opsrow">Loading ops…</div>
+<div id="opsmsg" class="sub"></div>
 <div id="err"></div>
 <script>
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -394,8 +430,105 @@ loadSources();
 updPill();
 pollLogs();
 setInterval(pollLogs, 2000);
+
+// ── G19a: ops buttons — run, then watch the matching log in the viewer ──
+const opsRow = document.getElementById("opsrow"), opsMsg = document.getElementById("opsmsg");
+async function watchLog(name) {
+  await loadSources();                       // a fresh run may have created the file
+  const id = "file:" + name;
+  if ([...sel.options].some(o => o.value === id)) {
+    sel.value = id; sel.dispatchEvent(new Event("change"));
+  }
+}
+async function runOps(sid) {
+  opsMsg.textContent = "Starting " + sid + "…";
+  try {
+    const r = await fetch("/api/admin/ops/run/" + encodeURIComponent(sid), { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d.started) { opsMsg.textContent = sid + " running — following its log."; setTimeout(() => watchLog(d.log), 600); }
+    else opsMsg.textContent = sid + ": " + (d.error || "could not start");
+  } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
+}
+async function triggerUpdate() {
+  if (!confirm("Run the updater on this box now? The services will restart; this page keeps following the log.")) return;
+  opsMsg.textContent = "Triggering the updater…";
+  try {
+    const r = await fetch("/api/admin/ops/trigger-update", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    opsMsg.textContent = d.triggered ? "Update triggered — following ops-update.log (the page rides through the restart)."
+                                     : (d.note || "trigger not installed");
+    if (d.triggered) setTimeout(() => watchLog(d.log), 1500);
+  } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
+}
+async function loadOps() {
+  try {
+    const r = await fetch("/api/admin/ops", { credentials: "same-origin" });
+    const d = await r.json();
+    let h = (d.scripts || []).map(s => '<a class="btn" href="javascript:void(0)" data-ops="' + esc(s.id) + '">' + esc(s.label) + "</a>").join("");
+    const t = d.updateTrigger || {};
+    h += t.installed
+      ? '<a class="btn" href="javascript:void(0)" id="ops-update">Run update (root trigger)</a>'
+      : '<span class="sub">update trigger not installed — run the deploy updater once to enable</span>';
+    opsRow.innerHTML = h;
+    opsRow.querySelectorAll("[data-ops]").forEach(b => b.addEventListener("click", () => runOps(b.dataset.ops)));
+    const u = document.getElementById("ops-update");
+    if (u) u.addEventListener("click", triggerUpdate);
+  } catch (e) { opsRow.textContent = "ops unavailable"; }
+}
+loadOps();
 </script>
 </body></html>"""
+
+
+# ── G19a: ops from the status page ──────────────────────────────────────────
+# Allowlisted, read-only-by-construction script runs + the update TRIGGER.
+# The web tier never chooses what executes: fixed ids → fixed argv. The update
+# is not run here at all — the FE is the E85-hardened unit (no privileges, and
+# a self-update would kill its own parent mid-run); it writes a flag file that
+# a root-side systemd path unit (deploy/systemd/orwell-ops-update.*, G19b)
+# watches, running the real updater and teeing to data/ops-update.log — which
+# the viewer above tails live, ACROSS the restart (the page is self-contained).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_OPS_SCRIPTS = {
+    # id → (label, script, argv, log basename) — READ-ONLY modes only.
+    "panel": ("Health panel (read-only)", "orwell-login-panel.sh", [], "ops-panel.log"),
+    "doctor-status": ("Doctor — status only (read-only)", "orwell-doctor.sh", ["--status"], "ops-doctor.log"),
+}
+_OPS_RUNNING = {}
+
+
+def _ops_script_path(script: str) -> str:
+    return os.path.join(_REPO_ROOT, "deploy", script)
+
+
+async def _run_ops_script(sid: str) -> dict:
+    label, script, argv, log_name = _OPS_SCRIPTS[sid]
+    path = _ops_script_path(script)
+    if not os.path.isfile(path):
+        return {"started": False, "error": "script-missing"}
+    if _OPS_RUNNING.get(sid):
+        return {"started": False, "error": "already-running", "log": log_name}
+    log_path = os.path.join(_data_dir(), log_name)
+    os.makedirs(_data_dir(), exist_ok=True)
+    logger.info("[ops] admin run: %s (%s)", sid, script)
+    import asyncio
+    import datetime as _dt
+    f = open(log_path, "w", encoding="utf-8")
+    f.write(f"==== {label} · {_dt.datetime.now(timezone.utc).isoformat()} ====\n")
+    f.flush()
+    proc = await asyncio.create_subprocess_exec(
+        "bash", path, *argv, cwd=_REPO_ROOT, stdout=f, stderr=f)
+    _OPS_RUNNING[sid] = True
+
+    async def _reap():
+        try:
+            code = await proc.wait()
+            f.write(f"\n[ops] exit {code}\n")
+        finally:
+            f.close()
+            _OPS_RUNNING[sid] = False
+    asyncio.get_event_loop().create_task(_reap())
+    return {"started": True, "log": log_name}
 
 
 def setup_admin_status_page() -> APIRouter:
