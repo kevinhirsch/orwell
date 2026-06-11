@@ -1,0 +1,39 @@
+[Unit]
+Description=orwell ops — web-requested update runner (G19b)
+# Started by orwell-ops-update.path when the web tier drops data/ops/update-requested. No
+# [Install] section: this unit is only ever started by its path unit, never enabled directly.
+#
+# DELIBERATELY ROOT + MINIMAL SANDBOX — the inverse of the E85 app units, and the reason this
+# unit exists at all: orwell-update.sh must git fetch/reset the checkout (system git config +
+# the A4 credential helper), npm ci + rebuild, write /etc/systemd drop-ins, daemon-reload, and
+# systemctl restart both services. An E85-style sandbox (User=orwell, empty capability set,
+# ProtectSystem=strict) would structurally forbid every one of those steps — which is exactly
+# why the hardened web tier cannot do this itself and hands off through the flag. Containment
+# is by DESIGN instead of by sandbox: only the one FIXED script path below ever runs; the
+# trigger flag is existence-only (its content is never read, parsed, or executed — nothing the
+# web tier writes is interpolated into any command); overlapping triggers no-op on the lock.
+#
+# Boot replay: if the box rebooted with a flag pending, the path unit fires at boot — wait for
+# the network so the git fetch isn't dead on arrival.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# oneshot, and deliberately WITHOUT RemainAfterExit: the unit must fall back to "inactive"
+# after each run so the path unit can trigger the next one. oneshot's TimeoutStartSec defaults
+# to infinity — correct here: a cold npm ci + rebuild legitimately takes minutes.
+Type=oneshot
+# Live output: stdout+stderr of every Exec line APPENDS to the run log the admin status page
+# tails (the G1b viewer reads any data/*.log). The installer/updater pre-create it readable.
+StandardOutput=append:/opt/orwell/data/ops-update.log
+StandardError=append:/opt/orwell/data/ops-update.log
+# Remove the flag BEFORE the run, never after: with PathExists= a flag that survived a run
+# would re-trigger this service the moment it deactivates — an infinite update loop. The flag
+# is dropped unread (the existence-only contract; see the path unit).
+ExecStartPre=/bin/rm -f /opt/orwell/data/ops/update-requested
+# flock: overlapping triggers NO-OP (exit 0) instead of stacking a second build on a box that
+# is mid-update — systemd already serializes starts of this unit; the lock covers every other
+# door (e.g. a manual `systemctl start` race). $$ is systemd's escape for a literal $ — the
+# date lands in the log as the timestamped per-run header. Only this one fixed script path
+# runs; the web tier chose WHEN, never WHAT.
+ExecStart=/bin/bash -c 'exec 9>>/run/orwell-ops-update.lock; flock -n 9 || { echo "ops-update: another run holds the lock — no-op"; exit 0; }; echo ""; echo "── orwell ops update run: $$(date -Is) (web-triggered) ──"; exec bash /opt/orwell/deploy/orwell-update.sh'

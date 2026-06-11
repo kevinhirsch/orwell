@@ -190,6 +190,7 @@
         note.textContent = "A generation run started recently — give it a few minutes, then try again.";
       }
     } catch (_) {
+      if (window.OrwellReport) window.OrwellReport.fail("cast", "backfill-post", _); // G11: fail open, never silent
       note.textContent = "The portrait service is offline right now.";
     }
     // Re-enable after a beat (the server debounces regardless — this just avoids mashing).
@@ -247,6 +248,7 @@
       render(data);
     } catch (_) {
       // Fail open: keep whatever's shown; an empty first load shows the empty-state copy.
+      if (window.OrwellReport) window.OrwellReport.fail("cast", "roster-fetch", _); // G11: fail open, never silent
       const el = document.getElementById(PANEL_ID);
       if (el && !el.querySelector("#oc-grid").children.length) {
         el.querySelector("#oc-empty").style.display = "";
