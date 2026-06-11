@@ -111,9 +111,55 @@ async function _createDirectChatFromPreferredModel() {
 // ============================================
 // EVENT LISTENERS INITIALIZATION
 // ============================================
+
+// ── G13: build gating cascades into the chrome menus ──
+// An entry whose action the game build refuses is HIDDEN, not click-refused —
+// the W1/W4 principle (the surface never advertises a dead lever) applied to
+// the export/overflow menus. E96 hid "Save to Documents" in CSS and chat.js
+// removed it lazily mid-render; the menu itself must never hold an entry
+// whose handler lands on a dropped vertical (POST /api/document is 404 by
+// design under the build). Runs before the menu wiring, so handlers never
+// attach to removed nodes.
+function _g13CascadeMenuTriggers() {
+  // The cascade rule: a launcher whose whole menu has zero visible items is
+  // a zombie parent (the Tools-chevron instance, G3, generalized) — it hides
+  // with its children. Re-run after any async pass that hides entries.
+  [
+    ['export-dl-btn', 'export-dropdown-menu', '.export-dropdown-item'],
+    ['overflow-plus-btn', 'overflow-menu', '.overflow-menu-item'],
+  ].forEach(([btnId, menuId, itemSel]) => {
+    const btn = el(btnId), menu = el(menuId);
+    if (!btn || !menu) return;
+    const anyVisible = Array.from(menu.querySelectorAll(itemSel)).some(it =>
+      !it.hidden && it.style.display !== 'none' && getComputedStyle(it).display !== 'none');
+    // Hide-only: never un-hide (the user's Appearance UI-vis toggles own that).
+    if (!anyVisible) btn.style.display = 'none';
+  });
+}
+
+function applyGameBuildMenuGating() {
+  if (!document.body.hasAttribute('data-game-build')) return;
+  // Menu entries acting on game-build-dropped verticals are removed outright.
+  ['export-doc-btn'].forEach(id => { const n = el(id); if (n) n.remove(); });
+  // Voice is the build's one opt-in vertical: its JS ships only when the
+  // voice flag is on (src/settings.py strips the tts-ai.js <script> tag
+  // otherwise). With the module unshipped the "TTS Mode" entry is a dead
+  // toggle — and .overflow-menu-item's display:flex would defeat its
+  // [hidden] attribute if the TTS-settings pass ever cleared the inline
+  // style — so the entry goes with its vertical.
+  if (!document.querySelector('script[src*="tts-ai.js"]')) {
+    const tts = el('overflow-tts-btn');
+    if (tts) tts.remove();
+  }
+  _g13CascadeMenuTriggers();
+}
+
 function initializeEventListeners() {
   // Chat form submission
 //  document.getElementById('chat-form').addEventListener('submit', chatModule.handleChatSubmit);
+
+  // G13: trim refused menu entries before any wiring below looks them up.
+  applyGameBuildMenuGating();
 
   // File attachments (inside overflow menu)
   const _overflowAttach = el('overflow-attach-btn');
@@ -1353,6 +1399,9 @@ function initializeEventListeners() {
       // off then on to trigger applyUIVis a second time, which is the
       // bug they report as "deep research only shows after I toggle".
       try { if (window.applyUIVis && window.loadUIVis) window.applyUIVis(window.loadUIVis()); } catch (_) {}
+      // G13: this pass may have hidden menu entries — a menu left with zero
+      // visible items must take its trigger down with it (gating cascades).
+      try { _g13CascadeMenuTriggers(); } catch (_) {}
     })
     .catch(() => {});
 
@@ -1373,6 +1422,9 @@ function initializeEventListeners() {
       if (overflowTts) {
         overflowTts.style.display = ttsOff ? 'none' : '';
       }
+      // G13: same cascade rule after the TTS-settings pass (it can hide the
+      // overflow entry too) — zero visible items hides the trigger.
+      try { _g13CascadeMenuTriggers(); } catch (_) {}
     })
     .catch(() => {});
 
