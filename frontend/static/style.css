@@ -458,7 +458,7 @@ body.bg-pattern-sparkles {
       flex: 1;
       min-width: 0;
       cursor: pointer;
-      padding: 6px 8px;
+      padding: var(--sidebar-btn-pad, 8px); /* G3: the one sidebar padding standard */
       border-radius: 8px;
       transition: background 0.15s;
     }
@@ -505,7 +505,7 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       opacity: 0.35;
       cursor: pointer;
-      padding: 6px;
+      padding: var(--sidebar-btn-pad, 8px); /* G3: icon-only but the SAME measured padding */
       border-radius: 6px;
       display: flex;
       align-items: center;
@@ -577,16 +577,28 @@ body.bg-pattern-sparkles {
     #sidebar-search-btn,
     #sidebar-new-chat-btn {
       margin: 0;
-      padding: 8px 8px;
+    }
+    /* ── G3 (ruling 2026-06-11): ONE sidebar padding standard. Every sidebar
+       button row measures the same padding per side as the New Chat / Search
+       rows (the .list-item standard — 8px each side). One token + one shared
+       rule, never per-button overrides; the icon-only user-bar buttons keep
+       their square aspect but measure the same padding. The mobile
+       touch-target overrides (12px 10px !important) stay uniform across the
+       same set, so the standard holds at every viewport. ── */
+    #sidebar {
+      --sidebar-btn-pad: 8px;
+    }
+    #sidebar .list-item,
+    #sidebar .section-header-flex,
+    #sidebar .user-bar-btn,
+    #sidebar .user-bar-left {
+      padding: var(--sidebar-btn-pad, 8px);
     }
     #sessions-section {
       margin-top: -1px;
     }
     #tools-section {
       margin-top: 1px;
-    }
-    #tools-section .list-item {
-      padding: 8px 8px;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
@@ -1263,6 +1275,20 @@ body.bg-pattern-sparkles {
     .section.collapsed .section-collapse-chevron { transform: rotate(-90deg); opacity: 0.5; }
     .section-header-flex:has(.section-header-btn) .section-collapse-btn { display: none; }
     .section.collapsed .section-collapse-btn { display: inline-flex !important; }
+
+    /* ── G3 (ruling 2026-06-11): no dead affordances. A section with ≤1
+       visible row has nothing to collapse — its chevron was a button that
+       visibly did nothing (under the game build every Tools child is
+       trimmed away). Such sections render as plain rows: no chevron, no
+       button styling, no collapse toggle; a section with NO visible content
+       at all hides outright. The classes are computed live in
+       js/section-management.js (initSectionCollapse). ── */
+    .section.section-no-collapse .section-collapse-btn { display: none !important; }
+    .section.section-no-collapse .section-header-flex { cursor: default; }
+    .section.section-no-collapse .section-header-flex:hover { background: transparent; }
+    .section.section-no-collapse .section-header-flex h4,
+    .section.section-no-collapse .section-header-flex .section-title { cursor: default !important; }
+    .section.section-empty { display: none !important; }
 
     /* Collapsed state */
     .section.collapsed > *:not(h4):not(.section-title):not(.section-header-flex) { display: none !important; }
@@ -4179,6 +4205,11 @@ body.bg-pattern-sparkles {
       .sidebar-assistant-entry .grow {
         font-size: 14px !important;
         left: 0 !important;
+      }
+      /* G3: the one sidebar padding standard tracks the mobile touch size, so
+         the bottom user-bar cluster measures the same as every other row. */
+      #sidebar {
+        --sidebar-btn-pad: 12px 10px;
       }
       /* Section separator — more breathing room */
       .section {
