@@ -20,14 +20,25 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from core.middleware import require_admin
 from src import orwell_engine
+from src.auth_helpers import effective_user
 
 logger = logging.getLogger(__name__)
 
 
 def _current_user(request: Request) -> Optional[str]:
-    """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021)."""
-    return getattr(getattr(request, "state", None), "current_user", None)
+    """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021).
+
+    E29: resolves the EFFECTIVE user — a bearer-token (`ody_`) caller is attributed to the
+    token's real owner (`request.state.api_token_owner`), not the shared "api" pseudo-user.
+    Before this, every bearer caller collapsed into ONE engine sandbox ("api"): two tokens
+    from different owners shared one game — a direct cross-user isolation break (0021).
+    Cookie sessions are unchanged (effective_user is identical to current_user for them)."""
+    try:
+        return effective_user(request)
+    except Exception:
+        return getattr(getattr(request, "state", None), "current_user", None)
 
 
 class NewGameRequest(BaseModel):
@@ -66,6 +77,12 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/moment")
     async def orwell_moment(request: Request, moment: Optional[str] = None):
+        """E15: ADMIN-GATED. The moment prompt is the full GM system prompt (lever manifest,
+        casting status, per-moment instruction) — pure meta-knowledge and a prompt-extraction
+        shortcut for a player. No player JS consumes this route (the chat path injects the
+        prompt server-side via chat_helpers); it stays only as an admin/debug read."""
+        from core.middleware import require_admin
+        require_admin(request)
         try:
             return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
@@ -191,7 +208,8 @@ def setup_orwell_routes() -> APIRouter:
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
-        "finale-statement", "finale-answer", "juror-vote",
+        "goodbye-message", "finale-statement", "finale-answer",
+        "juror-question", "juror-vote",
     }
 
     @router.post("/decision")
@@ -213,6 +231,13 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.post("/new-game")
     async def orwell_new_game(body: NewGameRequest, request: Request):
+        # Audit E70 — ADMIN-GATED, coherent with the one-door restart design (E1/D1): players
+        # start and restart seasons through the chat tools (the 0050 casting interview →
+        # createCharacter; a confirmed restart routes through the engine's one sanctioned reset
+        # door). This route bypasses the interview (a soul-shallow character one curl away), so it
+        # survives only as a debug/ops door: the deploy smoke and the responsive-matrix harness use
+        # it (both run with AUTH_ENABLED=false, which require_admin honors). Raises 403 otherwise.
+        require_admin(request)
         if not body.playerName.strip():
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         user = _current_user(request)

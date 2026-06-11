@@ -451,7 +451,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "Ask the user a multiple-choice question to get a decision or clarification when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target). The user sees clickable option buttons; calling this ENDS your turn and their selection arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow.",
+            "description": "Ask the user a multiple-choice question to get a decision or clarification when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target). The user sees clickable option buttons; calling this ENDS your turn and their selection arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow. In the Big Brother game, game levers are silent production machinery: NEVER use ask_user to ask permission to call a game tool — use it ONLY to present the engine's pending BINDING decision options (nominations, votes, veto and finale choices) as buttons.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1191,7 +1191,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "runCompetition",
-            "description": "Ask the engine to RESOLVE a competition over the live house. The ENGINE decides the winner from its own hidden stats — you do not supply or see stats/scores, only the winner's name. Use this to actually run an HOH/veto competition, then narrate the result.",
+            "description": "PREVIEW the current competition beat's ALREADY-DECIDED winner: the engine has picked from its own hidden stats, and advanceGame crowns the SAME winner when the beat resolves — this tool resolves nothing and is never a second decider. You do not supply or see stats/scores, only the winner's name. Use it to dress the comp scene, then resolve via advanceGame.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1321,7 +1321,8 @@ FUNCTION_TOOL_SCHEMAS = [
                         "enum": [
                             "nominations", "veto-decision", "comp-intent", "houseguests-choice",
                             "replacement", "eviction-vote", "tie-break", "final-eviction",
-                            "finale-statement", "finale-answer", "juror-vote",
+                            "goodbye-message", "finale-statement", "finale-answer",
+                            "juror-question", "juror-vote",
                         ],
                         "description": "The pending decision's kind (mirror the engine's pending.kind exactly).",
                     },
@@ -1329,8 +1330,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
                     "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
                     "replacement": {"type": "string", "description": "replacement: the houseguest id the HOH names as the replacement nominee."},
-                    "vote": {"type": "string", "description": "eviction-vote: the nominee id to evict. juror-vote: the finalist id the juror crowns."},
-                    "statement": {"type": "string", "description": "finale-statement: the player's opening statement to the jury (flavor; carries no score)."},
+                    "vote": {"type": "string", "description": "eviction-vote: the nominee id to evict. juror-vote: the finalist id the juror crowns. goodbye-message: the player's chosen tone — warm | respectful | cold (E34)."},
+                    "statement": {"type": "string", "description": "finale-statement / juror-question: the player's free text (flavor; carries no score). goodbye-message: the optional message text accompanying the chosen tone."},
                     "appeal": {"type": "string", "enum": ["own-game", "mend", "connect", "discredit-rival"], "description": "finale-answer: the structured appeal the player makes to the asking juror (engine-scored; never the prose)."},
                     "intent": {"type": "string", "enum": ["compete", "throw", "play-safe"], "description": "comp-intent: the player's declared approach for the upcoming competition (locked once the comp runs)."},
                 },

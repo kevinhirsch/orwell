@@ -1,5 +1,6 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
+import { TEMPERATURE_CONSTANTS } from "../domain/temperatureConstants";
 import {
   RELATIONSHIP_CONSTANTS,
   clamp01 as clamp,
@@ -41,7 +42,7 @@ export interface RelationshipRead {
  * stored (decision 0002).
  */
 export function relationshipLabel(
-  s: EdgeSignals,
+  s: Pick<EdgeSignals, "trust" | "affinity" | "threat">,
   disposition: RelationshipDisposition,
   constants: RelationshipConstants = RELATIONSHIP_CONSTANTS,
 ): "ally" | "enemy" | "acquaintance" {
@@ -94,12 +95,13 @@ export class RelationshipModel {
    * holder's `adverseScale`; bonding moves by `bondScale`. Four jitter draws are taken in a
    * fixed order (trust, affinity, threat, alignment) so seeded runs stay reproducible — with a
    * NEUTRAL holder and default constants this is identical to the pre-0026 behavior.
+   * `reliability` (E54: evidence, not sentiment) moves UN-jittered — proof is not a vibe — and
+   * takes no rng draw, so the four-draw stream stays byte-stable.
    */
-  private applyOneDirection(from: EntityId, to: EntityId, type: InteractionType, rng: RandomnessSource): void {
+  private applyOneDirection(from: EntityId, to: EntityId, imp: Partial<EdgeSignals>, rng: RandomnessSource): void {
     const e = this.edge(from, to);
     const C = this.constants;
     const disp = C.dispositionFactors[this.dispositionOf(from)];
-    const imp = C.IMPACT[type];
     const jitter = (): number => 1 + (rng.next() - 0.5) * C.TEMPERATURE_JITTER;
     const jTrust = jitter();
     const jAffinity = jitter();
@@ -109,17 +111,19 @@ export class RelationshipModel {
     const dAffinity = imp.affinity ?? 0;
     const dThreat = imp.threat ?? 0;
     const dAlignment = imp.alignment ?? 0;
+    const dReliability = imp.reliability ?? 0;
     e.trust = clamp(e.trust + dTrust * (dTrust < 0 ? disp.adverseScale : disp.bondScale) * jTrust);
     e.affinity = clamp(e.affinity + dAffinity * (dAffinity < 0 ? disp.adverseScale : disp.bondScale) * jAffinity);
     e.threat = clamp(e.threat + dThreat * (dThreat > 0 ? disp.adverseScale : disp.bondScale) * jThreat);
     e.alignment = clamp(e.alignment + dAlignment * disp.bondScale * jAlignment);
+    e.reliability = clamp(e.reliability + dReliability * (dReliability < 0 ? disp.adverseScale : disp.bondScale));
     e.confidence = clamp(e.confidence + C.CONFIDENCE_STEP);
   }
 
   /** Apply a mutual interaction to both directed edges, with small per-telling jitter. */
   apply(a: EntityId, b: EntityId, type: InteractionType, rng: RandomnessSource): void {
-    this.applyOneDirection(a, b, type, rng);
-    this.applyOneDirection(b, a, type, rng);
+    this.applyOneDirection(a, b, this.constants.IMPACT[type], rng);
+    this.applyOneDirection(b, a, this.constants.IMPACT[type], rng);
   }
 
   /**
@@ -127,7 +131,16 @@ export class RelationshipModel {
    * who never reciprocates) makes the edges asymmetric — the heart of decision 0002.
    */
   applyDirected(holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource): void {
-    this.applyOneDirection(holder, other, type, rng);
+    this.applyOneDirection(holder, other, this.constants.IMPACT[type], rng);
+  }
+
+  /**
+   * Directed update from a NAMED impact object (ceremony acts E47/E48, deal honors E43, gossip
+   * receipt E44) — the same proven rule (disposition × jitter × clamp), magnitudes from a
+   * constants module, never an inline number at a call site (the B59 gate).
+   */
+  applyImpactDirected(holder: EntityId, other: EntityId, impact: Partial<EdgeSignals>, rng: RandomnessSource): void {
+    this.applyOneDirection(holder, other, impact, rng);
   }
 
   /**
@@ -161,6 +174,7 @@ export class RelationshipModel {
       e.threat += (base.threat - e.threat) * r * C.THREAT_DECAY_FACTOR;
       e.alignment += (base.alignment - e.alignment) * r;
       e.confidence = clamp(e.confidence - r * 0.5);
+      // `reliability` (E54) deliberately does NOT decay: evidence stands until contradicted.
     }
   }
 
@@ -174,12 +188,14 @@ export class RelationshipModel {
     return { edges };
   }
 
-  /** Replace all edges from a serialized snapshot — recall after leaving/restart (0023/0007). */
-  load(edges: ReadonlyArray<{ from: EntityId; to: EntityId } & EdgeSignals>): void {
+  /** Replace all edges from a serialized snapshot — recall after leaving/restart (0023/0007).
+   *  Pre-E54 saves carry no `reliability`: those edges resume at the unproven baseline. */
+  load(edges: ReadonlyArray<{ from: EntityId; to: EntityId } & Omit<EdgeSignals, "reliability"> & { reliability?: number }>): void {
     this.edges.clear();
     for (const e of edges) {
       this.edges.set(this.key(e.from, e.to), {
         trust: e.trust, affinity: e.affinity, threat: e.threat, alignment: e.alignment, confidence: e.confidence,
+        reliability: e.reliability ?? this.constants.baseline.reliability,
       });
     }
   }
@@ -187,9 +203,15 @@ export class RelationshipModel {
   /**
    * Houseguest's Choice / NPC motivation: pick the strongest available bond
    * (trust+affinity) with BOUNDED temperature variance — a clear bond is not
-   * flipped by chance, but near-ties wobble.
+   * flipped by chance, but near-ties wobble. The default variance is the 0028
+   * per-variable `allianceShift` weight (audit E53) — one knob, actually consumed.
    */
-  chooseStrongestBond(holder: EntityId, candidates: EntityId[], rng: RandomnessSource, temperature = 0.1): EntityId {
+  chooseStrongestBond(
+    holder: EntityId,
+    candidates: EntityId[],
+    rng: RandomnessSource,
+    temperature = TEMPERATURE_CONSTANTS.variableWeights.allianceShift,
+  ): EntityId {
     let best = candidates[0]!;
     let bestScore = -Infinity;
     for (const c of candidates) {
@@ -199,10 +221,15 @@ export class RelationshipModel {
     return best;
   }
 
-  /** A soft, momentary read — the (trust+affinity) strength of a directed bond. */
+  /**
+   * A soft, momentary read — the (trust+affinity) strength of a directed bond, shaded by
+   * DEMONSTRATED loyalty (E54): a partner who has actually protected you reads as a stronger
+   * bond than one who has merely been pleasant. Evidence shades sentiment, never replaces it.
+   */
   bondStrength(a: EntityId, b: EntityId): number {
     const e = this.edge(a, b);
-    return (e.trust + e.affinity) / 2;
+    return (e.trust + e.affinity) / 2
+      + this.constants.RELIABILITY_WEIGHT * (e.reliability - this.constants.baseline.reliability);
   }
 
   /** An alliance is "active" when the bond is mutual and over threshold. */

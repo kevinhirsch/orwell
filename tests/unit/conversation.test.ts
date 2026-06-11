@@ -43,6 +43,15 @@ describe("0012 — bidirectional NPC initiation", () => {
     const ranked = rankApproaches(PLAYER, npcs, rel, new SeededRandom(3));
     expect([npc(3), npc(1)]).toContain(ranked[0]!.npc);
   });
+
+  it("each approach carries the coarse motive of its winning agenda (E60: bond vs probe)", () => {
+    const rel = relWith(npc(2), npc(4));
+    const ranked = rankApproaches(PLAYER, npcs, rel, new SeededRandom(9));
+    const byNpc = new Map(ranked.map((a) => [a.npc, a.motive]));
+    expect(byNpc.get(npc(2))).toBe("bond"); // the warm ally approaches over the tie
+    expect(byNpc.get(npc(4))).toBe("probe"); // the wary rival approaches to size up
+    for (const a of ranked) expect(["bond", "probe"]).toContain(a.motive);
+  });
 });
 
 describe("0012 — an NPC only voices what it legitimately knows", () => {

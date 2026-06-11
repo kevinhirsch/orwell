@@ -4,6 +4,39 @@ import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
 import type { KnowledgeFact, Suspicion, KnowledgeSnapshot } from "../../domain/knowledge";
 
+/** C14: confidence is a [0,1] certainty — clamp at every write seam (a caller-supplied 50 or −3 must never persist). */
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+/**
+ * A suspicion is a hunch, never near-certainty (audit C2): any confidence it carries is capped
+ * well below knowledge-grade so a downgraded surfacing can't masquerade as an anchored fact.
+ */
+const SUSPICION_CONFIDENCE_CAP = 0.5;
+
+/**
+ * Content lineage (E9/C2/C3): is the CLAIMED content genuinely derived from the SOURCE content?
+ * True only when, after normalization (the engine's overhear wrapper stripped, case/whitespace
+ * folded), the claim IS the source or a real fragment of it. Anything anchored under this rule is
+ * therefore a substring of something that actually happened — fabrication cannot pass. Tiny
+ * fragments (< MIN_FRAGMENT chars) must match exactly, so a one-letter "claim" can't fish.
+ */
+const MIN_FRAGMENT = 4;
+function normalizeContent(s: string): string {
+  return s
+    .replace(/^\(overheard, muffled\)\s*/i, "")
+    .replace(/…\s*$/, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function contentDerivedFrom(claimed: string, source: string): boolean {
+  const a = normalizeContent(claimed);
+  const b = normalizeContent(source);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.length >= MIN_FRAGMENT && b.includes(a);
+}
+
 export class InMemoryKnowledgeService implements KnowledgeService {
   private readonly knowledge = new Map<EntityId, KnowledgeFact[]>();
   private readonly suspicions = new Map<EntityId, Suspicion[]>();
@@ -46,12 +79,16 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     return [...(this.suspicions.get(entity) ?? [])];
   }
 
-  addSuspicion(entity: EntityId, fact: { content: string; subject?: EntityId }): Suspicion {
+  addSuspicion(entity: EntityId, fact: { content: string; subject?: EntityId; confidence?: number }): Suspicion {
     const s: Suspicion = {
       id: `suspect:${++this.seq}`,
       content: fact.content,
       ts: this.clock(),
       ...(fact.subject !== undefined ? { subject: fact.subject } : {}),
+      // C2/C14: a suspicion's certainty is clamped AND capped — it is a hunch, never knowledge-grade.
+      ...(fact.confidence !== undefined
+        ? { confidence: Math.min(clamp01(fact.confidence), SUSPICION_CONFIDENCE_CAP) }
+        : {}),
     };
     const list = this.suspicions.get(entity) ?? [];
     list.push(s);
@@ -91,24 +128,37 @@ export class InMemoryKnowledgeService implements KnowledgeService {
   }
 
   /**
-   * Is the pathway anchored to a real source (A4)?
-   *  - `told-by:<id>`     the claimed teller actually holds the fact — they were told it, OR they
-   *                       WITNESSED an event whose content is what they're telling (firsthand).
-   *  - `overheard:<id>`   an event with that id exists (something real was overheard).
-   * Anything else (an invented or sourceless pathway) is NOT anchored.
+   * Is the pathway anchored to a real source (A4), on CONTENT LINEAGE (audit E9/C2/C3)?
+   *  - `told-by:<id>`     the claimed teller actually holds the fact — a held belief (its content
+   *                       or its undistorted origin) the claim derives from, OR an event they
+   *                       WITNESSED whose content the claim derives from (firsthand).
+   *                       A subject-only match is NOT anchoring (C2): "the teller knows *something
+   *                       about them*" must never launder an invented claim into knowledge.
+   *  - `overheard:<id>`   the event exists AND the claim derives from THAT event's content (E9/C3
+   *                       — the engine's `rollOverhears` always passes a strict fragment; a real
+   *                       event id must not anchor unrelated invented content).
+   * Anything else (an invented or sourceless pathway) is NOT anchored. Anchored content is by
+   * construction a fragment of something real — the model cannot mint ground truth.
    */
   private pathwayAnchored(pathway: string, fact: { content: string; subject?: EntityId }): boolean {
     const told = /^told-by:(.+)$/.exec(pathway);
     if (told) {
       const teller = told[1]!;
       const holds = this.knownTo(teller).some(
-        (k) => k.content === fact.content || (fact.subject !== undefined && k.subject === fact.subject),
+        (k) =>
+          contentDerivedFrom(fact.content, k.content) ||
+          (k.originalContent !== undefined && contentDerivedFrom(fact.content, k.originalContent)),
       );
       if (holds) return true;
-      return this.events.query().some((e) => e.witnessSet.includes(teller) && e.content === fact.content);
+      return this.events
+        .query()
+        .some((e) => e.witnessSet.includes(teller) && contentDerivedFrom(fact.content, e.content));
     }
     const heard = /^overheard:(.+)$/.exec(pathway);
-    if (heard) return this.events.query().some((e) => e.id === heard[1]);
+    if (heard) {
+      const source = this.events.query().find((e) => e.id === heard[1]);
+      return source !== undefined && contentDerivedFrom(fact.content, source.content);
+    }
     return false;
   }
 
@@ -159,7 +209,8 @@ export class InMemoryKnowledgeService implements KnowledgeService {
       ...(f.subject !== undefined ? { subject: f.subject } : {}),
       ...(f.factId !== undefined ? { factId: f.factId } : {}),
       ...(f.source !== undefined ? { source: f.source } : {}),
-      ...(f.confidence !== undefined ? { confidence: f.confidence } : {}),
+      // C14: every entry seam (surfacing, seeding, gossip) clamps certainty into [0,1].
+      ...(f.confidence !== undefined ? { confidence: clamp01(f.confidence) } : {}),
       ...(f.hops !== undefined ? { hops: f.hops } : {}),
       ...(f.distortion !== undefined ? { distortion: f.distortion } : {}),
       ...(f.originalContent !== undefined ? { originalContent: f.originalContent } : {}),

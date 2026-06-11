@@ -172,7 +172,7 @@ different stories for one poll interval. Document it; don't "fix" it into coupli
 
 | # | Item | Sev | Surface |
 |---|---|---|---|
-| D1 | One sanctioned restart door: FE reset → admin reset delegate (or baseline-resetting `confirmRestart`); fault on restart ⇒ 4xx; **test: season 2 persists across engine restart** | CRIT | engine + FE route |
+| D1 | ✅ PR #215 — One sanctioned restart door: FE reset → admin reset delegate (or baseline-resetting `confirmRestart`); fault on restart ⇒ 4xx; **test: season 2 persists across engine restart** | CRIT | engine + FE route |
 | D2 | Floating-panel placement rule: presence strip + retrospective (and any future panel) must never intersect the composer or each other's controls; fix the `.hidden modal-minimized` pointer-events leak | CRIT | FE JS/CSS |
 | D3 | Decision-card boot re-arm: fetch pending on load, dispatch `orwell:pending` | CRIT | FE JS |
 | D4 | Player-survival calibration: investigate + property-gate jury-reach for a passive player; re-measure social play post-D1 | CRIT | engine |

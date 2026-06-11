@@ -172,7 +172,7 @@ later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed age
 
 - **Automated smoke:** [`deploy/smoke.sh`](./smoke.sh) builds + starts the engine, probes the HTTP
   MCP surface, exercises the player game tools (`createCharacter` → `getGameState` →
-  `getMomentPrompt` → `resolveCompetition`), proves channel isolation, and simulates an update
+  `getMomentPrompt` → `runCompetition`, and proves the removed `resolveCompetition` is refused — audit E20), proves channel isolation, and simulates an update
   (rebuild + restart). It runs offline, locally and in CI (`.github/workflows/ci.yml`), and
   asserts the update script never deletes the save.
 - **On-host validation** remains the full Proxmox-LXC provisioning (provision → one-liner install →

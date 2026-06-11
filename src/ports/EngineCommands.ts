@@ -1,5 +1,4 @@
 import type { EntityId } from "../domain/ids";
-import type { Competitor, CompetitionType, Intent } from "../domain/competitionOutcome";
 
 /**
  * Vault-free command port (0009). Action tools cross the membrane through THIS
@@ -21,13 +20,6 @@ export interface RecordInteractionReq {
   toward?: EntityId[];
 }
 
-export interface ResolveCompetitionReq {
-  type: CompetitionType;
-  participants: Competitor[];
-  intents?: Array<{ id: EntityId; intent: Intent }>;
-  seed: number;
-}
-
 export interface SurfaceReq {
   entity: EntityId;
   fact: { content: string };
@@ -40,10 +32,15 @@ export interface DiaryRoomReq {
 }
 
 export interface EngineCommands {
-  /** Records the interaction + folds its hidden impact. Throws if it names a non-living houseguest (B39). */
+  /**
+   * Records the interaction + folds its hidden impact. Throws if it names a non-living houseguest
+   * (B39) or if the witness set excludes the player (E21 — this is the player channel; off-screen
+   * scenes are the engine's to mint). Folds are budgeted per beat per edge (E21).
+   *
+   * (E20: there is NO `resolveCompetition` on this port — a caller-supplied-stats resolver was a
+   * seed-shopping second authority; the session's `runCompetition` over the LIVE house is the one.)
+   */
   recordInteraction(req: RecordInteractionReq): { eventId: string };
-  /** Outcome only — no stat scores, rankings, or Vault-derived reasoning. */
-  resolveCompetition(req: ResolveCompetitionReq): { winner: EntityId; type: string };
   /** `surfaced:true` if anchored into knowledge; `false` if the pathway was unanchored ⇒ a suspicion (A4). */
   surfaceInformationTo(req: SurfaceReq): { ok: true; surfaced: boolean };
   /**

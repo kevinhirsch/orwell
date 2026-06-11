@@ -48,4 +48,30 @@ export const DECISION = {
      */
     juryManagementWeight: 0.1,
   },
+  /**
+   * NPC↔NPC deal minting (audit E46): as a week's block goes up, the closest unbound NPC pair may
+   * crystallize their scheming into a real, Vault-held pact — which then BINDS them (the 0044 vote
+   * lean) and reconciles like any deal (E42): a break lands betrayal-shock, a jury demerit, and a
+   * hidden reveal. The player learns of it only by pathway (gossip/overhears), never the ledger.
+   */
+  npcDeal: {
+    /** Chance per nomination ceremony that the house's tightest unbound NPC pair makes a pact. */
+    mintProb: 0.35,
+    /** The pair's MUTUAL trust must clear this floor — pacts come from real bonds, not noise. */
+    mutualTrustMin: 0.5,
+    /** Above this mutual trust the pact is a full final-two; below, a week-scoped safety deal. */
+    finalTwoTrustMin: 0.72,
+  },
+} as const;
+
+/**
+ * E89 (product ruling #5, 2026-06-10): "'___ wants a word with you' must not spawn at the
+ * beginning of the game." The approach gate — no NPC approach fires until the season's FIRST
+ * ceremony beat (the week-1 HOH result) has resolved, so move-in and the first scenes get room
+ * to breathe. STRUCTURAL and engine-side (`socialInitiatives` returns empty until then); the
+ * front-end's started-gate is only the belt. The threshold lives HERE, not inline (B59).
+ */
+export const APPROACH_GATE = {
+  /** Approaches stay silent until the first ceremony beat of the season has resolved. */
+  requireFirstCeremonyBeat: true,
 } as const;

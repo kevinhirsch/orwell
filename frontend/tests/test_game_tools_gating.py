@@ -179,3 +179,152 @@ def test_additions_partition_covers_every_tool_tag():
     assert (set(GAME_TOOL_KEEP) | set(GAME_TOOL_OPTIONAL) | off) >= set(TOOL_TAGS)
     assert set(off) <= set(TOOL_TAGS)
     assert not (set(GAME_TOOL_KEEP) & off)
+
+
+# ── A1: the auto-escalation withhold is escalation-reason-aware ───────────────
+#
+# The old vacuous shape proved game_build_disabled_additions(["bash"]) excludes bash IN
+# ISOLATION while the route's unconditional auto-escalation withhold re-disabled it on
+# every chat-originated game turn. These tests COMPOSE the two production blocks exactly
+# as routes/chat_routes.py does (chokepoint → withhold), so the opt-in is proven on the
+# composed disabled set actually handed to the agent loop.
+
+from routes.chat_helpers import AUTO_ESCALATION_WITHHELD, auto_escalation_withhold
+
+
+def _composed_disabled_set(*, game_escalated: bool, game_tools_enabled: list) -> set:
+    """The chat route's game-turn disabled-set assembly, composed verbatim:
+    the game-build chokepoint, then the (reason-aware) auto-escalation withhold."""
+    disabled = set()
+    disabled.update(game_build_disabled_additions(game_tools_enabled))   # chokepoint
+    disabled.update(auto_escalation_withhold(game_escalated, game_tools_enabled))
+    return disabled
+
+
+def test_chat_path_game_escalation_honors_the_bash_optin():
+    # Game build on, admin opted bash in, default player path (chat → game escalation):
+    # bash must NOT be in the composed disabled set handed to the agent loop.
+    disabled = _composed_disabled_set(game_escalated=True, game_tools_enabled=["bash"])
+    assert "bash" not in disabled
+    # builtin_browser has no sanctioned opt-in — withheld unconditionally.
+    assert "builtin_browser" in disabled
+
+
+def test_chat_path_game_escalation_without_optin_still_withholds():
+    # Mirror case: no opt-in ⇒ the heavy tools stay withheld on the game escalation too.
+    disabled = _composed_disabled_set(game_escalated=True, game_tools_enabled=[])
+    for heavy in ("bash", "python", "read_file", "write_file", "builtin_browser"):
+        assert heavy in disabled, heavy
+
+
+def test_chat_path_intent_escalation_keeps_the_full_withhold():
+    # The notes/calendar/email intent escalation is NOT the game path: it withholds the
+    # heavy tools even when they are opted in for game turns.
+    disabled = _composed_disabled_set(game_escalated=False, game_tools_enabled=["bash"])
+    assert "bash" in disabled
+
+
+def test_chat_path_non_withheld_optional_consistent_either_way():
+    # A1's consistency pin: an optional tool outside the withhold set (grep) behaves
+    # identically on both escalation paths — enabled when opted in, off otherwise.
+    for game_escalated in (True, False):
+        assert "grep" not in _composed_disabled_set(
+            game_escalated=game_escalated, game_tools_enabled=["grep"])
+        assert "grep" in _composed_disabled_set(
+            game_escalated=game_escalated, game_tools_enabled=[])
+
+
+def test_withhold_never_unwithholds_outside_the_optional_set():
+    # Opting in nonsense (or a KEEP/dropped id) can never shrink the withhold beyond
+    # the sanctioned GAME_TOOL_OPTIONAL intersection.
+    out = auto_escalation_withhold(True, ["builtin_browser", "getGameState", "send_email", "nope"])
+    assert out == set(AUTO_ESCALATION_WITHHELD)
+
+
+def test_chat_route_wires_the_reason_aware_withhold():
+    # Drift pin: the route must feed BOTH blocks — the chokepoint and the reason-aware
+    # withhold — or the composition above stops mirroring production.
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "routes" / "chat_routes.py").read_text(encoding="utf-8")
+    assert 'game_build_disabled_additions(get_setting("game_tools_enabled", []))' in src
+    assert 'auto_escalation_withhold(game_escalated, get_setting("game_tools_enabled", []))' in src
+    assert "game_escalated = True" in src
+
+
+# ── A2 (gate 3): an enabled optional tool is actually OFFERED on a game turn ──
+#
+# The four-gate trace's third silent defeat: on game turns the function-calling array is
+# FUNCTION_TOOL_SCHEMAS ∩ _relevant_tools − disabled_tools, and the session-class optionals
+# (chat_with_model, …) are not in ALWAYS_AVAILABLE and have no keyword hints in-character
+# prose would trip — enabled but never offered. This is the NON-vacuous schema-assembly
+# test the addendum demands: game turn + game_tools_enabled=["chat_with_model"] ⇒ the
+# schema array handed to the API call contains it.
+
+def _captured_schema_names(monkeypatch, *, enabled: list) -> set:
+    import asyncio
+    from src import agent_loop as al
+
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)  # default = game build ON
+    monkeypatch.setattr(al, "get_setting", lambda key, default=None: (
+        enabled if key == "game_tools_enabled" else default))
+
+    # Hermetic: no embedding-backed tool index in tests — the keyword-fallback selection
+    # runs instead, which is exactly the filtered-set path the A2 finding is about.
+    import src.tool_index as ti
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)
+
+    captured: dict = {}
+
+    async def fake_stream(candidates, messages, **kwargs):
+        captured["tools"] = kwargs.get("tools") or []
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    from src.tool_schemas import ORWELL_GAME_TOOLS
+
+    async def drive():
+        gen = al.stream_agent_loop(
+            "https://api.openai.com/v1/chat/completions",  # API-model path ⇒ schemas are sent
+            "gpt-4",
+            [{"role": "system", "content": "GM moment prompt"},
+             {"role": "user", "content": "I pull the HOH aside for a quiet chat."}],
+            disabled_tools=game_build_disabled_additions(enabled),  # the route's chokepoint
+            pinned_tools=set(ORWELL_GAME_TOOLS),
+            game_mode="game",
+        )
+        async for _chunk in gen:
+            pass
+
+    asyncio.get_event_loop().run_until_complete(drive())
+    return {
+        s.get("function", {}).get("name")
+        for s in captured.get("tools", [])
+        if isinstance(s, dict)
+    }
+
+
+def test_game_turn_schema_array_contains_the_enabled_session_optional(monkeypatch):
+    names = _captured_schema_names(monkeypatch, enabled=["chat_with_model"])
+    assert "chat_with_model" in names
+    # and the pinned game tools still ride along
+    assert "advanceGame" in names and "recordInteraction" in names
+
+
+def test_game_turn_schema_array_omits_the_unopted_optional(monkeypatch):
+    names = _captured_schema_names(monkeypatch, enabled=[])
+    assert "chat_with_model" not in names
+    assert "advanceGame" in names  # the pinned game surface is unaffected
+
+
+# ── A2 (gate 4): the admin UI says who the opt-ins apply to ───────────────────
+
+def test_admin_tools_page_carries_the_gate4_copy():
+    # Per-owner security blocks every power tool for non-admin accounts regardless of the
+    # toggle (sound policy) — the page must SAY so, and note app_api's by-design 404s
+    # against dropped verticals, or multi-account installs read both as random breakage.
+    import pathlib
+    js = (pathlib.Path(__file__).parent.parent / "static" / "js" / "admin.js").read_text(encoding="utf-8")
+    assert "Opt-ins apply to admin accounts only" in js
+    assert "404 by design" in js
+    assert "OPTIONAL_TOOLS_NOTE" in js  # rendered into the System (opt-in) section body
