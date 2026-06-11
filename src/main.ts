@@ -35,6 +35,14 @@ const port = parsePort(
 // the game never breaks, and the next restart may upgrade again. Unset/anything-else keeps
 // the deterministic provider (tests, dev).
 const embedMode = (process.env["ORWELL_EMBEDDINGS"] ?? "").trim().toLowerCase();
+// G1: the embeddings-provider status surfaced on /health (the admin Health & Logs card).
+// `provider` is the EFFECTIVE provider right now; `degraded` is true when fastembed was
+// requested but the process is (or has fallen) on the deterministic fallback — either a
+// warm-up failure at boot or a mid-process worker death (FastembedEmbedding.degraded).
+let embeddingsStatus: () => { provider: string; degraded: boolean } = () => ({
+  provider: "deterministic",
+  degraded: false,
+});
 if (embedMode === "fastembed") {
   const dataDir =
     process.env["ORWELL_DATA_DIR"] ?? process.env["BBAI_DATA_DIR"] ?? "./.orwell-data";
@@ -47,8 +55,13 @@ if (embedMode === "fastembed") {
     });
     const { setRuntimeEmbedding } = await import("./composition/engineRoot");
     setRuntimeEmbedding(provider);
+    embeddingsStatus = () =>
+      provider.degraded
+        ? { provider: "deterministic", degraded: true } // worker died mid-process — permanent for this run
+        : { provider: "fastembed", degraded: false };
     console.log(`[orwell] semantic recall: fastembed (local ONNX, dim=${provider.dim}, cache=${cacheDir})`);
   } catch (e) {
+    embeddingsStatus = () => ({ provider: "deterministic", degraded: true }); // requested but unavailable
     console.error(
       `[orwell] fastembed warm-up failed (${e instanceof Error ? e.message : String(e)}); ` +
         `semantic recall uses deterministic embeddings this run. ` +
@@ -75,7 +88,7 @@ const requireUser = /^(1|true|yes|on)$/i.test(process.env["ORWELL_ENGINE_MULTIUS
 const knownUser = (user: string): boolean => runtime.knownUser(user);
 
 runtime.start();
-startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, adminToken, requireUser, knownUser }, host);
+startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, adminToken, requireUser, knownUser, embeddingsStatus }, host);
 // Tear the watcher down cleanly on shutdown (its interval is unref'd, so this is belt-and-suspenders).
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {

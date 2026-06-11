@@ -18,10 +18,39 @@ afterAll(async () => {
 });
 
 describe("HTTP MCP entrypoint (runnable engine)", () => {
-  it("serves a health endpoint", async () => {
+  it("serves a health endpoint with uptime, counters, the failure ring, and embeddings status (G1)", async () => {
     const res = await fetch(`${base}/health`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["ok"]).toBe(true);
+    expect(typeof body["uptimeSeconds"]).toBe("number");
+    expect(body["toolCalls"]).toMatchObject({ total: expect.any(Number), failed: expect.any(Number) });
+    expect(Array.isArray(body["recentFailures"])).toBe(true);
+    // no embeddingsStatus wired in this test ⇒ the deterministic, non-degraded default
+    expect(body["embeddings"]).toEqual({ provider: "deterministic", degraded: false });
+  });
+
+  it("records a failed tool call in the /health ring — tool name + error class + timing, never args (G1)", async () => {
+    const sentinel = "RING-SENTINEL-the-payload-that-must-not-leak";
+    const res = await fetch(`${base}/player/call`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "inspectNonVaultState", args: { note: sentinel } }), // admin tool on player channel → refused
+    });
+    expect(res.status).toBe(400);
+
+    const health = (await (await fetch(`${base}/health`)).json()) as {
+      recentFailures: Array<{ ts: number; tool: string; errorClass: string; durationMs: number }>;
+      toolCalls: { failed: number };
+    };
+    expect(health.toolCalls.failed).toBeGreaterThanOrEqual(1);
+    const entry = health.recentFailures.find((f) => f.tool === "inspectNonVaultState");
+    expect(entry).toBeDefined();
+    expect(Object.keys(entry!).sort()).toEqual(["durationMs", "errorClass", "tool", "ts"]);
+    expect(typeof entry!.errorClass).toBe("string");
+    expect(entry!.durationMs).toBeGreaterThanOrEqual(0);
+    // the Vault rule: no args, no payloads, no error MESSAGES cross into /health
+    expect(JSON.stringify(health)).not.toContain(sentinel);
   });
 
   it("exposes the player allowlist, all readsVault:false", async () => {
