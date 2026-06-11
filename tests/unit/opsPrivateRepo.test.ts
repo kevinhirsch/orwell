@@ -13,7 +13,9 @@ import { join } from "node:path";
  *         update, and the update owns the one-time `--set-token` setup/rotation path;
  *  - A4:  no PAT literal is ever committed (the secrets-guard extension the audit asked for);
  *  - E83: the frontend lockfile exists, is fully pinned, and is what the scripts install;
- *  - E85: the systemd units carry the hardening set and the frontend unit has a default port.
+ *  - E85: the systemd units carry the hardening set and the frontend unit has a default port;
+ *  - G19b: the web-triggered update seam — flag file → root path unit → one fixed script →
+ *          live log (the E85-sandboxed FE can never systemctl; existence-only trigger).
  */
 
 const DEPLOY = "deploy";
@@ -283,4 +285,85 @@ describe("container console access — the root password seam (orwell.sh)", () =
     expect(text).toContain("pct enter");
     expect(text).toContain("-- passwd");
   });
+});
+
+describe("G19b ops trigger — web-requested update via the root path unit", () => {
+  // The FE runs inside the E85-hardened unit (User=orwell, empty CapabilityBoundingSet=) and
+  // structurally CANNOT systemctl or self-update. The sanctioned pattern: the web tier writes a
+  // FLAG FILE (data/ops/update-requested); a root-side systemd PATH unit watches it and runs the
+  // ONE fixed maintenance script, output appended to data/ops-update.log — the same data/*.log
+  // surface the admin status page tails live (G1b). These gates pin the design's load-bearing
+  // edges: existence-only trigger, flag-removed-before-run, the lock, the live log, and that
+  // BOTH maintenance scripts reconcile the units onto existing boxes.
+  const pathUnit = readFileSync(join(DEPLOY, "systemd", "orwell-ops-update.path"), "utf8");
+  const svcUnit = readFileSync(join(DEPLOY, "systemd", "orwell-ops-update.service"), "utf8");
+  const install = readFileSync(join(DEPLOY, "orwell-install.sh"), "utf8");
+  const update = readFileSync(join(DEPLOY, "orwell-update.sh"), "utf8");
+
+  it("both units exist and are non-trivial", () => {
+    expect(pathUnit.length).toBeGreaterThan(100);
+    expect(svcUnit.length).toBeGreaterThan(100);
+  });
+
+  it("the path unit watches the flag by EXISTENCE only — and documents that contract", () => {
+    expect(pathUnit).toContain("PathExists=/opt/orwell/data/ops/update-requested");
+    expect(pathUnit).toContain("Unit=orwell-ops-update.service");
+    expect(pathUnit).toContain("WantedBy=multi-user.target");
+    // The commission's safety line: the flag's content is ignored — never parsed or executed.
+    expect(pathUnit).toMatch(/existence[- ]only/i);
+  });
+
+  it("the service removes the flag FIRST (no PathExists= retrigger loop), then runs", () => {
+    expect(svcUnit).toContain("ExecStartPre=/bin/rm -f /opt/orwell/data/ops/update-requested");
+    expect(svcUnit.indexOf("ExecStartPre=/bin/rm -f /opt/orwell/data/ops/update-requested"))
+      .toBeLessThan(svcUnit.indexOf("ExecStart=/bin/bash"));
+  });
+
+  it("only the ONE fixed script path runs — the web tier picks WHEN, never WHAT", () => {
+    expect(svcUnit).toContain("bash /opt/orwell/deploy/orwell-update.sh");
+    // The flag may appear in Exec lines ONLY as the removal target — never read/sourced/run.
+    const flagExecLines = svcUnit
+      .split("\n")
+      .filter((l) => l.startsWith("Exec") && l.includes("update-requested"));
+    expect(flagExecLines).toEqual(["ExecStartPre=/bin/rm -f /opt/orwell/data/ops/update-requested"]);
+  });
+
+  it("overlapping triggers no-op on the lock (flock) instead of stacking a second build", () => {
+    expect(svcUnit).toMatch(/flock -n/);
+    expect(svcUnit).toContain("exit 0"); // the no-op arm, not a failure
+  });
+
+  it("stdout+stderr append LIVE to the log the status page tails, with a per-run timestamp header", () => {
+    expect(svcUnit).toContain("StandardOutput=append:/opt/orwell/data/ops-update.log");
+    expect(svcUnit).toContain("StandardError=append:/opt/orwell/data/ops-update.log");
+    expect(svcUnit).toMatch(/date -Is/); // the timestamped header per run
+  });
+
+  it("the service is a oneshot, ROOT by documented design (it must git/npm/systemctl)", () => {
+    expect(svcUnit).toContain("Type=oneshot");
+    // RemainAfterExit would pin the unit "active" and the path unit could never re-trigger.
+    expect(svcUnit).not.toMatch(/^RemainAfterExit=/m);
+    // Root is the point, not an oversight: no User= drop, and the WHY is written into the unit.
+    expect(svcUnit).not.toMatch(/^User=/m);
+    expect(svcUnit).toMatch(/deliberately root/i);
+  });
+
+  for (const [name, text] of [["orwell-install.sh", install], ["orwell-update.sh", update]] as const) {
+    it(`${name} reconciles both ops units idempotently (the drop-in pattern)`, () => {
+      expect(text).toMatch(/install -m 644 "[^"]*orwell-ops-update\.path"\s+\/etc\/systemd\/system\/orwell-ops-update\.path/);
+      expect(text).toMatch(/install -m 644 "[^"]*orwell-ops-update\.service"\s+\/etc\/systemd\/system\/orwell-ops-update\.service/);
+      // The TRIGGER is the path unit — enabled; the service is started by the watcher only.
+      expect(text).toContain("enable --now orwell-ops-update.path");
+      expect(text).not.toContain("enable --now orwell-ops-update.service");
+    });
+
+    it(`${name} creates the orwell-owned flag dir (the FE writes the flag) + the readable live log`, () => {
+      expect(text).toMatch(/install -d -m 750 "[^"]*\/ops"/);
+      expect(text).toMatch(/chown orwell:orwell "[^"]*\/ops"/); // the data/ops ownership line
+      expect(text).toMatch(/touch "[^"]*ops-update\.log"/);
+      expect(text).toMatch(/chmod 644 "[^"]*ops-update\.log"/);
+      // `install` TRUNCATES an existing file — the live run log must never be created that way.
+      expect(text).not.toMatch(/install [^\n]*ops-update\.log/);
+    });
+  }
 });

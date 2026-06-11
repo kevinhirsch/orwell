@@ -1,0 +1,20 @@
+[Unit]
+Description=orwell ops trigger — web-requested update (G19b flag watch)
+# The seam that lets the admin status page trigger maintenance: the front-end runs inside the
+# E85-hardened orwell-frontend.service (User=orwell, empty CapabilityBoundingSet=) and
+# structurally CANNOT systemctl or self-update. The sanctioned pattern: the web tier writes a
+# FLAG FILE under data/ (the one tree it already owns) and this root-side path unit reacts by
+# starting the oneshot runner, which appends its output to data/ops-update.log — the same
+# data/*.log surface the status page already tails live (G1b). Click → run → watch.
+
+[Path]
+# EXISTENCE-only trigger: the flag's CONTENT is deliberately ignored — never read, parsed, or
+# executed — so the web tier can request "an update", never "a command". Only the one fixed
+# script wired into orwell-ops-update.service ever runs. The runner removes the flag FIRST;
+# PathExists= re-evaluates when the service deactivates, so a clean run does not re-trigger,
+# while a request landing DURING a run earns exactly one follow-up run.
+PathExists=/opt/orwell/data/ops/update-requested
+Unit=orwell-ops-update.service
+
+[Install]
+WantedBy=multi-user.target

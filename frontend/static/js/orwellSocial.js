@@ -314,6 +314,7 @@ import { isNarrow } from './platform.js';
     } catch (_) {
       // ENGINE HICCUP (not "no game"): keep a shown panel up (U5) — just don't refresh
       // approaches. Only hide when we've never shown it (nothing to keep).
+      if (window.OrwellReport) window.OrwellReport.fail("social", "state-poll", _); // G11: fail open, never silent
       _failures += 1;
       if (!_shown) hidePanel();
       return;
@@ -346,6 +347,7 @@ import { isNarrow } from './platform.js';
       renderApproaches(data && data.initiatives);
     } catch (_) {
       // initiatives hiccup: leave the existing chips, never blank them on a transient error
+      if (window.OrwellReport) window.OrwellReport.fail("social", "initiatives-poll", _); // G11: fail open, never silent
     }
   }
 

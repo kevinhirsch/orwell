@@ -13,17 +13,19 @@ no bespoke game chat route here. These endpoints are the onboarding + state seam
   * GET  /api/orwell/moment  -> the managed game-master prompt for the moment;
   * GET  /api/orwell/health  -> engine reachability.
 """
+import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
 from core.middleware import require_admin
 from src import orwell_engine
 from src import orwell_portraits
 from src.auth_helpers import effective_user
+from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -404,5 +406,41 @@ def setup_orwell_routes() -> APIRouter:
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    # ── G11: the front-end failure ring ──────────────────────────────────────────
+    # The FE's house style for user-facing feature failure is fail-OPEN (the panel
+    # simply isn't there) — correct UX, structurally SILENT. This is the beacon sink
+    # that makes those silences observable: orwellReport.js POSTs {surface, errorClass,
+    # detail} from inside the fail-open catches, and the line lands in the G1b LIVE
+    # ring via the root logger (src/log_rings.py), visible on /admin/status. NOT
+    # admin-gated (player-context JS sends it); rate-limited per user (IP when
+    # anonymous); shape-validated (three short strings only); NO storage beyond the
+    # ring. Always answers 204 — the reporter never reads the response (sendBeacon
+    # can't), and a misbehaving client gets silence, never an error to chase.
+    _fe_report_limiter = RateLimiter(max_requests=30, window_seconds=60)
+    _FE_REPORT_CAPS = {"surface": 80, "errorClass": 120, "detail": 300}
+
+    @router.post("/fe-report")
+    async def orwell_fe_report(request: Request):
+        # Manual parse: sendBeacon may land as text/plain — content-type is no gate.
+        try:
+            data = json.loads((await request.body()).decode("utf-8", "replace") or "{}")
+        except Exception:
+            return Response(status_code=204)  # malformed body: drop silently
+        if not isinstance(data, dict):
+            return Response(status_code=204)
+        fields = {}
+        for key, cap in _FE_REPORT_CAPS.items():
+            v = data.get(key, "")
+            if not isinstance(v, str):
+                return Response(status_code=204)  # three short strings only
+            fields[key] = " ".join(v.split())[:cap]  # one ring line: collapse whitespace, clip
+        if not fields["surface"]:
+            return Response(status_code=204)
+        who = _current_user(request) or (request.client.host if request.client else "anon")
+        if not _fe_report_limiter.check(f"fe-report:{who}"):
+            return Response(status_code=204)  # over the window: drop silently
+        logger.info("[fe-fail] %s: %s — %s", fields["surface"], fields["errorClass"], fields["detail"])
+        return Response(status_code=204)
 
     return router

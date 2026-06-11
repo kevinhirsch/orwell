@@ -205,6 +205,7 @@ import * as modalManager from "./modalManager.js";
       _failures = 0;
     } catch (_) {
       _failures += 1; // engine down → fail open (hide) + back the poll off (E67)
+      if (window.OrwellReport) window.OrwellReport.fail("finale", "finale-poll", _); // G11: fail open, never silent
       finale = null;
     }
     _staging = !!finale;
