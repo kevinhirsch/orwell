@@ -256,7 +256,36 @@ EOF
 else
   rm -f "$FRONTEND_DROPIN"
 fi
+
+# G19b — the web-triggered-update seam: reconcile the ops trigger units from the fresh checkout
+# (mirrors the drop-in reconcile above — the install may predate G19b, and the units must track
+# the repo). The E85-hardened FE (User=orwell, no systemctl) requests an update by dropping the
+# flag data/ops/update-requested; the root-side path unit consumes it and runs THIS script,
+# output appended to data/ops-update.log — the data/*.log surface the admin status page tails
+# live (G1b). Root-by-design: the WHY lives in the unit files' own comments. Legacy /opt/bbai
+# boxes are skipped — the units hard-code the modern /opt/orwell layout, and units pointing at
+# a pre-rename tree would be worse than absent.
+OPS_UNITS_READY=0
+if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-update.path" ]]; then
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.path"    /etc/systemd/system/orwell-ops-update.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.service" /etc/systemd/system/orwell-ops-update.service
+  # The flag dir is orwell-OWNED (the web tier writes the flag; root consumes it; the flag's
+  # content is ignored — existence only) and the live log exists ahead of the first run,
+  # FE-readable (the status page tails it). The log is touched, never truncated by a re-run.
+  install -d -m 750 "${APP_DIR}/data/ops"
+  if id -u orwell >/dev/null 2>&1; then chown orwell:orwell "${APP_DIR}/data/ops"; fi
+  touch "${APP_DIR}/data/ops-update.log"
+  chmod 644 "${APP_DIR}/data/ops-update.log"
+  OPS_UNITS_READY=1
+fi
 systemctl daemon-reload
+if [[ "$OPS_UNITS_READY" -eq 1 ]]; then
+  # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
+  # `enable --now` no-ops when already running; the restart re-arms it with any fresh unit
+  # config — restarting the PATH unit never touches a run already in flight (separate unit).
+  systemctl enable --now orwell-ops-update.path
+  systemctl restart orwell-ops-update.path
+fi
 
 echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
 systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
