@@ -2839,3 +2839,20 @@ PR per item).
 > (C5); the no-secrets guard scans the whole tree (E78). **Test integrity:** T8/T9/T12/T15–T17
 > step-definition hardening + the 0004/0009/0036/0037/0047 feature amendments.
 > **Open remainder (not reached — two lane agents died mid-work):** T3–T7, T10, T11, T19, T20.
+
+### Lane C — feature 0053 (admin transcripts, ruling #14) · front-end (Python) · **✅ DONE**
+
+> Built the L11-specced 0053 surface. **API** (`frontend/routes/admin_transcript_routes.py`,
+> registered in `app.py` after admin-wipe, both behind `require_admin`): `GET /api/admin/transcripts`
+> lists sessions across ALL users (id, owner, title, created/updated, message count, game-session
+> marker) with `?user=`/`?since=` filters + `?limit=`/`?offset=` pagination; `GET
+> /api/admin/transcripts/{id}?format=json|md` exports the full transcript — message roles +
+> timestamps AND the agent-thread tool-call nodes (names, args, outputs) verbatim, the debug value.
+> **UI:** one admin-only "Transcripts" `admin-card` in the System panel (`static/index.html`) driven
+> by `initTranscripts()` (`static/js/admin.js`) — owner filter + per-session JSON/MD download; no
+> nav surface; hidden for non-admins by the `.admin-only` rule. **Boundaries:** read-only (no
+> POST/PUT/PATCH/DELETE); the copy carries the Diary-Room-inclusion caveat; transcripts live in the
+> FE chat store so they survive the game reset and die with the factory reset by construction (no
+> script change). **Gate:** `frontend/tests/test_0053_admin_transcripts.py` (12 cases) — green; the
+> rest of the FE pytest suite unaffected (425 passing; the 2 reds are pre-existing env-only
+> module gaps: `rag_vector`). FE pytest lane only — never `cucumber.cjs`; no engine change.

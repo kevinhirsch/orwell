@@ -98,7 +98,7 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 | 0049 | [House presence & lingering play (rooms, occupancy, overhearing)](./0049-house-presence-and-lingering.md) | **Behavioral fidelity / ADR 0003** | **Done** — rooms+adjacency in the pure core · seeded one-room occupancy · `whereabouts` lever · co-presence⇒witness, adjacency⇒rare bidirectional `overheard:` pathways · lingering zero-beat · B64 |
 | 0050 | [The casting interview (producer-led character creation)](./0050-casting-interview.md) | Player UX / ADR 0003 | **Done** — interview-in-chat (no modal) · incremental `updateCasting` intake (engine owns the next step; half-done survives restart) · casting card (qualitative) · Soul-memory seeding |
 | 0051 | [In-character images (analyze in, generate out)](./0051-in-character-images.md) | Player UX / immersion | **Specced — not built** (2026-06-10 audit "Future specs" + ruling #9; spec only, not in any gate) |
-| 0053 | [Admin transcript retrieval (debug, quiet)](./0053-admin-transcripts.md) | App / admin · ops | **Specced — not built** (ruling #14, 2026-06-10; FE pytest lane when built — never `cucumber.cjs`) |
+| 0053 | [Admin transcript retrieval (debug, quiet)](./0053-admin-transcripts.md) | App / admin · ops | **Built — FE pytest-validated** (ruling #14; `frontend/tests/test_0053_admin_transcripts.py`; never `cucumber.cjs`) |
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the

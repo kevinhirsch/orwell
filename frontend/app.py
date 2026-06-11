@@ -552,6 +552,11 @@ app.include_router(setup_session_routes(session_manager, session_config, webhook
 from routes.admin_wipe_routes import setup_admin_wipe_routes
 app.include_router(setup_admin_wipe_routes(session_manager))
 
+# Admin transcript retrieval (Feature 0053, ruling #14) — quiet, read-only debug
+# access to any user's chat transcripts. Behind require_admin; no game-chrome surface.
+from routes.admin_transcript_routes import setup_admin_transcript_routes
+app.include_router(setup_admin_transcript_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.

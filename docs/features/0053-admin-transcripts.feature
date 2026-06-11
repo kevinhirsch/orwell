@@ -1,7 +1,7 @@
-# DRAFT executable spec — SPECCED, NOT BUILT (author: feature-maker; implementer makes it pass).
+# BUILT — FE pytest-validated (2026-06-11) by frontend/tests/test_0053_admin_transcripts.py.
 # Feature 0053 — Admin transcript retrieval (ruling #14, 2026-06-10). Front-end (Python) only; NO
-# engine change. When built: validated by frontend pytest (frontend/tests/), like 0029/0032 — never
-# added to cucumber.cjs. HARD rule: roles only ("admin"/"user" are account roles; player is a role).
+# engine change. Validated by frontend pytest (frontend/tests/), like 0029/0032 — never added to
+# cucumber.cjs. HARD rule: roles only ("admin"/"user" are account roles; player is a role).
 # Boundaries (recorded in the ruling): transcripts are player-visible content only (no Vault risk by
 # construction); they DO include the player's Diary-Room entries (accepted operator capability —
 # noted in the UI copy); retrieval is READ-ONLY (E93 applies to admins too); transcripts survive the
