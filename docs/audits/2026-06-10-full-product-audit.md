@@ -1666,3 +1666,12 @@ itself; a future incremental-snapshot item if play feels it.
 - **A10 [LOW · API]** The Houseguest's-Choice pending presents `options`+`pick:1` like
   choice-shaped decisions but `submitDecision` expects the pick on `vote` — any non-FE
   client trips. Align the field or document it on the pending view.
+
+- **A11 [LOW · Noise · prod-observed 2026-06-11]** onnxruntime inside an LXC logs
+  `pthread_setaffinity_np … error code: 22` (twice, at thread-pool creation) when the
+  container's cgroup cpuset doesn't grant the host CPU indexes ORT tries to pin — harmless
+  (threads run unpinned; inference unaffected), appears at prefetch and once at boot
+  warm-up. Mitigation is documentation only (deploy README + the doctor ignores it):
+  fastembed-js doesn't expose ORT's `intraOpNumThreads`, and widening the LXC cpuset is a
+  worse trade. Upgrades to a real finding only if it ever spams per-inference (it
+  shouldn't — one session, one pool, created once).
