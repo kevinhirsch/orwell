@@ -495,6 +495,22 @@ def main() -> int:
                 check(ban.get("owDismiss") is True and ban.get("w", 0) >= 24 and ban.get("h", 0) >= 24,
                       f"F6: banner dismiss is the shared ow-dismiss affordance ({ban})")
 
+            # F-3 (the ratchet, runtime half): every window-like surface on the page
+            # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
+            # bespoke-chrome marker ('Drag to move' titlebars outside the kit) is extinct.
+            ratchet = page.evaluate("""() => {
+              const panels = ['orwell-social', 'orwell-finale']
+                .map(id => document.getElementById(id)).filter(Boolean);
+              const unkitted = panels.filter(el => !el.hasAttribute('data-ow-window')).map(el => el.id);
+              const bespoke = [...document.querySelectorAll('[title="Drag to move"]')]
+                .filter(el => !el.closest('[data-ow-window]')).length;
+              const kitStack = window.OrwellWindowKit ? window.OrwellWindowKit.stackIds() : null;
+              return { panels: panels.length, unkitted, bespoke, kitStack: Array.isArray(kitStack) };
+            }""")
+            check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
+                  f"F-3: every window-like surface is kit-managed ({ratchet})")
+            check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
