@@ -123,6 +123,12 @@ if [[ -f "$ENV_FILE" ]]; then
   ENGINE_PORT="$(env_get ORWELL_ENGINE_PORT BBAI_ENGINE_PORT)"
   FE_PORT="$(env_get ORWELL_PORT BBAI_PORT)"
   MCP_URL="$(env_get ORWELL_ENGINE_MCP_URL BBAI_ENGINE_MCP_URL)"
+  # The installer mints ORWELL_ENGINE_TOKEN on every deploy, and the engine then
+  # demands it on every tool route (only /health is exempt). The tool probe below
+  # MUST present it or a perfectly healthy engine answers 401 — a false FAIL. Fall
+  # back to the admin token (admin ⊇ player privilege) when only that is set.
+  ENGINE_TOKEN="$(env_get ORWELL_ENGINE_TOKEN BBAI_ENGINE_TOKEN)"
+  [[ -z "$ENGINE_TOKEN" ]] && ENGINE_TOKEN="$(env_get ORWELL_ENGINE_ADMIN_TOKEN BBAI_ENGINE_ADMIN_TOKEN)"
   ENGINE_PORT="${ENGINE_PORT:-8765}"
 else
   warn "config: ${ENV_FILE} not found (using defaults; set ORWELL_HOME if installed elsewhere)"
@@ -146,7 +152,14 @@ engine_serves_tools() {
   local out
   out="$(curl -s -m 5 -X POST "${ENGINE_BASE}/player/call" \
           -H 'content-type: application/json' -H 'X-Orwell-User: __doctor__' \
+          ${ENGINE_TOKEN:+-H "x-orwell-token: ${ENGINE_TOKEN}"} \
           -d '{"name":"getGameState","args":{}}' 2>/dev/null)" || return 1
+  # A configured-but-unpresented token answers 401 "unauthorized"; surface that
+  # distinctly so a token mismatch never masquerades as a dead engine.
+  if grep -Eq '"error":"unauthorized"' <<<"$out"; then
+    warn "engine tool probe got 401 — ORWELL_ENGINE_TOKEN in ${ENV_FILE} may not match the running engine"
+    return 1
+  fi
   grep -Eq '"result"|no active game' <<<"$out"
 }
 
