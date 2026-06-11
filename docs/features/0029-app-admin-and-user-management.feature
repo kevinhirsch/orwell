@@ -1,4 +1,5 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED; these are acceptance criteria VALIDATED BY FRONTEND PYTEST
+# (frontend/tests/), not the unit/BDD harness — never added to cucumber.cjs (like 0010/0032).
 # Feature 0029 — App administrator role & user management. App/account tier (NOT the game's God Mode).
 # HARD rule: roles only (here "user"/"admin" are account roles; A/B are role labels).
 

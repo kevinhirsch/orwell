@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Build priority #5 — Competition eligibility & legality.
 # HARD rule: roles only; seeded randomness for draws.
 

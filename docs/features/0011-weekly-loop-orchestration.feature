@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0011 — Weekly loop orchestration (the gameplay spine). Pure domain core.
 # HARD rule: roles only. Binds 0005 (legality), 0006 (outcomes), 0008 (cadence), decision 0002.
 

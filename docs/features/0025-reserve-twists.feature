@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0025 — Reserve twists. Vault-sealed from player AND admin; engine-timed; format-preserving.
 # HARD rule: roles only. A twist's existence/timing is secret until it fires.
 

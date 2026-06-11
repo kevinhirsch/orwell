@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0045 — Endgame structure (Final 5 → Final 2). HARD rule: roles only (HOH, nominee, veto holder,
 # evictee, finalist, juror). Add to cucumber.cjs when green.
 

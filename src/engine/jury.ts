@@ -33,19 +33,35 @@ export interface EvictionManner {
 }
 
 /**
- * A juror's lean toward a finalist: relationship (trust+affinity, less threat) plus
- * the manner of eviction. Blindsided / betrayed / disrespected pulls the lean down
- * (less likely to vote for the responsible finalist); feeling respected lifts it.
- * The signed manner shifts live in `juryConstants.MANNER_LEAN`.
+ * A juror's lean toward a finalist: relationship (trust+affinity) plus the manner of
+ * eviction. Blindsided / betrayed / disrespected pulls the lean down (less likely to
+ * vote for the responsible finalist); feeling respected lifts it. The signed manner
+ * shifts live in `juryConstants.MANNER_LEAN`.
+ *
+ * THREAT is deliberately ABSENT here (D4/E33 ruling, 2026-06-11): fearing a dangerous player
+ * is an in-season eviction heuristic; at the finale the game is over, and a juror penalizing
+ * "they were a threat" structurally crowns the harmless goat. Post-season, a big game earns
+ * respect instead — the `gameRespect` resume term at the call site.
  */
 export function juryLean(rel: JuryRel, manner: EvictionManner = {}, w: JuryWeights = JURY_WEIGHTS): number {
-  const relationship = (rel.trust + rel.affinity) / 2 - 0.5 * rel.threat;
+  const relationship = (rel.trust + rel.affinity) / 2;
   const manners =
     (manner.respected ? MANNER_LEAN.respected : 0) +
     (manner.blindsided ? MANNER_LEAN.blindsided : 0) +
     (manner.betrayed ? MANNER_LEAN.betrayed : 0) +
     (manner.disrespected ? MANNER_LEAN.disrespected : 0);
   return w.relationship * relationship + w.manner * manners;
+}
+
+/**
+ * The signed GAME-RESPECT split between two finalists' public resumes (comp wins): the share of
+ * the pair's combined resume this finalist owns, centered (±0.5). Both résumé-less ⇒ 0 (neutral).
+ * Pure; weighted by `JURY_WEIGHTS.gameRespect` at the call site (ruling 2026-06-11).
+ */
+export function gameRespectTerm(own: number, other: number): number {
+  const total = own + other;
+  if (total <= 0) return 0;
+  return own / total - 0.5;
 }
 
 /** Finale performance in [0,1] — mean quality of the opening statement + answers. */

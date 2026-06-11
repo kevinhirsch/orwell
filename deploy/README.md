@@ -15,14 +15,38 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 
 ## Usage
 
+The repo is **private** (ruling #17, 2026-06-10). You authenticate **once, ever**: the
+first-install one-liner carries a fine-grained PAT (scope: this repo, **Contents: Read-only**,
+nothing else). The installer persists it to the container's `data/.env` (`GIT_TOKEN=…` — the one
+file every reset preserves) and wires a git **credential helper** that reads it at use time, so
+updates and resets never re-prompt and the token never lands in a remote URL or `.git/config`.
+
 ```bash
-# install — on the Proxmox host shell
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
-# update — host or inside the container
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
+# install — on the Proxmox host shell (THE one authenticated moment)
+GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+
+# update — host or inside the container: run the LOCAL checked-out copy (no GitHub fetch)
+bash /opt/orwell/deploy/orwell-update.sh
 ```
 
-The update one-liner works **either** on the Proxmox host **or** inside the container: the app and
+After install, **every maintenance command is the local copy** — `bash
+/opt/orwell/deploy/<script>.sh` inside the container, or the same script from a checkout on the
+host (it bridges into the LXC via `pct` and, with no local file, runs the **in-container
+checked-out copy**). No script fetches branch tips from GitHub anymore (audit E84): the only
+GitHub traffic is `git fetch/pull` itself, authenticated by the credential helper.
+
+For an **existing install** that predates the private flip, set the token once:
+
+```bash
+bash /opt/orwell/deploy/orwell-update.sh --set-token     # prompts; or GIT_TOKEN=… non-interactive
+```
+
+Fine-grained PATs cap at one year — `--set-token` is also the annual rotation (still "once," per
+year). Variant for never rotating: a read-only **deploy key** (SSH) pasted into GitHub once and an
+SSH `REPO=` URL; the PAT-in-`.env` path is the default because the preserve-`.env` infrastructure
+already exists.
+
+The update script works **either** on the Proxmox host **or** inside the container: the app and
 its git checkout live in the LXC (the host has no `git` / no app dir), so when run on the host the
 script locates the orwell container (by hostname `orwell`) and re-runs itself inside it via `pct` —
 the same bridge the installer uses. Override the target with `CTID=<id>` (or `CT_HOSTNAME=<name>`)
@@ -39,15 +63,19 @@ either **on the Proxmox host** (it bridges into the LXC, like `orwell-update.sh`
 container as root**:
 
 ```bash
-# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)"
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)" -- --dry-run
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-factory-reset.sh)" -- --yes
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell");
+# run from a host checkout, or any local copy of the script — it bridges into the LXC
+bash deploy/orwell-factory-reset.sh
+bash deploy/orwell-factory-reset.sh --dry-run
+bash deploy/orwell-factory-reset.sh --yes
 
 # or directly inside the container
 bash /opt/orwell/deploy/orwell-factory-reset.sh             # prompts: type RESET
 bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # preview what would be removed
 ```
+
+`data/.env` — including the deploy `GIT_TOKEN` — survives the scrub, so updates keep working
+without a re-prompt.
 
 It stops the services, removes the data, and restarts — the next visit begins at first-run
 onboarding. **Config is preserved** (`data/.env`: ports, engine URL, LLM keys), so the box still
@@ -72,9 +100,9 @@ Same host-aware bridge and flags as the factory reset:
 
 ```bash
 # from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)"
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)" -- --dry-run
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-game-reset.sh)" -- --yes
+bash deploy/orwell-game-reset.sh
+bash deploy/orwell-game-reset.sh --dry-run
+bash deploy/orwell-game-reset.sh --yes
 
 # or directly inside the container
 bash /opt/orwell/deploy/orwell-game-reset.sh             # prompts: type RESET
@@ -94,10 +122,10 @@ override) and re-runs itself inside, or run it directly **inside the container**
 units auto-detected):
 
 ```bash
-# from the Proxmox host
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)"
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)" -- --status
-CTID=112 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-doctor.sh)" -- --bounce
+# from the Proxmox host (a local copy of the script; it bridges into the LXC)
+bash deploy/orwell-doctor.sh
+bash deploy/orwell-doctor.sh --status
+CTID=112 bash deploy/orwell-doctor.sh --bounce
 
 # or directly inside the container
 bash /opt/orwell/deploy/orwell-doctor.sh             # diagnose; restart whatever is unhealthy; verify
@@ -109,7 +137,9 @@ It checks the full chain — units active → engine `/health` → the engine ac
 → the front-end's `/api/orwell/health` reports `engine:true` (the two tiers agree) — flags the
 classic `ORWELL_ENGINE_MCP_URL` ↔ `ORWELL_ENGINE_PORT` mismatch in `data/.env`, restarts in
 dependency order (engine first), and prints the failing unit's recent journal when a restart
-doesn't cure it. Exit `0` means healthy.
+doesn't cure it. Exit `0` means healthy. It also reads `systemd-analyze security` for both units
+and warns when a unit's exposure score drifts above the hardening floor (audit E85; override with
+`ORWELL_SECURITY_FLOOR=<score>`).
 
 ## Config UX (community-scripts style)
 
@@ -140,21 +170,22 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `BRIDGE` / `NET` / `GATEWAY` | `vmbr0` / `dhcp` / — | network (`NET` = `dhcp` or a CIDR) |
 | `ORWELL_PORT` | `8080` | front-end UI port |
 | `BRANCH` / `REPO` | `main` / this repo | source to install |
+| `GIT_TOKEN` | — | the deploy PAT (private repo; → `data/.env`, never committed) |
 | `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
 
 ```bash
 # fully non-interactive example
-CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
-  bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
+GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
+  bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
 ```
 
 ## Layout
 
 | File | Role |
 |---|---|
-| `orwell.sh` | Host-side: create the Proxmox LXC, then run the in-container install. |
-| `orwell-install.sh` | apt + Node 22 + Python; clone; verify + `npm run build`; front-end deps; write `.env`; register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
-| `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) and updates there; inside the container it runs directly. Auto-detects the app dir (`/opt/orwell`, or legacy `/opt/bbai`) and the matching service names. |
+| `orwell.sh` | Host-side: create the Proxmox LXC, bootstrap the **git checkout** inside it (persisting `GIT_TOKEN` + the credential helper — A4), then run the **checked-out** in-container installer. |
+| `orwell-install.sh` | apt + Node 22 (apt-signed repo, no `curl \| bash`) + Python; checkout; verify + `npm run build`; front-end deps from the **pinned `requirements.lock.txt`** (E83); write `.env` (engine token, multi-user mode); register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
+| `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) via its **local copy** (or the in-container copy — never a GitHub fetch); inside the container it runs directly. `--set-token` persists/rotates the deploy PAT. Auto-detects the app dir (`/opt/orwell`, or legacy `/opt/bbai`) and the matching service names. |
 | `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
@@ -172,9 +203,13 @@ later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed age
 
 - **Automated smoke:** [`deploy/smoke.sh`](./smoke.sh) builds + starts the engine, probes the HTTP
   MCP surface, exercises the player game tools (`createCharacter` → `getGameState` →
-  `getMomentPrompt` → `runCompetition`, and proves the removed `resolveCompetition` is refused — audit E20), proves channel isolation, and simulates an update
-  (rebuild + restart). It runs offline, locally and in CI (`.github/workflows/ci.yml`), and
-  asserts the update script never deletes the save.
+  `getMomentPrompt` → `runCompetition`, and proves the removed `resolveCompetition` is refused —
+  audit E20), proves channel isolation, and simulates an update (rebuild + restart) — asserting
+  **behaviorally** that the pre-update game resumes from disk and the update script never deletes
+  the save (E80), that no hidden-layer NUMBER (`physical`/`mental`/`social`/`trust`/`affinity`/
+  `threat`) leaks from a player surface, that the **A4 credential helper** hands git the `.env`
+  token, and that no deploy script fetches from `raw.githubusercontent.com` (E84). It runs
+  offline, locally and in CI (`.github/workflows/ci.yml`).
 - **On-host validation** remains the full Proxmox-LXC provisioning (provision → one-liner install →
   curl the UI → update → assert the save survived) — that part can't run in GitHub Actions (no LXC)
   and is the on-box test.

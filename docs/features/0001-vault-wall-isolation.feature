@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Build priority #1 (Vault isolation, incl. God Mode). Resolved stack: TypeScript / Node —
 # run via Cucumber.js + Vitest + fast-check + dependency-cruiser (see 0001-...md §8).
 # HARD rule: roles only, never houseguest or player names. Fixtures are generated,

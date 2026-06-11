@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0049 — House presence & lingering play: rooms + adjacency ground witnessing and
 # overhearing (both directions), and milling around never advances the week.
 # HARD rule: roles only (HOH, nominee, NPC, player, schemer, overhearer). Add to cucumber.cjs when green.

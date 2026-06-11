@@ -221,10 +221,41 @@ GAME_DROP_SET = frozenset({
     "cookbook", "hwfit", "compare", "deep_research", "research", "rag", "memory",
     "skills", "notes", "tasks", "shell", "web_fetch", "youtube",
     "webhooks", "signature", "companion", "codex", "copilot",
+    # W3 (2026-06-10 audit): the Bitwarden/Vaultwarden integration — an admin-gated,
+    # password-handling, subprocess-spawning surface the game build has no use for.
+    # (This is the password-manager vertical, NOT the game engine's Vault store.)
+    "vault",
 })
 
 # The kept opt-in exception (default off): see DEFAULT_FEATURES["voice"].
 GAME_VOICE = "voice"
+
+# ── W1/W5 (2026-06-10 audit): the ui_control safe subset under the game build ──
+# ui_control stays in the keep-set (it's the "📺 Camera direction" beat), but its
+# action space collapses to visual direction only. Everything else — mode flips,
+# model swaps, incognito/power toggles, panel opening, email drafts — is refused
+# structurally in do_ui_control (the single dispatch chokepoint), so neither the
+# model nor a prompt-injected houseguest line can flip the player out of the game.
+GAME_UI_CONTROL_SAFE_ACTIONS = frozenset({
+    "highlight", "clear_highlight",  # point the cameras at something on screen
+    "set_theme", "create_theme",     # house look & feel (ruling #13 / feature 0052)
+})
+
+# W5: the game-only ui_control manifest. Injected as a builtin tool-description
+# override under the game build (see get_setting), so the agent prompt's tool
+# section never teaches the model to open email/gallery/cookbook/documents panels
+# or flip modes/models on game turns — levers that are refused anyway (W1).
+# Format matters: the "- ```name``` — ..." one-liner shape is what the prompt
+# assembler classifies as a tool section.
+GAME_UI_CONTROL_SECTION = (
+    "- ```ui_control``` — Camera direction only: visually direct the player's screen. "
+    "Commands: `highlight <css-selector> [label]` (call out something on screen), "
+    "`clear_highlight`, `set_theme <preset>` (presets: dark, light, midnight, paper, "
+    "cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, "
+    "claude, cute), `create_theme <name> <bg> <fg> <panel> <border> <accent>` (custom hex "
+    "theme; auto-applies). No other UI action exists here — do not try to switch modes, "
+    "models, toggles, or open panels."
+)
 
 _GAME_BUILD_FALSEY = {"0", "false", "no", "off", ""}
 
@@ -371,8 +402,20 @@ def save_settings(settings: dict):
 
 
 def get_setting(key: str, default: Any = None) -> Any:
-    """Read a single setting value."""
-    return load_settings().get(key, default)
+    """Read a single setting value.
+
+    W5 (game build): the built-in tool-description overrides gain a structural,
+    non-optional entry for ``ui_control`` — the game-only manifest — so the agent
+    prompt's tool section advertises exactly the safe subset do_ui_control enforces
+    (W1). Injected on the READ path only (never persisted), and it wins over any
+    user-saved override while the game build is on; full-workspace mode is untouched.
+    """
+    val = load_settings().get(key, default)
+    if key == "builtin_tool_overrides" and game_build_enabled():
+        ov = dict(val) if isinstance(val, dict) else {}
+        ov["ui_control"] = GAME_UI_CONTROL_SECTION
+        return ov
+    return val
 
 
 def is_setting_overridden(key: str) -> bool:

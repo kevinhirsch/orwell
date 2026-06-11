@@ -1,6 +1,8 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED; shipped UNIT-GATED (tests/unit/liveSocialSurface.test.ts,
+# tests/unit/diaryRoom.test.ts) — never added to cucumber.cjs (recorded deviation, audit E87a;
+# the original "add to cucumber.cjs when green" instruction was not followed).
 # Feature 0036 — Live social surface: expose 0012's NPC-initiated approaches and 0013's Diary Room as
-# Vault-free live player tools. Engine-side (TS gate); add to cucumber.cjs when green.
+# Vault-free live player tools. Engine-side (TS gate).
 # HARD rule: roles only (player, NPC). The Diary Room wall is the crux — no NPC ever learns DR content.
 
 Feature: Live social surface (NPC approaches & the Diary Room)

@@ -7,8 +7,10 @@ const DIM = 256; // wide enough that distinct vocabularies rarely hash-collide
  * bag-of-words hashed into a fixed-dim vector. Texts that share words cluster
  * (high cosine similarity), so recall is by CONTENT, not recency — a query about
  * "the veto betrayal" retrieves that betrayal, not last night's chat. No model,
- * no network; the same text always yields the same vector. A real embedding model
- * backs `EmbeddingProvider` at runtime (open decision #4).
+ * no network; the same text always yields the same vector. NOTE: this is ALSO the
+ * production adapter today — the accepted runtime target (fastembed, local ONNX,
+ * version-pinned; ADR docs/decisions/0004) is not yet built, and this remains the
+ * sanctioned fallback once it is (ADR 0004 "Implementation status", audit E86).
  */
 export class DeterministicEmbedding implements EmbeddingProvider {
   embed(text: string): number[] {

@@ -494,7 +494,8 @@ Kept for history; every item below is decided (cross-check `CLAUDE.md` "Open dec
 2. **Temperature model** — ✅ resolved: shape in feature 0006 / `docs/decisions/0001`; constants
    firmed into `src/domain/temperatureConstants.ts` (feature 0028). Only fine-tuning remains.
 3. **Vector approach** — ✅ resolved: adopted, engine-only (`VectorIndex`); embedding provider is
-   **fastembed, local ONNX** per ADR `docs/decisions/0004` (deterministic fake in tests).
+   **fastembed, local ONNX** per ADR `docs/decisions/0004` (deterministic fake in tests; the
+   fastembed adapter itself is not yet built — runtime uses the fake today, E86).
 4. **Veto-draw rules, jury procedure, twists** — ✅ resolved: six-player veto with the
    "Houseguest's Choice" chip (`docs/decisions/0001`, feature 0005); jury choreography by
    feature 0037; reserve twists Vault-sealed (feature 0025).

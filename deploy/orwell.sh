@@ -2,8 +2,13 @@
 #
 # orwell — one-liner Proxmox LXC installer.
 #
-# On the Proxmox host shell:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+# On the Proxmox host shell (the repo is PRIVATE — this is the ONE authenticated moment, ever;
+# the fine-grained PAT needs only Contents: Read-only on kevinhirsch/orwell — A4/ruling #17):
+#   GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+#
+# The token is persisted ONCE into the container's data/.env (the file every reset preserves)
+# and git reads it through a credential helper at use time — no later command ever re-prompts,
+# and the token never lives in a remote URL or .git/config.
 #
 # Creates a Debian LXC and installs orwell — the TypeScript engine (MCP server) and the orwell
 # front-end — as systemd services (engine contract: `npm run build` / `npm start`).
@@ -22,7 +27,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 
 case "${1:-}" in
   -h|--help)
-    sed -n '3,16p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//'
+    sed -n '3,21p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//'
     exit 0 ;;
   -d|--default|--defaults) USE_DEFAULTS=1 ;;
 esac
@@ -100,6 +105,11 @@ STORAGE="${STORAGE:-$(storage_for rootdir)}";          STORAGE="${STORAGE:-local
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-$(storage_for vztmpl)}"; TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 REPO="${REPO:-https://github.com/kevinhirsch/orwell.git}"
 BRANCH="${BRANCH:-main}"
+APP_DIR="${APP_DIR:-/opt/orwell}"
+# The private-repo deploy credential (A4/ruling #17): a fine-grained PAT, Contents: Read-only.
+# Captured HERE, once — persisted into the container's data/.env; git reads it via a credential
+# helper from then on (updates/resets never re-prompt).
+GIT_TOKEN="${GIT_TOKEN:-}"
 ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"   # ORWELL_* primary; BBAI_* deprecated fallback
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OLLAMA_HOST="${OLLAMA_HOST:-}"
@@ -191,17 +201,36 @@ for _ in $(seq 1 30); do
 done
 [[ -n "$IP" ]] || IP="<container-ip>"
 
+# ── Bootstrap the git checkout inside the container (A4/ruling #17 — closes audit E84) ──────────
+# No raw-curl of branch tips: the ONLY GitHub fetch is `git` itself, authenticated (when the repo
+# is private) by a credential helper reading GIT_TOKEN from data/.env — the one file every reset
+# preserves. The installer that runs is the CHECKED-OUT copy, integrity-anchored to the git ref.
+msg "bootstrapping the git checkout inside the container"
+pct exec "$CTID" -- bash -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq git ca-certificates"
+pct exec "$CTID" -- bash -c "mkdir -p '${APP_DIR}/data'; touch '${APP_DIR}/data/.env'; chmod 600 '${APP_DIR}/data/.env'"
+if [[ -n "$GIT_TOKEN" ]]; then
+  # Persist the token via a pushed file (never on a pct exec command line / host ps).
+  TMP_TOKEN="$(mktemp /tmp/orwell-token-XXXXXX)"
+  chmod 600 "$TMP_TOKEN"
+  printf 'GIT_TOKEN=%s\n' "$GIT_TOKEN" > "$TMP_TOKEN"
+  pct push "$CTID" "$TMP_TOKEN" /tmp/orwell-token --perms 0600
+  rm -f "$TMP_TOKEN"
+  pct exec "$CTID" -- bash -c "grep -q '^GIT_TOKEN=' '${APP_DIR}/data/.env' || cat /tmp/orwell-token >> '${APP_DIR}/data/.env'; rm -f /tmp/orwell-token"
+fi
+# The credential helper reads the token at use time — it never lands in a URL or .git/config.
+pct exec "$CTID" -- bash -c "git config --system credential.helper '!f(){ echo username=x-access-token; echo \"password=\$(sed -n s/^GIT_TOKEN=//p ${APP_DIR}/data/.env)\"; };f'"
+# init+fetch+reset (not clone): the data/.env we just seeded makes ${APP_DIR} non-empty.
+pct exec "$CTID" -- bash -c "set -e; mkdir -p '${APP_DIR}'; cd '${APP_DIR}'; \
+  [ -d .git ] || git init -q; \
+  git remote get-url origin >/dev/null 2>&1 && git remote set-url origin '${REPO}' || git remote add origin '${REPO}'; \
+  git fetch --depth 1 origin '${BRANCH}'; \
+  git reset --hard \"origin/${BRANCH}\" --quiet"
+
 # ── In-container install (LLM config, if any, is passed through and lands in data/.env) ─────────
-# The fresh container has no curl yet, so download orwell-install.sh on the host (which always
-# has curl) and push it in via pct — no chicken-and-egg bootstrap problem.
-msg "running in-container install"
-TMP_INSTALL="$(mktemp /tmp/orwell-install-XXXXXX.sh)"
-curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-install.sh" -o "$TMP_INSTALL"
-pct push "$CTID" "$TMP_INSTALL" /tmp/orwell-install.sh
-rm -f "$TMP_INSTALL"
+msg "running in-container install (the checked-out deploy/orwell-install.sh)"
 pct exec "$CTID" -- bash -c \
-  "export REPO='${REPO}' BRANCH='${BRANCH}' ORWELL_PORT='${ORWELL_PORT}' \
+  "export REPO='${REPO}' BRANCH='${BRANCH}' APP_DIR='${APP_DIR}' ORWELL_PORT='${ORWELL_PORT}' \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
-   bash /tmp/orwell-install.sh"
+   bash '${APP_DIR}/deploy/orwell-install.sh'"
 
 msg "done. orwell UI: http://${IP}:${ORWELL_PORT}"

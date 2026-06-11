@@ -2,7 +2,7 @@
 // Lightweight popup that surfaces the existing /command registry as users
 // type. Reads COMMANDS from slashCommands.js — no command logic lives here.
 
-import { COMMANDS, LEGACY_ALIASES } from './slashCommands.js';
+import { COMMANDS, LEGACY_ALIASES, isGameSlashAllowed } from './slashCommands.js';
 
 const POPUP_ID = 'slash-autocomplete';
 const MAX_VISIBLE = 12;
@@ -29,6 +29,7 @@ function _flatten() {
 
   // 1. Top-level commands and their subcommands from COMMANDS
   for (const [name, def] of Object.entries(COMMANDS)) {
+    if (!isGameSlashAllowed(name)) continue; // W4: game-build menu = keep-set only
     if (EXCLUDED.has(name)) continue;
     if (def.hidden) continue;
     if (def.handler) {
@@ -62,6 +63,8 @@ function _flatten() {
   if (LEGACY_ALIASES) {
     for (const [alias, { parent, sub }] of Object.entries(LEGACY_ALIASES)) {
       if (!PROMOTED_ALIASES.has(alias)) continue;
+      if (!isGameSlashAllowed(parent)) continue; // W4
+
       const tok = `/${alias}`;
       if (seen.has(tok)) continue;
       const parentDef = COMMANDS[parent];

@@ -56,7 +56,11 @@ export interface HttpMcpOptions {
   knownUser?: (user: string) => boolean;
 }
 
-/** Constant-time secret comparison (audit E27) — hash both sides so length never short-circuits. */
+/**
+ * Constant-time secret comparison (audits E27 + E32): `===` short-circuits on the first differing
+ * byte — a timing oracle that lets a network attacker recover the shared secret byte-by-byte.
+ * Comparing fixed-length SHA-256 digests makes the time independent of both content and length.
+ */
 function secretsMatch(presented: string | undefined, expected: string): boolean {
   if (!presented) return false;
   const a = createHash("sha256").update(presented).digest();
@@ -91,6 +95,13 @@ function presentedToken(headers: Record<string, string | string[] | undefined>):
   if (auth && /^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
   return headerValue(headers["x-orwell-token"]);
 }
+
+/**
+ * Asserted-user-id cap (audit E8): `FileSaveStore` hex-doubles the id into a directory name, so a
+ * >127-byte header becomes `ENAMETOOLONG` 500s deep in the save path. Refuse absurd ids at the
+ * edge with a deliberate 400 instead.
+ */
+const MAX_USER_ID_CHARS = 64;
 
 export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options: HttpMcpOptions = {}): Server {
   // A request's MCP server is resolved per (channel, asserted user). Single-tenant deps ignore the
@@ -163,6 +174,10 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
       // (3) Identity: in multi-user mode a missing/empty user header is refused, never routed to "default".
       const rawUser = headerValue(req.headers[USER_HEADER]);
       if (options.requireUser && !rawUser) return send(400, { error: "missing user identity" });
+      // E8: an oversize id would ENAMETOOLONG deep in the save path — refuse it deliberately here.
+      if (rawUser && rawUser.length > MAX_USER_ID_CHARS) {
+        return send(400, { error: `user identity too long (max ${MAX_USER_ID_CHARS} chars)` });
+      }
       const user = rawUser ?? "default";
 
       if (req.method === "GET" && match[2] === "tools") {

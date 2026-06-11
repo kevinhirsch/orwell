@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Build priority #2 — Event visibility & propagation.
 # HARD rule: roles only, never names. Fixtures are generated, never sample-save content.
 

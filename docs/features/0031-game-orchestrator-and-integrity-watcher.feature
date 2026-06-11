@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0031 — Per-sandbox game orchestrator + integrity watcher (hybrid: turn-driven spine +
 # background supervisor). HARD rule: roles only (player, NPC, HOH, nominee); "user A"/"user B" are
 # account roles (0021). "the clock advances" = a FAKE clock stepped explicitly (no real timers).

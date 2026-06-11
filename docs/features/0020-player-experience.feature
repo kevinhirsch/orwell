@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0020 — Player experience (MVP-1): status panel, inline decisions, portraits.
 # HARD rule: roles only. Everything the player sees is Vault-free.
 

@@ -32,6 +32,7 @@ DROP_PREFIXES = (
     "/api/calendar", "/api/contacts", "/api/notes", "/api/tasks", "/api/research",
     "/api/cookbook", "/api/hwfit", "/api/webhooks", "/api/skills",
     "/api/signature", "/api/document", "/api/editor",
+    "/api/vault",  # W3: the Bitwarden/Vaultwarden password-manager vertical
 )
 
 _fails: list[str] = []
@@ -113,6 +114,8 @@ try:
     check(status(base, "/") == 200, "keep-set: GET / -> 200")
     check(status(base, "/api/shell/exec", "POST") == 404, "drop: /api/shell/exec -> 404 (gone server-side)")
     check(status(base, "/api/shell/stream", "POST") == 404, "drop: /api/shell/stream -> 404")
+    check(status(base, "/api/vault/config") == 404, "drop (W3): /api/vault/config -> 404")
+    check(status(base, "/backgrounds") == 404, "drop (W7): /backgrounds dev page removed")
     # Tier 2: the dropped verticals' JS is not shipped; the keep-set JS still is.
     home = body(base, "/")
     shipped = sorted(j for j in DROPPED_JS if f"/{j}" in home)
@@ -132,6 +135,9 @@ try:
     paths = mounted_paths(base)
     check(any(p.startswith("/api/shell") for p in paths), "switch off: shell router mounted again")
     check(status(base, "/api/shell/exec", "POST") != 404, "switch off: /api/shell/exec reachable (not 404)")
+    check(any(p.startswith("/api/vault") for p in paths), "switch off (W3): vault router mounted again")
+    # W7: /backgrounds was removed outright (its static page was never vendored), so it
+    # stays 404 in BOTH builds — no switch-off check.
 finally:
     stop(proc)
 
