@@ -42,6 +42,37 @@ def _current_user(request: Request) -> Optional[str]:
         return getattr(getattr(request, "state", None), "current_user", None)
 
 
+def _roster_cards(state: dict, user: Optional[str]) -> list:
+    """The Vault-free roster cards (0051) from the engine's public projection: id, name,
+    status, isPlayer, and the persisted portrait ref (or null). Shared by /roster and the
+    G9 backfill lever so "what's missing" is computed the same way everywhere."""
+    cards = []
+    # The player's own card first (when present), then the house.
+    player = state.get("player") if isinstance(state.get("player"), dict) else None
+    if player and player.get("name"):
+        pid = player.get("id") or "player"
+        cards.append({
+            "id": pid,
+            "name": player.get("name"),
+            "status": player.get("status") or "active",
+            "isPlayer": True,
+            "portrait": orwell_portraits.portrait_ref(user, pid),
+        })
+    house = state.get("house") if isinstance(state.get("house"), list) else []
+    for hg in house:
+        if not isinstance(hg, dict) or not hg.get("name"):
+            continue
+        hid = hg.get("id") or hg.get("name")
+        cards.append({
+            "id": hid,
+            "name": hg.get("name"),
+            "status": hg.get("status") or "active",
+            "isPlayer": False,
+            "portrait": orwell_portraits.portrait_ref(user, hid),
+        })
+    return cards
+
+
 class NewGameRequest(BaseModel):
     playerName: str
     archetype: Optional[str] = None
@@ -201,37 +232,61 @@ def setup_orwell_routes() -> APIRouter:
         if not isinstance(state, dict) or state.get("started") is False:
             return {"roster": [], "imagesAvailable": False}
 
-        cards = []
-        # The player's own card first (when present), then the house.
-        player = state.get("player") if isinstance(state.get("player"), dict) else None
-        if player and player.get("name"):
-            pid = player.get("id") or "player"
-            cards.append({
-                "id": pid,
-                "name": player.get("name"),
-                "status": player.get("status") or "active",
-                "isPlayer": True,
-                "portrait": orwell_portraits.portrait_ref(user, pid),
-            })
-        house = state.get("house") if isinstance(state.get("house"), list) else []
-        for hg in house:
-            if not isinstance(hg, dict) or not hg.get("name"):
-                continue
-            hid = hg.get("id") or hg.get("name")
-            cards.append({
-                "id": hid,
-                "name": hg.get("name"),
-                "status": hg.get("status") or "active",
-                "isPlayer": False,
-                "portrait": orwell_portraits.portrait_ref(user, hid),
-            })
+        cards = _roster_cards(state, user)
 
         images_available = False
         try:
             images_available = orwell_portraits.image_generation_available(user)
         except Exception:
             images_available = False
+
+        # G9 backfill: seasons that predate 0051 (or whose generation failed) have no stored
+        # portraits — once a provider IS configured, generate the missing set in the background
+        # via the engine's live `getPortraitPrompt` tool. Debounced per user in orwell_portraits
+        # (one attempt per process per window); fire-and-forget, NEVER blocks this response.
+        if images_available:
+            try:
+                missing = orwell_portraits.missing_portrait_ids(user, cards)
+                if missing:
+                    orwell_portraits.kickoff_backfill(missing, user)
+            except Exception as e:
+                logger.info(f"[orwell] portrait backfill kick failed: {e}")
+
         return {"roster": cards, "imagesAvailable": images_available}
+
+    @router.post("/portraits/backfill")
+    async def orwell_portraits_backfill(request: Request):
+        """The manual "Generate cast portraits" retry lever (G9). Player-or-admin: the
+        prompts the backfill fetches are the engine's Vault-free player-channel reads
+        (`getPortraitPrompt`), so the gate is the same as the roster's. Shares the per-user
+        debounce with the roster-driven backfill (a failing provider is never hammered).
+        Returns {kicked, missing, available}; fail-open shapes, never a 5xx to the player."""
+        user = _current_user(request)
+        try:
+            available = orwell_portraits.image_generation_available(user)
+        except Exception:
+            available = False
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+        except Exception as e:
+            logger.warning(f"[orwell] portraits/backfill failed: {e}")
+            return {"kicked": False, "missing": [], "available": available}
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"kicked": False, "missing": [], "available": available}
+        missing = orwell_portraits.missing_portrait_ids(user, _roster_cards(state, user))
+        kicked = False
+        if available and missing:
+            kicked = orwell_portraits.kickoff_backfill(missing, user)
+        return {"kicked": kicked, "missing": missing, "available": available}
+
+    @router.get("/portraits/log")
+    async def orwell_portraits_log(request: Request):
+        """ADMIN-GATED (G9 observability, same require_admin contract as the admin transcript
+        routes): the capped generation-attempt log — {ts, houseguestId, ok, errorClass,
+        durationMs} per attempt, oldest first. No Vault risk: the log carries only ids and
+        error classes (never a prompt, stat, or hidden element)."""
+        require_admin(request)
+        return {"log": orwell_portraits.read_attempt_log()}
 
     @router.get("/portrait/{houseguest_id}")
     async def orwell_portrait(houseguest_id: str, request: Request):
