@@ -480,12 +480,13 @@ class TestRemainingOrwellRoutes:
         # E15: a non-admin caller never receives the GM system prompt. The bare TestClient
         # has no admin session, so require_admin must refuse (auth enabled, no auth manager
         # configured ⇒ fail closed).
-        monkeypatch.setenv("AUTH_ENABLED", "true")
-
         async def fake_moment(moment=None, user=None):
             return {"prompt": "You are the game master. Week 2 has begun."}
 
         client = _build_client(monkeypatch, {"get_moment_prompt": fake_moment})
+        # AFTER the build: _build_client forces AUTH_ENABLED=false (the E70 smoke config);
+        # require_admin reads the env per request, so the E15 gate is asserted with auth ON.
+        monkeypatch.setenv("AUTH_ENABLED", "true")
         resp = client.get("/api/orwell/moment")
         assert resp.status_code == 403
         assert "game master" not in resp.text
