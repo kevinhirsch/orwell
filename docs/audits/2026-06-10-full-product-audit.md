@@ -1038,25 +1038,40 @@ proven only on a fixture:
   (`eviction_night.steps.ts:91–101`); the "no pre-reveal tally/unread vote" Then guards
   itself behind an `if` that can skip all assertions. Replacement: electorate-derived bounds
   + mid-stage surface sweeps. (The engine-side twin of E12.)
-- **T3/T4 [MED]** `assert.ok(recalled.length >= 0)` (offscreen recall) and `assert.ok(true)`
-  (CHARACTER-unchanged) — direct replacements specced.
-- **T5/T6 [MED]** "Narration can't change outcomes" proven against a pure local function
-  called twice; "narrator cannot advance the game" proven against a hand-built constant —
+- **T3/T4 [MED] ✅ PR #225** `assert.ok(recalled.length >= 0)` (offscreen recall) and
+  `assert.ok(true)` (CHARACTER-unchanged) — direct replacements specced. *Shipped:* T3 asserts
+  recall RETURNS the specific recorded off-screen note; T4 captures a real generated houseguest's
+  static Character bytes at premiere and asserts byte-stability across a season of soul-deepening.
+  Both mutation-verified.
+- **T5/T6 [MED] ✅ PR #225** "Narration can't change outcomes" proven against a pure local
+  function called twice; "narrator cannot advance the game" proven against a hand-built constant —
   both re-pointed at live sandboxes (the house-presence lingering steps are the pattern).
-- **T7 [MED]** The 0019 agent-play-loop gate asserts world slots nothing writes, accepts any
-  winner (`typeof winner.name === "string"`), and its fixture omits the relationship model —
-  the fold it "verifies" is impossible there. Re-point at the live seam (B55 pattern).
+  *Shipped:* T5 → a live `GameSessionAdapter` competition + hallucinating narrator (winner re-runs
+  identical, whole live state byte-identical); T6 → a live season at its real nomination beat
+  (live phase + pending unmoved by building the narrator prompt). Both mutation-verified.
+- **T7 [MED] ✅ PR #225** The 0019 agent-play-loop gate asserts world slots nothing writes, accepts
+  any winner (`typeof winner.name === "string"`), and its fixture omits the relationship model —
+  the fold it "verifies" is impossible there. Re-point at the live seam (B55 pattern). *Shipped:*
+  the engine winner is a real roster member that re-runs identical, and recording the result FOLDS
+  a real hidden consequence with a relationship model wired in. Mutation-verified (disable the fold
+  ⇒ red).
 - **T8 [MED]** Reserve-twist scenarios pre-filter to exactly-one-fired seeds then assert
   ≤1 fired; the witnessed-reveal step records the event itself then asserts it. Un-filtered
   seed loops + a second live twist-kind trace specced.
 - **T9 [MED]** Emergent-bloc steps re-write bloc edges to 0.95 every tick (overwriting live
   folds) and never compute the "more than chance" baseline; the temporal "sooner" claim is a
   single static call. Matched-seed lift test specced.
-- **T10 [LOW]** `readsVault === false` asserts a literal type — decorative (dep-cruiser is
-  the real proof).
-- **T11 [MED]** Off-screen isolation Thens prove disjoint id-sets that are disjoint by
+- **T10 [LOW] ✅ PR #225** `readsVault === false` asserts a literal type — decorative (dep-cruiser
+  is the real proof). *Shipped (with PR #221's step hardening):* the decorative assert now carries
+  a comment pointing at the dependency-cruiser proof AND a live-server behavioral assertion (the
+  channel serves exactly its static allowlist by name). Verified + stamped.
+- **T11 [MED] ✅ PR #225** Off-screen isolation Thens prove disjoint id-sets that are disjoint by
   construction (no content/knowledge cross-leak check); the per-wake cap hides a ×10 fudge;
-  one Then ends `assert.ok(true)`.
+  one Then ends `assert.ok(true)`. *Shipped:* the per-wake cap now asserts the TICK COUNT via an
+  `advance` spy (the ×10 fudge is gone); the isolation Thens plant unique per-user sentinels and
+  assert genuine content/knowledge cross-absence (record + knowledge + player surface); the
+  `assert.ok(true)` watcher-stop step now asserts no-dangling-timer + idempotent stop. Cap and
+  isolation both mutation-verified.
 - **T12 [MED]** Live-progression determinism asserts only final week/phase after 60 advances
   — two diverged games typically still agree; compare full event trails (the
   strategic_decisions pattern).
@@ -1073,12 +1088,18 @@ proven only on a fixture:
   orchestrator "same clock ticks" When is an empty step.
 - **T18 [LOW]** fast-check is used in 1 of 11 "property" files; the fixed-seed loops are
   mostly adequate — fix the lane description (CLAUDE.md overstates).
-- **T19 [MED · FE]** `test_c12_finale_relay.py` hand-mirrors the engine decision kinds — the
-  exact drift class C12 exists to kill; parse them from `GameSession.ts` like c13 does.
-- **T20 [MED · FE]** Source-grep tests (`"modalManager.register(" in src`) counted as behavior
-  coverage. Plus the ten most important untested FE behaviors, led by: **deleting `user=`
-  from any orwell route passes all 244 FE tests** (identity propagation never asserted — the
-  test-side twin of E29).
+- **T19 [MED · FE] ✅ PR #225** `test_c12_finale_relay.py` hand-mirrors the engine decision kinds —
+  the exact drift class C12 exists to kill; parse them from `GameSession.ts` like c13 does.
+  *Shipped (with PR #221):* the FE decision-kind list is parsed live from `src/ports/GameSession.ts`
+  via `_engine_decision_kinds()` (the c13 cross-language manifest-parser pattern) with a sanity
+  floor + duplicate guard. Verified + stamped.
+- **T20 [MED · FE] ✅ PR #225** Source-grep tests (`"modalManager.register(" in src`) counted as
+  behavior coverage. *Shipped:* `scripts/browser_smoke.py` gains a real social-HUD minimize-to-dock
+  BEHAVIOR check (minimize hides the panel + parks a dock chip; restoring from the chip re-opens
+  it); `tests/test_orwell_huds.py` source-greps are explicitly re-labeled as SOURCE-PINS
+  (`test_sourcepin_*`, docstring + per-test pointers to the browser-smoke behavior coverage) so
+  they read as wiring-present pins, not behavior coverage. *(The broader untested-FE-behaviors set
+  — identity propagation / `user=` deletion etc. — belongs to the FE waves, not this T-item.)*
 - *Patterns to preserve:* liveSentinel's self-auditing sweep, liveFairness' exchangeability
   band, jury_choreography's manner-share A/B, the B53 live twist trace, house_presence's
   per-tick invariants, the c13 cross-language manifest parser, the UAT's anomaly-model design.
