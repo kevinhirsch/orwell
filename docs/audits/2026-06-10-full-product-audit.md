@@ -762,7 +762,7 @@ consequence.*
   header — not cucumber-gated).
 
 - **0053 — Admin transcript retrieval** *(ruling #14, 2026-06-10: "Admin API + settings entry")*.
-  **✅ BUILT 2026-06-11 (Lane C, PR #__) — FE pytest-validated**
+  **✅ BUILT 2026-06-11 (Lane C, PR #223) — FE pytest-validated**
   (`frontend/routes/admin_transcript_routes.py` + the admin-only Settings "Transcripts" row in
   `static/index.html` / `static/js/admin.js`; gate `frontend/tests/test_0053_admin_transcripts.py`).
   Debug access to any user's chat transcripts, invisible to players:
