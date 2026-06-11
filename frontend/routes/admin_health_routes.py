@@ -309,9 +309,10 @@ _STATUS_PAGE = """<!doctype html>
   th { opacity: .55; font-weight: 600; }
   td.num { text-align: right; padding-right: 0; }
   .actions { margin: 18px 0; display: flex; gap: 12px; }
-  a.btn { color: #9cdef2; border: 1px solid #355a66; border-radius: 8px;
-          padding: 6px 12px; text-decoration: none; }
-  a.btn:hover { background: rgba(255,255,255,.06); }
+  .btn { color: #9cdef2; border: 1px solid #355a66; border-radius: 8px;
+         padding: 6px 12px; text-decoration: none; cursor: pointer;
+         background: transparent; font: inherit; display: inline-block; }
+  .btn:hover { background: rgba(255,255,255,.06); }
   #err { color: #e55; margin-top: 10px; }
 </style></head>
 <body>
@@ -320,7 +321,7 @@ _STATUS_PAGE = """<!doctype html>
 <div class="grid" id="grid">Loading…</div>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
-  <a class="btn" href="javascript:void(load())">Refresh now</a>
+  <button type="button" class="btn" id="refresh-now">Refresh now</button>
 </div>
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
@@ -335,7 +336,7 @@ _STATUS_PAGE = """<!doctype html>
 <div class="actions" id="opsrow">Loading ops…</div>
 <div id="opsmsg" class="sub"></div>
 <div id="err"></div>
-<script>
+<script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const up = s => { s = Math.max(0, +s || 0); const d = (s/86400)|0, h = ((s%86400)/3600)|0, m = ((s%3600)/60)|0;
   return d ? d+"d "+h+"h" : h ? h+"h "+m+"m" : m ? m+"m" : (s|0)+"s"; };
@@ -372,6 +373,7 @@ async function load() {
 }
 load();
 setInterval(load, 10000);
+document.getElementById("refresh-now").addEventListener("click", load);
 
 // ── the sticky-tail multi-source log viewer (G1b) ──
 const pane = document.getElementById("logpane"), pill = document.getElementById("follow"),
@@ -464,10 +466,10 @@ async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });
     const d = await r.json();
-    let h = (d.scripts || []).map(s => '<a class="btn" href="javascript:void(0)" data-ops="' + esc(s.id) + '">' + esc(s.label) + "</a>").join("");
+    let h = (d.scripts || []).map(s => '<button type="button" class="btn" data-ops="' + esc(s.id) + '">' + esc(s.label) + "</button>").join("");
     const t = d.updateTrigger || {};
     h += t.installed
-      ? '<a class="btn" href="javascript:void(0)" id="ops-update">Run update (root trigger)</a>'
+      ? '<button type="button" class="btn" id="ops-update">Run update (root trigger)</button>'
       : '<span class="sub">update trigger not installed — run the deploy updater once to enable</span>';
     opsRow.innerHTML = h;
     opsRow.querySelectorAll("[data-ops]").forEach(b => b.addEventListener("click", () => runOps(b.dataset.ops)));
@@ -543,6 +545,12 @@ def setup_admin_status_page() -> APIRouter:
     @router.get("/admin/status")
     async def admin_status_page(request: Request):
         require_admin(request)
-        return Response(content=_STATUS_PAGE, media_type="text/html")
+        # The page's inline <script> needs the per-request CSP nonce, exactly like
+        # index.html's {{CSP_NONCE}} templating (core/middleware.py sets the strict
+        # script-src 'nonce-…'); without it the poller is CSP-blocked and the page
+        # sits at "Loading…" forever (regression fix).
+        nonce = getattr(request.state, "csp_nonce", "")
+        html = _STATUS_PAGE.replace("{{CSP_NONCE}}", nonce)
+        return Response(content=html, media_type="text/html")
 
     return router

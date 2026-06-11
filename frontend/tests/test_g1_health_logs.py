@@ -384,3 +384,16 @@ def test_g1b_page_carries_the_sticky_tail_viewer(monkeypatch):
     assert 'id="logpane"' in body and 'id="logsrc"' in body
     assert "scrollHeight - pane.scrollTop" in body    # the at-bottom stickiness math
     assert "paused" in body and "following" in body   # the follow pill states
+
+
+def test_h1_status_page_inline_script_is_csp_nonceable_no_js_hrefs(monkeypatch):
+    # Regression (H1): the page's inline <script> MUST carry the CSP nonce
+    # placeholder, or the app's strict script-src nonce policy blocks it and the
+    # page sits at "Loading…" forever. And no javascript: href (CSP blocks those
+    # too) — interactive controls are real buttons with listeners.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    body = client.get("/admin/status").text
+    assert '<script nonce=' in body                  # nonce-templated, not bare <script>
+    assert "javascript:" not in body                 # no CSP-blocked href vectors
+    assert 'id="refresh-now"' in body                # refresh is a real button (listener-wired)
