@@ -1195,6 +1195,12 @@ if (!window._odyEscExpandGuard) {
     if (cur === _zCounter) return;
     m.style.zIndex = String(++_zCounter);
   };
+  // Lane G14 (DWE audit F9b): this counter is the ONE z-authority for the
+  // whole .modal family — the same ladder pickTopModal reads for Escape.
+  // modalManager's _bringToFront defers here instead of stamping its own
+  // second counter (the old _modalTopZ 300s, written with !important), so
+  // visual order, dock-restore order, and Escape order can never disagree.
+  window._owPromoteModal = _promote;
   // F8 (DWE audit / Lane F wave 3): closing a modal returns focus to its
   // opener — for the WHOLE .modal family, from this one observer. On the
   // hidden→visible transition we stash the element that had focus; on
