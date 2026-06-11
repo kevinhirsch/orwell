@@ -1,14 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { SoulStore } from "../../src/adapters/engine/SoulStore";
 import { DeterministicEmbedding } from "../../src/adapters/embedding/DeterministicEmbedding";
 import { npc } from "../../src/domain/ids";
 
 /**
- * Lane G8 — the soul-seeding batch must not pin the event loop. The real embedder
+ * Lanes G8/G12 — a soul-write batch must not pin the event loop. The real embedder
  * (ADR 0004) blocks the loop per call, so `recordToSoul` defers the DERIVED vector
  * indexing to a one-embed-per-macrotask drain; the AUTHORITATIVE soul (narrative +
  * memories) still updates synchronously, and `recall` flushes its houseguest's
- * pending queue first so recall semantics are unchanged. Roles only — no names.
+ * pending queue first so recall semantics are unchanged.
+ *
+ * G12 hoists the queue to ONE shared, process-wide lane: many stores (one per user
+ * sandbox) bursting together still cost at most a single embed per macrotask — and a
+ * dropped sandbox can `discardPending` its derived backlog off the lane entirely.
+ * Roles only — no names.
  */
 
 /** A counting embed over the deterministic vectors (the test adapter's space). */
@@ -19,6 +24,12 @@ function countingEmbed(): { calls: () => number; embed: (t: string) => number[] 
 }
 
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/** The lane is shared process-wide (G12): never leak one test's backlog into the next. */
+afterEach(async () => {
+  for (let i = 0; i < 1_000 && SoulStore.pendingTotal() > 0; i++) await tick();
+  expect(SoulStore.pendingTotal()).toBe(0);
+});
 
 const A = npc(1);
 const B = npc(2);
@@ -31,6 +42,7 @@ describe("G8 — SoulStore spaces its sync embeds (the loop breathes during a se
     expect(s.soulOf(A).memories).toHaveLength(8); // the soul itself deepened synchronously (0007)
     expect(s.soulOf(A).narrative.length).toBeGreaterThan(0);
     expect(e.calls()).toBe(0); // the batch pinned the loop with ZERO inline embeds
+    expect(s.pendingCount()).toBe(8); // …all queued on the breathing lane instead
   });
 
   it("the queue drains in the background, one embed per macrotask (the loop yields between calls)", async () => {
@@ -86,5 +98,57 @@ describe("G8 — SoulStore spaces its sync embeds (the loop breathes during a se
     expect(s.soulOf(A).memories).toHaveLength(2); // the authoritative soul never thinned (0007)
     const r = s.recall(A, "veto grudge", 2);
     expect(r.map((m) => m.content)).toContain("the surviving veto grudge");
+  });
+});
+
+describe("G12 — the breathing lane is SHARED across every store (sandbox bursts never stack)", () => {
+  it("two stores flooding together still drain ONE embed per macrotask TOTAL, in arrival order", async () => {
+    const e1 = countingEmbed();
+    const e2 = countingEmbed();
+    const s1 = new SoulStore(e1.embed); // two sandboxes restoring in the same tick (the boot preload)
+    const s2 = new SoulStore(e2.embed);
+    for (let i = 0; i < 3; i++) s1.recordToSoul(A, `house one arc beat ${i}`);
+    for (let i = 0; i < 3; i++) s2.recordToSoul(A, `house two arc beat ${i}`);
+    expect(SoulStore.pendingTotal()).toBe(6);
+    await tick();
+    expect(e1.calls() + e2.calls()).toBe(1); // pre-G12: one embed per STORE per macrotask — stalls stacked
+    await tick();
+    expect(e1.calls() + e2.calls()).toBe(2);
+    await tick();
+    expect([e1.calls(), e2.calls()]).toEqual([3, 0]); // FIFO: the first flood drains first
+    for (let i = 0; i < 10 && SoulStore.pendingTotal() > 0; i++) await tick();
+    expect([e1.calls(), e2.calls()]).toEqual([3, 3]);
+  });
+
+  it("recall flushes ONLY its own store's houseguest — another sandbox's backlog stays on the lane", () => {
+    const e1 = countingEmbed();
+    const e2 = countingEmbed();
+    const s1 = new SoulStore(e1.embed);
+    const s2 = new SoulStore(e2.embed);
+    s1.recordToSoul(A, "a whispered final-two promise");
+    s2.recordToSoul(A, "an unrelated scheme in another house"); // SAME houseguest id, different sandbox
+    expect(s1.recall(A, "final-two promise", 1)).toHaveLength(1);
+    expect(e1.calls()).toBe(2); // s1's one memory + the context embed
+    expect(e2.calls()).toBe(0); // the other sandbox was never forced inline
+    expect(s2.pendingCount()).toBe(1); // …its backlog still breathes on the shared lane
+  });
+
+  it("discardPending drops only THIS store's queued work; the authoritative soul is untouched", async () => {
+    const e1 = countingEmbed();
+    const e2 = countingEmbed();
+    const dead = new SoulStore(e1.embed); // a sandbox being reset/unloaded mid-drain
+    const live = new SoulStore(e2.embed);
+    for (let i = 0; i < 4; i++) dead.recordToSoul(A, `dead season beat ${i}`);
+    for (let i = 0; i < 2; i++) live.recordToSoul(B, `live season beat ${i}`);
+    dead.discardPending();
+    expect(dead.pendingCount()).toBe(0);
+    expect(SoulStore.pendingTotal()).toBe(2); // only the live sandbox's work remains
+    for (let i = 0; i < 10 && SoulStore.pendingTotal() > 0; i++) await tick();
+    expect(e1.calls()).toBe(0); // the dead season never burned an inference on the shared lane
+    expect(e2.calls()).toBe(2);
+    // Derived state only: the authoritative soul never thinned (0007) — a restore re-derives.
+    expect(dead.soulOf(A).memories).toHaveLength(4);
+    expect(dead.recall(A, "dead season", 2)).toEqual([]); // the discarded index is gone…
+    expect(e1.calls()).toBe(0); // …and recall on an index-less soul costs no embed
   });
 });
