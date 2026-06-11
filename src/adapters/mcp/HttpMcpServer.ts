@@ -4,6 +4,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "./McpServer";
 import { toolsFor } from "../../surfaces/tools/registry";
 import { EngineRefusal, TurnRefusedError, PersistFailureError } from "../../domain/errors";
+import { HealthMetrics, errorClassOf } from "./healthMetrics";
 
 /**
  * A minimal HTTP transport over the permissioned `McpServer` routers — the
@@ -54,6 +55,13 @@ export interface HttpMcpOptions {
   adminToken?: string;
   requireUser?: boolean;
   knownUser?: (user: string) => boolean;
+  /**
+   * Lane G1: the embeddings-provider status for `/health` — provider name plus whether the
+   * fastembed runtime has DEGRADED to the deterministic fallback (boot warm-up failure or a
+   * mid-process worker death). Wired by `main.ts`, which owns the provider choice; the
+   * transport stays free of any engine-root dependency. Unset ⇒ deterministic, not degraded.
+   */
+  embeddingsStatus?: () => { provider: string; degraded: boolean };
 }
 
 /**
@@ -109,6 +117,11 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
   const pick = (channel: "player" | "admin", user: string): McpServer =>
     isResolver(deps) ? deps.resolve(channel, user) : (channel === "player" ? deps.player : deps.admin);
 
+  // Lane G1: per-process health metrics — uptime, call counters, and the capped ring of
+  // recent tool FAILURES (tool name + sanitized error class + duration ONLY — the Vault
+  // rule; see healthMetrics.ts). Surfaced on /health for the admin Health & Logs card.
+  const metrics = new HealthMetrics();
+
   // Per-user serialization (B60/audit E10): two in-flight calls for the SAME user run in order —
   // closing the sandbox-swap race (a reset racing a player action) and future-proofing an async
   // narrator. Different users still run fully concurrently (isolation, 0021).
@@ -151,8 +164,19 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
 
-      // Health is an unauthenticated liveness probe — it carries no game data (deploy smoke / systemd).
-      if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
+      // Health is an unauthenticated liveness probe — it carries no game data (deploy smoke /
+      // systemd). G1 widens it with OPERATIONAL data only: uptime, call counters, the capped
+      // recent-failure ring (tool name + error class + timing — never args/payloads/users),
+      // and the embeddings-provider status (fastembed vs. the deterministic fallback).
+      if (req.method === "GET" && url.pathname === "/health") {
+        let embeddings = { provider: "deterministic", degraded: false };
+        try {
+          embeddings = options.embeddingsStatus?.() ?? embeddings;
+        } catch {
+          /* a broken status probe must never fail the liveness answer */
+        }
+        return send(200, { ok: true, ...metrics.snapshot(), embeddings });
+      }
 
       const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
       if (!match) return send(404, { error: "not found" });
@@ -219,6 +243,9 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
             if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
               return send(404, { error: "no active game for this user" });
             }
+            // G1: per-call duration tracking starts here — the dispatch path proper (resolve +
+            // callTool). Failures land in the /health ring as {ts, tool, errorClass, durationMs}.
+            const dispatchStart = Date.now();
             // E10: the sandbox is resolved HERE, inside the serialized job — never at request start.
             // Resolving can fail (e.g. an unreadable save) — a server error (500), distinct from a
             // bad tool/args (400). Either way the process stays up.
@@ -226,11 +253,18 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
             try {
               server = pick(channel, user);
             } catch {
+              metrics.recordFailure(name, "SandboxResolveError", Date.now() - dispatchStart);
               return send(500, { error: "internal error" });
             }
             try {
-              send(200, { result: await server.callTool(name, (args as Record<string, unknown>) ?? {}) });
+              const result = await server.callTool(name, (args as Record<string, unknown>) ?? {});
+              metrics.recordSuccess(name, Date.now() - dispatchStart);
+              send(200, { result });
             } catch (e) {
+              // G1: the ring records the sanitized class only — never e.message (it can quote
+              // caller content), never args. Recorded BEFORE the status mapping so every
+              // failure mode (409/400/500) is visible to the admin card.
+              metrics.recordFailure(name, errorClassOf(e), Date.now() - dispatchStart);
               // Typed engine errors first (audit E3/E7): a commit refused by the fail-closed
               // integrity checkpoint FAILS THE REQUEST — 409, state unchanged, never a 200 whose
               // view narrates a rolled-back beat. A durable-save failure is a 500 with a sanitized

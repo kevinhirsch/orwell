@@ -557,6 +557,11 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.admin_transcript_routes import setup_admin_transcript_routes
 app.include_router(setup_admin_transcript_routes())
 
+# Admin Health & Logs (Lane G1) — aggregated engine/FE health + the engine's recent-failure
+# ring + the secrets-redacted debug bundle. Behind require_admin; read-only by construction.
+from routes.admin_health_routes import setup_admin_health_routes
+app.include_router(setup_admin_health_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.

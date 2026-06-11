@@ -2110,6 +2110,17 @@
             <div id="adm-transcripts-list" class="settings-gap-top"></div>
             <div id="adm-transcripts-msg" style="margin-top:6px;"></div>
           </div>
+          <div class="admin-card admin-only" id="adm-health-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Health &amp; Logs</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Live health for both tiers (engine + front-end), the engine's recent tool-failure log (tool name, error class, timing — never game content), and a one-click debug bundle (config included, secrets redacted) to attach to a bug report.</div>
+            <div id="adm-health-rows" class="settings-gap-top"><div class="admin-empty">Loading…</div></div>
+            <div id="adm-health-failures" class="settings-gap-top"></div>
+            <div class="settings-row settings-row--end settings-gap-top">
+              <button class="admin-btn-add" id="adm-health-refresh">Refresh</button>
+              <a class="admin-btn-add" id="adm-health-bundle" href="/api/admin/debug-bundle" download>Download debug bundle</a>
+            </div>
+            <div id="adm-health-msg" style="margin-top:6px;"></div>
+          </div>
           <div class="admin-card admin-danger-card">
             <h2 style="color:#e55;">Danger Zone</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Irreversible. Each wipe targets one category — pick exactly what you want gone.</div>

@@ -2356,12 +2356,114 @@ function initTranscripts() {
   if (filterEl) filterEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
 }
 
+/* ── Health & Logs (Lane G1) — UI-based health checking + the failure log ── */
+function initHealthLogs() {
+  const card = el('adm-health-card');
+  if (!card) return;  // not rendered (non-admin DOM) — nothing to wire
+  const rowsEl = el('adm-health-rows');
+  const failEl = el('adm-health-failures');
+  const refreshBtn = el('adm-health-refresh');
+  const msgEl = el('adm-health-msg');
+
+  const badge = (ok, text) =>
+    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,85,85,.16)'};color:${ok ? '#3cb46e' : '#e55'};">${esc(text)}</span>`;
+
+  const row = (label, valueHtml) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+      <div class="admin-toggle-label">${esc(label)}</div>
+      <div class="admin-toggle-sub" style="text-align:right;">${valueHtml}</div>
+    </div>`;
+
+  const fmtUptime = (s) => {
+    s = Math.max(0, Number(s) || 0);
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m` : `${Math.floor(s)}s`;
+  };
+
+  function render(d) {
+    const eng = d.engine || {};
+    const rows = [];
+    let engineVal = badge(!!eng.ok, eng.ok ? 'REACHABLE' : 'DOWN');
+    if (eng.latencyMs != null) engineVal += ` ${esc(String(eng.latencyMs))} ms`;
+    if (eng.uptimeSeconds != null) engineVal += ` · up ${esc(fmtUptime(eng.uptimeSeconds))}`;
+    if (eng.error) engineVal += ` · ${esc(eng.error)}`;
+    rows.push(row('Engine', engineVal));
+    rows.push(row('Tiers agree', badge(!!d.tiersAgree, d.tiersAgree ? 'YES' : 'NO')));
+    const emb = eng.embeddings;
+    if (emb) {
+      rows.push(row('Embeddings', `${esc(emb.provider || '?')} ${emb.degraded ? badge(false, 'DEGRADED') : badge(true, 'OK')}`));
+    } else {
+      rows.push(row('Embeddings', badge(false, 'UNKNOWN')));
+    }
+    const img = d.images || {};
+    let imgVal = img.available ? badge(true, 'AVAILABLE') : badge(false, img.enabled ? 'NO USABLE MODEL' : 'DISABLED');
+    if (img.model) imgVal += ` ${esc(img.model)}`;
+    rows.push(row('Image generation', imgVal));
+    const tc = eng.toolCalls;
+    if (tc) rows.push(row('Tool calls (since engine start)', `${esc(String(tc.total ?? 0))} total · ${esc(String(tc.failed ?? 0))} failed`));
+    const store = (d.frontend || {}).store || {};
+    if (store.sessions != null) {
+      rows.push(row('Front-end store', `${esc(String(store.sessions))} session(s) · ${esc(String(store.messages ?? 0))} message(s)` +
+        (store.database_size_mb != null ? ` · ${esc(String(store.database_size_mb))} MB` : '')));
+    }
+    if (rowsEl) rowsEl.innerHTML = rows.join('');
+
+    // The failure log: the engine's G1 ring (tool / error class / timing — never game
+    // content) newest first, plus the FE tier's own recent engine error when present.
+    const failures = Array.isArray(eng.recentFailures) ? eng.recentFailures.slice().reverse() : [];
+    const feLast = (d.frontend || {}).lastError;
+    if (failEl) {
+      if (!failures.length && !feLast) {
+        failEl.innerHTML = '<div class="admin-toggle-sub" style="margin-top:8px;">No recent failures on record.</div>';
+      } else {
+        const fmtTs = (ms) => { try { return new Date(ms).toISOString().slice(0, 19).replace('T', ' '); } catch { return ''; } };
+        const trs = failures.map(f => `
+          <tr>
+            <td style="padding:3px 8px 3px 0;white-space:nowrap;">${esc(fmtTs(f.ts))}</td>
+            <td style="padding:3px 8px 3px 0;">${esc(f.tool || '')}</td>
+            <td style="padding:3px 8px 3px 0;">${esc(f.errorClass || '')}</td>
+            <td style="padding:3px 0;text-align:right;">${esc(String(f.durationMs ?? ''))} ms</td>
+          </tr>`).join('');
+        const feRow = feLast ? `<div class="admin-toggle-sub" style="margin-top:6px;">Front-end tier: ${esc(feLast.tool || '?')} — ${esc(feLast.kind || '')} — ${esc(feLast.error || '')} (${esc(String(feLast.ageSeconds ?? '?'))}s ago)</div>` : '';
+        failEl.innerHTML = `
+          <div class="admin-toggle-label" style="margin-top:10px;">Recent tool failures (engine)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.85em;margin-top:4px;">
+            <thead><tr style="opacity:0.6;text-align:left;">
+              <th style="padding:3px 8px 3px 0;">Time (UTC)</th><th style="padding:3px 8px 3px 0;">Tool</th>
+              <th style="padding:3px 8px 3px 0;">Error</th><th style="padding:3px 0;text-align:right;">Duration</th>
+            </tr></thead>
+            <tbody>${trs || '<tr><td colspan="4" class="admin-toggle-sub">None.</td></tr>'}</tbody>
+          </table>${feRow}`;
+      }
+    }
+  }
+
+  async function load() {
+    if (msgEl) { msgEl.textContent = 'Checking…'; msgEl.className = ''; }
+    try {
+      const res = await fetch('/api/admin/health', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Failed'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      render(data);
+      if (msgEl) { msgEl.textContent = `Checked ${new Date().toLocaleTimeString()}.`; msgEl.className = 'admin-toggle-sub'; }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    }
+  }
+
+  if (refreshBtn) refreshBtn.addEventListener('click', load);
+  load();  // live rows on open — the card is a health surface, not a form
+}
+
 /* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
