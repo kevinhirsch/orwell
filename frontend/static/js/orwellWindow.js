@@ -121,6 +121,28 @@ function flyTargetRect() {
   return { left: 16, top: window.innerHeight - 48, width: 32, height: 24 };
 }
 
+// ── parked-state persistence (G5 refresh-persistence audit F2 / Lane G16) ──
+// Parked means parked: modalManager's minimized registry is in-memory, so a
+// refresh used to snap every parked window back open (and lose its dock
+// chip). The kit persists a per-window parked flag — keyed per user,
+// mirroring the slot-offset scheme ('orwell-slot-offset:<key>:<user>') —
+// set on minimize(), cleared on a dock restore and on close/teardown.
+// open() consults it and mounts a previously-parked window DIRECTLY into
+// the dock (chip rendered, panel hidden, no open animation — no flash, no
+// raise, no focus steal).
+function parkedKey(id) {
+  return 'orwell-win-parked:' + id + ':' + ((document.body && document.body.dataset.user) || '');
+}
+function loadParked(id) {
+  try { return localStorage.getItem(parkedKey(id)) === '1'; } catch (_) { return false; }
+}
+function saveParked(id, on) {
+  try {
+    if (on) localStorage.setItem(parkedKey(id), '1');
+    else localStorage.removeItem(parkedKey(id));
+  } catch (_) {}
+}
+
 export class OrwellWindow {
   /**
    * opts: { id, title, icon, slot='top-right', slotKey=null, role='complementary',
@@ -244,6 +266,17 @@ export class OrwellWindow {
       restoreFn: () => this._afterDockRestore(),
       closeFn: () => this._teardown(),
     });
+    // F2 (G5 audit / G16): a window the player parked stays parked across a
+    // refresh — mount straight into the minimized state (dock chip, panel
+    // hidden; no open animation, no raise, no focus steal), exactly as if the
+    // minimize had happened this page-life. The dock chip (or an explicit
+    // restore) brings it back and durably un-parks it.
+    if (this.o.minimizable && loadParked(this.o.id)) {
+      this._displayBeforeMin = el.style.display;
+      Modals.minimize(this.o.id);
+      el.style.display = 'none';
+      return this;
+    }
     if (!REDUCED()) { el.classList.add('ow-anim-open'); setTimeout(() => el.classList.remove('ow-anim-open'), 220); }
     this.raise();
     if (this.o.focus) this.titlebar.focus();
@@ -265,6 +298,7 @@ export class OrwellWindow {
 
   minimize() {
     if (!this.el) return;
+    saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     this.el.classList.remove('ow-focused');
@@ -299,6 +333,12 @@ export class OrwellWindow {
     // re-show (the exact pre-minimize inline display, never '' — see minimize),
     // then re-assert the kit band so stacking stays one authority.
     this.el.style.display = this._displayBeforeMin || '';
+    // F2 (G16): a window that mounted straight into the dock (boot-parked)
+    // never had a real pre-minimize display captured, and '' can fall through
+    // to a consumer stylesheet's display:none (the finale defaults hidden) —
+    // a dock restore must always yield a VISIBLE window.
+    if (getComputedStyle(this.el).display === 'none') this.el.style.display = 'block';
+    saveParked(this.o.id, false); // F2 (G16): an explicit restore un-parks durably
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();
@@ -306,6 +346,9 @@ export class OrwellWindow {
   }
 
   restore() { Modals.restore(this.o.id); }
+
+  /** True while this window is parked in the dock (modalManager's registry). */
+  isMinimized() { return Modals.isMinimized(this.o.id); }
 
   close() {
     if (!this.el) return;
@@ -322,6 +365,7 @@ export class OrwellWindow {
   _teardown() {
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
+    saveParked(this.o.id, false); // F2 (G16): a closed window forgets its parked state
     this.ac.abort();
     const opener = this.opener;
     if (this.el) { this.el.remove(); this.el = null; }

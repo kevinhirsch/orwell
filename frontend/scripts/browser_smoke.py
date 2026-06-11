@@ -476,6 +476,71 @@ def main() -> int:
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
+            # G14 (DWE audit F9b): ONE z-authority for the .modal family —
+            # modalManager's _bringToFront defers to ui.js's counter instead of
+            # stamping a second 300s ladder with !important. Open theme, park it
+            # to the dock, restore from the chip (trusted clicks), THEN open
+            # settings fresh: the fresh open must sit visually ABOVE the
+            # dock-restored window (elementFromPoint at the content overlap),
+            # Escape must close settings first then theme (pickTopModal ==
+            # visual order), and no .modal may carry an inline !important z.
+            page.click("#tool-theme-btn")
+            page.wait_for_timeout(600)  # static node — the `_` was injected at boot
+            check(page.evaluate("!document.getElementById('theme-modal').classList.contains('hidden')") is True,
+                  "G14: theme opens from the sidebar entry")
+            page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
+            page.wait_for_timeout(400)
+            g14min = page.evaluate("""() => {
+              const m = document.getElementById('theme-modal');
+              return { parked: m.classList.contains('modal-minimized'),
+                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="theme-modal"]'),
+                       importantZ: m.style.getPropertyPriority('z-index') === 'important' };
+            }""")
+            check(g14min.get("parked") is True and g14min.get("chip") is True,
+                  f"G14: theme parks to a dock chip ({g14min})")
+            check(g14min.get("importantZ") is False,
+                  f"G14: a parked window holds NO inline !important z ({g14min})")
+            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='theme-modal']")
+            page.wait_for_timeout(400)
+            check(page.evaluate("getComputedStyle(document.getElementById('theme-modal')).display !== 'none'") is True,
+                  "G14: the dock chip restores theme (trusted click)")
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(500)
+            g14 = page.evaluate("""() => {
+              const t = document.getElementById('theme-modal');
+              const s = document.getElementById('settings-modal');
+              const vis = (m) => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
+              if (!vis(t) || !vis(s)) return { error: 'both must be open', theme: vis(t), settings: vis(s) };
+              const r1 = t.querySelector('.modal-content').getBoundingClientRect();
+              const r2 = s.querySelector('.modal-content').getBoundingClientRect();
+              const L = Math.max(r1.left, r2.left), R = Math.min(r1.right, r2.right);
+              const T = Math.max(r1.top, r2.top), B = Math.min(r1.bottom, r2.bottom);
+              if (R <= L || B <= T) return { error: 'contents do not overlap' };
+              const el = document.elementFromPoint((L + R) / 2, (T + B) / 2);
+              const owner = el ? (el.closest('.modal') || {}).id || null : null;
+              const importants = [...document.querySelectorAll('.modal')]
+                .filter(m => m.style.getPropertyPriority('z-index') === 'important').map(m => m.id);
+              return { owner, importants,
+                       themeZ: parseInt(getComputedStyle(t).zIndex, 10) || 0,
+                       settingsZ: parseInt(getComputedStyle(s).zIndex, 10) || 0 };
+            }""")
+            check(g14.get("owner") == "settings-modal" and g14.get("settingsZ", 0) > g14.get("themeZ", 0),
+                  f"G14: a fresh open sits visually ABOVE the dock-restored window ({g14})")
+            check(g14.get("importants") == [], f"G14: no .modal carries an inline !important z-index ({g14})")
+            page.mouse.move(640, 700)  # neutral ground: keep the arbiter's hovered-window pass out of it
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            g14esc = page.evaluate("""() => ({
+              settingsClosed: document.getElementById('settings-modal').classList.contains('hidden'),
+              themeOpen: !document.getElementById('theme-modal').classList.contains('hidden'),
+            })""")
+            check(g14esc.get("settingsClosed") is True and g14esc.get("themeOpen") is True,
+                  f"G14: Escape closes the top window (settings) FIRST ({g14esc})")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            check(page.evaluate("document.getElementById('theme-modal').classList.contains('hidden')") is True,
+                  "G14: the second Escape closes the dock-restored window (theme)")
+
             # F8 (wave 3): the WHOLE .modal family returns focus to its opener —
             # focus the gear for real, open settings, Escape, focus is back.
             page.focus("#user-bar-settings")
@@ -571,6 +636,145 @@ def main() -> int:
             page.wait_for_timeout(150)
             check(page.evaluate("!document.getElementById('orwell-decision-card')") is True,
                   "F11: Escape dismisses the focused decision card (never submits)")
+
+            # G16 (G5 refresh-persistence audit, F1+F2) — driven FOR REAL on an
+            # isolated page (its own context/localStorage) with the audit's
+            # sanctioned route mocks: a live-game /state + /status + /roster keep
+            # the gates and poll loops honest across reloads while the main smoke
+            # page stays engine-down. Role-named payloads only (no cast names).
+            #   F2 (kit parked-means-parked), on the CAST window: open via the
+            #       seam, minimize (trusted click) → RELOAD → re-open via the
+            #       seam: it must come back PARKED (hidden + dock chip, no
+            #       snap-open) → restore via the chip → RELOAD → re-open: OPEN,
+            #       no stale chip.
+            #   F1: collapse the status HUD (trusted click) → RELOAD → still
+            #       collapsed, restored from the SAME per-user+game key the
+            #       header click writes (E71).
+            g16 = browser.new_page()
+            g16_state = (
+                '{"started": true, "week": 1, "phase": "nominations",'
+                ' "player": {"id": "player", "name": "The Player", "status": "active"},'
+                ' "house": [{"id": "npc:1", "name": "A Houseguest", "status": "active"},'
+                ' {"id": "npc:2", "name": "Another Houseguest", "status": "active"}]}'
+            )
+            g16_status = (
+                '{"week": 1, "phase": "nominations",'
+                ' "hoh": {"id": "npc:1", "name": "A Houseguest"},'
+                ' "nominees": [{"id": "npc:2", "name": "Another Houseguest"}]}'
+            )
+            g16_roster = (
+                '{"imagesAvailable": false, "roster": ['
+                '{"id": "player", "name": "The Player", "status": "active", "isPlayer": true},'
+                '{"id": "npc:1", "name": "A Houseguest", "status": "active"}]}'
+            )
+
+            def _g16_json(body):
+                return lambda route: route.fulfill(
+                    status=200, content_type="application/json", body=body)
+
+            g16.route("**/api/orwell/state", _g16_json(g16_state))
+            g16.route("**/api/orwell/status", _g16_json(g16_status))
+            g16.route("**/api/orwell/roster", _g16_json(g16_roster))
+            g16.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            g16.route("**/api/orwell/initiatives", _g16_json('{"initiatives": []}'))
+            g16.route("**/api/orwell/finale", _g16_json('{"finale": null}'))
+
+            def _g16_wait_js(expr, label, tries=75):
+                # CSP keeps 'unsafe-eval' off the page, so wait_for_function's
+                # string predicate is blocked — poll through evaluate (CDP) instead.
+                for _ in range(tries):
+                    if g16.evaluate(expr):
+                        return True
+                    g16.wait_for_timeout(200)
+                check(False, label)
+                return False
+
+            g16.goto(base + "/", wait_until="load", timeout=30000)
+            g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
+            # F1, the act: collapse the HUD via its header (trusted click).
+            g16.click("#orwell-status .os-hdr")
+            f1_keys = g16.evaluate("""() => {
+              const user = (document.body && document.body.dataset.user) || '';
+              return {
+                collapsed: document.getElementById('orwell-status').classList.contains('os-collapsed'),
+                keys: Object.keys(localStorage).filter(k => k.startsWith('orwell-status-collapsed')),
+                expected: 'orwell-status-collapsed:The Player:' + user,
+              };
+            }""")
+            check(f1_keys.get("collapsed") is True
+                  and f1_keys.get("keys") == [f1_keys.get("expected")],
+                  f"G16/F1: the collapse writes under the per-user+game key ({f1_keys})")
+            # F2, the act: open the cast window via the seam, then park it (trusted click).
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit mount")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+            g16.click("#orwell-cast .ow-min")
+            g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
+                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
+                timeout=5000)
+            f2_flag = g16.evaluate(
+                "localStorage.getItem('orwell-win-parked:orwell-cast:' +"
+                " ((document.body && document.body.dataset.user) || ''))")
+            check(f2_flag == "1", f"G16/F2: minimize persists the parked flag ({f2_flag!r})")
+
+            # RELOAD #1 — the whole point: both states must survive the refresh.
+            g16.reload(wait_until="load", timeout=30000)
+            g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
+            f1_after = g16.evaluate("""() => {
+              const hud = document.getElementById('orwell-status');
+              const hdr = hud && hud.querySelector('.os-hdr');
+              return { collapsed: !!hud && hud.classList.contains('os-collapsed'),
+                       expanded: hdr ? hdr.getAttribute('aria-expanded') : null };
+            }""")
+            check(f1_after.get("collapsed") is True and f1_after.get("expanded") == "false",
+                  f"G16/F1: after a reload the status HUD is still collapsed ({f1_after})")
+            # F2: re-open via the seam — the parked window must mount INTO the dock.
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit after reload #1")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector(
+                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
+                timeout=5000)
+            after1 = g16.evaluate("""() => {
+              const cast = document.getElementById('orwell-cast');
+              const dock = document.getElementById('minimized-dock');
+              return {
+                castHidden: !!cast && getComputedStyle(cast).display === 'none',
+                castMinimized: !!cast && cast.classList.contains('modal-minimized'),
+                chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
+                dockVisible: !!dock && getComputedStyle(dock).display !== 'none'
+                  && dock.getBoundingClientRect().height > 0,
+              };
+            }""")
+            check(after1.get("castHidden") is True and after1.get("castMinimized") is True,
+                  f"G16/F2: re-opened after a reload, the cast window comes back PARKED ({after1})")
+            check(after1.get("chip") is True and after1.get("dockVisible") is True,
+                  f"G16/F2: after a reload its dock chip is back too ({after1})")
+            # Restore via the chip (trusted click) — visible again, un-parked durably.
+            g16.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']")
+            g16.wait_for_timeout(250)
+            restored1 = g16.evaluate("""() => ({
+              visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
+              flag: localStorage.getItem('orwell-win-parked:orwell-cast:' +
+                ((document.body && document.body.dataset.user) || '')),
+            })""")
+            check(restored1.get("visible") is True and restored1.get("flag") is None,
+                  f"G16/F2: the chip restores a boot-parked window AND clears the flag ({restored1})")
+
+            # RELOAD #2 — restored means restored: the seam must open it VISIBLE now.
+            g16.reload(wait_until="load", timeout=30000)
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit after reload #2")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+            after2 = g16.evaluate("""() => ({
+              visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
+              chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
+            })""")
+            check(after2.get("visible") is True and after2.get("chipGone") is True,
+                  f"G16/F2: after restore + reload the cast window comes back OPEN, no stale chip ({after2})")
+            g16.close()
 
             # F6 tail (wave 3): the engine-down banner's dismiss is the shared
             # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
@@ -963,6 +1167,164 @@ def main() -> int:
                   f"H4: the comparison covered the visible rail ({h4.get('comparedVisible')} of {h4.get('total')} paired entries)")
             check(all(m["exists"] and m["hasIcon"] and m["gateMirrors"] for m in h4.get("mirrors", [])),
                   f"H4: injected game chrome (Diary Room / Cast / status HUD) gets gated rail mirrors with icons ({h4.get('mirrors')})")
+            page.click("#hamburger-btn")  # restore the expanded sidebar
+            page.wait_for_timeout(250)
+
+            # G13 (gating cascades — the trim-zombie walk): the game build must
+            # hide PARENTS/launchers with their items (the G3 Tools-chevron rule
+            # generalized to the rest of the chrome): no shortcuts-modal row
+            # names a dropped vertical, no overflow/export entry is present
+            # whose handler is the build-refusal path, no empty non-admin
+            # settings tab button renders, and the build's own trimmed
+            # launchers stay invisible. The dropped list is DERIVED from the
+            # build's own sources (src.settings + game-trim.css) — never typed
+            # into this gate.
+            import re as _re
+            if ROOT not in sys.path:
+                sys.path.insert(0, ROOT)
+            from src.settings import GAME_DROP_SET, dropped_script_srcs
+            g13_tokens = sorted(GAME_DROP_SET)
+            g13_voice_dropped = any("tts-ai" in s for s in dropped_script_srcs())
+            if g13_voice_dropped:
+                g13_tokens += ["tts", "voice"]
+            g13_rx = _re.compile(
+                r"\b(" + "|".join(t.replace("_", "[ _-]") for t in g13_tokens) + r")\b",
+                _re.IGNORECASE)
+
+            def g13_zombies(labels):
+                return [l for l in labels if g13_rx.search(l or "")]
+
+            # (a) the chrome menus: an entry whose action the build refuses is
+            # GONE from the DOM (hidden, never click-refused) — and the menus
+            # keep their keep-set entries, so the trigger cascade must NOT have
+            # over-hidden the launchers themselves.
+            check(page.evaluate("!document.getElementById('export-doc-btn')") is True,
+                  "G13: the export entry whose handler posts into a dropped vertical is removed from the DOM")
+            if g13_voice_dropped:
+                check(page.evaluate("!document.getElementById('overflow-tts-btn')") is True,
+                      "G13: the TTS overflow entry goes with its unshipped voice module")
+            g13_menus = page.evaluate("""() => {
+              const vis = el => el && !el.hidden && getComputedStyle(el).display !== 'none';
+              const items = (menuId, sel) => [...document.querySelectorAll(`#${menuId} ${sel}`)]
+                .filter(vis).map(i => (i.id + ' ' + (i.textContent || '')).replace(/\\s+/g, ' ').trim());
+              document.getElementById('export-dl-btn').click();
+              const exp = items('export-dropdown-menu', '.export-dropdown-item');
+              document.getElementById('overflow-plus-btn').click();
+              const ovf = items('overflow-menu', '.overflow-menu-item');
+              return { export: exp, overflow: ovf,
+                       exportTrigger: vis(document.getElementById('export-dl-btn')),
+                       overflowTrigger: vis(document.getElementById('overflow-plus-btn')) };
+            }""")
+            page.keyboard.press("Escape")  # fold the overflow menu back
+            page.evaluate("document.body.click()")  # and dismiss the export dropdown
+            page.wait_for_timeout(500)
+            check(len(g13_menus["export"]) >= 3,
+                  f"G13: the export menu presents its keep-set entries ({g13_menus['export']})")
+            check(g13_zombies(g13_menus["export"]) == [],
+                  f"G13: no export-menu entry names a dropped vertical ({g13_zombies(g13_menus['export'])})")
+            check(len(g13_menus["overflow"]) >= 1,
+                  f"G13: the overflow menu still holds keep-set actions ({g13_menus['overflow']})")
+            check(g13_zombies(g13_menus["overflow"]) == [],
+                  f"G13: no overflow item present whose handler is the refusal path ({g13_zombies(g13_menus['overflow'])})")
+            check(g13_menus["exportTrigger"] is True and g13_menus["overflowTrigger"] is True,
+                  "G13: menus with keep-set items keep their triggers (the cascade is hide-only, never over-hides)")
+
+            # (b) the shortcuts modal: rows render, none names a dropped
+            # vertical, and no category header floats over zero rows.
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(300)
+            page.click("#settings-modal [data-settings-tab='shortcuts']")
+            page.wait_for_selector("#shortcuts-list .shortcut-row", timeout=4000)
+            g13_sc = page.evaluate("""() => {
+              const kids = [...document.getElementById('shortcuts-list').children];
+              return {
+                labels: [...document.querySelectorAll('#shortcuts-list .shortcut-row .shortcut-label')]
+                  .map(e => (e.textContent || '').trim()),
+                emptyCats: kids.filter((k, i) => k.classList.contains('shortcut-category') &&
+                    (i === kids.length - 1 || kids[i + 1].classList.contains('shortcut-category')))
+                  .map(k => (k.textContent || '').trim()),
+              };
+            }""")
+            check(len(g13_sc["labels"]) >= 6,
+                  f"G13: the shortcuts list renders its keep-set rows ({len(g13_sc['labels'])})")
+            check(g13_zombies(g13_sc["labels"]) == [],
+                  f"G13: no shortcuts-modal row names a dropped vertical ({g13_zombies(g13_sc['labels'])})")
+            check(g13_sc["emptyCats"] == [],
+                  f"G13: no empty shortcut category header renders ({g13_sc['emptyCats']})")
+
+            # (c) the player tier: no settings tab button renders whose page
+            # would be empty (every card admin-only) — and the cascade is
+            # COMPUTED, not hand-listed: force one tab's cards admin-only and
+            # its launcher hides and cannot be landed on.
+            page.evaluate("window.__g13WasAdmin = !!window._isAdmin; window._isAdmin = false;")
+            page.evaluate("document.querySelector('#settings-modal .close-btn').click()")
+            page.wait_for_timeout(300)
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(250)
+            g13_tabs = page.evaluate("""() => {
+              const m = document.getElementById('settings-modal');
+              return [...m.querySelectorAll('[data-settings-tab]')]
+                .filter(b => getComputedStyle(b).display !== 'none')
+                .map(b => {
+                  const t = b.dataset.settingsTab;
+                  const cards = [...m.querySelectorAll(`[data-settings-panel="${t}"] .admin-card`)];
+                  return { tab: t, cards: cards.length,
+                           allAdminOnly: cards.length > 0 && cards.every(c => c.classList.contains('admin-only')) };
+                });
+            }""")
+            g13_empty_tabs = [t for t in g13_tabs if t["cards"] == 0 or t["allAdminOnly"]]
+            check(len(g13_tabs) >= 3 and g13_empty_tabs == [],
+                  f"G13: no empty non-admin settings tab button renders ({g13_empty_tabs or [t['tab'] for t in g13_tabs]})")
+            page.evaluate("""() => {
+              document.querySelectorAll('[data-settings-panel="shortcuts"] .admin-card')
+                .forEach(c => c.classList.add('admin-only', 'g13-probe'));
+              document.querySelector('#settings-modal .close-btn').click();
+            }""")
+            page.wait_for_timeout(300)
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(250)
+            g13_probe = page.evaluate("""() => ({
+              tabHidden: getComputedStyle(document.querySelector('[data-settings-tab="shortcuts"]')).display === 'none',
+              landed: (document.querySelector('#settings-modal [data-settings-tab].active') || { dataset: {} }).dataset.settingsTab,
+            })""")
+            check(g13_probe.get("tabHidden") is True,
+                  f"G13: a tab whose every card went admin-only hides its launcher for the player ({g13_probe})")
+            check(g13_probe.get("landed") != "shortcuts",
+                  f"G13: the hidden tab is not landable either ({g13_probe})")
+            page.evaluate("""() => {
+              document.querySelectorAll('.g13-probe').forEach(c => {
+                c.classList.remove('admin-only', 'g13-probe');
+                c.style.display = '';  // clear the inline hide syncAdminVisibility wrote
+              });
+              window._isAdmin = window.__g13WasAdmin;
+              const m = document.getElementById('settings-modal');
+              const b = m && m.querySelector('.close-btn');
+              if (b) b.click();
+            }""")
+            page.wait_for_timeout(300)
+
+            # (d) the rail: collapse to the icon rail for real, then prove every
+            # launcher the build's own trim sheet (the unconditional first block
+            # of game-trim.css) drops stays invisible, and no VISIBLE rail
+            # launcher names a dropped vertical (coordinates with H4: a dropped
+            # row hidden under the build yields no rail icon).
+            with open(os.path.join(ROOT, "static", "css", "game-trim.css"), encoding="utf-8") as _fh:
+                g13_trimmed_ids = sorted(set(_re.findall(r"#([A-Za-z][\w-]*)", _fh.read().split("{", 1)[0])))
+            page.click("#hamburger-btn")
+            page.wait_for_timeout(400)
+            g13_rail = page.evaluate("""(trimmed) => {
+              const vis = el => el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
+              return {
+                railShown: vis(document.getElementById('icon-rail')),
+                rail: [...document.querySelectorAll('#icon-rail .icon-rail-btn')].filter(vis)
+                  .map(b => ((b.id || '') + ' ' + (b.title || b.getAttribute('aria-label') || '')).trim()),
+                trimmedVisible: trimmed.filter(id => vis(document.getElementById(id))),
+              };
+            }""", g13_trimmed_ids)
+            check(g13_rail["railShown"] is True and len(g13_rail["rail"]) >= 3 and g13_zombies(g13_rail["rail"]) == [],
+                  f"G13: no visible rail icon names a dropped vertical ({g13_zombies(g13_rail['rail']) or g13_rail['rail']})")
+            check(g13_rail["trimmedVisible"] == [],
+                  f"G13: every game-trim'd launcher stays invisible ({g13_rail['trimmedVisible']})")
             page.click("#hamburger-btn")  # restore the expanded sidebar
             page.wait_for_timeout(250)
 
