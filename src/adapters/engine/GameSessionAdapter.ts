@@ -6,6 +6,7 @@ import type {
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView,
 } from "../../ports/GameSession";
+import { randomBytes } from "node:crypto";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { HOUSE_ADJACENCY } from "../../domain/house";
@@ -15,8 +16,11 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
-import { involvedConfessionals } from "../../engine/confessionals";
-import { npcInitiatedApproaches } from "../../engine/conversation";
+import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
+import type { ConfessionalContext } from "../../engine/confessionals";
+import { rankApproaches } from "../../engine/conversation";
+import { DECISION } from "../../engine/decisionConstants";
+import type { EvictionManner } from "../../engine/jury";
 import type { NarrativePort } from "../../ports/NarrativePort";
 
 /** Player public standing — the only axis the snarky hero tagline (0033) keys on. Vault-free. */
@@ -52,7 +56,9 @@ import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotional
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
-import { CEREMONY_IMPACTS, RELATIONSHIP_CONSTANTS, clamp01 } from "../../engine/relationshipConstants";
+import {
+  CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
+} from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -63,10 +69,12 @@ import { EngineRefusal } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS,
-  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision,
+  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  firstCeremonyBeatResolved,
+  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
+import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
 import { derivedLoyalty } from "../../engine/blocs";
@@ -77,6 +85,16 @@ import { cloneSession } from "../../engine/sessionSnapshot";
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/**
+ * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
+ * `crypto` randomness, persisted in the snapshot (`gameSeed`) so the season stays reproducible
+ * AFTER creation. This is an adapter (not the pure core) — the one sanctioned place real
+ * entropy enters; everything downstream still flows through the seeded `RandomnessSource`.
+ */
+function entropySeed(): number {
+  return randomBytes(4).readUInt32LE(0);
+}
 
 /** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
 const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
@@ -347,7 +365,16 @@ export class GameSessionAdapter implements GameSession {
       kind: t.kind as string,
       firedWeek: fired.get(t.kind) ?? null,
     }));
-    return { winner: this.named(this.live.winner), hiddenStory, twists };
+    // E12: the weekly secret ballots unseal HERE — and only here, behind the same terminal gate.
+    const evictionVotes = (this.live.voteRecord ?? []).map((r) => ({
+      week: r.week,
+      evictee: { id: r.evictee, name: this.nameOf(r.evictee) },
+      votes: Object.entries(r.voteOf).map(([voter, votedFor]) => ({
+        voter: { id: voter as EntityId, name: this.nameOf(voter as EntityId) },
+        votedFor: { id: votedFor, name: this.nameOf(votedFor) },
+      })),
+    }));
+    return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
@@ -488,17 +515,27 @@ export class GameSessionAdapter implements GameSession {
 
   socialInitiatives(): SocialInitiative[] {
     if (!this.house) return [];
+    // E89 (ruling #5): no approach fires before the house has actually started playing —
+    // empty until the season's first ceremony beat (the week-1 HOH result) has resolved.
+    // Structural engine gate; the FE's started-gate is only the belt.
+    if (
+      APPROACH_GATE.requireFirstCeremonyBeat &&
+      (!this.live || !firstCeremonyBeatResolved(this.live))
+    ) {
+      return [];
+    }
     const player = this.house.player.id;
     // B52/audit D5: an evicted houseguest can't pull you aside — only LIVING NPCs approach.
     const evicted = new Set(this.live?.evictionOrder ?? []);
     const npcIds = this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id);
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
-    // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
-    // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
+    // so the same week/phase reproduces the same approaches. The hidden drive NUMBER is NOT
+    // surfaced — only the name + the coarse motive category (E60: the fact the GM voices in its
+    // own words, never a canned pretext line), so no trust/threat read leaks across the wall.
     const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${this.week}:${this.phase}`));
-    return npcInitiatedApproaches(player, npcIds, this.rel, rng, 3).map((id) => ({
-      houseguest: { id, name: this.nameOf(id) },
-      pretext: "wants a word with you",
+    return rankApproaches(player, npcIds, this.rel, rng).slice(0, 3).map((a) => ({
+      houseguest: { id: a.npc, name: this.nameOf(a.npc) },
+      motive: a.motive,
     }));
   }
 
@@ -565,7 +602,11 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
-    const seed = req.seed ?? hashSeed(playerName);
+    // E39/C7/D8: the DEFAULT seed is real entropy, persisted with the snapshot — the same player
+    // name must never replay the byte-identical season (incl. its hidden elements and twist
+    // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
+    // first-class for tests and replays.
+    const seed = req.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
@@ -713,11 +754,17 @@ export class GameSessionAdapter implements GameSession {
    * Fold a consequential moment into a houseguest's hidden soul (0041): evolve their emotional state
    * (bounded, mean-reverting — 0028 family) and deepen the recall-able arc (`recordToSoul`, 0024).
    * The static CHARACTER is never touched; only the SOUL drifts (0007). Hidden — never surfaced.
+   * Audit E52: the swing carries ADR 0001's bounded per-moment temperature roll on a SIDE rng
+   * (keyed off the game seed + the soul's own arc position — deterministic, restart-stable, and
+   * the main beat stream is untouched).
    */
   private inflect(id: EntityId, event: EmotionalEvent): void {
     const soul = this.soulObj(id);
     if (!soul) return;
-    evolveEmotion(soul, event);
+    const rng = new SeededRandom(hashSeed(
+      `${this.gameSeed ?? this.house?.player.name ?? "season"}:arc:${id}:${event}:${soul.emotionalHistory.length}`,
+    ));
+    evolveEmotion(soul, event, undefined, rng);
     const note = arcNote(event, this.week);
     soul.memory.push(note);                 // persisted arc (house snapshot, monotonic — 0007/0030)
     this.soul?.recordToSoul(id, note);       // vector recall index (0024), when wired into the sandbox
@@ -725,37 +772,53 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * Evolve the involved souls from a just-resolved beat (the live consequence fold, 0041): a comp
-   * winner is emboldened; on an eviction the evictee's closest surviving ally is blindsided toward
-   * distress. Drives the live emotional arc that then modulates later competitions + decisions.
+   * winner is emboldened and the CONTESTED LOSERS are stung (audit E51 — `comp-loss` finally
+   * fires); on an eviction the SURVIVING nominee is emboldened (`survived-vote`, the 0041 beat
+   * that never fired) and the evictee's closest surviving ally is blindsided toward distress.
+   * Drives the live emotional arc that then modulates later competitions + decisions.
    */
   private evolveFromBeat(ev: BeatEvent): void {
     if (!this.house) return;
+    const s = this.live;
     switch (ev.beat) {
       case "hoh-competition": {
         const winner = ev.participants[0];
         if (winner) this.inflect(winner, "comp-win");
+        // E51 (`comp-loss`): a loss stings where it was genuinely CONTESTED — the final-3 HOH
+        // crown, where each loser just watched their endgame narrow. Losing a 13-player
+        // mid-season HOH comp is background noise (folding it for the whole house weekly would
+        // also drown every soul's recall in identical filler — the C12/E55 lesson).
+        if (winner && s && s.active.length === 3) {
+          for (const h of s.active) if (h !== winner) this.inflect(h, "comp-loss");
+        }
         break;
       }
       case "nominations": {
         // B51: going on the block rattles a houseguest — distress ▲ — so they carry it INTO the veto
         // comp (their odds dip below their calm baseline). The Luck-replacement modifier, finally live.
-        for (const nom of this.live?.nominees ?? []) this.inflect(nom, "nominated");
+        for (const nom of s?.nominees ?? []) this.inflect(nom, "nominated");
         break;
       }
       case "veto-competition": {
-        const holder = this.live?.vetoHolder;
+        const holder = s?.vetoHolder;
         if (holder) this.inflect(holder, "comp-win");
+        // E51: the rest of the six-player field contested and lost (the participants ARE the field).
+        for (const h of ev.participants) if (h !== holder) this.inflect(h, "comp-loss");
         break;
       }
       case "veto-ceremony": {
         // A replacement nominee is newly on the block — same rattle (they don't play the veto, but the
         // arc is honest). The original saved nominee's relief isn't modeled here (kept minimal).
-        if (this.live?.replacement) this.inflect(this.live.replacement, "nominated");
+        if (s?.replacement) this.inflect(s.replacement, "nominated");
         break;
       }
       case "eviction": {
         const evictee = ev.participants[0];
-        if (evictee) this.blindsideClosestAlly(evictee);
+        if (!evictee) break;
+        this.blindsideClosestAlly(evictee);
+        // E51: the nominee who sat on the block and SURVIVED is emboldened — the 0041 arc beat.
+        const survivor = s?.eviction?.nominees.find((n) => n !== evictee);
+        if (survivor) this.inflect(survivor, "survived-vote");
         break;
       }
     }
@@ -778,9 +841,28 @@ export class GameSessionAdapter implements GameSession {
     if (ally) this.inflect(ally, "blindside");
   }
 
-  /** Deepen a houseguest's soul from an off-screen scene (0038/0041): the house lives between turns. */
+  /** Deepen a houseguest's soul from an off-screen scene (0038/0041): the house lives between turns.
+   *  Role-correct per audit E50: the INITIATOR of a betrayal is scheming, not wounded. */
   recordOffscreenSoul(npc: EntityId, type: InteractionType): void {
-    this.inflect(npc, offscreenEmotion(type));
+    this.inflect(npc, offscreenEmotion(type, "initiator"));
+  }
+
+  /**
+   * Deepen BOTH participants of an off-screen scene, per role (audit E50): the betrayal victim's
+   * soul finally moves (`betrayed`) while the betrayer schemes. The full-scene sibling of
+   * `recordOffscreenSoul` — the off-screen tick should prefer this seam.
+   */
+  recordOffscreenScene(initiator: EntityId, partner: EntityId, type: InteractionType): void {
+    this.inflect(initiator, offscreenEmotion(type, "initiator"));
+    this.inflect(partner, offscreenEmotion(type, "partner"));
+  }
+
+  /** The manner-scale of an eviction fold (audit E48): full shock only for a genuine grievance. */
+  private static mannerScale(m: EvictionManner): number {
+    if (m.betrayed) return EVICTION_MANNER_SCALE.betrayed;
+    if (m.blindsided) return EVICTION_MANNER_SCALE.blindsided;
+    if (m.disrespected) return EVICTION_MANNER_SCALE.disrespected;
+    return EVICTION_MANNER_SCALE.respected;
   }
 
   /**
@@ -788,17 +870,24 @@ export class GameSessionAdapter implements GameSession {
    * backbone that the live loop bypassed). Engine-owned, directed, magnitudes from `CEREMONY_IMPACTS`
    * (constants only). The change lives in the hidden layer — the player feels it later as behavior,
    * never as a number (0001). Runs on every ceremony (player- AND NPC-driven).
+   *
+   * Audit reworks: a comp win moves only the THREAT read (E47 — the house keeps liking its
+   * winner); the eviction fold scales by the evictee's RECORDED manner (E48 — a respected,
+   * expected eviction is not a betrayal); and the survivors' "proven threat" read lands on THIS
+   * week's HOH (E49 — the old code read `outgoingHoh` before the rollover, hitting last week's).
    */
   private foldCeremonyConsequence(ev: BeatEvent): void {
     const s = this.live;
     if (!s) return;
     const rng = this.beatRng();
-    const fold = (from: EntityId, to: EntityId, act: CeremonyAct): void => {
-      if (from !== to) this.rel.applyDirected(from, to, CEREMONY_IMPACTS[act], rng);
+    const fold = (from: EntityId, to: EntityId, act: CeremonyAct, scale = 1): void => {
+      if (from === to) return;
+      const impact = scale === 1 ? CEREMONY_IMPACTS[act] : scaleImpact(CEREMONY_IMPACTS[act], scale);
+      this.rel.applyImpactDirected(from, to, impact, rng);
     };
     switch (ev.beat) {
       case "hoh-competition": {
-        const winner = ev.participants[0]; // the new HOH reads as a threat to the whole house
+        const winner = ev.participants[0]; // the new HOH reads as a threat to the whole house (E47)
         if (winner) for (const h of s.active) fold(h, winner, "comp-won");
         break;
       }
@@ -812,18 +901,23 @@ export class GameSessionAdapter implements GameSession {
         break;
       }
       case "veto-ceremony": {
-        if (s.saved && s.vetoHolder) fold(s.saved, s.vetoHolder, "veto-saved"); // gratitude bond
+        if (s.saved && s.vetoHolder) fold(s.saved, s.vetoHolder, "veto-saved"); // gratitude bond + E54 evidence
         if (s.replacement && s.hoh) fold(s.replacement, s.hoh, "replaced");     // betrayal-shock if trusted
         break;
       }
       case "eviction": {
         const evictee = ev.participants[0];
         if (!evictee) break;
-        // The evictee resents everyone responsible for sending them out (HOH + the voters who voted to
-        // evict) — the SAME set the jury manner read already captured (mannerByEvictee keys). Feeds jury.
-        for (const r of Object.keys(s.mannerByEvictee?.[evictee] ?? {}) as EntityId[]) fold(evictee, r, "evicted");
-        // The survivors read the departing HOH as a proven threat (they just ran a week).
-        if (s.outgoingHoh) for (const h of s.active) fold(h, s.outgoingHoh, "comp-won");
+        // The evictee resents everyone responsible for sending them out (HOH + the voters who voted
+        // to evict) — the SAME set the jury manner read captured — scaled by HOW it landed (E48):
+        // a betrayal burns; a clean, expected move from a known rival leaves a fraction.
+        const manner = s.mannerByEvictee?.[evictee] ?? {};
+        for (const r of Object.keys(manner) as EntityId[]) {
+          fold(evictee, r, "evicted", GameSessionAdapter.mannerScale(manner[r]!));
+        }
+        // The survivors read THIS week's HOH as a proven threat — they just ran the week (E49;
+        // `rollWeek` has not run yet at this beat, so `s.hoh` is the reign that ends tonight).
+        if (s.hoh) for (const h of s.active) fold(h, s.hoh, "comp-won");
         break;
       }
     }
@@ -862,12 +956,9 @@ export class GameSessionAdapter implements GameSession {
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error).
     if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
+    // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
     return this.inOneCommit(() => {
-      // Reconcile the PLAYER's own eviction BEFORE the tally clears state — a player who votes out (or, as
-      // HOH breaks a tie toward, or as final HOH personally evicts) their deal partner breaks the deal (0039).
-      if ((req.kind === "eviction-vote" || req.kind === "tie-break" || req.kind === "final-eviction") && req.vote) {
-        this.reconcileDeals({ actor: PLAYER, kind: "vote-evict", targets: [req.vote] });
-      }
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
@@ -892,7 +983,8 @@ export class GameSessionAdapter implements GameSession {
       `${this.nameOf(PLAYER)} and ${this.nameOf(target)} make a ${req.kind} deal: ${terms}`,
       [PLAYER, target], "deal",
     );
-    const deal = this.deals.make([PLAYER, target], req.kind, terms, evId);
+    // `madeWeek` (E43) anchors the horizon: a safety/vote promise binds through THIS week's eviction.
+    const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
     this.persist();
     return this.dealView(deal);
   }
@@ -914,31 +1006,68 @@ export class GameSessionAdapter implements GameSession {
     if (broken.length > 0) this.persist(); // deferred into the beat's ONE commit (E3)
   }
 
-  /** The binding action a resolved beat represents (for deal reconciliation). */
-  private bindingActionFor(ev: BeatEvent): BindingAction | null {
+  /**
+   * EVERY binding action a resolved beat represents (audit E42 — the ledger must see NPC binding
+   * actions, not only the player's). An eviction beat yields one `vote-evict` per voter (player
+   * and NPC alike, from the staged reveal's `voteOf`) plus the HOH's deciding vote on a tie; the
+   * Final-3 eviction is the final HOH's personal vote. `alternatives` (E43) scope honoring to
+   * actions where the partner was a real option.
+   */
+  private bindingActionsFor(ev: BeatEvent): BindingAction[] {
     const s = this.live;
-    if (!s) return null;
+    if (!s) return [];
     switch (ev.beat) {
       case "nominations":
-        return s.hoh && s.nominees ? { actor: s.hoh, kind: "nominate", targets: [...s.nominees] } : null;
+        return s.hoh && s.nominees
+          ? [{
+              actor: s.hoh, kind: "nominate", targets: [...s.nominees],
+              alternatives: s.active.filter((h) => h !== s.hoh),
+            }]
+          : [];
       case "veto-ceremony":
-        return s.hoh && s.replacement ? { actor: s.hoh, kind: "replace", targets: [s.replacement] } : null;
+        return s.hoh && s.replacement ? [{ actor: s.hoh, kind: "replace", targets: [s.replacement] }] : [];
+      case "eviction": {
+        const e = s.eviction;
+        const evictee = ev.participants[0];
+        if (!e || !evictee) return [];
+        const actions: BindingAction[] = Object.entries(e.voteOf).map(([voter, votedFor]) => ({
+          actor: voter as EntityId, kind: "vote-evict", targets: [votedFor], alternatives: e.nominees,
+        }));
+        // A tied reveal means the HOH cast the deciding vote (player OR NPC) — that is binding too.
+        const votes = Object.values(e.voteOf);
+        const tied = votes.filter((v) => v === e.nominees[0]).length === votes.filter((v) => v === e.nominees[1]).length;
+        if (tied && s.hoh) {
+          actions.push({ actor: s.hoh, kind: "vote-evict", targets: [evictee], alternatives: e.nominees });
+        }
+        return actions;
+      }
+      case "final-eviction": {
+        // Final 3 (0045): the final HOH personally evicts — participants = [hoh, evictee]; the
+        // survivor (now in the Final 2 with them) was the alternative they spared.
+        const [actor, evictee] = ev.participants;
+        if (!actor || !evictee) return [];
+        const survivor = s.active.find((h) => h !== actor);
+        return [{
+          actor, kind: "vote-evict", targets: [evictee],
+          alternatives: survivor ? [evictee, survivor] : [evictee],
+        }];
+      }
       default:
-        return null;
+        return [];
     }
   }
 
   /** Fold a resolved beat into the public projection: record the event, reconcile deals, sync, persist. */
   private commit(ev: BeatEvent | null): void {
     if (ev) this.onEvent?.({ ...ev, content: this.humanize(ev.content) });
-    // 0039: a binding ceremony beat may honor or break an open deal — let the engine adjudicate.
-    if (ev) {
-      const action = this.bindingActionFor(ev);
-      if (action) this.reconcileDeals(action);
-    }
-    // 0040: at the nomination ceremony the directly-involved houseguests (HOH + nominees) privately
-    // confess their REAL engine-grounded read — Vault-only (witnessed by them alone), reaching no one.
-    if (ev && ev.beat === "nominations") this.recordCeremonyConfessionals();
+    // 0039/E42: a binding ceremony beat may honor or break open deals — the engine adjudicates
+    // EVERY binding actor's action (NPC votes and tie-breaks included), never only the player's.
+    if (ev) for (const action of this.bindingActionsFor(ev)) this.reconcileDeals(action);
+    // 0040/E55: at the week's dramatic beats the directly-involved houseguests privately confess
+    // their REAL engine-grounded read — Vault-only (witnessed by them alone), reaching no one.
+    if (ev) this.recordCeremonyConfessionals(ev);
+    // E46: as the block goes up, the tightest unbound NPC pair may seal a hidden pact of their own.
+    if (ev && ev.beat === "nominations") this.mintNpcDeal();
     // 0041: the season changes a houseguest — fold the beat's emotional impact into the involved souls
     // (a comp win emboldens; a blindside rattles), evolving the hidden arc that bends their later play.
     if (ev) this.evolveFromBeat(ev);
@@ -949,22 +1078,106 @@ export class GameSessionAdapter implements GameSession {
     // B51/audit C5: on the WEEK ROLLOVER (the eviction's result lands → a new week begins) untended
     // relationships decay slowly toward baseline — grudges and bonds fade if not refreshed, so the house
     // doesn't pin to extremes over a season. Slow (`DECAY_RATE`), disposition-scaled, threat lingers.
-    if (ev && ev.beat === "eviction-result") this.rel.decay(RELATIONSHIP_CONSTANTS.DECAY_RATE);
+    // E43: week-scoped promises whose week just passed un-broken resolve KEPT at the same boundary.
+    if (ev && ev.beat === "eviction-result") {
+      this.rel.decay(RELATIONSHIP_CONSTANTS.DECAY_RATE);
+      this.deals.expireWeekScoped(this.live?.week ?? 0);
+    }
     this.syncProjection();
     this.prunePresence(); // the just-evicted occupy no room (0049)
     this.persist();
   }
 
-  /** Record each involved NPC's Vault-only confessional at the nomination ceremony (0040). */
-  private recordCeremonyConfessionals(): void {
+  /** The beats whose directly-involved houseguests confess (E55: noms, the veto ceremony, eviction). */
+  private confessorsFor(ev: BeatEvent): { involved: EntityId[]; trigger: string } | null {
+    const s = this.live;
+    if (!s) return null;
+    switch (ev.beat) {
+      case "nominations":
+        return {
+          involved: [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id),
+          trigger: "the nomination ceremony",
+        };
+      case "veto-ceremony":
+        return {
+          involved: [s.vetoHolder, s.saved, s.replacement, s.hoh].filter((id): id is EntityId => !!id),
+          trigger: "the veto ceremony",
+        };
+      case "eviction": {
+        // The survivors of the vote confess: the HOH whose week it was + the nominee who stayed.
+        const survivor = s.eviction?.nominees.find((n) => n !== ev.participants[0]);
+        return {
+          involved: [s.hoh, survivor].filter((id): id is EntityId => !!id),
+          trigger: "the eviction vote",
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Record each involved NPC's Vault-only confessional at the week's dramatic beats (0040, extended
+   * by audit E55): STRUCTURED — it names its trigger, carries the confessor's soul mood, varies its
+   * phrasing by seed — and now reaches the NPC's own SOUL (audit C12: `recordConfessionalToSoul` +
+   * the durable `soul.memory` mirror), so a houseguest can recall their own past confessionals.
+   */
+  private recordCeremonyConfessionals(ev: BeatEvent): void {
     const s = this.live;
     if (!s || !this.house || !this.onPlayerEvent) return;
+    const at = this.confessorsFor(ev);
+    if (!at) return;
     const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
-    const involved = [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id);
-    for (const conf of involvedConfessionals(involved, everyone, this.rel)) {
+    const ctxFor = (npc: EntityId): ConfessionalContext => ({
+      trigger: at.trigger,
+      ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+      rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
+    });
+    for (const conf of involvedConfessionals(at.involved, everyone, this.rel, ctxFor)) {
       // witnessSet = [the confessing NPC] → hidden=true (the player is never a witness, 0002).
       this.onPlayerEvent(conf.content, [conf.npc], "confessional");
+      // C12: the confessional deepens the confessor's own recall-able soul (0024/0040) — durable
+      // via the soul.memory mirror (rebuildSoulIndex replays it after a restart, 0030).
+      this.soulObj(conf.npc)?.memory.push(conf.content);
+      if (this.soul) recordConfessionalToSoul(this.soul, conf);
     }
+  }
+
+  /**
+   * NPC↔NPC deals exist (audit E46): at the nomination ceremony, the tightest UNBOUND pair of
+   * living NPCs occasionally seals a pact of their own — Vault-held (the made event's witness set
+   * excludes the player ⇒ hidden, 0002), binding through the SAME ledger the votes reconcile
+   * against (E42), with full break consequences (betrayal fold, jury demerit, hidden reveal).
+   * Seeded + bounded by `DECISION.npcDeal`; the player learns of one only along a pathway.
+   */
+  private mintNpcDeal(): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    const D = DECISION.npcDeal;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:npc-deal:${s.week}`));
+    if (rng.next() >= D.mintProb) return;
+    const npcs = s.active.filter((id) => id !== PLAYER);
+    const bound = (a: EntityId, b: EntityId): boolean =>
+      this.deals.open().some((d) => d.parties.includes(a) && d.parties.includes(b));
+    let best: [EntityId, EntityId] | null = null;
+    let bestTrust: number = D.mutualTrustMin;
+    for (let i = 0; i < npcs.length; i++) {
+      for (let j = i + 1; j < npcs.length; j++) {
+        const a = npcs[i]!, b = npcs[j]!;
+        if (bound(a, b)) continue;
+        const mutual = Math.min(this.rel.edge(a, b).trust, this.rel.edge(b, a).trust);
+        if (mutual >= bestTrust) { bestTrust = mutual; best = [a, b]; }
+      }
+    }
+    if (!best) return;
+    const kind = bestTrust >= D.finalTwoTrustMin ? "final-two" : "safety";
+    const [a, b] = best;
+    // A vague paraphrase, not hidden numbers — but still Vault-held (no player witness).
+    const evId = this.onPlayerEvent(
+      `${this.nameOf(a)} and ${this.nameOf(b)} quietly seal a ${kind} pact`,
+      [a, b], "deal",
+    );
+    this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
   }
 
   /** Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers. */
@@ -1021,9 +1234,18 @@ export class GameSessionAdapter implements GameSession {
       case "final-eviction": // Final 3 (0045): the final HOH evicts; `vote` carries the evictee.
         if (!req.vote) throw new Error("a final-eviction target is required");
         return { kind: "final-eviction", evict: req.vote };
+      case "goodbye-message": { // E34: the tone rides `vote` (like comp-intent's `intent ?? vote` seam).
+        const tone = req.vote as GoodbyeTone | undefined;
+        if (!tone || !(GOODBYE_TONES as readonly string[]).includes(tone)) {
+          throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
+        }
+        return { kind: "goodbye-message", tone, ...(req.statement ? { message: req.statement } : {}) };
+      }
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: "finale-statement", statement: req.statement ?? "" };
+      case "juror-question": // E37: scoreless free text — nothing here can sway the tally.
+        return { kind: "juror-question", question: req.statement ?? "" };
       case "finale-answer": {
         if (!req.appeal || !(FINALE_APPEALS as readonly string[]).includes(req.appeal)) {
           throw new Error("a legal finale appeal is required");
@@ -1049,7 +1271,12 @@ export class GameSessionAdapter implements GameSession {
       case "nominations":
         return { kind: p.kind, by, prompt: "You are Head of Household — name two houseguests for eviction.", options: refs(p.options), pick: 2 };
       case "veto-decision":
-        return { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.nominees), pick: 1 };
+        // The 0034 legal-options contract (E36): the options ARE the legally saveable nominees.
+        // At Final 4 no replacement exists, so the set is EMPTY and the prompt says why — the
+        // engine never offers "use" only to silently invert it into "does not use the veto".
+        return p.saveable.length === 0
+          ? { kind: p.kind, by, prompt: "You hold the Power of Veto — but no replacement nominee exists at Final 4, so the veto cannot change the nominations. Confirm leaving them standing.", options: [], pick: 1 }
+          : { kind: p.kind, by, prompt: "You hold the Power of Veto — use it to save a nominee, or leave the nominations.", options: refs(p.saveable), pick: 1 };
       case "comp-intent":
         // The "options" ARE the three intents (id = the intent value), so the generic decision path
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
@@ -1064,6 +1291,14 @@ export class GameSessionAdapter implements GameSession {
         return { kind: p.kind, by, prompt: "The eviction vote is tied — as Head of Household you cast the deciding vote.", options: refs(p.nominees), pick: 1 };
       case "final-eviction":
         return { kind: p.kind, by, prompt: "You are the final Head of Household — evict one houseguest; the other sits beside you at the Final 2.", options: refs(p.options), pick: 1 };
+      // --- eviction night (E34): the player's own goodbye — tone is THEIR choice, never engine-read ---
+      case "goodbye-message":
+        return {
+          kind: p.kind, by,
+          prompt: `${this.nameOf(p.evictee)} has been evicted — record your goodbye message. Choose its tone; your own words carry it.`,
+          options: p.tones.map((t) => ({ id: t, name: t })),
+          evictee: this.named(p.evictee)!, pick: 1,
+        };
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: p.kind, by, prompt: "You are a finalist — give your opening statement to the jury.", options: [], pick: 0 };
@@ -1072,6 +1307,13 @@ export class GameSessionAdapter implements GameSession {
           kind: p.kind, by,
           prompt: `${this.nameOf(p.juror)} asks you a question — choose how you make your case.`,
           options: [], appeals: [...p.appeals], juror: this.named(p.juror)!, pick: 1,
+        };
+      // --- finale (E37): the player-juror's own question (scoreless free text) ---
+      case "juror-question":
+        return {
+          kind: p.kind, by,
+          prompt: `You sit on the jury — ask ${this.nameOf(p.finalist)} your question. It sways nothing by itself; their answer is theirs.`,
+          options: refs([p.finalist]), finalist: this.named(p.finalist)!, pick: 0,
         };
       case "juror-vote":
         return { kind: p.kind, by, prompt: "You sit on the jury — cast your vote for the winner.", options: refs(p.finalists), pick: 1 };
@@ -1104,8 +1346,10 @@ export class GameSessionAdapter implements GameSession {
     return {
       stage: e.stage,
       nominees: e.nominees.map(ref),
+      // E12: secret ballots — the projection carries the anonymized ballots read so far, never
+      // the voter; the attribution unseals only in the post-season retrospective (0048).
       votesRevealed: e.revealOrder.slice(0, e.revealIx).map((voter) => ({
-        voter: ref(voter), votedFor: ref(e.voteOf[voter]!),
+        votedFor: ref(e.voteOf[voter]!),
       })),
     };
   }
@@ -1281,6 +1525,8 @@ export class GameSessionAdapter implements GameSession {
           },
           ...(p.character.background ? { story: p.character.background } : {}),
           ...(p.motivation ? { motivation: p.motivation } : {}),
+          // C6: an engine-defaulted character type is SURFACED, never a silent grant.
+          ...(p.archetypeDefaulted ? { defaulted: true } : {}),
         },
       },
       house: this.house.npcs.map((n) => ({

@@ -62,7 +62,9 @@ check  "GET /health ok"                 "$(curl -fsS "${BASE}/health")"         
 player_tools="$(curl -fsS "${BASE}/player/tools")"
 check  "player tools: createCharacter"  "$player_tools" 'createCharacter'
 check  "player tools: getMomentPrompt"  "$player_tools" 'getMomentPrompt'
-check  "player tools: resolveCompetition" "$player_tools" 'resolveCompetition'
+check  "player tools: runCompetition"   "$player_tools" 'runCompetition'
+# E20: the caller-supplied-stats resolver is gone — runCompetition is the single authority.
+refute "player channel hides resolveCompetition (E20)" "$player_tools" 'resolveCompetition'
 refute "player channel hides admin tool" "$player_tools" 'inspectNonVaultState'
 
 admin_tools="$(curl -fsS "${BASE}/admin/tools")"
@@ -90,9 +92,11 @@ check  "runCompetition -> winner (live house)" "$runcomp" '"winner"'
 for leak in '"physical":' '"mental":' '"social":' '"score' '"trust":' '"affinity":' '"threat":'; do
   refute "runCompetition hides stats/scores (${leak})" "$runcomp" "$leak"
 done
+# E20: a direct caller-supplied-stats resolution must be REFUSED, not resolved.
 comp='{"name":"resolveCompetition","args":{"type":"endurance","participants":[{"id":"player","stats":{"physical":0.5,"mental":0.5,"social":0.5}},{"id":"npc:1","stats":{"physical":0.6,"mental":0.5,"social":0.5}}],"intents":[],"seed":1}}'
-check  "resolveCompetition -> winner"   "$(pcall "$comp")" '"winner"'
-refute "competition result hides scores" "$(pcall "$comp")" '"score'
+compres="$(pcall "$comp")"
+check  "resolveCompetition is refused (E20)" "$compres" 'error'
+refute "refused resolveCompetition returns no winner" "$compres" '"winner"'
 
 # Channel isolation: a player server must refuse an admin tool.
 check  "player refuses admin tool"      "$(pcall '{"name":"inspectNonVaultState","args":{}}')" 'error'

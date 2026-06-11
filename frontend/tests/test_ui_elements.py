@@ -471,11 +471,30 @@ class TestKeptElements:
 class TestRemainingOrwellRoutes:
     """
     Routes not covered by other test files:
-      GET /api/orwell/moment  — returns the game-master moment prompt
+      GET /api/orwell/moment  — returns the game-master moment prompt (E15: ADMIN-GATED —
+        it is the full GM system prompt, a prompt-extraction shortcut for a player)
       GET /api/orwell/health  — reports engine liveness
     """
 
-    def test_moment_passthrough(self, monkeypatch):
+    def test_moment_is_admin_gated_for_players(self, monkeypatch):
+        # E15: a non-admin caller never receives the GM system prompt. The bare TestClient
+        # has no admin session, so require_admin must refuse (auth enabled, no auth manager
+        # configured ⇒ fail closed).
+        async def fake_moment(moment=None, user=None):
+            return {"prompt": "You are the game master. Week 2 has begun."}
+
+        client = _build_client(monkeypatch, {"get_moment_prompt": fake_moment})
+        # AFTER the build: _build_client forces AUTH_ENABLED=false (the E70 smoke config);
+        # require_admin reads the env per request, so the E15 gate is asserted with auth ON.
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        resp = client.get("/api/orwell/moment")
+        assert resp.status_code == 403
+        assert "game master" not in resp.text
+
+    def test_moment_passthrough_for_admin(self, monkeypatch):
+        # AUTH_ENABLED=false is require_admin's documented bypass — exercises the handler.
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+
         async def fake_moment(moment=None, user=None):
             return {"prompt": "You are the game master. Week 2 has begun."}
 
@@ -484,6 +503,7 @@ class TestRemainingOrwellRoutes:
         assert resp.status_code == 200
 
     def test_moment_accepts_moment_param(self, monkeypatch):
+        monkeypatch.setenv("AUTH_ENABLED", "false")
         captured = {}
 
         async def fake_moment(moment=None, user=None):
@@ -495,6 +515,7 @@ class TestRemainingOrwellRoutes:
         assert captured.get("moment") == "nominations"
 
     def test_moment_502_on_engine_failure(self, monkeypatch):
+        monkeypatch.setenv("AUTH_ENABLED", "false")
         client = _build_client(
             monkeypatch,
             {"get_moment_prompt": _raise(lambda: Exception("down"))},

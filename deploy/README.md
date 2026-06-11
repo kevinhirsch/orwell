@@ -203,12 +203,13 @@ later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed age
 
 - **Automated smoke:** [`deploy/smoke.sh`](./smoke.sh) builds + starts the engine, probes the HTTP
   MCP surface, exercises the player game tools (`createCharacter` → `getGameState` →
-  `getMomentPrompt` → `resolveCompetition`), proves channel isolation, and simulates an update
-  (rebuild + restart) — asserting **behaviorally** that the pre-update game resumes from disk
-  (E80), that no hidden-layer key (`mental`/`social`/`trust`/`affinity`/`threat`…) leaks from a
-  player surface, that the **A4 credential helper** hands git the `.env` token, and that no
-  deploy script fetches from `raw.githubusercontent.com` (E84). It runs offline, locally and in
-  CI (`.github/workflows/ci.yml`).
+  `getMomentPrompt` → `runCompetition`, and proves the removed `resolveCompetition` is refused —
+  audit E20), proves channel isolation, and simulates an update (rebuild + restart) — asserting
+  **behaviorally** that the pre-update game resumes from disk and the update script never deletes
+  the save (E80), that no hidden-layer NUMBER (`physical`/`mental`/`social`/`trust`/`affinity`/
+  `threat`) leaks from a player surface, that the **A4 credential helper** hands git the `.env`
+  token, and that no deploy script fetches from `raw.githubusercontent.com` (E84). It runs
+  offline, locally and in CI (`.github/workflows/ci.yml`).
 - **On-host validation** remains the full Proxmox-LXC provisioning (provision → one-liner install →
   curl the UI → update → assert the save survived) — that part can't run in GitHub Actions (no LXC)
   and is the on-box test.
