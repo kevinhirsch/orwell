@@ -821,6 +821,68 @@ def main() -> int:
             check(f3["s"]["w"] >= 370 and f3["f"]["w"] >= 370, f"F3: sheets stay full-width ({f3})")
             mob.close()
 
+            # H4 (sidebar icons): the collapsed rail's icons ALWAYS match the
+            # expanded rows — single icon source. Every rail button is a clone
+            # of its data-rail-source row's svg (sidebar-layout.js
+            # syncRailIcons), and the JS-injected game chrome (Diary Room /
+            # Cast / the status HUD) gets a mirrored rail button the same way.
+            # Collapse the sidebar for REAL (the hamburger), then compare
+            # per-entry drawing signatures between the two states.
+            page.evaluate("""() => {  // clear floaters that could sit over the hamburger
+              const soc = document.getElementById('orwell-social');
+              if (soc) { const c = soc.querySelector('.ow-close'); if (c) c.click(); }
+              const ban = document.querySelector('#orwell-engine-status .oes-x');
+              if (ban) ban.click();
+            }""")
+            page.wait_for_timeout(350)
+            page.click("#hamburger-btn")
+            page.wait_for_timeout(400)
+            h4 = page.evaluate("""() => {
+              const rail = document.getElementById('icon-rail');
+              const sidebar = document.getElementById('sidebar');
+              const railShown = rail && getComputedStyle(rail).display !== 'none';
+              const collapsed = sidebar && sidebar.classList.contains('hidden');
+              const GEOM = ['d','points','cx','cy','r','rx','ry','x','y','x1','y1','x2','y2','width','height'];
+              const sig = (svg) => !svg ? null :
+                [...svg.querySelectorAll('path,circle,rect,line,polyline,polygon,ellipse')]
+                  .map(n => n.tagName + ':' + GEOM.map(a => n.getAttribute(a) || '').join(','))
+                  .join('|');
+              const iconSel = { 'rail-game-status': '.os-hdr svg' };
+              const entries = [...rail.querySelectorAll('.icon-rail-btn[data-rail-source]')].map(btn => {
+                const src = document.getElementById(btn.dataset.railSource);
+                const srcSvg = src && src.querySelector(iconSel[btn.id] || 'svg');
+                return { id: btn.id,
+                         visible: btn.getClientRects().length > 0,
+                         hasIcon: !!btn.querySelector(':scope > svg'),
+                         match: srcSvg ? sig(btn.querySelector(':scope > svg')) === sig(srcSvg) : null };
+              });
+              const mirrors = ['rail-diary-room', 'rail-cast', 'rail-game-status'].map(id => {
+                const b = document.getElementById(id);
+                const src = b && document.getElementById(b.dataset.railSource);
+                return { id, exists: !!b, hasIcon: !!(b && b.querySelector('svg')),
+                         gateMirrors: !!b && !!src &&
+                           ((getComputedStyle(src).display === 'none') === (getComputedStyle(b).display === 'none')) };
+              });
+              return { railShown, collapsed,
+                       total: entries.length,
+                       comparedVisible: entries.filter(e => e.visible && e.match === true).length,
+                       mismatch: entries.filter(e => e.match === false).map(e => e.id),
+                       naked: entries.filter(e => e.visible && !e.hasIcon).map(e => e.id),
+                       mirrors };
+            }""")
+            check(bool(h4.get("collapsed")) and bool(h4.get("railShown")),
+                  f"H4: the hamburger collapses the sidebar to the icon rail ({h4.get('collapsed')}/{h4.get('railShown')})")
+            check(h4.get("mismatch") == [],
+                  f"H4: every rail icon EQUALS its expanded row's icon — same glyph both states ({h4.get('mismatch')})")
+            check(h4.get("naked") == [],
+                  f"H4: no visible paired rail button renders without its icon ({h4.get('naked')})")
+            check(h4.get("comparedVisible", 0) >= 3,
+                  f"H4: the comparison covered the visible rail ({h4.get('comparedVisible')} of {h4.get('total')} paired entries)")
+            check(all(m["exists"] and m["hasIcon"] and m["gateMirrors"] for m in h4.get("mirrors", [])),
+                  f"H4: injected game chrome (Diary Room / Cast / status HUD) gets gated rail mirrors with icons ({h4.get('mirrors')})")
+            page.click("#hamburger-btn")  # restore the expanded sidebar
+            page.wait_for_timeout(250)
+
             browser.close()
     finally:
         proc.terminate()
