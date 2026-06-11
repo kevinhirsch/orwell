@@ -1,13 +1,18 @@
-"""Game HUDs (status + social) — minimize-to-dock SOURCE-PINS (T20).
+"""Game HUDs (status + social) — sidebar-chrome SOURCE-PINS (T20, refit by E64 + H5).
 
 EXPLICIT SOURCE-PINS, NOT BEHAVIOR COVERAGE. Every assertion in this file greps the static JS
-source (`"modalManager.register(" in src`, etc.); a passing grep proves the wiring is *present*,
-never that it *works*. The real BEHAVIOR — minimize hides the social HUD and parks a dock chip,
-and restoring from the chip re-opens it — is exercised in the headless browser by
-`scripts/browser_smoke.py` (search "T20" there). These pins remain as cheap, browserless
-regression guards: if a refactor deletes the dock wiring, this file goes red in the fast pytest
-gate before the browser smoke even runs. Read each `test_*` below as "the source still wires X",
-not "X behaves correctly".
+source; a passing grep proves the wiring is *present*, never that it *works*. The real
+BEHAVIOR is exercised in the headless browser by `scripts/browser_smoke.py`. These pins remain
+as cheap, browserless regression guards: if a refactor reverts a sidebar section to a floating
+window, this file goes red in the fast pytest gate before the browser smoke even runs. Read
+each `test_*` below as "the source still wires X", not "X behaves correctly".
+
+History: T20 originally pinned the HUDs' minimize-to-dock wiring. Ruling #3/E64 moved the
+status panel to sidebar chrome; H5/G7 (2026-06-11, user verdict on "The House") then folded
+the social/approaches surface into the sidebar the same way — so NO game HUD remains on the
+floating-window/dock contract here. The finale (still a kit window) is pinned in
+test_f_window_kit.py and exercised for real (T20/F1/F2) in browser_smoke.py; the H5 sidebar
+contract for the social section is pinned in test_h5_house_in_sidebar.py and mirrored below.
 
 Name-agnostic; no game state required.
 """
@@ -22,54 +27,36 @@ def _read(name: str) -> str:
         return f.read()
 
 
-# E64 (ruling #3): the status panel is SIDEBAR CHROME now — not a window, no dock.
-# Only the social HUD remains on the floating-window/dock contract here.
-HUDS = ["orwellSocial.js"]
+# ── H5/G7 (user verdict): the social surface is a sidebar section, never a window ──
+# SOURCE-PINS: these grep orwellSocial.js for "is sidebar chrome" markers, mirroring the
+# E64 status-panel pins below. The BEHAVIORAL counterpart — the section actually mounts
+# inside #sidebar, shows nothing while empty, and is never fixed-position — is asserted
+# in browser_smoke.py (the H5 block).
+
+def test_sourcepin_social_is_sidebar_chrome_not_a_window():
+    src = _read("orwellSocial.js")
+    assert "position: fixed" not in src, "H5: the social section must not be fixed-position"
+    assert "makeWindowDraggable" not in src, "H5: no drag"
+    assert "modalManager" not in src, "H5: no dock/minimize"
+    assert "OrwellWindowKit" not in src, "H5: the window kit is composed by WINDOWS — this is chrome"
+    assert "OrwellSlots" not in src, "H5: no slot placement — static sidebar flow"
+    assert 'getElementById("sidebar")' in src, "H5: mounts inside #sidebar"
+    assert '"sessions-section"' in src, "H5: anchors near the session list / status section"
 
 
-def test_sourcepin_huds_import_modal_manager():
-    # SOURCE-PIN (T20): the wiring is present. The minimize/restore BEHAVIOR is in browser_smoke.py.
-    for f in HUDS:
-        src = _read(f)
-        assert "modalManager" in src and "modalManager.js" in src, f"{f} must import modalManager"
+def test_sourcepin_social_keeps_poll_render_and_seams():
+    src = _read("orwellSocial.js")
+    for keep in ("orwell:gamechanged", "_orwellSocialEnsure", "_orwellSocialDriveApproaches",
+                 "MOTIVE_FRAMING", "firstCeremonyResolved", "MAX_APPROACHES"):
+        assert keep in src, f"H5 keeps the poll/render/seam logic: {keep}"
 
 
-def test_sourcepin_huds_register_with_the_dock():
-    # SOURCE-PIN (T20, amended by Lane F wave 1): the dock wiring now comes from the
-    # WINDOW KIT — the panel composes OrwellWindowKit (which registers with
-    # modalManager; pinned in test_f_window_kit.py) instead of hand-wiring the dock.
-    for f in HUDS:
-        src = _read(f)
-        assert "OrwellWindowKit.create(" in src, f"{f} must compose the window kit"
-        # A label + icon make the chip identifiable in the dock rows.
-        assert "title:" in src and "icon" in src, f"{f} must supply title + icon"
-
-
-def test_sourcepin_huds_minimize_routes_to_the_dock():
-    # SOURCE-PIN (T20, amended by Lane F wave 1): minimize goes through the kit
-    # (the kit's cluster button and the C26 auto-park both call kit minimize,
-    # which parks via modalManager). Behavior is in browser_smoke.py.
-    for f in HUDS:
-        src = _read(f)
-        assert "_win.minimize()" in src, f"{f} minimize must route through the kit"
-        assert "modalManager.minimize(" not in src, f"{f} must not hand-wire the dock anymore"
-
-
-def test_sourcepin_huds_poll_loop_respects_minimized_state():
-    # SOURCE-PIN (T20): the panels poll on a timer; while docked they must NOT force themselves
-    # back open. (The live poll-vs-minimized behavior is hard to exercise headlessly without
-    # waiting on timers, so this stays a source-pin by design.)
-    for f in HUDS:
-        src = _read(f)
-        assert "isMinimized()" in src, f"{f} must guard its poll loop with isMinimized()"
-
-
-def test_sourcepin_huds_dropped_in_place_collapse():
-    # SOURCE-PIN (T20): the old in-place collapse (localStorage MIN_KEY + os-/osoc-collapsed) is gone.
-    for f in HUDS:
-        src = _read(f)
-        assert "MIN_KEY" not in src, f"{f} still references the old in-place-collapse MIN_KEY"
-        assert "-collapsed" not in src, f"{f} still toggles the old in-place collapse class"
+def test_sourcepin_social_dropped_dock_state_bookkeeping():
+    # The dock-era state (isMinimized guards, the C26 mobile auto-park) is gone with the
+    # window; the sidebar drawer owns narrow viewports like every other section.
+    src = _read("orwellSocial.js")
+    assert "isMinimized" not in src, "H5: no minimized-state bookkeeping for a sidebar section"
+    assert "_mobileParkedOnce" not in src, "H5: no mobile auto-park — the drawer owns narrow"
 
 
 # ── E64 (ruling #3): the status panel is a sidebar section, never a window ──
