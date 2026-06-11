@@ -1,10 +1,15 @@
 # 0051 — In-character images (analyze in, generate out)
 
-> **Status:** **Specced — not built** (spec authored 2026-06-10; decisions locked 2026-06-11;
-> implementation is a future queue item). Mixed tier: prompt/descriptor plumbing is engine-side
-> (TS gates), the generation pipeline + storage + cast roster are front-end (pytest + browser
-> smoke). The gate split is decided at build time; nothing lands in `cucumber.cjs` until the
-> engine half is built to green.
+> **Status:** **Built (2026-06-11).** Mixed tier, both halves shipped: the engine side
+> (`ImageGenerationPort`, the Vault-free `portraitPrompts` builder, the seeded photorealistic
+> style anchor, `getPortraitPrompt` + `recordImageBeat` tools) is unit-gated (`tests/unit/
+> portraitPrompts.test.ts`) and swept by the live sentinel property test; the front-end
+> (move-in portrait pipeline, per-user persistence, the Cast roster sidebar, inline rendering,
+> reset scrub) is pytest-gated (`frontend/tests/test_orwell_portraits.py`). The image tools are
+> `INFRA_LEVERS` (FE pipeline calls them directly), not advertised in the GM lever manifest.
+> Not in `cucumber.cjs` (no BDD scenario — unit + pytest gated, like 0033/0036). Settings reuse
+> the existing `image_gen_enabled`/`image_model`/`image_quality` card (unhidden, text-to-image
+> filter). The browser-smoke render check is still owed (playwright unavailable in the build env).
 > **Executable spec:** [`0051-in-character-images.feature`](./0051-in-character-images.feature)
 > **Provenance:** `docs/audits/2026-06-10-full-product-audit.md` "Future specs" — 0051
 > (per the 2026-06-10 ruling, a feature spec, not a defect) · **ruling #9** (image attach —
