@@ -100,9 +100,10 @@ Given("a game with recorded events, relationship beliefs, and deepened souls", f
   this.registry = new GameSessionRegistry(new FileSaveStore(this.saveDir));
   const sb = this.registry.sandboxFor(A);
   sb.session.createCharacter({ playerName: "Keeper", seed: 5 });
-  // Real mutations that fold into events + the hidden relationship layer (0023).
-  sb.commands.recordInteraction({ initiator: "npc:1", witnessSet: ["npc:1", "npc:2"], content: "a quiet scheme", kind: "betrayal" });
-  sb.commands.recordInteraction({ initiator: "npc:2", witnessSet: ["npc:2", "npc:3"], content: "an alliance forms", kind: "alliance" });
+  // Real mutations that fold into events + the hidden relationship layer (0023). The command seam
+  // is player-witnessed by rule (E21); off-screen scenes are the engine's to mint.
+  sb.commands.recordInteraction({ initiator: "npc:1", witnessSet: ["npc:1", "player"], content: "a quiet warning", kind: "betrayal" });
+  sb.commands.recordInteraction({ initiator: "player", witnessSet: ["player", "npc:2"], content: "an alliance forms", kind: "alliance" });
 });
 
 When("the game is saved, the engine restarts, and the game is resumed", function (this: BbWorld) {
@@ -139,11 +140,16 @@ Given("a saved game whose Vault holds off-screen NPC scheming and hidden attribu
   sb.session.createCharacter({ playerName: "Watched", seed: 9 });
   this.durableSentinel = "SENTINEL-0030-OFFSCREEN";
   // Off-screen scheming the player did NOT witness — hidden, persisted, must STAY hidden on reload.
-  sb.commands.recordInteraction({
-    initiator: "npc:1", witnessSet: ["npc:1", "npc:2"], content: `secret scheme ${this.durableSentinel}`, kind: "betrayal",
+  // Minted ENGINE-side, as off-screen life is in production: the player-channel command seam refuses
+  // witness sets that exclude the player (E21), so the hidden layer is written directly here.
+  sb.engine.events.record({
+    id: "evt:0030:scheme", ts: 9_000_030, type: "conversation",
+    initiator: "npc:1", witnessSet: ["npc:1", "npc:2"], hidden: true,
+    content: `secret scheme ${this.durableSentinel}`,
   });
   // A hidden attribute in the Vault (engine-only; never persisted to the player save, never surfaced).
   sb.engine.vault.writeHidden({ id: "vault:0030", kind: "hidden-attribute", content: `hidden trait ${this.durableSentinel}-VAULT` });
+  this.registry.saveUser(A); // the direct engine-side write persists like any live mutation
 });
 
 When("the engine restarts and the player surface is queried over the resumed game", function (this: BbWorld) {

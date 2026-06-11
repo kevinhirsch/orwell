@@ -2573,6 +2573,115 @@ PR per item).
 > per-theme micro-motion on the E97 contract (reduced-motion strips motion, never frost), AA
 > contrast gated in pytest.
 
+## The round-5/6 parallel lanes · 2026-06-10
+
+### L1 — restart & spine (E1+D1+R1 · E2 · E3 · E6 · E7 · E57/R5 · R3 · R4 · E70 · T14)  ·  **✅ DONE (PR #215)**
+
+> The ONE sanctioned restart door: `Orchestrator.forgetUser` + save-dir rotation
+> (`UserSaveStore.resetUser`/`FileSaveStore`) wired into `registry.resetUser`, and the player
+> channel's confirmed `createCharacter` restart now delegates through that same hinge
+> (`GameSessionAdapter.setOnRestart`) — season 2 commits clean, persists, and survives an engine
+> restart (the headline R1 production bug; proven end-to-end in
+> `tests/integration/restartSpine.test.ts`, the audit's named missing test). E3: a refused commit
+> THROWS typed (`TurnRefusedError` ⇒ 409; never 200-then-rollback) with one `onPersist` per beat
+> (`inOneCommit`); E7: persist failures are their own fault class (`PersistFailureError` ⇒
+> sanitized 500, fail-closed rollback) + `EngineRefusal` typing; E2: pre-game ticks gated and the
+> synthetic npc pool deleted; E6: boot preload seeds baselines (`seedBaseline`); E57/R5: the
+> turn-driven tick debounced to the turn boundary (beat commits always tick; aux tool calls share
+> one); R3: the exported snapshot reused across checkpoint/save/tick (≤2 serializations per
+> mutation, save by reference); R4: idle-sandbox LRU unload (`maxResident`, rebuilds from disk);
+> E70: `POST /api/orwell/new-game` admin-gated (the chat tools are the player door; smoke/matrix
+> configs keep working); T14: the restore-into-fresh-registry tick regression test. Unit gates:
+> `restartDoor.test.ts` + `spineHardening.test.ts` + `test_e70_new_game_gate.py`.
+
+### U-L2 — Lane 2: knowledge integrity (engine) — E9+C2+C3 · C14 · E20 · E21  ·  **✅ DONE (PR #212)**
+
+> **E9/C2/C3 (one fix site — `InMemoryKnowledgeService.pathwayAnchored`):** anchoring now requires
+> **content lineage** — `told-by:` must derive from what the teller actually holds (content or its
+> undistorted gossip origin) or witnessed (subject-only match no longer anchors, the C2 exploit);
+> `overheard:<id>` must derive from THAT event's content (a strict normalized fragment, the shape
+> `rollOverhears` produces — a real id no longer anchors unrelated invented content, the E9/C3
+> exploit). Anchored knowledge is by construction a fragment of something real; everything else
+> downgrades to a suspicion with **capped** confidence. **C14:** `clamp01` on confidence at every
+> knowledge write seam (`pushKnown` — surfacing/seeding/gossip — and `addSuspicion`, which also caps
+> at 0.5: a hunch is never knowledge-grade). **E20:** `resolveCompetition` is **gone from the player
+> channel** (registry descriptor, McpServer dispatch, the `EngineCommands` port method) —
+> `runCompetition` is the single outcome authority (B37); the pure domain fn stays; smoke + the 0009
+> `.feature` now assert absence + refusal. **E21:** `recordInteraction` requires the **player in the
+> witness set** (the player initiating counts; off-screen scenes are the engine's to mint) and folds
+> are budgeted **per beat per directed edge** (`MAX_FOLDS_PER_PAIR_PER_BEAT`, window keyed off the
+> latest `season:` beat) on top of the B39 per-call cap. Verified by:
+> `tests/unit/knowledgeIntegrity.test.ts` (lineage + clamp), `tests/unit/playerChannelGuards.test.ts`
+> (E20 absence/refusal both channels; E21 throw/auto-seat/budget/budget-reopen), the amended
+> `docs/features/0009-mcp-tool-boundary.feature` scenarios, `tests/integration/httpServer.test.ts`
+> (HTTP 400 refusal), and `deploy/smoke.sh` (refusal probed on a live deploy).
+
+## Wave E-SOCIAL — Lane 3: social-sim consequence (E42–E55 · C9 · C12 · T1) · 2026-06-10 — ✅ DONE (PR #216)
+
+> **"Make the simulation matter":** deals, gossip, and the emotional arc stop being flavor.
+> **Deals (E42/E43/E46/T1):** `bindingActionsFor` reconciles EVERY binding actor in the live commit
+> path (NPC eviction votes from the staged `voteOf`, HOH tie-breaks, the Final-3 eviction); deals are
+> horizon-aware (`madeWeek` + `horizonOf`: safety/vote run through their week's eviction —
+> `expireWeekScoped` at the rollover — final-two/target-other bind until broken); honoring PAYS
+> (`DEAL_IMPACTS.honored` + `BindingAction.alternatives`); the tightest unbound NPC pair occasionally
+> seals a Vault-held NPC↔NPC pact at nominations (`DECISION.npcDeal`) that the same ledger
+> adjudicates. Live gate: `tests/integration/liveDealReconciliation.test.ts` (T1).
+> **Folds (E47/E48/E49):** `CEREMONY_IMPACTS` are named impact objects via `applyImpactDirected`;
+> comp-won is `{threat:+0.14}` only; the eviction fold scales by recorded manner
+> (`EVICTION_MANNER_SCALE`); the survivors' proven-threat read lands on THIS week's HOH.
+> **Arc (E50/E51/E52):** per-role scene emotions (betrayer schemes, victim is betrayed;
+> `recordOffscreenScene` evolves both); `survived-vote` fires for the surviving nominee and
+> `comp-loss` for contested losers; `evolveEmotion` delegates to the canonical `emotionalModifier`
+> with ADR 0001's seeded temperature roll (`swingTemperatureWeight`).
+> **Signals (E53/E54):** `variableWeights` wired-or-deleted (initiative → approach variance,
+> allianceShift → bond-pick wobble); ADR 0002's `reliability` evidence signal built (fed by honors/
+> saves/protective votes, torn down by betrayal, consumed by `bondStrength`, never decays, lossless).
+> **Interiority (E55/C12/C9):** structured confessionals (trigger/mood/seeded phrasing) at noms +
+> veto ceremony + eviction night, recorded to the SoulStore and the durable `soul.memory` mirror
+> (recall survives restart); hidden elements internally consistent (one secret-motive max,
+> stat-backed + genuinely concealed aptitudes — property-gated).
+> **Gossip (E44):** receipt folds (`GOSSIP_HEARD`, confidence-scaled, never the player's own edges)
+> make rumors move third-party reads — proven by the rumor→future-HOH nomination A/B.
+> **Left for the merge sequence (Lane 1 owns `orchestrator.ts`):** the ~6-line `defaultApply` wiring
+> that passes `edgeOf`/`occupancy` to `richOffscreenStretch` (E45 live), `rel`/`subjects`/`sceneType`
+> to `diffuseGossip` (E44 live), and swaps `recordOffscreenSoul` → `recordOffscreenScene` (E50's
+> both-souls half) — the exact diff is in PR #216's description. E54's `vetoSave`/`juryLean`
+> consumption is a 2-line post-merge follow-up in Lane 4's files.
+
+## Round-5/6 audit parallel phase — Lane 4 (player agency & ladder, engine) · 2026-06-10 — ✅ DONE (PR #217)
+
+> Source: `docs/audits/2026-06-10-full-product-audit.md` (lane plan: E34–E37, E12+T2, E38,
+> E39/C7, C1, C6; E51's eviction half coordinated to Lane 3). Every finding shipped with its
+> proving test in PR #217; the per-item stamps live on the audit doc's finding lines.
+
+### Lane 4 — E38 · E39/C7 · C6 · C1 · E35 · E36 · E12+T2 · E34 · E37  ·  Claude Code (engine)  ·  ✅ DONE 2026-06-10 (PR #217)
+
+> **DONE.** (E38 / ruling #1) NPC names are seeded samples from vendored real-name corpora
+> (`src/engine/data/givenNames.ts` + `surnames.ts`) — raw material only, "no fixed cast": no
+> full-name+persona pairing hard-coded (BDD-proven), the legacy Bible's names banned by corpus
+> exclusion, identity (never just a first name) carries across no two seeds; the inverse realism
+> gate (every part corpus-membered) finally exists. (E39/C7 = D8) `createCharacter` defaults to a
+> persisted ENTROPY seed — same name no longer replays the identical season (or its secrets);
+> explicit seeds stay for tests/replays. (C6) a missing/typo'd archetype defaults to the MEDIAN
+> floater spec, surfaced as `defaulted` on the casting card — never a silent comp-beast grant.
+> (C1, execution-confirmed) Houseguest's-Choice candidates snapshot AFTER the full draw and the
+> resume re-derives legality — a duplicate veto competitor is impossible (property over seeds ×
+> house sizes 5–16). (E35) the veto chip draw is a WITNESSED `veto-draw` beat (field + HC
+> holder/pick) preceding any winner, and ANY player in the drawn field — chip-drawn included —
+> declares compete/throw/play-safe. (E36) the F4 veto pending carries the honest legal set
+> (empty saveable + why); `{use:true}` is refused with the decision standing, never inverted.
+> (E12+T2) eviction votes are SECRET BALLOTS: anonymized reveal ("a vote to evict X"),
+> engine-only `voteRecord`, attribution unsealed exclusively in the 0048 retrospective
+> (`evictionVotes`); T2's vacuous secrecy Thens replaced with electorate-derived bounds + a new
+> 0047 scenario. (E34) the player's goodbye is a real `goodbye-message` pending (tone their
+> choice, folded via `goodbyeMannerFor` exactly as NPC tones; no engine-authored player goodbye
+> beat exists). (E37) the player-juror asks their own scoreless `juror-question` at the finale.
+> FE relay for both new kinds wired end-to-end (tool_schemas.py, orwellDecision.js,
+> orwell_routes.py, tool_implementations.py, c12 mirror) without touching Lane 6/7 files.
+> Gate: 516 unit/property/arch + 318 BDD + 334 FE pytest green. E51's eviction half
+> (`survived-vote` inflection) confirmed adapter-side — Lane 3's fold methods, no liveSeason
+> change forced.
+
 ## Full product audit (2026-06-10, round 5/6) — parallel lanes
 
 ### Lane 5 — prompt content (engine, fast)  ·  Claude Code  ·  **audit P1 + P4 + P6 + P9 + P10 + P11 + E58 + E60 + C8 — ✅ DONE (PR #213)**

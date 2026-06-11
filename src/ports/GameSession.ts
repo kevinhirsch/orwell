@@ -26,6 +26,12 @@ export interface CastingCard {
   /** The player's own authored material, played back. */
   story?: string;
   motivation?: string;
+  /**
+   * True when the engine DEFAULTED the character type (C6): the interview never captured a
+   * recognizable archetype, so the median spec was used — surfaced so an early finalization
+   * is visible on the card rather than a silent stat assignment.
+   */
+  defaulted?: boolean;
 }
 
 /** The player's own authored card. They authored it, so persona is theirs — but NO numeric stats cross the wall. */
@@ -228,7 +234,7 @@ export interface BeatEventView {
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "finale-statement" | "finale-answer" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -244,7 +250,11 @@ export interface PendingDecisionView {
   appeals?: string[];
   /** The juror asking, for a `finale-answer` (Vault-free name only); absent otherwise. */
   juror?: NamedRef;
-  /** How many to pick (nominations = 2; others = 1; finale-statement = 0). */
+  /** The finalist being questioned, for a `juror-question` (E37); absent otherwise. */
+  finalist?: NamedRef;
+  /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
+  evictee?: NamedRef;
+  /** How many to pick (nominations = 2; others = 1; finale-statement / juror-question = 0). */
   pick: number;
 }
 
@@ -268,14 +278,16 @@ export interface FinaleView {
  * The Vault-free projection of an in-progress weekly eviction (0047). The two nominees by name, the
  * current stage, and the votes REVEALED SO FAR only — NEVER the unread votes, never a pre-reveal tally,
  * never the evictee before the last vote lands. A vote appears here only once read in the seeded order.
+ * E12: eviction votes are SECRET BALLOTS — the reveal carries the ballot ("a vote to evict X"), never
+ * the voter; attributions unseal only in the post-season retrospective (0048).
  */
 export interface EvictionView {
   /** Which stage the eviction is in: votes | goodbye | result. */
   stage: string;
   /** The two nominees by name. */
   nominees: NamedRef[];
-  /** The votes revealed so far, in reveal order — each a (voter → the nominee they voted to evict) by name. */
-  votesRevealed: Array<{ voter: NamedRef; votedFor: NamedRef }>;
+  /** The anonymized ballots revealed so far, in reveal order — the nominee each vote names, never the voter. */
+  votesRevealed: Array<{ votedFor: NamedRef }>;
 }
 
 /** The Vault-free result of advancing the game or resolving a decision. */
@@ -385,12 +397,21 @@ export interface RetrospectiveView {
   hiddenStory: Array<{ type: string; content: string }>;
   /** The producer's sealed reserve twists: each kind + the week it fired (null = never fired). */
   twists: Array<{ kind: string; firedWeek: number | null }>;
+  /**
+   * The UNSEALED weekly eviction ballots (E12): who really voted to evict whom, week by week.
+   * Secret all season (the live reveal is anonymized); tellable only here, post-season.
+   */
+  evictionVotes?: Array<{
+    week: number;
+    evictee: NamedRef;
+    votes: Array<{ voter: NamedRef; votedFor: NamedRef }>;
+  }>;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "finale-statement" | "finale-answer" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   /** nominations: exactly two houseguest ids. */
   choice?: EntityId[];
   /** veto-decision: whether to use the veto. */
@@ -399,9 +420,11 @@ export interface SubmitDecisionReq {
   save?: EntityId;
   /** replacement: the replacement nominee the HOH names. */
   replacement?: EntityId;
-  /** eviction-vote / juror-vote: the finalist/nominee the player votes for. */
+  /** eviction-vote / juror-vote: the finalist/nominee the player votes for.
+   *  goodbye-message: the chosen tone ("warm" | "respectful" | "cold") rides here (E34). */
   vote?: EntityId;
-  /** finale-statement: the player's free-text opening statement (flavor; carries no score). */
+  /** finale-statement / juror-question: the player's free text (flavor; carries no score).
+   *  goodbye-message: the optional message text accompanying the chosen tone. */
   statement?: string;
   /** finale-answer: the structured appeal the player makes (engine-scored; never the prose). */
   appeal?: string;

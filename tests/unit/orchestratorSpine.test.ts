@@ -42,7 +42,9 @@ describe("B41 — every player turn commits through the fail-closed checkpoint",
     sb.engine.events.record({ id: "leak:h", ts: 1, type: "conversation", initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: `secret ${SECRET}` });
     sb.engine.events.record({ id: "leak:v", ts: 2, type: "house-event", initiator: npc(1), witnessSet: [PLAYER, npc(1)], hidden: false, content: `secret ${SECRET}` });
 
-    runtime.orchestrator.commitPlayerTurn("u"); // the checkpoint must catch the leak
+    // The checkpoint must catch the leak — and the refusal FAILS the commit call itself
+    // (audit E3): a typed error, never a silent 200-then-rollback.
+    expect(() => runtime.orchestrator.commitPlayerTurn("u")).toThrowError(/turn refused/);
 
     // Rolled back in memory…
     expect(runtime.registry.sandboxFor("u").engine.events.query().some((e) => e.content.includes(SECRET))).toBe(false);

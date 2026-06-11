@@ -29,18 +29,71 @@ describe("0039 — deal model & ledger (pure core)", () => {
     expect(actionBreaks(d, nominateThePartner)).toBe(true);
   });
 
-  it("honoring (nominating someone else) leaves it kept, no betrayal", () => {
+  it("honoring (nominating someone else) BUILDS trust and keeps the deal binding until its horizon (E43)", () => {
     const ledger = new DealLedger();
-    const d = ledger.make([PROMISOR, PARTNER], "safety", "safe");
+    const d = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 2);
     const rel = new RelationshipModel(0.5);
     const before = { ...rel.edge(PARTNER, PROMISOR) };
     const nominateOthers: BindingAction = { actor: PROMISOR, kind: "nominate", targets: ["x", "y"] };
     const r = ledger.reconcile(nominateOthers, { rel, rng: new SeededRandom(1) });
-    expect(r.kept).toHaveLength(1);
     expect(r.broken).toHaveLength(0);
+    // E43: a nomination that spares the partner HONORS the promise but does not END it — the
+    // safety deal still binds through this week's eviction (the pre-E43 bug self-extinguished it).
+    expect(d.status).toBe("open");
+    // ...and a kept promise finally BUILDS trust (plus the E54 evidence signal). Never a betrayal.
+    const after = rel.edge(PARTNER, PROMISOR);
+    expect(after.trust).toBeGreaterThan(before.trust);
+    expect(after.reliability).toBeGreaterThan(before.reliability);
+    expect(after.threat).toBeLessThanOrEqual(before.threat);
+  });
+
+  it("the eviction vote is the safety deal's horizon: an honoring vote resolves it KEPT (E43)", () => {
+    const ledger = new DealLedger();
+    const d = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 2);
+    const r = ledger.reconcile(
+      { actor: PROMISOR, kind: "vote-evict", targets: ["x"], alternatives: ["x", PARTNER] },
+      { rel: new RelationshipModel(0.5), rng: new SeededRandom(1) },
+    );
+    expect(r.kept).toHaveLength(1);
     expect(d.status).toBe("kept");
-    // No relationship move — the deal was honored.
-    expect(rel.edge(PARTNER, PROMISOR)).toEqual(before);
+  });
+
+  it("a final-two deal does NOT self-extinguish at an unrelated later nomination (E43)", () => {
+    const ledger = new DealLedger();
+    const d = ledger.make([PROMISOR, PARTNER], "final-two", "ride or die", undefined, 2);
+    // Week 3: the promisor nominates two OTHER houseguests — honoring, not concluding.
+    ledger.reconcile({ actor: PROMISOR, kind: "nominate", targets: ["x", "y"] });
+    expect(d.status).toBe("open");
+    expect(ledger.open()).toHaveLength(1);
+    // ...and it still BREAKS with full consequence weeks later.
+    const r = ledger.reconcile({ actor: PROMISOR, kind: "vote-evict", targets: [PARTNER] });
+    expect(r.broken).toHaveLength(1);
+    expect(d.status).toBe("broken");
+  });
+
+  it("week-scoped deals expire KEPT once their week passes un-broken; final-two never expires (E43)", () => {
+    const ledger = new DealLedger();
+    const safety = ledger.make([PROMISOR, PARTNER], "safety", "safe this week", undefined, 2);
+    const f2 = ledger.make([PROMISOR, PARTNER], "final-two", "to the end", undefined, 2);
+    expect(ledger.expireWeekScoped(2)).toHaveLength(0); // still week 2 — still binding
+    const resolved = ledger.expireWeekScoped(3);
+    expect(resolved).toHaveLength(1);
+    expect(safety.status).toBe("kept");
+    expect(f2.status).toBe("open");
+  });
+
+  it("with alternatives, sparing someone who was never an option proves nothing (E43)", () => {
+    const ledger = new DealLedger();
+    const d = ledger.make([PROMISOR, PARTNER], "final-two", "f2", undefined, 1);
+    const rel = new RelationshipModel(0.5);
+    const before = rel.edge(PARTNER, PROMISOR).trust;
+    // The partner was NOT one of the nominees — this vote demonstrates nothing about the promise.
+    ledger.reconcile(
+      { actor: PROMISOR, kind: "vote-evict", targets: ["x"], alternatives: ["x", "y"] },
+      { rel, rng: new SeededRandom(1) },
+    );
+    expect(d.status).toBe("open");
+    expect(rel.edge(PARTNER, PROMISOR).trust).toBe(before); // no unearned honor fold
   });
 
   it("breaking a deal hurts: wronged trust drops, threat rises (betrayal-shock), and lingers", () => {

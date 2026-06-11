@@ -4675,7 +4675,8 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
-        "finale-statement", "finale-answer", "juror-vote",
+        "goodbye-message", "finale-statement", "finale-answer",
+        "juror-question", "juror-vote",
     }
     if kind not in _DECISION_KINDS:
         return {"error": f"kind must be one of: {', '.join(sorted(_DECISION_KINDS))}", "exit_code": 1}

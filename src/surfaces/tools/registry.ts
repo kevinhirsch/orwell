@@ -32,8 +32,9 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
   // Action tools (0009): request in, Vault-free result out (engine performs them).
-  { name: "recordInteraction", channel: "player", readsVault: false, description: "Record a player-witnessed interaction; returns its id." },
-  { name: "resolveCompetition", channel: "player", readsVault: false, description: "Engine-decided outcome only — no stats, rankings, or Vault reasoning." },
+  // E20: `resolveCompetition` (caller-supplied stats + seed) is REMOVED — a second, seed-shoppable
+  // resolver one call away from the player channel. `runCompetition` is the single outcome authority.
+  { name: "recordInteraction", channel: "player", readsVault: false, description: "Record a player-witnessed interaction (the witness set must include the player); returns its id." },
   { name: "runCompetition", channel: "player", readsVault: false, description: "PREVIEW the current competition beat's already-decided winner (the weekly loop crowns the same one when advanceGame resolves the beat — never a second resolver); returns the winner (name) plus the drawn comp's name/format/narrative scaffold — never a stat or score." },
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
   { name: "diaryRoom", channel: "player", readsVault: false, description: "Record a player Diary-Room entry: the player's own OOC knowledge, with no in-game pathway to any houseguest." },
@@ -59,9 +60,9 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
  * manifest in the base game-master prompt (0018): `getMomentPrompt` supplies the
  * prompt itself, `endOfSessionSummary` just confirms a save exists.
  */
-// resolveCompetition stays callable but un-advertised: runCompetition is the single
-// advertised competition lever since B37 (one outcome authority); the manifest names one.
-const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "resolveCompetition", "finaleView"]);
+// (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
+// competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

@@ -29,7 +29,7 @@ interface FinaleFixture {
 
 /** A neutral directed edge (the live model's beliefs are graded, not binary). */
 function edge(from: EntityId, to: EntityId, s: Partial<EdgeSignals>): { from: EntityId; to: EntityId } & EdgeSignals {
-  return { from, to, trust: 0.5, affinity: 0.5, threat: 0.3, alignment: 0, confidence: 0.5, ...s };
+  return { from, to, trust: 0.5, affinity: 0.5, threat: 0.3, alignment: 0, confidence: 0.5, reliability: 0.3, ...s };
 }
 
 /**
@@ -263,6 +263,11 @@ When("the finale is advanced to the player's juror vote", async function (this: 
     const v = await adv(this.livePlayer!);
     this.lastAdvance = v;
     if (v.pending?.kind === "juror-vote") break;
+    if (v.pending?.kind === "juror-question") {
+      // E37: the player-juror's own question beats precede their vote — answer and continue.
+      await this.livePlayer!.callTool("submitDecision", { kind: "juror-question", statement: "what was your game?" });
+      continue;
+    }
     if (v.finished) break;
   }
 });

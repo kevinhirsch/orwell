@@ -82,20 +82,23 @@ export function vetoParticipants(
 
   const selected: EntityId[] = [];
   let houseguestsChoice: VetoDraw["houseguestsChoice"];
+  let deferredHolder: EntityId | undefined;
   let bi = 0;
 
   for (const puller of pullers) {
     while (bi < drawn.length) {
       const chip = drawn[bi++]!;
       if (chip === HOUSEGUESTS_CHOICE) {
-        const candidates = pool.filter((p) => !selected.includes(p));
-        if (candidates.length === 0) continue;
         if (opts?.playerChoosesOwn === puller) {
-          // The PLAYER drew the chip — DON'T pick for them (B45/audit B4). The field is left a player
-          // short; the loop pauses and the player picks the sixth competitor.
-          houseguestsChoice = { holder: puller, candidates };
+          // The PLAYER drew the chip — DON'T pick for them (B45/audit B4). The field is left a
+          // player short; the loop pauses and the player picks the sixth competitor. The
+          // candidate list is snapshotted AFTER the full draw, never mid-draw (C1): later
+          // pullers keep drawing below, and a candidate they pull must not stay offerable.
+          deferredHolder = puller;
           break;
         }
+        const candidates = pool.filter((p) => !selected.includes(p));
+        if (candidates.length === 0) continue;
         const picked = opts?.choose ? opts.choose(puller, candidates) : candidates[rng.int(candidates.length)]!;
         selected.push(picked);
         houseguestsChoice = { holder: puller, picked, candidates };
@@ -106,6 +109,15 @@ export function vetoParticipants(
         break;
       }
     }
+  }
+
+  if (deferredHolder !== undefined) {
+    // C1: the deferred candidates are the pool MINUS everyone actually drawn — computed only now,
+    // after every puller has drawn, so the player can never be offered an already-drawn name.
+    const candidates = pool.filter((p) => !selected.includes(p));
+    // No candidate left (a tiny late-game pool): the chip is dead — no choice exists, the field
+    // simply stays short, exactly as a dead chip resolved before the deferral existed.
+    if (candidates.length > 0) houseguestsChoice = { holder: deferredHolder, candidates };
   }
 
   const participants = [...pullers, ...selected];

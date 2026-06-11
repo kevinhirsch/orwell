@@ -51,6 +51,12 @@ describe("0047 — eviction night live", () => {
       const ev = advance(s, ctx, rng)!;
       expect(ev.beat).toBe("eviction-reveal");
       expect(s.eviction!.revealIx).toBe(i + 1); // exactly one more vote read per advance
+      // E12: the read ballot is ANONYMIZED — it names the nominee, never the voter.
+      expect(ev.content).toMatch(/^a vote to evict /);
+      for (const v of voters) {
+        expect(ev.content.includes(v)).toBe(false);
+        expect(ev.participants.includes(v)).toBe(false);
+      }
       reveals.push(ev);
     }
     expect(reveals).toHaveLength(voters.length);
@@ -65,9 +71,9 @@ describe("0047 — eviction night live", () => {
     const order = (seed: number): string => {
       const { s, ctx } = evictionAt();
       const rng = new SeededRandom(seed);
-      const voters: string[] = [];
-      for (let i = 0; i < 4; i++) voters.push(advance(s, ctx, rng)!.participants[0]!);
-      return voters.join(",");
+      const ballots: string[] = [];
+      for (let i = 0; i < 4; i++) ballots.push(advance(s, ctx, rng)!.participants[0]!);
+      return ballots.join(",");
     };
     expect(order(11)).toBe(order(11)); // deterministic by seed
     // Whatever the reveal order, the engine-decided evictee is the same (the tally, not the order).
@@ -101,12 +107,18 @@ describe("0047 — eviction night live", () => {
       for (let g = 0; g < 100 && s.eviction?.stage !== "goodbye"; g++) advance(s, ctx, rng);
       const senders = [...s.eviction!.goodbyeFrom];
       // Play out the goodbye messages (each folds its tone into the evictee's manner) and roll on.
-      for (let g = 0; g < 100 && s.beat === "eviction"; g++) advance(s, ctx, rng);
+      // E34: the PLAYER (a surviving sender) chooses their own tone — matched to the case here.
+      const playerTone = affinityToEvictee >= 0.6 ? "warm" as const : "cold" as const;
+      for (let g = 0; g < 100 && s.beat === "eviction"; g++) {
+        if (s.pending?.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: playerTone }, ctx);
+        else advance(s, ctx, rng);
+      }
       return { s, senders };
     };
     const warm = drive(0.85); // warm goodbyes
     const cold = drive(0.2);  // cold goodbyes
     expect(warm.senders.length).toBeGreaterThan(0);
+    expect(warm.senders).toContain(PLAYER); // E34: the surviving player always gets the lever
     // Every houseguest who left a goodbye now reads the evictee's manner with the tone they sent.
     for (const sender of warm.senders) expect(warm.s.mannerByEvictee![npc(2)]![sender]!.respected).toBe(true);
     for (const sender of cold.senders) expect(cold.s.mannerByEvictee![npc(2)]![sender]!.disrespected).toBe(true);
@@ -171,10 +183,36 @@ describe("0047 — the EvictionView projection is Vault-free and never leaks the
     });
     const surface = JSON.stringify(sb.session.advanceGame());
     expect(surface.includes(sentinel)).toBe(false);
-    // The projection carries names + revealed (voter→votedFor) pairs only — no hidden numbers, no manner.
+    // E12: the projection carries ANONYMIZED ballots only — each entry names a nominee and
+    // nothing else; no voter attribution exists anywhere on the player-facing surface.
     for (const r of ev.votesRevealed) {
-      expect(typeof r.voter.name).toBe("string");
+      expect(Object.keys(r)).toEqual(["votedFor"]);
       expect([ev.nominees[0]!.id, ev.nominees[1]!.id]).toContain(r.votedFor.id);
+    }
+    expect(JSON.stringify(ev).includes('"voter"')).toBe(false);
+  });
+
+  it("E12: the post-season retrospective — and only it — unseals the season's secret ballots", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("ev-unseal");
+    sb.session.createCharacter({ playerName: "P", seed: 3 });
+    // While the season lives, the retrospective is gated shut (0048) — no ballot is tellable.
+    expect(sb.session.seasonRetrospective()).toBeNull();
+    for (let i = 0; i < 5000; i++) {
+      const v = sb.session.advanceGame();
+      if (v.pending) resolve(sb.session, v.pending);
+      if (v.finished) break;
+    }
+    const retro = sb.session.seasonRetrospective();
+    expect(retro).not.toBeNull();
+    // The unsealing carries the real attribution: every weekly ballot names its voter.
+    expect(retro!.evictionVotes!.length).toBeGreaterThan(0);
+    for (const wk of retro!.evictionVotes!) {
+      expect(wk.votes.length).toBeGreaterThan(0);
+      for (const v of wk.votes) {
+        expect(typeof v.voter.name).toBe("string");
+        expect(typeof v.votedFor.name).toBe("string");
+      }
     }
   });
 });

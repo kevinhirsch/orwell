@@ -63,3 +63,14 @@ Feature: Live jury-vote choreography — the interactive finale
     Given two live games at Final 2 started from the same seed
     When the same finale appeals and votes are applied to each
     Then their revealed votes and winner are identical
+
+  # Amended 2026-06-10 (E37): the player-JUROR's seat at the finale is a real beat. When the
+  # question round reaches the player on the panel, the loop pauses for THEIR question (scoreless
+  # free text — anti-sycophancy: only structured appeals sway the tally); the finalist's answer
+  # remains engine-chosen exactly as for any juror.
+  Scenario: The player-juror asks their own finale question
+    Given a finale where the player sits on the jury
+    When the question round reaches the player's seat
+    Then the loop pauses for the player's juror question to each finalist
+    And the juror question is scoreless
+    And the finalist's answer remains engine-chosen
