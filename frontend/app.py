@@ -1101,6 +1101,18 @@ async def _startup_event():
     from src.cookbook_serve_lifecycle import cookbook_serve_lifecycle_loop
     _startup_tasks.append(asyncio.create_task(cookbook_serve_lifecycle_loop()))
 
+    # G20: the portrait reconciler — one background task per process that verifies the
+    # active cast's portrait set is complete and retries the gap through the standard
+    # pipeline (per-houseguest budgeted backoff; provider absence idles without consuming
+    # the budget). It sweeps only users seen by the roster/portrait routes, so it idles
+    # until someone actually plays. ensure_reconciler_started keeps its own strong ref
+    # and is idempotent (the single-task guard).
+    try:
+        from src import orwell_portraits as _orwell_portraits
+        _orwell_portraits.ensure_reconciler_started()
+    except Exception as e:
+        logger.warning(f"Portrait reconciler not started (non-critical): {e}")
+
     logger.info("Application startup complete")
 
 async def _shutdown_event():

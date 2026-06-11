@@ -239,6 +239,16 @@ def setup_orwell_routes() -> APIRouter:
 
         cards = _roster_cards(state, user)
 
+        # G20: the completeness counter (active cast only, shared derivation) so the cast
+        # panel can show "Generating N remaining…" while the reconciler works the set.
+        # Happy path only — the fail-open shapes above are pinned, and the panel falls
+        # back to its own roster-derived count when the keys are absent.
+        counts = {"total": 0, "present": 0, "missing": 0}
+        try:
+            counts = orwell_portraits.completeness(user, cards)
+        except Exception:
+            pass
+
         images_available = False
         try:
             images_available = orwell_portraits.image_generation_available(user)
@@ -257,7 +267,8 @@ def setup_orwell_routes() -> APIRouter:
             except Exception as e:
                 logger.info(f"[orwell] portrait backfill kick failed: {e}")
 
-        return {"roster": cards, "imagesAvailable": images_available}
+        return {"roster": cards, "imagesAvailable": images_available,
+                "portraitsPresent": counts["present"], "portraitsTotal": counts["total"]}
 
     @router.post("/portraits/backfill")
     async def orwell_portraits_backfill(request: Request):

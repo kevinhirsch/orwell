@@ -219,7 +219,19 @@
     const missing = roster.filter(
       (hg) => (!hg.status || hg.status === "active") && !hg.portrait
     );
-    if (actions) actions.style.display = (_imagesAvailable && missing.length) ? "" : "none";
+    if (actions) {
+      actions.style.display = (_imagesAvailable && missing.length) ? "" : "none";
+      // G20: standing completeness copy — the background reconciler verifies and
+      // retries the set; this row reports the live remainder (server counters when
+      // present, the rendered roster otherwise).
+      if (_imagesAvailable && missing.length) {
+        const note = el.querySelector("#oc-backfill-note");
+        const total = (data && typeof data.portraitsTotal === "number") ? data.portraitsTotal : null;
+        const present = (data && typeof data.portraitsPresent === "number") ? data.portraitsPresent : null;
+        if (note) note.textContent = "Generating " + missing.length + " remaining…" +
+          (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
+      }
+    }
 
     // Active first (player flagged), then jury, then evicted — keeps the live house on top.
     const order = { active: 0, jury: 1, evicted: 2 };

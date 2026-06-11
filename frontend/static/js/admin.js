@@ -2397,6 +2397,9 @@ function initHealthLogs() {
     const img = d.images || {};
     let imgVal = img.available ? badge(true, 'AVAILABLE') : badge(false, img.enabled ? 'NO USABLE MODEL' : 'DISABLED');
     if (img.model) imgVal += ` ${esc(img.model)}`;
+    // G20: portrait completeness over the active cast (the reconciler retries the gap).
+    const por = img.portraits;
+    if (por && por.total) imgVal += ` · ${badge(!por.missing, `portraits ${por.present}/${por.total}`)}`;
     rows.push(row('Image generation', imgVal));
     const tc = eng.toolCalls;
     if (tc) rows.push(row('Tool calls (since engine start)', `${esc(String(tc.total ?? 0))} total · ${esc(String(tc.failed ?? 0))} failed`));
