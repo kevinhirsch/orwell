@@ -67,6 +67,7 @@ The audit names the questions this spec must answer (and the .feature pins):
 | **Portrait trigger** | Auto on move-in — fires as part of `createCharacter` / season-start beat, no player prompt | The cast is introduced; their faces appear with them |
 | **Visual style** | Photorealistic — reality-TV-style headshots and scene stills | The per-season style anchor is a photorealistic descriptor seeded at cast time |
 | **Image provider** | Provider-agnostic `ImageGenerationPort` | First concrete adapter (DALL-E, Stability AI, etc.) wired at build time |
+| **Settings location** | Existing image gen card in the Settings modal (AI section) — currently hidden; unhide and update model filter to text-to-image models | `image_gen_enabled`, `image_model`, `image_quality` already exist in `settings.py` and `settings.js`; the card just needs to be made visible and the model filter corrected |
 | **Decline framing** | Production / show metaphor for all decline paths | "feeds are down," "production is holding the cameras," "that footage hasn't aired yet" — never a technical message, never a hint about hidden state |
 | **Image persistence** | Engine data dir — `{ORWELL_DATA_DIR}/{user}/portraits/{houseguest-id}.*` | Co-located with the save; managed by the FE; `orwell-factory-reset.sh` must scrub the portraits dir |
 | **Cast roster** | Sidebar panel — portrait + name + status (active / jury / evicted) | Status from the Vault-free public projection; evicted houseguests remain visible (dimmed/marked) for jury management reference |
