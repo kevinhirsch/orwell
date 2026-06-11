@@ -511,23 +511,27 @@ async def _run_ops_script(sid: str) -> dict:
     log_path = os.path.join(_data_dir(), log_name)
     os.makedirs(_data_dir(), exist_ok=True)
     logger.info("[ops] admin run: %s (%s)", sid, script)
-    import asyncio
     import datetime as _dt
+    import subprocess
+    import threading
     f = open(log_path, "w", encoding="utf-8")
     f.write(f"==== {label} · {_dt.datetime.now(timezone.utc).isoformat()} ====\n")
     f.flush()
-    proc = await asyncio.create_subprocess_exec(
-        "bash", path, *argv, cwd=_REPO_ROOT, stdout=f, stderr=f)
+    # A plain Popen + daemon-thread reaper, NOT an asyncio task: a task created
+    # on the request loop dies with that loop (TestClient tears it down per
+    # request, and uvicorn workers can recycle), which orphaned the exit marker
+    # and leaked _OPS_RUNNING=True. The thread outlives any loop.
+    proc = subprocess.Popen(["bash", path, *argv], cwd=_REPO_ROOT, stdout=f, stderr=f)
     _OPS_RUNNING[sid] = True
 
-    async def _reap():
+    def _reap():
         try:
-            code = await proc.wait()
+            code = proc.wait()
             f.write(f"\n[ops] exit {code}\n")
         finally:
             f.close()
             _OPS_RUNNING[sid] = False
-    asyncio.get_event_loop().create_task(_reap())
+    threading.Thread(target=_reap, name=f"ops-reap-{sid}", daemon=True).start()
     return {"started": True, "log": log_name}
 
 
