@@ -26,7 +26,10 @@ artifact) — through the B/C audit waves (B34–B73 / C12–C33), the round-4 U
 prioritized UI track U1–U5), and the 2026-06-11 close-out lanes (cross-lane tails, the
 T-remainder, 0053, E86a fastembed). The **campaign close-out ledger** in
 `docs/audits/2026-06-10-full-product-audit.md` is **the authoritative open-items list going
-forward**. The game is **folded into the main chat**: the player-facing tier is the vendored
+forward**. *(2026-06-11, post-ledger: the **DWE windowing lane** — Lane F — shipped end to end:
+the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWindow` kit +
+`.ow-*` family, the migration waves, and the F-3 anti-fragmentation ratchet; new FE windows
+MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
 `docs/features/` (through **0053**; 0052 — the house themes — shipped FE-side from the audit

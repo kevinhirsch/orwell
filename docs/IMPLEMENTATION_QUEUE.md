@@ -3039,10 +3039,20 @@ PR per item).
 > boot smoke · matrix 37/0/0 — green.
 > **F-2 is complete. Only F-3 (the ratchet) remains in Lane F.**
 
-### F-3 — the ratchet · **OPEN**
+### F-3 — the ratchet · **✅ DONE — LANE F COMPLETE**
 
 > A source-grep + runtime gate: any element matching the window selector must be
 > kit-managed — no JS outside the kit registers drag/persist/minimize handlers on a
 > window-like surface (the census §4 signatures are the grep corpus); new windows MUST
 > compose the kit. Matrix cells that passed stay green; each wave wires its flipped cells
 > into `browser_smoke.py` / `responsive_matrix.py` as hard assertions.
+> **DONE:** `frontend/tests/test_f3_window_ratchet.py` — the census signatures as the grep
+> corpus (drag-engine callers frozen to the kit + {planWindow, settings, theme, workspace};
+> slot registration = kit + the two ruling-class strips; dock registration = kit only; no new
+> geometry-persistence keys beyond the pinned marker set; no new per-surface Escape handlers
+> beyond the surveyed frozen list — shrink-only) + the runtime half in `browser_smoke.py`
+> (every floating game panel carries `[data-ow-window]`; the bespoke 'Drag to move' marker is
+> extinct outside the kit; the kit seam answers). Audit findings stamped on the doc.
+> **Post-Lane-F pointers:** `orwellCast.js` (0051, landed mid-campaign — own Escape handler,
+> grandfathered with a pointer) is the first kit-migration candidate; the W15 build=0 family
+> migration merges the legacy z counters (F9's tail) when it happens.

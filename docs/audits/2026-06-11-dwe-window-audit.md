@@ -105,7 +105,8 @@ Chrome-wide norm (i) anchor: the shipped `responsive_matrix.py` runs **37 pass �
 
 Severity · surface · norm — symptom → root cause (file:line) → fix spec → the pinning assertion.
 
-### F1 · CRIT · `#minimized-dock` (hits W1, W2, and every W15 modal) · norm e/g
+### F1 · CRIT
+**[FIXED — PR #237** (class-driven `.ow-has-rows` reveal; trusted-click gate) **]** · `#minimized-dock` (hits W1, W2, and every W15 modal) · norm e/g
 **Minimizing a window loses it: the sidebar "Windows" dock is permanently invisible.**
 Minimize hides the panel and renders a chip row into a dock whose computed display is `none` —
 there is **no pointer path to restore**. The House panel has no sidebar/rail button, so a
@@ -129,7 +130,8 @@ keyboard; T20 upgrades from evaluate-clicks to trusted clicks.
 DOM existence) and `page.click('.minimized-dock-chip[...]')` (a **trusted** click) restores.
 Screenshot: `assets/F1-invisible-windows-dock.png`.
 
-### F2 · MAJOR (CRIT for the affordance) · W1+W2 · norm c/f
+### F2 · MAJOR (CRIT for the affordance)
+**[FIXED — PR #237** (restack stands down during drag; idempotent single-write restack — incl. the latent restack↔mutation loop the fix armed) **]** · W1+W2 · norm c/f
 **Drag is completely dead on every slot-registered floating panel.** The header advertises
 drag (`cursor: move`, `title="Drag to move"`), but the panel never follows the cursor — not
 mid-drag, not at drop (live: x stayed 1132 through a 150px drag) — and the "persisted offset"
@@ -149,7 +151,8 @@ clamped at restore (the existing S11 clamp is correct — keep it).
 position survives an unrelated restack and a reload. Screenshots:
 `assets/F2-drag-dead-slot-panels.png`, `assets/F5-finale-drag-inert.png`.
 
-### F3 · MAJOR · W1+W2 (mobile ≤768) · norm i
+### F3 · MAJOR · W1+W2 (mobile ≤768)
+**[FIXED — PR #238** (the slot engine's narrow SHEET HOST; per-panel pins deleted; both-sheets gate at 390×844) **]** · norm i
 **Both mobile sheets pin to `top:44px` and overlap each other.** With a finale staging while
 an approach is live, social (44→116) and finale (44→243) stack on the same anchor — one sheet
 hides the other's header and intercepts its controls (live at 390×844; the D2 collision class,
@@ -164,7 +167,8 @@ collision rule structural on narrow too.
 `responsive_matrix.py` `_intersects` helper, extended to staged game surfaces). Screenshot:
 `assets/F3-mobile-sheets-overlap.png`.
 
-### F4 · MAJOR (ruling #19) · W1+W2 (+ every minimize path) · norm e
+### F4 · MAJOR (ruling #19)
+**[FIXED — PR #237** (kit fly-out/fly-away + reduced-motion strip; dock FLIP gated too) **]** · W1+W2 (+ every minimize path) · norm e
 **No minimize/close motion exists** — `display` flips synchronously (`orwellSocial.js:210-214`);
 the E97 contract ships open-only (`orwell-anim-in`, `orwellSlots.js:89-94`, honors reduced
 motion ✅). Ruling #19 specifies a Win7-style **fly-out toward the dock** on minimize and a
@@ -175,7 +179,8 @@ easing; `prefers-reduced-motion` strips all of it (the existing REDUCED gate gen
 **Pin:** computed animation/transform present during minimize (and absent under reduced
 motion). Screenshot: `assets/F4-no-minimize-flyout.png`.
 
-### F5 · MAJOR · W2 finale · norm c/f
+### F5 · MAJOR · W2 finale
+**[FIXED — PRs #237/#239** (slot offsets in #237; POS_KEY fully retired with the finale's kit migration in #239) **]** · norm c/f
 **Finale runs two position systems at once; both lose.** It registers slot key `finale` (never
 written — its `onDragEnd` writes its own `orwell-finale-pos` instead,
 `orwellFinale.js:156-158`), restores that key **unclamped** (`restorePosition`,
@@ -191,6 +196,7 @@ fully on-screen **via the one sanctioned mechanism** (and after migration the ke
 exist at all).
 
 ### F6 · MINOR · W1+W2 · norm a/h
+**[FIXED — PRs #237–#240** (the kit cluster on social #238 / finale #239; `.ow-dismiss` adoption for strip/panel/banner #240) **]**
 **Identity inconsistency across window families.** Game panels carry minimize-only (`–`,
 16×32px on desktop, no close); settings/theme carry the injected full cluster (`_` 24×24 +
 named ×); retro/presence/banner carry ×-only; social has no `role`/`aria-label` while finale
@@ -203,6 +209,7 @@ icons, same accessible names, ≥24px targets, on every window; per-window capab
 each control ≥24×24, accessible name non-empty. Screenshot: `assets/F6-identity-min-only.png`.
 
 ### F7 · MINOR · W1+W2 · norm g
+**[FIXED — PRs #237/#240** (kit windows on the single arbiter; ordering corrected in #240: menus → escape-scoped → modals → windows) **]**
 **Floating panels don't participate in Escape at all.** The ui.js arbiter closes hovered
 windows, then escMenuStack menus, then `.modal`s (`ui.js:1215-1288`); slot panels are none of
 those, so Escape with a panel focused/open does nothing (live).
@@ -213,6 +220,7 @@ minimizes or closes per its capabilities).
 it dismisses first. Screenshot: `assets/F7-escape-blind-to-panels.png`.
 
 ### F8 · MINOR · W11 (generalizes) · norm b
+**[FIXED — PR #240** (opener stashed/restored from ui.js's one visibility observer — the whole `.modal` family) **]**
 **Closing a modal never returns focus to its opener** (settings → `document.activeElement` =
 `BODY`, live). Keyboard users lose their place on every close; the #233 card got this right
 (focus lands in the card; page focusable after dismissal) — the rest of the chrome doesn't.
@@ -222,6 +230,7 @@ styledConfirm pattern, `ui.js:560-650`, generalized).
 Screenshot: `assets/F8-no-focus-return.png`.
 
 ### F9 · MINOR · W1/W2/W11/W15 · norm b
+**[PARTIAL — PR #237** (kit windows: one z band 500–980, click-to-front, `ow-focused`; modals verified above the band). The ui.js/modalManager counter merge rides the post-Lane-F W15 migration. **]**
 **(a)** No focus concept for panels: nothing raises on click (slot panels never re-stack
 visually; live click-to-front check only "passed" via an id-resolution artifact — re-tested:
 no raise logic exists), no focused-window affordance.
@@ -237,11 +246,13 @@ state, Escape keyed to the same order.
 window band; `pickTopModal` order equals visual order.
 
 ### F10 · MINOR · all draggable windows · norm h
+**[FIXED — PR #237** (arrows/Home on the kit titlebar) for kit windows; W15 keyboard-move rides its migration. **]**
 **No keyboard path moves or resizes any window** (drag-only — and on game panels even drag is
 dead, F2). **Fix spec:** kit: focused titlebar + arrow keys moves (Shift = resize), Home
 re-docks to slot. **Pin:** focus titlebar, ArrowRight ×5 ⇒ rect moves; offset persists.
 
 ### F11 · LOW · W9 decision card · norm g
+**[FIXED — PR #240** (card-scoped dismiss-only Escape via the `data-ow-escape-scope` contract) **]**
 The card dismisses only via its ×; Escape is ignored (deliberately conservative for a binding
 surface, but inconsistent with #233's "Escape is the keyboard way out" for non-binding
 dismissal — dismissing the card is explicitly allowed and non-binding).
@@ -307,3 +318,17 @@ element matching the window selector is kit-managed (no new bespoke drag/persist
 the live mid-game HUD carried no relationship numbers (live-asserted); no window builds or
 progresses the game outside the chat (decision card posts to the same validated seam, W9
 argued in-chat by design). No CRIT Vault finding.
+
+
+---
+
+## Lane F close-out (2026-06-11)
+
+Phase 2 landed end to end: **F-1** the kit (PR #237) → **F-2** waves 1–3 (PRs #238/#239/#240)
+→ **F-3** the ratchet (this PR): the signature grep-gate (`test_f3_window_ratchet.py` — drag /
+slot / dock registration callers frozen to the kit + the named grandfathered set; no new
+geometry keys; no new per-surface Escape handlers) + the runtime kit-managed assert in
+`browser_smoke.py`. Findings F1–F8, F10 (kit scope), F11 fixed; F9 partial by design (the
+legacy counter merge rides the post-Lane-F W15 migration). **First post-Lane-F candidate:**
+`orwellCast.js` (0051, landed mid-campaign) carries its own Escape handler and panel chrome —
+grandfathered in the ratchet with this pointer.
