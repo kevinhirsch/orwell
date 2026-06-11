@@ -15,7 +15,11 @@ JS = STATIC / "js"
 
 # The token set (responsive-tokens.css): @media widths and their min-width complements.
 MEDIA_TOKENS = {480, 768, 1024, 1440, 481, 769, 1025, 1441}
-CONTAINER_TOKENS = {360, 620}
+# 480 joined the container tiers with G6 (settings rail): the settings stacking
+# switch moved 620 → 480 so the LEFT tab rail survives moderately narrow modals
+# (user preference); 480 is already the narrowest member of the @media token set,
+# so container tiers stay aligned with the one breakpoint family — no new anarchy.
+CONTAINER_TOKENS = {360, 480, 620}
 
 # Documented exceptions, each tied to an open finding — REMOVE the entry when the
 # finding lands; the gate then enforces the token. Never add to this list without
