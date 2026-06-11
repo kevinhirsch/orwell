@@ -22,6 +22,7 @@ Boundaries:
   * Secrets never cross: the bundle redacts by key pattern BEFORE serialization.
 """
 
+import inspect
 import logging
 import os
 import re
@@ -114,10 +115,13 @@ def _store_stats() -> dict:
     return stats
 
 
-def _image_state(user: str | None) -> dict:
+async def _image_state(user: str | None) -> dict:
     """The image-generation provider state (0051): enabled? model? usable right now?
-    Best-effort — a broken resolver reads as available:false, never a 500."""
-    state: dict = {"enabled": False, "model": "", "quality": "", "available": False}
+    Plus (G20) `portraits: {total, present, missing}` — completeness over the ACTIVE
+    cast via the shared roster derivation, or None pre-game / engine down. Best-effort —
+    a broken resolver reads as available:false, never a 500."""
+    state: dict = {"enabled": False, "model": "", "quality": "", "available": False,
+                   "portraits": None}
     try:
         from src import orwell_portraits
         enabled, model_spec, quality = orwell_portraits._image_settings(user)
@@ -125,6 +129,11 @@ def _image_state(user: str | None) -> dict:
         state["available"] = bool(orwell_portraits.image_generation_available(user))
     except Exception as e:
         state["error"] = f"{type(e).__name__}: {e}"
+    try:
+        from src import orwell_portraits
+        state["portraits"] = await orwell_portraits.portrait_completeness(user)
+    except Exception:
+        state["portraits"] = None
     return state
 
 
@@ -156,12 +165,19 @@ async def _health_snapshot(user: str | None) -> dict:
         isinstance(fe_last, dict) and fe_last.get("kind") == "unreachable"
     )
 
+    # G20 made _image_state async (it awaits the engine's cast projection for the
+    # portrait completeness counter). isawaitable-tolerant on purpose: existing tests
+    # (and any future stub) may monkeypatch it with a plain sync callable.
+    images = _image_state(user)
+    if inspect.isawaitable(images):
+        images = await images
+
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "engine": engine,
         "frontend": frontend,
         "tiersAgree": tiers_agree,
-        "images": _image_state(user),
+        "images": images,
     }
 
 
@@ -348,7 +364,7 @@ function render(d) {
     ["Engine", B(!!eng.ok, eng.ok ? "REACHABLE" : "DOWN") + (eng.latencyMs != null ? " · " + esc(eng.latencyMs) + " ms" : "") + (eng.uptimeSeconds != null ? " · up " + esc(up(eng.uptimeSeconds)) : "") + (eng.error ? " · " + esc(eng.error) : "")],
     ["Tiers agree", B(!!d.tiersAgree, d.tiersAgree ? "YES" : "NO")],
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],
-    ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "")],
+    ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "") + (img.portraits && img.portraits.total ? " · portraits " + (img.portraits.missing ? '<span class="warn">' : '<span class="ok">') + esc(img.portraits.present) + "/" + esc(img.portraits.total) + "</span>" : "")],
     ["Tool calls", esc(tc.total ?? 0) + " total · " + esc(tc.failed ?? 0) + " failed"],
     ["Front-end store", esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
   ];

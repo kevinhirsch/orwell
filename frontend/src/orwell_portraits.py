@@ -51,6 +51,33 @@ PORTRAIT_LOG_MAX_ENTRIES = 100
 BACKFILL_DEBOUNCE_S = 10 * 60
 _LAST_BACKFILL_AT: dict = {}
 
+# ── G20 reconciler: verify-and-retry until the cast portrait set is complete ──────────────
+# The G9 backfill is LAZY (it fires only when someone views the roster) — if no model was
+# available when the cast moved in and nobody opens the panel, the set stays incomplete
+# forever. The reconciler is the autonomous half: one background task per process sweeps
+# every RECONCILE_INTERVAL_S over the users seen by the roster/portrait routes this
+# process-life, and for each with an active game AND a usable provider, retries the missing
+# set THROUGH the standard pipeline — under a per-houseguest budget (after a failed attempt
+# n it cools down ~2^n cycles; RECONCILE_MAX_ATTEMPTS real failures and the reconciler
+# stands down for that houseguest, leaving the lazy roster backfill + the manual lever).
+# Provider ABSENCE idles and never consumes the budget; absent→present resets all counters.
+RECONCILE_INTERVAL_S = 5 * 60
+RECONCILE_MAX_ATTEMPTS = 6
+# The budget sidecar, persisted next to the attempt log so a restart cannot forget how many
+# real attempts a houseguest already burned: {safeUser: {safeId: {attempts, cooldown}}}.
+RECONCILE_STATE_PATH = Path(DATA_DIR) / "portrait-reconcile.json"
+
+# Users seen by the roster/portrait read helpers this process (safe key → the raw identity
+# the routes asserted). The reconciler sweeps exactly these — per-user isolation holds; no
+# cross-user enumeration is invented.
+_SEEN_USERS: dict = {}
+# Per-user last-observed provider availability (the absent→present transition resets the
+# budget) and last-observed missing count — TRANSITION logging only (the A9 lesson: the
+# reconciler never logs a line per idle cycle).
+_PROVIDER_SEEN: dict = {}
+_LAST_MISSING: dict = {}
+_RECONCILER_TASK = None
+
 # The most recent _generate_one failure reason, consumed by the attempt logger. Module-level
 # is adequate: generate_and_store awaits each generation sequentially, and the log is
 # best-effort observability, never game state.
@@ -138,6 +165,18 @@ def _safe_user(user: Optional[str]) -> str:
     return u or "default"
 
 
+def note_user_seen(user: Optional[str]) -> None:
+    """Register `user` for the G20 reconciler sweep (first-seen identity wins).
+
+    Called from the per-user read helpers the roster/portrait routes already go through,
+    so the reconciler only ever works for users who actually touched those surfaces this
+    process. A pure dict write — it may never break a read path."""
+    try:
+        _SEEN_USERS.setdefault(_safe_user(user), user)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 def user_portrait_dir(user: Optional[str]) -> Path:
     """The per-user portrait directory (created lazily by callers that write)."""
     return PORTRAITS_DIR / _safe_user(user)
@@ -172,6 +211,7 @@ def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
     Verifies the file actually exists on disk (a manifest entry whose file was scrubbed
     must not produce a broken <img>). The ref is served by GET /api/orwell/portrait/{id}.
     """
+    note_user_seen(user)  # G20: a roster view enrolls this user in the reconciler sweep
     entry = load_manifest(user).get(_safe_id(houseguest_id))
     if not entry:
         return None
@@ -185,6 +225,7 @@ def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
 
 def portrait_file(user: Optional[str], houseguest_id: str) -> Optional[Path]:
     """The on-disk path for a stored portrait (for the serving route), or None."""
+    note_user_seen(user)  # G20: a portrait fetch enrolls this user in the reconciler sweep
     entry = load_manifest(user).get(_safe_id(houseguest_id))
     if not isinstance(entry, dict):
         return None
@@ -438,7 +479,11 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
 
 
 def missing_portrait_ids(user: Optional[str], roster_cards: list) -> list:
-    """Active houseguests (player included) on the roster with no stored portrait."""
+    """Active houseguests (player included) on the roster with no stored portrait.
+
+    THE one definition of "missing" — the roster's lazy backfill, the manual lever, the
+    G20 reconciler, and the completeness counters all derive from this helper."""
+    note_user_seen(user)  # G20: a missing-set read enrolls this user in the reconciler sweep
     out = []
     for card in roster_cards or []:
         if not isinstance(card, dict):
@@ -449,6 +494,40 @@ def missing_portrait_ids(user: Optional[str], roster_cards: list) -> list:
         if hid and portrait_file(user, hid) is None:
             out.append(str(hid))
     return out
+
+
+def completeness(user: Optional[str], roster_cards: list) -> dict:
+    """{total, present, missing} over the ACTIVE cast (player included) — G20 visibility.
+
+    `missing` comes straight from `missing_portrait_ids` (the one definition), so the
+    Health card, the /admin/status page, and the roster counter can never disagree with
+    what the backfill/reconciler would actually act on."""
+    active = [c for c in roster_cards or []
+              if isinstance(c, dict) and (c.get("status") or "active") == "active" and c.get("id")]
+    missing = missing_portrait_ids(user, roster_cards)
+    return {"total": len(active), "present": len(active) - len(missing), "missing": len(missing)}
+
+
+async def portrait_completeness(user: Optional[str]) -> Optional[dict]:
+    """{total, present, missing} for this user's active cast, or None pre-game/engine-down.
+
+    Fetches the same Vault-free public projection the roster route serves and derives the
+    cards with the SAME helper (`routes.orwell_routes._roster_cards`, imported lazily —
+    routes import this module at load, so the cycle only resolves at call time). Used by
+    the admin health surfaces (G20); best-effort — any failure reads as None, never a 500."""
+    from src import orwell_engine
+
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        return None
+    if not isinstance(state, dict) or state.get("started") is False:
+        return None
+    try:
+        from routes.orwell_routes import _roster_cards  # the one roster-card derivation (G9)
+        return completeness(user, _roster_cards(state, user))
+    except Exception:
+        return None
 
 
 def backfill_allowed(user: Optional[str]) -> bool:
@@ -522,6 +601,211 @@ def kickoff_backfill(missing_ids: list, user: Optional[str]) -> bool:
     return True
 
 
+# ── G20: the portrait reconciler (the autonomous verify-and-retry loop) ───────────────────
+
+
+def _load_reconcile_state() -> dict:
+    """The persisted budget sidecar: {safeUser: {safeId: {attempts, cooldown}}}."""
+    try:
+        with open(RECONCILE_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_reconcile_state(state: dict) -> None:
+    """Best-effort atomic write (mirrors the attempt log) — never breaks a sweep."""
+    try:
+        RECONCILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = RECONCILE_STATE_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, RECONCILE_STATE_PATH)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.info("[portraits] reconcile-state write failed: %s", e)
+
+
+def _clear_counters(safe_user: str) -> None:
+    """Drop one user's budget counters (fresh provider / complete set / new season)."""
+    sidecar = _load_reconcile_state()
+    if safe_user in sidecar:
+        sidecar.pop(safe_user, None)
+        _save_reconcile_state(sidecar)
+
+
+def _user_counters(sidecar: dict, safe_user: str) -> dict:
+    """One user's counters from the sidecar, shape-normalized (a tampered/corrupt file
+    must degrade to a fresh budget, never crash the sweep)."""
+    raw = sidecar.get(safe_user)
+    out: dict = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                try:
+                    out[str(k)] = {"attempts": int(v.get("attempts") or 0),
+                                   "cooldown": int(v.get("cooldown") or 0)}
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
+    """One user's verify-and-retry pass: {missing, attempted}, or None when idling.
+
+    The gates, cheapest first:
+      (a) an active game exists — engine state, fail-open (engine trouble = idle quietly);
+      (b) a provider is usable — ABSENCE idles and never consumes the retry budget; the
+          absent→present transition resets every counter (a fresh provider = a fresh budget,
+          because the burned attempts belonged to the old/missing one);
+      (c) missing = the roster route's own card derivation + `missing_portrait_ids` (the
+          shared helpers — never a second definition of "missing");
+      (d) the per-houseguest budget picks the eligible subset: after failed attempt n a
+          houseguest cools down ~2^n cycles; RECONCILE_MAX_ATTEMPTS real failures and the
+          reconciler stands down for it (the lazy roster backfill + manual lever remain);
+      (e) eligible ids retry THROUGH the standard pipeline (`backfill_missing`). Debounce
+          coordination is deliberate: the reconciler BYPASSES the lazy-path window *read*
+          — its per-houseguest budget is stricter and cycle-timed, and aliasing the 10-min
+          blanket window against the 5-min cycle would make backoff timing arbitrary — but
+          it WRITES the stamp, so a roster poll seconds after a reconciler attempt cannot
+          immediately re-hammer the same failing provider;
+      (f) outcomes: a landed portrait clears its counter (success resets); only a real
+          failed attempt consumes budget.
+
+    Logs TRANSITIONS only — started / complete / gave-up-per-budget / provider-appeared —
+    never a line per idle cycle (the A9 lesson)."""
+    from src import orwell_engine
+
+    safe = _safe_user(user)
+
+    # (a) an active game — cheap and fail-open.
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        return None
+    if not isinstance(state, dict) or state.get("started") is False:
+        return None
+
+    # (b) the provider gate — absence idles WITHOUT consuming the budget.
+    try:
+        available = bool(image_generation_available(user))
+    except Exception:
+        available = False
+    was_available = _PROVIDER_SEEN.get(safe)
+    _PROVIDER_SEEN[safe] = available
+    if not available:
+        return None
+    if was_available is False:
+        _clear_counters(safe)
+        logger.info("[portraits] reconciler: image provider available for %s — retry budget reset", safe)
+
+    # (c) what's missing — the SAME derivation the roster route serves.
+    from routes.orwell_routes import _roster_cards  # lazy: routes import this module at load
+
+    cards = _roster_cards(state, user)
+    missing = missing_portrait_ids(user, cards)
+    prev_missing = _LAST_MISSING.get(safe)
+    _LAST_MISSING[safe] = len(missing)
+    if not missing:
+        if prev_missing:
+            done = completeness(user, cards)
+            logger.info("[portraits] reconciler: portrait set complete for %s (%d/%d)",
+                        safe, done["present"], done["total"])
+        _clear_counters(safe)  # nothing to track when nothing is missing
+        return {"missing": 0, "attempted": 0}
+    if not prev_missing:
+        logger.info("[portraits] reconciler: %d portrait(s) missing for %s — verify-and-retry engaged",
+                    len(missing), safe)
+
+    # (d) the budget/backoff filter.
+    sidecar = _load_reconcile_state()
+    counters = _user_counters(sidecar, safe)
+    live_ids = {_safe_id(h) for h in missing}
+    counters = {k: v for k, v in counters.items() if k in live_ids}  # landed/departed: tidy
+    eligible = []
+    for hid in missing:
+        sid = _safe_id(hid)
+        entry = counters.get(sid) or {"attempts": 0, "cooldown": 0}
+        if entry["attempts"] >= RECONCILE_MAX_ATTEMPTS:
+            continue  # budget spent — the lazy/manual paths own this one now
+        if entry["cooldown"] > 0:
+            counters[sid] = {"attempts": entry["attempts"], "cooldown": entry["cooldown"] - 1}
+            continue
+        eligible.append(hid)
+    if not eligible:
+        sidecar[safe] = counters
+        _save_reconcile_state(sidecar)
+        return {"missing": len(missing), "attempted": 0}
+
+    # (e) retry through the standard pipeline; stamp the lazy-path debounce (see docstring).
+    _LAST_BACKFILL_AT[safe] = time.time()
+    await backfill_missing(list(eligible), user)
+
+    # (f) outcomes — success resets; a real failed attempt consumes one budget unit.
+    for hid in eligible:
+        sid = _safe_id(hid)
+        if portrait_file(user, hid) is not None:
+            counters.pop(sid, None)
+            continue
+        attempts = (counters.get(sid) or {"attempts": 0}).get("attempts", 0) + 1
+        counters[sid] = {"attempts": attempts, "cooldown": 2 ** attempts}
+        if attempts == RECONCILE_MAX_ATTEMPTS:
+            logger.info("[portraits] reconciler: gave up on %s for %s after %d failed attempts — "
+                        "the roster backfill and the manual lever still work", sid, safe, attempts)
+    sidecar[safe] = counters
+    _save_reconcile_state(sidecar)
+    return {"missing": len(missing), "attempted": len(eligible)}
+
+
+async def reconcile_once() -> dict:
+    """One sweep over every user seen this process: {safeUser: result-or-None}.
+
+    Exposed for tests; the loop calls it on the interval. One user's trouble never
+    starves another's pass (per-user isolation, like every other portrait surface)."""
+    results: dict = {}
+    for safe, raw in list(_SEEN_USERS.items()):
+        try:
+            results[safe] = await _reconcile_user(raw)
+        except Exception as e:
+            logger.info("[portraits] reconcile for %s failed: %s", safe, e)
+            results[safe] = None
+    return results
+
+
+async def _reconcile_loop() -> None:
+    """The per-process G20 loop: sleep first (nothing is registered at startup), then
+    sweep. A cycle error never kills the loop; cancellation passes through."""
+    while True:
+        await asyncio.sleep(RECONCILE_INTERVAL_S)
+        try:
+            await reconcile_once()
+        except asyncio.CancelledError:  # pragma: no cover - loop teardown
+            raise
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info("[portraits] reconcile sweep error: %s", e)
+
+
+def ensure_reconciler_started() -> bool:
+    """Start the reconcile loop on the running event loop (the app startup hook calls
+    this; idempotent). Returns True only when this call actually created the task —
+    a second start never double-runs (the single-task guard). A task whose loop died
+    (test harnesses / reloads) is replaced rather than wedging the guard forever."""
+    global _RECONCILER_TASK
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False  # no loop (sync caller) — the startup hook always has one
+    task = _RECONCILER_TASK
+    if task is not None and not task.done():
+        try:
+            if task.get_loop() is loop:
+                return False  # already running here
+        except Exception:  # pragma: no cover - defensive
+            pass
+    _RECONCILER_TASK = loop.create_task(_reconcile_loop())
+    return True
+
+
 def scrub_user(user: Optional[str]) -> None:
     """Delete one user's portrait set (used on a per-user new-season reset)."""
     import shutil
@@ -534,6 +818,10 @@ def scrub_user(user: Optional[str]) -> None:
         logger.info("[portraits] scrub_user(%s) failed: %s", _safe_user(user), e)
     # A new season may backfill immediately — the old debounce stamp shouldn't gate it.
     _LAST_BACKFILL_AT.pop(_safe_user(user), None)
+    # G20: a new season = a new cast — stale budget counters/trackers must not gate it.
+    _clear_counters(_safe_user(user))
+    _PROVIDER_SEEN.pop(_safe_user(user), None)
+    _LAST_MISSING.pop(_safe_user(user), None)
 
 
 def scrub_all() -> None:
@@ -545,3 +833,10 @@ def scrub_all() -> None:
             shutil.rmtree(PORTRAITS_DIR)
     except OSError as e:
         logger.info("[portraits] scrub_all failed: %s", e)
+    # G20: the budget sidecar and trackers describe casts that no longer exist.
+    try:
+        RECONCILE_STATE_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _PROVIDER_SEEN.clear()
+    _LAST_MISSING.clear()
