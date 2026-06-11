@@ -10,12 +10,23 @@
 // stat, relationship, or hidden element ever reaches this surface. ADR 0003: it AUGMENTS the chat
 // (a companion reference), never replaces an interaction; the game plays identically with no
 // portraits (the placeholder + name + status card). Fail-open everywhere.
+//
+// G22: portraits STREAM in. Generation is a server-side background job — faces land one by one
+// over several seconds — so the panel polls FAST while the roster reports a run in flight and
+// upgrades each card IN PLACE (keyed by roster id) the moment its face lands. The old shape
+// (a fixed 30s poll + a wholesale grid rebuild every tick) made the window feel dead: finished
+// portraits sat unseen for up to half a minute, then all popped at once while every already-
+// loaded image re-mounted (flicker).
 (function () {
   "use strict";
 
   const BTN_ID = "sidebar-cast-btn";
   const PANEL_ID = "orwell-cast";
+  // G22: adaptive poll cadence — FAST while a generation run is still landing portraits
+  // (the roster reports imagesAvailable with portraitsPresent < portraitsTotal), the idle
+  // cadence once the set is complete or no image provider is configured.
   const POLL_MS = 30000;
+  const FAST_POLL_MS = 3500;
 
   const ready = (fn) =>
     document.readyState === "loading"
@@ -23,18 +34,14 @@
       : fn();
 
   let _open = false;
-  let _timer = null;
+  let _timer = null;        // the ONE roster poll timer (a self-rescheduling setTimeout — G22)
+  let _pollDelay = POLL_MS; // recomputed from the freshest roster counters after every render
   let _imagesAvailable = false;
 
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
-  }
-
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
   // --- the sidebar button (standing chrome, game-gated) -------------------------
@@ -109,6 +116,13 @@
           display: flex; align-items: center; justify-content: center;
         }
         #orwell-cast .oc-portrait img { width: 100%; height: 100%; object-fit: cover; }
+        /* G22: a just-landed face fades in gently… */
+        @keyframes ocFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        #orwell-cast .oc-portrait img.oc-justin { animation: ocFadeIn .35s ease; }
+        /* …unless the player prefers reduced motion. */
+        @media (prefers-reduced-motion: reduce) {
+          #orwell-cast .oc-portrait img.oc-justin { animation: none; }
+        }
         #orwell-cast .oc-ph { font-size: 1.6rem; opacity: .45; }
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
@@ -147,7 +161,8 @@
       content,
       onClose: () => {
         _win = null; _open = false;
-        if (_timer) { clearInterval(_timer); _timer = null; }
+        if (_timer) { clearTimeout(_timer); _timer = null; }
+        _cards.clear(); // the kit tore the panel DOM down — drop the detached card nodes
       },
     });
     _win.open(document.getElementById(BTN_ID) || undefined);
@@ -197,6 +212,91 @@
     setTimeout(() => { btn.disabled = false; }, 5000);
   }
 
+  // --- G22: keyed, incremental render -------------------------------------------
+  // One card element per roster id, upserted in place across polls: a face that just
+  // landed fades into its OWN card and nothing else is touched — untouched cards (and
+  // their loaded <img> nodes) are never rebuilt, so nothing flickers or refetches.
+
+  const _cards = new Map(); // roster id → { el, holder, nameB, statusEl, name, status, portrait }
+
+  function cardKey(hg) {
+    // The roster route always sets a stable `id` (player → engine id or "player";
+    // NPC → engine id or name); the name fallback here is purely defensive.
+    const id = hg && hg.id != null && hg.id !== "" ? hg.id : (hg && hg.name);
+    return id == null ? "" : String(id);
+  }
+
+  function setPortrait(entry, url, justLanded) {
+    // Called ONLY on a real transition (placeholder→url, a changed url, url→gone):
+    // the same src is never re-assigned, so a loaded face never reloads.
+    entry.portrait = url || null;
+    entry.holder.textContent = "";
+    if (!url) {
+      const ph = document.createElement("span");
+      ph.className = "oc-ph";
+      ph.textContent = "👤";
+      entry.holder.appendChild(ph);
+      return;
+    }
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = entry.name;
+    if (justLanded) {
+      // The G22 arrival fade (reduced-motion guarded in the CSS above); drop the
+      // class once played so a later grid re-order can't replay it.
+      img.className = "oc-justin";
+      img.addEventListener("animationend", () => img.classList.remove("oc-justin"), { once: true });
+    }
+    // The placeholder fallback, as ever — and the entry forgets the url, so a
+    // transient miss (the file landing a beat after the manifest) heals next poll.
+    img.onerror = () => setPortrait(entry, null, false);
+    img.src = url;
+    entry.holder.appendChild(img);
+  }
+
+  function makeCard(hg) {
+    const out = hg.status && hg.status !== "active";
+    const card = document.createElement("div");
+    card.className = "oc-hg" + (out ? " oc-out" : "");
+    const holder = document.createElement("div");
+    holder.className = "oc-portrait";
+    const nameEl = document.createElement("div");
+    nameEl.className = "oc-name";
+    const nameB = document.createElement("b");
+    nameB.textContent = hg.name == null ? "" : String(hg.name);
+    nameEl.appendChild(nameB);
+    if (hg.isPlayer) nameEl.appendChild(document.createTextNode(" (you)"));
+    const statusEl = document.createElement("div");
+    statusEl.className = "oc-status";
+    statusEl.textContent = statusLabel(hg.status);
+    card.appendChild(holder);
+    card.appendChild(nameEl);
+    card.appendChild(statusEl);
+    const entry = {
+      el: card, holder, nameB, statusEl,
+      name: hg.name == null ? "" : String(hg.name),
+      status: hg.status || "active",
+      portrait: null,
+    };
+    // First paint of a brand-new card: no fade — the fade marks a portrait ARRIVING
+    // on a card the player is already looking at.
+    setPortrait(entry, hg.portrait || null, false);
+    return entry;
+  }
+
+  function updateCard(entry, hg) {
+    const status = hg.status || "active";
+    if (status !== entry.status) {
+      entry.status = status;
+      entry.el.classList.toggle("oc-out", !!(hg.status && hg.status !== "active"));
+      entry.statusEl.textContent = statusLabel(hg.status);
+    }
+    const name = hg.name == null ? "" : String(hg.name);
+    if (name !== entry.name) { entry.name = name; entry.nameB.textContent = name; }
+    const url = hg.portrait || null;
+    if (url !== entry.portrait) setPortrait(entry, url, !!url); // the stream moment
+  }
+
   function render(data) {
     const el = ensurePanel();
     const grid = el.querySelector("#oc-grid");
@@ -204,9 +304,20 @@
     const roster = (data && Array.isArray(data.roster)) ? data.roster : [];
     _imagesAvailable = !!(data && data.imagesAvailable);
 
-    grid.innerHTML = "";
+    // G22: the adaptive cadence reads the G20 counters — while a generation run is
+    // still landing portraits (provider configured + total > present), the next poll
+    // comes fast so each face shows up within a few seconds of being written.
+    const total = (data && typeof data.portraitsTotal === "number") ? data.portraitsTotal : null;
+    const present = (data && typeof data.portraitsPresent === "number") ? data.portraitsPresent : null;
+    const generating = _imagesAvailable && total != null && present != null && total > present;
+    _pollDelay = generating ? FAST_POLL_MS : POLL_MS;
+
     const actions = el.querySelector("#oc-actions");
     if (!roster.length) {
+      // The empty state (pre-season / a reset) — the ONLY path that empties the
+      // grid; a populated roster only ever upserts cards in place.
+      for (const entry of _cards.values()) entry.el.remove();
+      _cards.clear();
       empty.style.display = "";
       empty.textContent = "The cast hasn't moved in yet.";
       if (actions) actions.style.display = "none";
@@ -226,31 +337,39 @@
       // present, the rendered roster otherwise).
       if (_imagesAvailable && missing.length) {
         const note = el.querySelector("#oc-backfill-note");
-        const total = (data && typeof data.portraitsTotal === "number") ? data.portraitsTotal : null;
-        const present = (data && typeof data.portraitsPresent === "number") ? data.portraitsPresent : null;
         if (note) note.textContent = "Generating " + missing.length + " remaining…" +
           (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
       }
     }
 
-    // Active first (player flagged), then jury, then evicted — keeps the live house on top.
+    // Active first (player flagged), then jury, then evicted — keeps the live house
+    // on top. sort() is stable, so within a tier the server's order (player first)
+    // holds across polls: the grid order is keyed and deterministic.
     const order = { active: 0, jury: 1, evicted: 2 };
     const sorted = roster.slice().sort((a, b) =>
       (order[a.status] ?? 3) - (order[b.status] ?? 3));
 
+    // The keyed upsert: add new ids, upgrade changed cards in place, drop vanished
+    // ids (defensive), and keep the tier order by MOVING live nodes when it drifts —
+    // appendChild relocates an element without re-mounting it, so a loaded portrait
+    // never reloads.
+    const seen = new Set();
+    const desired = [];
     for (const hg of sorted) {
-      const card = document.createElement("div");
-      const out = hg.status && hg.status !== "active";
-      card.className = "oc-hg" + (out ? " oc-out" : "");
-      const portrait = hg.portrait
-        ? `<img src="${esc(hg.portrait)}" alt="${esc(hg.name)}" loading="lazy"
-              onerror="this.parentElement.innerHTML='<span class=&quot;oc-ph&quot;>👤</span>'">`
-        : `<span class="oc-ph">👤</span>`;
-      card.innerHTML = `
-        <div class="oc-portrait">${portrait}</div>
-        <div class="oc-name"><b>${esc(hg.name)}</b>${hg.isPlayer ? " (you)" : ""}</div>
-        <div class="oc-status">${esc(statusLabel(hg.status))}</div>`;
-      grid.appendChild(card);
+      const key = cardKey(hg);
+      if (!key || seen.has(key)) continue; // defensive: unkeyable / duplicate rows
+      seen.add(key);
+      let entry = _cards.get(key);
+      if (entry) updateCard(entry, hg);
+      else { entry = makeCard(hg); _cards.set(key, entry); }
+      desired.push(entry.el);
+    }
+    for (const [key, entry] of Array.from(_cards)) {
+      if (!seen.has(key)) { entry.el.remove(); _cards.delete(key); }
+    }
+    const current = Array.from(grid.children);
+    if (current.length !== desired.length || desired.some((node, i) => current[i] !== node)) {
+      for (const node of desired) grid.appendChild(node);
     }
   }
 
@@ -267,6 +386,23 @@
         el.querySelector("#oc-empty").textContent = "The cast list is offline right now.";
       }
     }
+  }
+
+  // G22: ONE self-rescheduling poll timer. The next delay is recomputed from the
+  // freshest roster (render() above) after each refresh — fast while portraits are
+  // landing, the idle cadence once the set is complete — and the timer is always
+  // cleared before it is re-armed, so cadence flips and re-entrant arms can never
+  // stack pollers. A hidden tab skips the fetch but keeps the loop alive for when
+  // the player returns; closing the panel stops it (onClose clears, and a cleared
+  // panel never re-arms).
+  function scheduleNextPoll() {
+    if (_timer) { clearTimeout(_timer); _timer = null; }
+    if (!_open) return;
+    _timer = setTimeout(async () => {
+      _timer = null;
+      if (_open && !document.hidden) await refreshRoster();
+      scheduleNextPoll();
+    }, _pollDelay);
   }
 
   function togglePanel(open) {
@@ -286,9 +422,8 @@
         el.style.display = "block";
         if (_win) { _win.restore(); _win.raise(); }
       }
-      refreshRoster();
-      if (_timer) clearInterval(_timer);
-      _timer = setInterval(() => { if (_open && !document.hidden) refreshRoster(); }, POLL_MS);
+      // G22: refresh now, then poll on the adaptive cadence that refresh computed.
+      refreshRoster().then(scheduleNextPoll);
     } else if (_win) {
       _win.close(); // kit close: fly-away, teardown, focus-return (onClose resets state)
     }
@@ -297,9 +432,14 @@
   // Seam for the headless gate (mirrors the other panels).
   window._orwellCastEnsure = () => { togglePanel(true); return true; };
 
-  // Public hooks (mirrors the other orwell panels): refresh on a game change.
-  window.orwellRefreshCast = () => { if (_open) refreshRoster(); };
-  window.addEventListener("orwell:gamechanged", () => { refreshGate(); if (_open) refreshRoster(); });
+  // Public hooks (mirrors the other orwell panels): refresh on a game change — and
+  // re-arm the poll so a cadence change (say, a fresh season that is generating its
+  // portraits) takes effect NOW, not at the old timer's next tick.
+  window.orwellRefreshCast = () => { if (_open) refreshRoster().then(scheduleNextPoll); };
+  window.addEventListener("orwell:gamechanged", () => {
+    refreshGate();
+    if (_open) refreshRoster().then(scheduleNextPoll);
+  });
 
   ready(() => {
     refreshGate();
