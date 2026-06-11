@@ -153,3 +153,14 @@ def test_smoke_exercises_wave3_for_real():
     smoke = _read("scripts", "browser_smoke.py")
     assert "F8: focus returns to the gear" in smoke
     assert "F11: Escape dismisses the focused decision card" in smoke
+
+
+# ── Lane G / G10 pins ─────────────────────────────────────────────────────
+
+def test_sourcepin_g10_cast_composes_the_kit():
+    js = _read("static", "js", "orwellCast.js")
+    assert "OrwellWindowKit.create(" in js           # the kit owns the chrome
+    assert "aria-modal" not in js                    # a reference panel, not a modal
+    assert "oc-close" not in js                      # bespoke close deleted (it never worked)
+    assert 'el.hidden' not in js                     # the [hidden]-vs-display:flex bug class is gone
+    assert '"Escape"' not in js                      # the kit arbiter owns Escape now

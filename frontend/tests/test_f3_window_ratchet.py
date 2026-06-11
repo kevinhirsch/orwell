@@ -65,9 +65,6 @@ GRANDFATHERED_ESCAPE = {
     "chatRenderer.js", "colorPicker.js", "modelPicker.js", "sessions.js",
     "settings.js", "slashAutocomplete.js", "emojiPicker.js",
     "keyboard-shortcuts.js",
-    # 0051's cast roster landed between the audit and this ratchet — the FIRST
-    # post-Lane-F kit-migration candidate (see the Lane F queue close-out).
-    "orwellCast.js",
 }
 
 # Geometry-persistence key minters (the census §2 set, kit-mediated or
