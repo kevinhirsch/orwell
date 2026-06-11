@@ -1,8 +1,10 @@
 # 0053 — Admin transcript retrieval (debug access, quiet)
 
-> **Status:** **Specced — not built** (spec authored 2026-06-10; implementation is a future
-> queue item). Front-end (Python) tier; when built it is **validated by frontend pytest**
-> (`frontend/tests/`) like 0029/0032 — **never** added to `cucumber.cjs`.
+> **Status:** **Built — FE pytest-validated** (2026-06-11). Front-end (Python) tier, validated
+> by frontend pytest (`frontend/tests/test_0053_admin_transcripts.py`) like 0029/0032 —
+> **never** added to `cucumber.cjs`. Implementation: `frontend/routes/admin_transcript_routes.py`
+> (the two `require_admin`-gated routes), the admin-only "Transcripts" row in
+> `frontend/static/index.html` (System panel) + its driver in `frontend/static/js/admin.js`.
 > **Executable spec:** [`0053-admin-transcripts.feature`](./0053-admin-transcripts.feature)
 > **Provenance:** product-owner **ruling #14** (2026-06-10): *"Admins can retrieve old chat
 > transcripts for debugging — quiet, not loudly exposed: an admin-gated API plus a small entry
@@ -87,3 +89,28 @@ and this feature touches neither).
 
 Every behavior above proven by frontend pytest; no engine change; no player-visible surface;
 read-only verified; the README index row flipped from "Specced — not built" to Done.
+
+## 7. As built (2026-06-11)
+
+- **API** — `frontend/routes/admin_transcript_routes.py`, registered in `app.py` right after the
+  admin-wipe routes, both behind `require_admin`:
+  - `GET /api/admin/transcripts` — lists sessions across all users (`id`, `owner`, `title`,
+    `created_at`, `updated_at`, `message_count`, `is_game_session`) with `?user=` / `?since=`
+    filters and `?limit=`/`?offset=` pagination (returns `{transcripts, total, limit, offset}`).
+  - `GET /api/admin/transcripts/{session_id}?format=json|md` — the full export. Every message
+    node carries `role`, `timestamp`, `content`, and (when present) `metadata` + top-level
+    `tool_calls` — the agent-thread tool-call nodes ride through verbatim. `role:"tool"` rows and
+    native `tool_calls` are the game-session marker.
+- **UI** — one admin-only `admin-card` ("Transcripts") in the System panel of Settings
+  (`static/index.html`), driven by `initTranscripts()` in `static/js/admin.js`: owner filter +
+  per-session JSON/MD download links. No nav surface; hidden for non-admins by the `.admin-only`
+  rule in `settings.js`. The copy carries the Diary-Room-inclusion caveat
+  (`#adm-transcripts-dr-caveat`).
+- **Boundaries** — read-only (no POST/PUT/PATCH/DELETE on the surface); transcripts live in the
+  front-end chat store (`sessions`/`chat_messages` in `app.db`), so they survive the game-only
+  reset (preserves the FE store) and die with the factory reset (scrubs it) by construction — no
+  reset-script change needed.
+- **Tests** — `frontend/tests/test_0053_admin_transcripts.py` (12 cases): admin-gating (non-admin
+  ⇒ 403, no disclosure) for both list and export; list shape + owner/since filters + pagination;
+  export shape in both formats including tool-call AND Diary-Room nodes; read-only (no mutating
+  verb, asserted at route + source level); the admin-only Settings row + the DR caveat in the copy.

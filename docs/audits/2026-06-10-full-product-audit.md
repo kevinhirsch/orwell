@@ -761,8 +761,11 @@ consequence.*
   `docs/features/0052-house-themes.{md,feature}` (FE pytest-validated, honest 0029-style
   header — not cucumber-gated).
 
-- **0053 (proposed) — Admin transcript retrieval** *(ruling #14, 2026-06-10: "Admin API +
-  settings entry")*. Debug access to any user's chat transcripts, invisible to players:
+- **0053 — Admin transcript retrieval** *(ruling #14, 2026-06-10: "Admin API + settings entry")*.
+  **✅ BUILT 2026-06-11 (Lane C, PR #223) — FE pytest-validated**
+  (`frontend/routes/admin_transcript_routes.py` + the admin-only Settings "Transcripts" row in
+  `static/index.html` / `static/js/admin.js`; gate `frontend/tests/test_0053_admin_transcripts.py`).
+  Debug access to any user's chat transcripts, invisible to players:
   - **API** (all behind the existing `require_admin` middleware, same pattern as
     `admin_wipe_routes.py` / `api_token_routes.py`): `GET /api/admin/transcripts` — list
     sessions across all users (session id, owner, title, created/updated, message count,
