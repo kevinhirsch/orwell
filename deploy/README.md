@@ -113,6 +113,15 @@ It resolves the engine save dir exactly the way the factory reset does (all thre
 generations), stops the services while it scrubs, and restarts them after. Use the **factory
 reset** instead when you also want accounts/settings gone (full OOBE).
 
+### The login health panel
+
+Entering the container (`pct enter`, ssh) greets you with a live one-glance panel — both
+units, both HTTP health probes, whether the tiers agree, the recall provider and model
+cache, save count, load/mem, and the play URL — installed automatically by
+install/update (`/usr/local/bin/orwell-panel`, hooked for interactive shells only). It is
+hard-bounded (1s probe timeouts, ~100ms typical) and can never block a login. Run it any
+time with `orwell-panel`.
+
 ### Doctor / bounce (when the game misbehaves)
 
 When the chat says **"the live feeds are down"**, the engine banner shows, or things just look

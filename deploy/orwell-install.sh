@@ -168,4 +168,16 @@ install -m 644 "${APP_DIR}/deploy/systemd/orwell-frontend.service" /etc/systemd/
 systemctl daemon-reload
 systemctl enable --now orwell-engine orwell-frontend
 
+# Login health panel (ruling #21, 2026-06-11): greet interactive container shells with live
+# health instead of a bare prompt. Time-bounded probes; guarded; can never block a login.
+install -m 0755 "${APP_DIR}/deploy/orwell-login-panel.sh" /usr/local/bin/orwell-panel
+if ! grep -qs 'orwell-panel' /etc/bash.bashrc; then
+  cat >> /etc/bash.bashrc <<'PANEL'
+
+# orwell login health panel (interactive shells only; guarded; never blocks)
+case $- in *i*) [ -z "${ORWELL_PANEL_SHOWN:-}" ] && export ORWELL_PANEL_SHOWN=1 && /usr/local/bin/orwell-panel 2>/dev/null || true ;; esac
+PANEL
+fi
+
+
 echo "==> orwell installed at ${APP_DIR} (data: ${DATA_DIR}). UI: http://0.0.0.0:${ORWELL_PORT}"
