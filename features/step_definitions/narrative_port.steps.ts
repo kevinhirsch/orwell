@@ -7,6 +7,7 @@ import { LlmNarrativePort, safeFallbackLine, type NarratorTransport } from "../.
 import { loadNarratorConfig } from "../../src/adapters/narrative/narratorConfig";
 import { resolveCompetition, CompetitionIntents } from "../../src/domain/competitionOutcome";
 import type { Competitor } from "../../src/domain/competitionOutcome";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { PLAYER, npc } from "../../src/domain/ids";
 
@@ -105,9 +106,19 @@ Then("re-reading the engine gives the same result", function (this: BbWorld) {
 });
 
 // --- Narration never changes an outcome ---------------------------------------
+// T5: re-pointed at a LIVE sandbox (was `decideWinner(11)`, a pure local function called twice —
+// proving only that a pure function is pure). Resolve a real competition through the LIVE
+// GameSessionAdapter, then let a HALLUCINATING narrator narrate it, and prove the live engine's
+// result AND its whole game state are unmoved: narration is text, never an outcome.
 
 Given("the engine has decided a competition result", function (this: BbWorld) {
-  this.engineWinnerBefore = decideWinner(11);
+  const game = new GameSessionAdapter();
+  game.createCharacter({ playerName: "Player One", seed: 11 });
+  this.liveCompGame = game;
+  this.liveCompResult = game.runCompetition({ type: "endurance" });
+  assert.ok(this.liveCompResult.winner, "the engine produced the winner the narrator must voice");
+  // The full Vault-free engine state right after the engine decided — narration must not move it.
+  this.liveStateBefore = JSON.stringify(game.getGameState());
 });
 
 When("the narrator produces narration for it", async function (this: BbWorld) {
@@ -126,12 +137,15 @@ When("the narrator produces narration for it", async function (this: BbWorld) {
 });
 
 Then("the engine's result is unchanged", function (this: BbWorld) {
-  assert.equal(decideWinner(11), this.engineWinnerBefore);
+  // Re-running the SAME live competition yields the same winner — the engine, not the prose, owns it.
+  const again = this.liveCompGame!.runCompetition({ type: "endurance" });
+  assert.deepEqual(again.winner, this.liveCompResult!.winner, "the live engine's competition winner is unmoved by narration");
 });
 
 Then("even a hallucinated result in the prose changes no game state", function (this: BbWorld) {
   assert.ok(this.narrationOut && this.narrationOut.length > 0); // the prose said something...
-  assert.equal(decideWinner(11), this.engineWinnerBefore); // ...the engine's seed-deterministic result is unmoved
+  // ...and the live engine's whole game state is byte-identical: the hallucination moved nothing.
+  assert.equal(JSON.stringify(this.liveCompGame!.getGameState()), this.liveStateBefore, "no game state changed");
 });
 
 // --- Provider and secrets come from config, never code ------------------------

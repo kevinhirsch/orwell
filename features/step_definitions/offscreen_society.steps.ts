@@ -154,8 +154,15 @@ Then("each houseguest's soul accumulates the off-screen scenes it lived", functi
 Then("a later recall can surface a specific past off-screen moment", function (this: BbWorld) {
   const core = this.osSandbox!.session.snapshot();
   const someone = core.house!.npcs.find((n) => n.soul.memory.length > 0)!;
-  const recalled = this.osSandbox!.engine.soul.recall(someone.id, someone.soul.memory[0]!, 1);
-  assert.ok(recalled.length >= 0); // the recall index answers (wired by 0041)
+  // Recall must genuinely RETURN the recorded off-screen content — not merely "answer" (T3). Query
+  // the soul index with a specific lived note and assert that exact past moment comes back.
+  const target = someone.soul.memory[0]!;
+  const recalled = this.osSandbox!.engine.soul.recall(someone.id, target, 3);
+  assert.ok(recalled.length >= 1, "the recall index surfaces at least one lived off-screen moment");
+  assert.ok(
+    recalled.some((m) => m.content === target),
+    "the specific off-screen note the houseguest lived is recallable by its own content",
+  );
 });
 
 Then("no previously recorded soul detail is lost", function (this: BbWorld) {
@@ -193,17 +200,31 @@ Then("their resulting societies are identical", function (this: BbWorld) {
 });
 
 Then("a long absence advances at most the configured number of ticks per wake", function (this: BbWorld) {
-  // The watcher's per-wake cap (0035) bounds TICKS — proven over the runtime with a fake clock.
+  // T11: the per-wake cap bounds TICKS, so assert the TICK COUNT directly — not a padded event
+  // bound. The old `grown <= 2*10` hid a ×10 fudge: one tick emits a VARIABLE number of scenes,
+  // so an event count can never pin the cap. Spy the orchestrator's `advance` to count the
+  // off-screen ticks the watcher actually fires in one wake, and assert it is EXACTLY the
+  // configured `maxOffscreenTicksPerWake` — no more (the cap), and (for a started, idle game)
+  // no fewer.
+  const MAX = 2;
   const clock = new FakeClock();
-  const rt = composeRuntime({ clock, watcher: { tickEveryMs: 1000, idleTickAfterMs: 1000, maxOffscreenTicksPerWake: 2, auditEveryMs: 0 } });
-  rt.registry.sandboxFor("os-cap").session.createCharacter({ playerName: "The Player", seed: 33 });
-  rt.orchestrator.touch("os-cap");
-  const before = rt.registry.sandboxFor("os-cap").engine.events.query().filter((e) => e.hidden).length;
-  rt.start();
+  const registry = new GameSessionRegistry();
+  const orch = new Orchestrator(registry, clock, { seed: 33 });
+  let offscreenTicks = 0;
+  const realAdvance = orch.advance.bind(orch);
+  orch.advance = (user, trigger, opts) => {
+    if (trigger === "offscreen-tick") offscreenTicks++;
+    return realAdvance(user, trigger, opts);
+  };
+  const watcher = new GameWatcher(registry, orch, clock, clock, {
+    tickEveryMs: 1000, idleTickAfterMs: 1000, maxOffscreenTicksPerWake: MAX, auditEveryMs: 0,
+  });
+  registry.sandboxFor("os-cap").session.createCharacter({ playerName: "The Player", seed: 33 });
+  orch.touch("os-cap");
+  watcher.start();
   clock.advance(1000); // ONE wake after a "long" absence
-  const grown = rt.registry.sandboxFor("os-cap").engine.events.query().filter((e) => e.hidden).length - before;
-  rt.stop();
-  assert.ok(grown <= 2 * 10, `bounded per wake (grew ${grown})`);
+  watcher.stop();
+  assert.equal(offscreenTicks, MAX, `the wake fires exactly maxOffscreenTicksPerWake ticks (was ${offscreenTicks})`);
 });
 
 // --- 0038 Scenario: Vault-free and isolated --------------------------------------------------
@@ -215,6 +236,15 @@ Given("two users each have their own idle game whose Vault holds hidden scheming
   const b = reg.sandboxFor("os-iso-b");
   a.session.createCharacter({ playerName: "The Player", seed: 44 });
   b.session.createCharacter({ playerName: "The Player", seed: 45 });
+  // T11: plant a UNIQUE hidden sentinel in each game's Vault + a houseguest's knowledge, so the
+  // Then can prove genuine content/knowledge cross-absence — a distinctive marker can't collide
+  // across stores the way generic templated scene text can.
+  this.osSentinelA = "ISO-SENTINEL-A-7f3";
+  this.osSentinelB = "ISO-SENTINEL-B-9k2";
+  a.engine.vault.writeHidden({ id: "iso:a", kind: "hidden-thread", content: `secret scheme ${this.osSentinelA}` });
+  b.engine.vault.writeHidden({ id: "iso:b", kind: "hidden-thread", content: `secret scheme ${this.osSentinelB}` });
+  a.engine.knowledge.seedBelief(npc(1), { content: `a houseguest knows ${this.osSentinelA}`, factId: "iso-fact-a" }, "witnessed");
+  b.engine.knowledge.seedBelief(npc(1), { content: `a houseguest knows ${this.osSentinelB}`, factId: "iso-fact-b" }, "witnessed");
   this.osRegistry = reg; this.osOrch = orch;
   this.osSandboxA = a; this.osSandbox = b;
   this.osUserA = "os-iso-a"; this.osUser = "os-iso-b";
@@ -237,16 +267,33 @@ Then("no player surface reveals a hidden scene or an opinion number", function (
 });
 
 Then("no off-screen activity carries one user's content into the other's game", function (this: BbWorld) {
-  // Structural isolation (0021): each sandbox is its own object graph — distinct stores, and no
-  // off-screen event instance of one user's game exists in the other's record.
-  assert.notEqual(this.osSandboxA!.engine.events, this.osSandbox!.engine.events);
-  assert.notEqual(this.osSandboxA!.engine.knowledge, this.osSandbox!.engine.knowledge);
-  const aOffscreen = new Set(
-    this.osSandboxA!.engine.events.query().filter((e) => e.id.startsWith("offscreen:")).map((e) => e.id),
-  );
-  for (const e of this.osSandbox!.engine.events.query().filter((x) => x.id.startsWith("offscreen:"))) {
-    assert.ok(!aOffscreen.has(e.id), "no shared off-screen event across users");
-  }
+  // T11: prove CONTENT/KNOWLEDGE cross-absence — that the absent party genuinely cannot ACCESS the
+  // other user's off-screen life — not merely disjoint id-sets (disjoint by construction). Each
+  // game planted a UNIQUE hidden sentinel in its Vault + a houseguest's knowledge (the Given);
+  // after both ran their off-screen society, that sentinel must be entirely unreachable from the
+  // other game — in its full event/knowledge record AND on its player surface.
+  const a = this.osSandboxA!; const b = this.osSandbox!;
+  assert.notEqual(a.engine.events, b.engine.events, "separate event stores (0021)");
+  assert.notEqual(a.engine.knowledge, b.engine.knowledge, "separate knowledge graphs (0021)");
+
+  const recordAndKnowledgeOf = (sb: typeof a): string => {
+    const core = sb.session.snapshot();
+    const ids = [core.house!.player.id, ...core.house!.npcs.map((n) => n.id)];
+    const known = ids.flatMap((id) => sb.engine.knowledge.knownTo(id).map((k) => `${k.content}|${k.originalContent ?? ""}`));
+    return JSON.stringify(sb.engine.events.query()) + "\n" + known.join("\n");
+  };
+  const surfaceOf = (sb: typeof a): string =>
+    JSON.stringify(sb.session.getGameState()) + "\n" + JSON.stringify(sb.player.getVisibleState());
+
+  // Each game holds its OWN sentinel in its hidden layer (sanity: the marker really is in A/B).
+  assert.ok(recordAndKnowledgeOf(a).includes(this.osSentinelA!), "user A holds its own hidden sentinel");
+  assert.ok(recordAndKnowledgeOf(b).includes(this.osSentinelB!), "user B holds its own hidden sentinel");
+
+  // ...and NEITHER game's record/knowledge nor player surface can reach the OTHER's sentinel.
+  const aReach = recordAndKnowledgeOf(a) + "\n" + surfaceOf(a);
+  const bReach = recordAndKnowledgeOf(b) + "\n" + surfaceOf(b);
+  assert.ok(!bReach.includes(this.osSentinelA!), "user A's hidden content/knowledge never reaches user B");
+  assert.ok(!aReach.includes(this.osSentinelB!), "user B's hidden content/knowledge never reaches user A");
 });
 
 // --- 0035 scenarios ----------------------------------------------------------------------------
@@ -261,9 +308,35 @@ Then("a watcher is instantiated over the session registry with a real-timer cloc
 });
 
 Then("it is started, and stops cleanly on shutdown", function (this: BbWorld) {
+  // T11: kill the vacuous `assert.ok(true)`. "Stops cleanly" means: after stop the watcher
+  // holds no live timer and a redundant stop is a harmless no-op (a dangling/double-cancel
+  // handle would throw). Drive it on a FAKE clock so we can prove no callback survives the
+  // stop — once stopped, advancing the clock past the cadence fires nothing more.
+  const clock = new FakeClock();
+  const registry = new GameSessionRegistry();
+  const orch = new Orchestrator(registry, clock, { seed: 9 });
+  let ticks = 0;
+  const realAdvance = orch.advance.bind(orch);
+  orch.advance = (user, trigger, opts) => {
+    if (trigger === "offscreen-tick") ticks++;
+    return realAdvance(user, trigger, opts);
+  };
+  const watcher = new GameWatcher(registry, orch, clock, clock, {
+    tickEveryMs: 1000, idleTickAfterMs: 1, maxOffscreenTicksPerWake: 1, auditEveryMs: 0,
+  });
+  registry.sandboxFor("os-stop").session.createCharacter({ playerName: "The Player", seed: 9 });
+  orch.touch("os-stop");
+  watcher.start();
+  clock.advance(1000); // one wake while running
+  const ranWhileLive = ticks;
+  assert.ok(ranWhileLive > 0, "the started watcher actually ticks");
+  watcher.stop();
+  clock.advance(10_000); // long after shutdown — a dangling timer would tick here
+  assert.equal(ticks, ranWhileLive, "no off-screen tick fires after a clean stop");
+  assert.doesNotThrow(() => watcher.stop(), "a redundant stop is a harmless no-op");
+  // The composed runtime's own start/stop must also be dangling-free (the suite hangs otherwise).
   this.osRuntime!.start();
-  this.osRuntime!.stop(); // no dangling timer (the suite would hang otherwise)
-  assert.ok(true);
+  this.osRuntime!.stop();
 });
 
 
@@ -275,6 +348,15 @@ Given("a started game left idle for a long stretch", function (this: BbWorld) {
   const rt = composeRuntime({ clock, watcher: { tickEveryMs: 1000, idleTickAfterMs: 1000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
   rt.registry.sandboxFor("os-long").session.createCharacter({ playerName: "The Player", seed: 5 });
   rt.orchestrator.touch("os-long");
+  // T11: spy the runtime's orchestrator so the Then can assert the TICK COUNT the watcher fires
+  // in one wake — not an event bound padded by a ×10 fudge.
+  const counter = { n: 0 };
+  const realAdvance = rt.orchestrator.advance.bind(rt.orchestrator);
+  rt.orchestrator.advance = (user, trigger, opts) => {
+    if (trigger === "offscreen-tick") counter.n++;
+    return realAdvance(user, trigger, opts);
+  };
+  this.osTickCount = counter;
   this.osRuntime2 = rt; this.osClock = clock;
 });
 
@@ -286,8 +368,12 @@ When("the watcher wakes", function (this: BbWorld) {
 });
 
 Then("it advances the game at most the configured number of off-screen ticks", function (this: BbWorld) {
+  // T11: assert the TICK COUNT directly. One wake fires exactly maxOffscreenTicksPerWake (3)
+  // off-screen ticks — the per-wake cap, proven on the count, never on a padded event total.
+  assert.equal(this.osTickCount!.n, 3, `one wake fires exactly maxOffscreenTicksPerWake ticks (was ${this.osTickCount!.n})`);
+  // And the souls genuinely deepened across those bounded ticks (the ticks did real work).
   const grown = this.osRuntime2!.registry.sandboxFor("os-long").engine.events.query().filter((e) => e.hidden).length - this.osHiddenBefore!;
-  assert.ok(grown <= 3 * 10, `at most maxOffscreenTicksPerWake ticks of events (grew ${grown})`);
+  assert.ok(grown > 0, "the bounded ticks produced real off-screen life");
 });
 
 Then("it does not fast-forward the season", function (this: BbWorld) {
@@ -304,13 +390,34 @@ Given("two users each have their own idle game", function (this: BbWorld) {
 
 
 Then("no off-screen advance carries one user's content into the other's game", function (this: BbWorld) {
+  // T11: prove CONTENT/KNOWLEDGE cross-absence (not just disjoint id-sets). The shared audit When
+  // planted a per-user MARKER then ran real off-screen ticks on both sandboxes. Assert: (a) each
+  // user's distinctive marker stays home and never reaches the other; (b) no knowledge fact crosses
+  // between the two games' knowledge graphs. (We don't string-compare generic templated scene text
+  // across stores — it shares the npc:1..15 id space and can collide by coincidence, which is
+  // template reuse, not a leak; the marker + knowledge checks are the real access guarantees.)
   const a = this.registry!.sandboxFor("user-a");
   const b = this.registry!.sandboxFor("user-b");
   assert.notEqual(a.engine.events, b.engine.events, "separate object graphs (0021)");
-  const aEventIds = new Set(a.engine.events.query().filter((e) => e.id.startsWith("offscreen:")).map((e) => e.id));
-  for (const e of b.engine.events.query().filter((x) => x.id.startsWith("offscreen:"))) {
-    assert.ok(!aEventIds.has(e.id), "no shared off-screen event instances across users");
-  }
+  assert.notEqual(a.engine.knowledge, b.engine.knowledge, "separate knowledge graphs (0021)");
+
+  const recordOf = (sb: typeof a): string => {
+    const core = sb.session.snapshot();
+    const ids = [core.house!.player.id, ...core.house!.npcs.map((n) => n.id)];
+    const known = ids.flatMap((id) => sb.engine.knowledge.knownTo(id).map((k) => k.content));
+    return JSON.stringify(sb.engine.events.query()) + "\n" + known.join("\n");
+  };
+  const aRecord = recordOf(a); const bRecord = recordOf(b);
+
+  // The distinctive per-user markers (event content AND, by the recordOf, any knowledge derived
+  // from them) stay home — neither user's unique marker is reachable from the other's full record.
+  assert.ok(aRecord.includes("MARKER-A-7f3") && !aRecord.includes("MARKER-B-9k2"), "user A keeps only its own content");
+  assert.ok(bRecord.includes("MARKER-B-9k2") && !bRecord.includes("MARKER-A-7f3"), "user B keeps only its own content");
+  // And neither marker leaks onto the OTHER user's player surface either.
+  const surfaceOf = (sb: typeof a): string =>
+    JSON.stringify(sb.session.getGameState()) + "\n" + JSON.stringify(sb.player.getVisibleState());
+  assert.ok(!surfaceOf(b).includes("MARKER-A-7f3"), "user A's content never surfaces in user B");
+  assert.ok(!surfaceOf(a).includes("MARKER-B-9k2"), "user B's content never surfaces in user A");
 });
 
 Given("the watcher cadence is configured to zero", function (this: BbWorld) {

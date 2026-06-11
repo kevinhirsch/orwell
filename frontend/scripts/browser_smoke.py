@@ -300,6 +300,31 @@ def main() -> int:
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
 
+            # T20: the social HUD's minimize-to-dock BEHAVIOR (the source-pins in
+            # tests/test_orwell_huds.py only prove the wiring is present — this proves it WORKS in
+            # the browser). Mount the panel, click its minimize control, and assert the panel hides
+            # AND a dock chip for it appears in the shared "Windows" dock; then restore via the chip
+            # and assert the panel returns. A regression that drops the dock wiring (reverting to an
+            # in-place collapse, or losing the chip) fails here, not just at the source grep.
+            page.evaluate("window._orwellSocialEnsure && window._orwellSocialEnsure()")
+            page.wait_for_selector("#orwell-social", timeout=3000)
+            check(page.evaluate("getComputedStyle(document.getElementById('orwell-social')).display !== 'none'") is True,
+                  "social HUD: mounts visible")
+            page.evaluate("document.querySelector('#orwell-social .osoc-min').click()")
+            page.wait_for_timeout(200)  # let the dock re-render
+            min_state = page.evaluate("""() => {
+              const el = document.getElementById('orwell-social');
+              const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]');
+              return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip };
+            }""")
+            check(min_state.get("hidden") is True, f"social HUD: minimize HIDES the panel ({min_state})")
+            check(min_state.get("chip") is True, f"social HUD: minimize parks a chip in the shared dock ({min_state})")
+            page.evaluate("document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id=\"orwell-social\"]').click()")
+            page.wait_for_timeout(200)
+            restored = page.evaluate(
+                "(function(){var e=document.getElementById('orwell-social');return !!e && getComputedStyle(e).display!=='none';})()")
+            check(restored is True, "social HUD: restoring from the dock chip re-opens the panel")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
@@ -354,6 +379,39 @@ def main() -> int:
             }""")
             check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
             check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
+
+            # E89 belt: even if the engine FAILS OPEN and hands the UI approaches before the first
+            # ceremony resolves, the FE renders NO chip. We drive the belt CLOSED and feed it two
+            # approaches; the strip must stay empty.
+            belt = mob.evaluate("""() => {
+              if (!window._orwellSocialDriveApproaches) return { ok: false };
+              const early = window._orwellSocialDriveApproaches(false, [
+                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
+                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
+              ]);
+              // The belt helper itself: the premiere HOH competition reads pre-ceremony.
+              const preHoh = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'hoh-competition' });
+              const postNoms = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'nominations' });
+              return { ok: true, earlyCount: early.count, preHoh, postNoms };
+            }""")
+            check(belt.get("ok") is True, "social belt: the test seam is present")
+            check(belt.get("earlyCount") == 0, f"E89: no chip renders on engine fail-open before the first ceremony ({belt})")
+            check(belt.get("preHoh") is False, "E89: the premiere HOH competition reads pre-ceremony")
+            check(belt.get("postNoms") is True, "E89: the first nominations beat opens the belt")
+
+            # E60: once the belt is OPEN, bond vs probe render DISTINCT, motive-tagged chips.
+            motive = mob.evaluate("""() => {
+              const r = window._orwellSocialDriveApproaches(true, [
+                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
+                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
+              ]);
+              return r;
+            }""")
+            check(motive.get("count") == 2, f"E60: both approaches render once the belt opens ({motive})")
+            check(motive.get("motives") == ["bond", "probe"], f"E60: chips are tagged by motive ({motive})")
+            classes = motive.get("classes") or []
+            check(len(set(classes)) == 2 and None not in classes,
+                  f"E60: bond and probe carry DISTINCT framing classes ({motive})")
             mob.close()
 
             browser.close()

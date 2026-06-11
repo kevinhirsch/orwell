@@ -421,7 +421,7 @@ consequence.*
   `conversation.ts:50`, `TEMPERATURE_JITTER`, `chooseStrongestBond` default). *Fix:* wire each
   weight to its subsystem or delete the struct. *Test:* changing `variableWeights.initiative`
   changes approach-ordering variance.
-- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`; vetoSave/juryLean consumption is a 2-line post-merge follow-up) — ADR 0002's `reliability` signal was never built** — trust is pure
+- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`) · ✅ PR #224 (the vetoSave + juryLean consumption tail: `chooseVetoSave` ranks the save by demonstrated loyalty, and a centered reliability term weighted by `JURY_WEIGHTS.reliability` shifts the juror's lean) — ADR 0002's `reliability` signal was never built** — trust is pure
   sentiment, never evidence; with E43, demonstrated loyalty has no representation. *Fix:* add
   `reliability` fed by protective votes/honored deals/veto saves; consume in `vetoSave`,
   `bondStrength`, `juryLean`.
@@ -441,7 +441,7 @@ consequence.*
   (12 hidden scenes, 4 reshuffles, 4 rumors/confessionals), force-marching the house and
   flooding the record. *Fix:* debounce to the turn boundary. *Test:*
   `recordInteraction+diaryRoom+advanceGame` ⇒ exactly one `offscreen-tick`.
-- **E58 [MED · Improvement] ✅ PR #213 — The daily-event invariant is satisfied by a verbatim filler event,
+- **E58 [MED · Improvement] ✅ PR #213 (varied state-derived house events) · ✅ PR #224 (the day index: `PublicGameStatus.day = dayOfWeek(phase)`, hoh=1…eviction=5, surfaced on `gameStatus`) — The daily-event invariant is satisfied by a verbatim filler event,
   and in-game days don't exist in the live game.** `orchestrator.ts:405–416` ("A house meeting
   shifts the week.", repeated, player-witnessed, pollutes THE RECORD re-entry facts);
   `schedule.ts` has no production callers; no day index on any view. *Fix:* derive day from the
@@ -450,7 +450,7 @@ consequence.*
 - **E59 [LOW · Change] `relationshipLabel` is a fixed 3-label taxonomy** (`relationships.ts:43–55`)
   vs. ADR 0002's organic vocabulary; `npcVoice` ships a stance for every living pair each call.
   *Fix:* disposition-framed phrase set; top-k stances (pairs with E11).
-- **E60 [LOW · Change] ✅ PR #213 — `socialInitiatives` ships the exact canned string ADR 0003 names as a
+- **E60 [LOW · Change] ✅ PR #213 (engine ships the `bond | probe` motive) · ✅ PR #224 (FE: the approach chip varies copy + class + tooltip by the motive enum) — `socialInitiatives` ships the exact canned string ADR 0003 names as a
   smell** (`pretext: "wants a word with you"`, `GameSessionAdapter.ts:454`) while discarding the
   computed drive. *Fix:* coarse categorical motive (`bond | probe`), never the number.
 - **E61 [LOW · Improvement] Exact ties resolve by array position, not seed** (`liveSeason.ts:400`,
@@ -548,7 +548,7 @@ consequence.*
   `window._orwellOpenDiaryRoom` seam re-pointed at the composer mode. *Note:* with E64 (status
   HUD) and this, R4's Diary-trigger occlusion becomes unreachable and D2 shrinks to the
   presence strip + retrospective panel.
-- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate; the FE started-gate belt already existed) — NPC approaches must not fire at the very start of the game.**
+- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate) · ✅ PR #224 (the dedicated FE belt: `firstCeremonyResolved` suppresses every chip pre-first-ceremony, holding even if the engine fails open — browser-smoke proven) — NPC approaches must not fire at the very start of the game.**
   `orwellSocial.js` gates only on `st.started` (`:6, :409`), and engine-side `socialInitiatives`
   ranks approaches from move-in — so "___ wants a word with you" can pop before the player has
   had a single unprompted beat in the house. *Ruling:* the approach surface may stay a window,
@@ -984,7 +984,7 @@ traceability; E-batch cross-references inline.
 - **C7 [MED] ✅ PR #217 —** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
   elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
   replays a season whose secrets they know).
-- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization; overwrite flag deferred) — Casting intake: no length caps, exact-string note dedupe only, scalars
+- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization) · ✅ PR #224 (the overwrite flag: `updateCasting` surfaces `overwrote: [...]` so the producer confirms a scalar replacement rather than silently clobbering) — Casting intake: no length caps, exact-string note dedupe only, scalars
   silently overwritable by any later `updateCasting`, and every captured value is echoed
   verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
   `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
@@ -1041,25 +1041,40 @@ proven only on a fixture:
   (`eviction_night.steps.ts:91–101`); the "no pre-reveal tally/unread vote" Then guards
   itself behind an `if` that can skip all assertions. Replacement: electorate-derived bounds
   + mid-stage surface sweeps. (The engine-side twin of E12.)
-- **T3/T4 [MED]** `assert.ok(recalled.length >= 0)` (offscreen recall) and `assert.ok(true)`
-  (CHARACTER-unchanged) — direct replacements specced.
-- **T5/T6 [MED]** "Narration can't change outcomes" proven against a pure local function
-  called twice; "narrator cannot advance the game" proven against a hand-built constant —
+- **T3/T4 [MED] ✅ PR #225** `assert.ok(recalled.length >= 0)` (offscreen recall) and
+  `assert.ok(true)` (CHARACTER-unchanged) — direct replacements specced. *Shipped:* T3 asserts
+  recall RETURNS the specific recorded off-screen note; T4 captures a real generated houseguest's
+  static Character bytes at premiere and asserts byte-stability across a season of soul-deepening.
+  Both mutation-verified.
+- **T5/T6 [MED] ✅ PR #225** "Narration can't change outcomes" proven against a pure local
+  function called twice; "narrator cannot advance the game" proven against a hand-built constant —
   both re-pointed at live sandboxes (the house-presence lingering steps are the pattern).
-- **T7 [MED]** The 0019 agent-play-loop gate asserts world slots nothing writes, accepts any
-  winner (`typeof winner.name === "string"`), and its fixture omits the relationship model —
-  the fold it "verifies" is impossible there. Re-point at the live seam (B55 pattern).
+  *Shipped:* T5 → a live `GameSessionAdapter` competition + hallucinating narrator (winner re-runs
+  identical, whole live state byte-identical); T6 → a live season at its real nomination beat
+  (live phase + pending unmoved by building the narrator prompt). Both mutation-verified.
+- **T7 [MED] ✅ PR #225** The 0019 agent-play-loop gate asserts world slots nothing writes, accepts
+  any winner (`typeof winner.name === "string"`), and its fixture omits the relationship model —
+  the fold it "verifies" is impossible there. Re-point at the live seam (B55 pattern). *Shipped:*
+  the engine winner is a real roster member that re-runs identical, and recording the result FOLDS
+  a real hidden consequence with a relationship model wired in. Mutation-verified (disable the fold
+  ⇒ red).
 - **T8 [MED]** Reserve-twist scenarios pre-filter to exactly-one-fired seeds then assert
   ≤1 fired; the witnessed-reveal step records the event itself then asserts it. Un-filtered
   seed loops + a second live twist-kind trace specced.
 - **T9 [MED]** Emergent-bloc steps re-write bloc edges to 0.95 every tick (overwriting live
   folds) and never compute the "more than chance" baseline; the temporal "sooner" claim is a
   single static call. Matched-seed lift test specced.
-- **T10 [LOW]** `readsVault === false` asserts a literal type — decorative (dep-cruiser is
-  the real proof).
-- **T11 [MED]** Off-screen isolation Thens prove disjoint id-sets that are disjoint by
+- **T10 [LOW] ✅ PR #225** `readsVault === false` asserts a literal type — decorative (dep-cruiser
+  is the real proof). *Shipped (with PR #221's step hardening):* the decorative assert now carries
+  a comment pointing at the dependency-cruiser proof AND a live-server behavioral assertion (the
+  channel serves exactly its static allowlist by name). Verified + stamped.
+- **T11 [MED] ✅ PR #225** Off-screen isolation Thens prove disjoint id-sets that are disjoint by
   construction (no content/knowledge cross-leak check); the per-wake cap hides a ×10 fudge;
-  one Then ends `assert.ok(true)`.
+  one Then ends `assert.ok(true)`. *Shipped:* the per-wake cap now asserts the TICK COUNT via an
+  `advance` spy (the ×10 fudge is gone); the isolation Thens plant unique per-user sentinels and
+  assert genuine content/knowledge cross-absence (record + knowledge + player surface); the
+  `assert.ok(true)` watcher-stop step now asserts no-dangling-timer + idempotent stop. Cap and
+  isolation both mutation-verified.
 - **T12 [MED]** Live-progression determinism asserts only final week/phase after 60 advances
   — two diverged games typically still agree; compare full event trails (the
   strategic_decisions pattern).
@@ -1076,12 +1091,18 @@ proven only on a fixture:
   orchestrator "same clock ticks" When is an empty step.
 - **T18 [LOW]** fast-check is used in 1 of 11 "property" files; the fixed-seed loops are
   mostly adequate — fix the lane description (CLAUDE.md overstates).
-- **T19 [MED · FE]** `test_c12_finale_relay.py` hand-mirrors the engine decision kinds — the
-  exact drift class C12 exists to kill; parse them from `GameSession.ts` like c13 does.
-- **T20 [MED · FE]** Source-grep tests (`"modalManager.register(" in src`) counted as behavior
-  coverage. Plus the ten most important untested FE behaviors, led by: **deleting `user=`
-  from any orwell route passes all 244 FE tests** (identity propagation never asserted — the
-  test-side twin of E29).
+- **T19 [MED · FE] ✅ PR #225** `test_c12_finale_relay.py` hand-mirrors the engine decision kinds —
+  the exact drift class C12 exists to kill; parse them from `GameSession.ts` like c13 does.
+  *Shipped (with PR #221):* the FE decision-kind list is parsed live from `src/ports/GameSession.ts`
+  via `_engine_decision_kinds()` (the c13 cross-language manifest-parser pattern) with a sanity
+  floor + duplicate guard. Verified + stamped.
+- **T20 [MED · FE] ✅ PR #225** Source-grep tests (`"modalManager.register(" in src`) counted as
+  behavior coverage. *Shipped:* `scripts/browser_smoke.py` gains a real social-HUD minimize-to-dock
+  BEHAVIOR check (minimize hides the panel + parks a dock chip; restoring from the chip re-opens
+  it); `tests/test_orwell_huds.py` source-greps are explicitly re-labeled as SOURCE-PINS
+  (`test_sourcepin_*`, docstring + per-test pointers to the browser-smoke behavior coverage) so
+  they read as wiring-present pins, not behavior coverage. *(The broader untested-FE-behaviors set
+  — identity propagation / `user=` deletion etc. — belongs to the FE waves, not this T-item.)*
 - *Patterns to preserve:* liveSentinel's self-auditing sweep, liveFairness' exchangeability
   band, jury_choreography's manner-share A/B, the B53 live twist trace, house_presence's
   per-tick invariants, the c13 cross-language manifest parser, the UAT's anomaly-model design.
@@ -1535,3 +1556,60 @@ local git remote (proves the credential helper path); a deploy-lint test asserti
 line); the existing secrets guard already covers "no token literal committed" — extend its
 scope per E78 so a pasted PAT in any tracked file fails CI; factory-reset test asserts
 `GIT_TOKEN` survives the scrub (it lives in the preserved `.env`).
+
+---
+
+# Campaign close-out ledger (2026-06-10, end of the parallel phase)
+
+The implementer's honest accounting, verified by the Audit Manager against final main where
+cheap to do so. This section is the authoritative open-items list going forward.
+
+## A — Findings never reached (no code, no PR)
+- **T3–T7, T10, T11, T19, T20** — nine T-stream test-integrity repairs (Lane 10 lost two
+  agents mid-work; only artifact-verified items shipped: T8/T9/T12/T15–T17). Open.
+- **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter. Lane 11 took the
+  honest path: ADR 0004 amended to "Accepted — adapter not yet built." Engine souls run on
+  the deterministic fake at runtime. Open (now truthfully documented).
+
+## B — Cross-lane tails that fell through (each verified absent on main)
+1. **E54 tail** — `reliability` is built, fed, and consumed by `bondStrength`, but
+   `vetoSave` and `juryLean` still don't read it (verified: zero hits in `liveSeason.ts`/
+   `jury.ts`).
+2. **E58 tail** — `dayOfWeek()` exists and feeds the prompt; `GameStatusView` never got the
+   `day` field (verified: absent from the port).
+3. **CLAUDE.md ruling-#1 wording** — the do-not at `CLAUDE.md:248` still reads "Don't
+   hard-code any … name" instead of the amended "no fixed cast" formulation (verified).
+   Documentation drift only — the ruling and the amended 0004 spec are authoritative.
+4. **C8's third sub-item** — the casting overwrite flag (surface when a later
+   `updateCasting` replaces a captured scalar). Scoped out as a casting-UX contract change;
+   unowned.
+5. **E60/E89 FE tail** — richer approach-chip variety/timing treatment beyond the shipped
+   motive fail-open mapping (the owning lane was repurposed to calibration).
+*Disposition: items 1–5 batch into one "cross-lane tails" PR with proving tests (~1 hr).*
+
+## C — Done differently than specced (deliberate, ruled)
+- **The calibration measurement** runs 20 seeds × one active variant (compete +
+  self-saving veto) as a permanent deterministic gate; the round-4 62-seed protocol and the
+  never-use-veto variant were not re-measured (the dead agent's runs died with it).
+- **The E33 ceiling (ruling):** passive jury-reach stays high (19/20) as emergent realism;
+  "purge the floater" house behavior was explicitly NOT built. Passive players coast to
+  Final 2 in ~half of seasons and lose there. **Revisit after real playtesting** — this is
+  the largest open game-feel question.
+- **`bondKeepWeight`** retained on realism grounds despite not moving the gate (ruled).
+
+## D — Pre-existing deferrals, untouched (never campaign scope)
+0022 (player-experience MVP-2) · 0010's container smoke on a real Proxmox host — which
+means **the A4 single-PAT deploy design has never been verified on a real deployed box**,
+only via simulated smoke probes; verify it during the private-repo flip · the real
+relational adapters (SQLite/Postgres, sqlite-vec/pgvector) · full MCP/JSON-RPC over the
+HTTP transport · the specced-not-built 0051 (in-character images) and 0053 (admin
+transcripts).
+
+## The remaining work, in dispatch order
+1. **The cross-lane tails PR** (B1–B5; one PR, proving tests included).
+2. **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20 — independent step/test files,
+   fan out freely).
+3. **0053 admin transcripts** (ruling #14 — the user wants this) and **0051** when ready.
+4. **E86(a)** fastembed adapter, or leave honestly deferred.
+5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
+6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
