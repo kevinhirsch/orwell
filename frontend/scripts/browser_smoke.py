@@ -128,9 +128,20 @@ def main() -> int:
               return !/compare mode|web search and code/i.test(t);
             }""")
             check(tip_ok is True, "welcome tip never names a dropped vertical")
-            # Clear the holding card so later sections (settings, modals) aren't behind inert.
-            page.evaluate("const h = document.getElementById('orwell-onboarding'); if (h) h.remove();"
-                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+            # No-trap invariant: a blocking holding card must be escapable by a REAL user
+            # action (this smoke once force-removed it via JS to proceed — the same deadlock
+            # a real operator hit on a fresh install). Dismiss it like a person would.
+            has_out = page.evaluate(
+                "!!document.querySelector('#orwell-onboarding [data-ob-dismiss]')")
+            check(has_out is True, "holding card carries an explicit way out (dismiss button)")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+            escaped = page.evaluate("""() => ({
+              gone: !document.getElementById('orwell-onboarding'),
+              inertLeft: document.querySelectorAll('[inert]').length
+            })""")
+            check(escaped.get("gone") is True, "Escape dismisses the holding card")
+            check(escaped.get("inertLeft") == 0, "dismissal un-inerts the page behind it")
 
             # 0050: character creation lives in the CHAT — onboarding never mounts a
             # data-entry form (the holding card is the only modal, and it has no inputs).
@@ -141,8 +152,15 @@ def main() -> int:
               return el.querySelectorAll('input, select, textarea, form').length === 0;
             }""")
             check(no_form is True, "onboarding mounts NO data-entry form (the interview owns intake)")
-            page.evaluate("document.getElementById('orwell-onboarding').remove();"
-                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+            # Dismiss via the card's own button (the second real way out, alongside Escape).
+            page.click("#orwell-onboarding [data-ob-dismiss]")
+            page.wait_for_timeout(200)
+            btn_out = page.evaluate("""() => ({
+              gone: !document.getElementById('orwell-onboarding'),
+              inertLeft: document.querySelectorAll('[inert]').length
+            })""")
+            check(btn_out.get("gone") is True, "dismiss button removes the holding card")
+            check(btn_out.get("inertLeft") == 0, "no inert residue after button dismissal")
 
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {

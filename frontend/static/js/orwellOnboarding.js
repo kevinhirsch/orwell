@@ -60,6 +60,17 @@
         }
         #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
         #orwell-onboarding .ob-hold .ob-hold-sub { opacity: .7; font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
+        #orwell-onboarding .ob-hold-actions { display: flex; gap: .6rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
+        #orwell-onboarding .ob-btn {
+          font: inherit; font-size: .82rem; padding: .45rem .9rem; border-radius: 8px; cursor: pointer;
+          background: transparent; color: var(--fg, #9cdef2);
+          border: 1px solid var(--border, #355a66);
+        }
+        #orwell-onboarding .ob-btn:hover { border-color: var(--fg, #9cdef2); }
+        #orwell-onboarding .ob-btn-primary {
+          background: var(--brand-color, var(--red, #e06c75)); color: var(--bg, #111);
+          border-color: transparent; font-weight: 600;
+        }
       </style>
       <div class="ob-card"></div>`;
     return el;
@@ -94,7 +105,15 @@
   // F5/J4: a blocking production notice — the only modal left in onboarding (it carries
   // no data entry; it blocks because the game genuinely cannot proceed). Re-probes
   // quietly and dissolves back into the flow the moment the blocker clears.
-  function mountHolding(title, sub, readyAgain) {
+  //
+  // A blocking notice must never be a TRAP: the page behind it is inert, so any remedy the
+  // card's copy names must be operable FROM the card, and there is always an explicit way
+  // out (a dismiss button + Escape). The J4 card once told the admin "Open Settings" while
+  // inerting the Settings button — a real operator was deadlocked on a fresh install with
+  // no model configured. The way out is one-shot per mount: dismissing stops the re-probe
+  // and stays dismissed until the next page load (route() runs on load only), so an
+  // operator mid-configuration is never re-blocked by the poller.
+  function mountHolding(title, sub, readyAgain, actions) {
     if (document.getElementById("orwell-onboarding")) return;
     const el = buildOverlay();
     const card = el.querySelector(".ob-card");
@@ -103,21 +122,52 @@
       <div class="ob-hold">
         <h1>${title}</h1>
         <p class="ob-hold-sub">${sub}</p>
+        <div class="ob-hold-actions"></div>
       </div>`;
+    let timer = null;
+    const dismiss = () => {
+      if (timer) clearInterval(timer);
+      uninertBackground();
+      el.remove();
+    };
+    const row = card.querySelector(".ob-hold-actions");
+    (actions || []).forEach((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ob-btn" + (a.primary ? " ob-btn-primary" : "");
+      b.textContent = a.label;
+      // Dismiss FIRST: the action's target (e.g. the Settings modal) must not open behind
+      // the overlay's inert wall.
+      b.addEventListener("click", () => { dismiss(); try { a.onClick && a.onClick(); } catch (_) {} });
+      row.appendChild(b);
+    });
+    const d = document.createElement("button");
+    d.type = "button";
+    d.className = "ob-btn";
+    d.setAttribute("data-ob-dismiss", "");
+    d.textContent = "Continue anyway";
+    d.addEventListener("click", dismiss);
+    row.appendChild(d);
+    el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
     document.body.appendChild(el);
     inertBackground(el);
     trapFocus(el);
     try { card.focus(); } catch (_) {}
-    const t = setInterval(async () => {
+    timer = setInterval(async () => {
       try {
         if (await readyAgain()) {
-          clearInterval(t);
-          uninertBackground();
-          el.remove();
+          dismiss();
           route();
         }
       } catch (_) { /* still blocked */ }
     }, 5000);
+  }
+
+  // The remedy the J4 card names: the workspace's own settings trigger (rail first, user
+  // bar as fallback). Called AFTER dismiss so the modal never opens behind the inert wall.
+  function openSettings() {
+    const btn = document.getElementById("rail-settings") || document.getElementById("user-bar-settings");
+    if (btn) btn.click();
   }
 
   // Seam for the headless browser gate: mount the dark-house holding card on demand.
@@ -187,12 +237,14 @@
       }
       if (!(await anyModelConfigured())) {
         // Sequence the prerequisite (J4): production needs a feed source first. Admins get
-        // pointed at setup; everyone else knows what to ask for. Re-probe and continue.
+        // pointed at setup — and a BUTTON that actually goes there (the copy's remedy must
+        // be operable from the card; the page behind it is inert). Re-probe and continue.
         mountHolding("Production needs a feed source",
           "No chat model is configured yet, so the house can't speak. " +
           (window._isAdmin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
                            : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
-          anyModelConfigured);
+          anyModelConfigured,
+          window._isAdmin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
         return;
       }
       takeASeat();
