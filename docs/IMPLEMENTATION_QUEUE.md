@@ -2705,3 +2705,32 @@ PR per item).
 > (`neutralizeForPrompt`; the prompt-forgery scenario asserted end-to-end). **Deferred:** C8's
 > overwrite flag (a `CastingStatusView` contract change — casting-UX follow-up); E58's
 > `gameStatus.day` field (one line in Lane 4's view group once lanes merge).
+
+## Audit parallel-phase lanes (round 5/6 + addenda) · 2026-06-10
+
+### Lane 6 — FE framing & turn integrity (Python) + the E89 engine gate  ·  **✅ DONE (PR #214)**
+
+> The agent-tools opt-in gates: **A1** the escalation-reason split (`auto_escalation_withhold` —
+> the game escalation subtracts sanctioned opt-ins; the intent escalation keeps the full
+> withhold; builtin_browser always withheld; the vacuous isolation test replaced by COMPOSITION
+> tests assembling the disabled set exactly as the route does) · **A2** gate 3 (opted-in
+> optionals join the schema candidate set at the pinned merge — proven by the non-vacuous
+> schema-assembly test: game turn + `game_tools_enabled=["chat_with_model"]` ⇒ the schema array
+> handed to the API call contains it) + gate 4 (admin-only UI copy + the app_api 404-by-design
+> note) · **P2** the re-entry moment requested on the first game turn of a (re)opened session
+> (THE RECORD on a fresh context; the casting session's premiere is NOT a re-entry) · **P3**
+> substitution keys on `ctx.framed` (a framed casting turn gets `CASTING_AGENT_PREAMBLE`, never
+> the producer-persona-on-generic-rulebook stack) · **P7/E24** incognito inert under the game
+> build (route force-off + framing-level belt) · **P8** single datetime + the slim prompt-safety
+> line on framed game-build turns · **E16** preset personas never ride the GM stack · **E22**
+> the narrated-but-never-recorded guard in CODE (`ensure_turn_recorded`: bounded digest fallback
+> + process counter; sanctioned explicitly in the B66 registry) · **E23** no blind retries of
+> advanceGame/submitDecision (re-read gameStatus; "may already be resolved") · **E25** the sync
+> game-turn 409 fires BEFORE the user message persists (+ discard belt) · **E29** effective_user
+> on the orwell routes and the chat path (bearer tokens map to their owner, never "api") ·
+> **W2** `/api/chat/events/{id}` owner-verified · **E15** `/api/orwell/moment` admin-gated ·
+> **E94** the one-line attachment scene framing (the player is SHOWING something to whoever is
+> present) · **E89** the ONE sanctioned engine change: `socialInitiatives` empty until the first
+> ceremony beat resolves (`APPROACH_GATE` in `decisionConstants.ts`, pure derived
+> `firstCeremonyBeatResolved`, seed-spanning test). Gates: FE pytest 372 green · boot/browser
+> smokes green · responsive matrix 37/0/0 · `npm test` green for the engine sliver.

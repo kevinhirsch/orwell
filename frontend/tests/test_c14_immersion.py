@@ -28,7 +28,7 @@ def _read(*rel):
 GM_PROMPT = "You are Big Brother: the host. [GM-PROMPT-MARKER]"
 
 
-def _system_text(game_mode: bool) -> str:
+def _system_text(game_mode) -> str:
     messages, _schemas = agent_loop._build_system_prompt(
         [{"role": "system", "content": GM_PROMPT},
          {"role": "user", "content": "hi"}],
@@ -59,11 +59,37 @@ def test_non_game_turn_keeps_the_generic_preamble():
     assert "IF AN OUTCOME TOOL FAILS" not in text
 
 
+def test_casting_turn_substitutes_the_casting_contract():
+    # P3: a FRAMED pre-game (casting interview) turn substitutes too — the producer persona
+    # must never stack on the generic assistant preamble + rulebook.
+    text = _system_text(game_mode="casting")
+    assert "[GM-PROMPT-MARKER]" in text                       # the interview prompt leads
+    assert "You are an AI assistant" not in text
+    assert "A failed tool is not a stopping condition" not in text
+    assert "Don't search for things you already know" not in text
+    # the casting tool contract is present (and the live-game rules are not)
+    assert "updateCasting" in text
+    assert "createCharacter" in text
+    assert "casting interview" in text
+    assert "IF AN OUTCOME TOOL FAILS" not in text
+
+
 def test_outcome_error_rule_forbids_invented_results():
     p = agent_loop.GAME_AGENT_PREAMBLE
     assert "do NOT narrate any result" in p
     assert "improvise a winner" in p
     assert "live feed glitched" in p
+
+
+def test_outcome_error_rule_forbids_blind_retry_of_committing_tools():
+    # E23: a timed-out advanceGame may have already committed engine-side — the contract
+    # demands a gameStatus re-read before any re-issue, never an unconditional retry.
+    p = agent_loop.GAME_AGENT_PREAMBLE
+    assert "NEVER" in p and "blindly retry advanceGame or submitDecision" in p
+    assert "double-advance" in p
+    assert "re-read gameStatus" in p
+    assert "may already be resolved" in p
+    assert "try the call once more" not in p  # the old blind-retry instruction is gone
 
 
 # --- 2. tool-less paths ----------------------------------------------------------------
@@ -84,8 +110,14 @@ def test_privilege_flip_keeps_the_agent_for_game_turns():
 
 
 def test_agent_loop_receives_game_mode():
+    # P3: substitution keys on FRAMED, not game_active — a live game gets the game contract,
+    # a framed pre-game turn gets the casting contract, an unframed turn keeps the generic
+    # preamble (and feed-down turns never masquerade as casting).
     src = _read("routes", "chat_routes.py")
-    assert "game_mode=ctx.game_active" in src
+    block = src[src.index("game_mode=("):]
+    block = block[:400]
+    assert '"game" if ctx.game_active' in block
+    assert '"casting" if (ctx.framed and not ctx.feed_down)' in block
 
 
 # --- 3. diegetic tool nodes -------------------------------------------------------------

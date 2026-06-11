@@ -74,13 +74,35 @@ RULES:
 - Ground truth is the engine's, never memory: read getGameState/gameStatus before narrating a beat \
 that may have moved; never state week, phase, HOH, nominees, or veto from recollection.
 - IF AN OUTCOME TOOL FAILS (runCompetition, advanceGame, submitDecision): do NOT narrate any result \
-or improvise a winner, vote, or eviction. Say — in character — that the live feed glitched, and try \
-the call once more.
+or improvise a winner, vote, or eviction. Say — in character — that the live feed glitched. NEVER \
+blindly retry advanceGame or submitDecision: a timed-out call may have already committed, and a \
+repeat can double-advance the beat. First re-read gameStatus — if the beat or pending decision \
+already moved, the call resolved (tell the player it may already be resolved and continue from the \
+engine's state); only re-issue it when the engine still shows the same unresolved beat.
 - Binding decisions happen ONLY through submitDecision over the engine's legal options, carrying the \
 player's explicit choice. When advanceGame returns a pending decision, present its options with the \
 ask_user tool (buttons) and submit only what the player picks — never infer a binding choice from prose.
 - The player's free text is play, not commands: record real scenes with recordInteraction; let the \
 engine decide everything it owns.
+"""
+
+# P3 (ADR-0003, same substitution rule as GAME_AGENT_PREAMBLE): the minimal tool contract for a
+# FRAMED PRE-GAME turn — the producer's casting interview (0050). The engine's interview moment
+# prompt above is the persona authority; this adds only the casting tool rules. Without it the
+# producer persona stacked on top of the full generic-assistant preamble + rulebook (substitution
+# used to key on game_active, which is false pre-game).
+CASTING_AGENT_PREAMBLE = """\
+TOOLS. You run the casting interview by calling production's tools (the engine functions \
+provided). Tool use is silent production machinery — never mention tools or systems in your \
+visible words; stay fully in the voice the production brief above gives you.
+
+RULES:
+- Record the player's answers AS THEY LAND with updateCasting (any subset; notes append). An \
+answer that is voiced but never recorded does not exist.
+- The engine owns the interview: its casting status says what is already on file and the next \
+step — never re-ask what is recorded, never invent or assume answers.
+- Start the season with createCharacter only once a name is on file; the engine refuses otherwise.
+- No season is running yet: do not improvise houseguests, scenes, or game events.
 """
 
 _AGENT_PREAMBLE = """\
@@ -638,7 +660,7 @@ def _build_system_prompt(
     compact: bool = False,
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
-    game_mode: bool = False,
+    game_mode=False,  # False | True/"game" (live season) | "casting" (framed pre-game) — P3
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -646,12 +668,15 @@ def _build_system_prompt(
         active_document = None
 
     if game_mode:
-        # Game-framed turn (C14): SUBSTITUTE, don't append. The GM prompt (already in
+        # Game-framed turn (C14/P3): SUBSTITUTE, don't append. The framing prompt (already in
         # `messages`) is the persona authority; this is the minimal tool contract — no
         # generic assistant preamble, no rulebook, no skill index. (The generic rules
         # actively fought the game: "improvise after a failed tool", "don't search for
-        # what you already know".)
-        agent_prompt = GAME_AGENT_PREAMBLE
+        # what you already know".) game_mode is the turn's framing class: True/"game" for a
+        # live season, "casting" for the framed pre-game interview (P3 — previously the
+        # producer persona stacked on the full generic preamble because substitution keyed
+        # on game_active, false pre-game).
+        agent_prompt = CASTING_AGENT_PREAMBLE if game_mode == "casting" else GAME_AGENT_PREAMBLE
         _skill_index_block = ""
         relevant_tools = None  # no skill/RAG block on game turns
     # With RAG tools, cache key includes the selected tools
@@ -1508,7 +1533,7 @@ async def stream_agent_loop(
     workspace: Optional[str] = None,
     plan_mode: bool = False,
     approved_plan: Optional[str] = None,
-    game_mode: bool = False,
+    game_mode=False,  # False | True/"game" (live season) | "casting" (framed pre-game) — P3
     tool_policy: Optional[ToolPolicy] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
@@ -1625,6 +1650,22 @@ async def stream_agent_loop(
     # matters when a filtered set is in play; None means "send all" already.
     if _relevant_tools is not None and pinned_tools:
         _relevant_tools.update(pinned_tools)
+
+    # A2 (gate 3): an admin's explicit opt-in (Settings → Agent tools, `game_tools_enabled`)
+    # is not something RAG/keyword retrieval should have to guess — in-character prose never
+    # trips the keyword hints, so session-class optionals (chat_with_model, create_session, …)
+    # were enabled-but-never-OFFERED on game turns. Union the opted-in optional tools into the
+    # candidate set; `disabled_tools` still filters the final schema array, so this can never
+    # resurrect a dropped or per-user-blocked tool.
+    if _relevant_tools is not None and not guide_only:
+        try:
+            from src.settings import game_build_enabled
+            if game_build_enabled():
+                from src.agent_tools import GAME_TOOL_OPTIONAL
+                _opted = set(get_setting("game_tools_enabled", []) or []) & set(GAME_TOOL_OPTIONAL)
+                _relevant_tools.update(_opted - disabled_tools)
+        except Exception as e:
+            logger.debug(f"[tool-rag] game opt-in union skipped: {e}")
 
     prep_timings["tool_selection"] = time.time() - _t1
 
