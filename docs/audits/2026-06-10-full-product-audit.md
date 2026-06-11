@@ -1570,9 +1570,10 @@ cheap to do so. This section is the authoritative open-items list going forward.
   mutation-verified; T10/T19 were already hardened in code by PR #221 and are verified +
   stamped here. (Originally open — Lane 10 lost two agents mid-work; only T8/T9/T12/T15–T17
   shipped then.)
-- **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter. Lane 11 took the
-  honest path: ADR 0004 amended to "Accepted — adapter not yet built." Engine souls run on
-  the deterministic fake at runtime. Open (now truthfully documented).
+- ✅ **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter — **DONE (PR #226):**
+  `FastembedEmbedding` + `fastembedWorker` behind the synchronous `EmbeddingProvider` seam, loud
+  permanent degrade to the deterministic fake on failure. (Was: open — ADR 0004 had been amended
+  to "Accepted — adapter not yet built." See the "E86a — BUILT" section below.)
 
 ## B — Cross-lane tails that fell through (each verified absent on main)
 **✅ All five DONE — one "cross-lane tails" PR (PR #224, Lane A), each with its proving test.**
@@ -1618,15 +1619,15 @@ agent tool-call nodes; FE pytest-validated.
 1. ✅ **The cross-lane tails PR** (B1–B5; one PR, proving tests included) — **DONE, PR #224.**
 2. ✅ **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20) — **DONE, PR #225.**
 3. ✅ **0053 admin transcripts** (ruling #14) — **DONE, PR #223.** **0051** still when ready.
-4. **E86(a)** fastembed adapter, or leave honestly deferred.
+4. ✅ **E86(a)** fastembed adapter — **DONE, PR #226** (see the "E86a — BUILT" section below).
 5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
 6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
 
 > **Close-out update (2026-06-11):** the three dispatch-order-1/2/3 lanes landed as PRs
 > #224 (cross-lane tails), #225 (T-remainder), and #223 (0053 admin transcripts), merged to
-> `main` in that order atop the ledger PR #222. Items 4–6 remain deliberately deferred
-> (decision-gated) at stamping time; **E86(a) has since landed too (PR #226)** — leaving the
-> private-repo flip (real-host A4 verification now under way on the user's box) and the
+> `main` in that order atop the ledger PR #222. Dispatch item 4 (**E86(a) fastembed**) has since
+> landed too (PR #226 — see the "E86a — BUILT" section below). Items 5–6 remain deliberately
+> deferred (decision-gated): the private-repo flip (needs a real-host A4 verification) and the
 > playtest-gated calibration revisit.
 
 ---
