@@ -2812,3 +2812,16 @@ PR per item).
 > built — never `cucumber.cjs`; no God-Mode/Vault escalation). Both indexed
 > "Specced — not built" in `docs/features/README.md`. Gates: full `npm test` green post-merge
 > (612 unit/property/arch · 318 BDD scenarios).
+
+### L9 — calibration (D4/E33 re-measurement · the jury-reach gate · finale calibration)  ·  **✅ DONE (PR #220)**
+
+> Re-measured on the merged spine: 19/20 passive seasons reach jury/endgame (was 0/62 in round 4)
+> — emergent NPC self-interest (floaters coast, goats get dragged), **ruled realistic 2026-06-11**;
+> the anti-sycophancy teeth move to the FINALE. The jury was crowning the goat (7/10 passive F2
+> wins): fixed by `bondKeepWeight` in `voteChoice` (voters protect the nominee THEY are bonded to),
+> dropping `−0.5·threat` from `juryLean` (finale threat-aversion structurally rewarded the goat),
+> and `JURY_WEIGHTS.gameRespect × gameRespectTerm` over a new persisted public-facts resume tally
+> (HOH + veto wins) — a betrayal manner still outweighs the max respect split (bitter juries stay
+> real). Passive finale wins 7/10 → 3/10, each EARNED (≥2 broadcast comp wins). The permanent gate:
+> `tests/property/juryReach.property.test.ts` (floor ≥3/20 · ceiling ≤19/20 · ≥1 pre-jury loss ·
+> wins rare AND comp-earned; seeded-deterministic, roles only).
