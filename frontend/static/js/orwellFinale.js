@@ -48,15 +48,6 @@ import * as modalManager from "./modalManager.js";
     return r.json();
   }
 
-  function restorePosition(el) {
-    try {
-      const pos = JSON.parse(localStorage.getItem(POS_KEY) || "null");
-      if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
-        el.style.left = pos.left + "px"; el.style.top = pos.top + "px"; el.style.right = "auto";
-      }
-    } catch (_) {}
-  }
-
   function isMinimized() {
     try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
   }
@@ -136,9 +127,14 @@ import * as modalManager from "./modalManager.js";
       <div class="ofin-move" id="ofin-move"></div>
       <div id="ofin-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
     document.body.appendChild(el);
-    if (window.OrwellSlots) window.OrwellSlots.register(el, "top-left", { key: "finale" });
-
-    restorePosition(el);
+    // F5 (DWE audit): ONE position system. The old custom POS_KEY persistence
+    // (raw, unclamped, fighting the slot restack) is gone — drag persists an
+    // offset-from-slot exactly like the social panel, clamped at restore (S11),
+    // and a stale orwell-finale-pos from older builds is cleared.
+    el._orwellSlot = window.OrwellSlots
+      ? window.OrwellSlots.register(el, "top-left", { key: "finale", draggable: true })
+      : null;
+    try { localStorage.removeItem(POS_KEY); } catch (_) {}
     try {
       modalManager.register(ID, {
         label: "The Finale", icon: ICON,
@@ -152,9 +148,9 @@ import * as modalManager from "./modalManager.js";
     });
     makeWindowDraggable(el, {
       content: el, header: el.querySelector(".ofin-hdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false, mobileSkip: 0,
+      enableDock: false, enableFullscreen: false, enableResize: false,
       onDragEnd: ({ rect }) => {
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: rect.left, top: rect.top })); } catch (_) {}
+        if (el._orwellSlot) el._orwellSlot.saveDragOffset(rect); // E91: offset-from-slot, clamped at restore
       },
     });
     return el;

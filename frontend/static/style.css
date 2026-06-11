@@ -844,6 +844,9 @@ body.bg-pattern-sparkles {
       padding-top: var(--space-2);
       border-top: 1px solid var(--border);
     }
+    /* F1 (DWE audit): the dock SHOWS iff it holds rows — class-driven, never the
+       inline-''-falls-back-to-none reveal that left minimized windows stranded. */
+    #minimized-dock.ow-has-rows { display: block; }
     #minimized-dock .minimized-dock-hd {
       font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 1px; opacity: 0.4; padding: 0 4px 4px;

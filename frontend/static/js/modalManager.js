@@ -315,7 +315,12 @@ function _renderDock() {
   // group. Collapse everyone back into the dock so the chain stays
   // together as a single group at the new size.
   if (!renderIds.length) {
-    dock.style.display = 'none';
+    // F1 (DWE audit): dock visibility is CLASS-driven. The old inline
+    // `display:''` reveal fell back to the base CSS `display:none` (the U3
+    // sidebar-rows rule), so the dock was invisible WHILE holding chips and a
+    // minimized window had no pointer path back.
+    dock.classList.remove('ow-has-rows');
+    dock.style.removeProperty('display');
     const rows0 = dock.querySelector('.minimized-dock-rows');
     if (rows0) rows0.innerHTML = '';
     return;
@@ -327,7 +332,8 @@ function _renderDock() {
     oldRects.set(c.dataset.modalId, c.getBoundingClientRect());
   });
 
-  dock.style.display = '';
+  dock.classList.add('ow-has-rows');
+  dock.style.removeProperty('display');
   const rows = dock.querySelector('.minimized-dock-rows') || dock;
   rows.innerHTML = '';
   for (const id of renderIds) {
@@ -378,8 +384,10 @@ function _renderDock() {
     rows.appendChild(chip);
   }
 
-  // FLIP: animate from old → new positions
-  dock.querySelectorAll('.minimized-dock-chip').forEach(c => {
+  // FLIP: animate from old → new positions (skipped under prefers-reduced-motion
+  // — the E97 contract applies to dock motion too; DWE audit note).
+  const _reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!_reduced) dock.querySelectorAll('.minimized-dock-chip').forEach(c => {
     const oldRect = oldRects.get(c.dataset.modalId);
     if (!oldRect) return;
     const newRect = c.getBoundingClientRect();
