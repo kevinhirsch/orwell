@@ -2966,7 +2966,7 @@ PR per item).
 > verified as the norm-(g) baseline and extended (3× cycles, the real J4 card). Matrix doc +
 > failure screenshots in `docs/audits/`.
 
-### F-1 — the window kit (`OrwellWindow` + `.ow-*`) · CRIT-first · **OPEN**
+### F-1 — the window kit (`OrwellWindow` + `.ow-*`) · CRIT-first · **✅ DONE**
 
 > Build the kit on the S-stream mechanism and fix the two structural breaks INSIDE it:
 > **F1** (the invisible `#minimized-dock` — minimize currently loses the window; visibility
@@ -2978,6 +2978,19 @@ PR per item).
 > reduced-motion (F4), one geometry-persistence scheme clamped per user+game (F5 deletes
 > `orwell-finale-pos`), focus-return on close (F8), keyboard move (F10), teardown. The A3
 > layout kit composes window BODIES. Gate: the kit's own browser-smoke block + the matrix.
+> **DONE:** `orwellWindow.js` (the kit: chrome cluster ≥24px named targets · click-to-front +
+> `ow-focused` + the 500–980 window band · ruling-#19 fly-out/fly-away with reduced-motion
+> strip · slot-offset persistence with explicit clamp · focus-return · arrows/Home keyboard
+> move · AbortController teardown · the `OrwellWindowKit` seam) + the `.ow-*` family;
+> **F1 fixed** (class-driven `#minimized-dock.ow-has-rows`, the inline-'' reveal gone; dock
+> FLIP respects reduced motion); **F2 fixed** (`orwellSlots` stands down while
+> `modal-dragging`, reentrancy-guarded; offsets now record real deltas); **F5's persistence
+> half folded in** (finale on the slot system, POS_KEY deleted + stale keys cleared,
+> `mobileSkip:0` gone — its chrome migrates in its F-2 wave); Escape spliced into ui.js's
+> single arbiter (menus → kit windows → modals, F7). Gates: browser_smoke gains the F1/F2
+> hard assertions (trusted clicks — the evaluate-click blindness is gone) + a real
+> kit-window end-to-end block; `test_f_window_kit.py` source-pins; FE pytest 445 green;
+> matrix 37/0/0.
 
 ### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **OPEN**
 

@@ -328,20 +328,122 @@ def main() -> int:
             page.wait_for_selector("#orwell-social", timeout=3000)
             check(page.evaluate("getComputedStyle(document.getElementById('orwell-social')).display !== 'none'") is True,
                   "social HUD: mounts visible")
-            page.evaluate("document.querySelector('#orwell-social .osoc-min').click()")
-            page.wait_for_timeout(200)  # let the dock re-render
+            # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
+            # clicks worked on an invisible dock and masked the stranded-window trap.
+            page.click("#orwell-social .osoc-min")
+            page.wait_for_timeout(250)  # let the dock re-render
             min_state = page.evaluate("""() => {
               const el = document.getElementById('orwell-social');
+              const dock = document.getElementById('minimized-dock');
               const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]');
-              return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip };
+              const dr = dock ? dock.getBoundingClientRect() : null;
+              return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip,
+                       dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dr.height > 0 };
             }""")
             check(min_state.get("hidden") is True, f"social HUD: minimize HIDES the panel ({min_state})")
             check(min_state.get("chip") is True, f"social HUD: minimize parks a chip in the shared dock ({min_state})")
-            page.evaluate("document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id=\"orwell-social\"]').click()")
-            page.wait_for_timeout(200)
+            check(min_state.get("dockVisible") is True,
+                  f"F1: the Windows dock is VISIBLE while holding a chip ({min_state})")
+            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-social']")
+            page.wait_for_timeout(250)
             restored = page.evaluate(
                 "(function(){var e=document.getElementById('orwell-social');return !!e && getComputedStyle(e).display!=='none';})()")
-            check(restored is True, "social HUD: restoring from the dock chip re-opens the panel")
+            check(restored is True, "social HUD: restoring from the dock chip re-opens the panel (trusted click)")
+
+            # F2 (DWE audit): drag must MOVE the panel — the slot restack used to revert
+            # every windowDrag style write, leaving drag dead and offsets at (0,0).
+            hdr = page.query_selector("#orwell-social .osoc-hdr")
+            hb = hdr.bounding_box()
+            r0 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            page.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
+            page.mouse.down()
+            for i in range(1, 9):
+                page.mouse.move(hb["x"] + hb["width"] / 2 - 150 * i / 8, hb["y"] + hb["height"] / 2 + 120 * i / 8)
+            page.mouse.up()
+            page.wait_for_timeout(200)
+            r1 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            moved = abs(r1["x"] - r0["x"]) > 100 or abs(r1["y"] - r0["y"]) > 80
+            check(moved is True, f"F2: dragging the title bar MOVES the panel (x {r0['x']:.0f}->{r1['x']:.0f}, y {r0['y']:.0f}->{r1['y']:.0f})")
+            off = page.evaluate("""() => {
+              const k = Object.keys(localStorage).find(k => k.startsWith('orwell-slot-offset:social'));
+              if (!k) return null;
+              try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; }
+            }""")
+            check(bool(off) and (abs(off.get("dx", 0)) > 60 or abs(off.get("dy", 0)) > 40),
+                  f"F2: the persisted slot offset is the real drag delta, not (0,0) ({off})")
+            page.evaluate("window._orwellStatusEnsure && window._orwellStatusEnsure()")  # provoke a restack
+            page.wait_for_timeout(250)
+            r2 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            check(abs(r2["x"] - r1["x"]) < 20 and abs(r2["y"] - r1["y"]) < 20,
+                  f"F2: the dragged position survives an unrelated restack ({r1['x']:.0f},{r1['y']:.0f} -> {r2['x']:.0f},{r2['y']:.0f})")
+
+            # The window KIT (Lane F / F-1): one class + one .ow-* family. Exercise a real
+            # kit window end-to-end: chrome, trusted drag, Escape-parks, dock restore,
+            # close-with-focus-return, clean teardown.
+            # Housekeeping: the theme/settings assertions above leave their modals open;
+            # a top modal legitimately outranks a kit window on Escape (DWE order), so
+            # clear them before testing the kit's own Escape path.
+            page.evaluate("""['theme-modal','settings-modal'].forEach(id => {
+              const m = document.getElementById(id);
+              if (m && !m.classList.contains('hidden')) {
+                const b = m.querySelector('.close-btn, .modal-close-btn, [data-action="close"]');
+                if (b) b.click(); else m.classList.add('hidden');
+              }
+            })""")
+            page.wait_for_timeout(200)
+            kit = page.evaluate("""() => {
+              const gear = document.getElementById('user-bar-settings');
+              if (gear) gear.focus();
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-smoke-window', title: 'Production Test', slot: 'top-left', slotKey: 'owsmoke',
+                content: '<p>kit smoke</p>', icon: '' });
+              w.open(document.activeElement);
+              window._owSmoke = w;
+              const el = document.getElementById('ow-smoke-window');
+              return { mounted: !!el, titlebar: !!el.querySelector('.ow-titlebar'),
+                       title: el.querySelector('.ow-title').textContent,
+                       focused: el.classList.contains('ow-focused') };
+            }""")
+            page.wait_for_timeout(280)  # let the open animation settle before measuring geometry
+            kit["ctrls"] = page.evaluate("""[...document.querySelectorAll('#ow-smoke-window .ow-controls button')].map(b => {
+              const r = b.getBoundingClientRect();
+              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+            })""")
+            check(kit.get("mounted") is True and kit.get("titlebar") is True, f"kit: window mounts with titlebar ({kit})")
+            check(all(c["w"] >= 24 and c["h"] >= 24 and c["label"] for c in kit.get("ctrls", [])),
+                  f"kit: control cluster named + >=24px targets ({kit.get('ctrls')})")
+            check(kit.get("focused") is True, "kit: opening focuses (ow-focused on top of the stack)")
+            kb = page.query_selector("#ow-smoke-window .ow-titlebar").bounding_box()
+            page.mouse.move(kb["x"] + 40, kb["y"] + kb["height"] / 2)
+            page.mouse.down()
+            for i in range(1, 7):
+                page.mouse.move(kb["x"] + 40 + 120 * i / 6, kb["y"] + kb["height"] / 2 + 90 * i / 6)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            kmoved = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            check(abs(kmoved["x"] - kb["x"]) > 60, f"kit: trusted drag moves the window (x {kb['x']:.0f}->{kmoved['x']:.0f})")
+            page.mouse.move(640, 500)  # neutral ground: the arbiter's hovered-window pass must not fire
+            page.evaluate("document.body.focus()")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(350)
+            parked = page.evaluate("""() => ({
+              hidden: getComputedStyle(document.getElementById('ow-smoke-window')).display === 'none',
+              chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-smoke-window"]'),
+            })""")
+            check(parked.get("hidden") is True and parked.get("chip") is True,
+                  f"kit: Escape parks the top window to the dock (F7) ({parked})")
+            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='ow-smoke-window']")
+            page.wait_for_timeout(250)
+            check(page.evaluate("getComputedStyle(document.getElementById('ow-smoke-window')).display !== 'none'") is True,
+                  "kit: dock chip restores the window (trusted click)")
+            page.click("#ow-smoke-window .ow-close")
+            page.wait_for_timeout(300)
+            closed = page.evaluate("""() => ({
+              gone: !document.getElementById('ow-smoke-window'),
+              focusBack: document.activeElement && document.activeElement.id === 'user-bar-settings',
+            })""")
+            check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
+            check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to

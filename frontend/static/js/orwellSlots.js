@@ -43,10 +43,36 @@
       || (el.isConnected && getComputedStyle(el).position === "fixed" && getComputedStyle(el).display !== "none");
   }
 
-  // Stack one slot: measured heights, gap, safe-area; then apply each panel's
-  // persisted drag offset CLAMPED so the panel stays fully on-screen.
+  // F2 (DWE audit): the restack must never fight a live drag. windowDrag moves
+  // a panel by writing style.left/top per pointermove; the style observer below
+  // used to restack on EVERY write, snapping the panel straight back to its
+  // slot base — drag was dead and every saved offset was (0,0). While a
+  // registered panel carries `modal-dragging` (windowDrag sets it for the whole
+  // gesture), restacks stand down; the drag-end save then records the REAL drop
+  // rect and the next restack applies it clamped (S11 unchanged).
+  let _restacking = false;
+  function dragInProgress() {
+    for (const list of Object.values(slots)) {
+      for (const { el } of list) if (el.classList && el.classList.contains("modal-dragging")) return true;
+    }
+    return false;
+  }
+
+  // Write a style prop only when the value actually changes. Restacks run off a
+  // style MutationObserver, so every write must be IDEMPOTENT — a value that
+  // ping-pongs between passes (the old base-then-offset two-phase write flipped
+  // `left` auto→px every cycle once a real offset existed) re-queues mutation
+  // records forever and busy-loops the page (F2 follow-up).
+  function setStyle(el, prop, val) {
+    if (el.style[prop] !== val) el.style[prop] = val;
+  }
+
+  // Stack one slot: measured heights, gap, safe-area; the final position —
+  // slot base PLUS the persisted drag offset, clamped (S11/E91) — is computed
+  // arithmetically and written ONCE, never via an intermediate base write.
   function restackSlot(name) {
     if (NARROW.matches) return; // sheets own narrow layouts
+    if (dragInProgress()) return; // F2: the gesture owns the position until drop
     const list = slots[name];
     const safeT = TOP_BASE, safeB = BOTTOM_BASE;
     let cursor = name.startsWith("top") ? safeT : safeB;
@@ -59,25 +85,28 @@
       if (name.startsWith("top")) { top = cursor; cursor += h + GAP; }
       else { bottom = cursor; cursor += h + GAP; }
 
-      // base position (the slot's anchor)
-      el.style.position = "fixed";
-      el.style.top = top !== null ? top + "px" : "auto";
-      el.style.bottom = bottom !== null ? bottom + "px" : "auto";
-      if (name.endsWith("right")) { el.style.right = "14px"; el.style.left = "auto"; }
-      else if (name.endsWith("left")) { el.style.left = "14px"; el.style.right = "auto"; }
-      else { el.style.left = "50%"; el.style.right = "auto"; el.style.transform = "translateX(-50%)"; }
-
-      // the persisted drag offset, clamped to the viewport (S11/E91)
+      setStyle(el, "position", "fixed");
       const off = entry.key ? loadOffset(entry.key) : null;
       if (off && (off.dx || off.dy)) {
-        const r = el.getBoundingClientRect();
-        const left = Math.max(4, Math.min(window.innerWidth - r.width - 4, r.left + off.dx));
-        const topPx = Math.max(4, Math.min(window.innerHeight - Math.min(r.height, 200) - 4, r.top + off.dy));
-        el.style.left = left + "px";
-        el.style.top = topPx + "px";
-        el.style.right = "auto";
-        el.style.bottom = "auto";
-        el.style.transform = "none";
+        // Derive the base coordinates numerically — no intermediate writes.
+        const baseLeft = name.endsWith("right") ? (window.innerWidth - 14 - w)
+          : name.endsWith("left") ? 14
+          : (window.innerWidth - w) / 2;
+        const baseTop = top !== null ? top : (window.innerHeight - bottom - h);
+        const left = Math.max(4, Math.min(window.innerWidth - w - 4, baseLeft + off.dx));
+        const topPx = Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, baseTop + off.dy));
+        setStyle(el, "left", left + "px");
+        setStyle(el, "top", topPx + "px");
+        setStyle(el, "right", "auto");
+        setStyle(el, "bottom", "auto");
+        setStyle(el, "transform", "none");
+      } else {
+        // base position (the slot's anchor)
+        setStyle(el, "top", top !== null ? top + "px" : "auto");
+        setStyle(el, "bottom", bottom !== null ? bottom + "px" : "auto");
+        if (name.endsWith("right")) { setStyle(el, "right", "14px"); setStyle(el, "left", "auto"); setStyle(el, "transform", ""); }
+        else if (name.endsWith("left")) { setStyle(el, "left", "14px"); setStyle(el, "right", "auto"); setStyle(el, "transform", ""); }
+        else { setStyle(el, "left", "50%"); setStyle(el, "right", "auto"); setStyle(el, "transform", "translateX(-50%)"); }
       }
     }
   }
@@ -98,13 +127,20 @@
     if (!slots[slotName]) slotName = "top-right";
     slots[slotName].push({ el, key: o.key || null, draggable: !!o.draggable });
     el.classList.add("orwell-slotted");
-    // Re-stack whenever this panel shows/hides or resizes.
+    // Re-stack whenever this panel shows/hides or resizes — but never re-enter
+    // off our own restack writes, and never while a drag owns the position (F2).
     try {
+      let _wasHidden = el.style.display === "none";
       new MutationObserver((muts) => {
         for (const m of muts) {
           if (m.attributeName === "style") {
-            if (el.style.display !== "none") animateIn(el);
-            restackAll();
+            if (_restacking) return;
+            const hidden = el.style.display === "none";
+            if (!hidden && _wasHidden) animateIn(el); // animate on reveal, not on every write
+            _wasHidden = hidden;
+            if (el.classList.contains("modal-dragging")) return; // F2: drag in progress
+            _restacking = true;
+            try { restackAll(); } finally { _restacking = false; }
             return;
           }
         }
@@ -116,12 +152,17 @@
       /** Record a drag-end as an offset from the slot base (never while hidden). */
       saveDragOffset(rect) {
         if (!o.key || !visible(el)) return;
-        // Re-derive the base by restacking with no offset, then diff.
-        try { localStorage.removeItem(offsetKey(o.key)); } catch (_) {}
-        restackSlot(slotName);
-        const base = el.getBoundingClientRect();
-        saveOffset(o.key, rect.left - base.left, rect.top - base.top);
-        restackSlot(slotName);
+        // Re-derive the base by restacking with no offset, then diff. The whole
+        // dance runs under the reentrancy guard so the style observer stays
+        // quiet until the final clamped position is applied (F2).
+        _restacking = true;
+        try {
+          try { localStorage.removeItem(offsetKey(o.key)); } catch (_) {}
+          restackSlot(slotName);
+          const base = el.getBoundingClientRect();
+          saveOffset(o.key, rect.left - base.left, rect.top - base.top);
+          restackSlot(slotName);
+        } finally { _restacking = false; }
       },
       restack() { restackSlot(slotName); },
     };

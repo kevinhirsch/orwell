@@ -1234,6 +1234,14 @@ if (!window._odyEscExpandGuard) {
       e.stopImmediatePropagation(); e.preventDefault();
       return;
     }
+    // Kit windows (Lane F / DWE audit F7): after menus, before modals — the
+    // top OrwellWindow parks (minimizable) or closes on Escape, through this
+    // same single arbiter. Floating panels stop being Escape-blind as their
+    // migration waves land them on the kit.
+    if (window.OrwellWindowKit && window.OrwellWindowKit.dismissTop()) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      return;
+    }
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const expanded = document.querySelector('.doclib-card-expanded');
