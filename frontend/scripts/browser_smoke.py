@@ -468,6 +468,74 @@ def main() -> int:
             check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
             check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
 
+            # G2 (Lane G): launcher-agnostic restore — a minimized window must
+            # come back through the REAL restore path no matter which launcher
+            # the user hits. The gear (#user-bar-settings) is NOT the sidebar
+            # tool button modalManager's interceptor knew about, so this is the
+            # exact reported bug: minimize settings, click the gear, dead air.
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(300)
+            check(page.evaluate("!document.getElementById('settings-modal').classList.contains('hidden')") is True,
+                  "G2: settings opens from the gear")
+            # The injected `_` (trusted click) — modalManager injects
+            # .modal-minimize-btn, or wires the legacy .minimize-btn when
+            # app.js's dock got there first; either way it minimizes via
+            # modalManager.
+            page.click("#settings-modal .modal-minimize-btn, #settings-modal .minimize-btn")
+            page.wait_for_timeout(300)
+            g2min = page.evaluate("""() => {
+              const m = document.getElementById('settings-modal');
+              return { minimized: m.classList.contains('modal-minimized'),
+                       hidden: getComputedStyle(m).display === 'none',
+                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
+            }""")
+            check(g2min.get("minimized") is True and g2min.get("hidden") is True and g2min.get("chip") is True,
+                  f"G2: the `_` button minimizes settings to a dock chip ({g2min})")
+            page.click("#user-bar-settings")  # the launcher itself — trusted click
+            page.wait_for_timeout(300)
+            g2 = page.evaluate("""() => {
+              const m = document.getElementById('settings-modal');
+              return { visible: !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none',
+                       unminimized: !m.classList.contains('modal-minimized'),
+                       chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
+            }""")
+            check(g2.get("visible") is True and g2.get("unminimized") is True and g2.get("chipGone") is True,
+                  f"G2: clicking the gear RESTORES the minimized settings window ({g2})")
+            # Interactive: a trusted click INSIDE the restored window lands (no
+            # .modal-minimized pointer-events:none residue) — the Account tab
+            # takes the click and activates.
+            page.click("#settings-modal [data-settings-tab='account']")
+            page.wait_for_timeout(150)
+            check(page.evaluate("document.querySelector(\"#settings-modal [data-settings-tab='account']\").classList.contains('active')") is True,
+                  "G2: the restored settings window is interactive (trusted click inside lands)")
+            # Same contract for EVERY window, launcher-agnostic: theme-modal,
+            # minimized for real, healed by an arbitrary opener that only
+            # removes `.hidden` (exactly what tool-theme-btn / the Settings →
+            # Appearance button do) — the observer must run the real restore.
+            page.evaluate("document.getElementById('settings-modal').querySelector('.close-btn').click()")
+            page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")
+            page.wait_for_timeout(250)
+            page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
+            page.wait_for_timeout(250)
+            check(page.evaluate("document.getElementById('theme-modal').classList.contains('modal-minimized')") is True,
+                  "G2: theme window minimizes to the dock")
+            page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")  # any launcher
+            page.wait_for_timeout(250)
+            g2t = page.evaluate("""() => {
+              const m = document.getElementById('theme-modal');
+              return { visible: !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none',
+                       unminimized: !m.classList.contains('modal-minimized'),
+                       chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="theme-modal"]') };
+            }""")
+            check(g2t.get("visible") is True and g2t.get("unminimized") is True and g2t.get("chipGone") is True,
+                  f"G2: an arbitrary un-hide heals the minimized theme window too ({g2t})")
+            page.evaluate("""() => {
+              const tm = document.getElementById('theme-modal');
+              const tb = tm.querySelector('.close-btn, .modal-close');
+              if (tb) tb.click(); else tm.classList.add('hidden');
+            }""")
+            page.wait_for_timeout(200)
+
             # F11 (wave 3): Escape while the decision card holds focus = the x path —
             # dismissed, never submitted.
             page.evaluate("""window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
