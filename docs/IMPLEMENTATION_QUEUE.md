@@ -2992,7 +2992,7 @@ PR per item).
 > kit-window end-to-end block; `test_f_window_kit.py` source-pins; FE pytest 445 green;
 > matrix 37/0/0.
 
-### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **WAVE 1 ✅ · remainder OPEN**
+### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **WAVES 1–2 ✅ · remainder OPEN**
 
 > Wave order: status HUD (stays sidebar chrome — composes title/controls only) → social +
 > approaches (F2/F3/F6/F7 cells flip; the narrow tier gets ONE sheet host so two sheets can
@@ -3014,8 +3014,15 @@ PR per item).
 > ruling #3 sidebar chrome; all its audit cells were already green; no change.
 > T20 pins amended to the kit composition (`test_orwell_huds.py`). Gates: FE pytest 464 ·
 > browser smoke (kit + F1/F2/F3 hard assertions) · boot smoke · matrix 37/0/0 — all green.
-> Remaining waves: Diary Room (verify-only) → finale chrome → retro/presence/banner cluster →
-> settings/theme (F8) → W13–W16 popovers/dialogs (F11) → the F-3 ratchet.
+> **WAVE 2 DONE:** the FINALE composes the kit — bespoke titlebar/minimize/dock/drag wiring
+> deleted from `orwellFinale.js` (`ofin-hdr`/`ofin-min`/`modalManager.register`/
+> `makeWindowDraggable` gone; `POS_KEY` fully retired); same ambient-HUD capability profile as
+> social (minimizable, no close); the F3 sheet host + `_orwellFinaleEnsure` seam from wave 1
+> keep gating it at 390×844. **Diary Room: verify-only** — ruling #4 composer mode, not a
+> window; its audit cells were all green and the E88 pins stand (`test_orwell_huds.py`,
+> `test_ui_elements.py`); no change.
+> Remaining waves: retro/presence/banner cluster consistency → settings/theme (F8
+> focus-return) → W13–W16 popovers/dialogs (F11) → the F-3 ratchet.
 
 ### F-3 — the ratchet · **OPEN**
 

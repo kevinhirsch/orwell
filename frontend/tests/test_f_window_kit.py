@@ -40,11 +40,12 @@ def test_sourcepin_f2_restack_stands_down_during_drag():
 
 
 def test_sourcepin_f5_finale_has_one_position_system():
+    # Amended by wave 2: the kit owns the slot-offset persistence outright —
+    # the panel no longer touches drag/persist APIs at all (see the wave-2 pin).
     js = _read("static", "js", "orwellFinale.js")
-    assert "saveDragOffset" in js                    # slot-offset persistence
-    assert "localStorage.setItem(POS_KEY" not in js  # the custom writer is gone
-    assert "removeItem(POS_KEY)" in js               # stale keys are cleared
-    assert "mobileSkip: 0" not in js                 # no touch-drag against sheet CSS
+    assert 'slotKey: "finale"' in js                 # ONE position system, via the kit
+    assert "localStorage.setItem" not in js          # no custom writer of any kind
+    assert "mobileSkip" not in js                    # no touch-drag against sheet CSS
 
 
 def test_sourcepin_kit_owns_the_contracts():
@@ -107,3 +108,15 @@ def test_sourcepin_wave1_finale_seam_for_the_gate():
 def test_smoke_asserts_f3_for_real():
     smoke = _read("scripts", "browser_smoke.py")
     assert "F3: both sheets visible without overlap" in smoke
+
+
+# ── Lane F / F-2 wave 2 pins ──────────────────────────────────────────────
+
+def test_sourcepin_wave2_finale_composes_the_kit():
+    js = _read("static", "js", "orwellFinale.js")
+    assert "OrwellWindowKit.create(" in js          # the kit owns the chrome
+    assert "makeWindowDraggable" not in js          # bespoke drag wiring deleted
+    assert "ofin-hdr" not in js                     # bespoke titlebar deleted
+    assert "ofin-min" not in js                     # bespoke minimize button deleted
+    assert "modalManager.register(" not in js       # the kit registers, not the panel
+    assert "POS_KEY" not in js                      # the F5 dual-persistence era is fully over

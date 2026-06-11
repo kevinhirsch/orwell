@@ -9,8 +9,8 @@
 //   • GET /api/orwell/finale → { finale: { stage, finalists[], asking, reveals[] } | null }
 //
 // Vault-free by construction (the engine withholds leans/tallies/manner/the pre-reveal winner);
-// fail-open everywhere. No new module deps beyond the existing windowDrag + modalManager.
-import { makeWindowDraggable } from "./windowDrag.js";
+// fail-open everywhere. Composes the window kit (Lane F wave 2); modalManager is
+// only consulted for the minimized state the poll loop must respect.
 import * as modalManager from "./modalManager.js";
 
 (function () {
@@ -19,7 +19,6 @@ import * as modalManager from "./modalManager.js";
   const POLL_FAST_MS = 5000;       // a finale is staging — poll briskly
   const POLL_SLOW_MS = 45000;      // no finale yet — a light heartbeat (E67/C18)
   const ID = "orwell-finale";
-  const POS_KEY = "orwell-finale-pos";
   const PLAYER_ID = "player";
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9H4.5a2.5 2.5 0 0 1 0-5H6'/><path d='M18 9h1.5a2.5 2.5 0 0 0 0-5H18'/><path d='M4 22h16'/><path d='M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22'/><path d='M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22'/><path d='M18 2H6v7a6 6 0 0 0 12 0V2Z'/></svg>";
   const STAGE_LABEL = { statements: "Opening statements", questions: "Jury questions", vote: "The jury votes", reveal: "The votes are read" };
@@ -58,34 +57,21 @@ import * as modalManager from "./modalManager.js";
     el.style.display = "none";
   }
 
+  // F-2 wave 2 (DWE audit): the panel COMPOSES the window kit — chrome, drag,
+  // minimize-to-dock, Escape, focus, and persistence come from OrwellWindow.
+  // This module keeps only the finale content: stage, finalists, reveals, and
+  // the composer-prefill move buttons.
+  let _win = null;
   function ensureUI() {
     let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("div");
-    el.id = ID;
-    el.setAttribute("role", "complementary");
-    el.setAttribute("aria-label", "The finale");
-    el.innerHTML = `
+    const content = document.createElement("div");
+    content.innerHTML = `
       <style>
         #orwell-finale {
-          /* E91/S11: positioned by the top-left SLOT (orwellSlots.js). */
-          position: fixed; z-index: 9000;
-          width: 240px; max-width: 64vw; display: none;
-          background: var(--panel, #111); color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          padding: .6rem .7rem; box-shadow: 0 10px 30px rgba(0,0,0,.35);
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem; line-height: 1.45;
+          width: 240px; display: none;
+          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem;
         }
-        #orwell-finale .ofin-hdr {
-          display: flex; align-items: baseline; gap: .4rem; margin-bottom: .5rem;
-          font-weight: 600; letter-spacing: .03em; cursor: move; user-select: none;
-        }
-        #orwell-finale .ofin-ttl { flex: 1; min-width: 0; opacity: .85; }
-        #orwell-finale .ofin-min {
-          cursor: pointer; border: none; background: none; color: inherit;
-          opacity: .55; font-size: 1rem; line-height: 1; padding: 0 .15rem; font-family: inherit;
-        }
-        #orwell-finale .ofin-min:hover { opacity: .9; }
         #orwell-finale .ofin-stage { opacity: .6; margin: 0 0 .4rem; letter-spacing: .03em; }
         #orwell-finale .ofin-final {
           display: flex; justify-content: space-between; gap: .4rem; margin-bottom: .5rem;
@@ -117,44 +103,25 @@ import * as modalManager from "./modalManager.js";
           }
         }
       </style>
-      <div class="ofin-hdr" title="Drag to move">
-        <span class="ofin-ttl">🏆 The Finale</span>
-        <button type="button" class="ofin-min" title="Minimize" aria-label="Minimize">–</button>
-      </div>
       <div class="ofin-stage" id="ofin-stage"></div>
       <div class="ofin-final" id="ofin-final"></div>
       <div class="ofin-hd" id="ofin-reveal-hd" style="display:none">The votes</div>
       <div id="ofin-reveals"></div>
       <div class="ofin-move" id="ofin-move"></div>
       <div id="ofin-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
-    document.body.appendChild(el);
-    // F5 (DWE audit): ONE position system. The old custom POS_KEY persistence
-    // (raw, unclamped, fighting the slot restack) is gone — drag persists an
-    // offset-from-slot exactly like the social panel, clamped at restore (S11),
-    // and a stale orwell-finale-pos from older builds is cleared.
-    el._orwellSlot = window.OrwellSlots
-      ? window.OrwellSlots.register(el, "top-left", { key: "finale", draggable: true })
-      : null;
-    try { localStorage.removeItem(POS_KEY); } catch (_) {}
-    try {
-      modalManager.register(ID, {
-        label: "The Finale", icon: ICON,
-        restoreFn: () => { el.style.display = "block"; },
-        closeFn: () => { el.style.display = "none"; },
-      });
-    } catch (_) {}
-    el.querySelector(".ofin-min").addEventListener("click", () => {
-      try { modalManager.minimize(ID); } catch (_) {}
-      el.style.display = "none";
+    // The kit owns chrome, drag, dock, Escape, focus, and the ONE position
+    // system (the clamped slot offset "finale" — the F5 dual-persistence era is
+    // over; wave 1 shipped the stale-key cleanup, retired here).
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "🏆 The Finale", icon: ICON,
+      slot: "top-left", slotKey: "finale", role: "complementary",
+      // An ambient HUD parks (minimize); the finale exists while one is staging,
+      // so it carries no close — a capability of the one kit cluster.
+      minimizable: true, closable: false, draggable: true,
+      content,
     });
-    makeWindowDraggable(el, {
-      content: el, header: el.querySelector(".ofin-hdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false,
-      onDragEnd: ({ rect }) => {
-        if (el._orwellSlot) el._orwellSlot.saveDragOffset(rect); // E91: offset-from-slot, clamped at restore
-      },
-    });
-    return el;
+    _win.open();
+    return document.getElementById(ID);
   }
 
   // Prefill the composer (never auto-send) — the chat agent reads it and calls submitDecision.
