@@ -576,3 +576,144 @@ if (document.readyState === 'loading') {
 } else {
   _initChatSwipeToOpenSidebar();
 }
+
+// ── H4: the collapsed rail derives every icon from its expanded row ──
+// User ruling: "The icons in the collapsed sidebar don't match the expanded
+// sidebar and always must." The rail used to be a second, hand-maintained
+// icon set — which drifted. Now there is ONE icon per nav entry: the expanded
+// row's svg. Static rail buttons declare their source row via
+// data-rail-source in index.html (and ship no svg of their own); the game
+// chrome that JS injects later (Diary Room / Cast / the status HUD) gets a
+// rail mirror created here with the same cloned icon and a visibility that
+// follows the row's game gating. A MutationObserver over #sidebar re-clones
+// on any change, so the two states can never drift again.
+//
+// Wired at MODULE scope (like the swipe gesture above) so a throw elsewhere
+// in initSidebarLayout can't drop it.
+
+const RAIL_MIRRORS = [
+  // Expanded rows injected at runtime → rail buttons created to match.
+  // `activate` forwards the rail click to the row itself (these actions work
+  // without opening the sidebar); `section` instead rides the existing rail
+  // click-handler that opens the sidebar and scrolls to the element.
+  { rail: 'rail-diary-room', source: 'sidebar-diary-room-btn', activate: true },
+  { rail: 'rail-cast', source: 'sidebar-cast-btn', activate: true },
+  {
+    rail: 'rail-game-status', source: 'orwell-status', section: 'orwell-status',
+    iconSel: '.os-hdr svg',
+    // The status HUD's header carries no svg of its own (it leads with live
+    // text). Until it grows one — at which point the clone path adopts it
+    // automatically — the watching eye stands in. A fallback is allowed ONLY
+    // where there is no expanded icon to mirror; never duplicate a row's icon.
+    fallback: '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z"/><circle cx="16" cy="16" r="4.5" fill="currentColor" stroke="none"/></svg>',
+  },
+];
+
+function _cloneRowIcon(svg) {
+  const clone = svg.cloneNode(true);
+  clone.removeAttribute('style');  // row-specific nudges (left:-2px, opacity)
+  clone.removeAttribute('class');  // .sidebar-action-icon / .section-icon
+  clone.setAttribute('width', '16');
+  clone.setAttribute('height', '16');
+  clone.setAttribute('aria-hidden', 'true');
+  return clone;
+}
+
+function _setRailIcon(btn, srcSvg) {
+  const next = _cloneRowIcon(srcSvg);
+  const cur = btn.querySelector(':scope > svg');
+  if (cur && cur.outerHTML === next.outerHTML) return; // already in step
+  if (cur) cur.replaceWith(next);
+  // First child, so appended extras (badges, loading spinners) survive.
+  else btn.insertBefore(next, btn.firstChild);
+}
+
+export function syncRailIcons() {
+  const rail = document.getElementById('icon-rail');
+  if (!rail) return;
+
+  // 1. Declared static buttons — clone the source row's icon svg.
+  rail.querySelectorAll('.icon-rail-btn[data-rail-source]').forEach((btn) => {
+    const src = document.getElementById(btn.dataset.railSource);
+    const spec = RAIL_MIRRORS.find((m) => m.rail === btn.id);
+    const svg = src && src.querySelector((spec && spec.iconSel) || 'svg');
+    if (svg) _setRailIcon(btn, svg);
+  });
+
+  // 2. Injected game chrome — create the mirror, keep icon + gating in step.
+  const sep = rail.querySelector('.rail-separator');
+  let anchor = sep || document.getElementById('rail-delete-session');
+  for (const spec of RAIL_MIRRORS) {
+    const src = document.getElementById(spec.source);
+    let btn = document.getElementById(spec.rail);
+    if (!src) {
+      if (btn) btn.style.display = 'none'; // source row left the DOM
+      continue;
+    }
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = spec.rail;
+      btn.className = 'icon-rail-btn';
+      btn.dataset.railSource = spec.source;
+      if (spec.section) btn.dataset.section = spec.section;
+      const label = src.title || src.getAttribute('aria-label') || '';
+      if (label) {
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      }
+      if (spec.activate) {
+        btn.addEventListener('click', () => {
+          const row = document.getElementById(spec.source);
+          if (row) row.click();
+        });
+      }
+      // Mirror the sidebar's order: Diary Room / Cast in the core cluster,
+      // the status entry after the Chats indicator (the expanded HUD sits
+      // below the session list).
+      const after = spec.section ? (document.getElementById('rail-chats') || anchor) : anchor;
+      if (after) after.after(btn);
+      else rail.appendChild(btn);
+      if (!spec.section) anchor = btn;
+      const svg = src.querySelector(spec.iconSel || 'svg');
+      if (!svg && spec.fallback) btn.innerHTML = spec.fallback;
+    }
+    // (Icons for mirrors with a source svg are cloned by pass 1 next sync —
+    // do it now too so a fresh button never renders empty.)
+    const svg = src.querySelector(spec.iconSel || 'svg');
+    if (svg) _setRailIcon(btn, svg);
+    // The row's game gating is the rail's too (hidden until a game exists).
+    btn.style.display = getComputedStyle(src).display === 'none' ? 'none' : '';
+  }
+}
+
+function _initRailIconSource() {
+  if (window.__odyRailIconsWired) return;
+  window.__odyRailIconsWired = true;
+  window._railIconsSync = syncRailIcons; // test/debug seam
+  try { syncRailIcons(); } catch (_) {}
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || typeof MutationObserver === 'undefined') return;
+  let queued = false;
+  const queue = () => {
+    if (queued) return;
+    queued = true;
+    setTimeout(() => {
+      queued = false;
+      try { syncRailIcons(); } catch (_) {}
+    }, 50);
+  };
+  // The rail lives OUTSIDE #sidebar, so our own writes never re-trigger this.
+  new MutationObserver(queue).observe(sidebar, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['style', 'class'],
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initRailIconSource);
+} else {
+  _initRailIconSource();
+}
