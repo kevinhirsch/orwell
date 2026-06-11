@@ -183,4 +183,21 @@ export class EngineCommandsAdapter implements EngineCommands {
     this.onPersist?.(); // durable save (0030): the player's DR is their persisted knowledge
     return { recorded: true };
   }
+
+  recordImageBeat(req: { houseguestId: EntityId; imageRef: string }): { eventId: string } {
+    // 0051: an image shown to the player in-character is a BEAT — recorded like any scene, so it
+    // has consequence and memory ("recorded or it didn't happen"). Player-witnessed by construction
+    // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image
+    // is built only from the player's visible state, so showing it is the player's own knowledge.
+    // Monotonic, restart-safe id off the store size (same discipline as recordInteraction, B40).
+    const n = this.events.query().length;
+    const eventId = `evt:image:${n}`;
+    this.events.record({
+      id: eventId, ts: n, type: "image-shown",
+      initiator: PLAYER, witnessSet: [PLAYER],
+      hidden: false, content: `image shown to the player: ${req.houseguestId} (${req.imageRef})`,
+    });
+    this.onPersist?.(); // durable save (0030): the image beat survives a restart
+    return { eventId };
+  }
 }

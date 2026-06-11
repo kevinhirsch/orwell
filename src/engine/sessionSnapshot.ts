@@ -55,6 +55,8 @@ export interface SessionCore {
   seed?: number;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
   casting?: CastingIntake;
+  /** Per-season photorealistic style anchor (0051): seeded at cast time, stable through the season. Absent on older saves (falls back to a default). */
+  portraitStyleAnchor?: string;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

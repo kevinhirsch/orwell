@@ -4,7 +4,7 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
-  UpdateCastingReq, CastingStatusView,
+  UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import type { GameEvent } from "../../domain/event";
@@ -51,6 +51,8 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
+import { buildPortraitPrompt, buildCastPortraitPrompts } from "../../engine/portraitPrompts";
+import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
@@ -151,6 +153,8 @@ export class GameSessionAdapter implements GameSession {
   private presence: Map<EntityId, Room> | null = null;
   /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
   private gameSeed: number | null = null;
+  /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
+  private portraitStyleAnchor: string | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -326,6 +330,28 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
+  /**
+   * The portrait prompt for one houseguest by id (0051) — Vault-free. Built from PUBLIC appearance
+   * facets only (appearance/age/presentation) + the per-season style anchor. Returns null when no
+   * game is started or the id is unknown. No stats, soul, or hidden element ever reaches the prompt.
+   */
+  getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null {
+    if (!this.house || !this.portraitStyleAnchor) return null;
+    const npc = this.house.npcs.find((n) => n.id === id);
+    const subject = id === this.house.player.id ? this.house.player : npc;
+    if (!subject) return null;
+    return buildPortraitPrompt(
+      subject.id,
+      subject.name,
+      {
+        appearance: subject.character.appearance,
+        age: subject.character.age,
+        presentation: subject.character.presentation,
+      },
+      this.portraitStyleAnchor,
+    );
+  }
+
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
   seasonRecap(): SeasonRecapView {
     const events = this.record?.events() ?? [];
@@ -390,6 +416,7 @@ export class GameSessionAdapter implements GameSession {
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
+      ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
     };
@@ -406,6 +433,15 @@ export class GameSessionAdapter implements GameSession {
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
+    // 0051: restore the per-season portrait style anchor. On a legacy save that predates it, re-seed
+    // from the game seed (so the look stays stable for a resumed game), or fall back to the first
+    // variant when there's no seed either — either way the season looks like itself.
+    this.portraitStyleAnchor = core.portraitStyleAnchor
+      ?? (core.house
+        ? (core.seed !== undefined
+          ? STYLE_ANCHOR_VARIANTS[new SeededRandom(hashSeed(`${core.seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)]
+          : STYLE_ANCHOR_VARIANTS[0])
+        : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
@@ -610,6 +646,11 @@ export class GameSessionAdapter implements GameSession {
     // first-class for tests and replays.
     const seed = req.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
+    // 0051: draw ONE per-season portrait style anchor, seeded off the game seed — same seed always
+    // draws the same anchor, so the house looks like itself across restarts and through the season.
+    this.portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
+      new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
+    ];
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
@@ -654,7 +695,28 @@ export class GameSessionAdapter implements GameSession {
       this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`))),
     );
     this.persist(); // durable save (0030): a started game must survive a restart
-    return this.view();
+    // 0051: attach the season-start portrait prompts — present ONLY on this response (the FE calls
+    // the image API once at move-in and stores the results). Built from PUBLIC appearance facets
+    // only (id/name/appearance/age/presentation) — never stats, soul, or hidden elements.
+    return { ...this.view(), portraitPrompts: this.castPortraitPrompts() };
+  }
+
+  /**
+   * Build the Vault-free cast portrait prompts (0051) from the PUBLIC house facets — the same
+   * fields the visible projection exports on the HouseguestCard. No stats, no soul, no hidden
+   * elements ever reach `buildCastPortraitPrompts`.
+   */
+  private castPortraitPrompts(): PortraitPromptEntry[] {
+    if (!this.house || !this.portraitStyleAnchor) return [];
+    const everyone = [this.house.player, ...this.house.npcs];
+    const publicCast = everyone.map((h) => ({
+      id: h.id,
+      name: h.name,
+      appearance: h.character.appearance,
+      age: h.character.age,
+      presentation: h.character.presentation,
+    }));
+    return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
   }
 
   /**
