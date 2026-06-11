@@ -1565,27 +1565,35 @@ The implementer's honest accounting, verified by the Audit Manager against final
 cheap to do so. This section is the authoritative open-items list going forward.
 
 ## A — Findings never reached (no code, no PR)
-- **T3–T7, T10, T11, T19, T20** — nine T-stream test-integrity repairs (Lane 10 lost two
-  agents mid-work; only artifact-verified items shipped: T8/T9/T12/T15–T17). Open.
+- ✅ **T3–T7, T10, T11, T19, T20** — nine T-stream test-integrity repairs — **DONE (PR #225,
+  Lane B)**. Re-pointed at live seams / real assertions, each strengthened test
+  mutation-verified; T10/T19 were already hardened in code by PR #221 and are verified +
+  stamped here. (Originally open — Lane 10 lost two agents mid-work; only T8/T9/T12/T15–T17
+  shipped then.)
 - **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter. Lane 11 took the
   honest path: ADR 0004 amended to "Accepted — adapter not yet built." Engine souls run on
   the deterministic fake at runtime. Open (now truthfully documented).
 
 ## B — Cross-lane tails that fell through (each verified absent on main)
-1. **E54 tail** — `reliability` is built, fed, and consumed by `bondStrength`, but
-   `vetoSave` and `juryLean` still don't read it (verified: zero hits in `liveSeason.ts`/
-   `jury.ts`).
-2. **E58 tail** — `dayOfWeek()` exists and feeds the prompt; `GameStatusView` never got the
-   `day` field (verified: absent from the port).
-3. **CLAUDE.md ruling-#1 wording** — the do-not at `CLAUDE.md:248` still reads "Don't
-   hard-code any … name" instead of the amended "no fixed cast" formulation (verified).
-   Documentation drift only — the ruling and the amended 0004 spec are authoritative.
-4. **C8's third sub-item** — the casting overwrite flag (surface when a later
-   `updateCasting` replaces a captured scalar). Scoped out as a casting-UX contract change;
-   unowned.
-5. **E60/E89 FE tail** — richer approach-chip variety/timing treatment beyond the shipped
-   motive fail-open mapping (the owning lane was repurposed to calibration).
-*Disposition: items 1–5 batch into one "cross-lane tails" PR with proving tests (~1 hr).*
+**✅ All five DONE — one "cross-lane tails" PR (PR #224, Lane A), each with its proving test.**
+1. ✅ **E54 tail** — `reliability` is now consumed in both seams: `chooseVetoSave` ranks the
+   veto save by demonstrated loyalty (`RELIABILITY_WEIGHT`), and a centered reliability term
+   (`JURY_WEIGHTS.reliability`) shifts `juryLean`. (Was: built/fed/consumed by `bondStrength`
+   only.)
+2. ✅ **E58 tail** — `PublicGameStatus.day = dayOfWeek(phase)` (hoh=1…eviction=5, null
+   off-ladder). (Was: helper existed and fed the prompt, but the view had no `day` field.)
+3. ✅ **CLAUDE.md ruling-#1 wording** — the do-not now reads the amended "no fixed cast"
+   formulation (name corpora are raw material; no full-name+persona pairing hard-coded; legacy
+   Bible's names stay banned). (Was: documentation drift only.)
+4. ✅ **C8's third sub-item** — a later `updateCasting` that replaces a captured scalar now
+   reports `overwrote: [...]` on the casting status, so the producer confirms rather than
+   silently clobbering.
+5. ✅ **E60/E89 FE tail** — the approach chip varies its framing by the `bond | probe` motive
+   (copy + class + tooltip), and a FE belt (`firstCeremonyResolved`) suppresses every chip
+   before the first ceremony resolves — holding even if the engine fails open (browser-smoke
+   proven).
+*Disposition: items 1–5 shipped as PR #224 with proving tests; engine `npm test` + FE
+pytest/browser-smoke/matrix green.*
 
 ## C — Done differently than specced (deliberate, ruled)
 - **The calibration measurement** runs 20 seeds × one active variant (compete +
@@ -1602,17 +1610,24 @@ cheap to do so. This section is the authoritative open-items list going forward.
 means **the A4 single-PAT deploy design has never been verified on a real deployed box**,
 only via simulated smoke probes; verify it during the private-repo flip · the real
 relational adapters (SQLite/Postgres, sqlite-vec/pgvector) · full MCP/JSON-RPC over the
-HTTP transport · the specced-not-built 0051 (in-character images) and 0053 (admin
-transcripts).
+HTTP transport · the specced-not-built 0051 (in-character images). **0053 (admin transcripts)
+is now ✅ built (PR #223, Lane C)** — read-only admin-gated transcript retrieval incl. the
+agent tool-call nodes; FE pytest-validated.
 
 ## The remaining work, in dispatch order
-1. **The cross-lane tails PR** (B1–B5; one PR, proving tests included).
-2. **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20 — independent step/test files,
-   fan out freely).
-3. **0053 admin transcripts** (ruling #14 — the user wants this) and **0051** when ready.
+1. ✅ **The cross-lane tails PR** (B1–B5; one PR, proving tests included) — **DONE, PR #224.**
+2. ✅ **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20) — **DONE, PR #225.**
+3. ✅ **0053 admin transcripts** (ruling #14) — **DONE, PR #223.** **0051** still when ready.
 4. **E86(a)** fastembed adapter, or leave honestly deferred.
 5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
 6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
+
+> **Close-out update (2026-06-11):** the three dispatch-order-1/2/3 lanes landed as PRs
+> #224 (cross-lane tails), #225 (T-remainder), and #223 (0053 admin transcripts), merged to
+> `main` in that order atop the ledger PR #222. Items 4–6 remain deliberately deferred
+> (decision-gated) at stamping time; **E86(a) has since landed too (PR #226)** — leaving the
+> private-repo flip (real-host A4 verification now under way on the user's box) and the
+> playtest-gated calibration revisit.
 
 ---
 
