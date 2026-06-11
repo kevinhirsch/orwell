@@ -251,6 +251,11 @@ export class OrwellWindow {
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     this.el.classList.remove('ow-focused');
+    // Capture the pre-minimize inline display so restore can put it BACK —
+    // clearing to '' would fall through to a consumer's own CSS (e.g. a panel
+    // whose stylesheet defaults to display:none), reproducing the F1 bug class
+    // one layer up.
+    this._displayBeforeMin = this.el.style.display;
     const done = () => {
       this.el.classList.remove('ow-anim-fly');
       this.el.style.transform = ''; this.el.style.opacity = '';
@@ -274,8 +279,9 @@ export class OrwellWindow {
 
   _afterDockRestore() {
     // modalManager.restore removed .hidden/.modal-minimized and stamped ITS z —
-    // re-show, then re-assert the kit band so stacking stays one authority.
-    this.el.style.display = '';
+    // re-show (the exact pre-minimize inline display, never '' — see minimize),
+    // then re-assert the kit band so stacking stays one authority.
+    this.el.style.display = this._displayBeforeMin || '';
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();

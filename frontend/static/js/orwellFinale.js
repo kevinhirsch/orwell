@@ -106,10 +106,11 @@ import * as modalManager from "./modalManager.js";
           font-family: inherit; font-size: .74rem; text-align: left;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
-        /* E67/C26: phones — the finale is a full-width top sheet, never a floating box. */
+        /* E67/C26 + F3: phones — a full-width top sheet whose POSITION the slot
+           engine's sheet host owns (no per-panel pins; two visible sheets stack,
+           never overlap). */
         @media (max-width: 768px) {
           #orwell-finale {
-            left: 0 !important; right: 0 !important; top: 44px !important;
             width: auto !important; max-width: none !important;
             border-radius: 0 0 12px 12px; border-left: none; border-right: none;
             max-height: 42vh; overflow: auto;
@@ -254,6 +255,8 @@ import * as modalManager from "./modalManager.js";
     timer = setTimeout(tick, _pollDelay());
   }
 
+  // Seam for the headless gate (F3 and the finale's own F-2 wave): build + show on demand.
+  window._orwellFinaleEnsure = () => { const el = ensureUI(); if (!isMinimized()) el.style.display = "block"; return true; };
   window.orwellRefreshFinale = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
   ready(start);

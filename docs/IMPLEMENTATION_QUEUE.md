@@ -2992,7 +2992,7 @@ PR per item).
 > kit-window end-to-end block; `test_f_window_kit.py` source-pins; FE pytest 445 green;
 > matrix 37/0/0.
 
-### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **OPEN**
+### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **WAVE 1 ✅ · remainder OPEN**
 
 > Wave order: status HUD (stays sidebar chrome — composes title/controls only) → social +
 > approaches (F2/F3/F6/F7 cells flip; the narrow tier gets ONE sheet host so two sheets can
@@ -3001,6 +3001,21 @@ PR per item).
 > settings + theme (F8 focus-return; cluster already injected) → remaining modals/popovers
 > (W13–W16; styledConfirm/Prompt traps fold into the kit's stack; decision card gains
 > non-binding Escape, F11).
+> **WAVE 1 DONE:** the SOCIAL panel composes the kit — bespoke chrome/drag/dock wiring
+> deleted (`osoc-hdr`/`osoc-min`/`modalManager.register`/`makeWindowDraggable` all gone from
+> `orwellSocial.js`); its Escape/focus/fly-out/persistence now come from `OrwellWindow`, and
+> the C26 auto-park routes through the kit. **F3 fixed structurally:** the slot engine's
+> narrow tier is a SHEET HOST (`restackNarrowSheets` — one stacked column across both top
+> slots, measured heights) and the per-panel `top:44px !important` pins are deleted from
+> social AND finale; two visible sheets stack, never overlap (browser-smoke-asserted at
+> 390×844 via the new `_orwellFinaleEnsure` seam). A kit restore bug caught by the gate
+> (display:'' falling through to a consumer's CSS `display:none` — the F1 class one layer up)
+> fixed by capture/restore of the pre-minimize inline display. STATUS HUD: verify-only —
+> ruling #3 sidebar chrome; all its audit cells were already green; no change.
+> T20 pins amended to the kit composition (`test_orwell_huds.py`). Gates: FE pytest 464 ·
+> browser smoke (kit + F1/F2/F3 hard assertions) · boot smoke · matrix 37/0/0 — all green.
+> Remaining waves: Diary Room (verify-only) → finale chrome → retro/presence/banner cluster →
+> settings/theme (F8) → W13–W16 popovers/dialogs (F11) → the F-3 ratchet.
 
 ### F-3 — the ratchet · **OPEN**
 

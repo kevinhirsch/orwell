@@ -35,19 +35,24 @@ def test_sourcepin_huds_import_modal_manager():
 
 
 def test_sourcepin_huds_register_with_the_dock():
-    # SOURCE-PIN (T20). Behavior (chip appears on minimize) is in browser_smoke.py.
+    # SOURCE-PIN (T20, amended by Lane F wave 1): the dock wiring now comes from the
+    # WINDOW KIT — the panel composes OrwellWindowKit (which registers with
+    # modalManager; pinned in test_f_window_kit.py) instead of hand-wiring the dock.
     for f in HUDS:
         src = _read(f)
-        assert "modalManager.register(" in src, f"{f} must register with the dock"
-        # A label + icon make the chip identifiable in the fly-out.
-        assert "restoreFn" in src and "icon" in src, f"{f} must supply restoreFn + icon"
+        assert "OrwellWindowKit.create(" in src, f"{f} must compose the window kit"
+        # A label + icon make the chip identifiable in the dock rows.
+        assert "title:" in src and "icon" in src, f"{f} must supply title + icon"
 
 
 def test_sourcepin_huds_minimize_routes_to_the_dock():
-    # SOURCE-PIN (T20). Behavior (panel hides on minimize) is in browser_smoke.py.
+    # SOURCE-PIN (T20, amended by Lane F wave 1): minimize goes through the kit
+    # (the kit's cluster button and the C26 auto-park both call kit minimize,
+    # which parks via modalManager). Behavior is in browser_smoke.py.
     for f in HUDS:
         src = _read(f)
-        assert "modalManager.minimize(" in src, f"{f} minimize must go to the dock"
+        assert "_win.minimize()" in src, f"{f} minimize must route through the kit"
+        assert "modalManager.minimize(" not in src, f"{f} must not hand-wire the dock anymore"
 
 
 def test_sourcepin_huds_poll_loop_respects_minimized_state():

@@ -29,8 +29,8 @@ T-remainder, 0053, E86a fastembed). The **campaign close-out ledger** in
 forward**. The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0053**; 0051 is specced-not-built, 0052 — the house themes — shipped
-FE-side from the audit spec with no standalone file). **New work starts as a new spec/queue
+`docs/features/` (through **0053**; 0052 — the house themes — shipped FE-side from the audit
+spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235). **New work starts as a new spec/queue
 item** — the remaining known deferrals are listed under [Current status](#current-status); the
 governing design rulings are `docs/audits/2026-06-09-product-audit.md` ("Remediation
 principles"), the **product-owner rulings #1–#21** in `docs/audits/2026-06-10-full-product-audit.md`,
@@ -472,8 +472,7 @@ the authoritative open-items list going forward.
 
 **Remaining work** (the queue is drained; new work starts as a new spec/queue item — and the
 **close-out ledger** in `docs/audits/2026-06-10-full-product-audit.md` is the authoritative
-open-items list): **0022** MVP-2 (the one deferred feature); **0051** in-character images
-(specced, not built); 0010's container smoke on a real Proxmox host — which is also the
+open-items list): **0022** MVP-2 (the one deferred feature); 0010's container smoke on a real Proxmox host — which is also the
 real-host verification the A4 single-PAT deploy design still needs (do it during the
 private-repo flip); the deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector
 — souls/vectors run in-memory + file today); full MCP/JSON-RPC over the current HTTP transport;

@@ -328,10 +328,17 @@ def main() -> int:
             page.wait_for_selector("#orwell-social", timeout=3000)
             check(page.evaluate("getComputedStyle(document.getElementById('orwell-social')).display !== 'none'") is True,
                   "social HUD: mounts visible")
+            page.wait_for_timeout(280)  # let the kit's open animation settle before measuring
+            soc_cluster = page.evaluate("""[...document.querySelectorAll('#orwell-social .ow-controls button')].map(b => {
+              const r = b.getBoundingClientRect();
+              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+            })""")
+            check(len(soc_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in soc_cluster),
+                  f"wave 1: social composes the kit cluster (named, >=24px) ({soc_cluster})")
             # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
             # clicks worked on an invisible dock and masked the stranded-window trap.
-            page.click("#orwell-social .osoc-min")
-            page.wait_for_timeout(250)  # let the dock re-render
+            page.click("#orwell-social .ow-min")
+            page.wait_for_timeout(500)  # the ruling-#19 fly-out runs ~270ms before the dock renders
             min_state = page.evaluate("""() => {
               const el = document.getElementById('orwell-social');
               const dock = document.getElementById('minimized-dock');
@@ -352,7 +359,7 @@ def main() -> int:
 
             # F2 (DWE audit): drag must MOVE the panel — the slot restack used to revert
             # every windowDrag style write, leaving drag dead and offsets at (0,0).
-            hdr = page.query_selector("#orwell-social .osoc-hdr")
+            hdr = page.query_selector("#orwell-social .ow-titlebar")
             hb = hdr.bounding_box()
             r0 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
             page.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
@@ -491,11 +498,15 @@ def main() -> int:
             # never covers the composer.
             soc_geo = mob.evaluate("""() => {
               if (window._orwellSocialEnsure) window._orwellSocialEnsure();
-              const el = document.getElementById('orwell-social');
-              const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
-              if (!el || !ta) return { ok: false };
-              const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
-              return { fullWidth: r.width >= window.innerWidth * 0.95, clearsComposer: r.bottom <= c.top };
+              // The sheet host (F3) positions sheets on the slot engine's observer
+              // microtask — settle before measuring, same as the F3 block below.
+              return new Promise(res => setTimeout(() => {
+                const el = document.getElementById('orwell-social');
+                const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+                if (!el || !ta) return res({ ok: false });
+                const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
+                res({ fullWidth: r.width >= window.innerWidth * 0.95, clearsComposer: r.bottom <= c.top });
+              }, 350));
             }""")
             check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
             check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
@@ -532,6 +543,20 @@ def main() -> int:
             classes = motive.get("classes") or []
             check(len(set(classes)) == 2 and None not in classes,
                   f"E60: bond and probe carry DISTINCT framing classes ({motive})")
+            # F3 (wave 1): two visible top sheets STACK, never overlap — the slot
+            # engine's narrow sheet host owns their positions now.
+            f3 = mob.evaluate("""() => {
+              window._orwellSocialEnsure && window._orwellSocialEnsure();
+              window._orwellFinaleEnsure && window._orwellFinaleEnsure();
+              return new Promise(res => setTimeout(() => {
+                const s = document.getElementById('orwell-social').getBoundingClientRect();
+                const f = document.getElementById('orwell-finale').getBoundingClientRect();
+                const overlap = !(s.right <= f.left || f.right <= s.left || s.bottom <= f.top || f.bottom <= s.top);
+                res({ s: { top: s.top, bottom: s.bottom, w: s.width }, f: { top: f.top, bottom: f.bottom, w: f.width }, overlap });
+              }, 350));
+            }""")
+            check(f3.get("overlap") is False, f"F3: both sheets visible without overlap ({f3})")
+            check(f3["s"]["w"] >= 370 and f3["f"]["w"] >= 370, f"F3: sheets stay full-width ({f3})")
             mob.close()
 
             browser.close()

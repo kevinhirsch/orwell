@@ -14,7 +14,6 @@
 // house, not a crowd), the NPC is framed as the one approaching (they initiated), and an
 // approach you act on or dismiss STAYS gone across a refresh (until a new game), so the
 // surface never nags about something you already handled.
-import { makeWindowDraggable } from "./windowDrag.js";
 import * as modalManager from "./modalManager.js";
 import { isNarrow } from './platform.js';
 
@@ -111,38 +110,22 @@ import { isNarrow } from './platform.js';
     el.style.display = "none";
   }
 
+  // F-2 wave 1 (DWE audit): the panel COMPOSES the window kit — chrome, drag,
+  // minimize-to-dock, Escape, focus, persistence, and animations all come from
+  // OrwellWindow (orwellWindow.js). This module keeps only what is social:
+  // the approaches content, the poll loop, and the E60/E89 framing rules.
+  let _win = null;
   function ensureUI() {
-    let el = document.getElementById("orwell-social");
+    let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("div");
-    el.id = "orwell-social";
-    el.innerHTML = `
+    const content = document.createElement("div");
+    content.innerHTML = `
       <style>
         #orwell-social {
-          /* E91/S11: positioned by the top-right SLOT (orwellSlots.js) — no coordinates here. */
-          position: fixed; z-index: 9000;
-          width: 220px; max-width: 60vw; display: none;
-          background: var(--panel, #111); color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          padding: .6rem .7rem; box-shadow: 0 10px 30px rgba(0,0,0,.35);
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem; line-height: 1.45;
+          width: 240px; display: none;
+          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem;
         }
-        #orwell-social .osoc-hdr {
-          display: flex; align-items: baseline; gap: .4rem; margin-bottom: .5rem;
-          font-weight: 600; letter-spacing: .03em; cursor: move; user-select: none;
-        }
-        #orwell-social .osoc-ttl { flex: 1; min-width: 0; opacity: .8; }
-        #orwell-social .osoc-min {
-          cursor: pointer; border: none; background: none; color: inherit;
-          opacity: .55; font-size: 1rem; line-height: 1; padding: 0 .15rem; font-family: inherit;
-        }
-        #orwell-social .osoc-min:hover { opacity: .9; }
-        #orwell-social .osoc-dr {
-          width: 100%; cursor: pointer; border-radius: 8px; padding: .35rem .5rem;
-          background: var(--accent, #e06c75); color: #fff; border: none; font-weight: 600;
-          font-family: inherit; font-size: .76rem;
-        }
-        #orwell-social .osoc-hd { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); margin: .55rem 0 .3rem; letter-spacing: .03em; }
+        #orwell-social .osoc-hd { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); margin: .15rem 0 .3rem; letter-spacing: .03em; }
         #orwell-social .osoc-chip {
           display: flex; align-items: center; gap: .35rem; margin: .25rem 0;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
@@ -155,7 +138,7 @@ import { isNarrow } from './platform.js';
         #orwell-social .osoc-chip .osoc-go b { color: var(--fg, #9cdef2); }
         #orwell-social .osoc-chip .osoc-x {
           cursor: pointer; opacity: .55; border: none; background: none; color: inherit;
-          font-size: .9rem; line-height: 1; padding: 0 .2rem;
+          font-size: .9rem; line-height: 1; padding: .2rem .35rem; min-width: 24px; min-height: 24px;
         }
         /* E60: the chip's framing VARIES by the engine's coarse motive — a warm overture (bond)
            reads differently from someone sizing the player up (probe). A left accent rail carries
@@ -169,61 +152,33 @@ import { isNarrow } from './platform.js';
         #orwell-social .osoc-chip.osoc-chip-pending .osoc-go b {
           color: var(--accent, #e06c75);
         }
-        /* C26/M1: phones — a full-width sheet under the status panel's slot, never a
-           floating box over the composer. No touch drag (default mobile cutoff). */
+        /* C26/M1 + F3: phones — a full-width sheet whose POSITION the slot
+           engine's sheet host owns (no per-panel top/left pins; the host
+           stacks every visible sheet so two can never overlap). */
         @media (max-width: 768px) {
           #orwell-social {
-            left: 0 !important; right: 0 !important; top: 44px !important;
             width: auto !important; max-width: none !important;
             border-radius: 0 0 12px 12px; border-left: none; border-right: none;
             max-height: 38vh; overflow: auto;
           }
         }
       </style>
-      <div class="osoc-hdr" title="Drag to move">
-        <span class="osoc-ttl">The House</span>
-        <button type="button" class="osoc-min" title="Minimize" aria-label="Minimize">–</button>
-      </div>
       <div class="osoc-body">
         <div class="osoc-hd" id="osoc-appr-hd" style="display:none">Wants a word</div>
         <div id="osoc-appr"></div>
       </div>`;
-    document.body.appendChild(el);
-    // E88 (ruling #4): the Diary Room is NOT here anymore — it is a standing
-    // sidebar button + a composer mode (orwellDiaryRoom.js). This panel keeps
-    // only the approaches.
-
-    // E91/S11: the top-right slot owns the position; drag persists an offset-from-slot.
-    el._orwellSlot = window.OrwellSlots
-      ? window.OrwellSlots.register(el, "top-right", { key: "social", draggable: true })
-      : null;
-    // Minimize → park as a chip in the shared dock (the fly-out of minimized windows),
-    // alongside every other tool, instead of collapsing in place.
-    try {
-      modalManager.register(ID, {
-        label: "The House",
-        icon: ICON,
-        restoreFn: () => { el.style.display = "block"; },
-        closeFn: () => { el.style.display = "none"; },
-      });
-    } catch (_) {}
-    el.querySelector(".osoc-min").addEventListener("click", () => {
-      try { modalManager.minimize(ID); } catch (_) {}
-      // Not a `.modal`, so hide explicitly (inline display beats the dock's `.hidden`).
-      el.style.display = "none";
+    // E88 (ruling #4): the Diary Room is NOT here — it is a standing sidebar
+    // button + a composer mode (orwellDiaryRoom.js). This panel is approaches only.
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "The House", icon: ICON,
+      slot: "top-right", slotKey: "social", role: "complementary",
+      // An ambient HUD parks (minimize); the game decides when it exists, so it
+      // carries no close — a CAPABILITY of the one kit cluster, not bespoke chrome.
+      minimizable: true, closable: false, draggable: true,
+      content,
     });
-
-    // Moveable window: drag the panel by its header (no dock/fullscreen/resize — it is a
-    // small HUD); the Diary-Room dialog drags by its title bar. Buttons are skipped by the
-    // default skipSelector, so the minimize click never starts a drag.
-    makeWindowDraggable(el, {
-      content: el, header: el.querySelector(".osoc-hdr"),
-      enableDock: false, enableFullscreen: false, enableResize: false,
-      onDragEnd: ({ rect }) => {
-        if (el._orwellSlot) el._orwellSlot.saveDragOffset(rect); // E91: offset-from-slot, clamped at restore
-      },
-    });
-    return el;
+    _win.open();
+    return document.getElementById(ID);
   }
 
   // --- Approaches -------------------------------------------------------
@@ -380,7 +335,7 @@ import { isNarrow } from './platform.js';
     if (isNarrow() && !_mobileParkedOnce && !isMinimized()) {
       _mobileParkedOnce = true;
       el.style.display = "block";
-      try { modalManager.minimize(ID); return; } catch (_) {}
+      try { if (_win) { _win.minimize(); return; } } catch (_) {}
     }
     if (!isMinimized()) el.style.display = "block";
     // E89 belt: don't even ask for approaches before the first ceremony resolves — and if the
