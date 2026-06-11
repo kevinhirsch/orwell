@@ -221,6 +221,10 @@ export class GameSessionRegistry {
           try {
             importSnapshot(sb, snap); // resume instead of fresh setup (the welcome-overlay fix)
           } catch {
+            // G12: a refused resume may already have flooded the shared soul-index lane
+            // (`rebuildSoulIndex` runs before the part that threw) — drop the dead graph's
+            // queued embeds so they never crowd the fresh sandbox's.
+            sb.engine.soul.discardPending();
             sb = buildUserSandbox(user);
           }
         }
@@ -247,10 +251,13 @@ export class GameSessionRegistry {
   private unloadIdle(current: string): void {
     if (!this.saveStore) return;
     while (this.sandboxes.size > this.maxResident) {
-      const lru = this.sandboxes.keys().next().value;
-      if (lru === undefined || lru === current) return; // never unload the sandbox being served
-      this.saveUser(lru); // park the latest state before dropping the object graph
-      this.sandboxes.delete(lru);
+      const next = this.sandboxes.entries().next().value;
+      if (next === undefined || next[0] === current) return; // never unload the sandbox being served
+      this.saveUser(next[0]); // park the latest state before dropping the object graph
+      // G12: the parked graph's queued soul-index work is derived state for indexes about to be
+      // garbage (the resume re-derives them) — drop it from the shared breathing lane.
+      next[1].engine.soul.discardPending();
+      this.sandboxes.delete(next[0]);
     }
   }
 
@@ -290,6 +297,9 @@ export class GameSessionRegistry {
    * advance's events behind. The durable save is untouched by this call.
    */
   restore(user: string, snap: SessionSnapshot): UserSandbox {
+    // G12: the rolled-back graph's queued soul-index work dies with it — the clean rebuild
+    // below re-floods the shared lane from the snapshot, breathing (one embed per macrotask).
+    this.sandboxes.get(user)?.engine.soul.discardPending();
     const sb = buildUserSandbox(user);
     importSnapshot(sb, snap);
     this.wireHooks(user, sb);
@@ -316,6 +326,9 @@ export class GameSessionRegistry {
    * via `onReset` (so season 2's first commit isn't a "degradation" against a finished season — E1).
    */
   resetUser(user: string): UserSandbox {
+    // G12: the dead season's queued (derived) soul-index work must not crowd the shared
+    // breathing lane the new season seeds through — discard it with the sandbox it served.
+    this.sandboxes.get(user)?.engine.soul.discardPending();
     this.saveStore?.resetUser?.(user); // rotate the dead season's saves off the live path (R1)
     this.onReset?.(user); // invalidate the orchestrator's baseline/health/rng for this user (E1)
     const sb = buildUserSandbox(user);

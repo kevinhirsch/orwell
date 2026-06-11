@@ -874,6 +874,56 @@ def main() -> int:
             check(f3.get("clearsComposer") is True, f"F3: the finale sheet never covers the composer ({f3})")
             mob.close()
 
+            # H6: the Chats auto-sort control reads "Tidy" ONCE. It is a split
+            # control — the main "★ Tidy" (AI) plus an options chevron that
+            # reveals the no-AI cleanup sub-row — and that sub-row must carry
+            # its own distinct label, never a second bare "Tidy". A fresh boot
+            # has zero chats (the section is hidden+collapsed), so un-hiding it
+            # is the setup; the dropdown + chevron clicks are real.
+            page.evaluate("""() => {
+              const sec = document.getElementById('sessions-section');
+              if (sec) sec.classList.remove('hidden', 'collapsed');
+            }""")
+            page.click("#session-sort-btn")
+            page.wait_for_timeout(250)
+
+            def h6_visible_tidy_labels():
+                return page.evaluate("""() => {
+                  const vis = el => el.getClientRects().length > 0 &&
+                                    getComputedStyle(el).display !== 'none';
+                  const out = [];
+                  document.querySelectorAll('#session-sort-dropdown *').forEach(el => {
+                    if (!vis(el)) return;
+                    const own = [...el.childNodes].filter(n => n.nodeType === 3)
+                      .map(n => n.textContent).join(' ');
+                    if (/\\bTidy\\b/.test(own)) out.push(el.id || el.className || el.tagName);
+                  });
+                  return out;
+                }""")
+
+            h6_closed = h6_visible_tidy_labels()
+            check(h6_closed == ["auto-sort-icon"],
+                  f"H6: ONE visible Tidy affordance with the options sub-row closed ({h6_closed})")
+            page.click("#auto-sort-sessions-more")  # the chevron reveals the no-AI sub-row
+            page.wait_for_timeout(250)
+            h6_open = h6_visible_tidy_labels()
+            check(h6_open == ["auto-sort-icon"],
+                  f"H6: STILL exactly one visible 'Tidy' with the sub-row expanded ({h6_open})")
+            h6_noai = page.evaluate("""() => {
+              const el = document.getElementById('auto-sort-sessions-noai-btn');
+              if (!el) return { present: false };
+              return { present: true,
+                       visible: el.getClientRects().length > 0 && getComputedStyle(el).display !== 'none',
+                       text: (el.textContent || '').replace(/\\s+/g, ' ').trim() };
+            }""")
+            check(h6_noai.get("visible") is True and h6_noai.get("text", "").startswith("Clean up"),
+                  f"H6: the revealed sub-row is the distinctly-labeled no-AI cleanup ({h6_noai})")
+            page.evaluate("""() => {
+              document.getElementById('session-sort-dropdown').style.display = 'none';
+              document.getElementById('auto-sort-sessions-noai-btn').style.display = 'none';
+              document.getElementById('sessions-section').classList.add('hidden', 'collapsed');
+            }""")
+
             browser.close()
     finally:
         proc.terminate()
