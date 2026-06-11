@@ -52,11 +52,29 @@ export function initKeyboardShortcuts(modules) {
 
   window._orwellKeybinds = { ..._defaultKeybinds };
 
-  // Load saved keybinds
-  fetch('/api/auth/settings', { credentials: 'same-origin' })
-    .then(r => r.json())
-    .then(s => { if (s.keybinds) window._orwellKeybinds = { ..._defaultKeybinds, ...s.keybinds }; })
-    .catch(() => {});
+  // Load saved keybinds — the SAME layering the Shortcuts tab renders from
+  // (settings.js initShortcuts): defaults ← global `keybinds` ← the per-user
+  // /api/prefs/keybinds override. The rebind UI persists per-profile via
+  // PUT /api/prefs/keybinds (C30), so the runtime keymap MUST read that store
+  // back; seeding from /api/auth/settings alone meant every custom shortcut
+  // silently reverted on reload (F1, 2026-06-11 settings-wiring audit).
+  // Sequential on purpose: the per-user layer must land on top.
+  (async () => {
+    const kb = { ..._defaultKeybinds };
+    try {
+      const r = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+      const s = await r.json();
+      if (s.keybinds) Object.assign(kb, s.keybinds);
+    } catch (_) {}
+    try {
+      const r = await fetch('/api/prefs/keybinds', { credentials: 'same-origin' });
+      if (r.ok) {
+        const { value } = await r.json();
+        if (value && typeof value === 'object') Object.assign(kb, value);
+      }
+    } catch (_) {}
+    window._orwellKeybinds = kb;
+  })();
 
   // ── Esc cancels select mode (capture phase, before modal-close) ──
   // Every tool's bulk-select bar has a `*-bulk-cancel` button whose click
