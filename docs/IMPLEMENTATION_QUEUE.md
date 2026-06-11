@@ -2825,3 +2825,17 @@ PR per item).
 > real). Passive finale wins 7/10 → 3/10, each EARNED (≥2 broadcast comp wins). The permanent gate:
 > `tests/property/juryReach.property.test.ts` (floor ≥3/20 · ceiling ≤19/20 · ≥1 pre-jury loss ·
 > wins rare AND comp-earned; seeded-deterministic, roles only).
+
+### L10 — hardening sweep (E18/E77 · E19 · E27/E28/E30/E31 · C4/C5 · E78 · T8/T9/T12/T15–T17)  ·  **✅ DONE (PR #221)**
+
+> **The structural wall hardens:** dep-cruiser goes **default-deny** (E18) and EVERY forbidden
+> rule is unit-asserted (E77 — `test:arch` is no longer the only place they run). **The live
+> sentinel deepens** (E19): knowledge-bearing reads swept per beat + one full post-finish sweep.
+> **The HTTP edge:** two-tier token auth — an admin secret is its own credential, player ⊉ admin
+> (E27, unified with #218's constant-time helper); tool LISTING never mints a sandbox (E28); a
+> dead-socket answer can't crash the process (E30); malformed args are field-naming 400s, never
+> 500s (E31 — the 0009 sentinel sweeps treat the typed refusal as an outcome and sweep ITS text).
+> **Integrity math:** any single degradation trips the checkpoint (C4); competition input guards
+> (C5); the no-secrets guard scans the whole tree (E78). **Test integrity:** T8/T9/T12/T15–T17
+> step-definition hardening + the 0004/0009/0036/0037/0047 feature amendments.
+> **Open remainder (not reached — two lane agents died mid-work):** T3–T7, T10, T11, T19, T20.
