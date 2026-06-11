@@ -76,4 +76,34 @@ def test_smoke_exercises_the_kit_for_real():
     assert "F1: the Windows dock is VISIBLE" in smoke
     assert "F2: dragging the title bar MOVES the panel" in smoke
     assert "ow-smoke-window" in smoke                # a real kit window end-to-end
-    assert 'page.click("#orwell-social .osoc-min")' in smoke  # trusted, not evaluate()
+    assert 'page.click("#orwell-social .ow-min")' in smoke  # trusted, not evaluate()
+
+
+# ── Lane F / F-2 wave 1 pins ──────────────────────────────────────────────
+
+def test_sourcepin_wave1_social_composes_the_kit():
+    js = _read("static", "js", "orwellSocial.js")
+    assert "OrwellWindowKit.create(" in js          # the kit owns the chrome
+    assert "makeWindowDraggable" not in js          # bespoke drag wiring deleted
+    assert "osoc-hdr" not in js                     # bespoke titlebar deleted
+    assert "osoc-min" not in js                     # bespoke minimize button deleted
+    assert "modalManager.register(" not in js       # the kit registers, not the panel
+
+
+def test_sourcepin_wave1_sheet_host_owns_narrow():
+    slots = _read("static", "js", "orwellSlots.js")
+    assert "restackNarrowSheets" in slots           # the F3 sheet host exists
+    for f in ("orwellSocial.js", "orwellFinale.js"):
+        js = _read("static", "js", f)
+        assert "top: 44px !important" not in js, f  # per-panel pins are gone
+        assert "left: 0 !important" not in js, f
+
+
+def test_sourcepin_wave1_finale_seam_for_the_gate():
+    js = _read("static", "js", "orwellFinale.js")
+    assert "_orwellFinaleEnsure" in js
+
+
+def test_smoke_asserts_f3_for_real():
+    smoke = _read("scripts", "browser_smoke.py")
+    assert "F3: both sheets visible without overlap" in smoke

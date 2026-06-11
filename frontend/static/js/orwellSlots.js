@@ -67,11 +67,35 @@
     if (el.style[prop] !== val) el.style[prop] = val;
   }
 
+  // F3 (DWE audit / F-2 wave 1): the narrow tier is a SHEET HOST, not a
+  // stand-down. Both top-slot panels used to pin themselves to top:44px with
+  // per-panel !important CSS — with two visible (a finale staging while an
+  // approach is live) they overlapped and occluded each other's controls.
+  // Now the slot engine stacks every visible top-slot panel as a full-width
+  // sheet by MEASURED height (the same rule it applies on desktop), one
+  // column across both top slots; bottom slots keep their own narrow CSS.
+  function restackNarrowSheets() {
+    let cursor = TOP_BASE - 8; // sheets sit flush under the app header
+    for (const name of ["top-left", "top-right"]) {
+      for (const entry of slots[name]) {
+        const el = entry.el;
+        if (!visible(el)) continue;
+        setStyle(el, "position", "fixed");
+        setStyle(el, "left", "0px");
+        setStyle(el, "right", "0px");
+        setStyle(el, "top", cursor + "px");
+        setStyle(el, "bottom", "auto");
+        setStyle(el, "transform", "none");
+        cursor += (el.offsetHeight || 0) + GAP;
+      }
+    }
+  }
+
   // Stack one slot: measured heights, gap, safe-area; the final position —
   // slot base PLUS the persisted drag offset, clamped (S11/E91) — is computed
   // arithmetically and written ONCE, never via an intermediate base write.
   function restackSlot(name) {
-    if (NARROW.matches) return; // sheets own narrow layouts
+    if (NARROW.matches) { restackNarrowSheets(); return; } // F3: the sheet host owns narrow
     if (dragInProgress()) return; // F2: the gesture owns the position until drop
     const list = slots[name];
     const safeT = TOP_BASE, safeB = BOTTOM_BASE;
@@ -170,12 +194,12 @@
 
   window.addEventListener("resize", restackAll);
   NARROW.addEventListener("change", () => {
-    if (NARROW.matches) {
-      // hand the layout back to the sheet rules
-      for (const list of Object.values(slots)) for (const { el } of list) {
-        el.style.top = ""; el.style.bottom = ""; el.style.left = ""; el.style.right = ""; el.style.transform = "";
-      }
-    } else restackAll();
+    // Crossing the breakpoint re-lays out under the new tier's rules — the
+    // sheet host on narrow (F3), slot anchors + offsets on wide.
+    for (const list of Object.values(slots)) for (const { el } of list) {
+      el.style.top = ""; el.style.bottom = ""; el.style.left = ""; el.style.right = ""; el.style.transform = "";
+    }
+    restackAll();
   });
 
   window.OrwellSlots = { register, restackAll };
