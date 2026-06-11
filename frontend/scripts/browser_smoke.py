@@ -637,6 +637,145 @@ def main() -> int:
             check(page.evaluate("!document.getElementById('orwell-decision-card')") is True,
                   "F11: Escape dismisses the focused decision card (never submits)")
 
+            # G16 (G5 refresh-persistence audit, F1+F2) — driven FOR REAL on an
+            # isolated page (its own context/localStorage) with the audit's
+            # sanctioned route mocks: a live-game /state + /status + /roster keep
+            # the gates and poll loops honest across reloads while the main smoke
+            # page stays engine-down. Role-named payloads only (no cast names).
+            #   F2 (kit parked-means-parked), on the CAST window: open via the
+            #       seam, minimize (trusted click) → RELOAD → re-open via the
+            #       seam: it must come back PARKED (hidden + dock chip, no
+            #       snap-open) → restore via the chip → RELOAD → re-open: OPEN,
+            #       no stale chip.
+            #   F1: collapse the status HUD (trusted click) → RELOAD → still
+            #       collapsed, restored from the SAME per-user+game key the
+            #       header click writes (E71).
+            g16 = browser.new_page()
+            g16_state = (
+                '{"started": true, "week": 1, "phase": "nominations",'
+                ' "player": {"id": "player", "name": "The Player", "status": "active"},'
+                ' "house": [{"id": "npc:1", "name": "A Houseguest", "status": "active"},'
+                ' {"id": "npc:2", "name": "Another Houseguest", "status": "active"}]}'
+            )
+            g16_status = (
+                '{"week": 1, "phase": "nominations",'
+                ' "hoh": {"id": "npc:1", "name": "A Houseguest"},'
+                ' "nominees": [{"id": "npc:2", "name": "Another Houseguest"}]}'
+            )
+            g16_roster = (
+                '{"imagesAvailable": false, "roster": ['
+                '{"id": "player", "name": "The Player", "status": "active", "isPlayer": true},'
+                '{"id": "npc:1", "name": "A Houseguest", "status": "active"}]}'
+            )
+
+            def _g16_json(body):
+                return lambda route: route.fulfill(
+                    status=200, content_type="application/json", body=body)
+
+            g16.route("**/api/orwell/state", _g16_json(g16_state))
+            g16.route("**/api/orwell/status", _g16_json(g16_status))
+            g16.route("**/api/orwell/roster", _g16_json(g16_roster))
+            g16.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            g16.route("**/api/orwell/initiatives", _g16_json('{"initiatives": []}'))
+            g16.route("**/api/orwell/finale", _g16_json('{"finale": null}'))
+
+            def _g16_wait_js(expr, label, tries=75):
+                # CSP keeps 'unsafe-eval' off the page, so wait_for_function's
+                # string predicate is blocked — poll through evaluate (CDP) instead.
+                for _ in range(tries):
+                    if g16.evaluate(expr):
+                        return True
+                    g16.wait_for_timeout(200)
+                check(False, label)
+                return False
+
+            g16.goto(base + "/", wait_until="load", timeout=30000)
+            g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
+            # F1, the act: collapse the HUD via its header (trusted click).
+            g16.click("#orwell-status .os-hdr")
+            f1_keys = g16.evaluate("""() => {
+              const user = (document.body && document.body.dataset.user) || '';
+              return {
+                collapsed: document.getElementById('orwell-status').classList.contains('os-collapsed'),
+                keys: Object.keys(localStorage).filter(k => k.startsWith('orwell-status-collapsed')),
+                expected: 'orwell-status-collapsed:The Player:' + user,
+              };
+            }""")
+            check(f1_keys.get("collapsed") is True
+                  and f1_keys.get("keys") == [f1_keys.get("expected")],
+                  f"G16/F1: the collapse writes under the per-user+game key ({f1_keys})")
+            # F2, the act: open the cast window via the seam, then park it (trusted click).
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit mount")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+            g16.click("#orwell-cast .ow-min")
+            g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
+                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
+                timeout=5000)
+            f2_flag = g16.evaluate(
+                "localStorage.getItem('orwell-win-parked:orwell-cast:' +"
+                " ((document.body && document.body.dataset.user) || ''))")
+            check(f2_flag == "1", f"G16/F2: minimize persists the parked flag ({f2_flag!r})")
+
+            # RELOAD #1 — the whole point: both states must survive the refresh.
+            g16.reload(wait_until="load", timeout=30000)
+            g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
+            f1_after = g16.evaluate("""() => {
+              const hud = document.getElementById('orwell-status');
+              const hdr = hud && hud.querySelector('.os-hdr');
+              return { collapsed: !!hud && hud.classList.contains('os-collapsed'),
+                       expanded: hdr ? hdr.getAttribute('aria-expanded') : null };
+            }""")
+            check(f1_after.get("collapsed") is True and f1_after.get("expanded") == "false",
+                  f"G16/F1: after a reload the status HUD is still collapsed ({f1_after})")
+            # F2: re-open via the seam — the parked window must mount INTO the dock.
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit after reload #1")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector(
+                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
+                timeout=5000)
+            after1 = g16.evaluate("""() => {
+              const cast = document.getElementById('orwell-cast');
+              const dock = document.getElementById('minimized-dock');
+              return {
+                castHidden: !!cast && getComputedStyle(cast).display === 'none',
+                castMinimized: !!cast && cast.classList.contains('modal-minimized'),
+                chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
+                dockVisible: !!dock && getComputedStyle(dock).display !== 'none'
+                  && dock.getBoundingClientRect().height > 0,
+              };
+            }""")
+            check(after1.get("castHidden") is True and after1.get("castMinimized") is True,
+                  f"G16/F2: re-opened after a reload, the cast window comes back PARKED ({after1})")
+            check(after1.get("chip") is True and after1.get("dockVisible") is True,
+                  f"G16/F2: after a reload its dock chip is back too ({after1})")
+            # Restore via the chip (trusted click) — visible again, un-parked durably.
+            g16.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']")
+            g16.wait_for_timeout(250)
+            restored1 = g16.evaluate("""() => ({
+              visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
+              flag: localStorage.getItem('orwell-win-parked:orwell-cast:' +
+                ((document.body && document.body.dataset.user) || '')),
+            })""")
+            check(restored1.get("visible") is True and restored1.get("flag") is None,
+                  f"G16/F2: the chip restores a boot-parked window AND clears the flag ({restored1})")
+
+            # RELOAD #2 — restored means restored: the seam must open it VISIBLE now.
+            g16.reload(wait_until="load", timeout=30000)
+            _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
+                         "G16: the cast seam + the kit after reload #2")
+            g16.evaluate("window._orwellCastEnsure()")
+            g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+            after2 = g16.evaluate("""() => ({
+              visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
+              chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
+            })""")
+            check(after2.get("visible") is True and after2.get("chipGone") is True,
+                  f"G16/F2: after restore + reload the cast window comes back OPEN, no stale chip ({after2})")
+            g16.close()
+
             # F6 tail (wave 3): the engine-down banner's dismiss is the shared
             # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
