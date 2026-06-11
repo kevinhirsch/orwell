@@ -1197,7 +1197,17 @@ async function initSearchSettings() {
   }
 
   provSel.addEventListener('change', function() { updateVisibility(); saveSearch(); _syncSearchPicker(); });
-  countSel.addEventListener('change', saveSearch);
+  countSel.addEventListener('change', function() {
+    // F2 (2026-06-11 settings-wiring audit): picking "Custom" must not fire a
+    // save while the custom field is still empty/invalid — that posted a stale
+    // count. The custom input saves itself on change once a real value exists.
+    if (countSel.value === 'custom') {
+      var customVal = parseInt(countCustomInput.value, 10);
+      if (isNaN(customVal) || customVal < 1 || customVal > 100) return;
+    }
+    saveSearch();
+  });
+  countCustomInput.addEventListener('change', saveSearch);
   urlInput.addEventListener('change', saveSearch);
   keyInput.addEventListener('change', saveSearch);
   cxInput.addEventListener('change', saveSearch);
@@ -1682,14 +1692,38 @@ function initAppearance() {
         'orwell-status-pos', 'orwell-status-min',
         'orwell-social-pos', 'orwell-social-min',
       ];
-      // Also sweep any generic winsize/pos keys the drag system may have written.
+      // Also sweep any generic winsize/pos keys the drag system may have
+      // written — plus the slot/kit era's keys (F3, 2026-06-11 settings-wiring
+      // audit): drag offsets persist under 'orwell-slot-offset:<key>:<user>'
+      // (orwellSlots.js) and G16's parked flags under
+      // 'orwell-win-parked:<id>:<user>' (orwellWindow.js). Prefix sweep only —
+      // never enumerate per-panel keys again (the F-3 ratchet).
+      var parkedIds = [];
+      var _user = (document.body && document.body.dataset.user) || '';
       for (var i = localStorage.length - 1; i >= 0; i--) {
         var k = localStorage.key(i);
-        if (k && (k.startsWith('winpos-') || k.startsWith('winsize-') || k.startsWith('modal-pos-'))) {
+        if (!k) continue;
+        if (k.startsWith('winpos-') || k.startsWith('winsize-') || k.startsWith('modal-pos-') ||
+            k.startsWith('orwell-slot-offset:') || k.startsWith('orwell-win-parked:')) {
           KEYS.push(k);
+        }
+        if (k.startsWith('orwell-win-parked:') && k.endsWith(':' + _user)) {
+          // 'orwell-win-parked:<id>:<user>' → the window id, for the live restore.
+          parkedIds.push(k.slice('orwell-win-parked:'.length, -(_user.length + 1)));
         }
       }
       KEYS.forEach(function(k) { try { localStorage.removeItem(k); } catch (_) {} });
+      // Restore/restack via the kit so the reset is visible without a reload:
+      // a window parked in the dock comes back open, and every slotted kit
+      // window snaps to its slot base now that its offset is gone.
+      if (parkedIds.length) {
+        import('./modalManager.js').then(function(m) {
+          parkedIds.forEach(function(id) {
+            try { if (m.isMinimized(id)) m.restore(id); } catch (_) {}
+          });
+        }).catch(function() {});
+      }
+      if (window.OrwellSlots) window.OrwellSlots.restackAll();
       // Reset inline positions of the currently-visible HUD panels so they
       // snap back immediately without requiring a page reload.
       ['orwell-status', 'orwell-social'].forEach(function(id) {

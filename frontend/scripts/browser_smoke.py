@@ -1464,6 +1464,56 @@ def main() -> int:
                   f"G17/F4: with the marker set and no draft, the seat prefill RE-ARMS after reload ({f4_seat1!r})")
             f4.close()
 
+            # S1+S2 / F1 (2026-06-11 settings-wiring audit): the Shortcuts
+            # persist→apply loop, driven for REAL. A rebind saves per-profile
+            # (PUT /api/prefs/keybinds, C30) — but the runtime keymap booted
+            # from /api/auth/settings only, a key nothing writes anymore, so
+            # every custom shortcut silently reverted on reload while the tab
+            # still rendered it as saved. Pin: rebind → reload → the new combo
+            # is loaded AND fires; the old default no longer does.
+            s1 = browser.new_page()
+            s1.goto(base + "/", wait_until="load", timeout=30000)
+            g17_settle(s1)
+            s1.click("#user-bar-settings")
+            s1.wait_for_timeout(300)
+            s1.click("#settings-modal [data-settings-tab='shortcuts']")
+            s1.wait_for_selector("#shortcuts-list .shortcut-key[data-action='search']", timeout=4000)
+            s1.click("#shortcuts-list .shortcut-key[data-action='search']")  # start listening
+            s1.keyboard.press("Control+Shift+M")  # preview the combo
+            s1.keyboard.press("Enter")            # commit → saveKeybinds → the per-user store
+            s1.wait_for_timeout(600)
+            s1_saved = s1.evaluate(
+                "fetch('/api/prefs/keybinds', { credentials: 'same-origin' })"
+                ".then(r => r.json()).then(d => (d.value || {}).search)")
+            check(s1_saved == "ctrl+shift+m",
+                  f"S1/F1: the rebind round-trips through the per-user store ({s1_saved!r})")
+            check(s1.evaluate("window._orwellKeybinds.search") == "ctrl+shift+m",
+                  "S1/F1: the rebind is live in-page immediately after the save")
+            s1.reload(wait_until="load")
+            g17_settle(s1)  # the keymap's async boot (global seed → prefs layer) settles
+            s1_kb = s1.evaluate("window._orwellKeybinds.search")
+            check(s1_kb == "ctrl+shift+m",
+                  f"S1/F1: the saved rebind survives a reload ({s1_kb!r}; pre-fix it reverted to 'ctrl+k')")
+            s1.keyboard.press("Control+Shift+M")
+            s1.wait_for_timeout(250)
+            check(s1.evaluate("!document.getElementById('search-overlay').classList.contains('hidden')") is True,
+                  "S1/F1: the rebound combo FIRES after reload (search opens)")
+            s1.keyboard.press("Control+Shift+M")  # the toggle path closes it again
+            s1.wait_for_timeout(250)
+            check(s1.evaluate("document.getElementById('search-overlay').classList.contains('hidden')") is True,
+                  "S1/F1: the rebound combo toggles closed")
+            s1.keyboard.press("Control+k")
+            s1.wait_for_timeout(250)
+            check(s1.evaluate("document.getElementById('search-overlay').classList.contains('hidden')") is True,
+                  "S1/F1: the OLD default no longer fires — the runtime serves the per-user layer")
+            # leave the store clean for the next run (null pref ⇒ defaults)
+            s1.evaluate(
+                "fetch('/api/prefs/keybinds', { method: 'PUT', credentials: 'same-origin',"
+                " headers: { 'Content-Type': 'application/json' },"
+                " body: JSON.stringify({ value: null }) }).then(r => r.status)")
+            s1.wait_for_timeout(300)
+            s1.close()
+
             browser.close()
     finally:
         proc.terminate()
