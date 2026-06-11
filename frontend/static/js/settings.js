@@ -589,86 +589,6 @@ async function initUtilityModel() {
   });
 }
 
-/* ── Teacher Model (escalation) ── */
-async function initTeacherModel() {
-  var epSel = el('set-teacherEpSelect');
-  var modelSel = el('set-teacherModelSelect');
-  var msg = el('set-teacherChatMsg');
-  if (!epSel || !modelSel) return;
-  var _endpoints = [];
-
-  // The backend persists ONE spec string, `teacher_model` — "model" (resolved
-  // across every endpoint) or "model@endpointName" (src/ai_interaction.py
-  // _resolve_model). No teacher endpoint settings key exists: the endpoint
-  // select scopes the model list, and the chosen endpoint's NAME rides along
-  // inside the saved spec.
-  function parseSpec(spec) {
-    var s = String(spec || '');
-    var at = s.lastIndexOf('@');
-    if (at <= 0) return { model: s, endpointName: '' };
-    return { model: s.slice(0, at), endpointName: s.slice(at + 1) };
-  }
-  function selectedEndpoint() {
-    return _endpoints.find(function(e) { return e.id === epSel.value; });
-  }
-  function specFor(model, ep) {
-    if (!model) return '';
-    return ep ? model + '@' + ep.name : model;
-  }
-
-  // H2b: the same shared pool the Default Chat Model card offers — a chosen
-  // endpoint narrows to its models (the chat-picker mechanism, exactly like
-  // the Utility card); no endpoint means a bare spec resolved across every
-  // endpoint, so the union pool applies. Never a hardcoded list; the blank
-  // option keeps the "—" (unset) default.
-  function refreshModels(selectedModel) {
-    var ep = selectedEndpoint();
-    _fillModelSelect(modelSel, ep ? ep.models : _availableModelIds(_endpoints), selectedModel, true);
-  }
-
-  try {
-    _endpoints = await _fetchModelEndpoints();
-    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
-  } catch (e) { console.warn('Failed to load endpoints for teacher model', e); }
-
-  try {
-    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-    var settings = await res.json();
-    var saved = parseSpec(settings.teacher_model || '');
-    if (saved.endpointName) {
-      var savedEp = _endpoints.find(function(e) {
-        return String(e.name || '').toLowerCase() === saved.endpointName.toLowerCase();
-      });
-      if (savedEp) epSel.value = savedEp.id;
-    }
-    refreshModels(saved.model);
-  } catch (e) { console.warn('Failed to load teacher model settings', e); }
-
-  // Empty model → teacher unset (the toggle's feature stays off; mirrors the
-  // utility card's "blank means unset" save path).
-  async function saveTeacher() {
-    try {
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teacher_model: specFor(modelSel.value || '', selectedEndpoint()) })
-      });
-      if (msg) {
-        msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
-        setTimeout(function() { msg.textContent = ''; }, 1500);
-      }
-    } catch (e) { if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; } }
-  }
-
-  epSel.addEventListener('change', function() { refreshModels(''); saveTeacher(); });
-  modelSel.addEventListener('change', saveTeacher);
-
-  _registerAiEndpointRefresh(function(endpoints) {
-    _endpoints = endpoints;
-    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
-    refreshModels(modelSel.value);
-  });
-}
-
 /* ── Image Generation ── */
 async function initImageSettings() {
   const modelSel = el('set-imgModelSelect');
@@ -2250,7 +2170,6 @@ function initAll() {
   initialized = true;
   initDefaultChat();
   initUtilityModel();
-  initTeacherModel();
   initImageSettings();
   initVisionSettings();
   initTtsSettings();
