@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0043 — Emergent multi-party bloc behavior: blocs DERIVED from the relationship graph at decision
 # time (never stored — decision 0002), driving coordinated targeting/voting and fracture on betrayal.
 # HARD rule: roles only (houseguest, HOH, nominee, bloc-mate). Add to cucumber.cjs when green.

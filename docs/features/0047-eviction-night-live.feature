@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0047 — Eviction night live: stage the weekly eviction through the 0034 seam like the finale.
 # HARD rule: roles only (HOH, nominee, evictee, voter, juror). Add to cucumber.cjs when green.
 

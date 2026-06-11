@@ -256,9 +256,11 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 ## Building & testing
 
 Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test lanes: **Vitest**
-(unit/property), **Cucumber.js** (the executable `.feature` specs), **fast-check** (property /
-distribution), and **dependency-cruiser** (the *structural* Vault-Wall test — proves no outward
-module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastore is
+(unit/property), **Cucumber.js** (the executable `.feature` specs), **fast-check** (used
+selectively — most "property" suites are seeded fixed-loop distribution tests, which is
+adequate for their claims; audit T18), and **dependency-cruiser** (the *structural* Vault-Wall
+test — proves no outward module imports `VaultStore`/`VectorIndex`, type-only imports
+included). Datastore is
 **in-memory** today; **SQLite (`better-sqlite3`) → Postgres** and **sqlite-vec → pgvector**
 (the latter engine-only) land behind their ports with the persistence/soul features.
 
@@ -268,7 +270,7 @@ module imports `VaultStore`/`VectorIndex`, type-only imports included). Datastor
 | `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run build` | Bundle the engine entrypoint to `dist/main.js` (esbuild). |
-| `npm start` | Run the built engine — the HTTP MCP server (`ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks). |
+| `npm start` | Run the built engine — the HTTP MCP server (a plain HTTP tool API; it does **not** yet speak MCP/JSON-RPC — that envelope is a known deferral). `ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks. |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
@@ -364,14 +366,17 @@ critical gap — now wired into the live game) · 0024 soul storage & semantic r
 0028 temperature/emotional constants · 0030 durable persistence (survive engine restart) · 0031
 per-sandbox game orchestrator & integrity watcher. **0022** (player experience MVP-2) is **deferred**.
 
-**Live loop batch (0032–0037) — built:** **0034** (live weekly progression & decision seam) and
+**Live loop batch (0032–0037) — built:** **0034** (live weekly progression & decision seam),
+**0035** (the off-screen watcher wired into the runtime — `SystemClock` + `composeRuntime`; since
+the 2026-06-10 ruling it is **opt-in, not the default**: the house lives between the player's own
+turns via per-turn ticks and does not exist while the player is away — BDD-gated via B70), and
 **0037** (the interactive finale / jury-vote choreography: appeal scorer + staged statements →
 per-juror questions → ordered vote reveal, through the 0034 seam) are BDD-gated in `cucumber.cjs`.
-**0033** (`playerTagline`), **0035** (the off-screen watcher wired into the runtime — `SystemClock`
-+ `composeRuntime`; since the 2026-06-10 ruling it is **opt-in, not the default**: the house lives
-between the player's own turns via per-turn ticks and does not exist while the player is away), and
-**0036** (`socialInitiatives` + `diaryRoom` live tools) shipped unit-gated. **0032** (front-end surface reduction / the game
-build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`.
+**0033** (`playerTagline`) and **0036** (`socialInitiatives` + `diaryRoom` live tools) shipped
+**unit-gated** (a recorded deviation — see their spec headers; audit E87a). **0032** (front-end surface reduction / the game
+build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`;
+**0029** (app administrator role & user management — the account tier, not God Mode) is likewise
+front-end pytest-validated.
 The 0037 **finale UI is built** (B26 — the Vault-free `finaleView` read tool on the `GameSession`
 port / `PLAYER_TOOLS` — plus C11, the `frontend/static/js/orwellFinale.js` panel over an
 `orwell_engine.finale_view` client; fail-open to `{ finale: null }`).
@@ -419,8 +424,9 @@ artifact; the queue is drained as of 2026-06-10.
 **Remaining work — only the long-acknowledged deferrals** (the queue is drained; new work
 starts as a new spec/queue item): **0022** MVP-2 (the one deferred feature); 0010's container
 smoke test on a real Proxmox host; the deferred real relational adapters (SQLite/Postgres,
-sqlite-vec/pgvector — souls/vectors run in-memory + file today); and full MCP/JSON-RPC over the
-current HTTP transport. *(By design, not a gap: the live engine-side narrator is
+sqlite-vec/pgvector — souls/vectors run in-memory + file today); the **ADR 0004 fastembed
+adapter** (decided, not built — runtime embeddings are the deterministic fake today; E86); and
+full MCP/JSON-RPC over the current HTTP transport. *(By design, not a gap: the live engine-side narrator is
 `EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
 `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 
@@ -439,6 +445,9 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    signal set, update rule, recency/decay, betrayal-shock, thresholds (promotes `docs/decisions/0002`).
 3. ✅ **Jury choreography** — **resolved** by **feature 0037** (the live interactive finale: statements →
    per-juror questions → ordered vote reveal). Reserve twists stay Vault-held (0025).
-4. ✅ **Embedding provider** — **resolved** (ADR `docs/decisions/0004`, ruling 2026-06-10):
-   **fastembed, local ONNX** (the JS port, version-pinned) backs `EmbeddingProvider` at runtime;
-   the deterministic fake remains the test adapter. *(No genuinely-open decisions remain.)*
+4. ✅ **Embedding provider** — **decided** (ADR `docs/decisions/0004`, ruling 2026-06-10):
+   **fastembed, local ONNX** (the JS port, version-pinned) is the accepted runtime target for
+   `EmbeddingProvider`; the deterministic fake remains the test adapter. **The adapter is not
+   yet built** — production currently composes the deterministic hash-vector fake (ADR 0004
+   "Implementation status", audit E86); the build is tracked with the deferrals above.
+   *(No genuinely-open decisions remain.)*

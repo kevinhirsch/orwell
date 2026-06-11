@@ -16,7 +16,22 @@ ORWELL_ENGINE_PORT="${ORWELL_ENGINE_PORT:-${BBAI_ENGINE_PORT:-8765}}"
 echo "==> apt deps"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl git build-essential ca-certificates python3 python3-venv python3-pip qemu-guest-agent
+apt-get install -y -qq curl git gnupg build-essential ca-certificates python3 python3-venv python3-pip qemu-guest-agent
+
+# ── Private-repo credential (A4/ruling #17) ────────────────────────────────────────────────────
+# GIT_TOKEN (a fine-grained PAT, Contents: Read-only) is persisted ONCE into data/.env — the file
+# every reset preserves — and git reads it at use time via a credential helper. It never lives in
+# the remote URL or .git/config; rotation = edit one line of .env (or orwell-update.sh --set-token).
+mkdir -p "$DATA_DIR"
+if [[ -n "${GIT_TOKEN:-}" ]] && ! grep -qs '^GIT_TOKEN=' "${DATA_DIR}/.env"; then
+  touch "${DATA_DIR}/.env"; chmod 600 "${DATA_DIR}/.env"
+  printf 'GIT_TOKEN=%s\n' "$GIT_TOKEN" >> "${DATA_DIR}/.env"
+fi
+if grep -qs '^GIT_TOKEN=' "${DATA_DIR}/.env"; then
+  echo "==> git credential helper (token read from ${DATA_DIR}/.env at use time)"
+  git config --system credential.helper \
+    '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p '"${DATA_DIR}"'/.env)"; };f'
+fi
 
 # Proxmox guest tools (qemu-guest-agent). It's a VM-only transport (virtio-serial), absent in an
 # LXC — so install it always, but ENABLE it only when that transport exists (a real VM). On an LXC
@@ -30,17 +45,27 @@ fi
 
 echo "==> Node 22"
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" -lt 22 ]]; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  # No `curl | bash` as root (audit E84): add the NodeSource apt repo by hand — fetch only the
+  # signing KEY, then let apt's signature verification gate every package install.
+  install -d -m 755 /usr/share/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor --yes -o /usr/share/keyrings/nodesource.gpg
+  echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -qq
   apt-get install -y -qq nodejs
 fi
 
-echo "==> clone orwell -> ${APP_DIR}"
-if [[ -d "${APP_DIR}/.git" ]]; then
-  git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
-  git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
-else
-  git clone --depth 1 -b "$BRANCH" "$REPO" "$APP_DIR"
+echo "==> checkout orwell -> ${APP_DIR}"
+# init+fetch+reset (not clone): ${APP_DIR} may already hold data/.env (the seeded GIT_TOKEN) —
+# clone refuses a non-empty dir. The credential helper above supplies auth on a private repo.
+if [[ ! -d "${APP_DIR}/.git" ]]; then
+  mkdir -p "$APP_DIR"
+  git -C "$APP_DIR" init -q
 fi
+git -C "$APP_DIR" remote set-url origin "$REPO" 2>/dev/null || git -C "$APP_DIR" remote add origin "$REPO"
+git -C "$APP_DIR" fetch --depth 1 origin "$BRANCH"
+git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
 mkdir -p "$DATA_DIR"
 mkdir -p "${APP_DIR}/frontend/data"   # orwell SQLite DB lives here (sqlite:///./data/app.db)
 
@@ -60,11 +85,18 @@ echo "==> front-end (orwell) deps"
 cd "${APP_DIR}/frontend"
 python3 -m venv .venv
 ./.venv/bin/pip install -q --upgrade pip
-./.venv/bin/pip install -q -r requirements.txt
+# Pinned lockfile first (audit E83): reproducible installs, no blind re-resolution per update.
+if [[ -f requirements.lock.txt ]]; then
+  ./.venv/bin/pip install -q -r requirements.lock.txt
+else
+  ./.venv/bin/pip install -q -r requirements.txt
+fi
 
 echo "==> config"
-if [[ ! -f "${DATA_DIR}/.env" ]]; then
-  cp "${APP_DIR}/frontend/.env.example" "${DATA_DIR}/.env" 2>/dev/null || touch "${DATA_DIR}/.env"
+# The token bootstrap above may already have created .env with just GIT_TOKEN — key the
+# "first install" config block on the app config being absent, not on the file existing.
+if ! grep -qs '^ORWELL_PORT=' "${DATA_DIR}/.env"; then
+  [[ -s "${DATA_DIR}/.env" ]] || cp "${APP_DIR}/frontend/.env.example" "${DATA_DIR}/.env" 2>/dev/null || touch "${DATA_DIR}/.env"
   {
     echo ""
     echo "# --- orwell ---"
@@ -83,6 +115,12 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
     # gitignored); scrubbed by orwell-factory-reset.sh.
     echo "ORWELL_DATA_DIR=${DATA_DIR}/saves"
+    # Multi-user identity (audit E32): the FE ships with accounts ON by default, so the engine
+    # must REQUIRE an asserted x-orwell-user — never silently collapse anonymous callers into a
+    # shared "default" sandbox (cross-user isolation, feature 0021).
+    echo "# engine multi-user mode: every request must assert its x-orwell-user"
+    echo "ORWELL_ENGINE_MULTIUSER=1"
+    echo "# behind TLS? also set SECURE_COOKIES=true (front-end session cookies get the Secure flag)"
     # LLM provider (B72/ops A3): write the names the FRONT-END actually consumes — LLM_HOSTS
     # (OpenAI-compatible endpoints, e.g. Ollama's /v1) and OPENAI_API_KEY — so "configured" is a
     # real signal, not a key nothing reads. Secrets only ever live here, in the container.

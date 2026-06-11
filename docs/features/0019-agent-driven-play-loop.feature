@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0019 — Agent-driven play loop. The agent orchestrates and voices; the engine decides.
 # HARD rule: roles only. Binding decisions only via the validated path; the engine decides outcomes.
 

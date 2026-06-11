@@ -489,9 +489,11 @@ Live status is deliberately **not** duplicated here (prose drifts):
 The original open list (stack, datastore, soul storage, temperature model, veto/jury
 procedure, non-degradation strategy, embedding provider) is **fully resolved** — see
 [`docs/decisions/`](docs/decisions/) and the constants modules the features firmed up.
-The last item, the **embedding provider** for semantic soul recall, was resolved 2026-06-10
-([ADR 0004](docs/decisions/0004-embedding-provider.md)): **fastembed (local ONNX)** at
-runtime, with the deterministic fake remaining the test adapter.
+The last item, the **embedding provider** for semantic soul recall, was decided 2026-06-10
+([ADR 0004](docs/decisions/0004-embedding-provider.md)): **fastembed (local ONNX)** as the
+runtime target, with the deterministic fake remaining the test adapter. The fastembed
+adapter is **not yet built** — runtime recall currently uses the deterministic fake (ADR
+0004 "Implementation status", audit E86); the build is a tracked deferral.
 
 ---
 

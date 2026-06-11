@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Build priority #6 — Outcomes by stats + temperature. Distribution-style over many seeds.
 # HARD rule: roles only. Assert PROPERTIES, not specific numbers (temperature math is open).
 

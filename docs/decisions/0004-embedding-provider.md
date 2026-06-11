@@ -1,6 +1,8 @@
 # 0004 — Embedding provider (runtime semantic soul recall)
 
-> **Status:** Accepted (ruling 2026-06-10, with the v1-transcript meta-feedback audit).
+> **Status:** Accepted — **adapter not yet built** (amended 2026-06-10, audit E86).
+> The *decision* stands (ruling 2026-06-10, with the v1-transcript meta-feedback audit);
+> the *implementation* has not landed: see "Implementation status" below.
 > **Resolves:** the last genuinely-open item in `CLAUDE.md` / `README.md` "Open decisions"
 > (`docs/bb-sim-spec.md` §16.3) — which model backs `EmbeddingProvider` at runtime.
 > **Source:** human ruling during the 2026-06-10 audit session
@@ -48,3 +50,33 @@ the embedding default should not introduce a mandatory API key or network depend
   thereafter), pinned alongside the engine version.
 - Revisit only if live play shows recall quality is a felt problem — that would be a new
   decision record superseding this one.
+
+## Implementation status (honest record — amended 2026-06-10, audit E86)
+
+**Not built.** As of this amendment the engine's only `EmbeddingProvider` adapter is the
+deterministic hash-vector fake (`src/adapters/embedding/DeterministicEmbedding.ts`), and it
+is what **production** composes — there is no `fastembed` dependency in `package.json`, no
+pinned model, and no deploy-time model fetch. Live "semantic" recall (0024/0041) therefore
+runs on the bag-of-words hash vector today. This is functional (recall is still by content,
+not recency) but it is **not** the accepted decision above, and no test gate can detect the
+gap because the fake is, by design, also the test adapter.
+
+*(Don't be confused by the front-end: `frontend/requirements*.txt` does install the **Python**
+fastembed — that is the vendored workspace's own RAG/memory stack, not the engine's
+`EmbeddingProvider`. Its pinning is the E83 lockfile work, tracked separately on the FE side.)*
+
+**The path to done (the fastembed adapter is its own queue item / engine lane):**
+
+1. Add the **version-pinned** `fastembed` JS library (exact pin, not a range) and pin its
+   default small BGE model alongside it.
+2. Build `FastembedEmbedding` in `src/adapters/embedding/` behind `EmbeddingProvider`:
+   **lazy** ONNX load at first embed; on any load/runtime failure, **fall back to
+   `DeterministicEmbedding`** (recall degrades gracefully — the game never breaks).
+3. Deploy scripts fetch/cache the model at install/update time (offline thereafter).
+4. The deterministic fake **remains the test adapter** — no test may depend on real
+   embeddings; the engine-only dependency-cruiser boundary already covers the new adapter's
+   ports (`EmbeddingProvider`/`VectorIndex` are engine-only).
+
+Until that lands, prose elsewhere (CLAUDE.md, README, spec §16 mirrors) must describe
+fastembed as the **accepted runtime target**, not as running — the deferral is tracked with
+the other long-acknowledged deferrals (relational adapters, MCP/JSON-RPC).

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0027 — NarrativePort LLM adapter. Async, streaming, Vault-free input, never alters outcomes.
 # HARD rule: roles only. The narrator voices; the engine decides.
 

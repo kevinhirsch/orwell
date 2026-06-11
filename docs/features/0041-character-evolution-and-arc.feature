@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0041 — Character evolution & season arc: live soul emotional evolution that modulates behavior,
 # accumulates as a recall-able arc, while the static CHARACTER stays byte-stable. Hidden layer only.
 # HARD rule: roles only (houseguest, HOH, nominee, evictee). Add to cucumber.cjs when green.

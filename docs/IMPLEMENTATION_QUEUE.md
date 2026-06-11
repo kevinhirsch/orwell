@@ -872,7 +872,12 @@ pure wiring), then 0039 & 0040 (genuine gaps), then 0041/0042/0043/0044.
 
 ---
 
-## Still on the feature-maker (me)
+## Still on the feature-maker (me) — HISTORICAL (superseded 2026-06-10)
+
+> **HISTORICAL (E87d):** this block is a point-in-time snapshot from mid-build and contradicts the
+> drained-queue banner — everything it lists as "remaining" subsequently shipped (0037 UI/B26+C11,
+> B27b, 0039–0044, the audit batches) except **0022**, which stays the one deferred feature. Kept
+> verbatim below for the record; trust the per-item ✅ stamps and `cucumber.cjs`, not this prose.
 
 **0001–0036 are built** (0022 deferred). The "continue all wiring" batch shipped the engine + API wiring:
 **B24/0035** (SystemClock + `composeRuntime` start the off-screen watcher in `main.ts` — the house now lives
@@ -2074,11 +2079,17 @@ PR per item).
 | **R-2 — Settings prune** | C31 dead-JS gating + live-data wipes (search prune superseded by C32) | front-end | settings S3·S5 |
 | **R-2 — tagline** | C33 hero tagline genuinely AI-generated (curated/static only as fallback) | front-end + engine | ruling 2026-06-09 |
 
-> **Reconciliation still owed:** a 4th audit pass (every prior finding → fixed/partial/open) was
+> **Reconciliation — RESOLVED / HISTORICAL (stamped 2026-06-10, E87d):** the owed 4th pass was
+> superseded by the round-5/6 full product audit (`docs/audits/2026-06-10-full-product-audit.md`),
+> which re-audited every prior finding from scratch. Of the confirmed fragments: **E3** (the
+> orchestrator commit seam) shipped with the L1 restart spine (PR #215); the **finale relay**
+> (product B3 / front-end C12) shipped (C12 ✅, finale UI B26+C11); 0041's competition-modifier
+> fairness gate landed with B69. Original note kept for the record:
+>
+> *(was)* a 4th audit pass (every prior finding → fixed/partial/open) was
 > started and parked. Confirmed fragments: **E3** (orchestrator bypassed by player turns) and the
 > **finale relay** (product B3 / front-end C12) are **STILL OPEN**; **0041's emotional-arc is genuinely
 > live** (real production callers) but its competition modifier is **unverified for fairness** (→ B69).
-> Resume that pass before closing prior items as done.
 
 ### B67 — wire `ORWELL_ENGINE_TOKEN` end-to-end; fix multi-user header semantics  ·  Claude Code (deploy + FE + engine)  ·  **R-0 · CRITICAL · ops A1 + A2 + sec §B3 · ✅ DONE 2026-06-10**
 
@@ -2197,7 +2208,9 @@ PR per item).
 >    repo stops implying coverage.
 > 3. **C8 — CI never runs coverage.** `.github/workflows/ci.yml` runs the functional gate but no
 >    `test:cov`/thresholds, so coverage can silently regress. Add a coverage job with per-directory branch
->    thresholds (`src/engine`, `src/composition`, `src/adapters/engine` ≥ 90%).
+>    thresholds (`src/engine`, `src/composition`, `src/adapters/engine` ≥ 90%). *(As built — see the DONE
+>    note above: engine 90 · composition 88 · adapters/engine 82, floors at the then-real levels so
+>    coverage only ratchets up; the audit's E87f records the deviation from the stated 90/90/90.)*
 > 4. **C9 — the 97.6% headline masks the orchestrator rollback path.** `src/composition/orchestrator.ts:
 >    184-200` (the fail-closed integrity checkpoint's rollback — what protects against persisting a
 >    degraded/leaky state) and `GameSessionAdapter` finale-answer rejection (81% branch) are uncovered.
@@ -2734,6 +2747,71 @@ PR per item).
 > ceremony beat resolves (`APPROACH_GATE` in `decisionConstants.ts`, pure derived
 > `firstCeremonyBeatResolved`, seed-spanning test). Gates: FE pytest 372 green · boot/browser
 > smokes green · responsive matrix 37/0/0 · `npm test` green for the engine sliver.
+
+### U5 — game-build trim remainder (Lane 8: W1+W5 · W3 · W4 · W7 · E17)  ·  **✅ DONE (PR #211)**
+
+> The Stream-W half U4 didn't carry. W1 `ui_control` collapses to the curated safe subset under
+> the game build — highlight/clear_highlight + set_theme/create_theme — enforced in code at
+> `do_ui_control` (mode/model/incognito-toggle/panel/email actions refused, game-framed) with a
+> `chatStream.js` data-game-build belt · W5 the ui_control manifest is game-only on BOTH paths
+> (the prompt section via a structural builtin-override injection on the settings read path —
+> `GAME_UI_CONTROL_SECTION`, never persisted, wins over user overrides — and the native function
+> schema via `game_ui_control_schema`: enum = safe subset, email args gone; `highlight` now
+> converts with its selector) · W3 the Bitwarden vault vertical joins `GAME_DROP_SET` +
+> `mount_optional` (404 server-side under the build, back off-build; boot-smoke proven live both
+> ways) · W4 the slash surface is the keep-set only (`GAME_SLASH_KEEP` + a dispatch-time gate
+> covering legacy aliases, with a game-framed refusal; /help, fuzzy suggestions, and the
+> autocomplete menu all filter through one `isGameSlashAllowed` seam) · W7 `/backgrounds`
+> removed outright (its static page was never vendored — the route only 500'd) · E17
+> `search_chats` KEEP → OPTIONAL (off by default; opt-in via Settings → Tools; membership lines
+> only — the gate logic is Lane 6's). Proving suite `frontend/tests/test_lane7_game_trim.py`
+> (25 tests); pytest 357 · boot/browser smokes · responsive matrix all green; the W6 keep-set
+> beat-label drift test stays green after the shrink.
+
+### L8 — ops & private-repo (A4/ruling #17+E84 · E80 · E83 · E85 · E8 · E32)  ·  **✅ DONE (PR #218)**
+
+> **A4/ruling #17 (closes E84):** the single-PAT private-repo design — `GIT_TOKEN` lives in
+> `data/.env`, a git credential helper supplies it to every fetch/pull, and the host
+> update/factory-reset bridges become LOCAL-COPY (execute the already-checked-out in-container
+> copy after a pinned-ref `git fetch`; zero raw-curl of branch tips); the installer tolerates a
+> checkout missing its origin remote. **E80:** `deploy/smoke.sh` refutes are behavioral (sentinel
+> save + the full stat/edge refute list + the credential-helper gate), not textual greps.
+> **E83:** the frontend Python deps ride a pip-compile lockfile (Python 3.11/Debian 12 target),
+> pinned on every update. **E85:** systemd units harden fully (`CapabilityBoundingSet`,
+> `RestrictAddressFamilies`, `SystemCallFilter=@system-service`, `ProtectKernel*`,
+> `RestrictSUIDSGID`, `LockPersonality`, `UMask=0077`) and `orwell-frontend.service` carries a
+> default `ORWELL_PORT`. **E8:** `FileSaveStore` fsyncs file + dir before rename (power-loss
+> durability). **E32:** user-id capped at the HTTP edge (400) + constant-time token compare in
+> `HttpMcpServer`. Verified by `tests/unit/opsPrivateRepo.test.ts`, `saveDurability.test.ts`,
+> `httpEdgeAuth.test.ts`, and the upgraded smoke refutes.
+
+### L11 — docs & specs (E86(b) · E87 · specs 0051/0053)  ·  **✅ DONE (PR #219)**
+
+> **E86 — the amend path** (the audit's lane split: building the fastembed adapter is its own
+> engine lane, E86(a) — still open): ADR 0004 → "Accepted — **adapter not yet built**" with an
+> honest Implementation-status section (production composes `DeterministicEmbedding`; no
+> `fastembed` in `package.json`; the FE's *Python* fastembed is the vendored RAG stack, not the
+> engine's `EmbeddingProvider`) and the concrete path to done (exact lib+model pin, lazy ONNX
+> load, deterministic fallback, deploy-time model fetch). CLAUDE.md / README /
+> `bb-sim-spec.md` §16 / `CLAUDE_CODE_INSTRUCTIONS.md` §15 / the decisions index stop
+> overclaiming — the adapter joins the long-acknowledged deferrals. No fake pin shipped.
+> **E87 — the hygiene sweep, all of (a)–(i)** (+ T18's fast-check-is-selective note):
+> 0033/0036's unit-gated deviation recorded in their spec headers + README rows; 0029's
+> honest pytest header; CLAUDE.md regroups 0035 as BDD-gated and mentions 0029; this queue's
+> "Still on the feature-maker" + "Reconciliation still owed" blocks stamped
+> HISTORICAL/RESOLVED; the README 0010 row carries its host-validation deferral; the B70
+> coverage-floor deviation (90/88/82) recorded; every shipped `.feature` sheds its "# DRAFT"
+> header (only 0022 — deferred — and the new specced-not-built files keep one); the
+> not-yet-MCP/JSON-RPC caveat parenthesized; `cucumber.cjs` 0048/0049 order/indent cosmetics
+> (**no path added or removed**). **Specs (spec only — NOT built, in no gate):** **0051
+> in-character images** (Vault-free prompt builder over the visible projection, knowledge-scoped
+> depiction, no unresolved-outcome stills, recorded image beats, per-season style anchor,
+> budgets, graceful absence — ADR 0003-bound) and **0053 admin transcripts** (ruling #14
+> verbatim: admin-gated API + one quiet Settings row, read-only, tool-call nodes first-class,
+> DR inclusion disclosed, survives game reset / dies with factory reset; FE pytest lane when
+> built — never `cucumber.cjs`; no God-Mode/Vault escalation). Both indexed
+> "Specced — not built" in `docs/features/README.md`. Gates: full `npm test` green post-merge
+> (612 unit/property/arch · 318 BDD scenarios).
 
 ### L9 — calibration (D4/E33 re-measurement · the jury-reach gate · finale calibration)  ·  **✅ DONE (PR #220)**
 

@@ -15,7 +15,28 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=/opt/orwell/data /opt/orwell/frontend/data
+# Hardening (audit E85): same posture as the engine unit. MemoryDenyWriteExecute is OMITTED —
+# the ONNX runtime (fastembed) JIT-compiles kernels.
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+UMask=0077
 WorkingDirectory=/opt/orwell/frontend
+# Default port (audit E85): the EnvironmentFile is optional (-), so a box without data/.env must
+# still expand ${ORWELL_PORT} — EnvironmentFile values override this default when present.
+Environment=ORWELL_PORT=8080
 EnvironmentFile=-/opt/orwell/data/.env
 # The orwell app reads ORWELL_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
 # MCP server (frontend/INTEGRATION.md). The UI port comes from ORWELL_PORT.

@@ -1,4 +1,5 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# DRAFT executable spec — DEFERRED (the one deferred feature; not built, not gated). Its §4/§8
+# "player read" cards must be redesigned per ADR 0002's human-driven-reads ruling before un-parking.
 # Feature 0022 — Player experience MVP-2 (rich game UI). Every surface shows only player knowledge.
 # HARD rule: roles only. House view, cards, journal, and comp visuals are all Vault-free.
 
