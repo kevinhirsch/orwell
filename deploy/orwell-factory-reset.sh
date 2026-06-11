@@ -65,12 +65,26 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || die "LXC ${CTID} is not running — start it first: pct start ${CTID}"
 
   msg "orwell lives in LXC ${CTID}; running factory reset inside the container"
-  TMP_RESET="$(mktemp /tmp/orwell-factory-reset-XXXXXX.sh)"
-  curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-factory-reset.sh" -o "$TMP_RESET"
-  pct push "$CTID" "$TMP_RESET" /tmp/orwell-factory-reset.sh
-  rm -f "$TMP_RESET"
-  # --yes is forwarded; --dry-run is forwarded; --no-restart is forwarded.
-  pct exec "$CTID" -- bash /tmp/orwell-factory-reset.sh "${EXTRA_FLAGS[@]:-}"
+  # LOCAL-COPY bridge (A4/ruling #17 — closes audit E84): never curl a branch tip from GitHub.
+  # Run from a file → push THAT file; run via `bash -c "$(...)"` → push the running text;
+  # otherwise run the container's own checked-out copy.
+  if [[ -n "${BASH_SOURCE[0]:-}" && -r "${BASH_SOURCE[0]:-}" ]]; then
+    TMP_RESET="$(mktemp /tmp/orwell-factory-reset-XXXXXX.sh)"
+    cp "${BASH_SOURCE[0]}" "$TMP_RESET"
+    pct push "$CTID" "$TMP_RESET" /tmp/orwell-factory-reset.sh
+    rm -f "$TMP_RESET"
+    pct exec "$CTID" -- bash /tmp/orwell-factory-reset.sh "${EXTRA_FLAGS[@]:-}"
+  elif [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then
+    TMP_RESET="$(mktemp /tmp/orwell-factory-reset-XXXXXX.sh)"
+    printf '%s\n' "$BASH_EXECUTION_STRING" > "$TMP_RESET"
+    pct push "$CTID" "$TMP_RESET" /tmp/orwell-factory-reset.sh
+    rm -f "$TMP_RESET"
+    pct exec "$CTID" -- bash /tmp/orwell-factory-reset.sh "${EXTRA_FLAGS[@]:-}"
+  else
+    pct exec "$CTID" -- bash -c "for d in /opt/orwell /opt/bbai; do
+        [ -f \"\$d/deploy/orwell-factory-reset.sh\" ] && exec bash \"\$d/deploy/orwell-factory-reset.sh\" ${EXTRA_FLAGS[*]:-}
+      done; echo 'ERROR: no in-container deploy/orwell-factory-reset.sh found' >&2; exit 1"
+  fi
   exit 0
 fi
 

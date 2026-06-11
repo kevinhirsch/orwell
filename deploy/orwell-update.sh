@@ -17,9 +17,13 @@ BRANCH="${BRANCH:-main}"
 # B71/ops A4 — pin + rollback:
 #   REF=<sha|tag>          update to a PINNED ref instead of the branch tip
 #   orwell-update.sh --rollback   return to the previous build (SHA + dist) recorded by the last update
+# A4/ruling #17 — private-repo token (one-time setup / annual rotation for an EXISTING install):
+#   orwell-update.sh --set-token  prompt for (or take GIT_TOKEN=) the deploy PAT, persist it into
+#                                 data/.env, and wire the git credential helper — then exit.
 REF="${REF:-}"
-ROLLBACK=0
+ROLLBACK=0; SET_TOKEN=0
 [[ "${1:-}" == "--rollback" ]] && ROLLBACK=1
+[[ "${1:-}" == "--set-token" ]] && SET_TOKEN=1
 CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-name fallback
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
@@ -46,14 +50,42 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   [[ "$(pct status "$CTID" 2>/dev/null)" == *running* ]] || { echo "ERROR: LXC ${CTID} is not running — start it first: pct start ${CTID}" >&2; exit 1; }
 
   echo "==> orwell lives in LXC ${CTID}; updating inside the container"
-  # The container already has curl; fetch on the host (always has curl) and push the script in, so
-  # we always run the latest update logic regardless of the container's currently-installed copy.
-  TMP_UPDATE="$(mktemp /tmp/orwell-update-XXXXXX.sh)"
-  curl -fsSL "https://raw.githubusercontent.com/kevinhirsch/orwell/${BRANCH}/deploy/orwell-update.sh" -o "$TMP_UPDATE"
-  pct push "$CTID" "$TMP_UPDATE" /tmp/orwell-update.sh
-  rm -f "$TMP_UPDATE"
-  # Forward only an explicit APP_DIR override; let auto-detect run inside the container otherwise.
-  pct exec "$CTID" -- bash -c "export ${APP_DIR_EXPLICIT:+APP_DIR='${APP_DIR_EXPLICIT}' }BRANCH='${BRANCH}' REF='${REF}'; bash /tmp/orwell-update.sh $([[ $ROLLBACK -eq 1 ]] && echo --rollback)"
+  # --set-token: capture the token on the host (prompt if interactive), then forward it via a
+  # pushed root-only file — never on a pct exec command line (host ps) and never in a URL.
+  if [[ $SET_TOKEN -eq 1 ]]; then
+    if [[ -z "${GIT_TOKEN:-}" && -t 0 ]]; then
+      read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " GIT_TOKEN; echo
+    fi
+    [[ -n "${GIT_TOKEN:-}" ]] || { echo "ERROR: --set-token needs GIT_TOKEN=<pat> (or a TTY to prompt)." >&2; exit 1; }
+    TMP_TOKEN="$(mktemp /tmp/orwell-token-XXXXXX)"
+    chmod 600 "$TMP_TOKEN"
+    printf 'GIT_TOKEN=%s\n' "$GIT_TOKEN" > "$TMP_TOKEN"
+    pct push "$CTID" "$TMP_TOKEN" /tmp/orwell-token --perms 0600
+    rm -f "$TMP_TOKEN"
+  fi
+  # LOCAL-COPY bridge (A4/ruling #17 — closes audit E84): never curl a branch tip from GitHub.
+  # Run from a file → push THAT file; run via `bash -c "$(...)"` → push the running text
+  # (BASH_EXECUTION_STRING); otherwise run the container's own checked-out copy (its first act
+  # is `git pull`, so the staleness window is one update cycle — the E84 integrity shape).
+  FWD_FLAG=""; [[ $ROLLBACK -eq 1 ]] && FWD_FLAG="--rollback"; [[ $SET_TOKEN -eq 1 ]] && FWD_FLAG="--set-token"
+  FWD_ENV="export ${APP_DIR_EXPLICIT:+APP_DIR='${APP_DIR_EXPLICIT}' }BRANCH='${BRANCH}' REF='${REF}';"
+  if [[ -n "${BASH_SOURCE[0]:-}" && -r "${BASH_SOURCE[0]:-}" ]]; then
+    TMP_UPDATE="$(mktemp /tmp/orwell-update-XXXXXX.sh)"
+    cp "${BASH_SOURCE[0]}" "$TMP_UPDATE"
+    pct push "$CTID" "$TMP_UPDATE" /tmp/orwell-update.sh
+    rm -f "$TMP_UPDATE"
+    pct exec "$CTID" -- bash -c "${FWD_ENV} bash /tmp/orwell-update.sh ${FWD_FLAG}"
+  elif [[ -n "${BASH_EXECUTION_STRING:-}" ]]; then
+    TMP_UPDATE="$(mktemp /tmp/orwell-update-XXXXXX.sh)"
+    printf '%s\n' "$BASH_EXECUTION_STRING" > "$TMP_UPDATE"
+    pct push "$CTID" "$TMP_UPDATE" /tmp/orwell-update.sh
+    rm -f "$TMP_UPDATE"
+    pct exec "$CTID" -- bash -c "${FWD_ENV} bash /tmp/orwell-update.sh ${FWD_FLAG}"
+  else
+    pct exec "$CTID" -- bash -c "${FWD_ENV} for d in \"\${APP_DIR:-}\" /opt/orwell /opt/bbai; do
+        [ -n \"\$d\" ] && [ -f \"\$d/deploy/orwell-update.sh\" ] && exec bash \"\$d/deploy/orwell-update.sh\" ${FWD_FLAG}
+      done; echo 'ERROR: no in-container deploy/orwell-update.sh found' >&2; exit 1"
+  fi
   exit 0
 fi
 
@@ -73,6 +105,43 @@ fi
 
 PREV_FILE="${APP_DIR}/data/.update-prev"      # the last good SHA (data/ survives updates)
 PREV_DIST="${APP_DIR}/dist.prev"              # the last good build output
+ENV_FILE="${APP_DIR}/data/.env"
+
+# Wire git to read GIT_TOKEN from data/.env at use time (A4/ruling #17). Idempotent; also the
+# self-heal for installs that predate the private flip: once the token line exists, every
+# `git fetch/pull` in this script just works — no re-prompt, no token in any URL/.git/config.
+wire_credential_helper() {
+  grep -qs '^GIT_TOKEN=' "$ENV_FILE" || return 0
+  git config --system credential.helper \
+    '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p '"${APP_DIR}"'/data/.env)"; };f'
+}
+
+# ── --set-token (A4): persist/rotate the deploy PAT, wire the helper, exit. ───────────────────
+if [[ "$SET_TOKEN" -eq 1 ]]; then
+  TOKEN="${GIT_TOKEN:-}"
+  if [[ -z "$TOKEN" && -r /tmp/orwell-token ]]; then
+    TOKEN="$(sed -n 's/^GIT_TOKEN=//p' /tmp/orwell-token | tail -1)"
+    rm -f /tmp/orwell-token
+  fi
+  if [[ -z "$TOKEN" && -t 0 ]]; then
+    read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " TOKEN; echo
+  fi
+  [[ -n "$TOKEN" ]] || { echo "ERROR: --set-token needs GIT_TOKEN=<pat> (or a TTY to prompt)." >&2; exit 1; }
+  mkdir -p "${APP_DIR}/data"
+  touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
+  # Rotate in place: drop any previous GIT_TOKEN line, then append the new one.
+  TMP_ENV="$(mktemp "${APP_DIR}/data/.env.XXXXXX")"
+  grep -v '^GIT_TOKEN=' "$ENV_FILE" > "$TMP_ENV" || true
+  printf 'GIT_TOKEN=%s\n' "$TOKEN" >> "$TMP_ENV"
+  chmod 600 "$TMP_ENV"
+  mv "$TMP_ENV" "$ENV_FILE"
+  wire_credential_helper
+  echo "==> deploy token saved to ${ENV_FILE} and git credential helper wired."
+  echo "    Rotation: re-run 'orwell-update.sh --set-token' (fine-grained PATs cap at one year)."
+  exit 0
+fi
+
+wire_credential_helper
 
 # ── Rollback (B71/ops A4): return to the recorded previous SHA + its dist, then restart. ──────
 if [[ "$ROLLBACK" -eq 1 ]]; then
@@ -123,7 +192,13 @@ fi
 
 echo "==> refresh front-end deps"
 cd "${APP_DIR}/frontend"
-./.venv/bin/pip install -q -r requirements.txt
+# Pinned lockfile first (audit E83): updates re-install exactly what CI tested, never a blind
+# re-resolution of unpinned ranges.
+if [[ -f requirements.lock.txt ]]; then
+  ./.venv/bin/pip install -q -r requirements.lock.txt
+else
+  ./.venv/bin/pip install -q -r requirements.txt
+fi
 
 # Record the rollback point only once the new build is in place.
 mkdir -p "${APP_DIR}/data"
