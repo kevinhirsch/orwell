@@ -1,8 +1,10 @@
 # 0004 — Embedding provider (runtime semantic soul recall)
 
-> **Status:** Accepted — **adapter not yet built** (amended 2026-06-10, audit E86).
-> The *decision* stands (ruling 2026-06-10, with the v1-transcript meta-feedback audit);
-> the *implementation* has not landed: see "Implementation status" below.
+> **Status:** Accepted — **BUILT** (E86a, 2026-06-11): `FastembedEmbedding` +
+> `fastembedWorker` in `src/adapters/embedding/`, fastembed pinned exact in
+> `package.json`, model pinned in the worker (`fast-bge-small-en-v1.5`), deploy
+> prefetch + `ORWELL_EMBEDDINGS=fastembed` written by the installer. See the
+> amended "Implementation status" below for the design constraints honored.
 > **Resolves:** the last genuinely-open item in `CLAUDE.md` / `README.md` "Open decisions"
 > (`docs/bb-sim-spec.md` §16.3) — which model backs `EmbeddingProvider` at runtime.
 > **Source:** human ruling during the 2026-06-10 audit session
@@ -51,9 +53,32 @@ the embedding default should not introduce a mandatory API key or network depend
 - Revisit only if live play shows recall quality is a felt problem — that would be a new
   decision record superseding this one.
 
-## Implementation status (honest record — amended 2026-06-10, audit E86)
+## Implementation status (BUILT — E86a, 2026-06-11)
 
-**Not built.** As of this amendment the engine's only `EmbeddingProvider` adapter is the
+The adapter is live, honoring three engine constraints:
+
+1. **The soul seam stays synchronous** (an `await` inside a mutating tool would reopen the
+   masked sandbox-swap race): real ONNX inference runs in a worker thread
+   (`fastembedWorker.ts`) and `FastembedEmbedding.embed()` blocks on a
+   SharedArrayBuffer/Atomics bridge with a bounded per-call timeout.
+2. **One vector space per process lifetime** (mixing spaces inside an index breaks cosine
+   recall): main.ts warms the provider up at boot (`ORWELL_EMBEDDINGS=fastembed`) BEFORE any
+   sandbox exists and injects it via `setRuntimeEmbedding`; warm-up failure composes the
+   deterministic provider for the whole process instead. Vectors are derived state
+   (`rebuildSoulIndex` re-embeds from `hg.soul.memory` on restore), so the space may differ
+   per process, never within one.
+3. **The game never breaks on embeddings:** a worker failure mid-process degrades the
+   provider permanently (for that process) to the deterministic fallback with a loud log;
+   the next restart re-derives all indexes. Deploy prefetches the model into `data/models`
+   (preserved by updates and both reset scripts; offline thereafter).
+
+The deterministic fake remains the test adapter (the bridge is proven against
+protocol-faithful fake workers in `tests/unit/fastembedBridge.test.ts`; the real model runs
+only in the opt-in `ORWELL_TEST_FASTEMBED=1` integration test).
+
+The original honest-record text is kept below for history.
+
+**Original record (superseded): Not built.** As of this amendment the engine's only `EmbeddingProvider` adapter is the
 deterministic hash-vector fake (`src/adapters/embedding/DeterministicEmbedding.ts`), and it
 is what **production** composes — there is no `fastembed` dependency in `package.json`, no
 pinned model, and no deploy-time model fetch. Live "semantic" recall (0024/0041) therefore

@@ -1620,3 +1620,49 @@ The E97 contract specced minimize motion toward the dock; the ruling sharpens it
 and a scale+fade fly-away on close, with pronounced easing (the Win7 feel). Open stays
 fade+scale-in. `prefers-reduced-motion` strips all of it. *Test:* the shared animation
 contract exposes distinct minimize/close keyframes; reduced-motion removes them.
+
+---
+
+# E86a — BUILT (2026-06-11) · and the round-7 verification sweep
+
+## E86a ✅ — the fastembed adapter (this PR)
+`FastembedEmbedding` + `fastembedWorker` (`src/adapters/embedding/`): real local-ONNX
+embeddings (fastembed pinned exact at 2.1.0; model pinned `fast-bge-small-en-v1.5`) behind
+the synchronous `EmbeddingProvider` seam via a worker-thread SharedArrayBuffer/Atomics
+bridge — the soul seam stays sync (the masked-race constraint), the vector space is
+committed once per process at boot warm-up (`setRuntimeEmbedding` before any sandbox;
+restore re-derives indexes via `rebuildSoulIndex`), and any failure degrades loudly +
+permanently (per process) to the deterministic provider — the game never breaks. Deploy:
+installer writes `ORWELL_EMBEDDINGS=fastembed` + `ORWELL_EMBED_CACHE=data/models` and
+prefetches the model; update re-prefetches (no-op when cached); both reset scripts preserve
+`data/models`. Tests: the bridge proven against protocol-faithful fake workers
+(`tests/unit/fastembedBridge.test.ts` — ok/stall-degrade/init-fail/composition); the real
+model only in the opt-in `ORWELL_TEST_FASTEMBED=1` integration test, per the ADR's
+no-test-depends-on-real-embeddings rule.
+
+## Round-7 verification sweep (origin/main @ 65cb5d4) — the campaign's claims, live-checked
+**15/16 CONFIRMED, 1 PARTIAL.** Confirmed live on the real engine: the restart family
+(season 2 survives reset + process kill; faults are 409s), the tick debounce (4 rapid calls
+⇒ one tick, +4 hidden events, was +16), knowledge anchoring (both invented-content channels
+refuse; genuine retellings pass), E20/E21, vote secrecy (13 staged evictions, `votedFor`-only
+reveals; attribution unseals post-season only), player goodbyes as pending decisions, the
+Houseguest's-Choice fix (seed-82 live repro: zero overlap, 6 distinct), 400s on malformed
+args, A1/A2, W1, P1/P2, E38 (real-name casts live: "Sage Carr, Ivan Ramirez, Natasha
+Lawrence…"), E22, E18 default-deny, and 3/3 doc stamps.
+**PARTIAL — R3 perf:** snapshot reuse landed and is tested (≤2 serializations/mutation, was
+~4), but late-season latency still grows linearly with the event log (~9× wk1→wk13, ~half
+the old curve) — improved, not eliminated. The remaining cost is the O(events) export
+itself; a future incremental-snapshot item if play feels it.
+
+### New defects from the sweep (open; small)
+- **A8 [LOW · Bug]** `humanize` mangles the English word "player(s)" in beat prose
+  (`GameSessionAdapter.ts:1379–1387` splits on the literal id `"player"`): live repro —
+  "the veto *Quinn Vales* are drawn… will name the final *Quinn Vale*" on every veto-draw
+  beat. Fix: word-boundary-aware substitution (the old E63 sub-item, still open in practice).
+- **A9 [LOW · Noise]** Late-season off-screen ticks log repeated
+  `integrity fault … kinds=no-daily-event` (21 lines/season observed; fail-closed, circuit
+  never opened, health ends ok) — quiet the expected-empty-tick case before it can ever
+  meet the circuit threshold.
+- **A10 [LOW · API]** The Houseguest's-Choice pending presents `options`+`pick:1` like
+  choice-shaped decisions but `submitDecision` expects the pick on `vote` — any non-FE
+  client trips. Align the field or document it on the pending view.
