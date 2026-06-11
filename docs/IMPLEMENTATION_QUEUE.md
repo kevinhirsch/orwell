@@ -2948,3 +2948,51 @@ PR per item).
 > *(Noted, not this lane: `npm run test:arch` (the depcruise CLI, outside the `npm test` gate)
 > reports 3 pre-existing violations from the E86a wiring — `src/main.ts → engineRoot /
 > FastembedEmbedding`; needs its own ruling/queue item.)*
+
+## Lane F — the DWE windowing mission (audit → one window kit) · 2026-06-11
+
+> Source: `docs/audits/2026-06-11-dwe-window-audit.md` (the surface × norm matrix is the
+> spec; findings F1–F11 + the duplication census are the work). Bar: ruling #16. Order:
+> ruling #15 (UI track outranks non-CRIT) — and within the lane, fresh-install blockers
+> first. House rules: FE-only (never `cucumber.cjs`/`npm test`); ADR 0003 — windows AUGMENT
+> the chat, no game interaction moves out of it; each wave DELETES its bespoke code in the
+> same PR and flips its matrix cells from ❌ to hard gate assertions (browser_smoke /
+> responsive_matrix); roles only in tests.
+
+### F-0 — Phase 1: the audit · **✅ DONE (this PR)**
+
+> 75 live Playwright assertions across virgin/casting/mid-game/finale-staged/engine-down ×
+> both builds × the viewport matrix; 16 fails → findings F1–F11; #233's no-trap contract
+> verified as the norm-(g) baseline and extended (3× cycles, the real J4 card). Matrix doc +
+> failure screenshots in `docs/audits/`.
+
+### F-1 — the window kit (`OrwellWindow` + `.ow-*`) · CRIT-first · **OPEN**
+
+> Build the kit on the S-stream mechanism and fix the two structural breaks INSIDE it:
+> **F1** (the invisible `#minimized-dock` — minimize currently loses the window; visibility
+> driven by a class with real-pointer restore, T20 upgraded from evaluate-clicks to trusted
+> clicks) and **F2** (slot-restack vs windowDrag fight — drag is dead on every slot panel;
+> restack pauses during drag or drag mutates the slot offset). Kit owns: registration
+> (modalManager + escMenuStack), drag+explicit clamp, resize, ONE z-authority +
+> click-to-front + focused state (F9), minimize-to-dock with the ruling-#19 fly-out + E97
+> reduced-motion (F4), one geometry-persistence scheme clamped per user+game (F5 deletes
+> `orwell-finale-pos`), focus-return on close (F8), keyboard move (F10), teardown. The A3
+> layout kit composes window BODIES. Gate: the kit's own browser-smoke block + the matrix.
+
+### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **OPEN**
+
+> Wave order: status HUD (stays sidebar chrome — composes title/controls only) → social +
+> approaches (F2/F3/F6/F7 cells flip; the narrow tier gets ONE sheet host so two sheets can
+> never overlap — F3) → Diary Room (button+pill stay; verify-only) → finale (F5 dual
+> persistence deleted) → retrospective + presence + banner (cluster consistency, F6) →
+> settings + theme (F8 focus-return; cluster already injected) → remaining modals/popovers
+> (W13–W16; styledConfirm/Prompt traps fold into the kit's stack; decision card gains
+> non-binding Escape, F11).
+
+### F-3 — the ratchet · **OPEN**
+
+> A source-grep + runtime gate: any element matching the window selector must be
+> kit-managed — no JS outside the kit registers drag/persist/minimize handlers on a
+> window-like surface (the census §4 signatures are the grep corpus); new windows MUST
+> compose the kit. Matrix cells that passed stay green; each wave wires its flipped cells
+> into `browser_smoke.py` / `responsive_matrix.py` as hard assertions.
