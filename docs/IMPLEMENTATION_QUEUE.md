@@ -3115,3 +3115,64 @@ PR per item).
 > loop through the SYNCHRONOUS embedding bridge; /health times out; the banner fires. Fix:
 > chunk the seeding so the loop breathes (engine), and suppress the red banner while
 > createCharacter is in flight in favor of an in-fiction holding line (FE).
+
+### Lane G wave 2 (commissioned 2026-06-11: "cover it all including root causes") — G10–G15
+
+> Each item names its ROOT CAUSE and fixes the pattern, not the instance. Dispatch is gated
+> on wave-1 file ownership (one owner per file); items launch as their blockers merge.
+
+### G10 — the cast window composes the kit · **QUEUED (after G9 — same file)**
+> User: cast window's close dead, no minimize, alien visual language, "basically broken."
+> ROOT CAUSE: post-kit drift — 0051 landed mid-campaign with hand-rolled chrome + its own
+> Escape handler (ratchet-grandfathered with this exact pointer). Fix: the social/finale
+> migration pattern; DELETE the bespoke chrome + private Escape; SHRINK the ratchet
+> grandfather list. PLUS tighten the runtime ratchet: any fixed-position element carrying
+> close/minimize-shaped controls must be `[data-ow-window]` or the gate fails (closes the
+> hand-rolled-chrome-without-censused-signatures hole).
+
+### G11 — the failure ring becomes the standard sink for every user-facing fail-open · **QUEUED (after G1 + G8)**
+> ROOT CAUSE: the house `catch (_) {}` fail-open idiom is correct UX but structurally
+> silent — every feature failure renders as absence (the image-gen complaint generalized).
+> Fix: one tiny FE reporter (surface, errorClass, durationMs → the G1 ring; never throws,
+> never blocks) and a sweep wiring it into the user-facing fail-open catches: panel polls,
+> in-fiction web search, TTS/voice, mid-turn agent tool failures (quiet OOC note + ring),
+> theme particles when A5 lands. The G1 card then shows EVERYTHING that silently failed.
+
+### G12 — every soul-write burst breathes · **QUEUED (after G8 — same seam)**
+> ROOT CAUSE: the ADR-0004 embedding bridge is synchronous per call; ANY batched soul write
+> pins the engine event loop (creation was just the loudest site). Fix at the seam, not the
+> site: move G8's chunk-and-yield INTO the shared soul-write path (SoulStore/seeding helper)
+> so eviction nights, finale bursts, season restarts, and future batch sites inherit it;
+> /health stays answerable during every burst (the G8 integration test generalized).
+> Note the R3 ledger item (O(events) snapshot export) compounds late-season — measure both
+> in the same harness; if week-10+ turn latency still breaches, promote R3's
+> incremental-snapshot item out of "if play feels it" (the playtest has now felt it).
+
+### G13 — the trim-zombie sweep: gating must cascade · **QUEUED (after wave 1 merges — tree-wide sweep)**
+> ROOT CAUSE: the game build hides ITEMS but not their PARENTS/launchers (the Tools chevron
+> instance generalized). Fix as a RULE: a container with zero visible actionable children
+> hides itself; an affordance whose action is build-refused is hidden, not click-refused.
+> Sweep: the shortcuts modal's bindings for dropped verticals, overflow-menu items, empty
+> settings tabs for non-admins, rail icons across build transitions. Gate: a browser-smoke
+> walk asserting every visible interactive element under the game build produces a visible
+> effect (the G3 assertion generalized beyond the sidebar).
+
+### G14 — one z-authority for restored modals · **QUEUED (after G2 — same file)**
+> ROOT CAUSE (the F9 tail, now user-adjacent): modalManager's `_bringToFront` stamps
+> `z-index ~300s !important` while ui.js promotes opens to ~1000s plain — inline !important
+> wins, so a dock-restored tool window likely sits ABOVE every newly opened window until
+> clicked (build=0; verify live first). Fix: `_bringToFront` defers to the ONE counter
+> (ui.js's promote, or a shared module both consume) — no !important. Pull this F9 tail
+> forward instead of waiting for the full W15 migration.
+
+### G15 — event-driven freshness: `orwell:gamechanged` dispatch sweep · **QUEUED (wave 2)**
+> ROOT CAUSE: sidebar/panel surfaces are poll-based (20–25s) and the `gamechanged` event is
+> dispatched inconsistently, so post-action UI lags up to a poll period ("the sidebar is
+> behind"). Fix: every FE path that mutates engine state (advanceGame, submitDecision,
+> recordInteraction, createCharacter, new-game, casting updates) dispatches
+> `orwell:gamechanged` on success — one helper at the tool-executor seam, not per-call-site
+> copies; panels already listen.
+
+> **Also recorded:** G5's audit findings will spawn G16+ fix items on landing; G4 (one
+> visual language) additionally covers the cast window's px/rem discipline and the three
+> chip languages (approach/decision/dock) under the shared tokens.

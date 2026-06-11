@@ -191,6 +191,21 @@ async def update_casting(fields: dict | None = None, user: str | None = None) ->
     return await _call("updateCasting", args, user=user)
 
 
+# --- G8: createCharacter-in-flight marker -------------------------------------------------------
+# createCharacter is the engine's heaviest call (sandbox mint + 16-cast generation + soul seeding
+# through the synchronous embedding bridge, ADR 0004). While it runs, a /health probe can stall or
+# time out — which is NOT an outage, just casting being finalized. This module-level marker lets
+# /api/orwell/health say so (`busy: "creating"`), and the engine-status banner shows an in-fiction
+# holding line instead of the false red "engine unavailable". Process-local on purpose (like
+# _LAST_ERROR): it describes THIS front-end's in-flight work.
+_CREATING_IN_FLIGHT = 0
+
+
+def creating_in_flight() -> bool:
+    """True while a createCharacter call from this front-end is in flight (G8)."""
+    return _CREATING_IN_FLIGHT > 0
+
+
 async def create_character(player_name: str | None = None, *, archetype=None, strategy_style=None,
                            seed=None, confirm_restart: bool = False, user: str | None = None,
                            persona_archetype=None, persona_strategy_style=None,
@@ -230,7 +245,12 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
         args["seed"] = seed
     if confirm_restart:
         args["confirmRestart"] = True
-    return await _call("createCharacter", args, user=user)
+    global _CREATING_IN_FLIGHT
+    _CREATING_IN_FLIGHT += 1  # G8: /health reports busy="creating" while this runs
+    try:
+        return await _call("createCharacter", args, user=user)
+    finally:
+        _CREATING_IN_FLIGHT -= 1
 
 
 async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> dict:
@@ -477,6 +497,10 @@ async def engine_health_detail() -> dict:
             "tool": le["tool"], "kind": le["kind"], "error": le["error"],
             "ageSeconds": int(time.time() - le["ts"]),
         }
+    # G8: while createCharacter is in flight, a slow/timed-out probe is casting being finalized,
+    # not an outage — the banner renders an in-fiction holding line instead of red.
+    if creating_in_flight():
+        detail["busy"] = "creating"
     return detail
 
 
