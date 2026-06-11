@@ -2839,3 +2839,32 @@ PR per item).
 > (C5); the no-secrets guard scans the whole tree (E78). **Test integrity:** T8/T9/T12/T15–T17
 > step-definition hardening + the 0004/0009/0036/0037/0047 feature amendments.
 > **Open remainder (not reached — two lane agents died mid-work):** T3–T7, T10, T11, T19, T20.
+> *(All cleared — see Lane B below.)*
+
+### Lane B — T-remainder test repairs (T3–T7 · T10 · T11 · T19 · T20)  ·  **✅ DONE (PR #225)**
+
+> The remaining open Stream-T findings (the L10 remainder). TESTS ONLY. Each strengthened test
+> **mutation-verified** (break the production behavior → red → revert).
+> **Live re-points:** T5 (narration never changes an outcome) and T6 (narrator cannot advance the
+> game) move off pure-function / hand-built-constant fixtures onto LIVE `GameSessionAdapter`
+> seasons (live competition + hallucinating narrator; live nomination beat — phase & pending
+> unmoved). T7 (agent can't fabricate an outcome) moves onto the B55 live seam WITH a relationship
+> model, so recording the engine's result FOLDS a real hidden consequence (the fold the old
+> fixture made impossible) — the winner is a real roster member that re-runs identical.
+> **Real assertions:** T3 (offscreen recall) returns the specific recorded note; T4
+> (CHARACTER-unchanged) asserts a real generated houseguest's static `Character` is byte-stable
+> across a season of soul-deepening.
+> **T11:** the per-wake cap asserts the TICK COUNT via an `advance` spy (the ×10 event-bound fudge
+> is gone); the isolation Thens plant unique per-user sentinels and assert genuine
+> content/knowledge cross-absence (record + knowledge + player surface); the vacuous
+> `assert.ok(true)` watcher-stop step asserts no-dangling-timer + idempotent stop.
+> **T10/T19 [FE/arch]:** already hardened in code by PR #221 — T10's decorative `readsVault` assert
+> carries a dep-cruiser pointer + a live-allowlist behavioral assert; T19's FE decision-kind list
+> is parsed live from `src/ports/GameSession.ts` (the c13 cross-language manifest parser). Verified
+> + stamped.
+> **T20 [FE]:** `scripts/browser_smoke.py` gains a real social-HUD minimize-to-dock behavior check;
+> `tests/test_orwell_huds.py` source-greps are explicitly re-labeled as SOURCE-PINS
+> (`test_sourcepin_*`) pointing at that behavior coverage.
+> **Gates:** engine `npm test` GREEN (typecheck → build → 659 unit/UAT → 318 BDD); FE
+> `test_orwell_huds.py` green + both touched FE files compile (full FE pytest/browser/matrix gate
+> runs in CI). Per-item stamps live on the audit doc's finding lines.
