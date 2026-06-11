@@ -222,6 +222,29 @@ case $- in *i*) [ -z "${ORWELL_PANEL_SHOWN:-}" ] && export ORWELL_PANEL_SHOWN=1 
 PANEL
 fi
 
+# Privileged UI port (<1024): reconcile the CAP_NET_BIND_SERVICE drop-in against the CURRENT
+# ORWELL_PORT in data/.env (mirrors orwell-install.sh — the install may predate this fix, or the
+# operator may have changed the port since). The hardened unit (E85) drops all capabilities, so
+# without this a non-root uvicorn can never bind a port below 1024 and the FE crash-loops.
+UI_PORT="$(sed -n 's/^ORWELL_PORT=//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+UI_PORT="${UI_PORT:-8080}"
+FRONTEND_DROPIN="/etc/systemd/system/${FRONTEND_SVC}.service.d/10-privileged-port.conf"
+if [[ "$UI_PORT" =~ ^[0-9]+$ ]] && (( UI_PORT < 1024 )); then
+  echo "==> ORWELL_PORT=${UI_PORT} is privileged (<1024): ensuring CAP_NET_BIND_SERVICE (drop-in)"
+  mkdir -p "${FRONTEND_DROPIN%/*}"
+  cat > "$FRONTEND_DROPIN" <<EOF
+# Written by orwell-update.sh: ORWELL_PORT=${UI_PORT} is a privileged port (<1024).
+# The base unit's empty CapabilityBoundingSet= is the audited default (E85); this grants the
+# single capability a non-root bind below 1024 requires. Removed when the port moves >=1024.
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+EOF
+else
+  rm -f "$FRONTEND_DROPIN"
+fi
+systemctl daemon-reload
+
 echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
 systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
 echo "==> update complete ($(git -C "$APP_DIR" rev-parse --short HEAD)); previous build kept for --rollback."

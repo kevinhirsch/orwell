@@ -177,7 +177,8 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `TEMPLATE_STORAGE` | first `vztmpl` storage → `local` | where the template is stored |
 | `TEMPLATE_NAME` / `TEMPLATE` | newest `debian-12-standard` | pin a specific template |
 | `BRIDGE` / `NET` / `GATEWAY` | `vmbr0` / `dhcp` / — | network (`NET` = `dhcp` or a CIDR) |
-| `ORWELL_PORT` | `8080` | front-end UI port |
+| `ORWELL_PORT` | `8080` | front-end UI port — ports **below 1024 (e.g. 80) are supported**: the installer/updater grant the hardened unit `CAP_NET_BIND_SERVICE` via a systemd drop-in (removed again when the port moves ≥1024) |
+| `CT_ROOT_PASSWORD` | — | optional container **root password for console login** (≥5 chars; fed via stdin, never on a command line). Without it the LXC console rejects every login — use `pct enter <CTID>` from the host, or set one later with `pct exec <CTID> -- passwd` |
 | `BRANCH` / `REPO` | `main` / this repo | source to install |
 | `GIT_TOKEN` | — | the deploy PAT (private repo; → `data/.env`, never committed) |
 | `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |

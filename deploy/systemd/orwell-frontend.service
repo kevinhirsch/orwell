@@ -17,6 +17,9 @@ PrivateTmp=yes
 ReadWritePaths=/opt/orwell/data /opt/orwell/frontend/data
 # Hardening (audit E85): same posture as the engine unit. MemoryDenyWriteExecute is OMITTED —
 # the ONNX runtime (fastembed) JIT-compiles kernels.
+# Privileged ports: with the empty bounding set a non-root uvicorn cannot bind <1024. When
+# ORWELL_PORT is below 1024 (e.g. 80), orwell-install.sh / orwell-update.sh write a drop-in
+# (orwell-frontend.service.d/10-privileged-port.conf) granting exactly CAP_NET_BIND_SERVICE.
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallFilter=@system-service
