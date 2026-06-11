@@ -284,6 +284,7 @@
         }
         setTimeout(removeCard, 4000);
       } catch (_) {
+        if (window.OrwellReport) window.OrwellReport.fail("decision", "submit-post", _); // G11: fail open, never silent
         confirm.disabled = false;
         confirm.textContent = "Confirm — this is binding";
         let err = card.querySelector(".odec-err");

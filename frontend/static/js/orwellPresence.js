@@ -96,6 +96,7 @@
       _failures = 0;
     } catch (_) {
       _failures += 1;
+      if (window.OrwellReport) window.OrwellReport.fail("presence", "whereabouts-poll", _); // G11: fail open, never silent
       render(null); // fail OPEN: the strip simply isn't there
     } finally {
       timer = setTimeout(tick, _pollDelay());

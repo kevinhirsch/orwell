@@ -93,6 +93,7 @@
       }
     } catch (_) {
       // The FE route itself failed — surface the most likely truth rather than going silent.
+      if (window.OrwellReport) window.OrwellReport.fail("engine-status", "health-fetch", _); // G11: fail open, never silent
       show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service.");
     }
   }

@@ -300,6 +300,7 @@ import { onNarrowChange } from './platform.js';
     } catch (_) {
       // ENGINE HICCUP (not "no game"): if we've shown the panel, keep the last-known
       // values up and flag the feed as reconnecting — don't blink the readout out.
+      if (window.OrwellReport) window.OrwellReport.fail("status-panel", "status-poll", _); // G11: fail open, never silent
       _failures += 1;
       if (_shown) markStale(true);
       else hidePanel();

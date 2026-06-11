@@ -106,6 +106,7 @@
           unsealed = data.retrospective || null;
           render(recap);
         } catch (_) {
+          if (window.OrwellReport) window.OrwellReport.fail("retrospective", "vault-open", _); // G11: fail open, never silent
           open.textContent = "The Vault would not open — try again";
         }
       });
@@ -127,6 +128,7 @@
       _failures = 0;
     } catch (_) {
       _failures += 1;
+      if (window.OrwellReport) window.OrwellReport.fail("retrospective", "recap-poll", _); // G11: fail open, never silent
       render(null); // fail OPEN: no panel on error
     } finally {
       timer = setTimeout(tick, _pollDelay());
