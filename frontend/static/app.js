@@ -1235,8 +1235,9 @@ function initializeEventListeners() {
     _syncSortChecks();
 
     // AI auto-sort — spinner on the sort button itself. Used by both
-    // the main "★ Tidy" button (AI) and the sub-row "Tidy" button
-    // (no AI, Phase 1 cleanup only) via the skipLlm flag.
+    // the main "★ Tidy" button (AI) and the sub-row "Clean up (no AI)"
+    // button (H6: Phase 1 cleanup only — never a second bare "Tidy"
+    // label) via the skipLlm flag.
     async function _runTidy(skipLlm) {
       const btnIcon = sortBtn.querySelector('.sort-icon');
       if (btnIcon) btnIcon.style.display = 'none';
