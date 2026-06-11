@@ -58,6 +58,16 @@ wt_input() {  # var "prompt" default
   printf -v "$__var" '%s' "${__val:-$3}"
 }
 
+wt_password() {  # var "prompt" — empty answer = skip; Linux requires >=5 chars (pct contract)
+  local __var="$1" __val
+  while :; do
+    __val="$(whiptail --title "$TITLE" --passwordbox "$2" 11 72 3>&1 1>&2 2>&3)" || die "cancelled."
+    [[ -z "$__val" || ${#__val} -ge 5 ]] && break
+    whiptail --title "$TITLE" --msgbox "Password must be at least 5 characters (or empty to skip)." 8 64
+  done
+  printf -v "$__var" '%s' "$__val"
+}
+
 wt_pick_storage() {  # var content default
   local __var="$1" content="$2" def="$3" rows args=() s sel
   mapfile -t rows < <(pvesm status --content "$content" 2>/dev/null | awk 'NR>1{print $1}')
@@ -111,6 +121,9 @@ APP_DIR="${APP_DIR:-/opt/orwell}"
 # helper from then on (updates/resets never re-prompt).
 GIT_TOKEN="${GIT_TOKEN:-}"
 ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"   # ORWELL_* primary; BBAI_* deprecated fallback
+# Optional container root password (console login). pct enter from the host never needs one;
+# without it the LXC console rejects every login (pct create sets no password by default).
+CT_ROOT_PASSWORD="${CT_ROOT_PASSWORD:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OLLAMA_HOST="${OLLAMA_HOST:-}"
 
@@ -139,11 +152,16 @@ if interactive; then
     wt_input NET         "IP — 'dhcp' or CIDR (e.g. 192.168.1.50/24)" "$NET"
     [[ "$NET" != "dhcp" ]] && wt_input GATEWAY "Gateway (for the static IP)" "${GATEWAY:-}"
     wt_input ORWELL_PORT   "orwell UI port"                               "$ORWELL_PORT"
+    wt_password CT_ROOT_PASSWORD "Container root password (console login)\nEmpty = none: 'pct enter ${CTID}' from this host always works without one."
     wt_input BRANCH      "Git branch"                                 "$BRANCH"
     wt_pick_template
     wt_pick_llm
   fi
 fi
+
+# Linux rejects short passwords at the chpasswd layer too — fail fast, not mid-install.
+[[ -z "$CT_ROOT_PASSWORD" || ${#CT_ROOT_PASSWORD} -ge 5 ]] \
+  || die "CT_ROOT_PASSWORD must be at least 5 characters (or unset for no console password)."
 
 # ── Resolve + download the OS template (the fix for the original failure) ───────────────────────
 ensure_template() {
@@ -191,6 +209,13 @@ pct create "$CTID" "$TEMPLATE" \
   --onboot 1
 pct start "$CTID"
 
+# Console password (optional). Fed via stdin — the same no-secrets-on-a-command-line rule as the
+# GIT_TOKEN handling below: it must never appear in host `ps` or the shell history of a pct exec.
+if [[ -n "$CT_ROOT_PASSWORD" ]]; then
+  msg "setting the container root password (console login)"
+  printf 'root:%s\n' "$CT_ROOT_PASSWORD" | pct exec "$CTID" -- chpasswd
+fi
+
 # Wait for a network address (DHCP lease) before running the in-container install.
 msg "waiting for the container network"
 IP=""
@@ -234,3 +259,9 @@ pct exec "$CTID" -- bash -c \
    bash '${APP_DIR}/deploy/orwell-install.sh'"
 
 msg "done. orwell UI: http://${IP}:${ORWELL_PORT}"
+if [[ -n "$CT_ROOT_PASSWORD" ]]; then
+  msg "console login: root + the password you set (or 'pct enter ${CTID}' from this host)."
+else
+  msg "no container root password was set — console login is disabled. Use 'pct enter ${CTID}'"
+  msg "from this host, or set one later: pct exec ${CTID} -- passwd"
+fi

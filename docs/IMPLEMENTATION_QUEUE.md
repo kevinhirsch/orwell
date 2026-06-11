@@ -2901,3 +2901,25 @@ PR per item).
 > script change). **Gate:** `frontend/tests/test_0053_admin_transcripts.py` (12 cases) — green; the
 > rest of the FE pytest suite unaffected (425 passing; the 2 reds are pre-existing env-only
 > module gaps: `rag_vector`). FE pytest lane only — never `cucumber.cjs`; no engine change.
+
+### Lane D — deploy: privileged UI port (80) + container console password · ops · **✅ DONE**
+
+> Two operator-reported install defects (2026-06-11), fixed at the deploy seam with the audited
+> E85 posture intact.
+> **Privileged UI port (<1024, e.g. 80):** the hardened `orwell-frontend.service` runs uvicorn as
+> the non-root `orwell` user with an EMPTY `CapabilityBoundingSet=` — it structurally cannot bind
+> a port below 1024, so `ORWELL_PORT=80` crash-looped into "connection refused".
+> `orwell-install.sh` AND `orwell-update.sh` now reconcile a systemd drop-in
+> (`orwell-frontend.service.d/10-privileged-port.conf`) granting exactly `CAP_NET_BIND_SERVICE`,
+> written only when the configured port is <1024 and removed otherwise — the base unit stays
+> byte-stable (the E85 pin holds) and running the updater repairs pre-fix installs (it reads the
+> LIVE port from `data/.env`).
+> **Console password:** `orwell.sh` created the LXC with no root password, so the Proxmox console
+> rejected every login. New optional `CT_ROOT_PASSWORD` (whiptail passwordbox in the advanced
+> flow + env for non-interactive; ≥5 chars), applied via `chpasswd` on STDIN — never on a pct
+> command line (the GIT_TOKEN no-secrets-in-argv rule) — and the installer's final message now
+> states the console-access path either way (`pct enter` always works).
+> **Gate:** `tests/unit/opsPrivateRepo.test.ts` gains two suites (drop-in present+gated+removable
+> in both scripts; update reads the live env; the base unit keeps `^CapabilityBoundingSet=$`;
+> password is stdin-only with no `pct … --password`) — the <1024 gate mutation-verified; full
+> `npm test` green (675 unit/property/arch → 318 BDD).

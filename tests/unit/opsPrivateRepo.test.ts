@@ -169,3 +169,47 @@ describe("E85 — systemd hardening", () => {
     expect(readFileSync(join(DEPLOY, "orwell-install.sh"), "utf8")).toContain("ORWELL_ENGINE_MULTIUSER=1");
   });
 });
+
+describe("privileged UI port (<1024, e.g. 80) — the drop-in seam", () => {
+  // The hardened unit drops ALL capabilities (E85), so a non-root uvicorn cannot bind a port
+  // below 1024 — install AND update must reconcile a CAP_NET_BIND_SERVICE drop-in against the
+  // configured port (granted only when needed, removed otherwise; the base unit stays audited).
+  for (const script of ["orwell-install.sh", "orwell-update.sh"]) {
+    it(`${script} writes the CAP_NET_BIND_SERVICE drop-in only below 1024 — and removes it otherwise`, () => {
+      const text = readFileSync(join(DEPLOY, script), "utf8");
+      expect(text).toContain("10-privileged-port.conf");
+      expect(text).toContain("AmbientCapabilities=CAP_NET_BIND_SERVICE");
+      expect(text).toContain("CapabilityBoundingSet=CAP_NET_BIND_SERVICE");
+      expect(text).toMatch(/< 1024/); // the gate — not unconditional
+      expect(text).toMatch(/rm -f "\$\{?FRONTEND_DROPIN\}?"/); // the un-grant when the port moves back
+    });
+  }
+
+  it("the update script reads the CURRENT port from data/.env (repairs pre-fix installs)", () => {
+    const text = readFileSync(join(DEPLOY, "orwell-update.sh"), "utf8");
+    expect(text).toMatch(/ORWELL_PORT=.*p.*\$ENV_FILE/); // sed of the live env, not a baked-in value
+  });
+
+  it("the base frontend unit keeps the audited empty bounding set (the grant lives in the drop-in)", () => {
+    const text = readFileSync(join(DEPLOY, "systemd", "orwell-frontend.service"), "utf8");
+    expect(text).toMatch(/^CapabilityBoundingSet=$/m);
+  });
+});
+
+describe("container console access — the root password seam (orwell.sh)", () => {
+  const text = readFileSync(join(DEPLOY, "orwell.sh"), "utf8");
+
+  it("supports an optional CT_ROOT_PASSWORD (env + interactive prompt), applied via stdin", () => {
+    expect(text).toContain("CT_ROOT_PASSWORD");
+    expect(text).toContain("wt_password");
+    // Applied through chpasswd on stdin — the password must never ride a pct command line
+    // (pct create --password / a pct exec argv would land it in host ps).
+    expect(text).toMatch(/printf 'root:%s\\n' "\$CT_ROOT_PASSWORD" \| pct exec/);
+    expect(text).not.toMatch(/pct\s+(create|exec)[^\n]*--password/);
+  });
+
+  it("tells the operator how to get in either way (password set or not: pct enter always works)", () => {
+    expect(text).toContain("pct enter");
+    expect(text).toContain("-- passwd");
+  });
+});

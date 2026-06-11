@@ -165,6 +165,28 @@ chown -R orwell:orwell "${APP_DIR}"
 echo "==> systemd services"
 install -m 644 "${APP_DIR}/deploy/systemd/orwell-engine.service"   /etc/systemd/system/orwell-engine.service
 install -m 644 "${APP_DIR}/deploy/systemd/orwell-frontend.service" /etc/systemd/system/orwell-frontend.service
+
+# Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
+# `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
+# (the bind fails, the unit crash-loops, the UI is "connection refused"). Grant exactly the one
+# capability needed via a drop-in, written only when needed and removed otherwise, so the
+# audited base unit stays byte-stable and the default 8080 posture keeps the empty bounding set.
+FRONTEND_DROPIN="/etc/systemd/system/orwell-frontend.service.d/10-privileged-port.conf"
+if [[ "${ORWELL_PORT}" =~ ^[0-9]+$ ]] && (( ORWELL_PORT < 1024 )); then
+  echo "==> ORWELL_PORT=${ORWELL_PORT} is privileged (<1024): granting CAP_NET_BIND_SERVICE (drop-in)"
+  mkdir -p "${FRONTEND_DROPIN%/*}"
+  cat > "$FRONTEND_DROPIN" <<EOF
+# Written by orwell-install.sh: ORWELL_PORT=${ORWELL_PORT} is a privileged port (<1024).
+# The base unit's empty CapabilityBoundingSet= is the audited default (E85); this grants the
+# single capability a non-root bind below 1024 requires. Removed when the port moves >=1024.
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+EOF
+else
+  rm -f "$FRONTEND_DROPIN"
+fi
+
 systemctl daemon-reload
 systemctl enable --now orwell-engine orwell-frontend
 
