@@ -108,14 +108,25 @@ def test_generate_one_skips_chat_model_no_http(monkeypatch):
 def test_manual_force_bypasses_debounce(monkeypatch):
     monkeypatch.setattr(orwell_portraits, "backfill_allowed", lambda user: False)  # window NOT elapsed
 
+    scheduled = []
+
     async def fake_backfill(ids, user):
+        scheduled.append(list(ids))
         return {"generated": 0, "skipped": 0, "total": 0}
     monkeypatch.setattr(orwell_portraits, "backfill_missing", fake_backfill)
 
-    # the AUTO poll path respects the debounce…
-    assert orwell_portraits.kickoff_backfill(["npc:1"], "u", force=False) is False
-    # …the explicit lever runs anyway.
-    assert orwell_portraits.kickoff_backfill(["npc:1"], "u", force=True) is True
+    # Drive inside a RUNNING loop so kickoff_backfill uses loop.create_task (its real call
+    # pattern) — never the asyncio.run fallback, which closes the loop and would poison every
+    # later test in the session ("no current event loop").
+    async def drive():
+        # the AUTO poll path respects the debounce…
+        assert orwell_portraits.kickoff_backfill(["npc:1"], "u", force=False) is False
+        # …the explicit lever runs anyway.
+        assert orwell_portraits.kickoff_backfill(["npc:1"], "u", force=True) is True
+        await asyncio.sleep(0)  # let the scheduled task run
+
+    _run(drive())
+    assert scheduled == [["npc:1"]]  # only the forced run scheduled work
 
 
 # ── failures capture the provider's reason ─────────────────────────────────────

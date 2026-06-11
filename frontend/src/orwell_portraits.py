@@ -346,11 +346,121 @@ def image_generation_available(user: Optional[str]) -> bool:
     return False
 
 
+def _extract_chat_image_url(data: dict) -> Optional[str]:
+    """Pull a generated image's URL (a data: URL or an https: URL) out of a chat-completions
+    response — OpenRouter returns images on the assistant message: as `message.images[]`
+    (native image-output models, a data URL), as an image part in `message.content`, or as a
+    URL embedded in text content (the openrouter:image_generation server tool). Best-effort."""
+    try:
+        msg = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not isinstance(msg, dict):
+        return None
+
+    def _url_of(obj):
+        if not isinstance(obj, dict):
+            return None
+        iu = obj.get("image_url")
+        if isinstance(iu, dict) and isinstance(iu.get("url"), str):
+            return iu["url"]
+        if isinstance(iu, str) and iu:
+            return iu
+        return obj.get("url") if isinstance(obj.get("url"), str) else None
+
+    images = msg.get("images")
+    if isinstance(images, list):
+        for im in images:
+            u = _url_of(im)
+            if u:
+                return u
+    content = msg.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in ("image_url", "output_image", "image"):
+                u = _url_of(part)
+                if u:
+                    return u
+    if isinstance(content, str) and content:
+        m = re.search(r'(data:image/[A-Za-z0-9.+\-]+;base64,[A-Za-z0-9+/=]+|https?://[^\s)"\']+)', content)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _chat_text_hint(data: dict) -> Optional[str]:
+    """A short clip of the assistant's text reply — useful when no image came back (the model
+    may have explained why). Best-effort; never our prompt."""
+    try:
+        c = data["choices"][0]["message"].get("content")
+        if isinstance(c, str) and c.strip():
+            return c.strip()[:140]
+    except Exception:
+        pass
+    return None
+
+
+async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
+    """Decode a data: URL or fetch an https: URL to raw image bytes. None on any failure."""
+    try:
+        if url.startswith("data:"):
+            b64 = url.split(",", 1)[1] if "," in url else ""
+            return base64.b64decode(b64) if b64 else None
+        r = await client.get(url)
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
+                                         prompt: str, headers: dict) -> Optional[bytes]:
+    """OpenRouter (and compatible) image generation over /chat/completions.
+
+    Two mechanisms, tried in order: native image-output via `modalities: [image, text]`
+    (the image-collection models), then the `openrouter:image_generation` server tool (any
+    model orchestrates and returns an image URL). The image is extracted from the assistant
+    message (data: or https:) and decoded. Best-effort: returns None and records the most
+    informative reason on failure."""
+    base_msg = {"model": model_id, "messages": [{"role": "user", "content": prompt}]}
+    attempts = (
+        {**base_msg, "modalities": ["image", "text"]},
+        {**base_msg, "tools": [{"type": "openrouter:image_generation"}]},
+    )
+    last_reason, last_detail = "no-image", None
+    for payload in attempts:
+        try:
+            resp = await client.post(chat_url, json=payload, headers=headers)
+        except Exception as e:  # transport error — try the next mechanism
+            last_reason, last_detail = type(e).__name__, None
+            continue
+        if resp.status_code != 200:
+            logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
+            last_reason, last_detail = f"http-{resp.status_code}", _provider_error_reason(resp)
+            continue
+        try:
+            data = resp.json()
+        except Exception:
+            last_reason, last_detail = "bad-json", None
+            continue
+        img_url = _extract_chat_image_url(data)
+        if not img_url:
+            last_reason, last_detail = "no-image-in-response", _chat_text_hint(data)
+            continue
+        png = await _image_bytes_from_url(client, img_url)
+        if png:
+            return png
+        last_reason, last_detail = "image-decode-failed", None
+    _note_gen_error(last_reason, last_detail)
+    return None
+
+
 async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
     """Generate a single image from `prompt`; return PNG bytes, or None on any failure.
 
     Best-effort: every failure path returns None (never raises) so a flaky image API can
-    never break game start or leak an error to the player.
+    never break game start or leak an error to the player. OpenRouter endpoints generate
+    via /chat/completions (see _generate_via_chat_completions); others use the OpenAI
+    Images API (/images/generations).
     """
     import httpx
     from src.ai_interaction import _resolve_model
@@ -385,6 +495,11 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
         _note_gen_error("no-model")
         return None
 
+    # OpenRouter does NOT implement the OpenAI /images/generations endpoint — its image
+    # models emit images through /chat/completions (native image-output via `modalities`,
+    # or any model via the openrouter:image_generation server tool). POSTing /images/...
+    # there 400s on every model, so route OpenRouter to the chat-completions transport.
+    is_openrouter = "openrouter.ai" in (url or "").lower()
     is_gpt_image = "gpt-image" in model_id.lower()
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
     images_url = base_url + "/images/generations"
@@ -398,6 +513,8 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
         ) as client:
+            if is_openrouter:
+                return await _generate_via_chat_completions(client, url, model_id, prompt, headers)
             resp = await client.post(images_url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info("[portraits] image API %s: %s", resp.status_code, resp.text[:200])

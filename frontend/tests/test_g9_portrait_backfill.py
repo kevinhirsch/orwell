@@ -265,23 +265,36 @@ def test_backfill_route_returns_kicked_missing_available(tmp_portraits, client, 
     _stub_provider(monkeypatch, True)
     _store_portrait("default", "npc:3")
 
-    def fake_kick(missing, user):
+    calls = {}
+
+    def fake_kick(missing, user, force=False):
+        calls["force"] = force
         return True
     monkeypatch.setattr(orwell_portraits, "kickoff_backfill", fake_kick)
 
     body = client.post("/api/orwell/portraits/backfill").json()
     assert body == {"kicked": True, "missing": ["player", "npc:1"], "available": True}
+    # the MANUAL lever forces past the auto-poll debounce (G21b)
+    assert calls["force"] is True
 
 
-def test_backfill_route_reports_debounced_attempt_honestly(tmp_portraits, client, monkeypatch):
+def test_backfill_route_forces_past_the_debounce(tmp_portraits, client, monkeypatch):
+    """The manual lever is an explicit act — it runs NOW (force=True), bypassing the
+    auto-poll debounce — and reports the kicked result honestly (G21b)."""
     _stub_state(monkeypatch)
     _stub_provider(monkeypatch, True)
-    monkeypatch.setattr(orwell_portraits, "kickoff_backfill", lambda missing, user: False)
+    seen = {}
+
+    def fake_kick(missing, user, force=False):
+        seen["force"] = force
+        return True
+    monkeypatch.setattr(orwell_portraits, "kickoff_backfill", fake_kick)
 
     body = client.post("/api/orwell/portraits/backfill").json()
-    assert body["kicked"] is False
+    assert body["kicked"] is True
     assert body["available"] is True
-    assert body["missing"]  # still reports what's missing
+    assert body["missing"]            # still reports what's missing
+    assert seen["force"] is True      # the lever forces past the debounce window
 
 
 def test_backfill_route_when_provider_unavailable(tmp_portraits, client, monkeypatch):
@@ -319,7 +332,7 @@ def test_backfill_route_is_player_reachable(tmp_portraits, client, monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "true")
     _stub_state(monkeypatch)
     _stub_provider(monkeypatch, True)
-    monkeypatch.setattr(orwell_portraits, "kickoff_backfill", lambda missing, user: True)
+    monkeypatch.setattr(orwell_portraits, "kickoff_backfill", lambda missing, user, force=False: True)
     assert client.post("/api/orwell/portraits/backfill").status_code == 200
 
 
