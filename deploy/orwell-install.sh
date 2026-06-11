@@ -245,12 +245,29 @@ ownership() {
   # DATA_DIR is chowned explicitly: it defaults inside APP_DIR but is overridable to a path
   # outside it — and the engine (running as `orwell`) must always be able to write saves/models.
   chown -R orwell:orwell "${APP_DIR}" "${DATA_DIR}"
+  # G19b — web-triggered maintenance: the FE (E85-hardened: User=orwell, every capability
+  # dropped — no systemctl) requests an update by dropping a FLAG FILE in data/ops/; the
+  # root-side orwell-ops-update.path unit consumes it. The flag dir must be orwell-WRITABLE
+  # (the web tier writes the flag; the flag's content is ignored — existence only) and the
+  # live run log FE-readable: the admin status page tails any data/*.log (G1b). The log is
+  # touched, never `install`ed — a re-run must not truncate the run history.
+  install -d -m 750 "${DATA_DIR}/ops"
+  chown orwell:orwell "${DATA_DIR}/ops"
+  rm -f "${DATA_DIR}/ops/update-requested"   # a stale pre-install request must not fire mid-install
+  touch "${DATA_DIR}/ops-update.log"
+  chmod 644 "${DATA_DIR}/ops-update.log"
 }
 
 systemd_services() {
   step "systemd services"
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-engine.service"   /etc/systemd/system/orwell-engine.service
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-frontend.service" /etc/systemd/system/orwell-frontend.service
+  # G19b — the web-triggered-update seam: the E85-hardened FE cannot systemctl or self-update,
+  # so the web tier drops the flag data/ops/update-requested and the root-side PATH unit runs
+  # the one fixed update script, output appended live to data/ops-update.log (the admin status
+  # page tails it). Root-by-design — the WHY is documented in the unit files themselves.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.path"    /etc/systemd/system/orwell-ops-update.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.service" /etc/systemd/system/orwell-ops-update.service
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -276,9 +293,11 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
+  # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
+  systemctl enable --now orwell-ops-update.path
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
-  systemctl restart orwell-engine orwell-frontend
+  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path
 }
 
 login_panel() {
