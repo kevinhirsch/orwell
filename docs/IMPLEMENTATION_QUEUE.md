@@ -2748,6 +2748,43 @@ PR per item).
 > `firstCeremonyBeatResolved`, seed-spanning test). Gates: FE pytest 372 green · boot/browser
 > smokes green · responsive matrix 37/0/0 · `npm test` green for the engine sliver.
 
+### U5 — game-build trim remainder (Lane 8: W1+W5 · W3 · W4 · W7 · E17)  ·  **✅ DONE (PR #211)**
+
+> The Stream-W half U4 didn't carry. W1 `ui_control` collapses to the curated safe subset under
+> the game build — highlight/clear_highlight + set_theme/create_theme — enforced in code at
+> `do_ui_control` (mode/model/incognito-toggle/panel/email actions refused, game-framed) with a
+> `chatStream.js` data-game-build belt · W5 the ui_control manifest is game-only on BOTH paths
+> (the prompt section via a structural builtin-override injection on the settings read path —
+> `GAME_UI_CONTROL_SECTION`, never persisted, wins over user overrides — and the native function
+> schema via `game_ui_control_schema`: enum = safe subset, email args gone; `highlight` now
+> converts with its selector) · W3 the Bitwarden vault vertical joins `GAME_DROP_SET` +
+> `mount_optional` (404 server-side under the build, back off-build; boot-smoke proven live both
+> ways) · W4 the slash surface is the keep-set only (`GAME_SLASH_KEEP` + a dispatch-time gate
+> covering legacy aliases, with a game-framed refusal; /help, fuzzy suggestions, and the
+> autocomplete menu all filter through one `isGameSlashAllowed` seam) · W7 `/backgrounds`
+> removed outright (its static page was never vendored — the route only 500'd) · E17
+> `search_chats` KEEP → OPTIONAL (off by default; opt-in via Settings → Tools; membership lines
+> only — the gate logic is Lane 6's). Proving suite `frontend/tests/test_lane7_game_trim.py`
+> (25 tests); pytest 357 · boot/browser smokes · responsive matrix all green; the W6 keep-set
+> beat-label drift test stays green after the shrink.
+
+### L8 — ops & private-repo (A4/ruling #17+E84 · E80 · E83 · E85 · E8 · E32)  ·  **✅ DONE (PR #218)**
+
+> **A4/ruling #17 (closes E84):** the single-PAT private-repo design — `GIT_TOKEN` lives in
+> `data/.env`, a git credential helper supplies it to every fetch/pull, and the host
+> update/factory-reset bridges become LOCAL-COPY (execute the already-checked-out in-container
+> copy after a pinned-ref `git fetch`; zero raw-curl of branch tips); the installer tolerates a
+> checkout missing its origin remote. **E80:** `deploy/smoke.sh` refutes are behavioral (sentinel
+> save + the full stat/edge refute list + the credential-helper gate), not textual greps.
+> **E83:** the frontend Python deps ride a pip-compile lockfile (Python 3.11/Debian 12 target),
+> pinned on every update. **E85:** systemd units harden fully (`CapabilityBoundingSet`,
+> `RestrictAddressFamilies`, `SystemCallFilter=@system-service`, `ProtectKernel*`,
+> `RestrictSUIDSGID`, `LockPersonality`, `UMask=0077`) and `orwell-frontend.service` carries a
+> default `ORWELL_PORT`. **E8:** `FileSaveStore` fsyncs file + dir before rename (power-loss
+> durability). **E32:** user-id capped at the HTTP edge (400) + constant-time token compare in
+> `HttpMcpServer`. Verified by `tests/unit/opsPrivateRepo.test.ts`, `saveDurability.test.ts`,
+> `httpEdgeAuth.test.ts`, and the upgraded smoke refutes.
+
 ### L11 — docs & specs (E86(b) · E87 · specs 0051/0053)  ·  **✅ DONE (PR #219)**
 
 > **E86 — the amend path** (the audit's lane split: building the fastembed adapter is its own

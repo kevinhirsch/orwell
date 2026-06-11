@@ -20,15 +20,22 @@ projections, never Vault data.
 
 ## Quick install (Proxmox)
 
-Run on the **Proxmox host shell**:
+The repo is **private**: create a fine-grained PAT once (scope: `kevinhirsch/orwell`,
+**Contents: Read-only**, nothing else), then run on the **Proxmox host shell** — this is the
+**single authenticated moment**; the token is persisted into the container's `data/.env` and
+every later update/reset reads it from there via a git credential helper (no re-prompt, never
+in a URL or `.git/config`):
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 ```
 
 This creates a Debian LXC and installs everything. Override defaults via env before the command:
 `CTID`, `CORES`, `RAM_MB`, `DISK_GB`, `BRIDGE`, `STORAGE`, `ORWELL_PORT`. When it finishes it prints
 the UI URL.
+
+Fine-grained PATs cap at one year: rotate with `bash /opt/orwell/deploy/orwell-update.sh
+--set-token` (also the one-time setup path for an install that predates the private flip).
 
 ---
 
@@ -40,8 +47,10 @@ the UI URL.
 | `ORWELL_ENGINE_PORT` | engine MCP server (loopback) | `8765` |
 | `ORWELL_ENGINE_HOST` | engine bind address | `127.0.0.1` |
 | `ORWELL_ENGINE_MCP_URL` | front-end → engine | `http://127.0.0.1:8765` |
-| `ORWELL_ENGINE_TOKEN` | shared secret required on every engine tool call (set if the engine is reachable beyond loopback) | — (off) |
-| `ORWELL_ENGINE_MULTIUSER` | reject a request with no `x-orwell-user` instead of routing to a shared `default` sandbox | — (off) |
+| `ORWELL_ENGINE_TOKEN` | shared secret required on every engine tool call (the installer generates one) | set by installer |
+| `ORWELL_ENGINE_MULTIUSER` | reject a request with no `x-orwell-user` instead of routing to a shared `default` sandbox | `1` (set by installer) |
+| `GIT_TOKEN` | the deploy PAT (private repo) — read by the git credential helper at fetch time | set by installer |
+| `SECURE_COOKIES` | set `true` behind TLS: front-end session cookies get the `Secure` flag | — (off) |
 | `OLLAMA_HOST` **or** `ANTHROPIC_API_KEY` | the LLM (set one) | — |
 
 After editing: `systemctl restart orwell-engine orwell-frontend`.
@@ -50,22 +59,33 @@ After editing: `systemctl restart orwell-engine orwell-frontend`.
 
 ## Update
 
+Run the **local checked-out copy** — no script fetches from GitHub anymore (the repo is private;
+`git pull` authenticates via the credential helper + `GIT_TOKEN` in `data/.env`):
+
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
+# inside the container — or from the Proxmox host with a checkout (it bridges into the LXC)
+bash /opt/orwell/deploy/orwell-update.sh
 ```
 
-Pulls latest, rebuilds the engine (`npm run build`), and restarts both services. **Your save
-(`/opt/orwell/data`) is never touched.**
+Pulls latest, rebuilds the engine (`npm run build`), refreshes front-end deps from the pinned
+`requirements.lock.txt`, and restarts both services. **Your save (`/opt/orwell/data`) is never
+touched.**
 
 ---
 
 ## Manual / non-Proxmox install
 
 ```bash
-git clone https://github.com/kevinhirsch/orwell.git /opt/orwell && cd /opt/orwell
+# Private repo: authenticate the clone once with your PAT, then keep the token OUT of git config
+# (the credential helper reads it from data/.env at fetch time — set it up below).
+git -c credential.helper='!f(){ echo username=x-access-token; echo password=$GIT_TOKEN; };f' \
+  clone https://github.com/kevinhirsch/orwell.git /opt/orwell && cd /opt/orwell
 npm ci && npm run build                                  # engine
-( cd frontend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt )
+( cd frontend && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.lock.txt )
 mkdir -p data && cp frontend/.env.example data/.env      # then edit data/.env (LLM + ports)
+echo "GIT_TOKEN=github_pat_xxx" >> data/.env && chmod 600 data/.env
+git config --system credential.helper \
+  '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p /opt/orwell/data/.env)"; };f'
 
 # run the two services (e.g. in two shells, or use the units in deploy/systemd/):
 npm start                                                # engine — MCP server
@@ -115,9 +135,11 @@ Updates never touch either data dir (non-degradation, feature 0007).
   port is exposed. **Engine auth is ON by default** (B67): the installer generates a shared
   `ORWELL_ENGINE_TOKEN` into `data/.env` — the engine enforces it on every tool route (401 without
   it) and the front-end sends it automatically (`Authorization: Bearer …`; `BBAI_ENGINE_TOKEN` is
-  the legacy fallback). For a multi-tenant engine also set `ORWELL_ENGINE_MULTIUSER=1`: every request
-  must assert its `x-orwell-user`, and an anonymous front-end call sends NO user header (it is
-  refused, never silently collapsed into a shared `default` sandbox).
+  the legacy fallback). **Multi-user mode is also ON by default** (audit E32): the installer sets
+  `ORWELL_ENGINE_MULTIUSER=1` — every request must assert its `x-orwell-user`, and an anonymous
+  front-end call sends NO user header (it is refused, never silently collapsed into a shared
+  `default` sandbox). The engine caps the asserted user id at 64 chars and compares the bearer
+  token in constant time. Behind TLS, also set `SECURE_COOKIES=true`.
 - Each container is its own **sandbox** (one game namespace). The **Vault Wall** keeps secret game
   state off every player-facing surface — enforced structurally, not by prompt.
 

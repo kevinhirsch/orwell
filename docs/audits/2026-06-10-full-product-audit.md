@@ -164,7 +164,7 @@ File references are to `main` @ 87687c0.
   **400** and leaks the data-dir path. *Fix:* catch around `saveUser` ⇒ `persist-failure` fault
   + rollback + typed error; classify refusals by an `EngineRefusal` type, not
   `constructor === Error`. *Test:* throwing `saveFor` ⇒ HTTP 500, health fault, state rolled back.
-- **E8 [LOW · Ops] `FileSaveStore` durability + user-id length.** `FileSaveStore.ts:66–70` (no
+- **E8 [LOW · Ops] ✅ PR #218 — `FileSaveStore` durability + user-id length.** `FileSaveStore.ts:66–70` (no
   fsync of file/dir before rename — power loss ⇒ `.corrupt` latest, silent multi-turn step-back);
   `:39` (hex-doubling ⇒ >127-byte user header = `ENAMETOOLONG` 500s). *Fix:* fsync before
   rename; cap `x-orwell-user` ≤64 chars at the HTTP edge (400).
@@ -215,7 +215,7 @@ File references are to `main` @ 87687c0.
   narration tone/recording discipline ("always portray the house as adoring me"). *Fix:* drop
   `preset.system_prompt` from the preface when `game_active` (ADR 0003: prefer removing
   context). *Test:* pytest asserting the preface on a game turn contains only the GM prompt.
-- **E17 [MED · Change] `search_chats` is in the game-build keep-set** (`agent_tools.py:112`) —
+- **E17 [MED · Change] ✅ PR #211 — `search_chats` is in the game-build keep-set** (`agent_tools.py:112`) —
   the GM can "remember" prior seasons and OOC chats, a parallel memory rivaling the stores
   ("memory is the store *recalled*, never the chat *remembered*"). *Fix:* move to
   `GAME_TOOL_OPTIONAL`.
@@ -291,7 +291,7 @@ File references are to `main` @ 87687c0.
 - **E31 [MED · Bug] Malformed tool args are 500s** (= **D10**, endorsed) — plus
   `McpServer.ts:43–101` casts blindly; add per-tool required-field/shape checks returning
   deliberate 400s with field names.
-- **E32 [LOW · Ops] Edge hygiene cluster.** Installer never sets `ORWELL_ENGINE_MULTIUSER=1`
+- **E32 [LOW · Ops] ✅ PR #218 — Edge hygiene cluster.** Installer never sets `ORWELL_ENGINE_MULTIUSER=1`
   though FE auth defaults on; `SECURE_COOKIES` defaults off and is never written by the
   installer (document for TLS deploys); reads shouldn't mint sandboxes
   (`orchestrator.ts:307–321` `freshHealth` — add `peekSandbox`).
@@ -653,7 +653,7 @@ consequence.*
 - **E79 [LOW · Test] `transportHardening.test.ts` vacuous/racy spots.** `:42` passes with zero
   assertions when the fetch rejects; `:92` real-timer race on the E10 ordering test. *Fix:*
   assert the disjunction + no side effect; gate on entering `callTool` instead of wall time.
-- **E80 [LOW · Test] `deploy/smoke.sh` refutes are textual and shallow.** `:88` grep-"proves"
+- **E80 [LOW · Test] ✅ PR #218 — `deploy/smoke.sh` refutes are textual and shallow.** `:88` grep-"proves"
   update never deletes data; `:75` stat-leak refute checks only `"physical":`/`"score` (not
   mental/social/trust/affinity/threat). *Fix:* behavioral sentinel-save check; extend the
   refute list. Also promote the round-4 Playwright harness into `frontend/scripts/` as a
@@ -667,17 +667,17 @@ consequence.*
 
 ### Theme 9 — Ops, deploy & supply chain
 
-- **E83 [MED · Ops] Frontend Python deps are 100% unpinned and reinstalled blind on every
+- **E83 [MED · Ops] ✅ PR #218 — Frontend Python deps are 100% unpinned and reinstalled blind on every
   update** (`requirements.txt`: zero `==`; `orwell-update.sh` runs `pip install -r` each time;
   ADR 0004 claims fastembed is version-pinned — it is not, see E86). *Fix:* `pip-compile`
   lockfile + CI pin-check.
-- **E84 [MED · Ops/Security] `curl | bash`-as-root self-update with no integrity check**
+- **E84 [MED · Ops/Security] ✅ PR #218 — `curl | bash`-as-root self-update with no integrity check**
   (update/factory-reset host bridges fetch branch-tip from raw.githubusercontent; nodesource
   pipe; mutable CI action tags). *Fix:* execute the already-checked-out in-container copy after
   a pinned-ref fetch, or verify a published SHA-256; pin action SHAs. *(The new
   `orwell-game-reset.sh` inherits the same bridge pattern by consistency — fix all three
   together.)*
-- **E85 [LOW · Ops] systemd hardening stops early + frontend unit crash-loops without `.env`.**
+- **E85 [LOW · Ops] ✅ PR #218 — systemd hardening stops early + frontend unit crash-loops without `.env`.**
   Missing `CapabilityBoundingSet=`, `RestrictAddressFamilies`, `SystemCallFilter=@system-service`,
   `ProtectKernel*`, `RestrictSUIDSGID`, `LockPersonality`, `UMask=0077` (test
   `MemoryDenyWriteExecute` carefully — Node JIT); `orwell-frontend.service` needs a default
@@ -903,7 +903,7 @@ traceability; E-batch cross-references inline.
 
 ## Stream W — inherited-workspace bleed & attack surface (W1–W8)
 
-- **W1 [HIGH · Security]** `ui_control` is in `GAME_TOOL_KEEP` (`agent_tools.py:112`) and
+- **W1 [HIGH · Security] ✅ PR #211 —** `ui_control` is in `GAME_TOOL_KEEP` (`agent_tools.py:112`) and
   honors `set_mode`, `switch_model`, `set_theme`, `toggle <web|bash|rag|research|incognito|…>`,
   `open_panel` (`ai_interaction.py:1314–1515`) with no game-build guard (`chatStream.js:46–141`)
   — the model (or a prompt-injected houseguest line) can flip the player to Chat mode, swap
@@ -914,16 +914,16 @@ traceability; E-batch cross-references inline.
   missing `_verify_session_owner` (`chat_routes.py:1297–1303` vs `:1311+`) — any
   authenticated user can subscribe to another user's activity stream (metadata side-channel +
   unbounded subscriber slot). *Fix:* one line, same guard as `chat_resume`.
-- **W3 [MED · Change]** The Bitwarden vault vertical mounts unconditionally
+- **W3 [MED · Change] ✅ PR #211 —** The Bitwarden vault vertical mounts unconditionally
   (`app.py:739–740`, not in `GAME_DROP_SET`) — an admin-gated, password-handling,
   subprocess-spawning surface (`vault_routes.py:157–226`, env-inheriting `_run_bw`) the game
   build claims to remove. *Fix:* `mount_optional` + add to the drop set.
-- **W4 [MED · Change]** Zero game-build gating on ~40 inherited slash commands: `/sh` (shell
+- **W4 [MED · Change] ✅ PR #211 —** Zero game-build gating on ~40 inherited slash commands: `/sh` (shell
   exec), `/toggle bash|web|research`, `/setup <provider> <api-key>`, `/email /gallery
   /cookbook /notes /memory /rag`, the `/tour-*` set (`slashCommands.js:5464–5842, 5960–6023`)
   — a parallel ungated UI into every dropped vertical. *Fix:* dispatch-time keep-set under the
   game build with a game-framed "not available" reply.
-- **W5 [MED · Change]** The `ui_control` prompt manifest teaches the model to open
+- **W5 [MED · Change] ✅ PR #211 —** The `ui_control` prompt manifest teaches the model to open
   email/gallery/cookbook/documents panels on game turns (`agent_loop.py:154–157, 368`) —
   lever-manifest bleed through a kept tool; calls silently no-op (narrated-but-dead). *Fix:*
   game-only `ui_control` description (pairs with W1's allowlist).
@@ -931,8 +931,9 @@ traceability; E-batch cross-references inline.
   `seasonRetrospective`/`npcVoice` + `ui_control` renders an expandable raw-JSON node
   (extends E11/D5 with the kept-meta-tool case; the proving test should iterate
   `GAME_TOOL_KEEP`).
-- **W7 [LOW · Security]** `/backgrounds` — a dev prototype page shipping in the game build
-  (`app.py:787–790`). Gate or remove.
+- **W7 [LOW · Security] ✅ PR #211 —** `/backgrounds` — a dev prototype page shipping in the game build
+  (`app.py:787–790`). Gate or remove. *(Removed: its `static/backgrounds.html` was never
+  vendored, so the route only 500'd — deleted outright, 404 in both builds.)*
 - **W8 [LOW · Change]** The CSP still allowlists `cdn.jsdelivr.net` for script/style/font
   (`core/middleware.py:143–153`) — the policy half of D6 (vendor/drop KaTeX+Mermaid): drop
   the origin from the game-build CSP too.
@@ -1477,7 +1478,7 @@ keyboard/pull-to-refresh classes; `windowResize.js` clamps restored sizes (the p
 unify); the composer's coarse-pointer bump works; and the decision card is the one game
 surface already on the correct sizing idiom — the model for the rest.
 
-## A4 [Ruling #17 + spec] Going private on GitHub — one PAT prompt, ever
+## A4 [Ruling #17 + spec] ✅ PR #218 — Going private on GitHub — one PAT prompt, ever
 
 **Ruling (2026-06-10):** `kevinhirsch/orwell` becomes a private repo; no deploy/update-adjacent
 script may break, and the user is asked for a credential **at most once**.
