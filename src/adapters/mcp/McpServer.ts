@@ -76,7 +76,12 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       }
       return;
     case "npcVoice":
+    case "getPortraitPrompt":
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
+      return;
+    case "recordImageBeat":
+      if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
+      if (!isStr(args["imageRef"])) refuse("imageRef", "a non-empty string");
       return;
     default:
       return; // read tools and free-text tools take no required structure
@@ -138,6 +143,8 @@ export class McpServer {
         return this.deps.session.seasonRetrospective();
       case "npcVoice":
         return this.deps.session.npcVoice(args["id"] as EntityId);
+      case "getPortraitPrompt":
+        return this.deps.session.getPortraitPrompt(args["id"] as EntityId);
       case "askProducers":
         return this.deps.player.ask(String(args["question"] ?? ""));
       case "endOfSessionSummary":
@@ -150,6 +157,10 @@ export class McpServer {
         return this.deps.commands.surfaceInformationTo(args as unknown as SurfaceReq);
       case "diaryRoom":
         return this.deps.commands.diaryRoom(args as unknown as DiaryRoomReq);
+      case "recordImageBeat":
+        return this.deps.commands.recordImageBeat(
+          args as unknown as { houseguestId: string; imageRef: string },
+        );
       case "inspectNonVaultState":
         return this.deps.admin.inspect();
       case "overrideMechanic":

@@ -506,6 +506,22 @@ export function mdToHtml(src, opts) {
     '$1[#$2](#$2)',
   );
 
+  // Feature 0051 — inline cast portraits / generated images. Upgrade markdown image
+  // syntax ![alt](url) to a real <img> ONLY for SAME-ORIGIN, app-served image paths
+  // (the portrait route + the generated-image route). This is the augment-not-replace
+  // hook: when the game master introduces the cast it can drop ![Name](/api/orwell/
+  // portrait/<id>) and the face renders in the transcript. The path allowlist keeps it
+  // from being a general image-injection vector; a non-matching ![..](..) falls through
+  // to the link handler below (becomes a plain link), so play is unaffected when absent.
+  // <img> survives the HTML sanitizer (onerror stripped, dangerous schemes neutralized).
+  s = s.replace(/!\[([^\]]*)\]\((\/api\/(?:orwell\/portrait|generated-image)\/[A-Za-z0-9_./-]+)\)/g,
+    (match, alt, url) => {
+      const a = escapeHtml(alt || 'Houseguest');
+      const u = escapeHtml(url);
+      return `<img class="orwell-portrait-inline" src="${u}" alt="${a}" title="${a}" loading="lazy" `
+        + `style="max-width:160px;border-radius:10px;border:1px solid var(--border,#355a66);margin:.25rem .35rem .25rem 0;vertical-align:middle">`;
+    });
+
   // Convert markdown links [text](url) to clickable links
   // Internal #hash links navigate in-page; external links open in new tab
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
@@ -546,6 +562,16 @@ export function mdToHtml(src, opts) {
 
   // ALSO preserve <a> tags the same way (they're now in the HTML from markdown conversion)
   s = s.replace(/<a\s+[^>]*>.*?<\/a>/gi, (match) => {
+    const placeholder = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
+    allowedHtmlBlocks.push(sanitizeAllowedHtml(match));
+    return placeholder;
+  });
+
+  // Preserve the inline cast-portrait <img> we emitted above (feature 0051) the same way,
+  // so the next line's blanket escape doesn't turn it back into text. Sanitized like the
+  // other preserved fragments (onerror stripped, scheme-checked); the src was already
+  // pinned to the same-origin portrait/generated-image routes by the upgrade regex.
+  s = s.replace(/<img class="orwell-portrait-inline"[^>]*>/gi, (match) => {
     const placeholder = `___ALLOWED_HTML_${allowedHtmlBlocks.length}___`;
     allowedHtmlBlocks.push(sanitizeAllowedHtml(match));
     return placeholder;

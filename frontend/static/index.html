@@ -1500,11 +1500,7 @@
               <div id="set-agentMsg" style="font-size:var(--fs-xs);color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>
-          <!-- Image Generation removed — only inpaint remains in this build,
-               and inpaint is configured via the gallery editor not this card.
-               Keeping the DOM (hidden) so JS wiring against the inputs
-               doesn't throw. -->
-          <div class="admin-card" hidden style="display:none">
+          <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Image Generation<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-imgEnabledToggle" checked><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Configure which model to use for image generation.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
@@ -2237,6 +2233,7 @@
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <script type="module" src="/static/js/orwellSocial.js"></script>  <!-- BB social: NPC approaches (Vault-free, 0036) -->
 <script src="/static/js/orwellDiaryRoom.js"></script>  <!-- BB Diary Room: standing sidebar button + composer mode (E88, ruling #4) -->
+<script src="/static/js/orwellCast.js"></script>  <!-- BB cast roster: portrait + name + status sidebar panel (Vault-free, 0051) -->
 <script src="/static/js/orwellPresence.js"></script>  <!-- BB presence strip: room + co-presence + nearby (Vault-free, 0049/C28; ambient, never click-to-act) -->
 <script src="/static/js/orwellRetrospective.js"></script>  <!-- BB season retrospective: post-season recap + the unsealed Vault (0048/C17; render-only, 404-gated while live) -->
 <script type="module" src="/static/js/orwellFinale.js"></script>  <!-- BB finale: staged jury-vote reveal (Vault-free, 0037/C11) -->

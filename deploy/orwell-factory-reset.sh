@@ -206,12 +206,25 @@ if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
 fi
 
 # ── 3. Scrub the front-end store (DB + key + settings + all data files); recreate empty ──────
+# This already removes the cast-portrait tree (${FE_DATA_DIR}/portraits/, feature 0051),
+# since it wipes everything under the FE store; step 3b removes it explicitly too, in case a
+# deployment points the portraits dir elsewhere.
 msg "scrubbing front-end data store ${FE_DATA_DIR}"
 if [[ -d "$FE_DATA_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
     < <(find "$FE_DATA_DIR" -mindepth 1 -maxdepth 1 -print0)
 fi
 [[ "$DRY_RUN" -eq 1 ]] || mkdir -p "$FE_DATA_DIR"
+
+# ── 3b. Scrub the cast-portrait dir explicitly (0051) ─────────────────────────────────────────
+#       The FE writes per-user portraits to ${FE_DATA_DIR}/portraits/<user>/ (the FE DATA_DIR
+#       IS <frontend>/data, i.e. FE_DATA_DIR). Covered by step 3 above, but named here so a
+#       "full reset" provably removes generated faces even if the layout shifts.
+PORTRAITS_DIR="${ORWELL_PORTRAITS_DIR:-${FE_DATA_DIR}/portraits}"
+if [[ -d "$PORTRAITS_DIR" ]]; then
+  msg "scrubbing cast portraits in ${PORTRAITS_DIR}"
+  do_rm "$PORTRAITS_DIR"
+fi
 
 # ── 4. Restart so the app re-initialises a fresh DB and lands at OOBE ─────────────────────────
 if [[ "$RESTART" -eq 1 && "$have_systemd" -eq 1 ]]; then

@@ -49,4 +49,7 @@ export interface EngineCommands {
    * strategy but NEVER reaches NPC behavior — no houseguest can ever learn it.
    */
   diaryRoom(req: DiaryRoomReq): { recorded: true };
+
+  /** Record that an image was shown to the player in-character (0051) — a player-witnessed image-shown event. */
+  recordImageBeat(req: { houseguestId: string; imageRef: string }): { eventId: string };
 }

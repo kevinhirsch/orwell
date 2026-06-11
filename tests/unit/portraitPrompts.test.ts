@@ -1,0 +1,202 @@
+import { describe, it, expect } from "vitest";
+import { buildPortraitPrompt, buildCastPortraitPrompts } from "../../src/engine/portraitPrompts";
+import { IMAGE_BUDGET, STYLE_ANCHOR_VARIANTS } from "../../src/engine/imageConstants";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
+import { buildEngineCore } from "../../src/composition/engineRoot";
+import { PLAYER } from "../../src/domain/ids";
+import type { EntityId } from "../../src/domain/ids";
+
+/**
+ * Feature 0051 — in-character images. The portrait prompt builder is the Vault-Wall gate: it draws
+ * ONLY public appearance facets + the per-season style anchor, so no stat / soul / hidden element
+ * can ever ride out to an image provider. HARD rule: roles only — no names, generated fixtures only.
+ */
+describe("0051 — portrait prompts (Vault-free builder)", () => {
+  const styleAnchor = STYLE_ANCHOR_VARIANTS[0]!;
+
+  it("buildPortraitPrompt assembles a prompt from the style anchor + public facets", () => {
+    const result = buildPortraitPrompt("hg:1", "A Houseguest", {
+      appearance: "athletic, close-cropped hair, a warm smile",
+      age: 28,
+      presentation: "confident and easygoing",
+    }, styleAnchor);
+    expect(result.houseguestId).toBe("hg:1");
+    expect(result.prompt).toContain(styleAnchor);
+    expect(result.prompt).toContain("28");
+    expect(result.prompt).toContain("athletic, close-cropped hair, a warm smile");
+    expect(result.prompt).toContain("confident and easygoing");
+  });
+
+  it("buildCastPortraitPrompts builds one prompt per houseguest with complete public facets", () => {
+    const cast = [
+      { id: "hg:1", name: "Houseguest One", appearance: "tall", age: 25, presentation: "loud" },
+      { id: "hg:2", name: "Houseguest Two", appearance: "short", age: 30, presentation: "quiet" },
+      { id: "hg:3", name: "Houseguest Three" }, // missing facets — filtered out
+    ];
+    const prompts = buildCastPortraitPrompts(cast, styleAnchor);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.map((p) => p.houseguestId)).toEqual(["hg:1", "hg:2"]);
+    for (const p of prompts) expect(p.prompt).toContain(styleAnchor);
+  });
+
+  it("IMAGE_BUDGET bounds generation: per-turn cap < per-week cap, move-in exempt", () => {
+    expect(IMAGE_BUDGET.perTurnCap).toBeGreaterThan(0);
+    expect(IMAGE_BUDGET.perWeekCap).toBeGreaterThan(IMAGE_BUDGET.perTurnCap);
+    expect(IMAGE_BUDGET.moveInPortraitExempt).toBe(true);
+  });
+});
+
+describe("0051 — createCharacter portrait prompts (full cast, Vault-free)", () => {
+  it("returns one portrait prompt for the whole cast (player + 15 NPCs)", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 42 });
+    expect(view.portraitPrompts).toBeDefined();
+    // The full cast: the player plus every NPC.
+    expect(view.portraitPrompts!.length).toBe(view.house.length + 1);
+    for (const pp of view.portraitPrompts!) {
+      expect(pp.houseguestId).toBeTruthy();
+      expect(pp.name).toBeTruthy();
+      expect(pp.prompt).toContain("photorealistic");
+    }
+    // The player is included (the full cast, not just NPCs).
+    expect(view.portraitPrompts!.some((p) => p.houseguestId === PLAYER)).toBe(true);
+  });
+
+  it("same seed draws the SAME style anchor; a different seed (usually) draws a different one", () => {
+    const anchorOf = (seed: number): string => {
+      const a = new GameSessionAdapter();
+      a.createCharacter({ playerName: "The Player", seed });
+      // The anchor is the shared photorealistic prefix every prompt carries; lift it from a prompt.
+      const pp = a.getPortraitPrompt(PLAYER)!;
+      return pp.prompt.split(". Subject:")[0]!;
+    };
+    // Same seed → identical anchor, every time.
+    expect(anchorOf(100)).toBe(anchorOf(100));
+    // Sweep a span of seeds: at least two distinct anchors appear (not a constant).
+    const seen = new Set<string>();
+    for (let s = 0; s < 40; s++) seen.add(anchorOf(s));
+    expect(seen.size).toBeGreaterThan(1);
+    // Every drawn anchor is one of the declared variants (no invented styles).
+    for (const a of seen) expect(STYLE_ANCHOR_VARIANTS as readonly string[]).toContain(a);
+  });
+
+  it("getPortraitPrompt returns a houseguest's prompt by id, and null for an unknown id", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 7 });
+    const someNpc = view.house[0]!;
+    const got = adapter.getPortraitPrompt(someNpc.id as EntityId);
+    expect(got).not.toBeNull();
+    expect(got!.houseguestId).toBe(someNpc.id);
+    expect(got!.name).toBe(someNpc.name);
+    expect(got!.prompt).toContain("photorealistic");
+
+    expect(adapter.getPortraitPrompt("npc:does-not-exist" as EntityId)).toBeNull();
+  });
+
+  it("getPortraitPrompt returns null before any game has started", () => {
+    const adapter = new GameSessionAdapter();
+    expect(adapter.getPortraitPrompt(PLAYER)).toBeNull();
+  });
+});
+
+describe("0051 — sentinel sweep: hidden-layer content NEVER reaches a portrait prompt", () => {
+  it("a houseguest whose HIDDEN fields carry sentinels yields a prompt containing NONE of them", () => {
+    const adapter = new GameSessionAdapter();
+    adapter.createCharacter({ playerName: "The Player", seed: 9 });
+
+    // Snapshot the live house, then poison every hidden surface of one NPC + the player with a
+    // unique sentinel. Portrait prompts read ONLY public facets, so a restored read must be clean.
+    const snap = adapter.snapshot();
+    const SENTINEL = "SENTINEL-HIDDEN-0051-DO-NOT-SURFACE";
+    const poison = (hg: { character: { stats: { physical: number; mental: number; social: number };
+      hiddenElements: { kind: "secret-motive"; detail: string }[] };
+      soul: { memory: string[] } }) => {
+      hg.character.hiddenElements.push({ kind: "secret-motive", detail: `${SENTINEL}-motive` });
+      hg.soul.memory.push(`${SENTINEL}-memory`);
+      // Stats are hidden too — make them recognizable strings if they ever stringified into a prompt.
+      hg.character.stats.physical = 99999;
+    };
+    poison(snap.house!.npcs[0]! as unknown as Parameters<typeof poison>[0]);
+    poison(snap.house!.player as unknown as Parameters<typeof poison>[0]);
+
+    const adapter2 = new GameSessionAdapter();
+    adapter2.restore(snap);
+
+    const targets: (EntityId)[] = [snap.house!.npcs[0]!.id, PLAYER];
+    for (const id of targets) {
+      const pp = adapter2.getPortraitPrompt(id)!;
+      expect(pp).not.toBeNull();
+      expect(pp.prompt).not.toContain(SENTINEL);
+      expect(pp.prompt).not.toContain("99999"); // no hidden stat leaked
+    }
+    // The full cast response is clean too.
+    const fresh = new GameSessionAdapter();
+    const view = fresh.createCharacter({ playerName: "The Player", seed: 9 });
+    for (const pp of view.portraitPrompts!) {
+      expect(pp.prompt).not.toMatch(/\b(trust|affinity|threat|soul|confessional|secret-motive)\b/i);
+    }
+  });
+});
+
+describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
+  it("survives a save → load round-trip and keeps the same look", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 42 });
+    const beforeAnchor = adapter.getPortraitPrompt(PLAYER)!.prompt.split(". Subject:")[0]!;
+
+    const snap = adapter.snapshot();
+    expect(snap.portraitStyleAnchor).toBeTruthy();
+    expect(snap.portraitStyleAnchor).toBe(beforeAnchor);
+
+    const restored = new GameSessionAdapter();
+    restored.restore(snap);
+    const afterAnchor = restored.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt.split(". Subject:")[0]!;
+    expect(afterAnchor).toBe(beforeAnchor);
+  });
+
+  it("a legacy save with no anchor (but a seed) re-seeds a stable, declared anchor", () => {
+    const adapter = new GameSessionAdapter();
+    adapter.createCharacter({ playerName: "The Player", seed: 77 });
+    const snap = adapter.snapshot();
+    // Simulate a pre-0051 save: drop the anchor field, keep the seed.
+    delete (snap as { portraitStyleAnchor?: string }).portraitStyleAnchor;
+
+    const restored = new GameSessionAdapter();
+    restored.restore(snap);
+    const pp = restored.getPortraitPrompt(PLAYER)!;
+    expect(pp).not.toBeNull();
+    const anchor = pp.prompt.split(". Subject:")[0]!;
+    expect(STYLE_ANCHOR_VARIANTS as readonly string[]).toContain(anchor);
+  });
+});
+
+describe("0051 — recordImageBeat (recorded or it didn't happen; player-witnessed, never Vault)", () => {
+  it("records a player-witnessed, non-hidden image-shown event", () => {
+    const core = buildEngineCore();
+    const cmd = new EngineCommandsAdapter(core.events, core.knowledge, core.relationships);
+
+    const { eventId } = cmd.recordImageBeat({ houseguestId: "npc:1", imageRef: "img-ref-abc" });
+    expect(eventId).toBeTruthy();
+
+    const ev = core.events.query().find((e) => e.id === eventId)!;
+    expect(ev).toBeDefined();
+    expect(ev.type).toBe("image-shown");
+    // Player-witnessed by construction ⇒ never hidden ⇒ never an off-screen/Vault secret.
+    expect(ev.witnessSet).toContain(PLAYER);
+    expect(ev.hidden).toBe(false);
+  });
+
+  it("the image beat is NOT recorded as off-screen/secret (Vault read excludes it)", () => {
+    const core = buildEngineCore();
+    const cmd = new EngineCommandsAdapter(core.events, core.knowledge, core.relationships);
+    const { eventId } = cmd.recordImageBeat({ houseguestId: "npc:2", imageRef: "img-ref-xyz" });
+
+    // No hidden event carries this beat (it is the player's own knowledge, Journal-visible).
+    const hiddenEvents = core.events.query().filter((e) => e.hidden);
+    expect(hiddenEvents.some((e) => e.id === eventId)).toBe(false);
+    // The Vault's hidden-attribute store never gained a record for it either.
+    const vaultRecords = core.vault.readHidden();
+    expect(vaultRecords.some((r) => r.content.includes("img-ref-xyz"))).toBe(false);
+  });
+});

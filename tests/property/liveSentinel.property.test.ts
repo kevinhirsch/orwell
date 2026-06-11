@@ -55,6 +55,10 @@ const args = (name: string): Record<string, unknown> => {
     // B65: voice the NPC who HOLDS adjacent secrets — their soul/hidden-element/Vault sentinels and
     // every OTHER houseguest's knowledge sentinel must still never cross (the per-NPC bound).
     case "npcVoice": return { id: npc(1) };
+    // 0051: portrait prompts are built from PUBLIC facets only — sweep them with a real id, and
+    // record an image beat (a player-witnessed, Vault-free event) — neither may carry a sentinel.
+    case "getPortraitPrompt": return { id: npc(1) };
+    case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels
