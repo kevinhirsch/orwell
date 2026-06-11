@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0021 — Game session & save lifecycle. One active game per user; sandbox per user;
 # unlimited concurrent users; cross-user isolation is absolute.
 # HARD rule: roles only (here, "user" = a physical-world account; A and B are role labels).

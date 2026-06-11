@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it green.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0037 — Live jury-vote choreography. The LIVE realization of 0014 §5–6 over liveSeason.ts +
 # GameSessionAdapter.advanceGame/submitDecision. HARD rule: roles only (player, finalist, juror, evictee).
 # The vote is ENGINE-decided; the finale sway comes from the player's STRUCTURED appeal choice, never

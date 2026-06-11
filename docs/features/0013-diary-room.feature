@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0013 — The Diary Room. Two walls: player-DR -> no NPC, and NPC-confessionals -> Vault-only.
 # HARD rule: roles only.
 

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0016 — God Mode (the administrator port). The SECOND walled surface.
 # HARD rule: roles only. The admin is walled from the Vault too — spoilers ruin the game.
 

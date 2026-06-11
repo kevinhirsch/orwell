@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0014 — Jury & endgame. HARD rule: roles only. Vote is engine-decided; LLM only voices.
 
 Feature: Jury & endgame — the jury vote decides the winner

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0026 — Relationship math. Default sticky/realistic; per-game feel via disposition + temperature; tunable.
 # HARD rule: roles only. The player never sees these numbers (0020).
 

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0017 — Relationship model (promotes decision 0002). Directed, graded, computed beliefs.
 # HARD rule: roles only. No binary ally/enemy flag is ever stored — labels are organic.
 

@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it pass.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0018 — Narrative & moment orchestration. The engine owns the moment; the LLM only narrates it.
 # HARD rule: roles only. Prompts are persona/framing, never the Vault Wall.
 

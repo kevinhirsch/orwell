@@ -1,4 +1,4 @@
-# DRAFT executable spec — author: feature-maker; implementer makes it green.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
 # Feature 0034 — Live weekly progression & binding-decision seam. CODIFIES already-built engine code
 # (liveSeason.ts + GameSessionAdapter.advanceGame/submitDecision), driven through the live MCP player
 # channel. HARD rule: roles only (player, HOH, nominee, veto holder, evictee).
