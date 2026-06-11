@@ -476,6 +476,71 @@ def main() -> int:
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
+            # G14 (DWE audit F9b): ONE z-authority for the .modal family —
+            # modalManager's _bringToFront defers to ui.js's counter instead of
+            # stamping a second 300s ladder with !important. Open theme, park it
+            # to the dock, restore from the chip (trusted clicks), THEN open
+            # settings fresh: the fresh open must sit visually ABOVE the
+            # dock-restored window (elementFromPoint at the content overlap),
+            # Escape must close settings first then theme (pickTopModal ==
+            # visual order), and no .modal may carry an inline !important z.
+            page.click("#tool-theme-btn")
+            page.wait_for_timeout(600)  # static node — the `_` was injected at boot
+            check(page.evaluate("!document.getElementById('theme-modal').classList.contains('hidden')") is True,
+                  "G14: theme opens from the sidebar entry")
+            page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
+            page.wait_for_timeout(400)
+            g14min = page.evaluate("""() => {
+              const m = document.getElementById('theme-modal');
+              return { parked: m.classList.contains('modal-minimized'),
+                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="theme-modal"]'),
+                       importantZ: m.style.getPropertyPriority('z-index') === 'important' };
+            }""")
+            check(g14min.get("parked") is True and g14min.get("chip") is True,
+                  f"G14: theme parks to a dock chip ({g14min})")
+            check(g14min.get("importantZ") is False,
+                  f"G14: a parked window holds NO inline !important z ({g14min})")
+            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='theme-modal']")
+            page.wait_for_timeout(400)
+            check(page.evaluate("getComputedStyle(document.getElementById('theme-modal')).display !== 'none'") is True,
+                  "G14: the dock chip restores theme (trusted click)")
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(500)
+            g14 = page.evaluate("""() => {
+              const t = document.getElementById('theme-modal');
+              const s = document.getElementById('settings-modal');
+              const vis = (m) => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
+              if (!vis(t) || !vis(s)) return { error: 'both must be open', theme: vis(t), settings: vis(s) };
+              const r1 = t.querySelector('.modal-content').getBoundingClientRect();
+              const r2 = s.querySelector('.modal-content').getBoundingClientRect();
+              const L = Math.max(r1.left, r2.left), R = Math.min(r1.right, r2.right);
+              const T = Math.max(r1.top, r2.top), B = Math.min(r1.bottom, r2.bottom);
+              if (R <= L || B <= T) return { error: 'contents do not overlap' };
+              const el = document.elementFromPoint((L + R) / 2, (T + B) / 2);
+              const owner = el ? (el.closest('.modal') || {}).id || null : null;
+              const importants = [...document.querySelectorAll('.modal')]
+                .filter(m => m.style.getPropertyPriority('z-index') === 'important').map(m => m.id);
+              return { owner, importants,
+                       themeZ: parseInt(getComputedStyle(t).zIndex, 10) || 0,
+                       settingsZ: parseInt(getComputedStyle(s).zIndex, 10) || 0 };
+            }""")
+            check(g14.get("owner") == "settings-modal" and g14.get("settingsZ", 0) > g14.get("themeZ", 0),
+                  f"G14: a fresh open sits visually ABOVE the dock-restored window ({g14})")
+            check(g14.get("importants") == [], f"G14: no .modal carries an inline !important z-index ({g14})")
+            page.mouse.move(640, 700)  # neutral ground: keep the arbiter's hovered-window pass out of it
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            g14esc = page.evaluate("""() => ({
+              settingsClosed: document.getElementById('settings-modal').classList.contains('hidden'),
+              themeOpen: !document.getElementById('theme-modal').classList.contains('hidden'),
+            })""")
+            check(g14esc.get("settingsClosed") is True and g14esc.get("themeOpen") is True,
+                  f"G14: Escape closes the top window (settings) FIRST ({g14esc})")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            check(page.evaluate("document.getElementById('theme-modal').classList.contains('hidden')") is True,
+                  "G14: the second Escape closes the dock-restored window (theme)")
+
             # F8 (wave 3): the WHOLE .modal family returns focus to its opener —
             # focus the gear for real, open settings, Escape, focus is back.
             page.focus("#user-bar-settings")
