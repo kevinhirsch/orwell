@@ -2839,3 +2839,65 @@ PR per item).
 > (C5); the no-secrets guard scans the whole tree (E78). **Test integrity:** T8/T9/T12/T15–T17
 > step-definition hardening + the 0004/0009/0036/0037/0047 feature amendments.
 > **Open remainder (not reached — two lane agents died mid-work):** T3–T7, T10, T11, T19, T20.
+> *(All cleared — see Lane A, Lane B, and Lane C below.)*
+
+### Lane A — cross-lane tails (E54 · E58 · C8 · E60/E89 · ruling #1)  ·  **✅ DONE (PR #224)**
+
+> The follow-up tails the parallel lanes left on the table, each with its proving test:
+> **E54** — the `reliability` evidence signal (built in #216) is now CONSUMED: `chooseVetoSave`
+> ranks a veto save by demonstrated loyalty (proven protector outranks an equally-liked stranger),
+> and a centered reliability term weighted by `JURY_WEIGHTS.reliability` shifts the juror's lean.
+> **E58** — the in-game DAY index (`dayOfWeek(phase)`, hoh=1…eviction=5, null off-ladder) is
+> surfaced on `PublicGameStatus.day`. **C8** — casting intake's third sub-item: a later
+> `updateCasting` that replaces a captured scalar reports `overwrote: [...]` so the producer
+> confirms rather than silently clobbering (caps + echo neutralization unchanged from #213).
+> **E60/E89 (FE)** — the approach chip varies its framing by the `bond | probe` motive enum (copy +
+> class + tooltip), and a dedicated FE belt (`firstCeremonyResolved`) suppresses every chip before
+> the first ceremony resolves — holding even if the engine fails open (browser-smoke proven).
+> **Ruling #1 (doc-only)** — the CLAUDE.md "no fixed cast" do-not formulation. Engine `npm test`
+> green (664 unit + 318 BDD); FE pytest + browser smoke + responsive matrix green.
+
+### Lane B — T-remainder test repairs (T3–T7 · T10 · T11 · T19 · T20)  ·  **✅ DONE (PR #225)**
+
+> The remaining open Stream-T findings (the L10 remainder). TESTS ONLY. Each strengthened test
+> **mutation-verified** (break the production behavior → red → revert).
+> **Live re-points:** T5 (narration never changes an outcome) and T6 (narrator cannot advance the
+> game) move off pure-function / hand-built-constant fixtures onto LIVE `GameSessionAdapter`
+> seasons (live competition + hallucinating narrator; live nomination beat — phase & pending
+> unmoved). T7 (agent can't fabricate an outcome) moves onto the B55 live seam WITH a relationship
+> model, so recording the engine's result FOLDS a real hidden consequence (the fold the old
+> fixture made impossible) — the winner is a real roster member that re-runs identical.
+> **Real assertions:** T3 (offscreen recall) returns the specific recorded note; T4
+> (CHARACTER-unchanged) asserts a real generated houseguest's static `Character` is byte-stable
+> across a season of soul-deepening.
+> **T11:** the per-wake cap asserts the TICK COUNT via an `advance` spy (the ×10 event-bound fudge
+> is gone); the isolation Thens plant unique per-user sentinels and assert genuine
+> content/knowledge cross-absence (record + knowledge + player surface); the vacuous
+> `assert.ok(true)` watcher-stop step asserts no-dangling-timer + idempotent stop.
+> **T10/T19 [FE/arch]:** already hardened in code by PR #221 — T10's decorative `readsVault` assert
+> carries a dep-cruiser pointer + a live-allowlist behavioral assert; T19's FE decision-kind list
+> is parsed live from `src/ports/GameSession.ts` (the c13 cross-language manifest parser). Verified
+> + stamped.
+> **T20 [FE]:** `scripts/browser_smoke.py` gains a real social-HUD minimize-to-dock behavior check;
+> `tests/test_orwell_huds.py` source-greps are explicitly re-labeled as SOURCE-PINS
+> (`test_sourcepin_*`) pointing at that behavior coverage.
+> **Gates:** engine `npm test` GREEN (typecheck → build → 659 unit/UAT → 318 BDD); FE
+> `test_orwell_huds.py` green + both touched FE files compile (full FE pytest/browser/matrix gate
+> runs in CI). Per-item stamps live on the audit doc's finding lines.
+
+### Lane C — feature 0053 (admin transcripts, ruling #14) · front-end (Python) · **✅ DONE (PR #223)**
+
+> Built the L11-specced 0053 surface. **API** (`frontend/routes/admin_transcript_routes.py`,
+> registered in `app.py` after admin-wipe, both behind `require_admin`): `GET /api/admin/transcripts`
+> lists sessions across ALL users (id, owner, title, created/updated, message count, game-session
+> marker) with `?user=`/`?since=` filters + `?limit=`/`?offset=` pagination; `GET
+> /api/admin/transcripts/{id}?format=json|md` exports the full transcript — message roles +
+> timestamps AND the agent-thread tool-call nodes (names, args, outputs) verbatim, the debug value.
+> **UI:** one admin-only "Transcripts" `admin-card` in the System panel (`static/index.html`) driven
+> by `initTranscripts()` (`static/js/admin.js`) — owner filter + per-session JSON/MD download; no
+> nav surface; hidden for non-admins by the `.admin-only` rule. **Boundaries:** read-only (no
+> POST/PUT/PATCH/DELETE); the copy carries the Diary-Room-inclusion caveat; transcripts live in the
+> FE chat store so they survive the game reset and die with the factory reset by construction (no
+> script change). **Gate:** `frontend/tests/test_0053_admin_transcripts.py` (12 cases) — green; the
+> rest of the FE pytest suite unaffected (425 passing; the 2 reds are pre-existing env-only
+> module gaps: `rag_vector`). FE pytest lane only — never `cucumber.cjs`; no engine change.

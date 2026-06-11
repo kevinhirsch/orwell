@@ -53,21 +53,57 @@ Then("the same game state always yields the same moment", function (this: BbWorl
 });
 
 // --- Narrator cannot advance the game -----------------------------------------
+// T6: re-pointed at a LIVE sandbox (was a hand-built `startedView` constant the Thens then
+// re-read — proving nothing). Drive a real GameSessionAdapter season to its live nomination
+// beat, build the narrator's prompt over the LIVE Vault-free view, then prove the live engine
+// state (phase + the exact pending decision) is byte-identical after — narration is a pure read.
 
 Given("the game is at the nomination phase", function (this: BbWorld) {
-  this.gsView = startedView("nominations");
+  const game = new GameSessionAdapter();
+  // Seed chosen so the PLAYER reaches the HOH seat and the live loop pauses on a real nomination
+  // decision (verified) — the live nomination beat, not a hand-built phase constant.
+  game.createCharacter({ playerName: "Player One", seed: 2 });
+  let view = game.advanceGame();
+  for (let i = 0; i < 400 && !(view.pending && view.pending.kind === "nominations"); i++) {
+    if (view.pending) {
+      const p = view.pending;
+      // Answer every non-nominations decision automatically until the loop pauses on nominations.
+      if (p.kind === "comp-intent") game.submitDecision({ kind: "comp-intent", intent: "compete" });
+      else if (p.kind === "veto-decision") game.submitDecision({ kind: "veto-decision", use: false });
+      else if (p.options[0]) game.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
+      else break;
+    }
+    view = game.advanceGame();
+  }
+  assert.equal(view.pending?.kind, "nominations", "the live loop paused on the nomination decision");
+  this.liveGame = game;
+  this.gsView = game.getGameState();
+  assert.equal(this.gsView.phase, "nominations", "the live phase is the nomination phase");
+  this.phaseBefore = this.gsView.phase;
+  this.pendingBefore = JSON.parse(JSON.stringify(view.pending));
 });
 
 When("the narrator produces narration for the moment", function (this: BbWorld) {
+  // Build the narrator's whole system prompt over the LIVE view — the only thing the narrator
+  // ever does at this seam. It is a pure read; it must move no engine state.
   this.lastOutput = buildSystemPrompt(momentForPhase(this.gsView!.phase), this.gsView!);
 });
 
 Then("the phase is still the nomination phase", function (this: BbWorld) {
-  assert.equal(this.gsView!.phase, "nominations"); // narration is a pure read; it mutates nothing
+  // Re-READ the live engine (not the captured constant) — its phase is unmoved by narration.
+  const after = this.liveGame!.getGameState();
+  assert.equal(after.phase, "nominations", "the live phase is unchanged by narration");
+  assert.equal(after.phase, this.phaseBefore, "the live phase did not drift");
+  // The pending decision the loop is waiting on is byte-identical too: nothing advanced.
+  const pendingAfter = this.liveGame!.advanceGame().pending; // idempotent while pending
+  assert.deepEqual(JSON.parse(JSON.stringify(pendingAfter)), this.pendingBefore, "the pending nomination decision is unchanged");
 });
 
 Then("the moment is unchanged", function (this: BbWorld) {
-  assert.equal(momentForPhase(this.gsView!.phase), "nominations");
+  // The moment derives from the LIVE phase, which narration did not move.
+  const after = this.liveGame!.getGameState();
+  assert.equal(momentForPhase(after.phase), "nominations");
+  assert.equal(after.phase, this.phaseBefore, "the live phase (and thus the moment) is unchanged");
 });
 
 // --- Persona framing ----------------------------------------------------------

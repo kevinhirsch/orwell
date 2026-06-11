@@ -245,7 +245,9 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 ## Hard "do-nots"
 
 - Don't hold game state in a chat context window as the source of truth.
-- Don't hard-code any protagonist, houseguest name, or persona (incl. the legacy example).
+- Don't hard-code a **fixed cast** (ruling #1, 2026-06-10): name corpora are raw material, but no
+  full-name+persona pairing may be hard-coded, and the legacy Bible's names stay banned. (NPC names
+  are seeded samples from the vendored real-name corpora — never a fixed list, never a paired identity.)
 - Don't reference names in tests; don't ingest sample-save content as data.
 - Don't rely on prompt wording for the Vault Wall — enforce it in code.
 - Don't let the narrative layer decide or alter outcomes.

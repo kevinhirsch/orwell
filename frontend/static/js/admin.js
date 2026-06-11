@@ -2305,12 +2305,63 @@ function initDangerZone() {
   });
 }
 
+/* ── Transcripts (Feature 0053) — quiet, read-only admin debug access ── */
+function initTranscripts() {
+  const card = el('adm-transcripts-card');
+  if (!card) return;  // not rendered (non-admin DOM) — nothing to wire
+  const listEl = el('adm-transcripts-list');
+  const filterEl = el('adm-transcripts-filter');
+  const loadBtn = el('adm-transcripts-load');
+  const msgEl = el('adm-transcripts-msg');
+
+  async function load() {
+    if (msgEl) { msgEl.textContent = 'Loading…'; msgEl.className = ''; }
+    const owner = (filterEl && filterEl.value || '').trim();
+    const qs = new URLSearchParams();
+    if (owner) qs.set('user', owner);
+    try {
+      const res = await fetch('/api/admin/transcripts?' + qs.toString(), { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Failed'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      render(data.transcripts || []);
+      if (msgEl) {
+        msgEl.textContent = `${(data.transcripts || []).length} of ${data.total ?? 0} session(s).`;
+        msgEl.className = 'admin-toggle-sub';
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    }
+  }
+
+  function render(rows) {
+    if (!listEl) return;
+    if (!rows.length) { listEl.innerHTML = '<div class="admin-toggle-sub">No sessions.</div>'; return; }
+    listEl.innerHTML = rows.map(r => `
+      <div class="settings-row settings-row--end settings-gap-top">
+        <div>
+          <div class="admin-toggle-label">${esc(r.title || r.id)}${r.is_game_session ? ' <span class="admin-badge">GAME</span>' : ''}</div>
+          <div class="admin-toggle-sub">${esc(r.owner || '(unknown)')} · ${r.message_count ?? 0} msg · ${esc((r.updated_at || '').slice(0, 16).replace('T', ' '))}</div>
+        </div>
+        <div style="display:flex;gap:6px;white-space:nowrap;">
+          <a class="admin-btn-sm" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=json" target="_blank" rel="noopener">JSON</a>
+          <a class="admin-btn-sm" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=md" target="_blank" rel="noopener">MD</a>
+        </div>
+      </div>`).join('');
+  }
+
+  if (loadBtn) loadBtn.addEventListener('click', load);
+  if (filterEl) filterEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+}
+
 /* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }

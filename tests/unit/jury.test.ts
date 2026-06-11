@@ -65,7 +65,7 @@ describe("0014 — engine-decided tally with last-juror tie-break", () => {
   it("most votes wins", () => {
     // All jurors lean A.
     const winner = tallyJuryVote(jurors, [A, B], () => 0, () => 0.5, evictionOrder, new SeededRandom(1),
-      { relationship: 1, manner: 1, finale: 0, gameRespect: 0 });
+      { relationship: 1, manner: 1, finale: 0, gameRespect: 0, reliability: 0 });
     // finale weight 0 + equal leans → deterministic A (>= tie goes to finalists[0]).
     expect(winner).toBe(A);
   });
@@ -77,7 +77,7 @@ describe("0014 — engine-decided tally with last-juror tie-break", () => {
       if (j === npc(2)) return f === B ? 1 : 0;
       return f === A ? 1 : 0; // npc(3), last-evicted
     };
-    const w = { relationship: 1, manner: 1, finale: 0, gameRespect: 0 };
+    const w = { relationship: 1, manner: 1, finale: 0, gameRespect: 0, reliability: 0 };
     expect(tallyJuryVote(jurors, [A, B], leanOf, () => 0, evictionOrder, new SeededRandom(1), w)).toBe(A);
 
     // Now a real 1-1 tie with two jurors; last-evicted (npc(2)) leans B → B wins.

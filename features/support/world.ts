@@ -147,13 +147,16 @@ export class BbWorld extends World {
   // Narrative & moment orchestration (0018) scratch state.
   gsView?: import("../../src/ports/GameSession").GameStateView;
   gsMoment?: string;
+  // T6: a LIVE GameSessionAdapter at the nomination beat (re-points "narrator cannot advance").
+  liveGame?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  phaseBefore?: string;
 
   // Agent-driven play loop (0019) scratch state.
   decisionCtx?: import("../../src/engine/decisions").DecisionContext;
   pending?: import("../../src/engine/decisions").PendingResult;
   decisionResult?: import("../../src/engine/decisions").DecisionResult;
   decisionRejected?: boolean;
-  compResult?: { winner: { id: string; name: string } | null };
+  compResult?: import("../../src/ports/GameSession").CompetitionResultView;
   bondBaseline?: number;
 
   // Player experience (0020) scratch state.
@@ -177,6 +180,9 @@ export class BbWorld extends World {
   recalled?: import("../../src/ports/SoulProvider").Memory[];
   archViolations?: unknown[];
   hiddenMemory?: string;
+  // T4: a real generated houseguest's static Character captured at premiere for byte-stability.
+  premiereCharacter?: import("../../src/engine/characterFactory").Character;
+  premiereCharacterBytes?: string;
 
   // Reserve twists (0025) scratch state.
   reserve?: import("../../src/engine/reserveTwists").ReserveTwist[];
@@ -250,6 +256,10 @@ export class BbWorld extends World {
   narrationChunks?: string[];
   narrationOut?: string;
   engineWinnerBefore?: string;
+  // T5: a LIVE GameSessionAdapter competition (re-points "narration never changes an outcome").
+  liveCompGame?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  liveCompResult?: import("../../src/ports/GameSession").CompetitionResultView;
+  liveStateBefore?: string;
   narratorEnv?: Record<string, string | undefined>;
   narratorCfg?: import("../../src/adapters/narrative/narratorConfig").NarratorConfig;
 
@@ -383,6 +393,11 @@ export class BbWorld extends World {
   osRuntime2?: import("../../src/composition/runtime").Runtime;
   osClock?: import("../../src/adapters/time/FakeClock").FakeClock;
   osHiddenBefore?: number;
+  /** T11: count of off-screen ticks the watcher actually fired in a wake (a TICK count, not an event bound). */
+  osTickCount?: { n: number };
+  /** T11: per-user unique hidden sentinels for genuine cross-user content/knowledge-absence checks. */
+  osSentinelA?: string;
+  osSentinelB?: string;
 
   // Emergent blocs (0043) scratch state.
   blRel?: import("../../src/engine/relationships").RelationshipModel;

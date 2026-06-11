@@ -85,6 +85,25 @@ export function mergeCastingUpdate(intake: CastingIntake, req: UpdateCastingReq)
   return next;
 }
 
+/**
+ * Which scalar fields this update OVERWRITES (audit C8): a field already captured whose value the
+ * update replaces with a DIFFERENT (post-cap, trimmed) value. A first write to an empty field is a
+ * capture, not an overwrite; a re-write of the identical value is a no-op. Notes APPEND, so they
+ * are never overwrites. The producer surfaces these so it can confirm, never silently clobber.
+ */
+export function overwrittenScalars(intake: CastingIntake, req: UpdateCastingReq): string[] {
+  const hits: string[] = [];
+  for (const { field } of CASTING_COVERAGE) {
+    if (field === "interviewNotes") continue;
+    const v = req[field];
+    if (typeof v !== "string" || v.trim().length === 0) continue;
+    const prev = intake[field];
+    const incoming = v.trim().slice(0, CASTING_LIMITS.scalarMax);
+    if (typeof prev === "string" && prev.trim().length > 0 && prev !== incoming) hits.push(field);
+  }
+  return hits;
+}
+
 /** True when a field has been captured (notes: at least one recorded). */
 function captured(intake: CastingIntake, field: keyof CastingIntake): boolean {
   if (field === "interviewNotes") return intake.interviewNotes.length > 0;
@@ -96,7 +115,7 @@ function captured(intake: CastingIntake, field: keyof CastingIntake): boolean {
  * Where the interview stands. `ready` is the hard gate (a name exists); `missing`/`next` are the
  * engine-ordered coverage still to acquire — the producer follows the engine, not its own memory.
  */
-export function castingStatusOf(intake: CastingIntake): CastingStatusView {
+export function castingStatusOf(intake: CastingIntake, overwrote: string[] = []): CastingStatusView {
   const known: Record<string, string> = {};
   const missing: string[] = [];
   let next: string | null = null;
@@ -110,7 +129,9 @@ export function castingStatusOf(intake: CastingIntake): CastingStatusView {
       if (next === null) next = ask;
     }
   }
-  return { known, missing, next, ready: captured(intake, "playerName") };
+  const status: CastingStatusView = { known, missing, next, ready: captured(intake, "playerName") };
+  if (overwrote.length > 0) status.overwrote = overwrote;
+  return status;
 }
 
 /** True when nothing has been captured yet (a fresh interview — nothing to persist or resume). */

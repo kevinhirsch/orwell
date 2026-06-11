@@ -5,6 +5,7 @@ import { SoulStore } from "../../src/adapters/engine/SoulStore";
 import { DeterministicEmbedding } from "../../src/adapters/embedding/DeterministicEmbedding";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
+import { generateHouse } from "../../src/engine/characterFactory";
 import { vaultBoundaryViolations } from "../../tests/support/architecture";
 import { PLAYER, npc } from "../../src/domain/ids";
 
@@ -107,7 +108,14 @@ Then("the houseguest's behavior may still reflect it", function (this: BbWorld) 
 
 Given("a houseguest at premiere", function (this: BbWorld) {
   this.soul = new SoulStore(embed);
-  this.npc = HG;
+  // T4: take a REAL generated houseguest so "the static Character is unchanged" is a genuine
+  // byte-stability claim, not `assert.ok(true)`. The static CHARACTER (0004/0015) is a layer
+  // distinct from the SOUL; capture its exact bytes at premiere so the Then can prove the
+  // season's soul-deepening never touched it. Roles only — a generated houseguest, no name.
+  const hg = generateHouse(new SeededRandom(424242)).npcs[0]!;
+  this.npc = hg.id;
+  this.premiereCharacter = hg.character;
+  this.premiereCharacterBytes = JSON.stringify(hg.character);
 });
 
 When("many events accumulate over the season", function (this: BbWorld) {
@@ -124,9 +132,14 @@ Then("the growth is monotonic — no memory is thinned away", function (this: Bb
 });
 
 Then("the static Character baseline is unchanged", function (this: BbWorld) {
-  // The static Character (0004/0015) is a separate, byte-stable layer; recording to the soul
-  // never touches it. (The soul is the ONLY thing that deepens.)
-  assert.ok(true);
+  // T4: a real byte-stability assertion. A full season of soul memories has accumulated for this
+  // houseguest; the static CHARACTER captured at premiere must be byte-identical — not one field,
+  // not one ordering, drifted. (The soul is the ONLY thing that deepens; the character is facts.)
+  assert.equal(
+    JSON.stringify(this.premiereCharacter),
+    this.premiereCharacterBytes,
+    "the static Character is byte-stable across a season of soul-deepening",
+  );
 });
 
 // --- The vector index is engine-only ------------------------------------------

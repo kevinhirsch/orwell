@@ -34,6 +34,40 @@ import { isNarrow } from './platform.js';
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
       : fn();
 
+  // E60: the engine ships a coarse categorical MOTIVE (bond | probe) — never the number, never a
+  // canned pretext line — and the chip varies its framing by that enum: a "bond" approach reads as
+  // a warm overture, a "probe" reads as someone sizing the player up. The GM voices the real scene
+  // in the chat; this is just how the chip carries the difference. Unknown/absent motive falls back
+  // to the neutral copy. Copy lives here (one place), not scattered inline.
+  const MOTIVE_FRAMING = {
+    bond:  { pretext: "wants to talk game with you",   cls: "osoc-motive-bond",  hint: "A friendly overture" },
+    probe: { pretext: "has been sizing up your game",  cls: "osoc-motive-probe", hint: "They're feeling you out" },
+  };
+  const MOTIVE_FALLBACK = { pretext: "wants a word with you", cls: "osoc-motive-neutral", hint: "Hear them out" };
+
+  // E89 belt: NO approach renders before the house has actually started PLAYING — the first
+  // ceremony (the week-1 HOH result) must have resolved. The engine's E89 gate already returns an
+  // empty list pre-first-ceremony; this is the FE's own belt, so even if the engine FAILS OPEN and
+  // ships approaches early (a "wants a word with you" at the premiere), the UI still shows nothing.
+  // Derived from /api/orwell/state alone: pre-ceremony beats are setup/premiere/character-creation
+  // and the week-1 HOH competition itself; once noms (or any later beat / a later week) is reached,
+  // the first ceremony has resolved.
+  function firstCeremonyResolved(st) {
+    if (!st || !st.started) return false;
+    const week = typeof st.week === "number" ? st.week : 1;
+    if (week > 1) return true; // a second HOH week ⇒ the first ceremony is long resolved
+    const phase = String(st.phase || st.moment || "").toLowerCase();
+    const preCeremony =
+      phase === "" ||
+      phase.indexOf("setup") >= 0 ||
+      phase.indexOf("premiere") >= 0 ||
+      phase.indexOf("character-creation") >= 0 ||
+      phase.indexOf("casting") >= 0 ||
+      phase.indexOf("hoh") >= 0; // the opening HOH COMPETITION is still pre-first-ceremony
+    return !preCeremony;
+  }
+  let _ceremonyResolved = false; // last-known belt state, refreshed each poll from /state
+
   let timer = null;
   // C18: a hidden tab polls nothing; consecutive failures back the poll off (max 2 min).
   let _failures = 0;
@@ -123,6 +157,12 @@ import { isNarrow } from './platform.js';
           cursor: pointer; opacity: .55; border: none; background: none; color: inherit;
           font-size: .9rem; line-height: 1; padding: 0 .2rem;
         }
+        /* E60: the chip's framing VARIES by the engine's coarse motive — a warm overture (bond)
+           reads differently from someone sizing the player up (probe). A left accent rail carries
+           the difference without leaking any number. */
+        #orwell-social .osoc-chip.osoc-motive-bond  { border-left: 3px solid color-mix(in srgb, #4caf50 70%, var(--border, #355a66)); }
+        #orwell-social .osoc-chip.osoc-motive-probe { border-left: 3px solid color-mix(in srgb, #e0a96c 70%, var(--border, #355a66)); }
+        #orwell-social .osoc-chip.osoc-motive-neutral { border-left: 3px solid var(--border, #355a66); }
         #orwell-social .osoc-chip.osoc-chip-pending {
           border-color: var(--accent, #e06c75); opacity: .85;
         }
@@ -241,7 +281,12 @@ import { isNarrow } from './platform.js';
     const hd = document.getElementById("osoc-appr-hd");
     if (!wrap) return;
     _wireComposer();
-    const items = (Array.isArray(list) ? list : [])
+    // E89 belt: before the first ceremony resolves, render NOTHING — even if the engine fails open
+    // and hands us approaches at the premiere. The belt comes from the last /state poll.
+    const allowed = _ceremonyResolved
+      ? (Array.isArray(list) ? list : [])
+      : [];
+    const items = allowed
       .filter((it) => it && it.houseguest && it.houseguest.id && !dismissed.has(it.houseguest.id))
       .slice(0, MAX_APPROACHES); // a few may want you at once (U7)
     wrap.innerHTML = "";
@@ -249,17 +294,19 @@ import { isNarrow } from './platform.js';
     for (const it of items) {
       const id = it.houseguest.id;
       const name = it.houseguest.name || "A houseguest";
-      // E60: the engine ships a coarse MOTIVE (bond | probe), never a canned pretext line;
-      // the chip maps it to short UI copy (the GM voices the real approach in the chat).
-      const pretext = it.pretext || ({ bond: "wants to talk game with you", probe: "has been watching your game" })[it.motive] || "wants a word with you";
+      // E60: the engine ships a coarse MOTIVE (bond | probe), never a canned pretext line; the chip
+      // VARIES its framing (copy + class + tooltip) by that enum — the GM voices the real scene.
+      const framing = (it.motive && MOTIVE_FRAMING[it.motive]) || MOTIVE_FALLBACK;
+      const pretext = it.pretext || framing.pretext;
       const chip = document.createElement("div");
-      chip.className = "osoc-chip";
+      chip.className = "osoc-chip " + framing.cls;
+      if (it.motive) chip.dataset.motive = it.motive;
       if (id === pendingApproachId) chip.classList.add("osoc-chip-pending");
       const go = document.createElement("button");
       go.type = "button";
       go.className = "osoc-go";
-      go.title = "Hear them out — prefills the composer";
-      go.setAttribute("aria-label", "Hear " + name + " out");
+      go.title = framing.hint + " — prefills the composer";
+      go.setAttribute("aria-label", "Hear " + name + " out (" + framing.hint + ")");
       go.innerHTML = `<b></b> <span class="osoc-pre"></span>`;
       go.querySelector("b").textContent = name;
       go.querySelector(".osoc-pre").textContent = pretext;
@@ -283,6 +330,25 @@ import { isNarrow } from './platform.js';
   // Seam for the headless browser gate: build + show the social panel on demand.
   window._orwellSocialEnsure = () => { const el = ensureUI(); el.style.display = "block"; return true; };
 
+  // E60/E89 test seam (headless browser keep-set): drive the belt + motive framing WITHOUT a live
+  // engine. `resolved` sets the FE belt; `list` is fed to renderApproaches exactly as a (possibly
+  // fail-open) initiatives payload would be — so the smoke can prove the belt suppresses chips even
+  // when approaches arrive early, and that bond/probe motives render distinct chips once it opens.
+  window._orwellSocialDriveApproaches = (resolved, list) => {
+    ensureUI();
+    _ceremonyResolved = !!resolved;
+    dismissed = new Set(); // a clean slate so the smoke isn't suppressed by prior dismissals
+    renderApproaches(list || []);
+    const wrap = document.getElementById("osoc-appr");
+    const chips = wrap ? [...wrap.querySelectorAll(".osoc-chip")] : [];
+    return {
+      count: chips.length,
+      motives: chips.map((c) => c.dataset.motive || null),
+      classes: chips.map((c) => (c.className.match(/osoc-motive-\w+/) || [null])[0]),
+    };
+  };
+  window._orwellFirstCeremonyResolved = (st) => firstCeremonyResolved(st);
+
 
   // --- Poll loop ----------------------------------------------------------------
 
@@ -300,10 +366,13 @@ import { isNarrow } from './platform.js';
     _failures = 0;
     if (!(st && st.started)) {
       _shown = false;
+      _ceremonyResolved = false;
       hidePanel(); // genuinely no game
       return;
     }
     _shown = true;
+    // E89 belt: track whether the first ceremony has resolved, from /state alone.
+    _ceremonyResolved = firstCeremonyResolved(st);
     const el = ensureUI();
     // Keep approaches fresh, but if the player parked it in the dock, leave it there.
     // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
@@ -314,6 +383,9 @@ import { isNarrow } from './platform.js';
       try { modalManager.minimize(ID); return; } catch (_) {}
     }
     if (!isMinimized()) el.style.display = "block";
+    // E89 belt: don't even ask for approaches before the first ceremony resolves — and if the
+    // engine fails open, renderApproaches([]) still suppresses everything against the belt.
+    if (!_ceremonyResolved) { renderApproaches([]); return; }
     try {
       const data = await getJSON("/api/orwell/initiatives");
       renderApproaches(data && data.initiatives);

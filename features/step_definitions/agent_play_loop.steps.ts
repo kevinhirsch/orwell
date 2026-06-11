@@ -90,6 +90,13 @@ Then("the game state is unchanged", function (this: BbWorld) {
 });
 
 // --- The agent cannot fabricate an outcome ------------------------------------
+// T7: re-pointed at the LIVE seam (B55 pattern). The old gate slotted nothing the world ever
+// wrote, accepted any winner (`typeof winner.name === "string"`), and its fixture OMITTED the
+// relationship model — so the consequence fold it claimed to verify was impossible there. Now:
+//  - the winner is the LIVE engine's, drawn from the live roster, and re-runs identically;
+//  - there is no agent-settable winner field — the engine is the sole authority;
+//  - recording that result as a witnessed scene FOLDS its hidden impact into a real relationship
+//    model (the fold the old fixture could not exercise), proving the live consequence seam.
 
 Given("a competition is resolved by the engine", function (this: BbWorld) {
   const game = new GameSessionAdapter();
@@ -97,16 +104,44 @@ Given("a competition is resolved by the engine", function (this: BbWorld) {
   this.compResult = game.runCompetition({ type: "endurance" });
   // Determinism per moment: the engine yields the same winner; there is no agent-set winner API.
   const again = game.runCompetition({ type: "endurance" });
-  assert.deepEqual(again.winner, this.compResult.winner);
+  assert.deepEqual(again.winner, this.compResult.winner, "the engine's winner is reproducible, not the agent's to pick");
+
+  // The winner is a REAL living houseguest from the live roster — not a free-text label the agent
+  // could have invented.
+  const roster = new Set<string>([game.getGameState().player!.id, ...game.getGameState().house.map((h) => h.id)]);
+  assert.ok(roster.has(this.compResult.winner!.id), "the winner is a real houseguest the engine chose");
+  this.liveCompGame = game;
 });
 
 Then("the agent narrates the engine's result", function (this: BbWorld) {
   assert.ok(this.compResult!.winner, "the engine produced the winner the agent must voice");
+  // Drive the consequence fold over the live seam WITH a relationship model wired in (B55) — the
+  // result becomes a witnessed scene whose hidden impact moves the relationship layer. (The agent
+  // only voices the beat; recording it is what carries real consequence.)
+  const rel = new RelationshipModel(0.5);
+  const winner = this.compResult!.winner!.id;
+  // The fold moves how the OTHER party feels about the INITIATOR — the directed edge winner→PLAYER.
+  const before = rel.edge(winner, PLAYER).threat;
+  const commands = new EngineCommandsAdapter(this.sandbox!.engine.events, this.sandbox!.engine.knowledge, rel);
+  commands.recordInteraction({
+    initiator: PLAYER,
+    witnessSet: [PLAYER, winner],
+    content: "The HOH comp settled — the player clashes with the new HOH, who reads them as a threat.",
+    kind: "conflict",
+    toward: [winner],
+  });
+  this.rel = rel;
+  this.threatBefore = before;
 });
 
 Then("the agent cannot produce a different winner", function (this: BbWorld) {
   // The only outcome available is the engine's; there is no tool/field by which the agent sets one.
-  assert.ok(this.compResult!.winner && typeof this.compResult!.winner.name === "string");
+  // Re-running the SAME live competition yields the SAME winner (the engine owns it), and the
+  // recorded result genuinely folded into the relationship layer — a real, hidden consequence.
+  const again = this.liveCompGame!.runCompetition({ type: "endurance" });
+  assert.deepEqual(again.winner, this.compResult!.winner, "no path lets the agent settle a different winner");
+  const after = this.rel!.edge(this.compResult!.winner!.id, PLAYER).threat;
+  assert.notEqual(after, this.threatBefore, "recording the engine's result folded a real hidden consequence");
 });
 
 // --- Free-text social play is not a binding decision --------------------------

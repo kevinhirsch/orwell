@@ -132,6 +132,13 @@ export interface CastingStatusView {
   next: string | null;
   /** True once the required minimum (a name) is in — createCharacter may finalize. */
   ready: boolean;
+  /**
+   * Scalar fields this update OVERWROTE — an already-captured value replaced by a different one
+   * (audit C8's third sub-item). Present only on the `updateCasting` that caused it, so the
+   * producer can CONFIRM the replacement ("changing their backstory — got it") rather than
+   * silently clobbering an answer. Empty/absent when nothing captured was changed.
+   */
+  overwrote?: string[];
 }
 
 /** The player makes a deal WITH a houseguest (player↔NPC). NPC↔NPC deals are off-screen/Vault-held. */
@@ -214,6 +221,13 @@ export interface CompetitionResultView {
 export interface PublicGameStatus {
   week: number;
   phase: string;
+  /**
+   * The in-game DAY within the current HOH week (E58): hoh=1, nominations=2, veto=3,
+   * veto-ceremony=4, eviction=5 — the canonical `dayOfWeek(phase)` mapping that already feeds the
+   * GM moment prompt, now surfaced so the player UI can show "Day N". `null` off the weekly ladder
+   * (pre-game, finale, twist beats). Ceremony-level fact only — no hidden state.
+   */
+  day: number | null;
   hoh: { id: EntityId; name: string } | null;
   nominees: Array<{ id: EntityId; name: string }>;
   veto: { holder: { id: EntityId; name: string } | null; used: boolean };
