@@ -1714,3 +1714,13 @@ itself; a future incremental-snapshot item if play feels it.
   fastembed-js doesn't expose ORT's `intraOpNumThreads`, and widening the LXC cpuset is a
   worse trade. Upgrades to a real finding only if it ever spams per-inference (it
   shouldn't — one session, one pool, created once).
+
+## A12 [Ruling #21 · 2026-06-11 — SHIPPED same day] The container shell greets with a live health panel
+**Ruling:** entering the container must never feel hung — interactive shells get a terminal
+health panel. **Shipped:** `deploy/orwell-login-panel.sh` → installed as
+`/usr/local/bin/orwell-panel` by install/update with a guarded `/etc/bash.bashrc` hook
+(interactive shells only, `ORWELL_PANEL_SHOWN` guard). Shows: unit + HTTP health for both
+tiers (and whether the tiers agree), recall provider + model-cache state, save count,
+load/mem, the play URL, and the doctor/update one-liners. Design rule: NEVER blocks a
+login — every probe `curl -m 1`, everything `|| true`, measured 96ms worst-case render with
+all probes failing, exit 0 always. Legacy bbai-aware.
