@@ -235,6 +235,17 @@ describe("install-script quality — the post-incident hardening (a real install
     expect(inst).toContain("safe.directory");
   });
 
+  it("the UPDATER self-heals safe.directory before its first git call (F4 hit a real box)", () => {
+    // Boxes installed before the F4 fix have an orwell-owned checkout and a root updater —
+    // git >=2.35 refuses the very fetch that would deliver the fixed installer. The updater
+    // must wire the exception itself, ahead of any git use.
+    const upd = readFileSync(join(DEPLOY, "orwell-update.sh"), "utf8");
+    expect(upd).toContain("wire_safe_directory");
+    expect(upd).toMatch(/git config --system --add safe\.directory "\$APP_DIR"/);
+    // The call precedes the first real git invocation (rollback's reset / the update fetch).
+    expect(upd.indexOf("wire_safe_directory")).toBeLessThan(upd.indexOf('git -C "$APP_DIR" reset'));
+  });
+
   it("ownership covers DATA_DIR explicitly (it is overridable to outside APP_DIR)", () => {
     expect(inst).toMatch(/chown -R orwell:orwell "\$\{APP_DIR\}" "\$\{DATA_DIR\}"/);
   });
