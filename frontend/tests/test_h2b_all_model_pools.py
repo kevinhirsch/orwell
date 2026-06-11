@@ -3,27 +3,23 @@
 H2 made the flat default-model selects (Image Generation, Vision, TTS endpoint
 mode) draw from the ONE shared pool the Default Chat Model card offers
 (`_fetchModelEndpoints()` → `_availableModelIds()` / per-endpoint `ep.models`).
-H2b closes out the two stragglers the follow-up audit found — model selects
-with REAL backend settings that were never populated at all, stuck forever on
-their inherit placeholder:
+H2b closed out the straggler the follow-up audit found — a model select with a
+REAL backend setting that was never populated, stuck forever on its inherit
+placeholder:
 
   * `#set-researchModel`  — backend pair research_endpoint_id + research_model
     (src/settings.py; routes/model_routes.py:_ENDPOINT_SETTING_FIELDS treats
     them exactly like the utility pair). `initResearchSettings()` wired the
     endpoint select but never the model select, and never saved the model.
-  * `#set-teacherModelSelect` (+ `#set-teacherEpSelect`) — backend key
-    teacher_model (a spec: "model" or "model@endpointName", resolved by
-    src/ai_interaction.py:_resolve_model). No init function existed at all.
 
-Both now mirror the existing patterns: research is endpoint-scoped exactly
-like the Utility card; teacher narrows to the chosen endpoint's models (the
-chat-picker mechanism) or offers the union pool when unscoped (a bare spec is
-resolved across every endpoint). Blank stays the inherit/unset default; both
-persist through the same /api/auth/settings POST the other AI-defaults use.
+It now mirrors the existing pattern: research is endpoint-scoped exactly like
+the Utility card; blank stays the inherit/unset default; it persists through
+the same /api/auth/settings POST the other AI-defaults use. (The Teacher Model
+card was removed wholesale in F4 — that escalation is not an active feature.)
 
 The sweep below is exhaustive and ratcheted: it enumerates EVERY `<select>` on
 the settings page whose purpose is choosing a model, pins that the set is
-exactly the known seven, that none ships hardcoded model options in markup
+exactly the known six, that none ships hardcoded model options in markup
 (the TTS markup trio is the one H2-sanctioned no-data fallback, pinned as
 such), and — at runtime — that every model select's options are a subset of
 the chat pool, with a disabled endpoint's models offered nowhere.
@@ -71,7 +67,6 @@ MODEL_SELECT_IDS = {
     "set-researchModel",        # endpoint-scoped, like utility (H2b)
     "set-imgModelSelect",       # union pool (H2)
     "set-ttsModelSelect",       # endpoint-scoped TTS models (H2)
-    "set-teacherModelSelect",   # endpoint-scoped / union when unscoped (H2b)
 }
 
 # The one sanctioned markup fallback (H2): the TTS select's options are used
@@ -144,8 +139,7 @@ def test_sweep_every_model_select_is_populated_from_the_shared_endpoint_source()
     js = _read("static/js/settings.js")
     blocks = {
         "set-defaultModelSelect": _block(js, "async function initDefaultChat", "/* ── Utility Model ── */"),
-        "set-utilityModelSelect": _block(js, "async function initUtilityModel", "/* ── Teacher Model"),
-        "set-teacherModelSelect": _block(js, "async function initTeacherModel", "/* ── Image Generation ── */"),
+        "set-utilityModelSelect": _block(js, "async function initUtilityModel", "/* ── Image Generation ── */"),
         "set-imgModelSelect": _block(js, "async function initImageSettings", "/* ── Vision ── */"),
         "set-vlModelSelect": _block(js, "async function initVisionSettings", "/* ── Face Recognition ── */"),
         "set-ttsModelSelect": _block(js, "async function initTtsSettings", "/* ── Speech to Text ── */"),
@@ -182,45 +176,12 @@ def test_research_model_select_is_populated_loaded_and_saved():
     assert "refreshModels(modelSel.value)" in research
 
 
-# ── H2b straggler 2: the teacher endpoint + model selects ──────────────────────
-
-
-def test_teacher_model_init_exists_and_mirrors_the_utility_pattern():
-    js = _read("static/js/settings.js")
-    assert "async function initTeacherModel(" in js, "H2b: the teacher card must have an init"
-    teacher = _block(js, "async function initTeacherModel", "/* ── Image Generation ── */")
-    assert "el('set-teacherEpSelect')" in teacher
-    assert "el('set-teacherModelSelect')" in teacher
-    # Endpoint select fills from the shared source, keeping the "—" blank.
-    assert "_fillEndpointSelect(epSel, _endpoints, epSel.value, true)" in teacher
-    # A chosen endpoint narrows to its models; unscoped offers the union pool.
-    assert "ep ? ep.models : _availableModelIds(_endpoints)" in teacher
-    # Loads the saved spec ("model" or "model@endpointName")…
-    assert "settings.teacher_model" in teacher
-    assert "lastIndexOf('@')" in teacher
-    # …and saves the same spec format the backend resolver accepts. There is
-    # deliberately no teacher_endpoint_id setting — the name rides in the spec.
-    assert "teacher_model: specFor(" in teacher
-    assert "model + '@' + ep.name" in teacher
-    assert "_registerAiEndpointRefresh" in teacher
-
-
-def test_teacher_init_is_wired_into_the_settings_init_sequence():
-    js = _read("static/js/settings.js")
-    init_all = _block(js, "function initAll()", "function notifyIntegrationsChanged")
-    assert "initUtilityModel();" in init_all
-    assert "initTeacherModel();" in init_all, "initTeacherModel must run alongside the other AI-default inits"
 
 
 def test_backend_keys_the_two_cards_persist_actually_exist():
     py = _read("src/settings.py")
     assert '"research_endpoint_id": ""' in py
     assert '"research_model": ""' in py
-    assert '"teacher_model": ""' in py
-    # No teacher endpoint key exists — the FE must NOT invent one.
-    assert '"teacher_endpoint_id"' not in py
-    js = _read("static/js/settings.js")
-    assert "teacher_endpoint_id" not in js
 
 
 # ── runtime: boot + seed + open settings — every model select ⊆ the chat pool ──
@@ -252,7 +213,7 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
     """Seed one ONLINE endpoint (with a TTS-capable model so the TTS endpoint
     mode participates) and one DISABLED endpoint, open settings, drive each
     endpoint-scoped card onto the live endpoint, and prove EVERY model select
-    offers only models the chat picker can offer — research and teacher
+    offers only models the chat picker can offer — research
     included (the two H2b stragglers), the ghost's models nowhere."""
     try:
         from playwright.sync_api import sync_playwright
@@ -321,25 +282,17 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');
                   const img = document.getElementById('set-imgModelSelect');
-                  const teach = document.getElementById('set-teacherModelSelect');
                   const rEp = document.getElementById('set-researchEndpoint');
                   return ep && ep.options.length > 0
                       && img && img.options.length > 1
-                      && teach && teach.options.length > 1   // union pool, even unscoped
                       && rEp && rEp.options.length > 1;      // endpoint arrived
                 }""",
                 timeout=15000,
             )
 
-            # Teacher offers the union pool BEFORE any endpoint is picked (a
-            # bare teacher_model spec resolves across every endpoint).
-            teacher_unscoped = page.evaluate(
-                "[...document.getElementById('set-teacherModelSelect').options].map(o => o.value)"
-            )
-
             # Drive each endpoint-scoped card onto the live endpoint the way a
             # user does (the chat card may hold a stale saved endpoint id, and
-            # utility/research/teacher start blank = inherit).
+            # utility/research start blank = inherit).
             page.evaluate(
                 """(liveId) => {
                   const pick = (id, value) => {
@@ -354,7 +307,6 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                   pick('set-defaultEpSelect', firstReal('set-defaultEpSelect'));
                   pick('set-utilityEpSelect', firstReal('set-utilityEpSelect'));
                   pick('set-researchEndpoint', firstReal('set-researchEndpoint'));
-                  pick('set-teacherEpSelect', firstReal('set-teacherEpSelect'));
                   // TTS: endpoint mode is the pool-fed path (markup options are
                   // only the no-data fallback).
                   pick('set-ttsProviderSelect', 'endpoint:' + liveId);
@@ -378,7 +330,6 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                     research: read('set-researchModel'),
                     img: read('set-imgModelSelect'),
                     tts: read('set-ttsModelSelect'),
-                    teacher: read('set-teacherModelSelect'),
                   };
                 }"""
             )
@@ -389,7 +340,7 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
             f"the chat pool must be the live endpoint's models, got {pool}"
         )
 
-        for name in ("utility", "vision", "research", "img", "tts", "teacher"):
+        for name in ("utility", "vision", "research", "img", "tts"):
             values = {o["value"] for o in opts[name]}
             nonblank = values - {""}
             assert nonblank, f"the {name} model select must be populated from the pool ({opts[name]})"
@@ -403,17 +354,9 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                 f"no synthetic hardcoded entries in the {name} select"
             )
 
-        # The unscoped teacher list was already the union pool (not stuck on
-        # the "—" placeholder, the pre-H2b failure mode).
-        teacher_unscoped_nonblank = set(teacher_unscoped) - {""}
-        assert teacher_unscoped_nonblank == pool, (
-            f"unscoped teacher must offer the union pool, got {teacher_unscoped_nonblank}"
-        )
-
-        # The two stragglers specifically: scoped to the live endpoint they
-        # offer exactly its models.
+        # The research straggler specifically: scoped to the live endpoint it
+        # offers exactly its models.
         assert {o["value"] for o in opts["research"]} - {""} == pool
-        assert {o["value"] for o in opts["teacher"]} - {""} == pool
         # Vision applies its capability filter (a narrowing of the pool only —
         # the tts-flavored model is excluded, nothing is added).
         assert {o["value"] for o in opts["vision"]} - {""} == {"h2b-alpha-model", "h2b-beta-model"}
