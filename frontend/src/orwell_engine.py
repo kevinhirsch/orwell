@@ -33,7 +33,14 @@ def _engine_token() -> str | None:
     return os.environ.get("ORWELL_ENGINE_TOKEN") or os.environ.get("BBAI_ENGINE_TOKEN") or None
 
 
-def _user_headers(user: str | None) -> dict:
+def _engine_admin_token() -> str | None:
+    """Audit E27: the SEPARATE admin/God-Mode secret. When the engine has ORWELL_ENGINE_ADMIN_TOKEN
+    set, /admin/* refuses the player token — admin calls must present this one. Falls back to the
+    shared token when no admin secret is configured (single-token back-compat)."""
+    return os.environ.get("ORWELL_ENGINE_ADMIN_TOKEN") or _engine_token()
+
+
+def _user_headers(user: str | None, admin: bool = False) -> dict:
     # The front-end is the trusted auth tier (0021): it ASSERTS the authenticated user, and the
     # engine routes the call into that user's isolated sandbox.
     #
@@ -44,10 +51,11 @@ def _user_headers(user: str | None) -> dict:
     headers: dict = {}
     if user:
         headers["X-Orwell-User"] = user
-    token = _engine_token()
+    token = _engine_admin_token() if admin else _engine_token()
     if token:
         # B67/ops A1: the engine enforces this token on every tool route; without sending it the
-        # documented auth-on config 401'd every call and bricked the game.
+        # documented auth-on config 401'd every call and bricked the game. Admin calls send the
+        # E27 admin secret (the engine refuses the player token on /admin/*).
         headers["Authorization"] = f"Bearer {token}"
     return headers
 
@@ -122,7 +130,8 @@ async def _post_tool(path: str, name: str, args: dict | None, user: str | None, 
     try:
         client = _shared_client()
         if True:
-            r = await client.post(url, json={"name": name, "args": args or {}}, headers=_user_headers(user),
+            r = await client.post(url, json={"name": name, "args": args or {}},
+                                  headers=_user_headers(user, admin=path.startswith("/admin")),
                                   timeout=timeout if timeout is not None else _TIMEOUT)
             if r.status_code >= 400:
                 err = None

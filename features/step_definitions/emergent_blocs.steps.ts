@@ -65,47 +65,119 @@ Then("it carries a shared target derived from the members' aggregate threat", fu
 
 // --- Scenario: bloc-mates coordinate more than chance ------------------------------------
 
-Given("a bloc within the house", function (this: BbWorld) {
-  const reg = new GameSessionRegistry();
-  const sb = reg.sandboxFor("bl-live");
-  sb.session.createCharacter({ playerName: "The Player", seed: 12 });
-  this.blSandbox = sb;
-  this.blMembers = [npc(1), npc(2), npc(3)];
-});
+// T9: a MATCHED-SEED LIFT test. The old step re-wrote the trio's edges to 0.95 on every tick
+// (overwriting the engine's own live folds) and never computed a chance baseline. Now the same
+// live seed is played twice — once with the trio's bonds seeded ONCE up front, once without —
+// and the engine's own folds evolve both runs untouched. The conditioned run's coordination
+// lift over the unconditioned baseline IS the "more than chance" proof.
 
-When("nominations and eviction votes resolve", function (this: BbWorld) {
-  const sb = this.blSandbox!;
-  const s = sb.session;
-  const members = this.blMembers!;
-  this.blViolations = [];
-  this.blEnemyTargeted = 0;
-  for (let i = 0; i < 240; i++) {
-    // Hold the engineered structure against the loop's own folds (an iron bloc + a clear enemy).
+/** One live run's coordination read: trio ballot agreement + trio-HOH nomination shielding. */
+interface BlocCoordination {
+  agreePairs: number;
+  votePairs: number;
+  mateNoms: number;
+  trioHohWeeks: number;
+  mateNomViolations: string[];
+}
+
+const BL_LIFT_SEED = 9;
+const BL_LIFT_WEEKS = 6;
+let blBaseline: BlocCoordination | undefined;
+let blConditioned: BlocCoordination | undefined;
+
+function blPlayLiveRun(seedBonds: boolean, user: string, members: EntityId[]): BlocCoordination {
+  const reg = new GameSessionRegistry();
+  const sb = reg.sandboxFor(user);
+  sb.session.createCharacter({ playerName: "The Player", seed: BL_LIFT_SEED });
+  if (seedBonds) {
+    // Seed the trio's iron mutual bonds ONCE; from here the engine's live folds own the graph.
     for (const a of members) for (const b of members) if (a !== b) {
-      const e = sb.engine.relationships.edge(a, b); e.trust = 0.95; e.affinity = 0.95; e.threat = 0;
+      const e = sb.engine.relationships.edge(a, b);
+      e.trust = 0.95; e.affinity = 0.95; e.threat = 0;
     }
+  }
+  const s = sb.session;
+  const nomsByWeek = new Map<number, { hoh: EntityId; noms: EntityId[] }>();
+  for (let i = 0; i < 1500; i++) {
     const v = s.advanceGame();
     if (v.pending) {
       const p = v.pending;
       if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
       else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
       else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
-      else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
+      else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: "respectful" });
+      else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+      else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id });
     }
-    const status = s.gameStatus();
-    if (status.hoh && members.includes(status.hoh.id) && status.nominees.length === 2) {
-      for (const nom of status.nominees) {
-        if (members.includes(nom.id)) this.blViolations!.push(`bloc HOH nominated a bloc-mate in week ${status.week}`);
+    const st = s.gameStatus();
+    if (st.hoh && st.nominees.length === 2 && !nomsByWeek.has(st.week)) {
+      nomsByWeek.set(st.week, { hoh: st.hoh.id, noms: st.nominees.map((n) => n.id) });
+    }
+    if (v.status.week > BL_LIFT_WEEKS || v.finished) break;
+  }
+  // Trio nomination shielding, read from the public ceremony record.
+  let mateNoms = 0;
+  let trioHohWeeks = 0;
+  const mateNomViolations: string[] = [];
+  for (const [week, { hoh, noms }] of nomsByWeek) {
+    if (!members.includes(hoh)) continue;
+    trioHohWeeks++;
+    for (const nom of noms) {
+      if (members.includes(nom)) {
+        mateNoms++;
+        mateNomViolations.push(`bloc HOH nominated a bloc-mate in week ${week}`);
       }
     }
-    if (v.status.week >= 4 || v.finished) break;
   }
+  // Trio ballot agreement, read from the ENGINE's own per-week ballot record.
+  const record = s.snapshot().live?.voteRecord ?? [];
+  let agreePairs = 0;
+  let votePairs = 0;
+  for (const wk of record) {
+    const ballots = members.map((m) => wk.voteOf[m]).filter((b): b is EntityId => b !== undefined);
+    for (let i = 0; i < ballots.length; i++) {
+      for (let j = i + 1; j < ballots.length; j++) {
+        votePairs++;
+        if (ballots[i] === ballots[j]) agreePairs++;
+      }
+    }
+  }
+  return { agreePairs, votePairs, mateNoms, trioHohWeeks, mateNomViolations };
+}
+
+Given("a bloc within the house", function (this: BbWorld) {
+  this.blMembers = [npc(1), npc(2), npc(3)];
+  blBaseline = undefined;
+  blConditioned = undefined;
+});
+
+When("nominations and eviction votes resolve", function (this: BbWorld) {
+  blBaseline = blPlayLiveRun(false, "bl-live-base", this.blMembers!);
+  blConditioned = blPlayLiveRun(true, "bl-live-cond", this.blMembers!);
+  this.blViolations = blConditioned.mateNomViolations;
 });
 
 Then("bloc-mates shield each other from nomination and vote together", function (this: BbWorld) {
-  assert.deepEqual(this.blViolations, [], "a bloc HOH never nominates a bloc-mate");
-  // Voting together is structural: every member computes the SAME derived bloc and the same
-  // shielded/targeted read — pinned at the unit level (npcEvictChoice + blocTerm).
+  const base = blBaseline!;
+  const cond = blConditioned!;
+  // Shielding: a bloc HOH never nominates a bloc-mate — and the claim is not vacuous (the trio
+  // genuinely held HOH in the conditioned run).
+  assert.ok(cond.trioHohWeeks > 0, "the trio actually held HOH during the conditioned run");
+  assert.deepEqual(cond.mateNomViolations, [], "a bloc HOH never nominates a bloc-mate");
+  // The lift over the matched-seed baseline: unbonded, the same trio under the same seed DID
+  // nominate each other — the seeded bloc is what shields.
+  assert.ok(
+    cond.mateNoms < base.mateNoms,
+    `shielding lift: ${cond.mateNoms} mate-nominations with the bloc vs ${base.mateNoms} without`,
+  );
+  // Voting together, measured on the engine's own ballot record — measurably above chance:
+  assert.ok(base.votePairs > 0 && cond.votePairs > 0, "both runs recorded trio ballots to compare");
+  const agreeRate = (c: BlocCoordination): number => c.agreePairs / c.votePairs;
+  assert.ok(
+    agreeRate(cond) > agreeRate(base),
+    `vote-alignment lift: ${agreeRate(cond).toFixed(2)} with the bloc vs ${agreeRate(base).toFixed(2)} without`,
+  );
+  // And the mechanism is pinned at the unit level: every member computes the SAME shielded read.
   const rel = new RelationshipModel(0.5);
   const ids = blTrio(rel);
   const blocs = detectBlocs({ rel, active: [...ids, npc(9)], loyaltyOf: () => 0.9 });

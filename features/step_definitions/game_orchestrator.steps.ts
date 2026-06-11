@@ -128,21 +128,49 @@ Then("an integrity fault is recorded on that sandbox's health", function (this: 
 
 // --- S4: the watcher is deterministic and holds no game logic -----------------
 
+/** T17: one fully-wired game (registry + orchestrator + WATCHER on a fake clock), un-ticked. */
+interface TickedRun {
+  reg: GameSessionRegistry;
+  clock: FakeClock;
+  watcher: GameWatcher;
+}
+let tickedRunA: TickedRun | undefined;
+let tickedRunB: TickedRun | undefined;
+
 Given("two games started from the same seed", function (this: BbWorld) {
-  const run = (): string => {
+  // T17: the Given only STARTS the two same-seed games; the When (previously an empty step)
+  // is what applies the identical clock-tick sequence through the real watcher seam.
+  const mk = (): TickedRun => {
     const reg = new GameSessionRegistry();
-    const orch = new Orchestrator(reg, new FakeClock(), { seed: 42 });
+    const clock = new FakeClock();
+    const orch = new Orchestrator(reg, clock, { seed: 42 });
+    const watcher = new GameWatcher(reg, orch, clock, clock, {
+      tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 2, auditEveryMs: 2000,
+    });
     reg.sandboxFor(U).session.createCharacter({ playerName: "Same", seed: 42 });
-    for (let i = 0; i < 3; i++) orch.advance(U, "player-turn");
-    const s = reg.snapshot(U);
-    return JSON.stringify({ events: s.events, relationships: s.relationships });
+    orch.touch(U);
+    return { reg, clock, watcher };
   };
-  this.stateA = run();
-  this.stateB = run();
+  tickedRunA = mk();
+  tickedRunB = mk();
 });
 
-When("the same sequence of clock ticks is applied to each", function () {
-  // Each run above applied the identical player-turn sequence; states captured in stateA/stateB.
+When("the same sequence of clock ticks is applied to each", function (this: BbWorld) {
+  // The SAME tick sequence, driven through the running watcher on each game's fake clock —
+  // the watcher's off-screen advances (and audits) are what the ticks trigger.
+  const ticks = [1000, 1000, 500, 1500, 1000, 3000];
+  const apply = (run: TickedRun): string => {
+    const before = run.reg.sandboxFor(U).engine.events.query().length;
+    run.watcher.start();
+    for (const ms of ticks) run.clock.advance(ms);
+    run.watcher.stop();
+    // The ticks genuinely advanced the game — the comparison below is not vacuous.
+    assert.ok(run.reg.sandboxFor(U).engine.events.query().length > before, "the clock ticks advanced the game");
+    const s = run.reg.snapshot(U);
+    return JSON.stringify({ events: s.events, relationships: s.relationships });
+  };
+  this.stateA = apply(tickedRunA!);
+  this.stateB = apply(tickedRunB!);
 });
 
 Then("their resulting states are identical", function (this: BbWorld) {

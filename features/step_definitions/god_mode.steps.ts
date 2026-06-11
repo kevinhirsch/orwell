@@ -39,13 +39,15 @@ Then("the admin sees the sandbox configuration", function (this: BbWorld) {
 
 // --- Inspection returns no Vault content --------------------------------------
 
-Then("no hidden attribute appears", function (this: BbWorld) {
+// T16: ONE shared sweep — these two Thens had byte-identical bodies (and a third copy
+// lived in moment_orchestration.steps.ts, deduplicated there the same way).
+function sweepLastViewForHiddenContent(this: BbWorld): void {
   assertNoneAppear(JSON.stringify(this.lastView), this.sandbox!.hiddenContents);
-});
+}
 
-Then("no off-screen event appears", function (this: BbWorld) {
-  assertNoneAppear(JSON.stringify(this.lastView), this.sandbox!.hiddenContents);
-});
+Then("no hidden attribute appears", sweepLastViewForHiddenContent);
+
+Then("no off-screen event appears", sweepLastViewForHiddenContent);
 
 Then("no Vault sentinel value appears", function (this: BbWorld) {
   assertNoSentinels(JSON.stringify(this.lastView), this.sandbox!.sentinels);
@@ -63,7 +65,14 @@ Then("the tool set is a fixed allowlist", function (this: BbWorld) {
 });
 
 Then("no tool in it reads the Vault", function (this: BbWorld) {
+  // `readsVault` is the literal type `false` — the flag alone is decorative. The STRUCTURAL
+  // proof that nothing outward can even import the Vault is dependency-cruiser
+  // (tests/architecture/vault-boundary.test.ts). What this step adds behaviorally: the flag
+  // describes the tools a LIVE admin server actually serves — the served set is exactly the
+  // static allowlist, by name, so no unflagged tool can ride along at runtime.
   assert.ok(this.tools!.every((t) => t.readsVault === false));
+  const served = adminServerOf(this.sandbox!).listTools().map((t) => t.name).sort();
+  assert.deepEqual(served, [...ADMIN_TOOLS].map((t) => t.name).sort(), "the live admin channel serves exactly the static allowlist");
 });
 
 Then("no tool in it returns reserve-twist content", function (this: BbWorld) {

@@ -11,6 +11,9 @@ import { InterrogationHandler } from "../../src/surfaces/player/InterrogationHan
 import { SummaryService } from "../../src/services/SummaryService";
 import { toolsFor } from "../../src/surfaces/tools/registry";
 import type { OutwardChannel } from "../../src/surfaces/tools/registry";
+import { McpServer } from "../../src/adapters/mcp/McpServer";
+import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 
 // --- Background ---------------------------------------------------------------
 
@@ -228,13 +231,35 @@ Then("that context contains no Vault sentinel value", function (this: BbWorld) {
 
 // --- Capability + dependency boundary -----------------------------------------
 
+/** The channel under examination (set by the Given, read by the Then in the same scenario). */
+let examinedChannel: OutwardChannel;
+
 Given("the tools available in the {string} channel", function (this: BbWorld, channel: string) {
-  this.tools = toolsFor(channel as OutwardChannel);
+  examinedChannel = channel as OutwardChannel;
+  this.tools = toolsFor(examinedChannel);
 });
 
 Then("none of them can read from the VaultStore", function (this: BbWorld) {
   assert.ok(this.tools.length > 0, "channel should expose at least one tool");
+  // `readsVault` is the literal type `false` — the flag alone is decorative. The STRUCTURAL
+  // proof is dependency-cruiser (tests/architecture/vault-boundary.test.ts), which the next
+  // step of this scenario runs. What this step adds behaviorally: a LIVE server mounted on
+  // this channel serves exactly the static allowlist, by name — no unflagged tool can ride
+  // along at runtime to reach the Vault.
   assert.ok(this.tools.every((t) => t.readsVault === false), "no outward tool may read the Vault");
+  const sb = this.sandbox;
+  const live = new McpServer(examinedChannel, {
+    player: sb.player,
+    admin: sb.admin,
+    summary: sb.summary,
+    commands: new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge),
+    session: new GameSessionAdapter(),
+  });
+  assert.deepEqual(
+    live.listTools().map((t) => t.name).sort(),
+    this.tools.map((t) => t.name).sort(),
+    "the live server serves exactly the channel's static allowlist",
+  );
 });
 
 Then(

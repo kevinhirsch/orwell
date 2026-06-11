@@ -78,6 +78,11 @@ if [[ ! -f "${DATA_DIR}/.env" ]]; then
     # (the engine enforces it; the front-end sends it) — even co-located behind loopback.
     echo "# shared secret: the engine requires it on every tool route; the front-end sends it"
     echo "ORWELL_ENGINE_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    # Audit E27: a SEPARATE secret for the admin/God-Mode channel — one shared bearer must not
+    # grant both any-user impersonation AND God Mode. The engine demands this one on /admin/*
+    # (the player token is refused there); the front-end sends it on admin calls only.
+    echo "# admin/God-Mode secret: required on /admin/* (the player token is refused there)"
+    echo "ORWELL_ENGINE_ADMIN_TOKEN=$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     # engine save dir — pin it INSIDE data/ so saves live where docs, update, and the
     # factory-reset script all expect (the engine default is ./.orwell-data, which hid the
     # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
