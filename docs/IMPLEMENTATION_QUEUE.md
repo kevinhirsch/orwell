@@ -2747,3 +2747,31 @@ PR per item).
 > ceremony beat resolves (`APPROACH_GATE` in `decisionConstants.ts`, pure derived
 > `firstCeremonyBeatResolved`, seed-spanning test). Gates: FE pytest 372 green · boot/browser
 > smokes green · responsive matrix 37/0/0 · `npm test` green for the engine sliver.
+
+### L11 — docs & specs (E86(b) · E87 · specs 0051/0053)  ·  **✅ DONE (PR #219)**
+
+> **E86 — the amend path** (the audit's lane split: building the fastembed adapter is its own
+> engine lane, E86(a) — still open): ADR 0004 → "Accepted — **adapter not yet built**" with an
+> honest Implementation-status section (production composes `DeterministicEmbedding`; no
+> `fastembed` in `package.json`; the FE's *Python* fastembed is the vendored RAG stack, not the
+> engine's `EmbeddingProvider`) and the concrete path to done (exact lib+model pin, lazy ONNX
+> load, deterministic fallback, deploy-time model fetch). CLAUDE.md / README /
+> `bb-sim-spec.md` §16 / `CLAUDE_CODE_INSTRUCTIONS.md` §15 / the decisions index stop
+> overclaiming — the adapter joins the long-acknowledged deferrals. No fake pin shipped.
+> **E87 — the hygiene sweep, all of (a)–(i)** (+ T18's fast-check-is-selective note):
+> 0033/0036's unit-gated deviation recorded in their spec headers + README rows; 0029's
+> honest pytest header; CLAUDE.md regroups 0035 as BDD-gated and mentions 0029; this queue's
+> "Still on the feature-maker" + "Reconciliation still owed" blocks stamped
+> HISTORICAL/RESOLVED; the README 0010 row carries its host-validation deferral; the B70
+> coverage-floor deviation (90/88/82) recorded; every shipped `.feature` sheds its "# DRAFT"
+> header (only 0022 — deferred — and the new specced-not-built files keep one); the
+> not-yet-MCP/JSON-RPC caveat parenthesized; `cucumber.cjs` 0048/0049 order/indent cosmetics
+> (**no path added or removed**). **Specs (spec only — NOT built, in no gate):** **0051
+> in-character images** (Vault-free prompt builder over the visible projection, knowledge-scoped
+> depiction, no unresolved-outcome stills, recorded image beats, per-season style anchor,
+> budgets, graceful absence — ADR 0003-bound) and **0053 admin transcripts** (ruling #14
+> verbatim: admin-gated API + one quiet Settings row, read-only, tool-call nodes first-class,
+> DR inclusion disclosed, survives game reset / dies with factory reset; FE pytest lane when
+> built — never `cucumber.cjs`; no God-Mode/Vault escalation). Both indexed
+> "Specced — not built" in `docs/features/README.md`. Gates: full `npm test` green post-merge
+> (612 unit/property/arch · 318 BDD scenarios).

@@ -686,7 +686,7 @@ consequence.*
 
 ### Theme 10 — Docs, specs & the queue record
 
-- **E86 [HIGH · Drift] ADR 0004 is accepted but unimplemented, and CLAUDE.md presents it as
+- **E86 [HIGH · Drift] ✅ PR #219 (the amend path: ADR 0004 → "Accepted — adapter not yet built" + an honest Implementation-status section; CLAUDE.md/README/spec mirrors stop overclaiming and track the adapter as a deferral; building the fastembed adapter itself — E86(a) — remains its own engine lane) — ADR 0004 is accepted but unimplemented, and CLAUDE.md presents it as
   running.** No `fastembed` in `package.json`; the only adapter is `DeterministicEmbedding`
   (whose comment still says "open decision #4"); no deploy script fetches a model — production
   "semantic" recall (0024/0041) runs on a hash-vector fake, undetectable by the gate because
@@ -694,7 +694,7 @@ consequence.*
   the deterministic embed, pinned lib+model, deploy-time model fetch) **or** amend ADR 0004 to
   "Accepted — adapter not yet built" and move it to the deferral list. Either way CLAUDE.md
   stops overclaiming.
-- **E87 [MED · Drift] Doc-hygiene sweep (one B57-style PR).** (a) 0036 and 0033 say "add to
+- **E87 [MED · Drift] ✅ PR #219 (all of a–i: deviations recorded in spec headers/README rows; the queue's contradicting blocks stamped HISTORICAL/RESOLVED; DRAFT headers retired on every shipped `.feature`; the B70 floor + the not-yet-MCP/JSON-RPC caveat recorded; the cucumber.cjs change is the (i) cosmetic only — no path added or removed) — Doc-hygiene sweep (one B57-style PR).** (a) 0036 and 0033 say "add to
   cucumber.cjs when green" and never were — gate them or record the unit-gated deviation;
   (b) 0029's `.feature` needs the honest "validated by frontend pytest" header like 0010's;
   (c) CLAUDE.md wrongly groups 0035 as "unit-gated" (it's BDD-gated) and never mentions 0029;
