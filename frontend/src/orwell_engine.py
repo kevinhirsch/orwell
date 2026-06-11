@@ -233,6 +233,20 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
     return await _call("createCharacter", args, user=user)
 
 
+async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> dict:
+    """Feature 0051: the Vault-free portrait prompt for one houseguest, built from public
+    appearance facets + the per-season style anchor. Used to (re)generate a missing portrait.
+    Returns ``{ houseguestId, name, prompt }``."""
+    return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
+
+
+async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
+    """Feature 0051: record that a generated portrait was SHOWN to the player — a
+    player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored
+    filename/URL. Vault-free; the engine logs it like any player-present scene."""
+    return await _call("recordImageBeat", {"houseguestId": houseguest_id, "imageRef": image_ref}, user=user)
+
+
 async def get_game_state(user: str | None = None, timeout: float | None = None) -> dict:
     """Current Vault-free game state for this user: phase, the player's card, the house roster.
 
@@ -388,6 +402,19 @@ async def diary_room(entry: str, user: str | None = None) -> dict:
     """Record the player's out-of-character Diary-Room entry (0036). The player's own knowledge,
     with no in-game pathway to any houseguest — never reaches the house."""
     return await _call("diaryRoom", {"entry": entry}, user=user)
+
+
+async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> dict:
+    """The Vault-free portrait prompt for ONE houseguest (0051) — used to regenerate a missing
+    portrait. Returns ``{houseguestId, name, prompt}``; the engine builds it from public
+    appearance facets + the per-season photorealistic style anchor (no hidden state crosses)."""
+    return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
+
+
+async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
+    """Record a shown portrait/image as a player-witnessed beat (0051): recorded-or-it-didn't-
+    happen. `imageRef` is the stored filename/URL the player saw. Player knowledge, never the Vault."""
+    return await _call("recordImageBeat", {"houseguestId": houseguest_id, "imageRef": image_ref}, user=user)
 
 
 # --- God Mode / admin channel (0016) --------------------------------------------------

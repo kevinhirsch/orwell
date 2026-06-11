@@ -4634,6 +4634,16 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             seed=args.get("seed"),
             user=owner,
         )
+        # 0051: move-in cast portraits. The engine returns Vault-free portrait prompts on
+        # season start; kick off generation in the background so game start NEVER blocks on
+        # images, and so a missing image model is a silent no-op (graceful absence).
+        try:
+            prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
+            if prompts:
+                from src import orwell_portraits
+                orwell_portraits.kickoff_generation(prompts, owner)
+        except Exception:
+            pass  # portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

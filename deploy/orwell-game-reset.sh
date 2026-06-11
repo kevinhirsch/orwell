@@ -201,6 +201,16 @@ if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   fi
 fi
 
+# ── 2c. Scrub the cast-portrait dir (feature 0051) — a new season means a new cast, so the ────
+#       generated faces from the old game must go too. The rest of the FE store (accounts,
+#       sessions, settings) is PRESERVED; only this game-scoped subtree is removed.
+FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
+PORTRAITS_DIR="${ORWELL_PORTRAITS_DIR:-${FE_DATA_DIR}/portraits}"
+if [[ -d "$PORTRAITS_DIR" ]]; then
+  msg "scrubbing cast portraits in ${PORTRAITS_DIR}"
+  do_rm "$PORTRAITS_DIR"
+fi
+
 # ── 3. Restart so the engine reloads with no saves; the front-end keeps its config ────────────
 if [[ "$RESTART" -eq 1 && "$have_systemd" -eq 1 ]]; then
   msg "restarting services"
