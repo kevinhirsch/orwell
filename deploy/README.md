@@ -113,6 +113,20 @@ It resolves the engine save dir exactly the way the factory reset does (all thre
 generations), stops the services while it scrubs, and restarts them after. Use the **factory
 reset** instead when you also want accounts/settings gone (full OOBE).
 
+### Web-triggered update (the admin status page)
+
+The admin status page can trigger `orwell-update.sh` and watch its output live. The web tier
+runs inside the E85-hardened unit (`User=orwell`, every capability dropped) and structurally
+cannot `systemctl` or self-update — so it never executes anything. Instead it drops a **flag
+file** (`data/ops/update-requested`; content ignored — **existence only**, never parsed or
+executed) and the root-side **path unit** `orwell-ops-update.path` reacts by running the **one
+fixed script** (`deploy/orwell-update.sh`) via a oneshot root service, appending stdout+stderr
+to `data/ops-update.log` — the same `data/*.log` surface the status page already tails (G1b).
+The runner removes the flag *before* the run (a finished run never re-triggers; a request that
+lands mid-run earns exactly one follow-up run) and holds a `flock` so overlapping triggers
+no-op. The web tier chooses *when*, never *what*. Factory reset is deliberately **not**
+web-triggerable (pending an explicit product go).
+
 ### The login health panel
 
 Entering the container (`pct enter`, ssh) greets you with a live one-glance panel — both
@@ -199,6 +213,8 @@ GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL
 | `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
+| `systemd/orwell-ops-update.path` | Root-side watcher (G19b): `PathExists=` on `data/ops/update-requested` (written by the sandboxed FE) → starts the runner. Existence-only — flag content is never parsed or executed. |
+| `systemd/orwell-ops-update.service` | Oneshot **root** runner (G19b — deliberately unsandboxed; the unit documents why): removes the flag first, takes a `flock`, runs **only** `deploy/orwell-update.sh`, output appended to `data/ops-update.log` (tailed live by the status page). |
 
 ## Proxmox guest tools
 
