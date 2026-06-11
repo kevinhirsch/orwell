@@ -133,6 +133,16 @@
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
         #orwell-cast .oc-hg.oc-out .oc-portrait img { filter: grayscale(1); }
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
+        #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+        #orwell-cast .oc-backfill {
+          cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
+          color: inherit; background: rgba(255,255,255,.06);
+          border: 1px solid var(--border, #355a66); border-radius: 8px;
+          padding: .4rem .7rem; min-height: 32px;
+        }
+        #orwell-cast .oc-backfill:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+        #orwell-cast .oc-backfill:disabled { opacity: .5; cursor: default; }
+        #orwell-cast .oc-backfill-note { font-size: .72rem; opacity: .65; line-height: 1.4; }
         @media (max-width: 768px) {
           #orwell-cast .oc-card { width: auto; border-radius: 0; max-height: 100vh; height: 100%; }
         }
@@ -144,8 +154,13 @@
         </div>
         <div class="oc-grid" id="oc-grid"></div>
         <div class="oc-empty" id="oc-empty" style="display:none"></div>
+        <div class="oc-actions" id="oc-actions" style="display:none">
+          <button type="button" class="oc-backfill" id="oc-backfill">Generate cast portraits</button>
+          <span class="oc-backfill-note" id="oc-backfill-note"></span>
+        </div>
       </div>`;
     document.body.appendChild(el);
+    el.querySelector("#oc-backfill").addEventListener("click", requestBackfill);
     el.querySelector(".oc-close").addEventListener("click", () => togglePanel(false));
     el.addEventListener("click", (e) => { if (e.target === el) togglePanel(false); });
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") togglePanel(false); });
@@ -158,6 +173,40 @@
     return "In the house";
   }
 
+  // --- the G9 manual lever: backfill missing portraits -------------------------
+  // Shown only when a provider is configured (imagesAvailable) AND active houseguests
+  // still show placeholders — e.g. a season created before 0051 shipped, or a prior
+  // generation run that failed. POSTs the debounced backfill route; never blocks.
+
+  async function requestBackfill() {
+    const el = ensurePanel();
+    const btn = el.querySelector("#oc-backfill");
+    const note = el.querySelector("#oc-backfill-note");
+    btn.disabled = true;
+    note.textContent = "Requesting…";
+    try {
+      const r = await fetch("/api/orwell/portraits/backfill", {
+        method: "POST", credentials: "same-origin",
+      });
+      const data = r.ok ? await r.json() : null;
+      if (data && data.kicked) {
+        const n = Array.isArray(data.missing) ? data.missing.length : 0;
+        note.textContent = "Generating " + n + " portrait" + (n === 1 ? "" : "s") +
+          " in the background — they'll appear here as they land.";
+      } else if (data && !data.available) {
+        note.textContent = "No image model is configured — the game plays on without portraits.";
+      } else if (data && !(data.missing || []).length) {
+        note.textContent = "Nothing missing — every active houseguest has a portrait.";
+      } else {
+        note.textContent = "A generation run started recently — give it a few minutes, then try again.";
+      }
+    } catch (_) {
+      note.textContent = "The portrait service is offline right now.";
+    }
+    // Re-enable after a beat (the server debounces regardless — this just avoids mashing).
+    setTimeout(() => { btn.disabled = false; }, 5000);
+  }
+
   function render(data) {
     const el = ensurePanel();
     const grid = el.querySelector("#oc-grid");
@@ -166,12 +215,21 @@
     _imagesAvailable = !!(data && data.imagesAvailable);
 
     grid.innerHTML = "";
+    const actions = el.querySelector("#oc-actions");
     if (!roster.length) {
       empty.style.display = "";
       empty.textContent = "The cast hasn't moved in yet.";
+      if (actions) actions.style.display = "none";
       return;
     }
     empty.style.display = "none";
+
+    // G9: offer the retry lever when a provider is configured but active houseguests
+    // still show placeholders (pre-0051 seasons / failed generation runs).
+    const missing = roster.filter(
+      (hg) => (!hg.status || hg.status === "active") && !hg.portrait
+    );
+    if (actions) actions.style.display = (_imagesAvailable && missing.length) ? "" : "none";
 
     // Active first (player flagged), then jury, then evicted — keeps the live house on top.
     const order = { active: 0, jury: 1, evicted: 2 };

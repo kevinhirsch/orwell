@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,89 @@ logger = logging.getLogger(__name__)
 # Base dir for all per-user portrait sets (co-located with the FE data store so the
 # existing factory-reset scrub of data/ removes it; game-reset clears it explicitly).
 PORTRAITS_DIR = Path(DATA_DIR) / "portraits"
+
+# ── G9 observability: the generation-attempt log ──────────────────────────────────────────
+# Every generation attempt/outcome lands here as one JSON line — {ts, houseguestId, ok,
+# errorClass, durationMs} — capped to the last PORTRAIT_LOG_MAX_ENTRIES so it can never
+# grow unbounded. The logger.info lines stay; this file is the operator-visible record
+# (served admin-gated via GET /api/orwell/portraits/log, picked up by the admin Health card).
+PORTRAIT_LOG_PATH = Path(DATA_DIR) / "portrait-log.jsonl"
+PORTRAIT_LOG_MAX_ENTRIES = 100
+
+# ── G9 backfill debounce: at most ONE backfill attempt per user per process per window ────
+# (a failing image provider must not be hammered by every roster poll / button mash).
+BACKFILL_DEBOUNCE_S = 10 * 60
+_LAST_BACKFILL_AT: dict = {}
+
+# The most recent _generate_one failure reason, consumed by the attempt logger. Module-level
+# is adequate: generate_and_store awaits each generation sequentially, and the log is
+# best-effort observability, never game state.
+_LAST_GEN_ERROR: Optional[str] = None
+
+
+def _note_gen_error(error_class: str) -> None:
+    global _LAST_GEN_ERROR
+    _LAST_GEN_ERROR = error_class
+
+
+def _consume_gen_error() -> Optional[str]:
+    global _LAST_GEN_ERROR
+    e = _LAST_GEN_ERROR
+    _LAST_GEN_ERROR = None
+    return e
+
+
+def log_attempt(houseguest_id: str, ok: bool, error_class: Optional[str] = None,
+                duration_ms: int = 0) -> None:
+    """Append one generation attempt/outcome to the capped JSONL ring. Best-effort:
+    a logging failure must never break the generation pipeline itself."""
+    entry = {
+        "ts": time.time(),
+        "houseguestId": str(houseguest_id),
+        "ok": bool(ok),
+        "errorClass": None if ok else (error_class or "unknown"),
+        "durationMs": int(duration_ms),
+    }
+    try:
+        lines = []
+        try:
+            with open(PORTRAIT_LOG_PATH, "r", encoding="utf-8") as f:
+                lines = [ln for ln in f.read().splitlines() if ln.strip()]
+        except (FileNotFoundError, OSError):
+            lines = []
+        lines.append(json.dumps(entry))
+        lines = lines[-PORTRAIT_LOG_MAX_ENTRIES:]
+        PORTRAIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = PORTRAIT_LOG_PATH.with_suffix(".jsonl.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, PORTRAIT_LOG_PATH)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.info("[portraits] attempt-log write failed: %s", e)
+
+
+def read_attempt_log(limit: int = PORTRAIT_LOG_MAX_ENTRIES) -> list:
+    """The last `limit` attempt entries, oldest first. Empty when none/unreadable."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = PORTRAIT_LOG_MAX_ENTRIES
+    if limit <= 0:
+        return []
+    try:
+        with open(PORTRAIT_LOG_PATH, "r", encoding="utf-8") as f:
+            lines = [ln for ln in f.read().splitlines() if ln.strip()]
+    except (FileNotFoundError, OSError):
+        return []
+    out = []
+    for ln in lines[-limit:]:
+        try:
+            entry = json.loads(ln)
+            if isinstance(entry, dict):
+                out.append(entry)
+        except (ValueError, TypeError):
+            continue
+    return out
 
 # A houseguest id is engine-supplied (e.g. "npc:3", "player"). Sanitize to a safe, stable
 # filename stem so it can never escape the user's portrait dir.
@@ -174,12 +258,14 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
             except Exception:
                 continue
     if not model_spec:
+        _note_gen_error("no-model")
         return None
 
     try:
         url, model_id, headers = _resolve_model(model_spec, owner=user or None)
     except Exception as e:
         logger.info("[portraits] no image model resolved: %s", e)
+        _note_gen_error("no-model")
         return None
 
     is_gpt_image = "gpt-image" in model_id.lower()
@@ -198,10 +284,12 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
             resp = await client.post(images_url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info("[portraits] image API %s: %s", resp.status_code, resp.text[:200])
+                _note_gen_error(f"http-{resp.status_code}")
                 return None
             data = resp.json()
             images = data.get("data", [])
             if not images:
+                _note_gen_error("empty-response")
                 return None
             img = images[0]
             if img.get("b64_json"):
@@ -211,9 +299,13 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
                 ir = await client.get(img["url"])
                 if ir.status_code == 200:
                     return ir.content
+                _note_gen_error(f"image-fetch-http-{ir.status_code}")
+                return None
+            _note_gen_error("empty-response")
             return None
     except Exception as e:
         logger.info("[portraits] generation failed: %s", e)
+        _note_gen_error(type(e).__name__)
         return None
 
 
@@ -269,16 +361,22 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
 
+        _consume_gen_error()  # clear any stale reason before this attempt
+        t0 = time.monotonic()
         png = await _generate_one(str(prompt), user)
+        duration_ms = int((time.monotonic() - t0) * 1000)
         if not png:
+            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed", duration_ms)
             skipped += 1
             continue
         try:
             _write_portrait(user, str(hid), png, str(name))
+            log_attempt(str(hid), True, None, duration_ms)
             generated += 1
             newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
         except Exception as e:
             logger.info("[portraits] failed to persist %s: %s", hid, e)
+            log_attempt(str(hid), False, "persist-failed", duration_ms)
             skipped += 1
 
     if record_beats and newly_shown:
@@ -330,6 +428,100 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
             logger.info("[portraits] sync generation error: %s", e)
 
 
+# ── G9 backfill: portraits for seasons that predate 0051 (or whose generation failed) ─────
+# Portrait generation originally kicked off ONLY from the createCharacter response, so any
+# season created before 0051 merged (or before an image provider was configured) showed
+# placeholders forever. The backfill closes that: when the roster is served (or the manual
+# "Generate cast portraits" lever is pulled) and portraits are missing for active houseguests,
+# fetch each missing houseguest's Vault-free prompt via the engine's live `getPortraitPrompt`
+# player-channel tool and run it through the SAME generate+persist pipeline. No engine change.
+
+
+def missing_portrait_ids(user: Optional[str], roster_cards: list) -> list:
+    """Active houseguests (player included) on the roster with no stored portrait."""
+    out = []
+    for card in roster_cards or []:
+        if not isinstance(card, dict):
+            continue
+        if (card.get("status") or "active") != "active":
+            continue  # departed houseguests keep their placeholder — no late generation
+        hid = card.get("id")
+        if hid and portrait_file(user, hid) is None:
+            out.append(str(hid))
+    return out
+
+
+def backfill_allowed(user: Optional[str]) -> bool:
+    """True when this user's process-local backfill debounce window has elapsed."""
+    last = _LAST_BACKFILL_AT.get(_safe_user(user))
+    return last is None or (time.time() - last) >= BACKFILL_DEBOUNCE_S
+
+
+async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
+    """Fetch each missing houseguest's prompt from the engine and generate + persist it.
+
+    Best-effort throughout (never raises): a houseguest whose prompt can't be fetched is
+    logged to the attempt ring and skipped; the rest still generate. Reuses the standard
+    `generate_and_store` pipeline (idempotent, beat-recording, availability-gated)."""
+    from src import orwell_engine
+
+    prompts = []
+    for hid in missing_ids or []:
+        try:
+            p = await orwell_engine.get_portrait_prompt(str(hid), user=user)
+        except Exception as e:
+            logger.info("[portraits] backfill prompt fetch failed for %s: %s", hid, e)
+            log_attempt(str(hid), False, "prompt-fetch-failed", 0)
+            continue
+        if isinstance(p, dict) and p.get("prompt"):
+            prompts.append({
+                "houseguestId": p.get("houseguestId") or str(hid),
+                "name": p.get("name") or "",
+                "prompt": p.get("prompt"),
+            })
+        else:
+            log_attempt(str(hid), False, "no-prompt", 0)
+    if not prompts:
+        return {"generated": 0, "skipped": 0, "total": 0}
+    summary = await generate_and_store(prompts, user)
+    logger.info("[portraits] backfill for %s: %s", _safe_user(user), summary)
+    return summary
+
+
+def kickoff_backfill(missing_ids: list, user: Optional[str]) -> bool:
+    """Debounced fire-and-forget backfill; returns True when a run was actually kicked.
+
+    At most one attempt per user per process per BACKFILL_DEBOUNCE_S (the roster poll and
+    the manual lever share the window — a failing provider is never hammered). Never blocks
+    the caller: scheduled on the running loop like `kickoff_generation`."""
+    if not missing_ids:
+        return False
+    if not backfill_allowed(user):
+        return False
+    _LAST_BACKFILL_AT[_safe_user(user)] = time.time()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        task = loop.create_task(backfill_missing(list(missing_ids), user))
+
+        def _done(t):
+            try:
+                t.result()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.info("[portraits] background backfill error: %s", e)
+
+        task.add_done_callback(_done)
+    else:  # non-async callers (tests drive backfill_missing directly)
+        try:
+            asyncio.run(backfill_missing(list(missing_ids), user))
+        except Exception as e:
+            logger.info("[portraits] sync backfill error: %s", e)
+    return True
+
+
 def scrub_user(user: Optional[str]) -> None:
     """Delete one user's portrait set (used on a per-user new-season reset)."""
     import shutil
@@ -340,6 +532,8 @@ def scrub_user(user: Optional[str]) -> None:
             shutil.rmtree(d)
     except OSError as e:
         logger.info("[portraits] scrub_user(%s) failed: %s", _safe_user(user), e)
+    # A new season may backfill immediately — the old debounce stamp shouldn't gate it.
+    _LAST_BACKFILL_AT.pop(_safe_user(user), None)
 
 
 def scrub_all() -> None:
