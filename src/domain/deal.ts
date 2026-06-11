@@ -37,6 +37,17 @@ export interface Deal {
   madeEventId?: string;
   /** The event that recorded it being kept/broken (set on reconciliation). */
   resolvedEventId?: string;
+  /**
+   * The week the promise was made (audit E43): `safety`/`vote` deals bind through THAT week's
+   * eviction and then resolve; `final-two`/`target-other` bind until broken or the season ends.
+   * Optional for pre-E43 saves (those never expire by week).
+   */
+  madeWeek?: number;
+}
+
+/** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. */
+export function horizonOf(kind: DealKind): "week" | "season" {
+  return kind === "safety" || kind === "vote" ? "week" : "season";
 }
 
 /** A binding action through the live decision seam (0034/0005) the engine reconciles deals against. */
@@ -45,6 +56,12 @@ export interface BindingAction {
   kind: "nominate" | "replace" | "veto-use" | "vote-evict";
   /** Who the action moves AGAINST (nominees, replacement, eviction target) — NOT a veto save. */
   targets: readonly EntityId[];
+  /**
+   * Who the actor COULD legally have moved against (audit E43): when present, an action only
+   * HONORS a deal if the protected partner was a real alternative the actor pointedly spared —
+   * a vote between two strangers proves nothing about a promise to a third party.
+   */
+  alternatives?: readonly EntityId[];
 }
 
 /** Adverse actions move against their target; using the veto SAVES, so it is never a betrayal. */
@@ -97,12 +114,14 @@ export function wrongedParty(deal: Deal, action: BindingAction): EntityId | unde
 /**
  * Did a party HONOR the deal — i.e., take an adverse binding action where they COULD have moved
  * against their partner but pointedly did not? That is the signal that a promise was actively kept
- * (not merely untouched). Used by the seam to mark a deal `kept`.
+ * (not merely untouched). When the action carries `alternatives` (audit E43), the partner must have
+ * been a real option: sparing someone you couldn't have hit demonstrates nothing.
  */
 export function actionHonors(deal: Deal, action: BindingAction): boolean {
   if (deal.status !== "open") return false;
   if (!ADVERSE.has(action.kind)) return false;
   if (!deal.condition.promisors.includes(action.actor)) return false;
   const other = deal.parties.find((p) => p !== action.actor);
-  return !!other && action.targets.length > 0 && !action.targets.includes(other);
+  if (!other || action.targets.length === 0 || action.targets.includes(other)) return false;
+  return action.alternatives ? action.alternatives.includes(other) : true;
 }

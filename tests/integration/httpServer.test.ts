@@ -30,7 +30,7 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     expect(tools.every((t) => t.readsVault === false)).toBe(true);
   });
 
-  it("resolves a competition over HTTP, returning an outcome-only result", async () => {
+  it("refuses a caller-supplied-stats competition resolution over HTTP (E20 — runCompetition is the one authority)", async () => {
     const res = await fetch(`${base}/player/call`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -46,8 +46,10 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
         },
       }),
     });
-    const { result } = (await res.json()) as { result: Record<string, unknown> };
-    expect(Object.keys(result).sort()).toEqual(["type", "winner"]);
+    expect(res.status).toBe(400); // an allowlist refusal, not an outcome
+    const body = (await res.json()) as { error?: string; result?: unknown };
+    expect(body.error).toMatch(/not available/);
+    expect(body.result).toBeUndefined(); // no winner ever crosses from a seed-shopped resolution
   });
 
   it("onboards over HTTP: createCharacter -> getGameState -> getMomentPrompt (the front-end path)", async () => {

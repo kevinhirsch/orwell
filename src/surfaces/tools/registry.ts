@@ -24,7 +24,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "socialRead", channel: "player", readsVault: false, description: "Honest, Vault-free read of the room or a houseguest; may hint, never names off-screen events." },
-  { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a neutral pretext only — no hidden motive)." },
+  { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a coarse motive category (bond | probe) the narrator voices in its own words — never a number)." },
   { name: "whereabouts", channel: "player", readsVault: false, description: "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only, never motives, numbers, or non-adjacent rooms." },
   { name: "seasonRecap", channel: "player", readsVault: false, description: "The season's public arc from the event record (0048): reigns, ceremonies, evictions, deals — Vault-free, stores not memory." },
   { name: "seasonRetrospective", channel: "player", readsVault: false, description: "POST-SEASON ONLY (0048): the finished season's unsealed hidden story — off-screen scheming, confessionals, the twists. Returns null while a season is live (gated on the terminal state in code)." },
@@ -32,13 +32,14 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
   // Action tools (0009): request in, Vault-free result out (engine performs them).
-  { name: "recordInteraction", channel: "player", readsVault: false, description: "Record a player-witnessed interaction; returns its id." },
-  { name: "resolveCompetition", channel: "player", readsVault: false, description: "Engine-decided outcome only — no stats, rankings, or Vault reasoning." },
-  { name: "runCompetition", channel: "player", readsVault: false, description: "Resolve a competition over the LIVE house using the engine's own stats; returns the winner (name) plus the drawn comp's name/format/narrative scaffold — never a stat or score." },
+  // E20: `resolveCompetition` (caller-supplied stats + seed) is REMOVED — a second, seed-shoppable
+  // resolver one call away from the player channel. `runCompetition` is the single outcome authority.
+  { name: "recordInteraction", channel: "player", readsVault: false, description: "Record a player-witnessed interaction (the witness set must include the player); returns its id." },
+  { name: "runCompetition", channel: "player", readsVault: false, description: "PREVIEW the current competition beat's already-decided winner (the weekly loop crowns the same one when advanceGame resolves the beat — never a second resolver); returns the winner (name) plus the drawn comp's name/format/narrative scaffold — never a stat or score." },
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
   { name: "diaryRoom", channel: "player", readsVault: false, description: "Record a player Diary-Room entry: the player's own OOC knowledge, with no in-game pathway to any houseguest." },
   { name: "advanceGame", channel: "player", readsVault: false, description: "Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale); stops and returns a pending decision when it's the player's turn to choose." },
-  { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending decision (nominations / use veto / replacement / eviction vote) and continue the loop." },
+  { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending binding decision — whatever kind the engine is blocked on; the pending decision itself names its kind and legal options — and continue the loop." },
   { name: "makeDeal", channel: "player", readsVault: false, description: "Make a deal with a houseguest (safety / vote / final-two / target-other). Tracked as a first-class promise; the engine reconciles it against later binding actions and a broken promise hurts." },
 ];
 
@@ -59,9 +60,9 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
  * manifest in the base game-master prompt (0018): `getMomentPrompt` supplies the
  * prompt itself, `endOfSessionSummary` just confirms a save exists.
  */
-// resolveCompetition stays callable but un-advertised: runCompetition is the single
-// advertised competition lever since B37 (one outcome authority); the manifest names one.
-const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "resolveCompetition", "finaleView"]);
+// (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
+// competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

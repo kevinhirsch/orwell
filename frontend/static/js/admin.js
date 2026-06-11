@@ -1406,8 +1406,14 @@ const TOOL_META = {
   grep:              { name: 'Grep',              desc: 'Search file contents',            cat: 'System (opt-in)', ctx: '~100' },
   glob:              { name: 'Glob',              desc: 'Match files by pattern',          cat: 'System (opt-in)', ctx: '~100' },
   ls:                { name: 'List Dir',          desc: 'List directory contents',         cat: 'System (opt-in)', ctx: '~100' },
-  app_api:           { name: 'App API',           desc: 'Call a UI-button endpoint',       cat: 'System (opt-in)', ctx: '~200' },
+  app_api:           { name: 'App API',           desc: 'Call a UI-button endpoint (game build: dropped verticals answer 404 by design)', cat: 'System (opt-in)', ctx: '~200' },
 };
+
+// A2 (gate 4): per-owner security blocks every power tool for non-admin accounts regardless
+// of these toggles — say so, or a multi-account install reads the opt-in as random breakage.
+const OPTIONAL_TOOLS_NOTE =
+  'Opt-ins apply to admin accounts only — non-admin players never receive these tools. ' +
+  'Under the game build, App API calls into removed features return 404 by design.';
 
 async function loadBuiltinTools() {
   const list = el('adm-builtin-tools-list');
@@ -1452,6 +1458,9 @@ async function loadBuiltinTools() {
           </span>
         </div>
         <div class="admin-tool-cat-body hidden" id="${catId}">`;
+      if (cat === 'System (opt-in)') {
+        html += `<div class="admin-tool-desc" style="display:block;padding:6px 10px 2px;opacity:0.65;">${esc(OPTIONAL_TOOLS_NOTE)}</div>`;
+      }
       for (const t of items) {
         const optHint = t.optional
           ? '<span class="admin-tool-desc" style="opacity:0.6;font-style:italic;">off by default · security</span>'

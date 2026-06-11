@@ -1,0 +1,101 @@
+import { describe, it, expect } from "vitest";
+import { confessionalFor } from "../../src/engine/confessionals";
+import { RelationshipModel } from "../../src/engine/relationships";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import type { AdvanceView } from "../../src/ports/GameSession";
+import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import { SeededRandom } from "../../src/adapters/random/SeededRandom";
+import { PLAYER, npc } from "../../src/domain/ids";
+
+/**
+ * Audit E55 + C12 — confessionals are STRUCTURED (trigger/mood/seeded phrasing — never one
+ * canned line all season), fire at the week's dramatic beats (noms, veto ceremony, eviction),
+ * and finally reach the confessor's own SOUL so they can recall their past reads. Roles only.
+ */
+
+function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
+  if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+  else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
+  else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
+  else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
+  else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
+  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+describe("E55 — structured confessional content (pure)", () => {
+  const rel = new RelationshipModel(0.5);
+  const others = [npc(1), npc(2), npc(3)];
+
+  it("names its trigger, carries a soul-derived mood, and stays grounded in engine truth", () => {
+    rel.edge(npc(1), npc(2)).threat = 0.9;
+    rel.edge(npc(1), npc(3)).trust = 0.9; rel.edge(npc(1), npc(3)).affinity = 0.8;
+    const conf = confessionalFor(npc(1), others, rel, {
+      trigger: "the nomination ceremony", emotionalState: 0.2, rng: new SeededRandom(5),
+    });
+    expect(conf.content).toContain("the nomination ceremony"); // references its trigger (E55)
+    expect(conf.trigger).toBe("the nomination ceremony");
+    expect(conf.mood).toBe("rattled");
+    expect(conf.target).toBe(npc(2)); // still the engine's real threat read (anti-sycophancy)
+    expect(conf.ally).toBe(npc(3));
+  });
+
+  it("varies its phrasing by seed — never one identical line all season", () => {
+    const lines = new Set<string>();
+    for (let seed = 1; seed <= 12; seed++) {
+      lines.add(confessionalFor(npc(1), others, rel, { trigger: "the eviction vote", rng: new SeededRandom(seed) }).content);
+    }
+    expect(lines.size).toBeGreaterThan(1);
+  });
+
+  it("without a context the pre-E55 deterministic shape is preserved", () => {
+    const a = confessionalFor(npc(1), others, rel);
+    const b = confessionalFor(npc(1), others, rel);
+    expect(a.content).toBe(b.content);
+    expect(a.trigger).toBeUndefined();
+  });
+});
+
+describe("E55/C12 — live ceremony confessionals reach the record AND the soul", () => {
+  it("fires at nominations, the veto ceremony, and eviction night; content is Vault-only and recall-able after a restart", () => {
+    const reg = new GameSessionRegistry();
+    const user = "conf-user";
+    const sb = reg.sandboxFor(user);
+    sb.session.createCharacter({ playerName: "P", seed: 6 });
+    const session = sb.session as GameSessionAdapter;
+
+    // Play one full week (through the eviction result).
+    for (let i = 0; i < 200; i++) {
+      const adv = sb.session.advanceGame();
+      if (adv.pending) resolve(session, adv.pending);
+      if (adv.event?.beat === "eviction-result" || adv.finished) break;
+    }
+
+    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    expect(confs.length).toBeGreaterThan(0);
+    // Vault-only: the player never witnesses an NPC confessional (0002).
+    for (const c of confs) {
+      expect(c.hidden).toBe(true);
+      expect(c.witnessSet.includes(PLAYER)).toBe(false);
+    }
+    // E55: more than one beat confesses now — distinct triggers appear across the week.
+    const triggers = new Set<string>();
+    for (const c of confs) {
+      const m = c.content.match(/After (the [a-z ]+):/);
+      if (m) triggers.add(m[1]!);
+    }
+    expect(triggers.size, `distinct confession triggers (saw: ${[...triggers].join(", ")})`).toBeGreaterThanOrEqual(2);
+
+    // C12: the confessional reached the confessor's own soul (durable mirror)...
+    const house = sb.session.snapshot().house!;
+    const confessor = house.npcs.find((n) => n.soul.memory.some((m) => m.includes("[confessional")));
+    expect(confessor, "an NPC carries their own confessional in their soul").toBeTruthy();
+
+    // ...and is recall-able from the SoulStore AFTER a restart (0030 — the store recalled).
+    const reg2 = new GameSessionRegistry();
+    reg2.restore(user, reg.snapshot(user));
+    const hits = reg2.sandboxFor(user).engine.soul.recall(confessor!.id, "confessional", 5);
+    expect(hits.some((m) => m.content.includes("[confessional"))).toBe(true);
+  });
+});

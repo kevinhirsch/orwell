@@ -36,7 +36,7 @@ integration linchpin — it's what drives the game.
 ## Integration plan (the refactor — next)
 
 1. The Orwell engine exposes the game as a permissioned **MCP server**: `getVisibleStateFor`,
-   `recordInteraction`, `resolveCompetition`, `surfaceInformationTo` (the tools in
+   `recordInteraction`, `runCompetition`, `surfaceInformationTo` (the tools in
    `CLAUDE.md` / the spec). These return **only visible-projection data**.
 2. Point Orwell's agent (`routes/mcp_routes.py`, `mcp_servers/`) at that MCP server as a
    tool backend; the LLM narrates *Big Brother* by calling the engine tools.

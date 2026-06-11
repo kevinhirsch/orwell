@@ -7,6 +7,7 @@ import { richOffscreenStretch } from "../engine/offscreen";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
+import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
@@ -440,13 +441,16 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     ? richOffscreenStretch({
         events: sandbox.engine.events, rng, npcs: ids, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
+        // E45 — motivated, co-present society: partners by tie strength, scenes need co-presence.
+        edgeOf: (a, b) => sandbox.engine.relationships.edge(a, b),
+        ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
     sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
     // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
-    sandbox.session.recordOffscreenSoul(s.initiator, s.type);
+    sandbox.session.recordOffscreenScene(s.initiator, s.partner, s.type); // E50 — both roles evolve
     // 0049: the scene happens WHERE its initiator is; anyone one room over — INCLUDING the player —
     // may catch a piece of it. A successful roll is a real, traceable `overheard:` pathway (0002),
     // partial and lower-confidence: eavesdropping is information-gathering, never narrative vibes.
@@ -485,6 +489,10 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
         rounds: GOSSIP.rounds,
         transmitProb: GOSSIP.transmitProb,
         decay: GOSSIP.decay,
+        // E44 — hearing a rumor moves the listener's read of its subjects (never the player's edges).
+        rel: sandbox.engine.relationships,
+        subjects: [scene.initiator, scene.partner],
+        sceneType: scene.type,
       });
     }
   }
@@ -506,7 +514,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       initiator: ids[0]!,
       witnessSet: [PLAYER, ids[0]!],
       hidden: false,
-      content: "A house meeting shifts the week.",
+      content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
     });
   }
   // Every recorded scene (+ the player-turn day) counts toward the advance.

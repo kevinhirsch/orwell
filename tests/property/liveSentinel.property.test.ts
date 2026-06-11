@@ -48,7 +48,6 @@ const args = (name: string): Record<string, unknown> => {
     case "socialRead": return { houseguest: npc(1) };
     case "askProducers": return { question: "is anyone working against me?" };
     case "recordInteraction": return { initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a chat" };
-    case "resolveCompetition": return { type: "endurance", participants: [{ id: PLAYER, stats: { physical: 0.5, mental: 0.5, social: 0.5 } }, { id: npc(1), stats: { physical: 0.6, mental: 0.5, social: 0.5 } }], intents: [], seed: 1 };
     case "runCompetition": return { type: "endurance" };
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
     case "diaryRoom": return { entry: "my private read" };

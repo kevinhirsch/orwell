@@ -20,10 +20,17 @@ PROGRESSING = [
     "make_deal", "record_interaction", "surface_information",
 ]
 
-# The two sanctioned UI commitment paths (file, function-name marker, required guard marker).
+# The sanctioned commitment paths (file, function-name marker, required guard marker).
+# The first two are the UI confirm paths; the third is NOT a UI control at all — it is the
+# E22 turn-integrity guard ("narrated but never recorded" enforced in code): on a COMPLETED
+# agent game turn with non-trivial narration and zero engine writes, the server folds a
+# bounded digest of the conversation that just happened into the record. It records the
+# conversation; it never replaces one (ADR 0003 §4 intact), and it never advances the week.
+# Its guard marker is the zero-engine-writes precondition set.
 SANCTIONED = {
     "submit_decision": ("routes/orwell_routes.py", "orwell_decision", "_DECISION_KINDS"),
     "create_character": ("routes/orwell_routes.py", "orwell_new_game", "409"),
+    "record_interaction": ("routes/chat_helpers.py", "ensure_turn_recorded", "GAME_ENGINE_WRITE_TOOLS"),
 }
 
 

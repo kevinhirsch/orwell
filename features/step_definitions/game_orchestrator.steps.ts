@@ -33,7 +33,7 @@ When("the player triggers an advance", function (this: BbWorld) {
 
 Then("the day carries at least one meaningful event", function (this: BbWorld) {
   const witnessed = this.registry!.sandboxFor(U).engine.events.query({ witnessedBy: PLAYER });
-  assert.ok(witnessed.some((e) => e.content.includes("house meeting")), "a meaningful player-witnessed event");
+  assert.ok(witnessed.some((e) => e.type === "house-event"), "a meaningful player-witnessed event"); // E58: the day event is typed; its content varies by design
 });
 
 Then("at least one off-screen scene occurs that the player does not witness", function (this: BbWorld) {

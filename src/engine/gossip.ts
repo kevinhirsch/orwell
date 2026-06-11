@@ -1,6 +1,10 @@
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { EntityId } from "../domain/ids";
+import { PLAYER } from "../domain/ids";
+import { scaleImpact } from "./relationshipConstants";
+import type { EdgeSignals } from "./relationshipConstants";
+import type { RelationshipModel } from "./relationships";
 
 /**
  * The social graph gossip travels along. Minimal here (undirected adjacency); the
@@ -46,6 +50,23 @@ export const GOSSIP = {
   affinityEdge: 0.35,
 } as const;
 
+/**
+ * What HEARING a rumor does to the listener's read of its SUBJECTS (audit E44): a rumor finally
+ * changes minds, not just hands. Small directed folds keyed by the scene's nature, scaled by the
+ * listener's CONFIDENCE in the belief (a fifth-hand whisper barely registers) — so noms, votes,
+ * saves and blocs (which all read the relationship layer) now genuinely move on what travels.
+ * Magnitudes live here only (the B59 pattern); the fold runs through the proven 0026 update rule.
+ */
+export const GOSSIP_HEARD: Record<string, Partial<EdgeSignals>> = {
+  alliance: { threat: +0.06 },                  // "getting awfully close" — a pair is a power read
+  strategy: { threat: +0.05 },                  // "plotting something"
+  bonding: { threat: +0.03 },                   // "thick as thieves lately"
+  showmance: { threat: +0.04 },                 // "more than friends" — a duo to the end
+  gossip: { trust: -0.04 },                     // "talking about everyone behind their backs"
+  conflict: { affinity: -0.03 },                // "at each other's throats" — messy to be near
+  betrayal: { trust: -0.06, threat: +0.07 },    // "about to turn on someone" — dangerous to trust
+};
+
 /** The vague gloss a scene's nature gets when it becomes a rumor — NEVER the verbatim scene. */
 export const RUMOR_GLOSS: Record<string, string> = {
   alliance: "getting awfully close",
@@ -77,6 +98,12 @@ function distort(content: string, rng: RandomnessSource): string {
  * recipient holds the fact as a belief with provenance + confidence (decaying
  * with hops) + distortion (growing with hops). It reaches the player only if a
  * chain of tellings terminates at the player. Deterministic under a fixed seed.
+ *
+ * With `rel` + `subjects` (audit E44), each NPC RECEIPT also folds a small, confidence-scaled
+ * move toward the rumor's subjects (`GOSSIP_HEARD`) — hearsay finally shifts third-party reads,
+ * so a betrayal-rumor reaching a future HOH genuinely raises its subject's nomination danger.
+ * The PLAYER's own edges are never gossip-folded: the human forms their own reads (ADR 0003 /
+ * 0017 — the engine hands them the belief, not the feeling).
  */
 export function diffuseGossip(deps: {
   knowledge: KnowledgeService;
@@ -87,10 +114,25 @@ export function diffuseGossip(deps: {
   rounds: number;
   transmitProb?: number;
   decay?: number;
+  /** The live relationship model (E44) — when present, receipts fold toward the subjects. */
+  rel?: RelationshipModel;
+  /** Who the rumor is ABOUT (the scene's initiator + partner). */
+  subjects?: readonly EntityId[];
+  /** The originating scene's nature — keys the `GOSSIP_HEARD` impact. */
+  sceneType?: string;
 }): { factId: string; original: string } {
-  const { knowledge, graph, rng, origin, fact, rounds } = deps;
+  const { knowledge, graph, rng, origin, fact, rounds, rel, subjects, sceneType } = deps;
   const transmitProb = deps.transmitProb ?? 0.8;
   const decay = deps.decay ?? 0.7;
+  const heard = sceneType ? GOSSIP_HEARD[sceneType] : undefined;
+  /** The E44 receipt fold: listener → each subject (≠ self, ≠ player-holder), scaled by confidence. */
+  const foldReceipt = (listener: EntityId, confidence: number): void => {
+    if (!rel || !subjects || !heard || listener === PLAYER) return;
+    const scaled = scaleImpact(heard, confidence);
+    for (const subject of subjects) {
+      if (subject !== listener) rel.applyImpactDirected(listener, subject, scaled, rng);
+    }
+  };
   const factId = `fact:${origin}:${rng.int(1_000_000)}`;
   const original = fact.content;
 
@@ -112,6 +154,7 @@ export function diffuseGossip(deps: {
         if (holds(to)) continue;
         if (rng.next() >= transmitProb) continue;
         const hops = (belief.hops ?? 0) + 1;
+        const confidence = (belief.confidence ?? 1) * decay;
         knowledge.transmitGossip(
           from,
           to,
@@ -119,7 +162,7 @@ export function diffuseGossip(deps: {
             content: distort(belief.content, rng),
             originalContent: original,
             factId,
-            confidence: (belief.confidence ?? 1) * decay,
+            confidence,
             source: from,
             hops,
             // hops + fractional noise → strictly ordered by hops, with per-telling variance.
@@ -127,6 +170,8 @@ export function diffuseGossip(deps: {
           },
           `told-by:${from}`,
         );
+        // E44: hearing it MOVES the listener's read of the subjects (confidence-scaled, hidden).
+        foldReceipt(to, confidence);
       }
     }
   }

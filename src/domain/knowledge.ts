@@ -41,6 +41,11 @@ export interface Suspicion {
   content: string;
   subject?: EntityId;
   ts: number;
+  /**
+   * 0..1 certainty, CAPPED below knowledge-grade at the write seam (audit C2/C14): a hunch —
+   * including a surfacing downgraded for failing content-lineage anchoring — is never near-certain.
+   */
+  confidence?: number;
 }
 
 /**

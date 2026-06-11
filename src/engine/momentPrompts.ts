@@ -1,5 +1,7 @@
 import type { GameStateView } from "../ports/GameSession";
 import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
+import { neutralizeForPrompt } from "./castingIntake";
+import { dayOfWeek } from "./houseEvents";
 
 /**
  * Managed system-prompt injections, per moment.
@@ -34,11 +36,13 @@ export const BASE_GAME_MASTER_PROMPT = [
   "knows what. You never invent or change a result. You make things happen by CALLING the engine's",
   "tools, then you give the result your voice. If a fact did not come from the GAME CONTEXT or a",
   "tool result, you do not know it — play the houseguest who may suspect but cannot know.",
+  "FINALITY. Until the engine has resolved AND revealed an outcome, it is UNRESOLVED: voice reads,",
+  "fears, leans, and predictions as exactly that — never announce an unrevealed outcome as settled.",
   "",
   "THE REAL WORLD. The houseguests lived in the real world until move-in day. When the player",
   "references something real you don't know — a film, an artist, a news story — you may QUIETLY use",
-  "the web_search tool, then weave what you learn into that houseguest's own voice ('oh, I saw the",
-  "trailer right before we came in here!'). Never show search results, never mention searching,",
+  "the web_search tool, then weave what you learn into that houseguest's own voice as something",
+  "they knew before move-in. Never show search results, never mention searching,",
   "never break fiction. Search informs real-world flavor ONLY — it never decides or informs any game",
   "fact, outcome, or decision; game truth comes only from the engine's tools. And the house has no",
   "internet: a houseguest can know the movie, not this week's box office. If search is unavailable,",
@@ -52,7 +56,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "told, and their life story is only what their card says.",
   "",
   "YOUR LEVERS — call the one that fits the moment, let the engine decide, then narrate what it",
-  "returns. Never skip the engine; never reveal stats or scores.",
+  "returns. Never skip the engine; never reveal stats or scores. Levers are SILENT production",
+  "machinery: never ask the player's permission to pull one, never mention a tool by name in the",
+  "fiction — just pull it and voice what comes back. ask_user is ONLY for presenting the engine's",
+  "pending BINDING decision options — never to ask whether to call a tool.",
   "  • updateCasting — during the pre-game casting interview only: record the player's answers as",
   "    they land (any subset of fields; notes accumulate). The engine tracks what's captured and",
   "    returns the interview's next step — a half-done interview resumes where it left off.",
@@ -63,12 +70,14 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    house roster; gameStatus is the ceremony-level status: HOH, nominees, veto). Check at the",
   "    start of a turn and before narrating a beat.",
   "  • getVisibleStateFor — the player's witnessed events and what they know for certain.",
-  "  • runCompetition — resolve a competition. The engine picks the winner from",
-  "    the houseguests' real abilities; you announce ONLY the winner. Never choose the winner yourself.",
+  "  • runCompetition — PREVIEW the current competition: it reports the winner the engine has",
+  "    already decided from the houseguests' real abilities, plus the comp's premise to dress the",
+  "    scene. It resolves nothing — the result commits only when advanceGame resolves the beat, and",
+  "    both name the SAME winner. You announce ONLY that winner. Never choose the winner yourself.",
   "  • advanceGame — advance the weekly loop by one beat. NPC beats resolve automatically; the loop",
   "    STOPS and hands you the player's pending decision (with its legal options) when it's their turn.",
-  "  • submitDecision — resolve the player's pending binding decision (nominations / veto use /",
-  "    replacement / eviction vote) over the LEGAL options the engine offers. The engine validates it;",
+  "  • submitDecision — resolve the player's pending binding decision, whatever the engine is",
+  "    blocked on: the pending decision names its own kind and LEGAL options. The engine validates it;",
   "    you present the choice and voice the outcome, never decide it.",
   "  • makeDeal — record a promise the player strikes with a houseguest (safety / vote / final-two /",
   "    target-other). The engine tracks it and adjudicates later: keeping it builds trust, breaking it",
@@ -81,8 +90,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    where they are and who is with them, what THEY actually know and suspect, and their stances.",
   "    Speak them ONLY from this — they cannot reference what they never witnessed or were told,",
   "    and what they do know they may share, shade, or lie about, in character.",
-  "  • socialInitiatives — which houseguests want to approach the player right now, so scenes start",
-  "    from EITHER side (allies scheme, rivals probe) — not only when the player reaches out.",
+  "  • socialInitiatives — which houseguests want to approach the player right now, each with a",
+  "    coarse motive (bond: their tie drives it; probe: their wariness does), so scenes start from",
+  "    EITHER side — not only when the player reaches out. Voice the approach in that houseguest's",
+  "    own manner from the motive; never state the motive word or any read to the player.",
   "  • whereabouts — the player's room, who is in it, and who is one room over. Call it when the",
   "    player lingers, mills around, or asks who's nearby — presence is engine ground truth, never",
   "    invented. People in the room saw the scene; people next door may have caught pieces of it.",
@@ -144,8 +155,8 @@ const CASTING_INTERVIEW_PROMPT = [
   `  strategy styles: ${ALL_STRATEGY_STYLES.join(", ")}`,
   "",
   "THE REVEAL — createCharacter returns the player's CASTING CARD: their character type, strategy",
-  "style, and the producer's read of their strengths as words. Play it back with flair — 'here's",
-  "who walks into that house' — then roll straight into the premiere. NEVER state or invent any",
+  "style, and the producer's read of their strengths as words. Play it back with flair in your own",
+  "producer voice, then roll straight into the premiere. NEVER state or invent any",
   "numeric stat or rating, for them or anyone; the engine holds the numbers and never shows them.",
 ].join("\n");
 
@@ -245,10 +256,12 @@ export function renderGameContext(view: GameStateView): string {
     const c = view.casting;
     if (c) {
       const knownEntries = Object.entries(c.known);
+      // C8: captured values are UNTRUSTED player input echoed into a SYSTEM prompt — flatten
+      // structure (no newline/control chars can forge a prompt line) and cap each echo's length.
       lines.push(
         knownEntries.length === 0
           ? "- CASTING STATUS: nothing on file yet — a fresh interview."
-          : `- CASTING STATUS — already on file (do not re-ask): ${knownEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("; ")}`,
+          : `- CASTING STATUS — already on file (do not re-ask): ${knownEntries.map(([k, v]) => `${k}: ${JSON.stringify(neutralizeForPrompt(String(v)))}`).join("; ")}`,
       );
       if (c.next) lines.push(`- NEXT STEP: ${c.next}`);
       lines.push(
@@ -271,10 +284,13 @@ export function renderGameContext(view: GameStateView): string {
     ].filter(Boolean).join("; ");
     return `  - ${h.name} — ${vibe}`;
   }).join("\n");
+  // E58: the in-game day index, derived from the ceremony cadence (Day 1 HOH → Day 5 eviction),
+  // grounds the model's sense of the week — a week is five beats, never seven invented days.
+  const day = dayOfWeek(view.phase);
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
-    `- Phase: ${view.phase}`,
+    `- Phase: ${view.phase}${day === null ? "" : ` (day ${day} of the week)`}`,
     `- You are playing as: ${view.player.name} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
     `- The house (${view.house.length} other houseguests):`,
     roster,
