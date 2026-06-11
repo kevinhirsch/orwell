@@ -647,6 +647,9 @@ import { isNarrow } from './platform.js';
       messageInput.value = '';
       messageInput.style.height = '';
       messageInput.dispatchEvent(new Event('input'));
+      // G17 (refresh-persistence audit F3): a sent turn clears the persisted composer
+      // draft — a refresh must never resurrect words the house already heard.
+      if (window._orwellComposerDraftClear) window._orwellComposerDraftClear();
       // Mobile: dismiss the on-screen keyboard after sending. iOS in
       // particular ignores a bare blur() in some cases (or some other
       // listener refocuses straight after), so we temporarily mark the

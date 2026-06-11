@@ -1328,6 +1328,142 @@ def main() -> int:
             page.click("#hamburger-btn")  # restore the expanded sidebar
             page.wait_for_timeout(250)
 
+            # G17 (refresh-persistence audit F3/F5/F7 + F4): the composer draft survives
+            # a refresh as ONE per-user sessionStorage record {text, drMode,
+            # pendingApproachId}; a Diary-Room draft re-enters DR mode BEFORE its text
+            # lands (F5 — a restored confessional must never be sendable to the house);
+            # an approach prefill keeps its pending chip; and the casting seat re-arms.
+            # Driven for REAL on fresh pages: real typing, real reloads, real clicks.
+            g17 = browser.new_page()
+            # A STARTED game is staged with the sanctioned route-mock pattern (the G15
+            # decision fake above; the G5 audit drove its DR cell against a real game):
+            # the Diary-Room gate legitimately EXITS DR mode when no game is running, so
+            # an engine-down page could never hold a restored confessional open.
+            g17.route("**/api/orwell/state",
+                      lambda r: r.fulfill(status=200, content_type="application/json",
+                                          body='{"started": true, "week": 2, "phase": "social"}'))
+            # The F5 ORDER SPY, armed before every navigation: at the exact moment the
+            # restored text lands in #message (the restore's input dispatch), record
+            # whether DR mode was ALREADY active on <body>. Synchronous truth, no race.
+            g17.add_init_script("""
+              window.__g17Order = [];
+              window.addEventListener('input', (e) => {
+                if (e.target && e.target.id === 'message' && e.target.value) {
+                  window.__g17Order.push({
+                    dr: document.body.classList.contains('orwell-dr-mode'),
+                    text: e.target.value });
+                }
+              }, true);
+            """)
+
+            def g17_settle(p):
+                p.wait_for_timeout(2500)
+                # the engine-down boot mounts the dark-house card — dismiss like a person
+                if p.query_selector("#orwell-onboarding"):
+                    p.keyboard.press("Escape")
+                    p.wait_for_timeout(200)
+
+            g17.goto(base + "/", wait_until="load", timeout=30000)
+            g17_settle(g17)
+
+            # F3 (M1, the commission's literal text): a player-typed draft survives.
+            g17.click("#message")
+            g17.keyboard.type("I want to pull the HOH aside before the ceremony.")
+            g17.wait_for_timeout(600)  # > the write debounce
+            g17_rec = g17.evaluate("window._orwellComposerDraftPeek && window._orwellComposerDraftPeek()")
+            check(bool(g17_rec) and g17_rec.get("text", "").startswith("I want to pull")
+                  and "drMode" in g17_rec and "pendingApproachId" in g17_rec,
+                  f"G17/F3: typing writes ONE draft record {{text, drMode, pendingApproachId}} ({g17_rec})")
+            g17.reload(wait_until="load")
+            g17_settle(g17)
+            check(g17.input_value("#message") == "I want to pull the HOH aside before the ceremony.",
+                  "G17/F3: the typed draft is restored into the composer after reload")
+
+            # F5 (the privacy gate): a Diary-Room draft re-enters DR mode BEFORE the text.
+            g17.click("#message")
+            g17.keyboard.press("Control+a")
+            g17.keyboard.press("Delete")  # empty the box for real (drops the record)
+            g17.evaluate("window._orwellOpenDiaryRoom()")
+            check(g17.evaluate("document.body.classList.contains('orwell-dr-mode')") is True,
+                  "G17/F5 setup: the composer is in Diary-Room mode")
+            g17.keyboard.type("Confessional: I'm secretly working with the nominee.")
+            g17.wait_for_timeout(600)
+            g17.reload(wait_until="load")
+            g17_settle(g17)
+            g17_order = g17.evaluate("window.__g17Order")
+            check(len(g17_order) >= 1 and g17_order[0].get("dr") is True
+                  and g17_order[0].get("text", "").startswith("Confessional:"),
+                  f"G17/F5: DR mode was active BEFORE the restored text landed ({g17_order})")
+            check(g17.evaluate("document.body.classList.contains('orwell-dr-mode')") is True
+                  and g17.evaluate("window._orwellDiaryRoomActive && window._orwellDiaryRoomActive()") is True,
+                  "G17/F5: the restored confessional draft sits in an ACTIVE Diary-Room composer")
+            check(g17.evaluate("getComputedStyle(document.getElementById('orwell-dr-pill')).display") != "none",
+                  "G17/F5: the DR pill is visible with the restored draft")
+            check(g17.input_value("#message").startswith("Confessional:"),
+                  "G17/F5: the confessional text itself is restored")
+
+            # F7: an approach prefill keeps its pending chip across a reload.
+            g17.click("#message")
+            g17.keyboard.press("Escape")  # the player's own exit from the Diary Room
+            check(g17.evaluate("!(window._orwellDiaryRoomActive && window._orwellDiaryRoomActive())") is True,
+                  "G17/F7 setup: Escape leaves Diary-Room mode")
+            g17.keyboard.press("Control+a")
+            g17.keyboard.press("Delete")
+            g17.evaluate("""window._orwellSocialDriveApproaches(true, [
+              { houseguest: { id: 'npc:7', name: 'A Houseguest' }, motive: 'bond' },
+            ])""")
+            g17.click("#orwell-social .osoc-chip .osoc-go")  # real chip click → prefill + pending
+            g17.wait_for_timeout(600)
+            check(g17.evaluate("window._orwellPendingApproach.get()") == "npc:7",
+                  "G17/F7 setup: the chip click marks the approach pending")
+            g17.reload(wait_until="load")
+            g17_settle(g17)
+            check("A Houseguest" in g17.input_value("#message"),
+                  f"G17/F7: the approach prefill is restored after reload ({g17.input_value('#message')!r})")
+            check(g17.evaluate("window._orwellPendingApproach.get()") == "npc:7",
+                  "G17/F7: pendingApproachId survives the reload (send still dismisses the chip)")
+            g17_chip = g17.evaluate("""() => {
+              const r = window._orwellSocialDriveApproaches(true, [
+                { houseguest: { id: 'npc:7', name: 'A Houseguest' }, motive: 'bond' },
+              ]);
+              const chip = document.querySelector('#orwell-social .osoc-chip');
+              return { count: r.count, pending: !!(chip && chip.classList.contains('osoc-chip-pending')) };
+            }""")
+            check(g17_chip.get("count") == 1 and g17_chip.get("pending") is True,
+                  f"G17/F7: the restored pending approach re-accents its chip ({g17_chip})")
+            g17.close()
+
+            # F4: the casting-seat prefill re-arms after a refresh (the marker used to
+            # one-shot at prefill time, stranding an empty composer forever). Pre-game is
+            # staged with routed fakes — the sanctioned G5-audit pattern, same as the G15
+            # decision route above: state says started:false, models says one is live.
+            f4 = browser.new_page()
+            f4.route("**/api/orwell/state",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body='{"started": false}'))
+            f4.route("**/api/models",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body='{"items": [{"models": ["m"], "offline": false}]}'))
+            f4.goto(base + "/", wait_until="load", timeout=30000)
+            f4.wait_for_timeout(3000)  # route() probes + the fresh-session click + the prefill
+            f4_seat0 = f4.input_value("#message")
+            check(f4_seat0.startswith("I take my seat"),
+                  f"G17/F4 setup: pre-game boot prefills the casting-seat line ({f4_seat0!r})")
+            check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
+                  "G17/F4 setup: the seat marker is set (the F7 one-session fence)")
+            # The exact F4 trap: no draft left (composer emptied for real) AND the marker
+            # claiming "interview underway" — a refresh used to strand this forever.
+            f4.click("#message")
+            f4.keyboard.press("Control+a")
+            f4.keyboard.press("Delete")
+            f4.wait_for_timeout(300)  # the empty write lands (drops the F3 record)
+            f4.reload(wait_until="load")
+            f4.wait_for_timeout(3000)  # route() + the re-arm's settle delay
+            f4_seat1 = f4.input_value("#message")
+            check(f4_seat1.startswith("I take my seat"),
+                  f"G17/F4: with the marker set and no draft, the seat prefill RE-ARMS after reload ({f4_seat1!r})")
+            f4.close()
+
             browser.close()
     finally:
         proc.terminate()

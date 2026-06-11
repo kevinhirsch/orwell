@@ -78,6 +78,18 @@
   let _failures = 0;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
   let pendingApproachId = null;  // approach prefilled but not yet sent
+  // G17 (refresh-persistence audit F7): the pending approach rides the persisted
+  // composer-draft record, so every change must be observable. setPendingApproach is
+  // the ONE live mutation door (it notifies the draft module); the boot restore comes
+  // back through the seam below without re-notifying.
+  function setPendingApproach(id) {
+    pendingApproachId = id;
+    try { window.dispatchEvent(new CustomEvent("orwell:approachpending", { detail: { id } })); } catch (_) {}
+  }
+  window._orwellPendingApproach = {
+    get: () => pendingApproachId,
+    restore: (id) => { pendingApproachId = id; }, // G17 boot restore: silent on purpose
+  };
   let _shown = false;  // shown a real game this session (U5: keep last-known on a hiccup)
 
   // Approaches the player has acted on or waved off. Persisted so a refresh (or a sent
@@ -92,7 +104,7 @@
   }
   function clearDismissed() {
     dismissed = new Set();
-    pendingApproachId = null;
+    setPendingApproach(null);
     try { localStorage.removeItem(DISMISS_KEY); } catch (_) {}
   }
 
@@ -205,7 +217,7 @@
     box.value = line(name);
     box.dispatchEvent(new Event("input", { bubbles: true }));
     box.focus();
-    pendingApproachId = id;
+    setPendingApproach(id);
   }
 
   // When the player actually sends a message, dismiss the pending approach so
@@ -213,7 +225,7 @@
   function onMessageSend() {
     if (pendingApproachId !== null) {
       dismiss(pendingApproachId);
-      pendingApproachId = null;
+      setPendingApproach(null);
       // Clear and collapse; the next poll re-renders any approaches still live
       // (H5: an empty section never lingers on screen).
       renderApproaches([]);
@@ -279,7 +291,7 @@
       const x = document.createElement("button");
       x.className = "osoc-x"; x.title = "Skip (dismiss)"; x.textContent = "×";
       x.addEventListener("click", () => {
-        if (pendingApproachId === id) pendingApproachId = null;
+        if (pendingApproachId === id) setPendingApproach(null);
         dismiss(id);
         renderApproaches(list);
       });

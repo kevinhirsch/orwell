@@ -82,6 +82,13 @@
     return pill;
   }
 
+  // G17 (refresh-persistence audit F5): the composer-draft module persists the DR flag
+  // WITH the draft — it must hear every mode change the moment it happens, so a
+  // confessional-in-progress can never be stored as (or restored into) house-bound text.
+  function notifyModeChange() {
+    try { window.dispatchEvent(new CustomEvent("orwell:drmode", { detail: { active: drMode } })); } catch (_) {}
+  }
+
   function enterDRMode() {
     const box = composerBox();
     const pill = ensurePill();
@@ -92,6 +99,7 @@
     _returnPlaceholder = box.placeholder;
     box.placeholder = "Tell the producers what you're really thinking…";
     box.focus();
+    notifyModeChange();
   }
 
   function exitDRMode() {
@@ -101,6 +109,7 @@
     if (pill) pill.style.display = "none";
     document.body.classList.remove("orwell-dr-mode");
     if (box && _returnPlaceholder !== null) { box.placeholder = _returnPlaceholder; _returnPlaceholder = null; }
+    notifyModeChange();
   }
 
   async function submitDR(entry) {

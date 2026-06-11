@@ -190,6 +190,10 @@
     } catch (_) { return true; }
   }
 
+  // The casting-seat line is ONE constant: takeASeat prefills it, and the G17/F4
+  // re-arm re-offers it after a refresh.
+  const SEAT_LINE = "I take my seat for the casting interview.";
+
   // Hand the player to the producer — in the chat, no modal. Runs ONCE per interview
   // (sessionStorage marker): opens a fresh chat session (F7 — a finished or reset season's
   // transcript must never ride along as narrator context for the new one), then PREFILLS
@@ -197,7 +201,12 @@
   function takeASeat() {
     let seated = false;
     try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
-    if (seated) return; // mid-interview reload: the conversation is already underway
+    if (seated) {
+      // G17/F4: mid-interview reload — re-offer the seat line if nothing was spoken
+      // (the marker used to one-shot at prefill time and strand an empty composer).
+      rearmSeatPrefill();
+      return;
+    }
     try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
@@ -206,11 +215,27 @@
     setTimeout(() => {
       const box = document.getElementById("message");
       if (box && !box.value.trim()) {
-        box.value = "I take my seat for the casting interview.";
+        box.value = SEAT_LINE;
         box.dispatchEvent(new Event("input", { bubbles: true }));
         box.focus();
       }
     }, 400); // after the fresh-session click settles
+  }
+
+  // F4: re-run the PREFILL ONLY — never the fresh-session click (the F7 fence stays
+  // one-per-interview, so a reload can never spawn extra sessions). Guards: an
+  // F3-restored draft or the player's own typing always wins (composer non-empty), and
+  // once the interview has spoken (a player message exists in the transcript) the
+  // conversation is the cue, not the prefill.
+  function rearmSeatPrefill() {
+    setTimeout(() => {
+      const box = document.getElementById("message");
+      if (!box || box.value.trim()) return;                            // a draft/typing wins
+      if (document.querySelector("#chat-history .msg-user")) return;   // already speaking
+      box.value = SEAT_LINE;
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      box.focus();
+    }, 700); // after boot settles: the F3 draft restore + the session transcript render
   }
 
   // E65: a season restart (createCharacter success mid-session) opens a FRESH chat
