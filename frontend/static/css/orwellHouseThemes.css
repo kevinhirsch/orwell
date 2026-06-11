@@ -13,15 +13,21 @@
      pytest gate computes the ratios).
    ========================================================================== */
 
-/* ---- FROST (capability-gated; fallback = the existing solid panel) -------- */
+/* ---- FROST (capability-gated; fallback = the existing solid panel) --------
+   Covers BOTH window families at once (Lane G4): the legacy modal family
+   (.modal-content) and the OrwellWindow kit (.ow-window — usually also
+   .orwell-slotted, but pinned by family name so unslotted kit windows frost
+   identically). The fallback mix derives from the shared --win-bg token so
+   the frost always composites from the same ground both families paint. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   body.house-theme #sidebar,
   body.house-theme .orwell-slotted,
   body.house-theme #orwell-status,
   body.house-theme #minimized-dock,
   body.house-theme .settings-modal-content,
-  body.house-theme .modal-content {
-    background: var(--panel-frost, color-mix(in srgb, var(--panel) 62%, transparent));
+  body.house-theme .modal-content,
+  body.house-theme .ow-window {
+    background: var(--panel-frost, color-mix(in srgb, var(--win-bg, var(--panel)) 62%, transparent));
     -webkit-backdrop-filter: blur(14px) saturate(1.15);
     backdrop-filter: blur(14px) saturate(1.15);
   }

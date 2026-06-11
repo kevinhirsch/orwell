@@ -37,6 +37,15 @@ const REDUCED = () =>
   !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 // ── the one CSS family ────────────────────────────────────────────────────
+// The window FRAME (bg / border / radius / shadow) and the titlebar TYPE
+// (size / weight / tracking) come from the shared --win-* tokens defined
+// once in style.css :root (Lane G4) — the SAME tokens the legacy modal
+// family (.modal-content / .modal-header h4) consumes, so kit windows and
+// the settings/theme/tool modals paint one visual language and per-theme
+// overrides (the 0052 house presets, the frost layer) hit both families at
+// once. The fallbacks below only cover style.css not having loaded. The
+// titlebar COLOR stays var(--fg) by design — see the :root token note
+// (the modal family's var(--red) header fails AA on some palettes).
 function ensureCss() {
   if (document.getElementById('ow-window-css')) return;
   const st = document.createElement('style');
@@ -45,24 +54,28 @@ function ensureCss() {
     .ow-window {
       position: fixed; z-index: ${Z_BASE};
       min-width: 180px; max-width: 64vw;
-      background: var(--panel, #111); color: var(--fg, #9cdef2);
-      border: 1px solid var(--border, #355a66); border-radius: 10px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      background: var(--win-bg, var(--panel, #111)); color: var(--fg, #9cdef2);
+      border: 1px solid var(--win-border, var(--border, #355a66));
+      border-radius: var(--win-radius, 10px);
+      box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
       font-size: var(--fs-sm, .8rem); line-height: 1.45;
     }
     .ow-window.ow-focused {
-      border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--border, #355a66));
+      border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--win-border, var(--border, #355a66)));
       box-shadow: 0 12px 36px rgba(0,0,0,.5);
     }
     .ow-titlebar {
       display: flex; align-items: center; gap: .4rem;
       padding: .45rem .55rem .35rem .7rem;
       cursor: move; user-select: none; -webkit-user-select: none;
-      border-radius: 10px 10px 0 0;
+      border-radius: var(--win-radius, 10px) var(--win-radius, 10px) 0 0;
     }
     .ow-titlebar:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: -2px; }
     .ow-title {
-      flex: 1; min-width: 0; font-weight: 600; letter-spacing: .03em;
+      flex: 1; min-width: 0;
+      font-size: var(--win-titlebar-fs, 1rem);
+      font-weight: var(--win-titlebar-weight, 600);
+      letter-spacing: var(--win-titlebar-ls, -0.03em);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .ow-controls { display: flex; gap: 2px; flex-shrink: 0; }
