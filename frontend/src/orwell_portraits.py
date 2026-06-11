@@ -78,15 +78,18 @@ _PROVIDER_SEEN: dict = {}
 _LAST_MISSING: dict = {}
 _RECONCILER_TASK = None
 
-# The most recent _generate_one failure reason, consumed by the attempt logger. Module-level
-# is adequate: generate_and_store awaits each generation sequentially, and the log is
-# best-effort observability, never game state.
+# The most recent _generate_one failure reason (+ an optional short detail — the provider's
+# own error code/message on an HTTP failure), consumed by the attempt logger. Module-level is
+# adequate: generate_and_store awaits each generation sequentially, and the log is best-effort
+# observability, never game state.
 _LAST_GEN_ERROR: Optional[str] = None
+_LAST_GEN_DETAIL: Optional[str] = None
 
 
-def _note_gen_error(error_class: str) -> None:
-    global _LAST_GEN_ERROR
+def _note_gen_error(error_class: str, detail: Optional[str] = None) -> None:
+    global _LAST_GEN_ERROR, _LAST_GEN_DETAIL
     _LAST_GEN_ERROR = error_class
+    _LAST_GEN_DETAIL = detail or None
 
 
 def _consume_gen_error() -> Optional[str]:
@@ -96,10 +99,68 @@ def _consume_gen_error() -> Optional[str]:
     return e
 
 
+def _consume_gen_detail() -> Optional[str]:
+    global _LAST_GEN_DETAIL
+    d = _LAST_GEN_DETAIL
+    _LAST_GEN_DETAIL = None
+    return d
+
+
+# Recognized text→image model families — the Python mirror of settings.js `_isImageModel`.
+# A non-image (chat) model resolves fine but can't generate: POSTing it to /images/generations
+# 400s instantly. This keeps such a model from being treated as available or attempted, so the
+# pipeline never 400-loops on a mis-set model and `image_generation_available` stays truthful
+# (G20's reconciler and the Health "portraits N/M" counter both gate on it).
+_IMAGE_MODEL_FAMILIES = (
+    "gpt-image", "dall-e", "dalle",
+    "flux", "stable-diffusion", "sdxl", "sd3", "sd-", "playground-v",
+    "imagen", "ideogram", "recraft", "kolors", "kandinsky", "pixart",
+    "firefly", "titan-image", "aura-flow", "hidream", "seedream",
+    "qwen-image", "wan2", "janus", "omnigen", "cogview", "chroma",
+    "lumina", "nano-banana", "photon", "phoenix", "luma-photon",
+)
+_VISION_MARKERS = ("vision", "-vl", "understand", "caption", "ocr", "embed", "rerank")
+
+
+def _is_image_model(model_id: Optional[str]) -> bool:
+    lower = str(model_id or "").lower()
+    if any(kw in lower for kw in _IMAGE_MODEL_FAMILIES):
+        return True
+    if "image" in lower or "text-to-image" in lower or "t2i" in lower:
+        return not any(m in lower for m in _VISION_MARKERS)
+    return False
+
+
+def _provider_error_reason(resp) -> Optional[str]:
+    """A short, SAFE hint from a non-200 image response — the provider's own error
+    code/message (e.g. 'This model does not support image generation'), clipped, never
+    our prompt. Best-effort; None when nothing useful parses out."""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code") or err.get("type")
+                if msg:
+                    return str(msg)[:140]
+            elif isinstance(err, str) and err:
+                return err[:140]
+            msg = body.get("message")
+            if msg:
+                return str(msg)[:140]
+    except Exception:
+        pass
+    return None
+
+
 def log_attempt(houseguest_id: str, ok: bool, error_class: Optional[str] = None,
-                duration_ms: int = 0) -> None:
+                duration_ms: int = 0, detail: Optional[str] = None) -> None:
     """Append one generation attempt/outcome to the capped JSONL ring. Best-effort:
-    a logging failure must never break the generation pipeline itself."""
+    a logging failure must never break the generation pipeline itself.
+
+    `detail` (failures only) is a short provider-supplied reason — e.g. the body of an
+    image-API 400 ('model does not support image generation') — so a failure is
+    self-diagnosing without grepping the live log. Clipped; never carries our prompt."""
     entry = {
         "ts": time.time(),
         "houseguestId": str(houseguest_id),
@@ -107,6 +168,8 @@ def log_attempt(houseguest_id: str, ok: bool, error_class: Optional[str] = None,
         "errorClass": None if ok else (error_class or "unknown"),
         "durationMs": int(duration_ms),
     }
+    if (not ok) and detail:
+        entry["detail"] = str(detail)[:200]
     try:
         lines = []
         try:
@@ -265,7 +328,13 @@ def image_generation_available(user: Optional[str]) -> bool:
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
         return False
-    candidates = [model_spec] if model_spec else ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
+    # A configured model only counts if it's an IMAGE model — a chat model resolves fine but
+    # can't generate (it 400s), so a non-image pick falls through to the auto-detect image
+    # candidates instead of reporting a false positive.
+    candidates = []
+    if model_spec and _is_image_model(model_spec):
+        candidates.append(model_spec)
+    candidates += ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
     for cand in candidates:
         if not cand:
             continue
@@ -277,11 +346,121 @@ def image_generation_available(user: Optional[str]) -> bool:
     return False
 
 
+def _extract_chat_image_url(data: dict) -> Optional[str]:
+    """Pull a generated image's URL (a data: URL or an https: URL) out of a chat-completions
+    response — OpenRouter returns images on the assistant message: as `message.images[]`
+    (native image-output models, a data URL), as an image part in `message.content`, or as a
+    URL embedded in text content (the openrouter:image_generation server tool). Best-effort."""
+    try:
+        msg = data["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not isinstance(msg, dict):
+        return None
+
+    def _url_of(obj):
+        if not isinstance(obj, dict):
+            return None
+        iu = obj.get("image_url")
+        if isinstance(iu, dict) and isinstance(iu.get("url"), str):
+            return iu["url"]
+        if isinstance(iu, str) and iu:
+            return iu
+        return obj.get("url") if isinstance(obj.get("url"), str) else None
+
+    images = msg.get("images")
+    if isinstance(images, list):
+        for im in images:
+            u = _url_of(im)
+            if u:
+                return u
+    content = msg.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in ("image_url", "output_image", "image"):
+                u = _url_of(part)
+                if u:
+                    return u
+    if isinstance(content, str) and content:
+        m = re.search(r'(data:image/[A-Za-z0-9.+\-]+;base64,[A-Za-z0-9+/=]+|https?://[^\s)"\']+)', content)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _chat_text_hint(data: dict) -> Optional[str]:
+    """A short clip of the assistant's text reply — useful when no image came back (the model
+    may have explained why). Best-effort; never our prompt."""
+    try:
+        c = data["choices"][0]["message"].get("content")
+        if isinstance(c, str) and c.strip():
+            return c.strip()[:140]
+    except Exception:
+        pass
+    return None
+
+
+async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
+    """Decode a data: URL or fetch an https: URL to raw image bytes. None on any failure."""
+    try:
+        if url.startswith("data:"):
+            b64 = url.split(",", 1)[1] if "," in url else ""
+            return base64.b64decode(b64) if b64 else None
+        r = await client.get(url)
+        return r.content if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
+                                         prompt: str, headers: dict) -> Optional[bytes]:
+    """OpenRouter (and compatible) image generation over /chat/completions.
+
+    Two mechanisms, tried in order: native image-output via `modalities: [image, text]`
+    (the image-collection models), then the `openrouter:image_generation` server tool (any
+    model orchestrates and returns an image URL). The image is extracted from the assistant
+    message (data: or https:) and decoded. Best-effort: returns None and records the most
+    informative reason on failure."""
+    base_msg = {"model": model_id, "messages": [{"role": "user", "content": prompt}]}
+    attempts = (
+        {**base_msg, "modalities": ["image", "text"]},
+        {**base_msg, "tools": [{"type": "openrouter:image_generation"}]},
+    )
+    last_reason, last_detail = "no-image", None
+    for payload in attempts:
+        try:
+            resp = await client.post(chat_url, json=payload, headers=headers)
+        except Exception as e:  # transport error — try the next mechanism
+            last_reason, last_detail = type(e).__name__, None
+            continue
+        if resp.status_code != 200:
+            logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
+            last_reason, last_detail = f"http-{resp.status_code}", _provider_error_reason(resp)
+            continue
+        try:
+            data = resp.json()
+        except Exception:
+            last_reason, last_detail = "bad-json", None
+            continue
+        img_url = _extract_chat_image_url(data)
+        if not img_url:
+            last_reason, last_detail = "no-image-in-response", _chat_text_hint(data)
+            continue
+        png = await _image_bytes_from_url(client, img_url)
+        if png:
+            return png
+        last_reason, last_detail = "image-decode-failed", None
+    _note_gen_error(last_reason, last_detail)
+    return None
+
+
 async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
     """Generate a single image from `prompt`; return PNG bytes, or None on any failure.
 
     Best-effort: every failure path returns None (never raises) so a flaky image API can
-    never break game start or leak an error to the player.
+    never break game start or leak an error to the player. OpenRouter endpoints generate
+    via /chat/completions (see _generate_via_chat_completions); others use the OpenAI
+    Images API (/images/generations).
     """
     import httpx
     from src.ai_interaction import _resolve_model
@@ -289,6 +468,13 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
         return None
+
+    # Ignore a configured CHAT model (it can't generate — it would 400) and fall back to
+    # image auto-detect, mirroring image_generation_available so a stale/mis-set model never
+    # 400-loops the pipeline.
+    if model_spec and not _is_image_model(model_spec):
+        logger.info("[portraits] configured image_model %r is not an image model — using auto-detect", model_spec)
+        model_spec = ""
 
     if not model_spec:
         for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
@@ -309,6 +495,11 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
         _note_gen_error("no-model")
         return None
 
+    # OpenRouter does NOT implement the OpenAI /images/generations endpoint — its image
+    # models emit images through /chat/completions (native image-output via `modalities`,
+    # or any model via the openrouter:image_generation server tool). POSTing /images/...
+    # there 400s on every model, so route OpenRouter to the chat-completions transport.
+    is_openrouter = "openrouter.ai" in (url or "").lower()
     is_gpt_image = "gpt-image" in model_id.lower()
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
     images_url = base_url + "/images/generations"
@@ -322,10 +513,12 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
         ) as client:
+            if is_openrouter:
+                return await _generate_via_chat_completions(client, url, model_id, prompt, headers)
             resp = await client.post(images_url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info("[portraits] image API %s: %s", resp.status_code, resp.text[:200])
-                _note_gen_error(f"http-{resp.status_code}")
+                _note_gen_error(f"http-{resp.status_code}", _provider_error_reason(resp))
                 return None
             data = resp.json()
             images = data.get("data", [])
@@ -402,12 +595,13 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
 
-        _consume_gen_error()  # clear any stale reason before this attempt
+        _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail
         t0 = time.monotonic()
         png = await _generate_one(str(prompt), user)
         duration_ms = int((time.monotonic() - t0) * 1000)
         if not png:
-            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed", duration_ms)
+            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
+                        duration_ms, detail=_consume_gen_detail())
             skipped += 1
             continue
         try:
@@ -567,15 +761,17 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
     return summary
 
 
-def kickoff_backfill(missing_ids: list, user: Optional[str]) -> bool:
-    """Debounced fire-and-forget backfill; returns True when a run was actually kicked.
+def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False) -> bool:
+    """Fire-and-forget backfill; returns True when a run was actually kicked.
 
-    At most one attempt per user per process per BACKFILL_DEBOUNCE_S (the roster poll and
-    the manual lever share the window — a failing provider is never hammered). Never blocks
-    the caller: scheduled on the running loop like `kickoff_generation`."""
+    The AUTOMATIC roster-poll path is debounced (at most one attempt per user per process per
+    BACKFILL_DEBOUNCE_S — a failing provider is never hammered). `force=True` is the EXPLICIT
+    manual lever ("Generate cast portraits"): a deliberate click means "run now", so it
+    bypasses the debounce window — but still STAMPS it, so an auto-poll seconds later can't
+    pile on. Never blocks the caller: scheduled on the running loop like `kickoff_generation`."""
     if not missing_ids:
         return False
-    if not backfill_allowed(user):
+    if not force and not backfill_allowed(user):
         return False
     _LAST_BACKFILL_AT[_safe_user(user)] = time.time()
 

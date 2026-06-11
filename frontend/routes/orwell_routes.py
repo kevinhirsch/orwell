@@ -292,15 +292,18 @@ def setup_orwell_routes() -> APIRouter:
         missing = orwell_portraits.missing_portrait_ids(user, _roster_cards(state, user))
         kicked = False
         if available and missing:
-            kicked = orwell_portraits.kickoff_backfill(missing, user)
+            # The MANUAL lever — a deliberate click runs now, bypassing the auto-poll
+            # debounce (it still stamps the window so a roster poll can't pile on).
+            kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
 
     @router.get("/portraits/log")
     async def orwell_portraits_log(request: Request):
         """ADMIN-GATED (G9 observability, same require_admin contract as the admin transcript
         routes): the capped generation-attempt log — {ts, houseguestId, ok, errorClass,
-        durationMs} per attempt, oldest first. No Vault risk: the log carries only ids and
-        error classes (never a prompt, stat, or hidden element)."""
+        durationMs, detail?} per attempt, oldest first. No Vault risk: ids, error classes, and
+        (on failures) a short PROVIDER-supplied reason — never a prompt, stat, or hidden
+        element."""
         require_admin(request)
         return {"log": orwell_portraits.read_attempt_log()}
 
