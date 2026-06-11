@@ -196,6 +196,66 @@ describe("privileged UI port (<1024, e.g. 80) — the drop-in seam", () => {
   });
 });
 
+describe("install-script quality — the post-incident hardening (a real install died silently)", () => {
+  // A real box's install died between the engine build and service registration, leaving a
+  // half-install whose only symptom was "connection refused". These pin the framework that
+  // makes that failure mode impossible: loud located failure, a persisted log, and a success
+  // banner that is EARNED by verification rather than reached by falling off the end.
+  const inst = readFileSync(join(DEPLOY, "orwell-install.sh"), "utf8");
+
+  it("fails loudly and located: ERR trap (inherited into functions) + per-step tracking", () => {
+    expect(inst).toContain("set -Eeuo pipefail"); // -E so the trap fires inside functions
+    expect(inst).toContain("trap 'on_err $LINENO' ERR");
+    expect(inst).toContain("INSTALL FAILED during: ${STEP}");
+    expect(inst).toMatch(/idempotent/i); // the trap tells the operator a re-run resumes
+  });
+
+  it("persists every run to an install log (pct exec output scrolls away)", () => {
+    expect(inst).toMatch(/tee -a "\$INSTALL_LOG"/);
+  });
+
+  it("verifies the install before claiming success: units active + both health probes", () => {
+    // The bare invocation line — the definition alone is not enough (mutation-verified: the
+    // toContain form stayed green when the CALL was deleted from main()).
+    expect(inst).toMatch(/^\s*verify_install\s*$/m);
+    expect(inst).toMatch(/is-active --quiet orwell-engine/);
+    expect(inst).toMatch(/is-active --quiet orwell-frontend/);
+    expect(inst).toContain('"ok":true'); // the engine /health contract (same probe as smoke.sh)
+    expect(inst).toContain("/openapi.json"); // the FE liveness contract (same probe as smoke.sh)
+    // …and a verification failure surfaces the WHY (status + journal tails), not just a code.
+    expect(inst).toMatch(/journalctl -u/);
+  });
+
+  it("guards up front: root required, ports validated before anything runs", () => {
+    expect(inst).toMatch(/id -u.*-eq 0.*\|\|/s);
+    expect(inst).toContain("is not a valid port");
+  });
+
+  it("git safe.directory is wired (the orwell-owned checkout must stay updatable by root git)", () => {
+    expect(inst).toContain("safe.directory");
+  });
+
+  it("ownership covers DATA_DIR explicitly (it is overridable to outside APP_DIR)", () => {
+    expect(inst).toMatch(/chown -R orwell:orwell "\$\{APP_DIR\}" "\$\{DATA_DIR\}"/);
+  });
+
+  it("the drop-in/verification key on the EFFECTIVE port from data/.env, not the env arg", () => {
+    // A re-run with a different env ORWELL_PORT must not drift the capability grant away from
+    // the port the unit actually reads (its EnvironmentFile).
+    expect(inst).toMatch(/\(\( EFFECTIVE_PORT < 1024 \)\)/);
+    expect(inst).toMatch(/EFFECTIVE_PORT="\$\(sed -n 's\/\^ORWELL_PORT=\/\/p' "\$\{DATA_DIR\}\/\.env"/);
+  });
+
+  it("re-runs restart the services (a re-run after a rebuild must not keep stale processes)", () => {
+    expect(inst).toContain("systemctl restart orwell-engine orwell-frontend");
+  });
+
+  it("the final message prints a browsable address, never 0.0.0.0", () => {
+    expect(inst).toMatch(/hostname -I/);
+    expect(inst).not.toContain("http://0.0.0.0");
+  });
+});
+
 describe("container console access — the root password seam (orwell.sh)", () => {
   const text = readFileSync(join(DEPLOY, "orwell.sh"), "utf8");
 
