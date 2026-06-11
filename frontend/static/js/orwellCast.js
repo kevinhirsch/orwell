@@ -80,39 +80,24 @@
 
   // --- the panel ----------------------------------------------------------------
 
+  // G10 (DWE / Lane G): the roster COMPOSES the window kit — it is a companion
+  // reference (its own doc-comment), so it is a normal non-modal window: kit
+  // titlebar (close + minimize), drag, slot placement, Escape-parks, dock chip,
+  // and the one visual language. The old bespoke full-screen modal scrim and
+  // hidden-attribute toggling are gone (an author display:flex rule silently
+  // defeated that attribute — the close button never worked; root cause
+  // recorded in the Lane G ledger).
+  let _win = null;
   function ensurePanel() {
     let el = document.getElementById(PANEL_ID);
     if (el) return el;
-    el = document.createElement("div");
-    el.id = PANEL_ID;
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-label", "The cast");
-    el.setAttribute("aria-modal", "true");
-    el.hidden = true;
-    el.innerHTML = `
+    const content = document.createElement("div");
+    content.innerHTML = `
       <style>
         #orwell-cast {
-          position: fixed; inset: 0; z-index: 9500;
-          display: flex; align-items: center; justify-content: center;
-          background: color-mix(in srgb, var(--bg, #282c34) 80%, black);
+          width: min(560px, 92vw);
           font-family: 'Fira Code', ui-monospace, monospace;
         }
-        #orwell-cast .oc-card {
-          width: 560px; max-width: 94vw; max-height: 88vh; overflow: auto;
-          background: var(--panel, #111); color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 12px;
-          padding: 1.1rem 1.2rem; box-shadow: 0 20px 60px rgba(0,0,0,.45);
-        }
-        #orwell-cast .oc-hdr {
-          display: flex; align-items: baseline; gap: .5rem; margin-bottom: .8rem;
-          font-weight: 600; letter-spacing: .03em;
-        }
-        #orwell-cast .oc-ttl { flex: 1; min-width: 0; }
-        #orwell-cast .oc-close {
-          cursor: pointer; border: none; background: none; color: inherit;
-          opacity: .6; font-size: 1.3rem; line-height: 1; padding: 0 .2rem;
-        }
-        #orwell-cast .oc-close:hover { opacity: 1; }
         #orwell-cast .oc-grid {
           display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
           gap: .7rem;
@@ -143,28 +128,32 @@
         #orwell-cast .oc-backfill:hover:not(:disabled) { background: rgba(255,255,255,.12); }
         #orwell-cast .oc-backfill:disabled { opacity: .5; cursor: default; }
         #orwell-cast .oc-backfill-note { font-size: .72rem; opacity: .65; line-height: 1.4; }
+        /* Narrow: the slot engine's sheet host owns the position; just fit. */
         @media (max-width: 768px) {
-          #orwell-cast .oc-card { width: auto; border-radius: 0; max-height: 100vh; height: 100%; }
+          #orwell-cast { width: auto !important; max-width: none !important; }
         }
       </style>
-      <div class="oc-card" tabindex="-1">
-        <div class="oc-hdr">
-          <span class="oc-ttl">🎬 The Cast</span>
-          <button type="button" class="oc-close" aria-label="Close">&times;</button>
-        </div>
-        <div class="oc-grid" id="oc-grid"></div>
-        <div class="oc-empty" id="oc-empty" style="display:none"></div>
-        <div class="oc-actions" id="oc-actions" style="display:none">
-          <button type="button" class="oc-backfill" id="oc-backfill">Generate cast portraits</button>
-          <span class="oc-backfill-note" id="oc-backfill-note"></span>
-        </div>
+      <div class="oc-grid" id="oc-grid"></div>
+      <div class="oc-empty" id="oc-empty" style="display:none"></div>
+      <div class="oc-actions" id="oc-actions" style="display:none">
+        <button type="button" class="oc-backfill" id="oc-backfill">Generate cast portraits</button>
+        <span class="oc-backfill-note" id="oc-backfill-note"></span>
       </div>`;
-    document.body.appendChild(el);
-    el.querySelector("#oc-backfill").addEventListener("click", requestBackfill);
-    el.querySelector(".oc-close").addEventListener("click", () => togglePanel(false));
-    el.addEventListener("click", (e) => { if (e.target === el) togglePanel(false); });
-    el.addEventListener("keydown", (e) => { if (e.key === "Escape") togglePanel(false); });
-    return el;
+    _win = window.OrwellWindowKit.create({
+      id: PANEL_ID, title: "🎬 The Cast",
+      icon: "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='9' cy='7' r='4'/><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/></svg>",
+      slot: "top-left", slotKey: "cast", role: "complementary",
+      minimizable: true, closable: true, draggable: true,
+      content,
+      onClose: () => {
+        _win = null; _open = false;
+        if (_timer) { clearInterval(_timer); _timer = null; }
+      },
+    });
+    _win.open(document.getElementById(BTN_ID) || undefined);
+    const el2 = document.getElementById(PANEL_ID);
+    el2.querySelector("#oc-backfill").addEventListener("click", requestBackfill);
+    return el2;
   }
 
   function statusLabel(s) {
@@ -267,18 +256,21 @@
   }
 
   function togglePanel(open) {
-    const el = ensurePanel();
-    _open = open;
-    el.hidden = !open;
     if (open) {
+      const el = ensurePanel();
+      _open = true;
+      el.style.display = "block";
+      if (_win) { _win.restore(); _win.raise(); }
       refreshRoster();
-      try { el.querySelector(".oc-card").focus(); } catch (_) {}
       if (_timer) clearInterval(_timer);
       _timer = setInterval(() => { if (_open && !document.hidden) refreshRoster(); }, POLL_MS);
-    } else if (_timer) {
-      clearInterval(_timer); _timer = null;
+    } else if (_win) {
+      _win.close(); // kit close: fly-away, teardown, focus-return (onClose resets state)
     }
   }
+
+  // Seam for the headless gate (mirrors the other panels).
+  window._orwellCastEnsure = () => { togglePanel(true); return true; };
 
   // Public hooks (mirrors the other orwell panels): refresh on a game change.
   window.orwellRefreshCast = () => { if (_open) refreshRoster(); };

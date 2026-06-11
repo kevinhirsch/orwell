@@ -511,6 +511,46 @@ def main() -> int:
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
 
+            # G10: the cast roster composes the kit — open via the seam, prove the
+            # chrome, and prove CLOSE actually closes (the bespoke version's close
+            # was silently defeated by its own display:flex beating [hidden]).
+            page.evaluate("window._orwellCastEnsure && window._orwellCastEnsure()")
+            page.wait_for_timeout(400)
+            cast = page.evaluate("""() => {
+              const el = document.getElementById('orwell-cast');
+              if (!el) return { mounted: false };
+              return { mounted: true, kit: el.hasAttribute('data-ow-window'),
+                       modal: el.getAttribute('aria-modal'),
+                       controls: [...el.querySelectorAll('.ow-controls button')].map(b => b.getAttribute('aria-label')) };
+            }""")
+            check(cast.get("mounted") is True and cast.get("kit") is True,
+                  f"G10: the cast window is kit-managed ({cast})")
+            check(cast.get("modal") is None and "Close" in (cast.get("controls") or []) and "Minimize" in (cast.get("controls") or []),
+                  f"G10: non-modal with the full kit cluster ({cast})")
+            page.click("#orwell-cast .ow-close")
+            page.wait_for_timeout(350)
+            check(page.evaluate("!document.getElementById('orwell-cast')") is True,
+                  "G10: close CLOSES (trusted click; the [hidden] defeat is dead)")
+
+            # G10 ratchet tightening: any close/minimize-shaped control inside a
+            # fixed-position surface must belong to the kit or the legacy .modal family.
+            rogue_chrome = page.evaluate("""() => {
+              const out = [];
+              document.querySelectorAll('button[aria-label="Close"], button[aria-label="Minimize"]').forEach(b => {
+                let n = b.parentElement, fixed = null;
+                while (n && n !== document.body) {
+                  if (getComputedStyle(n).position === 'fixed') { fixed = n; break; }
+                  n = n.parentElement;
+                }
+                if (!fixed) return;
+                if (fixed.closest('[data-ow-window]') || fixed.closest('.modal') || fixed.id === 'minimized-dock'
+                    || fixed.id === 'orwell-engine-status' || fixed.id === 'orwell-onboarding') return;
+                out.push(fixed.id || fixed.className.toString().slice(0, 30));
+              });
+              return out;
+            }""")
+            check(rogue_chrome == [], f"F-3+: no bespoke window chrome outside the kit/.modal families ({rogue_chrome})")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
