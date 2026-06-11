@@ -272,6 +272,9 @@
           body: JSON.stringify(payload),
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
+        // G15: a bound decision mutates the game — nudge every panel through the
+        // shared debounced dispatcher NOW, not at the next 20–30s poll.
+        if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind);
         card.classList.add("odec-done");
         card.innerHTML = `<div class="odec-head"><span class="odec-title">✓ Locked in.</span></div>`;
         // The play continues in conversation: prefill (never auto-send) so the model
