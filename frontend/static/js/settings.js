@@ -589,6 +589,37 @@ async function initUtilityModel() {
   });
 }
 
+/* G21 — only image-generation models belong in the Image select.
+ * H2 unified every flat model dropdown onto the chat pool but, unlike Vision
+ * and TTS, left the Image select UNFILTERED — so a chat model (DeepSeek,
+ * Llama, gpt-4o…) could be picked. Resolving such a spec succeeds (it's a
+ * real chat model) but POSTing it to /images/generations 400s instantly:
+ * the provider fast-rejects a non-image model. This INCLUSION filter offers
+ * only recognizable image-model families; everything else falls to the blank
+ * "Auto-detect" option (which probes gpt-image/dall-e). Data-driven on the
+ * model id — never a hardcoded endpoint list. */
+function _isImageModel(mid) {
+  var lower = String(mid || '').toLowerCase();
+  // Known text→image families (provider-agnostic substrings). Broad on
+  // purpose: better to offer a real image model we don't recognize by name
+  // than to offer a chat model that can only 400.
+  var families = [
+    'gpt-image', 'dall-e', 'dalle',
+    'flux', 'stable-diffusion', 'sdxl', 'sd3', 'sd-', 'playground-v',
+    'imagen', 'ideogram', 'recraft', 'kolors', 'kandinsky', 'pixart',
+    'firefly', 'titan-image', 'aura-flow', 'hidream', 'seedream',
+    'qwen-image', 'wan2', 'janus', 'omnigen', 'cogview', 'chroma',
+    'lumina', 'nano-banana', 'photon', 'phoenix', 'luma-photon'
+  ];
+  if (families.some(function(kw) { return lower.includes(kw); })) return true;
+  // Generic "image"/"text-to-image" tokens catch newer entrants, but never
+  // when paired with a vision/understanding marker (those are chat models).
+  if (/image|text-to-image|t2i/.test(lower)) {
+    return !/(vision|-vl\b|understand|caption|ocr|embed|rerank)/.test(lower);
+  }
+  return false;
+}
+
 /* ── Image Generation ── */
 async function initImageSettings() {
   const modelSel = el('set-imgModelSelect');
@@ -597,12 +628,22 @@ async function initImageSettings() {
   const enabledToggle = el('set-imgEnabledToggle');
   const configWrap = modelSel ? modelSel.closest('div[style*="flex-direction"]') : null;
   var _endpoints = [];
-  // H2: the options mirror the Default Chat Model card — same endpoint
-  // source, same availability filter, no hardcoded model list. The blank
-  // "Auto-detect" option is the sane fallback when the saved model is no
-  // longer available.
+  // H2/G21: the options mirror the Default Chat Model card's endpoint source
+  // and availability filter, NARROWED to image-capable models. The blank
+  // "Auto-detect" option is the sane fallback when no model resolves.
   function refreshModels(selectedModel) {
-    _fillModelSelect(modelSel, _availableModelIds(_endpoints), selectedModel, true);
+    _fillModelSelect(modelSel, _availableModelIds(_endpoints, function(mid) { return _isImageModel(mid); }), selectedModel, true);
+  }
+  // A saved pick that isn't an image model (the pre-G21 footgun, e.g. a chat
+  // model) self-heals to Auto-detect AND persists the correction — otherwise
+  // the dropdown would show Auto-detect while generation kept 400-ing on the
+  // stale value. Returns true when it corrected (so we can tell the player).
+  function autoHealStaleModel(savedModel) {
+    var saved = (savedModel || '').trim();
+    if (!saved) return false;
+    if (_isImageModel(saved)) return false;
+    modelSel.value = '';
+    return true;
   }
   try {
     _endpoints = await _fetchModelEndpoints();
@@ -611,6 +652,14 @@ async function initImageSettings() {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await settingsRes.json();
     refreshModels(settings.image_model || '');
+    if (autoHealStaleModel(settings.image_model)) {
+      await saveSettings();
+      if (msg) {
+        msg.textContent = "Reset image model — '" + String(settings.image_model).split('/').pop() + "' can't generate images";
+        msg.style.color = 'var(--amber, var(--fg))';
+        setTimeout(() => { msg.textContent = ''; }, 6000);
+      }
+    }
     if (settings.image_quality) qualSel.value = settings.image_quality;
     if (enabledToggle) enabledToggle.checked = settings.image_gen_enabled !== false;
   } catch (e) { console.warn('Failed to load settings', e); refreshModels(''); }
