@@ -1,21 +1,28 @@
-// Orwell social surface (feature 0036 / C10) — the player-facing UI for NPC approaches
-// over the engine's Vault-free routes (the Diary Room lives in the sidebar —
-// orwellDiaryRoom.js). Built as a self-contained,
-// fail-open sibling to orwellStatusPanel.js: it only shows while a game is in progress,
-// renders ONLY what the routes return, and never disturbs the chat if the engine is down.
+// Orwell social surface (feature 0036 / C10, refit by H5/G7) — NPC approaches as
+// SIDEBAR CHROME, over the engine's Vault-free routes (the Diary Room lives in the
+// sidebar too — orwellDiaryRoom.js). Built as a self-contained, fail-open sibling to
+// orwellStatusPanel.js: it only shows while a game is in progress AND a houseguest
+// actually wants the player, renders ONLY what the routes return, and never disturbs
+// the chat if the engine is down.
 //
 //   • GET  /api/orwell/state        → gate on an active game (started)
-//   • GET  /api/orwell/initiatives  → houseguests who want to approach (name + pretext)
+//   • GET  /api/orwell/initiatives  → houseguests who want to approach (name + motive)
 //
 // Vault-free by construction (the engine withholds all hidden state); fail-open everywhere.
 //
-// Like the settings panel it is a real moveable window: drag it by its header, minimize it,
-// and it remembers both across reloads. A few houseguests may want you at once (a living
-// house, not a crowd), the NPC is framed as the one approaching (they initiated), and an
-// approach you act on or dismiss STAYS gone across a refresh (until a new game), so the
-// surface never nags about something you already handled.
-import * as modalManager from "./modalManager.js";
-import { isNarrow } from './platform.js';
+// H5 (the user verdict on "The House", = the long-parked G7): this is NOT a window
+// anymore. The floating kit panel read as a useless empty box, so the surface is folded
+// into the sidebar on the ruling #3/E64 precedent (the status HUD pattern): a <section>
+// injected into #sidebar directly under the game-status section — no drag, no saved
+// position, no minimize dock, no z-index, no titlebar. On mobile it lives in the
+// sidebar drawer like every other section. And because an approaches surface with no
+// approaches is exactly the "empty window" the verdict retired, the section renders
+// NOTHING while no approach is pending — it appears when a houseguest wants a word and
+// collapses away again once the player has handled them all.
+//
+// What it keeps (all the real behavior): the approach chips with E60 motive framing,
+// the E89 first-ceremony belt, per-user dismissals, the prefill-the-composer action,
+// and the C18 poll loop with backoff.
 
 (function () {
   "use strict";
@@ -27,7 +34,6 @@ import { isNarrow } from './platform.js';
   // so one account's waved-off approaches never bleed into another's session.
   const DISMISS_KEY = "orwell-social-dismissed:" +
     ((document.body && document.body.dataset.user) || "");
-  const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -71,7 +77,6 @@ import { isNarrow } from './platform.js';
   // C18: a hidden tab polls nothing; consecutive failures back the poll off (max 2 min).
   let _failures = 0;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
-  let _mobileParkedOnce = false;  // C26: auto-parked to the dock on mobile this session
   let pendingApproachId = null;  // approach prefilled but not yet sent
   let _shown = false;  // shown a real game this session (U5: keep last-known on a hiccup)
 
@@ -97,42 +102,47 @@ import { isNarrow } from './platform.js';
     return r.json();
   }
 
-  // True while the dock holds this panel minimized — the poll loop must not reopen it.
-  function isMinimized() {
-    try { return modalManager.isMinimized && modalManager.isMinimized(ID); } catch (_) { return false; }
-  }
-  // Hide the panel and clear any dock chip (no active game / engine down) so no stale
-  // "The House" chip lingers in the fly-out.
+  // Hide the section outright (no active game / engine down before first paint).
   function hidePanel() {
     const el = document.getElementById(ID);
-    if (!el) return;
-    if (isMinimized()) { try { modalManager.restore(ID); } catch (_) {} }
-    el.style.display = "none";
+    if (el) el.style.display = "none";
   }
 
-  // F-2 wave 1 (DWE audit): the panel COMPOSES the window kit — chrome, drag,
-  // minimize-to-dock, Escape, focus, persistence, and animations all come from
-  // OrwellWindow (orwellWindow.js). This module keeps only what is social:
-  // the approaches content, the poll loop, and the E60/E89 framing rules.
-  let _win = null;
-  function ensureUI() {
+  // H5: the section is sidebar chrome, mirroring orwellStatusPanel.js's ensure/mount
+  // pattern (ruling #3/E64) — static flow, full sidebar width, the status panel's
+  // visual standard. display is CONTENT-DRIVEN: renderApproaches() shows the section
+  // only while it holds at least one live chip, so an empty "The House" box can never
+  // sit on the screen again.
+  function ensureSection() {
     let el = document.getElementById(ID);
     if (el) return el;
-    const content = document.createElement("div");
-    content.innerHTML = `
+    el = document.createElement("section");
+    el.id = ID;
+    el.setAttribute("aria-label", "House approaches");
+    el.innerHTML = `
       <style>
+        /* H5: sidebar chrome, not a window — the orwell-status visual standard. */
         #orwell-social {
-          width: 240px; display: none;
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem;
+          display: none;
+          margin: var(--space-2) var(--space-2) 0;
+          padding: var(--space-2) var(--space-3);
+          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
+          color: var(--fg, #9cdef2);
+          border: 1px solid var(--border, #355a66); border-radius: 10px;
+          font-family: 'Fira Code', ui-monospace, monospace;
+          font-size: var(--fs-xs); line-height: 1.5;
         }
-        #orwell-social .osoc-hd { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); margin: .15rem 0 .3rem; letter-spacing: .03em; }
+        #orwell-social .osoc-hd {
+          color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
+          margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
+        }
         #orwell-social .osoc-chip {
           display: flex; align-items: center; gap: .35rem; margin: .25rem 0;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
           border-radius: 8px; padding: .25rem .4rem;
         }
         #orwell-social .osoc-chip .osoc-go {
-          flex: 1; cursor: pointer; text-align: left;
+          flex: 1; cursor: pointer; text-align: left; min-height: 24px;
           border: none; background: none; color: inherit; font: inherit; padding: 0;
         }
         #orwell-social .osoc-chip .osoc-go b { color: var(--fg, #9cdef2); }
@@ -152,33 +162,26 @@ import { isNarrow } from './platform.js';
         #orwell-social .osoc-chip.osoc-chip-pending .osoc-go b {
           color: var(--accent, #e06c75);
         }
-        /* C26/M1 + F3: phones — a full-width sheet whose POSITION the slot
-           engine's sheet host owns (no per-panel top/left pins; the host
-           stacks every visible sheet so two can never overlap). */
-        @media (max-width: 768px) {
-          #orwell-social {
-            width: auto !important; max-width: none !important;
-            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
-            max-height: 38vh; overflow: auto;
-          }
-        }
       </style>
-      <div class="osoc-body">
-        <div class="osoc-hd" id="osoc-appr-hd" style="display:none">Wants a word</div>
-        <div id="osoc-appr"></div>
-      </div>`;
+      <div class="osoc-hd" id="osoc-appr-hd">Wants a word</div>
+      <div id="osoc-appr"></div>`;
     // E88 (ruling #4): the Diary Room is NOT here — it is a standing sidebar
-    // button + a composer mode (orwellDiaryRoom.js). This panel is approaches only.
-    _win = window.OrwellWindowKit.create({
-      id: ID, title: "The House", icon: ICON,
-      slot: "top-right", slotKey: "social", role: "complementary",
-      // An ambient HUD parks (minimize); the game decides when it exists, so it
-      // carries no close — a CAPABILITY of the one kit cluster, not bespoke chrome.
-      minimizable: true, closable: false, draggable: true,
-      content,
-    });
-    _win.open();
-    return document.getElementById(ID);
+    // button + a composer mode (orwellDiaryRoom.js). This section is approaches only.
+    //
+    // Mount INSIDE the sidebar, directly under the game-status section (or under the
+    // session list before the status panel has mounted — the two orderings converge:
+    // sessions → status → approaches). Never document.body, never floating.
+    const sidebar = document.getElementById("sidebar");
+    const anchor = document.getElementById("orwell-status") ||
+                   document.getElementById("sessions-section");
+    if (anchor && anchor.parentElement) {
+      anchor.parentElement.insertBefore(el, anchor.nextSibling);
+    } else if (sidebar) {
+      sidebar.appendChild(el);
+    } else {
+      document.body.appendChild(el); // headless/degraded DOM — still functional
+    }
+    return el;
   }
 
   // --- Approaches -------------------------------------------------------
@@ -211,10 +214,9 @@ import { isNarrow } from './platform.js';
     if (pendingApproachId !== null) {
       dismiss(pendingApproachId);
       pendingApproachId = null;
-      // Re-render using the last fetched list (next poll will update naturally).
-      const wrap = document.getElementById("osoc-appr");
-      const hd = document.getElementById("osoc-appr-hd");
-      if (wrap) { wrap.innerHTML = ""; if (hd) hd.style.display = "none"; }
+      // Clear and collapse; the next poll re-renders any approaches still live
+      // (H5: an empty section never lingers on screen).
+      renderApproaches([]);
     }
   }
   // Hook into the send button and Enter-to-submit on the composer.
@@ -232,6 +234,7 @@ import { isNarrow } from './platform.js';
   };
 
   function renderApproaches(list) {
+    const el = ensureSection();
     const wrap = document.getElementById("osoc-appr");
     const hd = document.getElementById("osoc-appr-hd");
     if (!wrap) return;
@@ -246,6 +249,9 @@ import { isNarrow } from './platform.js';
       .slice(0, MAX_APPROACHES); // a few may want you at once (U7)
     wrap.innerHTML = "";
     hd.style.display = items.length ? "block" : "none";
+    // H5: content-driven visibility — the section exists on screen ONLY while it
+    // holds at least one chip (the verdict: never an empty "The House" box).
+    el.style.display = items.length ? "block" : "none";
     for (const it of items) {
       const id = it.houseguest.id;
       const name = it.houseguest.name || "A houseguest";
@@ -282,15 +288,16 @@ import { isNarrow } from './platform.js';
     }
   }
 
-  // Seam for the headless browser gate: build + show the social panel on demand.
-  window._orwellSocialEnsure = () => { const el = ensureUI(); el.style.display = "block"; return true; };
+  // Seam for the headless browser gate: mount the section on demand (display stays
+  // content-driven — H5: an empty section never shows).
+  window._orwellSocialEnsure = () => { ensureSection(); return true; };
 
   // E60/E89 test seam (headless browser keep-set): drive the belt + motive framing WITHOUT a live
   // engine. `resolved` sets the FE belt; `list` is fed to renderApproaches exactly as a (possibly
   // fail-open) initiatives payload would be — so the smoke can prove the belt suppresses chips even
   // when approaches arrive early, and that bond/probe motives render distinct chips once it opens.
   window._orwellSocialDriveApproaches = (resolved, list) => {
-    ensureUI();
+    ensureSection();
     _ceremonyResolved = !!resolved;
     dismissed = new Set(); // a clean slate so the smoke isn't suppressed by prior dismissals
     renderApproaches(list || []);
@@ -312,7 +319,7 @@ import { isNarrow } from './platform.js';
     try {
       st = await getJSON("/api/orwell/state");
     } catch (_) {
-      // ENGINE HICCUP (not "no game"): keep a shown panel up (U5) — just don't refresh
+      // ENGINE HICCUP (not "no game"): keep a shown section up (U5) — just don't refresh
       // approaches. Only hide when we've never shown it (nothing to keep).
       if (window.OrwellReport) window.OrwellReport.fail("social", "state-poll", _); // G11: fail open, never silent
       _failures += 1;
@@ -329,16 +336,9 @@ import { isNarrow } from './platform.js';
     _shown = true;
     // E89 belt: track whether the first ceremony has resolved, from /state alone.
     _ceremonyResolved = firstCeremonyResolved(st);
-    const el = ensureUI();
-    // Keep approaches fresh, but if the player parked it in the dock, leave it there.
-    // C26/M1: on a phone, first appearance parks in the chip dock (chat stays
-    // unobstructed); the dock chip restores it as a full-width top sheet.
-    if (isNarrow() && !_mobileParkedOnce && !isMinimized()) {
-      _mobileParkedOnce = true;
-      el.style.display = "block";
-      try { if (_win) { _win.minimize(); return; } } catch (_) {}
-    }
-    if (!isMinimized()) el.style.display = "block";
+    ensureSection();
+    // H5: no minimize/dock/mobile-park bookkeeping anymore — the section is sidebar
+    // chrome, and renderApproaches() owns whether it shows (chips) or collapses (none).
     // E89 belt: don't even ask for approaches before the first ceremony resolves — and if the
     // engine fails open, renderApproaches([]) still suppresses everything against the belt.
     if (!_ceremonyResolved) { renderApproaches([]); return; }
@@ -352,7 +352,6 @@ import { isNarrow } from './platform.js';
   }
 
   function start() {
-    ensureUI();
     refresh();
     if (timer) clearInterval(timer);
     const tick = async () => {

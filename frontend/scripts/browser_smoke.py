@@ -318,69 +318,113 @@ def main() -> int:
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
 
-            # T20: the social HUD's minimize-to-dock BEHAVIOR (the source-pins in
-            # tests/test_orwell_huds.py only prove the wiring is present — this proves it WORKS in
-            # the browser). Mount the panel, click its minimize control, and assert the panel hides
-            # AND a dock chip for it appears in the shared "Windows" dock; then restore via the chip
-            # and assert the panel returns. A regression that drops the dock wiring (reverting to an
-            # in-place collapse, or losing the chip) fails here, not just at the source grep.
+            # H5/G7 (the user verdict on "The House"): the approaches surface is SIDEBAR
+            # CHROME now — a <section> injected into #sidebar on the ruling #3/E64
+            # status-panel pattern, NOT a window. No kit chrome, no dock chip, no fixed
+            # position; and while no approach is pending the section shows NOTHING (the
+            # "useless empty window" the verdict retired can never render at all).
             page.evaluate("window._orwellSocialEnsure && window._orwellSocialEnsure()")
-            page.wait_for_selector("#orwell-social", timeout=3000)
-            check(page.evaluate("getComputedStyle(document.getElementById('orwell-social')).display !== 'none'") is True,
-                  "social HUD: mounts visible")
+            page.wait_for_selector("#orwell-social", state="attached", timeout=3000)
+            h5 = page.evaluate("""() => {
+              const el = document.getElementById('orwell-social');
+              const sb = document.getElementById('sidebar');
+              const cs = getComputedStyle(el);
+              return { tag: el.tagName, inSidebar: !!(sb && sb.contains(el)),
+                       fixed: cs.position === 'fixed', kit: el.hasAttribute('data-ow-window'),
+                       chrome: !!el.querySelector('.ow-titlebar, .ow-controls'),
+                       emptyHidden: cs.display === 'none' };
+            }""")
+            check(h5.get("tag") == "SECTION" and h5.get("inSidebar") is True,
+                  f"H5: The House mounts as a sidebar section ({h5})")
+            check(h5.get("kit") is False and h5.get("chrome") is False and h5.get("fixed") is False,
+                  f"H5: no window chrome — not kit-managed, never fixed ({h5})")
+            check(h5.get("emptyHidden") is True,
+                  f"H5: with no pending approach the section shows nothing ({h5})")
+            h5_chips = page.evaluate("""() => {
+              const r = window._orwellSocialDriveApproaches(true, [
+                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
+                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
+              ]);
+              const el = document.getElementById('orwell-social');
+              return { count: r.count, visible: getComputedStyle(el).display !== 'none',
+                       inSidebar: document.getElementById('sidebar').contains(el) };
+            }""")
+            check(h5_chips.get("count") == 2 and h5_chips.get("visible") is True
+                  and h5_chips.get("inSidebar") is True,
+                  f"H5: approach chips render inside the sidebar section ({h5_chips})")
+            h5_empty = page.evaluate("""() => {
+              window._orwellSocialDriveApproaches(true, []);
+              return getComputedStyle(document.getElementById('orwell-social')).display === 'none';
+            }""")
+            check(h5_empty is True, "H5: clearing the approaches collapses the section again")
+            check(page.evaluate("!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id=\"orwell-social\"]')") is True,
+                  "H5: no orwell-social dock chip exists (it is not a window)")
+            check(page.evaluate("!document.getElementById('orwell-social').querySelector('[title=\"Drag to move\"]')") is True,
+                  "H5: the section advertises no drag affordance")
+
+            # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
+            # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
+            # panel, click its minimize control, and assert the panel hides AND a dock chip
+            # for it appears in the shared "Windows" dock; then restore via the chip and
+            # assert the panel returns. A regression that drops the dock wiring (reverting
+            # to an in-place collapse, or losing the chip) fails here, not at a source grep.
+            page.evaluate("window._orwellFinaleEnsure && window._orwellFinaleEnsure()")
+            page.wait_for_selector("#orwell-finale", timeout=3000)
+            check(page.evaluate("getComputedStyle(document.getElementById('orwell-finale')).display !== 'none'") is True,
+                  "finale panel: mounts visible")
             page.wait_for_timeout(280)  # let the kit's open animation settle before measuring
-            soc_cluster = page.evaluate("""[...document.querySelectorAll('#orwell-social .ow-controls button')].map(b => {
+            fin_cluster = page.evaluate("""[...document.querySelectorAll('#orwell-finale .ow-controls button')].map(b => {
               const r = b.getBoundingClientRect();
               return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
             })""")
-            check(len(soc_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in soc_cluster),
-                  f"wave 1: social composes the kit cluster (named, >=24px) ({soc_cluster})")
+            check(len(fin_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in fin_cluster),
+                  f"finale composes the kit cluster (named, >=24px) ({fin_cluster})")
             # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
             # clicks worked on an invisible dock and masked the stranded-window trap.
-            page.click("#orwell-social .ow-min")
+            page.click("#orwell-finale .ow-min")
             page.wait_for_timeout(500)  # the ruling-#19 fly-out runs ~270ms before the dock renders
             min_state = page.evaluate("""() => {
-              const el = document.getElementById('orwell-social');
+              const el = document.getElementById('orwell-finale');
               const dock = document.getElementById('minimized-dock');
-              const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]');
+              const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-finale"]');
               const dr = dock ? dock.getBoundingClientRect() : null;
               return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip,
                        dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dr.height > 0 };
             }""")
-            check(min_state.get("hidden") is True, f"social HUD: minimize HIDES the panel ({min_state})")
-            check(min_state.get("chip") is True, f"social HUD: minimize parks a chip in the shared dock ({min_state})")
+            check(min_state.get("hidden") is True, f"finale panel: minimize HIDES the panel ({min_state})")
+            check(min_state.get("chip") is True, f"finale panel: minimize parks a chip in the shared dock ({min_state})")
             check(min_state.get("dockVisible") is True,
                   f"F1: the Windows dock is VISIBLE while holding a chip ({min_state})")
-            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-social']")
+            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-finale']")
             page.wait_for_timeout(250)
             restored = page.evaluate(
-                "(function(){var e=document.getElementById('orwell-social');return !!e && getComputedStyle(e).display!=='none';})()")
-            check(restored is True, "social HUD: restoring from the dock chip re-opens the panel (trusted click)")
+                "(function(){var e=document.getElementById('orwell-finale');return !!e && getComputedStyle(e).display!=='none';})()")
+            check(restored is True, "finale panel: restoring from the dock chip re-opens the panel (trusted click)")
 
             # F2 (DWE audit): drag must MOVE the panel — the slot restack used to revert
             # every windowDrag style write, leaving drag dead and offsets at (0,0).
-            hdr = page.query_selector("#orwell-social .ow-titlebar")
+            hdr = page.query_selector("#orwell-finale .ow-titlebar")
             hb = hdr.bounding_box()
-            r0 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            r0 = page.evaluate("document.getElementById('orwell-finale').getBoundingClientRect().toJSON()")
             page.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
             page.mouse.down()
             for i in range(1, 9):
-                page.mouse.move(hb["x"] + hb["width"] / 2 - 150 * i / 8, hb["y"] + hb["height"] / 2 + 120 * i / 8)
+                page.mouse.move(hb["x"] + hb["width"] / 2 + 150 * i / 8, hb["y"] + hb["height"] / 2 + 120 * i / 8)
             page.mouse.up()
             page.wait_for_timeout(200)
-            r1 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            r1 = page.evaluate("document.getElementById('orwell-finale').getBoundingClientRect().toJSON()")
             moved = abs(r1["x"] - r0["x"]) > 100 or abs(r1["y"] - r0["y"]) > 80
             check(moved is True, f"F2: dragging the title bar MOVES the panel (x {r0['x']:.0f}->{r1['x']:.0f}, y {r0['y']:.0f}->{r1['y']:.0f})")
             off = page.evaluate("""() => {
-              const k = Object.keys(localStorage).find(k => k.startsWith('orwell-slot-offset:social'));
+              const k = Object.keys(localStorage).find(k => k.startsWith('orwell-slot-offset:finale'));
               if (!k) return null;
               try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; }
             }""")
             check(bool(off) and (abs(off.get("dx", 0)) > 60 or abs(off.get("dy", 0)) > 40),
                   f"F2: the persisted slot offset is the real drag delta, not (0,0) ({off})")
-            page.evaluate("window._orwellStatusEnsure && window._orwellStatusEnsure()")  # provoke a restack
+            page.evaluate("window.OrwellSlots && window.OrwellSlots.restackAll()")  # provoke a restack
             page.wait_for_timeout(250)
-            r2 = page.evaluate("document.getElementById('orwell-social').getBoundingClientRect().toJSON()")
+            r2 = page.evaluate("document.getElementById('orwell-finale').getBoundingClientRect().toJSON()")
             check(abs(r2["x"] - r1["x"]) < 20 and abs(r2["y"] - r1["y"]) < 20,
                   f"F2: the dragged position survives an unrelated restack ({r1['x']:.0f},{r1['y']:.0f} -> {r2['x']:.0f},{r2['y']:.0f})")
 
@@ -566,18 +610,26 @@ def main() -> int:
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
             # bespoke-chrome marker ('Drag to move' titlebars outside the kit) is extinct.
+            # (H5: orwell-social is no longer a window — it is sidebar chrome and must
+            # stay OUT of the kit, asserted alongside.)
             ratchet = page.evaluate("""() => {
-              const panels = ['orwell-social', 'orwell-finale']
+              const panels = ['orwell-finale']
                 .map(id => document.getElementById(id)).filter(Boolean);
               const unkitted = panels.filter(el => !el.hasAttribute('data-ow-window')).map(el => el.id);
               const bespoke = [...document.querySelectorAll('[title="Drag to move"]')]
                 .filter(el => !el.closest('[data-ow-window]')).length;
               const kitStack = window.OrwellWindowKit ? window.OrwellWindowKit.stackIds() : null;
-              return { panels: panels.length, unkitted, bespoke, kitStack: Array.isArray(kitStack) };
+              const soc = document.getElementById('orwell-social');
+              const socWindowish = !!soc && (soc.hasAttribute('data-ow-window') ||
+                getComputedStyle(soc).position === 'fixed');
+              return { panels: panels.length, unkitted, bespoke,
+                       kitStack: Array.isArray(kitStack), socWindowish };
             }""")
             check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
+            check(ratchet.get("socWindowish") is False,
+                  f"H5: the social section stays sidebar chrome — never kit-managed or fixed ({ratchet})")
 
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
@@ -756,22 +808,21 @@ def main() -> int:
             }""")
             check(hud_geo.get("inSidebar") is True, f"mobile: status panel is sidebar chrome ({hud_geo})")
             check(hud_geo.get("fixed") is False, f"mobile: status panel is never fixed-position ({hud_geo})")
-            # C26/M1: the social HUD (still a window) stays a full-width top sheet that
-            # never covers the composer.
+            # H5: The House (approaches) is sidebar chrome too — on a phone it lives
+            # inside the off-canvas drawer like the status panel, so it can never cover
+            # the composer (the D2 collision rule holds structurally).
             soc_geo = mob.evaluate("""() => {
               if (window._orwellSocialEnsure) window._orwellSocialEnsure();
-              // The sheet host (F3) positions sheets on the slot engine's observer
-              // microtask — settle before measuring, same as the F3 block below.
-              return new Promise(res => setTimeout(() => {
-                const el = document.getElementById('orwell-social');
-                const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
-                if (!el || !ta) return res({ ok: false });
-                const r = el.getBoundingClientRect(), c = ta.getBoundingClientRect();
-                res({ fullWidth: r.width >= window.innerWidth * 0.95, clearsComposer: r.bottom <= c.top });
-              }, 350));
+              const el = document.getElementById('orwell-social');
+              const sb = document.getElementById('sidebar');
+              if (!el || !sb) return { ok: false, why: 'missing' };
+              const cs = getComputedStyle(el);
+              return { ok: true, inSidebar: sb.contains(el), fixed: cs.position === 'fixed',
+                       dockChip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]') };
             }""")
-            check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
-            check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
+            check(soc_geo.get("inSidebar") is True, f"mobile: The House is sidebar chrome (lives in the drawer) ({soc_geo})")
+            check(soc_geo.get("fixed") is False, f"mobile: The House is never fixed-position ({soc_geo})")
+            check(soc_geo.get("dockChip") is False, f"mobile: no orwell-social dock chip exists ({soc_geo})")
 
             # E89 belt: even if the engine FAILS OPEN and hands the UI approaches before the first
             # ceremony resolves, the FE renders NO chip. We drive the belt CLOSED and feed it two
@@ -805,20 +856,22 @@ def main() -> int:
             classes = motive.get("classes") or []
             check(len(set(classes)) == 2 and None not in classes,
                   f"E60: bond and probe carry DISTINCT framing classes ({motive})")
-            # F3 (wave 1): two visible top sheets STACK, never overlap — the slot
-            # engine's narrow sheet host owns their positions now.
+            # F3 (wave 1, amended by H5): with The House folded into the sidebar, the
+            # finale is the one mobile game sheet — the slot engine's narrow sheet host
+            # still owns its position: full-width, below the top bar, clear of the
+            # composer (the D2 collision rule on narrow).
             f3 = mob.evaluate("""() => {
-              window._orwellSocialEnsure && window._orwellSocialEnsure();
               window._orwellFinaleEnsure && window._orwellFinaleEnsure();
               return new Promise(res => setTimeout(() => {
-                const s = document.getElementById('orwell-social').getBoundingClientRect();
                 const f = document.getElementById('orwell-finale').getBoundingClientRect();
-                const overlap = !(s.right <= f.left || f.right <= s.left || s.bottom <= f.top || f.bottom <= s.top);
-                res({ s: { top: s.top, bottom: s.bottom, w: s.width }, f: { top: f.top, bottom: f.bottom, w: f.width }, overlap });
+                const ta = document.getElementById('message') || document.querySelector('#chat-form textarea');
+                const c = ta ? ta.getBoundingClientRect() : null;
+                res({ f: { top: f.top, bottom: f.bottom, w: f.width },
+                      clearsComposer: !!c && f.bottom <= c.top });
               }, 350));
             }""")
-            check(f3.get("overlap") is False, f"F3: both sheets visible without overlap ({f3})")
-            check(f3["s"]["w"] >= 370 and f3["f"]["w"] >= 370, f"F3: sheets stay full-width ({f3})")
+            check(f3["f"]["w"] >= 370, f"F3: the finale sheet stays full-width ({f3})")
+            check(f3.get("clearsComposer") is True, f"F3: the finale sheet never covers the composer ({f3})")
             mob.close()
 
             browser.close()
