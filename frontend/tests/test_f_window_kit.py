@@ -77,23 +77,30 @@ def test_smoke_exercises_the_kit_for_real():
     assert "F1: the Windows dock is VISIBLE" in smoke
     assert "F2: dragging the title bar MOVES the panel" in smoke
     assert "ow-smoke-window" in smoke                # a real kit window end-to-end
-    assert 'page.click("#orwell-social .ow-min")' in smoke  # trusted, not evaluate()
+    # H5 folded the social window into the sidebar, so the finale carries the
+    # real-game-panel half of the T20/F1 behavior block now.
+    assert 'page.click("#orwell-finale .ow-min")' in smoke  # trusted, not evaluate()
 
 
 # ── Lane F / F-2 wave 1 pins ──────────────────────────────────────────────
 
-def test_sourcepin_wave1_social_composes_the_kit():
+def test_sourcepin_wave1_social_superseded_by_h5():
+    # Wave 1 moved the social panel ONTO the kit; H5/G7 (2026-06-11, the user verdict
+    # on "The House") then retired the window outright — approaches are SIDEBAR CHROME
+    # now (the ruling #3/E64 pattern; pinned in test_h5_house_in_sidebar.py). What this
+    # pin still owes Lane F: none of the audit's bespoke-chrome findings may regrow here.
     js = _read("static", "js", "orwellSocial.js")
-    assert "OrwellWindowKit.create(" in js          # the kit owns the chrome
-    assert "makeWindowDraggable" not in js          # bespoke drag wiring deleted
-    assert "osoc-hdr" not in js                     # bespoke titlebar deleted
-    assert "osoc-min" not in js                     # bespoke minimize button deleted
-    assert "modalManager.register(" not in js       # the kit registers, not the panel
+    assert "OrwellWindowKit" not in js              # not a window — composes NO chrome
+    assert "makeWindowDraggable" not in js          # bespoke drag wiring stays deleted
+    assert "osoc-hdr" not in js                     # bespoke titlebar stays deleted
+    assert "osoc-min" not in js                     # bespoke minimize button stays deleted
+    assert "modalManager.register(" not in js       # never registers with the dock
 
 
 def test_sourcepin_wave1_sheet_host_owns_narrow():
     slots = _read("static", "js", "orwellSlots.js")
     assert "restackNarrowSheets" in slots           # the F3 sheet host exists
+    # (H5: social left the sheet world for the sidebar; finale is the game sheet.)
     for f in ("orwellSocial.js", "orwellFinale.js"):
         js = _read("static", "js", f)
         assert "top: 44px !important" not in js, f  # per-panel pins are gone
@@ -107,7 +114,10 @@ def test_sourcepin_wave1_finale_seam_for_the_gate():
 
 def test_smoke_asserts_f3_for_real():
     smoke = _read("scripts", "browser_smoke.py")
-    assert "F3: both sheets visible without overlap" in smoke
+    # H5 amended F3's denominator: with the social window folded into the sidebar,
+    # the finale is the one mobile game sheet — the host still owns its position.
+    assert "F3: the finale sheet stays full-width" in smoke
+    assert "F3: the finale sheet never covers the composer" in smoke
 
 
 # ── Lane F / F-2 wave 2 pins ──────────────────────────────────────────────

@@ -131,7 +131,9 @@ def test_browser_smoke_carries_the_h6_runtime_gate():
     assert "H6: ONE visible Tidy affordance with the options sub-row closed" in smoke
     assert "H6: STILL exactly one visible 'Tidy' with the sub-row expanded" in smoke
     assert "H6: the revealed sub-row is the distinctly-labeled no-AI cleanup" in smoke
-    # Anchored after the last pre-H6 check (the F3 sheets block), per the lane brief.
-    f3 = smoke.index("F3: sheets stay full-width")
+    # Anchored after the last pre-H6 check (the F3 sheet block), per the lane brief.
+    # (H5 folded the social window into the sidebar, so the F3 block is finale-only
+    # now and its label changed with it.)
+    f3 = smoke.index("F3: the finale sheet stays full-width")
     h6 = smoke.index("H6: the Chats auto-sort control reads")
-    assert h6 > f3, "the H6 smoke block sits after the F3 sheets block"
+    assert h6 > f3, "the H6 smoke block sits after the F3 sheet block"
