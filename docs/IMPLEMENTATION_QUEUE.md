@@ -2923,3 +2923,28 @@ PR per item).
 > in both scripts; update reads the live env; the base unit keeps `^CapabilityBoundingSet=$`;
 > password is stdin-only with no `pct … --password`) — the <1024 gate mutation-verified; full
 > `npm test` green (675 unit/property/arch → 318 BDD).
+
+### Lane E — install-script audit & hardening (post-incident) · ops · **✅ DONE**
+
+> A real install died silently between the engine build and service registration: the box
+> answered "connection refused", the updater later failed with "Unit … not found", and the
+> script's success banner was reachable by simply falling off the end. The audit (F1–F8) and
+> refactor of `deploy/orwell-install.sh`:
+> **Observability:** ERR trap + per-step tracking (`set -E` so it fires inside functions) names
+> the failed step/line/exit and says a plain re-run resumes (idempotent); every run appends to
+> `data/install.log`; the success banner is EARNED by `verify_install` — both units active AND
+> the engine `/health` + FE `/openapi.json` probes answering (smoke.sh's own contracts), with
+> status/journal tails on failure.
+> **Bugs:** `git safe.directory` (the orwell-owned checkout vs root-git updates — git ≥2.35
+> "dubious ownership" would have killed every update; latent because the 0010 real-host smoke
+> never ran) · `chown` covers an out-of-tree `DATA_DIR` · the privileged-port drop-in keys on
+> the EFFECTIVE port from `data/.env` (no env-arg drift on re-runs) · root guard + port
+> validation up front · re-runs `systemctl restart` (no stale processes after a rebuild) · the
+> final message prints the container's real IP, never `http://0.0.0.0`.
+> Structured into named phase functions + `main()`; every decision comment
+> (A4/E27/E32/E83/E84/E85/B67/B72/ADR-0004) preserved in place.
+> **Gate:** `opsPrivateRepo.test.ts` "post-incident hardening" suite (9 tests; the verify-call
+> and <1024 gates mutation-verified); `bash -n` clean; typecheck/build/684 unit/318 BDD green.
+> *(Noted, not this lane: `npm run test:arch` (the depcruise CLI, outside the `npm test` gate)
+> reports 3 pre-existing violations from the E86a wiring — `src/main.ts → engineRoot /
+> FastembedEmbedding`; needs its own ruling/queue item.)*
