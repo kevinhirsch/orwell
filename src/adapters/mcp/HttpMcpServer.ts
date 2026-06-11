@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "./McpServer";
+import { toolsFor } from "../../surfaces/tools/registry";
 import { EngineRefusal, TurnRefusedError, PersistFailureError } from "../../domain/errors";
 
 /**
@@ -42,8 +44,24 @@ export interface HttpMcpResolver {
  */
 export interface HttpMcpOptions {
   token?: string;
+  /**
+   * Audit E27: a SEPARATE secret for the admin/God-Mode channel. With only the shared `token`,
+   * one bearer granted any-user impersonation AND God Mode. When `adminToken` is set, `/admin/*`
+   * requires it specifically — the player token is refused there (401). Player routes accept
+   * either (admin is strictly more privileged). Unset ⇒ the single-token behavior is unchanged
+   * (single-tenant trusted-loopback back-compat).
+   */
+  adminToken?: string;
   requireUser?: boolean;
   knownUser?: (user: string) => boolean;
+}
+
+/** Constant-time secret comparison (audit E27) — hash both sides so length never short-circuits. */
+function secretsMatch(presented: string | undefined, expected: string): boolean {
+  if (!presented) return false;
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 /** The front-end (trusted loopback auth tier, 0021) asserts the user via this header. */
@@ -85,7 +103,18 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
   // narrator. Different users still run fully concurrently (isolation, 0021).
   const queues = new Map<string, Promise<void>>();
   const enqueue = (user: string, job: () => Promise<void>): void => {
-    const tail = (queues.get(user) ?? Promise.resolve()).then(job, job);
+    // Audit E30: a rejecting job on a drained queue (e.g. `send` racing a timeout-destroyed
+    // socket) had no `.catch` — an unhandled rejection exits the process on modern Node. Every
+    // job body is wrapped so the chain can NEVER reject; the request's own structured error
+    // handling already answered (or the socket is gone and there is no one to answer).
+    const run = async (): Promise<void> => {
+      try {
+        await job();
+      } catch {
+        /* swallowed by design — the per-request handlers own error responses */
+      }
+    };
+    const tail = (queues.get(user) ?? Promise.resolve()).then(run, run);
     queues.set(user, tail);
     void tail.finally(() => {
       if (queues.get(user) === tail) queues.delete(user); // drop drained queues (no unbounded map)
@@ -94,8 +123,16 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
 
   const server = createServer((req, res) => {
     const send = (code: number, body: unknown): void => {
-      res.writeHead(code, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
+      // E30: the socket may be gone (request timeout, client abort) by the time a queued job
+      // answers — writing then throws and used to surface as an unhandled rejection. A dead
+      // response is simply dropped.
+      if (res.writableEnded || res.destroyed) return;
+      try {
+        res.writeHead(code, { "content-type": "application/json" });
+        res.end(JSON.stringify(body));
+      } catch {
+        /* socket torn down mid-write — nothing to answer */
+      }
     };
     // Guard the whole request (audit E2): an unexpected throw — e.g. resolving a sandbox whose save
     // is unreadable — becomes a 500 for THIS request, never an uncaughtException that exits the
@@ -108,20 +145,32 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
 
       const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
       if (!match) return send(404, { error: "not found" });
+      const channel = match[1] as "player" | "admin";
 
-      // (2) Shared-secret auth on every tool route, when a token is configured.
-      if (options.token && presentedToken(req.headers) !== options.token) {
-        return send(401, { error: "unauthorized" });
+      // (2) Secret auth on every tool route, when configured — constant-time compares (E27).
+      // The admin channel demands its OWN secret when one is set: the player token must not
+      // grant God Mode. Player routes accept either secret (admin ⊇ player privilege).
+      const presented = presentedToken(req.headers);
+      if (channel === "admin" && options.adminToken) {
+        if (!secretsMatch(presented, options.adminToken)) return send(401, { error: "unauthorized" });
+      } else if (options.token || options.adminToken) {
+        const playerOk =
+          (options.token !== undefined && secretsMatch(presented, options.token)) ||
+          (options.adminToken !== undefined && secretsMatch(presented, options.adminToken));
+        if (!playerOk) return send(401, { error: "unauthorized" });
       }
 
       // (3) Identity: in multi-user mode a missing/empty user header is refused, never routed to "default".
       const rawUser = headerValue(req.headers[USER_HEADER]);
       if (options.requireUser && !rawUser) return send(400, { error: "missing user identity" });
       const user = rawUser ?? "default";
-      const channel = match[1] as "player" | "admin";
 
       if (req.method === "GET" && match[2] === "tools") {
-        return send(200, { tools: pick(channel, user).listTools() });
+        // Audit E28: the tool list is the STATIC per-channel allowlist — serving it must never
+        // resolve (and so never mint) a sandbox for an asserted user. Previously a GET for any
+        // sprayed id created the sandbox, making the id "known" for later POSTs and defeating
+        // the B34 anti-spray gate.
+        return send(200, { tools: toolsFor(channel === "player" ? "player" : "admin/God Mode") });
       }
 
       if (req.method === "POST" && match[2] === "call") {

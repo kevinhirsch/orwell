@@ -24,6 +24,19 @@ const VAULT =
   "|^src/engine/(sessionSnapshot|relationships|confessionals|offscreen|gossip|liveSeason)\\.ts$" +
   "|^src/composition/engineRoot\\.ts$";
 
+// Audit E18: the VAULT denylist above enumerates KNOWN hidden modules — every new engine
+// module (characterFactory's hiddenElements, emotionalArc, deals, decisions, jury, blocs,
+// presence, competitionLibrary, …) had to be remembered into it. ENGINE_LAYER closes that
+// hole by construction: outward code may not reach into the engine layer AT ALL. The only
+// sanctioned edge is the process entrypoint composing the runtime (src/main.ts →
+// src/composition/runtime.ts); everything else outward consumes ports and outward-safe
+// services. The denylist rule stays as a second, independent tripwire (strengthen, never
+// weaken).
+const ENGINE_LAYER =
+  "^src/engine/" +
+  "|^src/adapters/(inmemory|engine|embedding)/" +
+  "|^src/composition/";
+
 module.exports = {
   forbidden: [
     {
@@ -34,6 +47,26 @@ module.exports = {
         "The narrator cannot leak what it never receives.",
       from: { path: OUTWARD },
       to: { path: VAULT },
+    },
+    {
+      name: "no-engine-layer-on-outward",
+      severity: "error",
+      comment:
+        "Default-deny (audit E18): outward code may not import ANY engine-layer module — " +
+        "src/engine/**, the engine/inmemory/embedding adapters, or the composition wiring. " +
+        "New hidden-state modules are covered the day they are created, without being " +
+        "enumerated. The sole exception is below (entrypoint → runtime).",
+      from: { path: OUTWARD, pathNot: "^src/main\\.ts$" },
+      to: { path: ENGINE_LAYER, pathNot: "^src/composition/outwardRoot\\.ts$" },
+    },
+    {
+      name: "entrypoint-composes-runtime-only",
+      severity: "error",
+      comment:
+        "The process entrypoint may compose the runtime (which wires the Vault internally) " +
+        "but nothing else in the engine layer (audit E18).",
+      from: { path: "^src/main\\.ts$" },
+      to: { path: ENGINE_LAYER, pathNot: "^src/composition/(runtime|outwardRoot)\\.ts$" },
     },
     {
       name: "no-circular",

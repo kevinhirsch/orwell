@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 // Reuse the very same rules the CLI uses, so the test and `npm run test:arch` agree.
 const config = require("../../.dependency-cruiser.cjs") as {
-  forbidden: unknown[];
+  forbidden: Array<{ name: string }>;
   options: Record<string, unknown>;
 };
 
@@ -16,8 +16,7 @@ export interface Violation {
 
 let cache: Violation[] | undefined;
 
-/** Run dependency-cruiser over `src` and return Vault-boundary violations. */
-export async function vaultBoundaryViolations(): Promise<Violation[]> {
+async function allViolations(): Promise<Violation[]> {
   if (cache) return cache;
 
   const result = await cruise(["src"], {
@@ -35,9 +34,25 @@ export async function vaultBoundaryViolations(): Promise<Violation[]> {
     to: string;
   }>;
 
-  cache = violations
-    .map((v) => ({ rule: v.rule?.name ?? "unknown", from: v.from, to: v.to }))
-    .filter((v) => v.rule === "no-vault-on-outward");
-
+  cache = violations.map((v) => ({ rule: v.rule?.name ?? "unknown", from: v.from, to: v.to }));
   return cache;
+}
+
+/** Run dependency-cruiser over `src` and return Vault-boundary violations. */
+export async function vaultBoundaryViolations(): Promise<Violation[]> {
+  return (await allViolations()).filter((v) => v.rule === "no-vault-on-outward");
+}
+
+/**
+ * Audit E77: EVERY forbidden rule is enforced by the unit gate — previously only the Vault
+ * rule was asserted and `no-circular` (plus any future rule) was enforced nowhere, because
+ * `npm test` never runs the `test:arch` CLI step.
+ */
+export async function forbiddenRuleViolations(): Promise<Violation[]> {
+  return allViolations();
+}
+
+/** The configured rule names — lets the test prove the rule set itself hasn't been hollowed out. */
+export function configuredForbiddenRules(): string[] {
+  return config.forbidden.map((r) => r.name);
 }
