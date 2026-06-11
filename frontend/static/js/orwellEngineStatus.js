@@ -37,14 +37,12 @@
         #${ID}.oes-degraded { background: #92400e; }
         #${ID} b { letter-spacing: .03em; }
         #${ID} .oes-reason { opacity: .85; }
-        #${ID} .oes-x {
-          position: absolute; right: .5rem; top: .35rem; cursor: pointer; border: none;
-          background: none; color: inherit; opacity: .7; font-size: 1rem; line-height: 1; padding: 0 .3rem;
-        }
-        #${ID} .oes-x:hover { opacity: 1; }
+        /* F6 tail: the dismiss is the shared .ow-dismiss affordance (kit CSS),
+           positioned for the banner. */
+        #${ID} .oes-x { position: absolute; right: .5rem; top: .15rem; }
       </style>
       <span><b class="oes-title"></b> <span class="oes-reason"></span></span>
-      <button type="button" class="oes-x" title="Dismiss" aria-label="Dismiss">×</button>`;
+      <button type="button" class="oes-x ow-dismiss" title="Dismiss" aria-label="Dismiss">×</button>`;
     document.body.appendChild(el);
     el.querySelector(".oes-x").addEventListener("click", () => {
       dismissedKey = el.querySelector(".oes-reason").textContent || "";

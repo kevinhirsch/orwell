@@ -2992,7 +2992,7 @@ PR per item).
 > kit-window end-to-end block; `test_f_window_kit.py` source-pins; FE pytest 445 green;
 > matrix 37/0/0.
 
-### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **WAVES 1–2 ✅ · remainder OPEN**
+### F-2 — migration waves (each: behavior-identical-or-better, bespoke code deleted) · **✅ COMPLETE (waves 1–3)**
 
 > Wave order: status HUD (stays sidebar chrome — composes title/controls only) → social +
 > approaches (F2/F3/F6/F7 cells flip; the narrow tier gets ONE sheet host so two sheets can
@@ -3021,8 +3021,23 @@ PR per item).
 > keep gating it at 390×844. **Diary Room: verify-only** — ruling #4 composer mode, not a
 > window; its audit cells were all green and the E88 pins stand (`test_orwell_huds.py`,
 > `test_ui_elements.py`); no change.
-> Remaining waves: retro/presence/banner cluster consistency → settings/theme (F8
-> focus-return) → W13–W16 popovers/dialogs (F11) → the F-3 ratchet.
+> **WAVE 3 DONE (closes F-2):** the F6 tail — presence/retro/banner dismiss buttons adopt the
+> shared `.ow-dismiss` affordance (kit CSS, injected at load; ≥24px, hover/focus-visible) —
+> these stay NON-windows per rulings #3-class chrome. **F8 fixed for the WHOLE `.modal`
+> family** from ui.js's one visibility observer: opener stashed on hidden→visible, focus
+> restored on visible→hidden, never yanked if the user moved it. **F11 fixed**: Escape in the
+> decision card = the × path (dismiss only, never submit), via the new
+> `data-ow-escape-scope` contract — any in-flow surface can claim focused-context-first
+> Escape and the global arbiter stands down. **Arbiter ordering corrected** (caught live by
+> the smoke): menus → escape-scoped surfaces → MODALS → kit windows — a visible modal
+> outranks every non-modal window, so Escape can no longer park a background panel while
+> settings is open. **W13/W14 disposition:** styled dialogs + escMenuStack stay as-is (their
+> audit cells were green; the keep-list keeps them; the F-3 ratchet grandfathers their
+> census'd signatures). **W15/W16 disposition:** the build=0 tool-modal family gains F8
+> focus-return via the shim; full kit adoption there is post-Lane-F (the game build is the
+> product). Gates: FE pytest 469 · browser smoke (F8/F11/F6 + the re-ordered Escape ladder) ·
+> boot smoke · matrix 37/0/0 — green.
+> **F-2 is complete. Only F-3 (the ratchet) remains in Lane F.**
 
 ### F-3 — the ratchet · **OPEN**
 

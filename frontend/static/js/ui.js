@@ -1195,13 +1195,38 @@ if (!window._odyEscExpandGuard) {
     if (cur === _zCounter) return;
     m.style.zIndex = String(++_zCounter);
   };
+  // F8 (DWE audit / Lane F wave 3): closing a modal returns focus to its
+  // opener — for the WHOLE .modal family, from this one observer. On the
+  // hidden→visible transition we stash the element that had focus; on
+  // visible→hidden we restore it, but ONLY when focus still sits inside the
+  // closing modal or fell to <body> (never yank it from somewhere the user
+  // has since moved it).
+  const _restoreFocus = (m) => {
+    const opener = m._owOpener;
+    m._owOpener = null;
+    if (!opener || !opener.isConnected || typeof opener.focus !== 'function') return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !m.contains(active)) return;
+    try { opener.focus(); } catch {}
+  };
+  const _trackVisibility = (m) => {
+    if (!m?.classList?.contains('modal')) return;
+    const vis = _isVisible(m);
+    if (vis && !m._owWasVisible) {
+      const a = document.activeElement;
+      if (a && a !== document.body && !m.contains(a)) m._owOpener = a;
+    } else if (!vis && m._owWasVisible) {
+      _restoreFocus(m);
+    }
+    m._owWasVisible = vis;
+  };
   new MutationObserver((muts) => {
     for (const m of muts) {
-      if (m.type === 'childList') m.addedNodes.forEach(n => n.nodeType === 1 && _promote(n));
-      else if (m.type === 'attributes' && m.target?.classList?.contains('modal')) _promote(m.target);
+      if (m.type === 'childList') m.addedNodes.forEach(n => { if (n.nodeType === 1) { _promote(n); _trackVisibility(n); } });
+      else if (m.type === 'attributes' && m.target?.classList?.contains('modal')) { _promote(m.target); _trackVisibility(m.target); }
     }
   }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-  document.querySelectorAll('.modal').forEach(_promote);
+  document.querySelectorAll('.modal').forEach((m) => { _promote(m); m._owWasVisible = _isVisible(m); });
 
   const pickTopModal = () => {
     const modals = [...document.querySelectorAll('.modal')].filter(_isVisible);
@@ -1214,6 +1239,12 @@ if (!window._odyEscExpandGuard) {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
+
+    // Focused-context-first (DWE; Lane F wave 3): a surface marked
+    // data-ow-escape-scope owns Escape while the event originates inside it
+    // (e.g. the decision card's dismiss-only handler). The arbiter stands down
+    // and lets the surface's own listener act.
+    if (e.target && e.target.closest && e.target.closest('[data-ow-escape-scope]')) return;
 
     // Find the single thing to close, in priority order. The first hit wins.
     // Important: if a thinking block is open we MUST handle it ourselves and
@@ -1234,11 +1265,11 @@ if (!window._odyEscExpandGuard) {
       e.stopImmediatePropagation(); e.preventDefault();
       return;
     }
-    // Kit windows (Lane F / DWE audit F7): after menus, before modals — the
-    // top OrwellWindow parks (minimizable) or closes on Escape, through this
-    // same single arbiter. Floating panels stop being Escape-blind as their
-    // migration waves land them on the kit.
-    if (window.OrwellWindowKit && window.OrwellWindowKit.dismissTop()) {
+    // Kit windows (Lane F / DWE audit F7, ordering fixed in wave 3): a visible
+    // MODAL outranks every non-modal window (it owns the higher z band), so the
+    // top kit window parks on Escape only when no modal is open — menus, then
+    // modals, then windows.
+    if (!pickTopModal() && window.OrwellWindowKit && window.OrwellWindowKit.dismissTop()) {
       e.stopImmediatePropagation(); e.preventDefault();
       return;
     }
