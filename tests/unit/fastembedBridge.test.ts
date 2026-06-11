@@ -81,7 +81,7 @@ describe("engineRoot composition (ADR 0004 fallback semantics)", () => {
     expect(got).toHaveLength(1);
   });
 
-  it("an injected runtime provider is what every new sandbox's SoulStore embeds with", () => {
+  it("an injected runtime provider is what every new sandbox's SoulStore embeds with", async () => {
     const calls: string[] = [];
     setRuntimeEmbedding({
       embed: (t) => {
@@ -93,6 +93,9 @@ describe("engineRoot composition (ADR 0004 fallback semantics)", () => {
     });
     const core = buildEngineCore();
     core.soul.recordToSoul("npc:1", "a memory recorded through the injected provider");
+    // G8: indexing is deferred (one sync embed per macrotask, so a seeding batch never pins
+    // the event loop) — drain a tick, then the INJECTED provider must be the one consulted.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(calls.length).toBeGreaterThan(0);
   });
 });
