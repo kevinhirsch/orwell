@@ -78,15 +78,18 @@ _PROVIDER_SEEN: dict = {}
 _LAST_MISSING: dict = {}
 _RECONCILER_TASK = None
 
-# The most recent _generate_one failure reason, consumed by the attempt logger. Module-level
-# is adequate: generate_and_store awaits each generation sequentially, and the log is
-# best-effort observability, never game state.
+# The most recent _generate_one failure reason (+ an optional short detail — the provider's
+# own error code/message on an HTTP failure), consumed by the attempt logger. Module-level is
+# adequate: generate_and_store awaits each generation sequentially, and the log is best-effort
+# observability, never game state.
 _LAST_GEN_ERROR: Optional[str] = None
+_LAST_GEN_DETAIL: Optional[str] = None
 
 
-def _note_gen_error(error_class: str) -> None:
-    global _LAST_GEN_ERROR
+def _note_gen_error(error_class: str, detail: Optional[str] = None) -> None:
+    global _LAST_GEN_ERROR, _LAST_GEN_DETAIL
     _LAST_GEN_ERROR = error_class
+    _LAST_GEN_DETAIL = detail or None
 
 
 def _consume_gen_error() -> Optional[str]:
@@ -96,10 +99,68 @@ def _consume_gen_error() -> Optional[str]:
     return e
 
 
+def _consume_gen_detail() -> Optional[str]:
+    global _LAST_GEN_DETAIL
+    d = _LAST_GEN_DETAIL
+    _LAST_GEN_DETAIL = None
+    return d
+
+
+# Recognized text→image model families — the Python mirror of settings.js `_isImageModel`.
+# A non-image (chat) model resolves fine but can't generate: POSTing it to /images/generations
+# 400s instantly. This keeps such a model from being treated as available or attempted, so the
+# pipeline never 400-loops on a mis-set model and `image_generation_available` stays truthful
+# (G20's reconciler and the Health "portraits N/M" counter both gate on it).
+_IMAGE_MODEL_FAMILIES = (
+    "gpt-image", "dall-e", "dalle",
+    "flux", "stable-diffusion", "sdxl", "sd3", "sd-", "playground-v",
+    "imagen", "ideogram", "recraft", "kolors", "kandinsky", "pixart",
+    "firefly", "titan-image", "aura-flow", "hidream", "seedream",
+    "qwen-image", "wan2", "janus", "omnigen", "cogview", "chroma",
+    "lumina", "nano-banana", "photon", "phoenix", "luma-photon",
+)
+_VISION_MARKERS = ("vision", "-vl", "understand", "caption", "ocr", "embed", "rerank")
+
+
+def _is_image_model(model_id: Optional[str]) -> bool:
+    lower = str(model_id or "").lower()
+    if any(kw in lower for kw in _IMAGE_MODEL_FAMILIES):
+        return True
+    if "image" in lower or "text-to-image" in lower or "t2i" in lower:
+        return not any(m in lower for m in _VISION_MARKERS)
+    return False
+
+
+def _provider_error_reason(resp) -> Optional[str]:
+    """A short, SAFE hint from a non-200 image response — the provider's own error
+    code/message (e.g. 'This model does not support image generation'), clipped, never
+    our prompt. Best-effort; None when nothing useful parses out."""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code") or err.get("type")
+                if msg:
+                    return str(msg)[:140]
+            elif isinstance(err, str) and err:
+                return err[:140]
+            msg = body.get("message")
+            if msg:
+                return str(msg)[:140]
+    except Exception:
+        pass
+    return None
+
+
 def log_attempt(houseguest_id: str, ok: bool, error_class: Optional[str] = None,
-                duration_ms: int = 0) -> None:
+                duration_ms: int = 0, detail: Optional[str] = None) -> None:
     """Append one generation attempt/outcome to the capped JSONL ring. Best-effort:
-    a logging failure must never break the generation pipeline itself."""
+    a logging failure must never break the generation pipeline itself.
+
+    `detail` (failures only) is a short provider-supplied reason — e.g. the body of an
+    image-API 400 ('model does not support image generation') — so a failure is
+    self-diagnosing without grepping the live log. Clipped; never carries our prompt."""
     entry = {
         "ts": time.time(),
         "houseguestId": str(houseguest_id),
@@ -107,6 +168,8 @@ def log_attempt(houseguest_id: str, ok: bool, error_class: Optional[str] = None,
         "errorClass": None if ok else (error_class or "unknown"),
         "durationMs": int(duration_ms),
     }
+    if (not ok) and detail:
+        entry["detail"] = str(detail)[:200]
     try:
         lines = []
         try:
@@ -265,7 +328,13 @@ def image_generation_available(user: Optional[str]) -> bool:
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
         return False
-    candidates = [model_spec] if model_spec else ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
+    # A configured model only counts if it's an IMAGE model — a chat model resolves fine but
+    # can't generate (it 400s), so a non-image pick falls through to the auto-detect image
+    # candidates instead of reporting a false positive.
+    candidates = []
+    if model_spec and _is_image_model(model_spec):
+        candidates.append(model_spec)
+    candidates += ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
     for cand in candidates:
         if not cand:
             continue
@@ -289,6 +358,13 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
         return None
+
+    # Ignore a configured CHAT model (it can't generate — it would 400) and fall back to
+    # image auto-detect, mirroring image_generation_available so a stale/mis-set model never
+    # 400-loops the pipeline.
+    if model_spec and not _is_image_model(model_spec):
+        logger.info("[portraits] configured image_model %r is not an image model — using auto-detect", model_spec)
+        model_spec = ""
 
     if not model_spec:
         for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
@@ -325,7 +401,7 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
             resp = await client.post(images_url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info("[portraits] image API %s: %s", resp.status_code, resp.text[:200])
-                _note_gen_error(f"http-{resp.status_code}")
+                _note_gen_error(f"http-{resp.status_code}", _provider_error_reason(resp))
                 return None
             data = resp.json()
             images = data.get("data", [])
@@ -402,12 +478,13 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
 
-        _consume_gen_error()  # clear any stale reason before this attempt
+        _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail
         t0 = time.monotonic()
         png = await _generate_one(str(prompt), user)
         duration_ms = int((time.monotonic() - t0) * 1000)
         if not png:
-            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed", duration_ms)
+            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
+                        duration_ms, detail=_consume_gen_detail())
             skipped += 1
             continue
         try:
@@ -567,15 +644,17 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
     return summary
 
 
-def kickoff_backfill(missing_ids: list, user: Optional[str]) -> bool:
-    """Debounced fire-and-forget backfill; returns True when a run was actually kicked.
+def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False) -> bool:
+    """Fire-and-forget backfill; returns True when a run was actually kicked.
 
-    At most one attempt per user per process per BACKFILL_DEBOUNCE_S (the roster poll and
-    the manual lever share the window — a failing provider is never hammered). Never blocks
-    the caller: scheduled on the running loop like `kickoff_generation`."""
+    The AUTOMATIC roster-poll path is debounced (at most one attempt per user per process per
+    BACKFILL_DEBOUNCE_S — a failing provider is never hammered). `force=True` is the EXPLICIT
+    manual lever ("Generate cast portraits"): a deliberate click means "run now", so it
+    bypasses the debounce window — but still STAMPS it, so an auto-poll seconds later can't
+    pile on. Never blocks the caller: scheduled on the running loop like `kickoff_generation`."""
     if not missing_ids:
         return False
-    if not backfill_allowed(user):
+    if not force and not backfill_allowed(user):
         return False
     _LAST_BACKFILL_AT[_safe_user(user)] = time.time()
 
