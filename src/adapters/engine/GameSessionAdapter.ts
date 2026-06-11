@@ -9,11 +9,12 @@ import type {
 import { randomBytes } from "node:crypto";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
+import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_ADJACENCY } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
-import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate } from "../../engine/castingIntake";
+import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
@@ -442,6 +443,7 @@ export class GameSessionAdapter implements GameSession {
     return {
       week: this.week,
       phase: this.phase,
+      day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
       veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
@@ -665,11 +667,14 @@ export class GameSessionAdapter implements GameSession {
     // Season already running: casting is over; a stray call records nothing and reports done.
     if (this.house) return { known: {}, missing: [], next: null, ready: true };
     const before = this.intake;
+    // C8: which already-captured scalars this update replaces — computed against the PRIOR intake,
+    // surfaced so the producer confirms the change rather than silently clobbering an answer.
+    const overwrote = overwrittenScalars(before, req);
     this.intake = mergeCastingUpdate(this.intake, req);
     if (JSON.stringify(before) !== JSON.stringify(this.intake)) {
       this.persist(); // a half-done interview is durable state (0030)
     }
-    return castingStatusOf(this.intake);
+    return castingStatusOf(this.intake, overwrote);
   }
 
   /**

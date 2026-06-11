@@ -421,7 +421,7 @@ consequence.*
   `conversation.ts:50`, `TEMPERATURE_JITTER`, `chooseStrongestBond` default). *Fix:* wire each
   weight to its subsystem or delete the struct. *Test:* changing `variableWeights.initiative`
   changes approach-ordering variance.
-- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`; vetoSave/juryLean consumption is a 2-line post-merge follow-up) — ADR 0002's `reliability` signal was never built** — trust is pure
+- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`) · ✅ PR #224 (the vetoSave + juryLean consumption tail: `chooseVetoSave` ranks the save by demonstrated loyalty, and a centered reliability term weighted by `JURY_WEIGHTS.reliability` shifts the juror's lean) — ADR 0002's `reliability` signal was never built** — trust is pure
   sentiment, never evidence; with E43, demonstrated loyalty has no representation. *Fix:* add
   `reliability` fed by protective votes/honored deals/veto saves; consume in `vetoSave`,
   `bondStrength`, `juryLean`.
@@ -441,7 +441,7 @@ consequence.*
   (12 hidden scenes, 4 reshuffles, 4 rumors/confessionals), force-marching the house and
   flooding the record. *Fix:* debounce to the turn boundary. *Test:*
   `recordInteraction+diaryRoom+advanceGame` ⇒ exactly one `offscreen-tick`.
-- **E58 [MED · Improvement] ✅ PR #213 — The daily-event invariant is satisfied by a verbatim filler event,
+- **E58 [MED · Improvement] ✅ PR #213 (varied state-derived house events) · ✅ PR #224 (the day index: `PublicGameStatus.day = dayOfWeek(phase)`, hoh=1…eviction=5, surfaced on `gameStatus`) — The daily-event invariant is satisfied by a verbatim filler event,
   and in-game days don't exist in the live game.** `orchestrator.ts:405–416` ("A house meeting
   shifts the week.", repeated, player-witnessed, pollutes THE RECORD re-entry facts);
   `schedule.ts` has no production callers; no day index on any view. *Fix:* derive day from the
@@ -450,7 +450,7 @@ consequence.*
 - **E59 [LOW · Change] `relationshipLabel` is a fixed 3-label taxonomy** (`relationships.ts:43–55`)
   vs. ADR 0002's organic vocabulary; `npcVoice` ships a stance for every living pair each call.
   *Fix:* disposition-framed phrase set; top-k stances (pairs with E11).
-- **E60 [LOW · Change] ✅ PR #213 — `socialInitiatives` ships the exact canned string ADR 0003 names as a
+- **E60 [LOW · Change] ✅ PR #213 (engine ships the `bond | probe` motive) · ✅ PR #224 (FE: the approach chip varies copy + class + tooltip by the motive enum) — `socialInitiatives` ships the exact canned string ADR 0003 names as a
   smell** (`pretext: "wants a word with you"`, `GameSessionAdapter.ts:454`) while discarding the
   computed drive. *Fix:* coarse categorical motive (`bond | probe`), never the number.
 - **E61 [LOW · Improvement] Exact ties resolve by array position, not seed** (`liveSeason.ts:400`,
@@ -548,7 +548,7 @@ consequence.*
   `window._orwellOpenDiaryRoom` seam re-pointed at the composer mode. *Note:* with E64 (status
   HUD) and this, R4's Diary-trigger occlusion becomes unreachable and D2 shrinks to the
   presence strip + retrospective panel.
-- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate; the FE started-gate belt already existed) — NPC approaches must not fire at the very start of the game.**
+- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate) · ✅ PR #224 (the dedicated FE belt: `firstCeremonyResolved` suppresses every chip pre-first-ceremony, holding even if the engine fails open — browser-smoke proven) — NPC approaches must not fire at the very start of the game.**
   `orwellSocial.js` gates only on `st.started` (`:6, :409`), and engine-side `socialInitiatives`
   ranks approaches from move-in — so "___ wants a word with you" can pop before the player has
   had a single unprompted beat in the house. *Ruling:* the approach surface may stay a window,
@@ -981,7 +981,7 @@ traceability; E-batch cross-references inline.
 - **C7 [MED] ✅ PR #217 —** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
   elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
   replays a season whose secrets they know).
-- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization; overwrite flag deferred) — Casting intake: no length caps, exact-string note dedupe only, scalars
+- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization) · ✅ PR #224 (the overwrite flag: `updateCasting` surfaces `overwrote: [...]` so the producer confirms a scalar replacement rather than silently clobbering) — Casting intake: no length caps, exact-string note dedupe only, scalars
   silently overwritable by any later `updateCasting`, and every captured value is echoed
   verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
   `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
