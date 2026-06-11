@@ -17,11 +17,12 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 from core.middleware import require_admin
 from src import orwell_engine
+from src import orwell_portraits
 from src.auth_helpers import effective_user
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,73 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] finale failed: {e}")
             return {"finale": None}
 
+    @router.get("/roster")
+    async def orwell_roster(request: Request):
+        """The cast roster (0051): each houseguest's name, current status (active / jury /
+        evicted) and persisted portrait ref (or null). Built ENTIRELY from the engine's
+        Vault-free public projection (getGameState.house + player) merged with the local
+        portrait manifest — never a stat, relationship, or hidden element. Fails OPEN to an
+        empty roster so the sidebar never blocks the page.
+
+        Also reports `imagesAvailable` so the UI can pick its empty-state copy (a configured-
+        but-not-yet-generated set vs. graceful absence — no image model)."""
+        user = _current_user(request)
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+        except Exception as e:
+            logger.warning(f"[orwell] roster failed: {e}")
+            return {"roster": [], "imagesAvailable": False}
+
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"roster": [], "imagesAvailable": False}
+
+        cards = []
+        # The player's own card first (when present), then the house.
+        player = state.get("player") if isinstance(state.get("player"), dict) else None
+        if player and player.get("name"):
+            pid = player.get("id") or "player"
+            cards.append({
+                "id": pid,
+                "name": player.get("name"),
+                "status": player.get("status") or "active",
+                "isPlayer": True,
+                "portrait": orwell_portraits.portrait_ref(user, pid),
+            })
+        house = state.get("house") if isinstance(state.get("house"), list) else []
+        for hg in house:
+            if not isinstance(hg, dict) or not hg.get("name"):
+                continue
+            hid = hg.get("id") or hg.get("name")
+            cards.append({
+                "id": hid,
+                "name": hg.get("name"),
+                "status": hg.get("status") or "active",
+                "isPlayer": False,
+                "portrait": orwell_portraits.portrait_ref(user, hid),
+            })
+
+        images_available = False
+        try:
+            images_available = orwell_portraits.image_generation_available(user)
+        except Exception:
+            images_available = False
+        return {"roster": cards, "imagesAvailable": images_available}
+
+    @router.get("/portrait/{houseguest_id}")
+    async def orwell_portrait(houseguest_id: str, request: Request):
+        """Serve one houseguest's persisted portrait PNG (0051) from this user's portrait dir.
+        Per-user scoped (cross-user isolation): a user only ever reads their OWN sandbox's
+        portraits. 404 when none is stored (the roster falls back to a placeholder)."""
+        user = _current_user(request)
+        path = orwell_portraits.portrait_file(user, houseguest_id)
+        if path is None:
+            return JSONResponse(status_code=404, content={"error": "no portrait"})
+        return FileResponse(
+            str(path),
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+        )
+
     class DiaryRoomRequest(BaseModel):
         entry: str
 
@@ -253,7 +321,12 @@ def setup_orwell_routes() -> APIRouter:
                         "started": True,
                     },
                 )
-            return await orwell_engine.create_character(
+            # A new season = a new cast: scrub the prior portrait set before generating (0051).
+            try:
+                orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            res = await orwell_engine.create_character(
                 body.playerName.strip(),
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
@@ -261,6 +334,15 @@ def setup_orwell_routes() -> APIRouter:
                 confirm_restart=body.confirm,
                 user=user,
             )
+            # Kick off move-in cast portraits (0051) — background, never blocks the response,
+            # silent no-op when no image model is configured (graceful absence).
+            try:
+                prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
+                if prompts:
+                    orwell_portraits.kickoff_generation(prompts, user)
+            except Exception:
+                pass
+            return res
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})

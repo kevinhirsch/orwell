@@ -81,6 +81,13 @@ export interface DealView {
   status: "open" | "kept" | "broken";
 }
 
+/** A portrait prompt for one houseguest (0051) — returned at season start for the FE to call the image API. */
+export interface PortraitPromptEntry {
+  houseguestId: string;
+  name: string;
+  prompt: string;
+}
+
 /** The Vault-free projection of the running game the front-end may render. */
 export interface GameStateView {
   started: boolean;
@@ -94,6 +101,8 @@ export interface GameStateView {
   deals?: DealView[];
   /** Pre-game only (0050): where the casting interview stands — what's captured, what's next. */
   casting?: CastingStatusView;
+  /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
+  portraitPrompts?: PortraitPromptEntry[];
 }
 
 /**
@@ -527,4 +536,7 @@ export interface GameSession {
    * unknown or non-active houseguest (the departed are voiced from the public record only).
    */
   npcVoice(id: EntityId): NpcVoiceView | null;
+
+  /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
+  getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
 }
