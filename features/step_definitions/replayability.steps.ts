@@ -5,11 +5,18 @@ import { PLAYER } from "../../src/domain/ids";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import {
   startNewGame, generateHouse, hashSeed, isPlausibleHouseguest, isPlausibleArchetype,
-  dispositionOf, ENSEMBLE, CAST_SIZE, NPC_COUNT,
+  dispositionOf, ENSEMBLE, CAST_SIZE, NPC_COUNT, isCorpusName, NAME_CORPORA,
 } from "../../src/engine/characterFactory";
+import type { Houseguest } from "../../src/engine/characterFactory";
 
-// Legacy sample-save names that must NEVER be generated (BB_GameBible §3).
+// Legacy sample-save names that must NEVER be generated (BB_GameBible §3) — banned from the
+// vendored corpora by policy (E38 / ruling #1: "the legacy Bible's names stay banned").
 const FORBIDDEN_SAMPLE = ["ryne", "marcus", "felix"];
+
+// A houseguest's full IDENTITY (E38): with real-name corpora a bare first name MAY recur across
+// seeds (real names repeat in the real world); what must never carry over is the identity.
+const identityOf = (n: Houseguest): string =>
+  `${n.name}|${n.character.archetype}|${n.character.background}|${n.character.appearance}`;
 
 function newHouse(world: BbWorld): void {
   world.house = startNewGame({ seed: 1001, playerName: "AuthoredPlayer" });
@@ -47,8 +54,8 @@ Then(
 
 Then("no identity carries over from any previous game", function (this: BbWorld) {
   const previous = generateHouse(new SeededRandom(hashSeed("a-previous-game"))).npcs;
-  const current = new Set(this.house!.npcs.map((n) => n.name));
-  assert.ok(previous.every((p) => !current.has(p.name)), "no NPC identity should carry over");
+  const current = new Set(this.house!.npcs.map(identityOf));
+  assert.ok(previous.every((p) => !current.has(identityOf(p))), "no NPC identity should carry over");
 });
 
 // --- Cast composition ---------------------------------------------------------
@@ -118,17 +125,45 @@ Then("every houseguest display name is unique within the house", function (this:
   assert.equal(new Set(names).size, names.length, "names must be unique within the house");
 });
 
-Then("no name is drawn from any hard-coded or sample-save list", function (this: BbWorld) {
+// E38 / ruling #1 (2026-06-10): names are seeded samples from vendored REAL-NAME corpora.
+// The corpora are raw material — never a fixed cast: no full-name+persona pairing is
+// hard-coded, and the legacy Bible's names stay banned (excluded from the corpora).
+Then("every generated name is sampled from the vendored real-name corpora", function (this: BbWorld) {
+  for (const n of this.house!.npcs) {
+    assert.ok(isCorpusName(n.name), `name "${n.name}" must be sampled from the corpora`);
+    assert.match(n.name, /^[A-Z][a-z]+ [A-Z][a-z]+$/, "names keep the display-name shape");
+  }
+});
+
+Then("no legacy sample-save name is ever generated", function (this: BbWorld) {
+  // Banned by construction: the legacy names are excluded from the corpora themselves…
+  for (const part of [...NAME_CORPORA.given, ...NAME_CORPORA.surnames]) {
+    assert.ok(!FORBIDDEN_SAMPLE.includes(part.toLowerCase()), `corpus must not carry legacy name "${part}"`);
+  }
+  // …and therefore never generated.
   for (const n of this.house!.npcs) {
     const first = n.name.split(" ")[0]!.toLowerCase();
     assert.ok(!FORBIDDEN_SAMPLE.includes(first), `name "${n.name}" must not come from the sample save`);
-    assert.match(n.name, /^[A-Z][a-z]+ [A-Z][a-z]+$/, "names must be procedurally synthesized");
+  }
+});
+
+Then("no full name and persona pairing is fixed across seeds", function (this: BbWorld) {
+  // "No fixed cast" (the amended 0004 do-not): if the same full name ever recurs in another
+  // seeded house, it must not arrive carrying the same persona — the pairing is the seed's draw.
+  const current = new Map(this.house!.npcs.map((n) => [n.name, identityOf(n)]));
+  for (const seed of ["pairing-probe-1", "pairing-probe-2", "pairing-probe-3"]) {
+    for (const other of generateHouse(new SeededRandom(hashSeed(seed))).npcs) {
+      const here = current.get(other.name);
+      if (here !== undefined) {
+        assert.notEqual(here, identityOf(other), `"${other.name}" must not be a fixed name+persona pairing`);
+      }
+    }
   }
 });
 
 // --- No carryover across seeds ------------------------------------------------
 
 Then("the two houses share no houseguest identities", function (this: BbWorld) {
-  const a = new Set(this.housesBySeed!["A"]!.map((n) => n.name));
-  assert.ok(this.housesBySeed!["B"]!.every((n) => !a.has(n.name)), "houses must share no identities");
+  const a = new Set(this.housesBySeed!["A"]!.map(identityOf));
+  assert.ok(this.housesBySeed!["B"]!.every((n) => !a.has(identityOf(n))), "houses must share no identities");
 });

@@ -94,11 +94,21 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
   });
 
   it("every ceremony magnitude comes only from the constants module (no inline numbers)", () => {
-    // CEREMONY_IMPACTS maps each act to a real InteractionType whose magnitudes live in IMPACT.
-    for (const type of Object.values(CEREMONY_IMPACTS)) {
-      expect(RELATIONSHIP_CONSTANTS.IMPACT[type]).toBeDefined();
+    // CEREMONY_IMPACTS maps each act to a NAMED impact object whose magnitudes live in the module.
+    for (const impact of Object.values(CEREMONY_IMPACTS)) {
+      expect(Object.keys(impact).length).toBeGreaterThan(0);
+      for (const v of Object.values(impact)) expect(typeof v).toBe("number");
     }
     // The acts cover the loop's consequential moves.
     expect(Object.keys(CEREMONY_IMPACTS).sort()).toEqual(["comp-won", "evicted", "nominated", "replaced", "veto-saved"]);
+  });
+
+  it("a comp win is a THREAT read only (audit E47) — the house does not stop liking its winner", () => {
+    const impact = CEREMONY_IMPACTS["comp-won"];
+    expect(impact.threat ?? 0).toBeGreaterThan(0);
+    // No souring: winning must not cost the winner warmth or trust from anyone.
+    expect(impact.affinity ?? 0).toBe(0);
+    expect(impact.trust ?? 0).toBe(0);
+    expect(RELATIONSHIP_CONSTANTS.IMPACT.conflict.affinity).toBeLessThan(0); // the old (wrong) mapping
   });
 });

@@ -39,10 +39,14 @@ Feature: MCP tool boundary — the engine's permissioned outward API
     And it becomes part of the player's knowledge
     And it is never written to the Vault
 
-  Scenario: resolveCompetition returns an engine-decided outcome only
-    When the player requests a competition resolution
-    Then the result is the engine-decided outcome
-    And it contains no stat scores, rankings, or Vault-derived reasoning
+  # Amended per audit E20 (2026-06-10): the caller-supplied-stats resolver was a seed-shopping
+  # second outcome authority on the player channel — nothing recorded, no folds. runCompetition
+  # (over the LIVE house, engine stats, recorded beat) has been the single authority since B37.
+  Scenario: resolveCompetition is not a player tool — runCompetition is the single outcome authority
+    Given a client connected on the player channel
+    Then resolveCompetition is absent from the channel's tool list
+    And calling resolveCompetition is refused
+    And runCompetition remains on the channel's tool list
 
   Scenario: surfaceInformationTo moves a hidden fact into knowledge via a pathway
     Given a hidden fact the player does not know
@@ -61,6 +65,6 @@ Feature: MCP tool boundary — the engine's permissioned outward API
 
   Scenario: An external client can drive a minimal game loop without receiving Vault data
     Given an external MCP client on the player channel
-    When it reads visible state, records an interaction, resolves a competition, and reads the summary
+    When it reads visible state, records an interaction, is refused a direct competition resolution, and reads the summary
     Then every response is Vault-free
     And the summary confirms only that updated save(s) exist

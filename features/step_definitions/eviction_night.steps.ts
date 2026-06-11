@@ -55,6 +55,9 @@ const revealOrder = (views: AdvanceView[]): string =>
 Given("a started game at an eviction with a decided vote", function (this: BbWorld) {
   const s = newGame(this, 2);
   this.enViews = [driveToEvictionStaging(s)];
+  // T2: capture the ELECTORATE size from the engine's own staged state — the honest bound the
+  // revealed-ballot assertions are measured against (never derived from the surface under test).
+  this.enElectorate = s.snapshot().live!.eviction!.revealOrder.length;
 });
 
 When("the eviction is advanced through the seam", function (this: BbWorld) {
@@ -89,14 +92,21 @@ Then("the reveal order is the same for the same seed", function (this: BbWorld) 
 });
 
 Then("the running tally shows only the votes revealed so far", function (this: BbWorld) {
-  // The projection only ever carries the votes already read — never an unread vote or a pre-reveal total.
+  // T2: honest, ELECTORATE-derived bounds (the old Then compared the surface against its own
+  // maximum — true by definition). Mid-stage every view shows strictly fewer ballots than the
+  // electorate; the final votes-stage view shows exactly the electorate's ballots.
+  const electorate = this.enElectorate!;
+  assert.ok(electorate >= 2, "a real electorate");
   const staging = this.enViews!.filter((v) => v.eviction?.stage === "votes");
-  const last = staging[staging.length - 1]!.eviction!;
-  const totalRevealedEver = Math.max(...staging.map((v) => v.eviction!.votesRevealed.length));
-  // While still in the votes stage, fewer than the full electorate are shown (the rest are unread).
-  for (const v of staging.slice(0, -1)) assert.ok(v.eviction!.votesRevealed.length < totalRevealedEver + 1);
-  for (const r of last.votesRevealed) {
-    assert.ok([last.nominees[0]!.id, last.nominees[1]!.id].includes(r.votedFor.id), "a revealed vote is for a nominee");
+  assert.ok(staging.length >= 2, "several staged views were collected");
+  for (const v of staging.slice(0, -1)) {
+    assert.ok(v.eviction!.votesRevealed.length < electorate, "mid-stage: strictly fewer ballots than the electorate");
+  }
+  assert.equal(staging[staging.length - 1]!.eviction!.votesRevealed.length, electorate, "the last reveal shows every ballot");
+  for (const v of staging) {
+    for (const r of v.eviction!.votesRevealed) {
+      assert.ok([v.eviction!.nominees[0]!.id, v.eviction!.nominees[1]!.id].includes(r.votedFor.id), "a revealed ballot names a nominee");
+    }
   }
 });
 
@@ -116,17 +126,24 @@ When("the eviction surface is read mid-reveal", function (this: BbWorld) {
     id: "hidden:0047-bdd", ts: 10_000_003, type: "conversation",
     initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: this.enSentinel,
   });
-  this.lastOutput = JSON.stringify(this.enSandbox!.session.advanceGame()) + "\n" + JSON.stringify(this.enSandbox!.session.getGameState());
+  const v = this.enSandbox!.session.advanceGame();
+  this.enViews!.push(v);
+  this.lastOutput = JSON.stringify(v) + "\n" + JSON.stringify(this.enSandbox!.session.getGameState());
 });
 
 Then("it shows no pre-reveal tally and no unread vote", function (this: BbWorld) {
-  const view = this.enSandbox!.session.advanceGame();
+  // T2: no self-guarding `if` — the Given staged a mid-reveal eviction BY CONSTRUCTION, so the
+  // assertions always run (the old Then could skip every check when the guard missed).
+  const view = this.enViews![this.enViews!.length - 1]!;
   const ev: EvictionView | null | undefined = view.eviction;
-  if (ev && ev.stage === "votes") {
-    // Only the read votes are present; the electorate size is never disclosed.
-    assert.ok(ev.votesRevealed.length >= 1);
-    assert.ok(!Object.keys(ev).includes("tally"), "no pre-reveal tally field");
-  }
+  assert.ok(ev && ev.stage === "votes", "mid-reveal by construction");
+  const electorate = this.enSandbox!.session.snapshot().live!.eviction!.revealOrder.length;
+  assert.ok(ev.votesRevealed.length >= 1, "at least one ballot was read");
+  assert.ok(ev.votesRevealed.length < electorate, "unread ballots are NOT shown (electorate-derived bound)");
+  assert.ok(!Object.keys(ev).includes("tally"), "no pre-reveal tally field");
+  // E12: secret ballots — no entry carries a voter; the surface holds no attribution at all.
+  for (const r of ev.votesRevealed) assert.deepEqual(Object.keys(r), ["votedFor"]);
+  assert.ok(!JSON.stringify(view).includes('"voter"'), "no voter attribution on the mid-reveal surface");
 });
 
 Then("it does not name the evictee until the final vote lands", function (this: BbWorld) {
@@ -138,6 +155,40 @@ Then("it does not name the evictee until the final vote lands", function (this: 
 
 Then("no Vault sentinel value appears on the eviction surface", function (this: BbWorld) {
   assert.ok(!this.lastOutput.includes(this.enSentinel!), "no Vault sentinel crosses onto the eviction surface");
+});
+
+// --- Scenario: vote secrecy (E12 + T2) --------------------------------------------
+
+Then("every revealed ballot is anonymized", function (this: BbWorld) {
+  // E12: eviction votes are SECRET BALLOTS — every reveal beat reads "a vote to evict …" and the
+  // projection's entries carry the nominee only; no voter attribution exists on any surface.
+  const reveals = this.enViews!.filter((v) => v.event?.beat === "eviction-reveal");
+  assert.ok(reveals.length >= 2, "ballots were revealed");
+  for (const v of reveals) assert.match(v.event!.content, /^a vote to evict /, "the ballot reads anonymized");
+  for (const v of this.enViews!) {
+    if (!v.eviction) continue;
+    for (const r of v.eviction.votesRevealed) assert.deepEqual(Object.keys(r), ["votedFor"]);
+    assert.ok(!JSON.stringify(v.eviction).includes('"voter"'), "no voter key on the eviction surface");
+  }
+});
+
+Then("the post-season retrospective unseals the season's ballots", function (this: BbWorld) {
+  const s = this.enSandbox!.session;
+  // Sealed while the season lives (0048's structural gate).
+  assert.equal(s.seasonRetrospective(), null, "sealed while the season lives");
+  // Play the season out (first legal option per pending), then unseal.
+  for (let i = 0; i < 5000; i++) {
+    const v = s.advanceGame();
+    if (v.pending) resolve(s, v.pending);
+    if (v.finished) break;
+  }
+  const retro = s.seasonRetrospective();
+  assert.ok(retro, "the finished season unseals");
+  assert.ok(retro!.evictionVotes && retro!.evictionVotes.length > 0, "the weekly ballots are unsealed");
+  for (const wk of retro!.evictionVotes!) {
+    assert.ok(wk.votes.length > 0, "each unsealed week carries its ballots");
+    for (const b of wk.votes) assert.ok(b.voter.name.length > 0, "the unsealed ballot names its voter");
+  }
 });
 
 // --- Scenario: the evicted houseguest gets a goodbye beat ------------------------

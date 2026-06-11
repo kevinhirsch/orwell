@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { ConsequenceEngine, restoreMemory } from "../../src/engine/consequence";
 import { RelationshipModel } from "../../src/engine/relationships";
+import { RELATIONSHIP_CONSTANTS } from "../../src/engine/relationshipConstants";
 import { chooseNominations } from "../../src/engine/season";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
@@ -217,7 +218,11 @@ Then("nothing the player legitimately changed was lost", function (this: BbWorld
   for (const e of this.snap!.relationships.edges) {
     assert.deepEqual(
       now.edge(e.from, e.to),
-      { trust: e.trust, affinity: e.affinity, threat: e.threat, alignment: e.alignment, confidence: e.confidence },
+      {
+        trust: e.trust, affinity: e.affinity, threat: e.threat, alignment: e.alignment, confidence: e.confidence,
+        // E54: `reliability` rides the same lossless round-trip (pre-E54 snapshots load at baseline).
+        reliability: e.reliability ?? RELATIONSHIP_CONSTANTS.baseline.reliability,
+      },
       `edge ${e.from}->${e.to} preserved`,
     );
   }

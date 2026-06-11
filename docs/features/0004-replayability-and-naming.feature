@@ -38,10 +38,16 @@ Feature: Replayability & naming — a fresh, randomly-named house every game
     And no single archetype dominates the house beyond the configured balance
     And the mix includes personalities likely to clash and to bond
 
-  Scenario: Names are unique within a house and not from a fixed list
+  # Amended by product ruling #1 (2026-06-10, E38): NPC names must read as REAL names —
+  # seeded sampling from vendored real-name corpora. The corpora are raw material only
+  # ("no fixed cast"): no full-name+persona pairing is hard-coded, and the legacy Bible's
+  # names stay banned (excluded from the corpora).
+  Scenario: Names are unique within a house, realistic, and never a fixed cast
     When a new house is generated
     Then every houseguest display name is unique within the house
-    And no name is drawn from any hard-coded or sample-save list
+    And every generated name is sampled from the vendored real-name corpora
+    And no legacy sample-save name is ever generated
+    And no full name and persona pairing is fixed across seeds
 
   Scenario: Two differently-seeded games share no identities
     Given a house generated with seed "A"

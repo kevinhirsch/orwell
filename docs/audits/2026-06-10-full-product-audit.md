@@ -171,7 +171,7 @@ File references are to `main` @ 87687c0.
 
 ### Theme 2 — Vault Wall & knowledge integrity
 
-- **E9 [HIGH · Bug] `surfaceInformationTo` launders invented facts into full-confidence
+- **E9 [HIGH · Bug] ✅ PR #212 — `surfaceInformationTo` launders invented facts into full-confidence
   knowledge.** `InMemoryKnowledgeService.ts:110–111` — `overheard:<id>` anchoring checks only
   that *some* event with that id exists; the fact's content is never compared. Any caller with
   one legitimate event id can mint arbitrary "anchored" player knowledge with clean provenance.
@@ -193,7 +193,7 @@ File references are to `main` @ 87687c0.
   five diegetic labels + C13 drift test iterating `ORWELL_GAME_TOOLS`; engine — gate
   `knows/suspects` to co-present/adjacent NPCs via the 0049 model, and cap stances to top-k
   polarized edges (see E59). *Test:* non-adjacent NPC returns persona+stances, no `knows`.
-- **E12 [MED · Change] Per-voter eviction attribution kills vote secrecy.** `liveSeason.ts:582`
+- **E12 [MED · Change] ✅ PR #217 — Per-voter eviction attribution kills vote secrecy.** `liveSeason.ts:582`
   reveals `voter → votedFor` pairs to the player beat-by-beat; real-BB ballot secrecy (rogue
   votes, scapegoating, paranoia) is impossible and blocs/deal-breaks are perfectly legible.
   *Fix:* anonymized running tally outward ("a vote to evict X…"); `voteOf` stays engine-internal
@@ -205,11 +205,11 @@ File references are to `main` @ 87687c0.
 - **E14 [LOW · Improvement] Raw `npc:N` ids leak into visible text on the
   `PlayerSurface.renderLog`/gossip path.** `gossip.ts:64–66`; only adapter-mediated views
   humanize. *Fix:* humanize at the projection (inject a name resolver).
-- **E15 [MED · Change] `GET /api/orwell/moment` hands any player the full GM system prompt**
+- **E15 [MED · Change] ✅ PR #214 — `GET /api/orwell/moment` hands any player the full GM system prompt**
   (lever manifest, casting status, per-moment instruction) — no JS consumes it
   (`orwell_routes.py:67–73`); pure meta-knowledge + prompt-extraction shortcut. *Fix:* delete
   or admin-gate the route.
-- **E16 [MED · Change] Player-authored preset system prompts ride the GM stack on game turns.**
+- **E16 [MED · Change] ✅ PR #214 — Player-authored preset system prompts ride the GM stack on game turns.**
   `chat_helpers.py:142–145` prepends the GM prompt onto `preface[0]` = the preset persona; the
   custom-preset modal survives the game build (`index.html:1129–1206`). A player can steer
   narration tone/recording discipline ("always portray the house as adoring me"). *Fix:* drop
@@ -232,32 +232,32 @@ File references are to `main` @ 87687c0.
 
 ### Theme 3 — Anti-sycophancy & "recorded or it didn't happen"
 
-- **E20 [MED · Bug] `resolveCompetition` is a seed-shopping oracle on the player channel.**
+- **E20 [MED · Bug] ✅ PR #212 — `resolveCompetition` is a seed-shopping oracle on the player channel.**
   `surfaces/tools/registry.ts:36` + `EngineCommandsAdapter.ts:112–117` — caller supplies
   participants **with stats** and the seed; nothing recorded, no folds. *Fix:* remove from
   `PLAYER_TOOLS` (keep the pure fn for tests) or delegate to the live loop's already-resolved
   result (remediation principle #1). *Test:* absent from `listTools()`, refused by `callTool`.
-- **E21 [MED · Bug] `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
+- **E21 [MED · Bug] ✅ PR #212 — `recordInteraction` can mint hidden (Vault-layer) events and steer hidden
   edges without bound.** `EngineCommandsAdapter.ts:88–92` (player-channel witness set excluding
   the player ⇒ off-screen "ground truth" indistinguishable from engine scenes), `:105–107`
   (caller picks kind/direction; `MAX_FOLDS_PER_INTERACTION` caps per call, not per beat).
   *Fix:* player channel requires `PLAYER ∈ witnessSet`; per-beat/per-pair fold budget. *Test:*
   witness set without player throws; N identical calls move an edge ≤ budget.
-- **E22 [HIGH · Improvement] The cardinal sin is enforced only by prompt wording FE-side.**
+- **E22 [HIGH · Improvement] ✅ PR #214 — The cardinal sin is enforced only by prompt wording FE-side.**
   `agent_loop.py:68–84` is the entire enforcement; nothing in the agent-stream completion
   (`chat_routes.py:1198–1221`) checks that a narrated `game_active` turn made ≥1 engine write.
   *Fix:* on `[DONE]`, if narration is non-trivial and `_agent_tool_calls` holds zero engine
   writes, fire a server-side fallback `recordInteraction` (bounded digest) + counter. *Test:*
   pytest asserting the guard.
-- **E23 [MED · Bug] Instructed retry of `advanceGame` with no idempotency key can
+- **E23 [MED · Bug] ✅ PR #214 — Instructed retry of `advanceGame` with no idempotency key can
   double-advance a beat.** `agent_loop.py:76–78` ("try the call once more") + 30s client
   timeout where the engine may have committed. *Fix:* on transport failure re-read
   `gameStatus`/pending and report "may already be resolved" (or add an idempotency token).
-- **E24 [MED · Bug] Incognito ("Nobody") bypasses all game framing under the game build.**
+- **E24 [MED · Bug] ✅ PR #214 — Incognito ("Nobody") bypasses all game framing under the game build.**
   `chat_helpers.py:105–106` early-returns; reachable via `/incognito` + hidden checkbox —
   unframed, unrecorded imitation play. *Fix:* under `game_build_enabled()` disable the toggle
   or apply game framing regardless.
-- **E25 [MED · Bug] Sync `/api/chat` persists the user message *before* the 409 game-turn
+- **E25 [MED · Bug] ✅ PR #214 — Sync `/api/chat` persists the user message *before* the 409 game-turn
   refusal** (`chat_routes.py:322–342`) ⇒ orphaned/duplicated transcript messages. *Fix:* hoist
   the check before `add_user_message` (or pop on raise).
 - **E26 [LOW · Improvement] Idempotent no-op answers look like acceptance.**
@@ -279,7 +279,7 @@ File references are to `main` @ 87687c0.
   *Fix:* serve the static per-channel tool list without resolving; apply `knownUser` to GET;
   LRU-cap un-started intake sandboxes. *Test:* unknown-user `GET /player/tools` ⇒
   `userCount()` unchanged, follow-up POST still 404.
-- **E29 [MED · Security] All FE bearer-token (`ody_`) callers collapse into one engine user
+- **E29 [MED · Security] ✅ PR #214 — All FE bearer-token (`ody_`) callers collapse into one engine user
   `"api"`.** `app.py:349` + `orwell_routes.py:28–30` (uses `current_user`, not
   `effective_user`) — two tokens from different owners share one game: a direct cross-user
   isolation break. *Fix:* resolve `api_token_owner` in game routes (or 403 bearer callers on
@@ -306,14 +306,14 @@ File references are to `main` @ 87687c0.
   deepening while a passive player's edges idle — E45/E57 are co-causes) + a permanent property
   gate ("across N passive seeds the player reaches jury in ≥X%"); re-measure social play after
   D1/E1.
-- **E34 [HIGH · Bug] The engine authors the player's goodbye messages.**
+- **E34 [HIGH · Bug] ✅ PR #217 — The engine authors the player's goodbye messages.**
   `liveSeason.ts:542–545` samples senders from `s.active` (player included) and `:597–603`
   asserts a tone computed from the hidden player→NPC edge — the engine deciding and narrating
   the player's own feelings, on jury management's signature lever. *Fix:* exclude `PLAYER` from
   `selectGoodbyeSenders`; add an optional `goodbye-message` pending decision (tone +
   model-voiced text) folded via `goodbyeMannerFor` exactly as NPC tones. *Test:* no
   player-sent goodbye beat without a resolved player decision.
-- **E35 [MED · Bug] A player drawn into the veto by chip never declares intent, and the chip
+- **E35 [MED · Bug] ✅ PR #217 — A player drawn into the veto by chip never declares intent, and the chip
   draw isn't a ceremony.** `liveSeason.ts:795–798` pauses for intent only pre-draw-resolution
   for pullers; the draw emits no witnessed BeatEvent (the field appears only on the winner
   event), so the player misses the canonical compete/throw/play-safe declaration and never
@@ -321,16 +321,16 @@ File references are to `main` @ 87687c0.
   naming the six + HC holder/pick; pause for `comp-intent` whenever the player is in the field)
   then `veto-competition`. *Test:* chip-drawn player gets a `comp-intent` pending; a
   `veto-draw` event precedes any winner.
-- **E36 [MED · Bug] The F4 veto decision offers "use" then silently inverts it.**
+- **E36 [MED · Bug] ✅ PR #217 — The F4 veto decision offers "use" then silently inverts it.**
   `liveSeason.ts:851–857/:960–963` — submitting `{use:true}` with no legal replacement resets
   `vetoUsed=false` and narrates "does not use the veto," contradicting the submitted choice and
   the 0034 legal-options contract. *Fix:* surface the F4 rule in the pending's legal set (or
   refuse with the decision standing). 
-- **E37 [LOW · Improvement] The player-juror has no question beat at the finale.**
+- **E37 [LOW · Improvement] ✅ PR #217 — The player-juror has no question beat at the finale.**
   `liveSeason.ts:710–712` pauses only for a player *finalist*; a juror watches their own
   question auto-answered. *Fix:* a scoreless `juror-question` pending (free text; NPC answer
   still engine-chosen) — the finale-statement precedent shows this is cheap.
-- **E38 [HIGH · Bug] NPC names are gobbledygook ("Sheehoaika Peokakith") — product ruling: real
+- **E38 [HIGH · Bug] ✅ PR #217 — NPC names are gobbledygook ("Sheehoaika Peokakith") — product ruling: real
   names.** `characterFactory.ts:134–147` glues random ONSET+NUCLEUS+CODA syllables; the only
   filter is a capitalization regex (`:152`). Violates 0004's own "plausible BB contestant"
   bound and ADR 0003 §8 on the game's first screen. *Fix:* vendored corpora (~300+ given names,
@@ -341,7 +341,7 @@ File references are to `main` @ 87687c0.
   `characterCreation.test.ts:50–53` from zero-name-overlap to no-*identity*-carryover; add the
   inverse realism gate (every generated part ∈ corpus — the check `0004:63–64` asked for and
   never got); roles-only rule untouched.
-- **E39 [MED · Change] Same name ⇒ byte-identical season** (= **D8**, endorsed; engine evidence
+- **E39 [MED · Change] ✅ PR #217 — Same name ⇒ byte-identical season** (= **D8**, endorsed; engine evidence
   `GameSessionAdapter.ts:513` `seed = req.seed ?? hashSeed(playerName)`). Entropy default
   (per-creation nonce persisted in the snapshot); explicit seeds remain for tests/replays.
 - **E40 [LOW · Change] Final 3 is a single comp** — the canonical three-part HOH
@@ -359,7 +359,7 @@ File references are to `main` @ 87687c0.
 all disconnected from decisions. E42+E43+E44 convert three shipped systems from flavor into
 consequence.*
 
-- **E42 [HIGH · Bug] NPC eviction votes are never reconciled against deals.** Reconciliation
+- **E42 [HIGH · Bug] ✅ PR #216 — NPC eviction votes are never reconciled against deals.** Reconciliation
   runs only for the player's vote and nominate/replace beats (`GameSessionAdapter.ts:808–809`,
   `:857–868`); NPC votes (`liveSeason.ts:404–418`) and NPC HOH tie-breaks (`:591`) bypass
   `DealLedger.reconcile` — though `voteChoice`'s own docstring (`:384–386`) promises the
@@ -367,7 +367,7 @@ consequence.*
   `{actor: voter, kind:"vote-evict", targets:[evictee]}` for every voter in `commitStagedEviction`.
   *Test:* an NPC with an open safety deal voting the player out ⇒ deal `broken`,
   `mannerByEvictee` betrayed, witnessed betrayal reveal.
-- **E43 [HIGH · Bug] Deals self-extinguish after one ceremony and keeping one never builds
+- **E43 [HIGH · Bug] ✅ PR #216 — Deals self-extinguish after one ceremony and keeping one never builds
   trust.** `deals.ts:101–104` (first adverse-action-missing-partner ⇒ terminal `kept` — a
   week-2 final-two deal stops binding at the week-3 noms); no positive fold exists for honoring
   (`:89–121`), contradicting the lever manifest ("keeping it builds trust",
@@ -375,57 +375,57 @@ consequence.*
   eviction; final-two ⇒ F2 or break) + a bounded positive fold per honoring action
   (constants-module magnitude). *Test:* final-two deal still `open()` after an unrelated week-3
   nom; honored safety deal raises trust.
-- **E44 [HIGH · Improvement] Gossip never changes anyone's mind.** Diffusion writes
+- **E44 [HIGH · Improvement] ✅ PR #216 (mechanism + receipt folds + tests; the 3-line tick wiring rides Lane 1's orchestrator merge) — Gossip never changes anyone's mind.** Diffusion writes
   `KnowledgeService` beliefs (`orchestrator.ts:372–395`, model correct in `gossip.ts:81–135`)
   but noms/votes/saves/blocs/confessionals read only relationship edges — a rumor never moves
   any third party's threat read; the only fold is the tellers bonding. *Fix:* on receipt, a
   small directed fold toward the rumor's subjects keyed by scene type × belief confidence
   (new `GOSSIP_HEARD` constants). *Test:* a betrayal-rumor chain to a future HOH raises the
   subject's nomination ranking vs. the no-rumor control at the same seed.
-- **E45 [HIGH · Improvement] Off-screen society is socially incoherent.** `offscreen.ts:88–94`
+- **E45 [HIGH · Improvement] ✅ PR #216 (motivated/co-present draw + tests behind `edgeOf`/`occupancy` deps; same tick-wiring note) — Off-screen society is socially incoherent.** `offscreen.ts:88–94`
   — uniform-random partner and nature (allies draw `betrayal` as often as `bonding`); scenes
   ignore the presence model (witness in a different room than the scene,
   `orchestrator.ts:357–364`). *Fix:* weight partner by edges (affinity→bonding,
   alignment→strategy, threat→conflict); gate `betrayal` on an existing bond + incentive;
   require co-presence. *Tests:* betrayal only over above-threshold prior bonds; every
   off-screen witness set co-located in `occupancy`.
-- **E46 [MED · Improvement] NPC↔NPC deals don't exist** though comments claim they live in the
+- **E46 [MED · Improvement] ✅ PR #216 (minted at the nomination ceremony, Vault-held, fully reconciled) — NPC↔NPC deals don't exist** though comments claim they live in the
   Vault (`GameSessionAdapter.ts:111, 819–820`; `DealLedger.npcOnly()` dead). *Fix:* off-screen
   high-mutual-trust scenes occasionally mint Vault-held NPC deals; reconcile against NPC
   actions (free with E42); breaks drive folds + rumor seeds. *Test:* seeded season produces ≥1
   NPC deal; nothing crosses outward (extend the sentinel).
-- **E47 [MED · Change] Winning a comp makes the whole house dislike you.**
+- **E47 [MED · Change] ✅ PR #216 — Winning a comp makes the whole house dislike you.**
   `CEREMONY_IMPACTS["comp-won"] = "conflict"` (affinity −0.16/trust −0.13 from *everyone*,
   `relationshipConstants.ts:120–126`) — allies cool on their own winner. *Fix:* dedicated
   `comp-won` impact `{threat:+0.14}` only (small affinity gain from bloc-mates optional).
-- **E48 [MED · Change] A fully-expected, "respected" eviction still folds full betrayal-shock**
+- **E48 [MED · Change] ✅ PR #216 — A fully-expected, "respected" eviction still folds full betrayal-shock**
   toward every responsible voter (`relationshipConstants.ts:124` + `GameSessionAdapter.ts:767–769`),
   disagreeing with the recorded manner. *Fix:* scale the fold by manner
   (betrayed/blindsided/respected).
-- **E49 [MED · Bug] The "departing HOH" eviction fold targets the wrong week's HOH.**
+- **E49 [MED · Bug] ✅ PR #216 — The "departing HOH" eviction fold targets the wrong week's HOH.**
   `GameSessionAdapter.ts:770–771` reads `s.outgoingHoh` before `rollWeek` runs ⇒ the previous
   week's HOH gets the proven-threat fold twice, the current one a week late. *Fix:* fold toward
   `s.hoh`.
-- **E50 [MED · Bug] Betrayal scenes give the *betrayer* the betrayed emotion; the victim's soul
+- **E50 [MED · Bug] ✅ PR #216 (initiator-side live; both-souls seam `recordOffscreenScene` awaits the same tick wiring) — Betrayal scenes give the *betrayer* the betrayed emotion; the victim's soul
   never moves.** `emotionalArc.ts:50–58` + `orchestrator.ts:354` (initiator-only evolution).
   *Fix:* per-role mapping (initiator→`scheme`, partner→`betrayed`); evolve both participants.
-- **E51 [MED · Bug] Half the arc vocabulary is dead.** `survived-vote`/`comp-loss` exist only
+- **E51 [MED · Bug] ✅ PR #216 (adapter-side — no liveSeason edit; comp-loss scoped to contested fields) — Half the arc vocabulary is dead.** `survived-vote`/`comp-loss` exist only
   inside `emotionalArc.ts` — the emboldened-survivor beat 0041 defines never fires. *Fix:*
   `inflect(survivingNominee,"survived-vote")` on eviction; `comp-loss` for contested losers.
-- **E52 [MED · Change] The live emotional swing omits ADR 0001's temperature roll, and the
+- **E52 [MED · Change] ✅ PR #216 (delegates to `emotionalModifier`; also retires C16's dead parallel) — The live emotional swing omits ADR 0001's temperature roll, and the
   canonical `emotionalModifier()` has no production caller** (`emotionalArc.ts:82–87`
   deterministic; `temperatureConstants.ts:79–87` dead) — two parallel formulas, one dead.
   *Fix:* seeded temperature into `evolveEmotion`; delete or delegate to `emotionalModifier`.
-- **E53 [MED · Bug] `variableWeights` — the "temperature is per-moment, per-variable" config —
+- **E53 [MED · Bug] ✅ PR #216 (initiative + allianceShift wired; the four consumer-less fields deleted) — `variableWeights` — the "temperature is per-moment, per-variable" config —
   is decorative** (zero consumers; subsystems roll ad-hoc variance:
   `conversation.ts:50`, `TEMPERATURE_JITTER`, `chooseStrongestBond` default). *Fix:* wire each
   weight to its subsystem or delete the struct. *Test:* changing `variableWeights.initiative`
   changes approach-ordering variance.
-- **E54 [MED · Change] ADR 0002's `reliability` signal was never built** — trust is pure
+- **E54 [MED · Change] ✅ PR #216 (signal + feeds + `bondStrength`; vetoSave/juryLean consumption is a 2-line post-merge follow-up) — ADR 0002's `reliability` signal was never built** — trust is pure
   sentiment, never evidence; with E43, demonstrated loyalty has no representation. *Fix:* add
   `reliability` fed by protective votes/honored deals/veto saves; consume in `vetoSave`,
   `bondStrength`, `juryLean`.
-- **E55 [MED · Improvement] Confessionals are one canned template, never reach soul recall.**
+- **E55 [MED · Improvement] ✅ PR #216 — Confessionals are one canned template, never reach soul recall.**
   `confessionals.ts:53–55` (identical line all season — also the 0048 unsealing payoff);
   ceremony confessionals fire only at noms; `recordConfessionalToSoul` has zero callers (0040's
   recall half unwired). *Fix:* structured confessionals (trigger/target/mood/surfaced element)
@@ -441,7 +441,7 @@ consequence.*
   (12 hidden scenes, 4 reshuffles, 4 rumors/confessionals), force-marching the house and
   flooding the record. *Fix:* debounce to the turn boundary. *Test:*
   `recordInteraction+diaryRoom+advanceGame` ⇒ exactly one `offscreen-tick`.
-- **E58 [MED · Improvement] The daily-event invariant is satisfied by a verbatim filler event,
+- **E58 [MED · Improvement] ✅ PR #213 — The daily-event invariant is satisfied by a verbatim filler event,
   and in-game days don't exist in the live game.** `orchestrator.ts:405–416` ("A house meeting
   shifts the week.", repeated, player-witnessed, pollutes THE RECORD re-entry facts);
   `schedule.ts` has no production callers; no day index on any view. *Fix:* derive day from the
@@ -450,7 +450,7 @@ consequence.*
 - **E59 [LOW · Change] `relationshipLabel` is a fixed 3-label taxonomy** (`relationships.ts:43–55`)
   vs. ADR 0002's organic vocabulary; `npcVoice` ships a stance for every living pair each call.
   *Fix:* disposition-framed phrase set; top-k stances (pairs with E11).
-- **E60 [LOW · Change] `socialInitiatives` ships the exact canned string ADR 0003 names as a
+- **E60 [LOW · Change] ✅ PR #213 — `socialInitiatives` ships the exact canned string ADR 0003 names as a
   smell** (`pretext: "wants a word with you"`, `GameSessionAdapter.ts:454`) while discarding the
   computed drive. *Fix:* coarse categorical motive (`bond | probe`), never the number.
 - **E61 [LOW · Improvement] Exact ties resolve by array position, not seed** (`liveSeason.ts:400`,
@@ -548,7 +548,7 @@ consequence.*
   `window._orwellOpenDiaryRoom` seam re-pointed at the composer mode. *Note:* with E64 (status
   HUD) and this, R4's Diary-trigger occlusion becomes unreachable and D2 shrinks to the
   presence strip + retrospective panel.
-- **E89 [MED · UX · ruling] NPC approaches must not fire at the very start of the game.**
+- **E89 [MED · UX · ruling] ✅ PR #214 (the engine gate; the FE started-gate belt already existed) — NPC approaches must not fire at the very start of the game.**
   `orwellSocial.js` gates only on `st.started` (`:6, :409`), and engine-side `socialInitiatives`
   ranks approaches from move-in — so "___ wants a word with you" can pop before the player has
   had a single unprompted beat in the house. *Ruling:* the approach surface may stay a window,
@@ -595,7 +595,7 @@ consequence.*
   under the game build, on `game_active` sessions: hide edit/delete/regenerate on all
   messages after game start (keep copy); pre-game OOC sessions unaffected. *Test:* pytest/
   browser smoke asserts no edit/delete affordances render on a started game's transcript.
-- **E94 [MED · UX/Bug · ruling] ✅ PR #208 (FE half: first-class paperclip + the framing/attachment coexistence gate; the one-line scene framing rides Lane 6) — Image attach: promote it out of the overflow menu and make it
+- **E94 [MED · UX/Bug · ruling] ✅ PR #208 (FE half: first-class paperclip + the framing/attachment coexistence gate) + ✅ PR #214 (the one-line scene framing: the player is SHOWING something to whoever is present) — Image attach: promote it out of the overflow menu and make it
   work in character.** Today "Attach files" is an overflow-menu item behind the `+` button
   (`index.html` `#overflow-attach-btn`) — one icon hidden behind another — and nothing
   guarantees an attached image reaches the model with game framing intact. *Fix spec:* (a) a
@@ -854,26 +854,26 @@ traceability; E-batch cross-references inline.
 
 ## Stream P — GM prompt & narrative context (P1–P11)
 
-- **P1 [HIGH · Bug]** The B61 "finality language" line never landed though B61 is ✅ in the
+- **P1 [HIGH · Bug]** ✅ PR #213 — The B61 "finality language" line never landed though B61 is ✅ in the
   queue (`IMPLEMENTATION_QUEUE.md:1755–1758`): nothing in `momentPrompts.ts` or
   `agent_loop.py` forbids voicing unresolved outcomes as settled ("X is going home") — the
   exact v1 §3.9 failure. *Fix:* one line in `BASE_GAME_MASTER_PROMPT` after AUTHORITY
   ("unresolved outcomes are READS… never results until the engine resolves and reveals") +
   a `leverManifest.test.ts` regex pin.
-- **P2 [HIGH · Bug]** The re-entry moment is never requested: `storyFacts`/THE RECORD attach
+- **P2 [HIGH · Bug] ✅ PR #214 —** The re-entry moment is never requested: `storyFacts`/THE RECORD attach
   only to `re-entry`/`post-season` (`GameSessionAdapter.ts:1104–1105`), `view.moment` can
   never *be* `re-entry` (`:1195–1197`), and the FE always passes the phase moment
   (`chat_helpers.py:135,156`). A player resuming in a fresh session mid-season gets zero
   recorded history (ADR 0003 §6). C22's DONE note verified only the premiere slice. *Fix:*
   FE requests `re-entry` on the first game turn of a (re)opened session; pytest pins the
   requested moment.
-- **P3 [HIGH · Change]** Casting-interview turns stack the producer persona ("never a generic
+- **P3 [HIGH · Change] ✅ PR #214 —** Casting-interview turns stack the producer persona ("never a generic
   assistant", `momentPrompts.ts:115–116`) on top of the full generic-assistant preamble +
   rulebook + skills index, because substitution keys on `game_active` (false pre-game)
   (`chat_routes.py:1142`, `agent_loop.py:86–135, 911`) — and `test_c14_immersion.py:56–59`
   pins the violation in place. *Fix:* key substitution on a `framed` flag from
   `apply_game_framing`; small casting-mode tool contract.
-- **P4 [MED · Change]** The fourth-wall gap is prompt-compliant: nothing says levers are
+- **P4 [MED · Change]** ✅ PR #213 — The fourth-wall gap is prompt-compliant: nothing says levers are
   silent, and the generic `ask_user` description ("get a decision or clarification…",
   `tool_schemas.py:454`) invites "Record this interaction?". *Fix:* "levers are silent
   production machinery — never ask permission to use one; ask_user is ONLY for pending
@@ -881,20 +881,20 @@ traceability; E-batch cross-references inline.
 - **P5 [MED · Improvement]** THE RECORD's blind `slice(-8)` degenerates exactly when re-entry
   matters: at the finale all eight slots are near-identical vote lines (measured). *Fix:*
   per-type fact selection (latest ceremony beat per kind + recent social/deal events).
-- **P6 [MED · Bug]** `runCompetition`'s BASE manifest bullet says "resolve… you announce ONLY
+- **P6 [MED · Bug]** ✅ PR #213 — `runCompetition`'s BASE manifest bullet says "resolve… you announce ONLY
   the winner" (`momentPrompts.ts:66–67`); the preview semantics live only in the HOH fragment
   — on other turns the model can announce a never-committed winner. *Fix:* reword BASE + FE
   schema to "previews… resolves only via advanceGame"; manifest test pin.
-- **P7 [MED · Bug]** Incognito strips all game framing while the in-character transcript rides
+- **P7 [MED · Bug] ✅ PR #214 —** Incognito strips all game framing while the in-character transcript rides
   along — ungrounded, consequence-free continuation (mechanism behind E24). *Fix:* disable
   under the game build or substitute a FEED_DOWN-style non-narration frame.
-- **P8 [LOW]** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
+- **P8 [LOW] ✅ PR #214 —** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
   policy referencing memories/skills the game build disables (ADR 0003 §1).
-- **P9 [LOW]** The casting-sheet *field* manifest isn't drift-pinned against
+- **P9 [LOW]** ✅ PR #213 — The casting-sheet *field* manifest isn't drift-pinned against
   `CASTING_COVERAGE` (the archetype table is; the nine field names aren't).
-- **P10 [LOW]** `submitDecision`'s manifest line enumerates 4 of 11 pending kinds — say
+- **P10 [LOW]** ✅ PR #213 — `submitDecision`'s manifest line enumerates 4 of 11 pending kinds — say
   "answer the engine's pending decision (its kind + legal options)" instead.
-- **P11 [LOW]** Two quoted example lines flirt with scripts-to-recite (`momentPrompts.ts:40–42,
+- **P11 [LOW]** ✅ PR #213 — Two quoted example lines flirt with scripts-to-recite (`momentPrompts.ts:40–42,
   147–148`) — cut to descriptions.
 - *Held up:* every woven block Vault-free under sentinels; lever manifest drift-pinned both
   directions; casting sheet generated + dually pinned; `npcVoice` genuinely knowledge-scoped
@@ -910,7 +910,7 @@ traceability; E-batch cross-references inline.
   the narrating LLM mid-scene, or toggle incognito (which strips all framing — P7/E24).
   *Fix:* game-build allowlist of safe actions (highlight only); reject
   mode/model/incognito/panel actions on game turns; pytest + JS guards.
-- **W2 [MED · Security]** `GET /api/chat/events/{session_id}` is the only session endpoint
+- **W2 [MED · Security] ✅ PR #214 —** `GET /api/chat/events/{session_id}` is the only session endpoint
   missing `_verify_session_owner` (`chat_routes.py:1297–1303` vs `:1311+`) — any
   authenticated user can subscribe to another user's activity stream (metadata side-channel +
   unbounded subscriber slot). *Fix:* one line, same guard as `chat_resume`.
@@ -943,7 +943,7 @@ traceability; E-batch cross-references inline.
 
 ## Stream C — pure domain core + souls (C1–C17; C1–C3 execution-confirmed)
 
-- **C1 [HIGH · Bug · confirmed]** Houseguest's-Choice deferral hands the player a stale
+- **C1 [HIGH · Bug · confirmed] ✅ PR #217 —** Houseguest's-Choice deferral hands the player a stale
   candidate list: candidates snapshot mid-draw (`eligibility.ts:91–101`) while later pullers
   keep drawing; resume validates only membership in the stale list
   (`liveSeason.ts:976–978`) and appends blindly. Confirmed: field
@@ -952,13 +952,13 @@ traceability; E-batch cross-references inline.
   (`candidates − vetoField`), reject already-drawn picks, snapshot deferred candidates after
   the full draw. *Test:* property over seeds × house sizes 5–16 + a live submit loop
   asserting no duplicates and correct field size.
-- **C2 [HIGH · Bug · confirmed]** `pathwayAnchored`'s `told-by:` check passes on
+- **C2 [HIGH · Bug · confirmed] ✅ PR #212 —** `pathwayAnchored`'s `told-by:` check passes on
   subject-match alone (`k.content === fact.content || k.subject === fact.subject`) —
   seeding an NPC with "npc:9 likes to cook breakfast" anchors the invented "npc:9 has a
   final-two deal against you and is throwing comps" as real player knowledge. On the
   player-channel allowlist. *Fix:* anchor on content lineage (`factId`/fuzzy content match);
   subject-only ⇒ suspicion with capped confidence. (Sister of E9; both close together.)
-- **C3 [HIGH · confirmed]** E9's `overheard:` hole verified by execution ("totally fabricated
+- **C3 [HIGH · confirmed] ✅ PR #212 —** E9's `overheard:` hole verified by execution ("totally fabricated
   secret" surfaced as knowledge against an unrelated event id). The legitimate engine caller
   always passes a strict content fragment — make the anchor require it.
 - **C4 [MED · Bug]** `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
@@ -972,20 +972,20 @@ traceability; E-batch cross-references inline.
   `competitors[0]` (`competitionOutcome.ts:79–92`); empty field throws TypeError; `serialize`
   silently converts NaN → null ("lossless" becomes a type lie). *Fix:* finiteness asserts +
   empty-field throw; fast-check property.
-- **C6 [MED · Bug]** A missing/typo'd archetype silently grants the player **comp-beast**
+- **C6 [MED · Bug] ✅ PR #217 —** A missing/typo'd archetype silently grants the player **comp-beast**
   stats — `SPEC_OF.get(...) || ARCHETYPES[0]` (`characterFactory.ts:314`), and the
   archetype/style steps aren't part of the casting `ready` gate, so early finalization is
   normal. Anti-sycophancy via fallback. *Fix:* default to a median spec (floater), surface
   "defaulted" on the casting card. *Test:* default-stats ≠ global max.
-- **C7 [MED]** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
+- **C7 [MED] ✅ PR #217 —** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
   elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
   replays a season whose secrets they know).
-- **C8 [MED · Bug]** Casting intake: no length caps, exact-string note dedupe only, scalars
+- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization; overwrite flag deferred) — Casting intake: no length caps, exact-string note dedupe only, scalars
   silently overwritable by any later `updateCasting`, and every captured value is echoed
   verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
   `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
   (e.g. 500 chars/scalar, bounded notes), neutralize structure when echoing, overwrite flag.
-- **C9 [MED-LOW]** Hidden elements can contradict each other (multiple `secret-motive`s) and
+- **C9 [MED-LOW] ✅ PR #216** — Hidden elements can contradict each other (multiple `secret-motive`s) and
   the character's stats ("hidden endurance machine" on a 0.45-physical floater — unbackable
   flavor; "sharper at puzzles" on a public mastermind — not concealed). *Fix:* one
   secret-motive max; gate `concealed-aptitude` on actual stat ≥ threshold with a non-matching
@@ -997,7 +997,7 @@ traceability; E-batch cross-references inline.
 - **C11 [LOW]** `tallyJury` evaluates `votesFor(j)` up to 3× per juror and silently drops
   votes for non-finalists (`season.ts:127,131`) — latent (live caller precomputes). *Fix:*
   evaluate once, throw on non-finalist.
-- **C12 [LOW]** `recordConfessionalToSoul` has no production caller — 0040's
+- **C12 [LOW] ✅ PR #216** — `recordConfessionalToSoul` has no production caller — 0040's
   "live soul-recall" half is unwired: confessional content never reaches `SoulStore`, an NPC
   can't recall their own past confessionals. *Fix:* call it at both live record sites,
   mirrored into `hg.soul.memory` (see C13).
@@ -1006,7 +1006,7 @@ traceability; E-batch cross-references inline.
   `rebuildSoulIndex` replays it — any future direct `recordToSoul` writer is silently lost on
   restart and invisible to the checkpoint (C4). *Fix:* make the durable mirror the API
   (`deepenSoul(id, note)`); property test through public seams.
-- **C14 [LOW]** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
+- **C14 [LOW] ✅ PR #212 —** Knowledge `confidence` never clamped to [0,1] at the MCP seam — confidence 50
   or −3 persists and feeds prompts. `clamp01` at `pushKnown`.
 - **C15 [LOW]** `vetoParticipants` doesn't validate the `choose` callback's return (could
   insert the HOH/a nominee/a duplicate); `chooseStrongestBond([])` returns `undefined`.
@@ -1029,11 +1029,11 @@ Production-vs-fixture: 17 step files drive the LIVE registry/adapter spine (stro
 pure-core features legitimately test the pure core; the gaps are where a live promise is
 proven only on a fixture:
 
-- **T1 [HIGH · Fixture-gap]** Live deal reconciliation has zero coverage — the 0039 BDD steps
+- **T1 [HIGH · Fixture-gap] ✅ PR #216** (`tests/integration/liveDealReconciliation.test.ts`) — Live deal reconciliation has zero coverage — the 0039 BDD steps
   assert their own stubs (`deal_tracking.steps.ts:17–30, 122–127`); `reconcileDeals`,
   `bindingActionFor`, jury demerits, and the reveal event are untested on the production
   path. (The missing gate for E42/E43.) Full live-test spec recorded.
-- **T2 [HIGH · Vacuous]** Vote secrecy's Then is `x ≤ max(xs)` — true by definition
+- **T2 [HIGH · Vacuous] ✅ PR #217 —** Vote secrecy's Then is `x ≤ max(xs)` — true by definition
   (`eviction_night.steps.ts:91–101`); the "no pre-reveal tally/unread vote" Then guards
   itself behind an `if` that can skip all assertions. Replacement: electorate-derived bounds
   + mid-stage surface sweeps. (The engine-side twin of E12.)
@@ -1247,7 +1247,7 @@ result; the liveSentinel/liveFairness lanes are the cross-lane regression net.
 
 # Post-merge addenda (2026-06-10, after the round-5/6 merge to main)
 
-## A1 [MED-HIGH · Bug + Vacuous-test] Admin-enabled optional agent tools are silently re-disabled on every default game turn
+## A1 [MED-HIGH · Bug + Vacuous-test] ✅ PR #214 — Admin-enabled optional agent tools are silently re-disabled on every default game turn
 
 **The ruling/request (2026-06-10):** the Settings → Admin → Agent tools page lists the
 optional "power" tools (off by default); when an admin ENABLES one, it must actually work
@@ -1293,7 +1293,7 @@ in it — mirror case (no opt-in) asserts it IS; (b) the same pair for a non-wit
 game turn and the tool executes. This closes the gap the existing test's isolation
 assertion papers over.
 
-## A2 [MED · Bug + Change] Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
+## A2 [MED · Bug + Change] ✅ PR #214 — Enabled optional tools: the full four-gate trace — two more silent defeats beyond A1
 
 End-to-end answer to "do disabled tools actually work when activated and called by the LLM's
 lever?" Four gates sit between the Settings → Admin → Agent tools toggle and a working call:

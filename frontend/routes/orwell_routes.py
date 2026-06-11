@@ -22,13 +22,23 @@ from pydantic import BaseModel
 
 from core.middleware import require_admin
 from src import orwell_engine
+from src.auth_helpers import effective_user
 
 logger = logging.getLogger(__name__)
 
 
 def _current_user(request: Request) -> Optional[str]:
-    """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021)."""
-    return getattr(getattr(request, "state", None), "current_user", None)
+    """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021).
+
+    E29: resolves the EFFECTIVE user — a bearer-token (`ody_`) caller is attributed to the
+    token's real owner (`request.state.api_token_owner`), not the shared "api" pseudo-user.
+    Before this, every bearer caller collapsed into ONE engine sandbox ("api"): two tokens
+    from different owners shared one game — a direct cross-user isolation break (0021).
+    Cookie sessions are unchanged (effective_user is identical to current_user for them)."""
+    try:
+        return effective_user(request)
+    except Exception:
+        return getattr(getattr(request, "state", None), "current_user", None)
 
 
 class NewGameRequest(BaseModel):
@@ -67,6 +77,12 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/moment")
     async def orwell_moment(request: Request, moment: Optional[str] = None):
+        """E15: ADMIN-GATED. The moment prompt is the full GM system prompt (lever manifest,
+        casting status, per-moment instruction) — pure meta-knowledge and a prompt-extraction
+        shortcut for a player. No player JS consumes this route (the chat path injects the
+        prompt server-side via chat_helpers); it stays only as an admin/debug read."""
+        from core.middleware import require_admin
+        require_admin(request)
         try:
             return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
@@ -192,7 +208,8 @@ def setup_orwell_routes() -> APIRouter:
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
-        "finale-statement", "finale-answer", "juror-vote",
+        "goodbye-message", "finale-statement", "finale-answer",
+        "juror-question", "juror-vote",
     }
 
     @router.post("/decision")

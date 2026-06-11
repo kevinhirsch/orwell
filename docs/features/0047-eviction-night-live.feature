@@ -23,6 +23,17 @@ Feature: Eviction night live
     And it does not name the evictee until the final vote lands
     And no Vault sentinel value appears on the eviction surface
 
+  # Amended 2026-06-10 (E12 + T2): eviction votes are SECRET BALLOTS, as on the real show — the
+  # staged reveal reads anonymized ballots ("a vote to evict …"), never the voter; rogue votes,
+  # scapegoating, and vote paranoia become possible again. The attribution is recorded
+  # engine-only and unseals exclusively in the post-season retrospective (0048). T2 also
+  # replaced the self-referential tally assertions with electorate-derived bounds.
+  Scenario: Vote secrecy — ballots are anonymous until the season ends
+    Given a started game at an eviction with a decided vote
+    When the eviction is advanced through the seam
+    Then every revealed ballot is anonymized
+    And the post-season retrospective unseals the season's ballots
+
   Scenario: The evicted houseguest gets a goodbye beat
     Given an eviction whose result has landed
     When the staging continues
@@ -38,3 +49,14 @@ Feature: Eviction night live
     Given an eviction staged through the advance seam
     When the engine restarts mid-reveal
     Then the eviction resumes from where it left off
+
+  # Amended 2026-06-10 (E34): the engine never authors the PLAYER's goodbye message. A surviving
+  # player records their own — a real pending decision through the 0034 seam (the tone is the
+  # player's choice; the prose is the model's to voice) — folded into the evictee's manner
+  # exactly as NPC tones are. Jury management's signature lever belongs to the player.
+  Scenario: The player's goodbye message is their own decision
+    Given an eviction whose result has landed with the player surviving
+    When the goodbye stage reaches the player
+    Then the loop pauses for the player's goodbye message
+    And no player goodbye beat exists before the decision is resolved
+    And the player's chosen tone folds into the evictee's manner toward the player

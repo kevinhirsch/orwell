@@ -43,6 +43,8 @@ function playToEnd(s: LiveSeasonState, ctx: SeasonCtx, seed: number): BeatEvent[
       else if (p.kind === "tie-break") events.push(applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx));
       else if (p.kind === "houseguests-choice") events.push(applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng));
       else if (p.kind === "comp-intent") events.push(applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng));
+      else if (p.kind === "goodbye-message") events.push(applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx));
+      else if (p.kind === "juror-question") events.push(applyDecision(s, { kind: "juror-question", question: "q" }, ctx));
       else events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
     } else {
       const ev = advance(s, ctx, rng);
@@ -99,7 +101,8 @@ describe("live weekly loop (incremental 0011)", () => {
         if (s.pending) {
           const p = s.pending;
           if (p.kind === "nominations") applyDecision(s, { kind: "nominations", choice: [p.options[0]!, p.options[1]!] }, ctx);
-          else if (p.kind === "veto-decision") applyDecision(s, { kind: "veto-decision", use: true, save: p.nominees[0] }, ctx);
+          // E36: save from the LEGAL set — empty at Final 4 means using the veto is barred.
+          else if (p.kind === "veto-decision") applyDecision(s, p.saveable.length > 0 ? { kind: "veto-decision", use: true, save: p.saveable[0]! } : { kind: "veto-decision", use: false }, ctx);
           else if (p.kind === "replacement") applyDecision(s, { kind: "replacement", replacement: p.options[0]! }, ctx);
           else if (p.kind === "eviction-vote") applyDecision(s, { kind: "eviction-vote", vote: p.nominees[0] }, ctx);
           else if (p.kind === "finale-statement") applyDecision(s, { kind: "finale-statement", statement: "thanks" }, ctx);
@@ -108,6 +111,8 @@ describe("live weekly loop (incremental 0011)", () => {
           else if (p.kind === "tie-break") applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx);
           else if (p.kind === "houseguests-choice") applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng);
           else if (p.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
+          else if (p.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx);
+          else if (p.kind === "juror-question") applyDecision(s, { kind: "juror-question", question: "q" }, ctx);
           else applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);
         } else {
           if (s.replacement) {
@@ -408,8 +413,11 @@ describe("0037 — live finale sub-loop", () => {
     const s: LiveSeasonState = { week: 9, beat: "finale", active: [A, B], vetoUsed: false, evictionOrder: [...jury], finished: false };
     const ctx: SeasonCtx = { player: PLAYER, statsOf: () => ({ physical: 0.5, mental: 0.5, social: 0.5 }), rel };
     const rng = new SeededRandom(7);
-    // Advance to the player's juror vote (no statements/answers since the player isn't a finalist).
-    while (!s.finished && s.pending?.kind !== "juror-vote") advance(s, ctx, rng);
+    // Advance to the player's juror vote, answering the player-juror's own question beats (E37).
+    while (!s.finished && s.pending?.kind !== "juror-vote") {
+      if (s.pending?.kind === "juror-question") applyDecision(s, { kind: "juror-question", question: "q" }, ctx);
+      else advance(s, ctx, rng);
+    }
     expect(s.pending?.kind).toBe("juror-vote");
     // An illegal vote (not a finalist) is refused; the pending decision stands.
     expect(() => applyDecision(s, { kind: "juror-vote", vote: npc(1) }, ctx)).toThrow();
