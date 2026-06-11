@@ -66,6 +66,27 @@
   /* Warm accent — used by the Goals/Today UI in Notes. Lives as a token so
      themes can override without touching the goal CSS. */
   --accent-warm: #d19a66;
+
+  /* ── Window visual tokens (Lane G4) — ONE window visual language ──
+     The shared window frame, defined ONCE and consumed by BOTH window
+     families: the OrwellWindow kit (.ow-window — css injected by
+     static/js/orwellWindow.js ensureCss) and the legacy modal family
+     (.modal-content / .modal-header h4 below). Settings, theme, and tool
+     modals therefore share one look with every kit window, and a theme
+     that moves --panel/--border (e.g. the five 0052 house presets) or the
+     house frost layer (orwellHouseThemes.css) re-skins both families at
+     once. Source pin: tests/test_g4_visual_tokens.py.
+     Deliberately NOT a shared token: the titlebar COLOR — the modal
+     family's var(--red) header fails AA 4.5:1 on the panel in some
+     palettes (room-101 2.81:1, light 3.03:1), so the kit titlebar keeps
+     its AA-proven var(--fg) rather than inheriting that debt. */
+  --win-bg: var(--panel);
+  --win-border: var(--border);
+  --win-radius: 10px;
+  --win-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --win-titlebar-fs: 1rem;
+  --win-titlebar-weight: 600;
+  --win-titlebar-ls: -0.03em;
 }
 
 :root.light {
@@ -4987,8 +5008,11 @@ body.bg-pattern-sparkles {
       }
     }
     .modal-content {
-      background:var(--panel);
-      border:1px solid var(--border);
+      /* The window FRAME (bg / border / radius / shadow) comes from the
+         shared --win-* tokens (:root, Lane G4) so this family and the
+         OrwellWindow kit (.ow-window) paint one visual language. */
+      background:var(--win-bg);
+      border:1px solid var(--win-border);
       width:min(520px, 92vw); max-height:85vh; padding:10px;
       box-sizing:border-box; font-size:14px;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -4996,8 +5020,8 @@ body.bg-pattern-sparkles {
       display:flex; flex-direction:column;
       position:relative;
       overflow-y:auto;
-      border-radius:10px;
-      box-shadow:0 8px 32px rgba(0,0,0,0.45);
+      border-radius:var(--win-radius);
+      box-shadow:var(--win-shadow);
       pointer-events:auto;
       animation: modal-enter 0.25s ease-out both;
     }
@@ -5062,9 +5086,12 @@ body.bg-pattern-sparkles {
          opacity slider are present, so the minimize button never floats to
          the centre when a sibling is hidden. */
       margin-right:auto;
-      font-size:1rem;
-      font-weight:600;
-      letter-spacing:-0.03em;
+      /* Titlebar type rides the shared --win-titlebar-* tokens (Lane G4) —
+         the same scale/weight/tracking as the kit's .ow-title. The color
+         stays this family's var(--red) identity (see the :root note). */
+      font-size:var(--win-titlebar-fs);
+      font-weight:var(--win-titlebar-weight);
+      letter-spacing:var(--win-titlebar-ls);
       color:var(--red);
     }
     .close-btn,
