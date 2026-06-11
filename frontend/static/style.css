@@ -458,7 +458,7 @@ body.bg-pattern-sparkles {
       flex: 1;
       min-width: 0;
       cursor: pointer;
-      padding: 6px 8px;
+      padding: var(--sidebar-btn-pad, 8px); /* G3: the one sidebar padding standard */
       border-radius: 8px;
       transition: background 0.15s;
     }
@@ -505,7 +505,7 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       opacity: 0.35;
       cursor: pointer;
-      padding: 6px;
+      padding: var(--sidebar-btn-pad, 8px); /* G3: icon-only but the SAME measured padding */
       border-radius: 6px;
       display: flex;
       align-items: center;
@@ -577,16 +577,28 @@ body.bg-pattern-sparkles {
     #sidebar-search-btn,
     #sidebar-new-chat-btn {
       margin: 0;
-      padding: 8px 8px;
+    }
+    /* ── G3 (ruling 2026-06-11): ONE sidebar padding standard. Every sidebar
+       button row measures the same padding per side as the New Chat / Search
+       rows (the .list-item standard — 8px each side). One token + one shared
+       rule, never per-button overrides; the icon-only user-bar buttons keep
+       their square aspect but measure the same padding. The mobile
+       touch-target overrides (12px 10px !important) stay uniform across the
+       same set, so the standard holds at every viewport. ── */
+    #sidebar {
+      --sidebar-btn-pad: 8px;
+    }
+    #sidebar .list-item,
+    #sidebar .section-header-flex,
+    #sidebar .user-bar-btn,
+    #sidebar .user-bar-left {
+      padding: var(--sidebar-btn-pad, 8px);
     }
     #sessions-section {
       margin-top: -1px;
     }
     #tools-section {
       margin-top: 1px;
-    }
-    #tools-section .list-item {
-      padding: 8px 8px;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
@@ -1263,6 +1275,20 @@ body.bg-pattern-sparkles {
     .section.collapsed .section-collapse-chevron { transform: rotate(-90deg); opacity: 0.5; }
     .section-header-flex:has(.section-header-btn) .section-collapse-btn { display: none; }
     .section.collapsed .section-collapse-btn { display: inline-flex !important; }
+
+    /* ── G3 (ruling 2026-06-11): no dead affordances. A section with ≤1
+       visible row has nothing to collapse — its chevron was a button that
+       visibly did nothing (under the game build every Tools child is
+       trimmed away). Such sections render as plain rows: no chevron, no
+       button styling, no collapse toggle; a section with NO visible content
+       at all hides outright. The classes are computed live in
+       js/section-management.js (initSectionCollapse). ── */
+    .section.section-no-collapse .section-collapse-btn { display: none !important; }
+    .section.section-no-collapse .section-header-flex { cursor: default; }
+    .section.section-no-collapse .section-header-flex:hover { background: transparent; }
+    .section.section-no-collapse .section-header-flex h4,
+    .section.section-no-collapse .section-header-flex .section-title { cursor: default !important; }
+    .section.section-empty { display: none !important; }
 
     /* Collapsed state */
     .section.collapsed > *:not(h4):not(.section-title):not(.section-header-flex) { display: none !important; }
@@ -4179,6 +4205,11 @@ body.bg-pattern-sparkles {
       .sidebar-assistant-entry .grow {
         font-size: 14px !important;
         left: 0 !important;
+      }
+      /* G3: the one sidebar padding standard tracks the mobile touch size, so
+         the bottom user-bar cluster measures the same as every other row. */
+      #sidebar {
+        --sidebar-btn-pad: 12px 10px;
       }
       /* Section separator — more breathing room */
       .section {
@@ -21563,14 +21594,48 @@ body.gallery-selecting .gallery-dl-btn,
 .settings-appearance-panel > .admin-card:nth-of-type(4) { order: 2; } /* Chat Bar */
 .settings-appearance-panel > .admin-card:nth-of-type(n+5) { order: 4; }
 
-/* Mobile: stack tabs on top */
-/* (the viewport-600 layout copy is gone — the container-620 switch below is the
-   ONE narrow-settings mechanism; S3) */
+/* Narrow settings (the viewport-600 layout copy is gone — the container tiers
+   below are the ONE narrow-settings mechanism; S3/G6): compress the left rail
+   at the 620 token, stack tabs on top only below the 480 token. */
 
-/* Snapped/narrow Settings window: move the tab rail to the top. Viewport media
-   alone misses desktop right-half snapping, where the modal is narrow but the
-   browser window is not. */
+/* G6 — the LEFT rail is the settings window's identity (explicit user
+   preference: "I liked the settings window with the left hand panel on it").
+   Narrowing now degrades in TWO container tiers instead of jumping straight
+   to a top bar:
+
+   tier 1 (≤620 token): COMPRESS the rail in place — a tighter width clamp,
+   denser items, labels ellipsizing — so moderately narrow contexts (~1024
+   desktops behind the sidebar, right-half snaps) keep the left rail.
+   tier 2 (≤480 token): only a genuinely narrow modal stacks the rail on top
+   (the last resort). Container queries, not viewport media, because desktop
+   snapping makes the modal narrow while the browser window is not. */
 @container settings-modal (max-width: 620px) {
+  .settings-sidebar {
+    width: clamp(96px, 24cqw, 140px);
+    padding: 6px;
+  }
+  .settings-nav-item {
+    min-width: 0;
+    padding: 7px 8px;
+    gap: 6px;
+    font-size: var(--fs-xs);
+  }
+  /* Labels give way before the rail does — ellipsize, never overflow.
+     (min-width:0 lets the span flex-shrink below its content width.) */
+  .settings-nav-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .settings-panels {
+    padding: 14px 16px;
+  }
+}
+
+/* Snapped/genuinely-narrow Settings window: move the tab rail to the top.
+   (This block must follow the 620 compress tier in source — same specificity;
+   the stacked geometry has to win below 480.) */
+@container settings-modal (max-width: 480px) {
   .settings-layout {
     flex-direction: column;
   }

@@ -1143,7 +1143,36 @@ export function register(id, { restoreFn, closeFn, railBtnId, sidebarBtnId, labe
     const _isVisible = () => !_modalEl.classList.contains('hidden')
         && getComputedStyle(_modalEl).display !== 'none';
     _modalEl._mmAutoStackLast = _isVisible();
+    _modalEl._mmLastHidden = _modalEl.classList.contains('hidden');
+    _modalEl._mmLastInlineDisplay = _modalEl.style.display;
     const obs = new MutationObserver(() => {
+      // G2 (launcher-agnostic restore): when ANY code path un-hides this
+      // modal while its minimized state is held — e.g. the settings gear
+      // calls the tool's own open(), which just removes `.hidden` — run the
+      // REAL restore path (clear .modal-minimized, the dock chip, badges and
+      // state) instead of leaving a window that looks open but is
+      // display:none + pointer-events:none under `.modal-minimized`. The
+      // detection is transition-based (hidden → un-hidden, or the inline
+      // display turned visible) so the minimize paths themselves — which add
+      // `.hidden`/`.modal-minimized` — never trip it.
+      const nowHidden = _modalEl.classList.contains('hidden');
+      const nowDisplay = _modalEl.style.display;
+      const unHid = _modalEl._mmLastHidden && !nowHidden;
+      const displayedInline = !!nowDisplay && nowDisplay !== 'none'
+          && nowDisplay !== _modalEl._mmLastInlineDisplay;
+      _modalEl._mmLastHidden = nowHidden;
+      _modalEl._mmLastInlineDisplay = nowDisplay;
+      if ((unHid || displayedInline)
+          && _state.get(id)?.isMinimized
+          && _modalEl.classList.contains('modal-minimized')) {
+        restore(id);
+        // restore() just mutated class/style itself — resync the trackers to
+        // the restored state so the re-entrant callback diffs cleanly.
+        _modalEl._mmLastHidden = _modalEl.classList.contains('hidden');
+        _modalEl._mmLastInlineDisplay = _modalEl.style.display;
+        _modalEl._mmAutoStackLast = _isVisible();
+        return;
+      }
       const vis = _isVisible();
       if (vis && !_modalEl._mmAutoStackLast) {
         _bringToFront(_modalEl);
@@ -1243,6 +1272,12 @@ export function restore(id) {
   const modal = document.getElementById(id);
   if (modal) {
     modal.classList.remove('hidden', 'modal-minimized');
+    // G2 interop: the legacy app.js minimize dock marks windows with its own
+    // `minimized` class (display:none !important). When both systems engaged
+    // on the same `_` click, a restore through THIS path must scrub that
+    // class too — otherwise the window stays invisible after a "successful"
+    // restore.
+    modal.classList.remove('minimized');
     modal.style.display = '';
     _applyRestoreHeight(modal, s);
     // Surface above any already-open tool window — restoring from the dock
@@ -1392,7 +1427,12 @@ const _AUTO_WIRE = {
   'email-lib-modal':      { rail: null,             sidebar: null },
   'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn' },
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
-  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },
+  // G2: the user-bar gear (#user-bar-settings) is a settings launcher too —
+  // listing it lets the capture-phase click interceptor below restore a
+  // minimized settings window even when the click never reaches the tool's
+  // own open() (belt #1; the auto-stack observer's launcher-agnostic heal in
+  // register() is belt #2 and covers launchers nobody listed).
+  'settings-modal':       { rail: null,             sidebar: ['tool-settings-btn', 'user-bar-settings'] },
   'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn' },
   'ge-shortcuts-modal':   { rail: null,             sidebar: null },
   // Prompt window opens from the overflow menu (no rail/sidebar button), but

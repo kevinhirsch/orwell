@@ -212,6 +212,40 @@ def main():
                 page.goto(FE, wait_until="domcontentloaded")
                 audit_page(page, vp_name, w, h, coarse, with_game)
 
+                # G6: the settings tab rail keeps its LEFT orientation in any
+                # modal wider than the 480 token (explicit user preference);
+                # top-bar stacking is the last resort below it. Force-open is
+                # scoped to this measurement and restored — the legacy click
+                # selector below predates the rail buttons and opens nothing.
+                rail = page.evaluate("""
+                  (() => {
+                    const overlay = document.querySelector('#settings-modal');
+                    if (!overlay) return null;
+                    const wasHidden = overlay.classList.contains('hidden');
+                    if (wasHidden) overlay.classList.remove('hidden');
+                    const m = overlay.querySelector('.settings-modal-content');
+                    const r = overlay.querySelector('.settings-sidebar');
+                    const p = overlay.querySelector('.settings-panels');
+                    let out = null;
+                    if (m && r && p) {
+                      const rb = r.getBoundingClientRect(), pb = p.getBoundingClientRect();
+                      out = { modalW: m.getBoundingClientRect().width,
+                              left: rb.x < pb.x && rb.height > rb.width };
+                    }
+                    if (wasHidden) overlay.classList.add('hidden');
+                    return out;
+                  })()
+                """)
+                if rail is None:
+                    report("fail", f"{vp_name} settings-rail: modal nodes missing")
+                elif rail["modalW"] > 480 and not rail["left"]:
+                    report("fail", f"{vp_name} settings-rail: stacked at a {rail['modalW']:.0f}px modal "
+                                   "(G6 — the LEFT rail must survive above the 480 token)")
+                elif rail["modalW"] <= 480 and rail["left"]:
+                    report("fail", f"{vp_name} settings-rail: not stacked below the 480 token ({rail['modalW']:.0f}px)")
+                else:
+                    report("pass", f"{vp_name} settings-rail ({'left' if rail['left'] else 'stacked'} @ {rail['modalW']:.0f}px)")
+
                 # settings open (the S1 surface) on a representative pair
                 if vp_name in ("desktop-1366", "phone-390"):
                     page.evaluate("(document.querySelector('#settings-btn,[data-settings],[aria-label*=ettings]')||{click(){}}).click()")

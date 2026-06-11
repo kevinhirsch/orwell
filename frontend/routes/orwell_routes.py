@@ -97,6 +97,9 @@ def setup_orwell_routes() -> APIRouter:
             "engineUrl": detail.get("engineUrl"),
             "error": detail.get("error"),
             "lastError": detail.get("lastError"),
+            # G8: "creating" while createCharacter is in flight — the banner holds in-fiction
+            # (casting being finalized) instead of flashing a false "engine unavailable".
+            "busy": detail.get("busy"),
         }
 
     @router.get("/state")
