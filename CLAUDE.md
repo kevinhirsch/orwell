@@ -426,9 +426,9 @@ artifact; the queue is drained as of 2026-06-10.
 **Remaining work — only the long-acknowledged deferrals** (the queue is drained; new work
 starts as a new spec/queue item): **0022** MVP-2 (the one deferred feature); 0010's container
 smoke test on a real Proxmox host; the deferred real relational adapters (SQLite/Postgres,
-sqlite-vec/pgvector — souls/vectors run in-memory + file today); the **ADR 0004 fastembed
-adapter** (decided, not built — runtime embeddings are the deterministic fake today; E86); and
-full MCP/JSON-RPC over the current HTTP transport. *(By design, not a gap: the live engine-side narrator is
+sqlite-vec/pgvector — souls/vectors run in-memory + file today); and
+full MCP/JSON-RPC over the current HTTP transport. *(The ADR 0004 fastembed adapter is
+now BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side narrator is
 `EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
 `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 
@@ -447,9 +447,9 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    signal set, update rule, recency/decay, betrayal-shock, thresholds (promotes `docs/decisions/0002`).
 3. ✅ **Jury choreography** — **resolved** by **feature 0037** (the live interactive finale: statements →
    per-juror questions → ordered vote reveal). Reserve twists stay Vault-held (0025).
-4. ✅ **Embedding provider** — **decided** (ADR `docs/decisions/0004`, ruling 2026-06-10):
-   **fastembed, local ONNX** (the JS port, version-pinned) is the accepted runtime target for
-   `EmbeddingProvider`; the deterministic fake remains the test adapter. **The adapter is not
-   yet built** — production currently composes the deterministic hash-vector fake (ADR 0004
-   "Implementation status", audit E86); the build is tracked with the deferrals above.
+4. ✅ **Embedding provider** — **decided AND built** (ADR `docs/decisions/0004`; E86a,
+   2026-06-11): **fastembed, local ONNX** (the JS port + model both version-pinned) is the
+   runtime `EmbeddingProvider` — warmed up at boot (`ORWELL_EMBEDDINGS=fastembed`, the deploy
+   default), served synchronously through a worker-thread bridge, with the deterministic fake
+   as both the test adapter and the whole-process fallback when the model is unavailable.
    *(No genuinely-open decisions remain.)*

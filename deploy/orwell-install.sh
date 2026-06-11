@@ -81,6 +81,13 @@ if ! node -e "const s=require('${APP_DIR}/package.json').scripts||{};process.exi
 fi
 npm run build
 
+# Prefetch the pinned embedding model (ADR 0004 / E86a) so engine boots are offline + fast.
+# Non-fatal: a fetch failure here just means the first boot tries again (and falls back to
+# deterministic recall if it still can't — the game never breaks on embeddings).
+echo "==> embedding model prefetch (fastembed, pinned — ADR 0004)"
+node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" \
+  || echo "WARN: embedding model prefetch failed — the engine will retry at boot and fall back to deterministic recall meanwhile"
+
 echo "==> front-end (orwell) deps"
 cd "${APP_DIR}/frontend"
 python3 -m venv .venv
@@ -120,6 +127,13 @@ if ! grep -qs '^ORWELL_PORT=' "${DATA_DIR}/.env"; then
     # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
     # gitignored); scrubbed by orwell-factory-reset.sh.
     echo "ORWELL_DATA_DIR=${DATA_DIR}/saves"
+    # Semantic recall (ADR 0004 / audit E86a): the deploy default is the REAL local-ONNX
+    # embedding provider (fastembed, version-pinned). The model is prefetched below into
+    # data/models (offline thereafter; preserved by updates and both reset scripts). If the
+    # model is ever missing the engine logs loudly and falls back to deterministic recall —
+    # the game never breaks.
+    echo "ORWELL_EMBEDDINGS=fastembed"
+    echo "ORWELL_EMBED_CACHE=${DATA_DIR}/models"
     # Multi-user identity (audit E32): the FE ships with accounts ON by default, so the engine
     # must REQUIRE an asserted x-orwell-user — never silently collapse anonymous callers into a
     # shared "default" sandbox (cross-user isolation, feature 0021).
