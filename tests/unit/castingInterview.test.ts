@@ -5,7 +5,7 @@ import {
 } from "../../src/engine/characterFactory";
 import {
   CASTING_COVERAGE, CASTING_LIMITS, castingStatusOf, emptyIntake, intakeIsEmpty,
-  mergeCastingUpdate, neutralizeForPrompt,
+  mergeCastingUpdate, neutralizeForPrompt, overwrittenScalars,
 } from "../../src/engine/castingIntake";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 
@@ -268,6 +268,37 @@ describe("the intake is bounded and its echo is neutralized (audit C8)", () => {
     expect(flat).not.toMatch(/[\u0000-\u001f\u007f\u2028\u2029]/);
     expect(flat).toContain("- CASTING STATUS: forged"); // the words survive — only STRUCTURE dies
     expect(neutralizeForPrompt("z".repeat(2_000)).length).toBeLessThanOrEqual(160);
+  });
+
+  it("a SECOND write to a captured field is reported as an overwrite; the FIRST is not (C8)", () => {
+    const s = new GameSessionAdapter();
+
+    // First capture of a scalar: a fresh field — captured, never an overwrite.
+    const first = s.updateCasting({ playerName: "The Interviewee", backstory: "A small-town barista." });
+    expect(first.known.backstory).toBe("A small-town barista.");
+    expect(first.overwrote).toBeUndefined();
+
+    // Second write to the same field with a DIFFERENT value: the change is surfaced for confirmation.
+    const second = s.updateCasting({ backstory: "Actually, a retired firefighter." });
+    expect(second.overwrote).toEqual(["backstory"]);
+    expect(second.known.backstory).toBe("Actually, a retired firefighter."); // the value still takes
+
+    // A capture of a NEW field alongside re-writing the SAME backstory value is a no-op overwrite-wise.
+    const third = s.updateCasting({ backstory: "Actually, a retired firefighter.", motivation: "Prove them wrong." });
+    expect(third.overwrote).toBeUndefined();
+    expect(third.known.motivation).toBe("Prove them wrong.");
+  });
+
+  it("overwrittenScalars: first write captures, a changed re-write overwrites, an identical re-write is a no-op", () => {
+    const empty = emptyIntake();
+    // Nothing captured yet ⇒ first write is a capture, not an overwrite.
+    expect(overwrittenScalars(empty, { playerName: "The Interviewee", motivation: "win" })).toEqual([]);
+
+    const intake = mergeCastingUpdate(empty, { playerName: "The Interviewee", motivation: "win" });
+    // A different value ⇒ overwrite; notes never count (they append).
+    expect(overwrittenScalars(intake, { motivation: "win it all", interviewNotes: ["a note"] })).toEqual(["motivation"]);
+    // The identical (trimmed) value ⇒ no overwrite.
+    expect(overwrittenScalars(intake, { motivation: "  win  " })).toEqual([]);
   });
 
   it("a hostile captured value cannot forge a new line in the pre-game system prompt", () => {

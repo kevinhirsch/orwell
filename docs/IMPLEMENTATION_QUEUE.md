@@ -2839,7 +2839,23 @@ PR per item).
 > (C5); the no-secrets guard scans the whole tree (E78). **Test integrity:** T8/T9/T12/T15–T17
 > step-definition hardening + the 0004/0009/0036/0037/0047 feature amendments.
 > **Open remainder (not reached — two lane agents died mid-work):** T3–T7, T10, T11, T19, T20.
-> *(All cleared — see Lane B below.)*
+> *(All cleared — see Lane A and Lane B below.)*
+
+### Lane A — cross-lane tails (E54 · E58 · C8 · E60/E89 · ruling #1)  ·  **✅ DONE (PR #224)**
+
+> The follow-up tails the parallel lanes left on the table, each with its proving test:
+> **E54** — the `reliability` evidence signal (built in #216) is now CONSUMED: `chooseVetoSave`
+> ranks a veto save by demonstrated loyalty (proven protector outranks an equally-liked stranger),
+> and a centered reliability term weighted by `JURY_WEIGHTS.reliability` shifts the juror's lean.
+> **E58** — the in-game DAY index (`dayOfWeek(phase)`, hoh=1…eviction=5, null off-ladder) is
+> surfaced on `PublicGameStatus.day`. **C8** — casting intake's third sub-item: a later
+> `updateCasting` that replaces a captured scalar reports `overwrote: [...]` so the producer
+> confirms rather than silently clobbering (caps + echo neutralization unchanged from #213).
+> **E60/E89 (FE)** — the approach chip varies its framing by the `bond | probe` motive enum (copy +
+> class + tooltip), and a dedicated FE belt (`firstCeremonyResolved`) suppresses every chip before
+> the first ceremony resolves — holding even if the engine fails open (browser-smoke proven).
+> **Ruling #1 (doc-only)** — the CLAUDE.md "no fixed cast" do-not formulation. Engine `npm test`
+> green (664 unit + 318 BDD); FE pytest + browser smoke + responsive matrix green.
 
 ### Lane B — T-remainder test repairs (T3–T7 · T10 · T11 · T19 · T20)  ·  **✅ DONE (PR #225)**
 

@@ -22,6 +22,13 @@ export interface JuryRel {
   trust: number;
   affinity: number;
   threat: number;
+  /**
+   * ADR 0002's EVIDENCE signal (E54), already CENTERED on the edge baseline by the caller so a
+   * juror with no protective track record reads 0 (neutral). Demonstrated loyalty toward this
+   * juror lifts the lean; proven disloyalty (betrayal tears reliability down) pulls it under 0.
+   * Optional: a read without an evidence term (older call sites, tests) defaults to neutral.
+   */
+  reliability?: number;
 }
 
 /** How the finalist treated this juror on the way out — the manner of eviction. */
@@ -42,6 +49,10 @@ export interface EvictionManner {
  * is an in-season eviction heuristic; at the finale the game is over, and a juror penalizing
  * "they were a threat" structurally crowns the harmless goat. Post-season, a big game earns
  * respect instead — the `gameRespect` resume term at the call site.
+ *
+ * RELIABILITY (E54 consumption tail) adds a centered evidence term: a juror leans toward a finalist
+ * who DEMONSTRATED loyalty toward them (honored deals, protective votes, a veto save) above sentiment,
+ * and away from one who proved disloyal. Sized below relationship+manner (`JURY_WEIGHTS.reliability`).
  */
 export function juryLean(rel: JuryRel, manner: EvictionManner = {}, w: JuryWeights = JURY_WEIGHTS): number {
   const relationship = (rel.trust + rel.affinity) / 2;
@@ -50,7 +61,7 @@ export function juryLean(rel: JuryRel, manner: EvictionManner = {}, w: JuryWeigh
     (manner.blindsided ? MANNER_LEAN.blindsided : 0) +
     (manner.betrayed ? MANNER_LEAN.betrayed : 0) +
     (manner.disrespected ? MANNER_LEAN.disrespected : 0);
-  return w.relationship * relationship + w.manner * manners;
+  return w.relationship * relationship + w.manner * manners + w.reliability * (rel.reliability ?? 0);
 }
 
 /**

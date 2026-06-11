@@ -20,9 +20,16 @@ export interface JuryWeights {
    * manners) can still go bitter and crown the goat: real-BB juries do both.
    */
   gameRespect: number;
+  /**
+   * RELIABILITY (ADR 0002's evidence signal, E54 consumption tail): a juror leans toward a finalist
+   * who DEMONSTRATED loyalty toward them — honored a deal, protected them, saved them — beyond mere
+   * sentiment. Signed/centered on the edge baseline (a no-track-record juror reads neutral). Sized
+   * BELOW relationship+manner: proof reinforces a lean, it does not eclipse how the game actually went.
+   */
+  reliability: number;
 }
 
-export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.9 };
+export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.9, reliability: 0.4 };
 
 /**
  * How the MANNER of a finalist's eviction move shifts a juror's lean toward them (signed; `juryLean`).

@@ -379,6 +379,39 @@ def main() -> int:
             }""")
             check(soc_geo.get("fullWidth") is True, f"mobile: social HUD is a full-width sheet ({soc_geo})")
             check(soc_geo.get("clearsComposer") is True, f"mobile: social HUD never covers the composer ({soc_geo})")
+
+            # E89 belt: even if the engine FAILS OPEN and hands the UI approaches before the first
+            # ceremony resolves, the FE renders NO chip. We drive the belt CLOSED and feed it two
+            # approaches; the strip must stay empty.
+            belt = mob.evaluate("""() => {
+              if (!window._orwellSocialDriveApproaches) return { ok: false };
+              const early = window._orwellSocialDriveApproaches(false, [
+                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
+                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
+              ]);
+              // The belt helper itself: the premiere HOH competition reads pre-ceremony.
+              const preHoh = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'hoh-competition' });
+              const postNoms = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'nominations' });
+              return { ok: true, earlyCount: early.count, preHoh, postNoms };
+            }""")
+            check(belt.get("ok") is True, "social belt: the test seam is present")
+            check(belt.get("earlyCount") == 0, f"E89: no chip renders on engine fail-open before the first ceremony ({belt})")
+            check(belt.get("preHoh") is False, "E89: the premiere HOH competition reads pre-ceremony")
+            check(belt.get("postNoms") is True, "E89: the first nominations beat opens the belt")
+
+            # E60: once the belt is OPEN, bond vs probe render DISTINCT, motive-tagged chips.
+            motive = mob.evaluate("""() => {
+              const r = window._orwellSocialDriveApproaches(true, [
+                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
+                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
+              ]);
+              return r;
+            }""")
+            check(motive.get("count") == 2, f"E60: both approaches render once the belt opens ({motive})")
+            check(motive.get("motives") == ["bond", "probe"], f"E60: chips are tagged by motive ({motive})")
+            classes = motive.get("classes") or []
+            check(len(set(classes)) == 2 and None not in classes,
+                  f"E60: bond and probe carry DISTINCT framing classes ({motive})")
             mob.close()
 
             browser.close()
