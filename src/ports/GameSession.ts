@@ -308,12 +308,15 @@ export interface AdvanceView {
 
 /**
  * A houseguest who, by their own soul motivation, wants to approach the player now
- * (0012/0036). Vault-free: the name and a neutral public pretext only — never the
- * underlying drive (bond vs. threat), which would leak the hidden relationship read.
+ * (0012/0036, reshaped by audit E60 per ADR 0003): the name plus a COARSE categorical
+ * motive — `bond` (their tie to the player drives the approach) or `probe` (their threat
+ * read does). The motive is the fact the narrator voices in its own words; the underlying
+ * trust/affinity/threat numbers never cross the wall, and the engine ships no canned
+ * pretext line ("facts to voice, never scripts to recite").
  */
 export interface SocialInitiative {
   houseguest: NamedRef;
-  pretext: string;
+  motive: "bond" | "probe";
 }
 
 /** A snarky, state-aware one-line hero tagline for the player (0033). Vault-free; one line. */
@@ -468,7 +471,8 @@ export interface GameSession {
   /**
    * Which houseguests want to approach the player right now (0012/0036) — relationship-driven
    * (allies scheme, rivals probe), so scenes start from EITHER side, not only player→NPC. Returns
-   * names + a neutral pretext; the hidden drive never crosses the wall. Empty before a game starts.
+   * names + a coarse motive (bond | probe); the hidden numbers never cross the wall. Empty before
+   * a game starts.
    */
   socialInitiatives(): SocialInitiative[];
   /**

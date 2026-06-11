@@ -334,8 +334,9 @@ async def player_tagline(user: str | None = None) -> dict:
 
 
 async def social_initiatives(user: str | None = None) -> dict:
-    """Which houseguests want to approach the player now (0036) — names + a neutral pretext only,
-    so scenes start from either side. Vault-free (no hidden motive)."""
+    """Which houseguests want to approach the player now (0036/E60) — names + a coarse motive
+    (bond | probe) the GM voices in its own words, so scenes start from either side. Vault-free
+    (never a relationship number)."""
     return await _call("socialInitiatives", {}, user=user)
 
 

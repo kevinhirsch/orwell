@@ -18,7 +18,7 @@ import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
-import { npcInitiatedApproaches } from "../../engine/conversation";
+import { rankApproaches } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
 import type { EvictionManner } from "../../engine/jury";
 import type { NarrativePort } from "../../ports/NarrativePort";
@@ -518,12 +518,13 @@ export class GameSessionAdapter implements GameSession {
     const evicted = new Set(this.live?.evictionOrder ?? []);
     const npcIds = this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id);
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
-    // so the same week/phase reproduces the same approaches. The hidden drive is NOT surfaced —
-    // only the name + a neutral pretext, so no trust/threat read leaks across the wall (0001).
+    // so the same week/phase reproduces the same approaches. The hidden drive NUMBER is NOT
+    // surfaced — only the name + the coarse motive category (E60: the fact the GM voices in its
+    // own words, never a canned pretext line), so no trust/threat read leaks across the wall.
     const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${this.week}:${this.phase}`));
-    return npcInitiatedApproaches(player, npcIds, this.rel, rng, 3).map((id) => ({
-      houseguest: { id, name: this.nameOf(id) },
-      pretext: "wants a word with you",
+    return rankApproaches(player, npcIds, this.rel, rng).slice(0, 3).map((a) => ({
+      houseguest: { id: a.npc, name: this.nameOf(a.npc) },
+      motive: a.motive,
     }));
   }
 

@@ -35,7 +35,7 @@ describe("0031 — game orchestrator & integrity watcher", () => {
 
     const sb = registry.sandboxFor(U);
     // A meaningful, player-witnessed day event (daily-event invariant).
-    expect(sb.engine.events.query({ witnessedBy: PLAYER }).some((e) => e.content.includes("house meeting"))).toBe(true);
+    expect(sb.engine.events.query({ witnessedBy: PLAYER }).some((e) => e.type === "house-event")).toBe(true); // E58: content now varies — assert the typed day event, not one canned line
     // At least one off-screen scene the player does not witness.
     expect(hidden(sb).length).toBeGreaterThanOrEqual(1);
     // The new state is persisted (a later save with more events).

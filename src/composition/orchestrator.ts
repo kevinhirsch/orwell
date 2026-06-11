@@ -7,6 +7,7 @@ import { richOffscreenStretch } from "../engine/offscreen";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
+import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
@@ -513,7 +514,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       initiator: ids[0]!,
       witnessSet: [PLAYER, ids[0]!],
       hidden: false,
-      content: "A house meeting shifts the week.",
+      content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
     });
   }
   // Every recorded scene (+ the player-turn day) counts toward the advance.

@@ -441,7 +441,7 @@ consequence.*
   (12 hidden scenes, 4 reshuffles, 4 rumors/confessionals), force-marching the house and
   flooding the record. *Fix:* debounce to the turn boundary. *Test:*
   `recordInteraction+diaryRoom+advanceGame` ⇒ exactly one `offscreen-tick`.
-- **E58 [MED · Improvement] The daily-event invariant is satisfied by a verbatim filler event,
+- **E58 [MED · Improvement] ✅ PR #213 — The daily-event invariant is satisfied by a verbatim filler event,
   and in-game days don't exist in the live game.** `orchestrator.ts:405–416` ("A house meeting
   shifts the week.", repeated, player-witnessed, pollutes THE RECORD re-entry facts);
   `schedule.ts` has no production callers; no day index on any view. *Fix:* derive day from the
@@ -450,7 +450,7 @@ consequence.*
 - **E59 [LOW · Change] `relationshipLabel` is a fixed 3-label taxonomy** (`relationships.ts:43–55`)
   vs. ADR 0002's organic vocabulary; `npcVoice` ships a stance for every living pair each call.
   *Fix:* disposition-framed phrase set; top-k stances (pairs with E11).
-- **E60 [LOW · Change] `socialInitiatives` ships the exact canned string ADR 0003 names as a
+- **E60 [LOW · Change] ✅ PR #213 — `socialInitiatives` ships the exact canned string ADR 0003 names as a
   smell** (`pretext: "wants a word with you"`, `GameSessionAdapter.ts:454`) while discarding the
   computed drive. *Fix:* coarse categorical motive (`bond | probe`), never the number.
 - **E61 [LOW · Improvement] Exact ties resolve by array position, not seed** (`liveSeason.ts:400`,
@@ -854,7 +854,7 @@ traceability; E-batch cross-references inline.
 
 ## Stream P — GM prompt & narrative context (P1–P11)
 
-- **P1 [HIGH · Bug]** The B61 "finality language" line never landed though B61 is ✅ in the
+- **P1 [HIGH · Bug]** ✅ PR #213 — The B61 "finality language" line never landed though B61 is ✅ in the
   queue (`IMPLEMENTATION_QUEUE.md:1755–1758`): nothing in `momentPrompts.ts` or
   `agent_loop.py` forbids voicing unresolved outcomes as settled ("X is going home") — the
   exact v1 §3.9 failure. *Fix:* one line in `BASE_GAME_MASTER_PROMPT` after AUTHORITY
@@ -873,7 +873,7 @@ traceability; E-batch cross-references inline.
   (`chat_routes.py:1142`, `agent_loop.py:86–135, 911`) — and `test_c14_immersion.py:56–59`
   pins the violation in place. *Fix:* key substitution on a `framed` flag from
   `apply_game_framing`; small casting-mode tool contract.
-- **P4 [MED · Change]** The fourth-wall gap is prompt-compliant: nothing says levers are
+- **P4 [MED · Change]** ✅ PR #213 — The fourth-wall gap is prompt-compliant: nothing says levers are
   silent, and the generic `ask_user` description ("get a decision or clarification…",
   `tool_schemas.py:454`) invites "Record this interaction?". *Fix:* "levers are silent
   production machinery — never ask permission to use one; ask_user is ONLY for pending
@@ -881,7 +881,7 @@ traceability; E-batch cross-references inline.
 - **P5 [MED · Improvement]** THE RECORD's blind `slice(-8)` degenerates exactly when re-entry
   matters: at the finale all eight slots are near-identical vote lines (measured). *Fix:*
   per-type fact selection (latest ceremony beat per kind + recent social/deal events).
-- **P6 [MED · Bug]** `runCompetition`'s BASE manifest bullet says "resolve… you announce ONLY
+- **P6 [MED · Bug]** ✅ PR #213 — `runCompetition`'s BASE manifest bullet says "resolve… you announce ONLY
   the winner" (`momentPrompts.ts:66–67`); the preview semantics live only in the HOH fragment
   — on other turns the model can announce a never-committed winner. *Fix:* reword BASE + FE
   schema to "previews… resolves only via advanceGame"; manifest test pin.
@@ -890,11 +890,11 @@ traceability; E-batch cross-references inline.
   under the game build or substitute a FEED_DOWN-style non-narration frame.
 - **P8 [LOW]** ~100 wasted tokens per game turn: double datetime header + the untrusted-content
   policy referencing memories/skills the game build disables (ADR 0003 §1).
-- **P9 [LOW]** The casting-sheet *field* manifest isn't drift-pinned against
+- **P9 [LOW]** ✅ PR #213 — The casting-sheet *field* manifest isn't drift-pinned against
   `CASTING_COVERAGE` (the archetype table is; the nine field names aren't).
-- **P10 [LOW]** `submitDecision`'s manifest line enumerates 4 of 11 pending kinds — say
+- **P10 [LOW]** ✅ PR #213 — `submitDecision`'s manifest line enumerates 4 of 11 pending kinds — say
   "answer the engine's pending decision (its kind + legal options)" instead.
-- **P11 [LOW]** Two quoted example lines flirt with scripts-to-recite (`momentPrompts.ts:40–42,
+- **P11 [LOW]** ✅ PR #213 — Two quoted example lines flirt with scripts-to-recite (`momentPrompts.ts:40–42,
   147–148`) — cut to descriptions.
 - *Held up:* every woven block Vault-free under sentinels; lever manifest drift-pinned both
   directions; casting sheet generated + dually pinned; `npcVoice` genuinely knowledge-scoped
@@ -980,7 +980,7 @@ traceability; E-batch cross-references inline.
 - **C7 [MED] ✅ PR #217 —** Same-name ⇒ identical season confirmed at the domain layer incl. hidden
   elements + twist schedule (= E39/D8; adds the spoiler-integrity angle: a restarting player
   replays a season whose secrets they know).
-- **C8 [MED · Bug]** Casting intake: no length caps, exact-string note dedupe only, scalars
+- **C8 [MED · Bug]** ✅ PR #213 (caps + echo neutralization; overwrite flag deferred) — Casting intake: no length caps, exact-string note dedupe only, scalars
   silently overwritable by any later `updateCasting`, and every captured value is echoed
   verbatim (JSON.stringify) into the system prompt (`castingIntake.ts:40–52`,
   `momentPrompts.ts:246–251`) — an unbounded, durable prompt-injection surface. *Fix:* caps
