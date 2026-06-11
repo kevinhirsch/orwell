@@ -26,17 +26,20 @@ const advancePastFirstHoh = (sb: ReturnType<GameSessionRegistry["sandboxFor"]>):
 };
 
 describe("0036 — socialInitiatives (NPC-initiated approaches)", () => {
-  it("returns houseguests who want to approach the player — names + a neutral pretext only", async () => {
+  it("returns houseguests who want to approach the player — names + a coarse motive only (E60)", async () => {
     const sb = sandboxWithGame();
     advancePastFirstHoh(sb); // E89: approaches only exist once the house is actually playing
-    const out = (await sb.mcp.player.callTool("socialInitiatives")) as Array<{ houseguest: { id: string; name: string }; pretext: string }>;
+    const out = (await sb.mcp.player.callTool("socialInitiatives")) as Array<{ houseguest: { id: string; name: string }; motive: string }>;
 
     expect(out.length).toBeGreaterThan(0); // the house reaches out — scenes are bidirectional
     for (const it of out) {
       expect(typeof it.houseguest.name).toBe("string");
       expect(it.houseguest.name.length).toBeGreaterThan(0);
-      expect(it.pretext).toBe("wants a word with you");
+      // ADR 0003: the engine hands the GM the categorical FACT to voice, never a canned line.
+      expect(["bond", "probe"]).toContain(it.motive);
     }
+    // The canned pretext is gone — no scripted sentence ships in the projection.
+    expect(JSON.stringify(out)).not.toContain("wants a word");
   });
 
   it("never leaks the hidden drive (no trust/threat number crosses the wall)", async () => {

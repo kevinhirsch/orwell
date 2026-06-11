@@ -7,10 +7,12 @@ import { richOffscreenStretch } from "../engine/offscreen";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
+import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
-import { PLAYER, npc } from "../domain/ids";
+import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
+import { TurnRefusedError, PersistFailureError } from "../domain/errors";
 
 /**
  * Per-sandbox game orchestrator (feature 0031). The SINGLE path that moves a game:
@@ -29,7 +31,8 @@ export type Trigger = "player-turn" | "offscreen-tick" | "audit";
 
 export interface Fault {
   when: number;
-  kind: "degradation" | "no-daily-event" | "vault-leak";
+  /** `persist-failure` is its OWN class (audit E7): a disk failure is never misread as degradation. */
+  kind: "degradation" | "no-daily-event" | "vault-leak" | "persist-failure";
 }
 
 /** Vault-free health metadata for God Mode (0016) — never game content, never Vault. */
@@ -68,6 +71,13 @@ export interface OrchestratorConfig {
    * wakes, so every player turn fires ONE bounded off-screen tick (B41/audit D4/M6). Default false.
    */
   turnDriven?: boolean;
+  /**
+   * Auxiliary-commit tick debounce (audit E57/R5): a beat commit (the live loop moved) always earns
+   * its tick, but auxiliary tool calls inside the SAME player turn (recordInteraction + diaryRoom +
+   * a read…) must not each fire one — one bounded tick per player TURN, not per tool call. An aux
+   * commit ticks only when this much wall time has passed since the user's last turn tick.
+   */
+  auxTickDebounceMs?: number;
 }
 
 export class Orchestrator {
@@ -75,11 +85,14 @@ export class Orchestrator {
   private static readonly BREAKER_THRESHOLD = 3;
   /** Stored-fault cap per sandbox — health keeps the most recent, never an unbounded log. */
   private static readonly MAX_STORED_FAULTS = 20;
+  /** Default aux-commit tick debounce (E57/R5): tool calls inside one turn land within seconds. */
+  private static readonly AUX_TICK_DEBOUNCE_MS = 10_000;
 
   private readonly seed: number;
   private readonly offscreenInteractions: number;
   private readonly applyFn: NonNullable<OrchestratorConfig["apply"]>;
   private readonly turnDriven: boolean;
+  private readonly auxTickDebounceMs: number;
   private readonly rngs = new Map<string, SeededRandom>();
   private readonly health = new Map<string, HealthRecord>();
   private readonly lastActivity = new Map<string, number>();
@@ -87,6 +100,8 @@ export class Orchestrator {
   private readonly consecutiveFaults = new Map<string, number>();
   /** The last GOOD persisted state per user — the baseline a player-turn commit checks against (B41). */
   private readonly baselines = new Map<string, SessionSnapshot>();
+  /** Wall time of the user's last turn-driven off-screen tick (the E57 debounce anchor). */
+  private readonly lastTurnTickAt = new Map<string, number>();
   private seq = 0;
 
   constructor(
@@ -98,6 +113,34 @@ export class Orchestrator {
     this.offscreenInteractions = cfg.offscreenInteractions ?? 3; // matches the long-standing live cadence
     this.applyFn = cfg.apply ?? defaultApply;
     this.turnDriven = cfg.turnDriven ?? false;
+    this.auxTickDebounceMs = cfg.auxTickDebounceMs ?? Orchestrator.AUX_TICK_DEBOUNCE_MS;
+  }
+
+  /**
+   * Drop every per-user trace of a DEAD season (audit E1/D1/R1) — baselines, faults, health, rng
+   * stream, idle/tick clocks. Wired as the registry's `onReset` hook, so the ONE sanctioned restart
+   * door (`registry.resetUser` — reached by the admin reset AND by a confirmed player-channel
+   * `createCharacter` restart) invalidates the old season's non-degradation baseline. Without this,
+   * season 2's first commit reads as a count regression against the finished season ⇒ a degradation
+   * fault on every turn, nothing persists, and the dead season resurrects on engine restart.
+   */
+  forgetUser(user: string): void {
+    this.baselines.delete(user);
+    this.health.delete(user);
+    this.rngs.delete(user);
+    this.lastActivity.delete(user);
+    this.consecutiveFaults.delete(user);
+    this.lastTurnTickAt.delete(user);
+  }
+
+  /**
+   * Seed the non-degradation baseline from the user's CURRENT (just-resumed) state (audit E6).
+   * Called by the runtime's boot preload: without it, the first commit after an engine restart was
+   * checkpoint-blind — the guard had a hole exactly at resume-from-disk, where the historical
+   * memory-thinning bug lived.
+   */
+  seedBaseline(user: string): void {
+    this.baselines.set(user, this.registry.snapshot(user));
   }
 
   /** Per-user deterministic RNG stream (seed + user), created once and advanced across ticks. */
@@ -131,10 +174,12 @@ export class Orchestrator {
   }
 
   /** How many LIVING NPCs the off-screen society can draw on (B52: evictees stop living).
-   *  No live game ⇒ the synthetic test pool — always enough. */
+   *  No started game ⇒ ZERO (audit E2): the pre-game interview has no house to scheme in — an
+   *  off-screen tick before move-in would fabricate hidden history with houseguests that don't
+   *  exist yet (and non-degradation would forbid ever deleting it). */
   private offscreenPoolSize(user: string): number {
     const core = this.registry.sandboxFor(user).session.snapshot();
-    if (!core.house) return Infinity;
+    if (!core.started || !core.house) return 0;
     const evicted = new Set(core.live?.evictionOrder ?? []);
     return core.house.npcs.filter((n) => !evicted.has(n.id)).length;
   }
@@ -148,22 +193,26 @@ export class Orchestrator {
   }
 
   /** The one advance spine. `audit` verifies only (no progression). */
-  advance(user: string, trigger: Trigger): AdvanceResult {
+  advance(user: string, trigger: Trigger, opts: { baseline?: SessionSnapshot } = {}): AdvanceResult {
     // The circuit breaker (B58/E6): after repeated identical faults, off-screen ticks SKIP this
     // sandbox instead of blindly retrying — the flag shows in health; a good player turn resets it.
     if (trigger === "offscreen-tick" && this.circuitOpen(user)) {
       return { events: 0, integrity: "fault", faults: this.health.get(user)?.faults.slice(-1) ?? [] };
     }
     // Deep endgame (0044 follow-through of the B52 rule): with fewer than two LIVING NPCs there is
-    // no off-screen society left to run — e.g. the player standing in the Final 2. That tick is a
-    // clean no-op, NOT an integrity fault: the daily-event invariant belongs to the live loop's own
-    // beats (the finale is full of them), and flagging the empty house would log a false fault on
-    // every finale turn of a healthy, player-won game.
+    // no off-screen society left to run — e.g. the player standing in the Final 2, or no started
+    // game at all (E2: the pool is zero pre-game). That tick is a clean no-op, NOT an integrity
+    // fault: the daily-event invariant belongs to the live loop's own beats (the finale is full of
+    // them), and flagging the empty house would log a false fault on every finale turn of a
+    // healthy, player-won game.
     if (trigger === "offscreen-tick" && this.offscreenPoolSize(user) < 2) {
       return { events: 0, integrity: "ok", faults: [] };
     }
     const sandbox = this.registry.sandboxFor(user);
-    const baseline = this.registry.snapshot(user);
+    // R3: a caller that JUST exported this exact state (the turn-driven tick runs right after its
+    // commit stored the candidate) hands the snapshot over instead of paying a second O(events)
+    // serialization — the per-mutation cost was ~4 full exports, quadratic over a season.
+    const baseline = opts.baseline ?? this.registry.snapshot(user);
 
     let produced = 0;
     if (trigger !== "audit") {
@@ -176,7 +225,7 @@ export class Orchestrator {
 
     if (faults.length === 0) {
       this.consecutiveFaults.set(user, 0); // any clean advance closes the circuit
-      if (trigger !== "audit") { this.registry.saveUser(user); this.baselines.set(user, candidate); }
+      if (trigger !== "audit") { this.registry.saveUser(user, candidate); this.baselines.set(user, candidate); }
       if (trigger === "player-turn") this.touch(user);
       this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "ok");
       return { events: produced, integrity: "ok", faults: [] };
@@ -200,6 +249,10 @@ export class Orchestrator {
    * NOT saved (mandate #4). It also `touch`es the user (so the watcher's idle gate stops flooding
    * off-screen ticks mid-scene) and, in pure turn-driven mode, fires ONE bounded off-screen tick so
    * the house still lives turn-to-turn without the watcher.
+   *
+   * A refused commit FAILS THE REQUEST (audit E3/D1): the rollback throws a typed error the HTTP
+   * boundary maps to 4xx/5xx — never a 200 whose view narrates a beat that officially never
+   * happened ("narrated but never recorded" at the engine seam).
    */
   commitPlayerTurn(user: string): void {
     const sandbox = this.registry.sandboxFor(user);
@@ -208,30 +261,71 @@ export class Orchestrator {
     const baseline = this.baselines.get(user);
 
     // The first commit (e.g. createCharacter) has no prior good state — accept it and establish the
-    // baseline; there is nothing to degrade away from.
+    // baseline; there is nothing to degrade away from. (A season RESTART through the one sanctioned
+    // door lands here too: `forgetUser` cleared the dead season's baseline, so week 1 of season 2
+    // is a first commit again, not a count regression against a finished season — E1/R1.)
     const faults = baseline ? this.checkpoint(baseline, candidate, sandbox, "player-turn", { requireDailyEvent: false }) : [];
 
     if (faults.length === 0) {
+      try {
+        this.registry.saveUser(user, candidate); // R3: reuse the exported snapshot — no re-serialize
+      } catch {
+        // E7: the SAVE itself failed (disk). Its own fault class — never fail-open (the turn must
+        // not proceed unsaved), never misclassified as the caller's fault, no path in the message.
+        this.recordFault(user, "player-turn", when, [{ when, kind: "persist-failure" }], baseline);
+        throw new PersistFailureError();
+      }
       this.consecutiveFaults.set(user, 0); // a good player turn closes the circuit (B58/E6)
-      this.registry.saveUser(user);
       this.baselines.set(user, candidate);
       this.touch(user);
-      this.maybeTurnDrivenTick(user);            // may record an offscreen-tick health entry…
+      this.maybeTurnDrivenTick(user, baseline, candidate); // may record an offscreen-tick health entry…
       this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "ok"); // …player-turn has the last word
       return;
     }
-    // Fail-closed: roll the in-memory sandbox back to the last good state and DO NOT persist.
-    this.registry.restore(user, baseline!);
+    // Fail-closed: roll the in-memory sandbox back to the last good state, DO NOT persist, and
+    // surface the refusal as an ERROR to the caller (E3) — state unchanged, request failed.
+    this.recordFault(user, "player-turn", when, faults, baseline);
+    throw new TurnRefusedError(faults.map((f) => f.kind));
+  }
+
+  /** Roll back (when a good baseline exists), count the fault, log it, and record health. */
+  private recordFault(
+    user: string,
+    trigger: Trigger,
+    when: number,
+    faults: Fault[],
+    baseline: SessionSnapshot | undefined,
+  ): void {
+    if (baseline) this.registry.restore(user, baseline);
     this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
-    this.logFaults(user, "player-turn", faults);
+    this.logFaults(user, trigger, faults);
     const prior = this.health.get(user);
-    this.recordHealth(user, this.registry.sandboxFor(user), "player-turn", when, "fault",
+    this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "fault",
       [...(prior?.faults ?? []), ...faults].slice(-Orchestrator.MAX_STORED_FAULTS));
   }
 
-  /** In pure turn-driven mode, advance one bounded off-screen tick so the house lives between turns (B41). */
-  private maybeTurnDrivenTick(user: string): void {
-    if (this.turnDriven) this.advance(user, "offscreen-tick");
+  /**
+   * In pure turn-driven mode, advance one bounded off-screen tick so the house lives between turns
+   * (B41) — debounced to the TURN boundary (audit E57/R5): a beat commit (the live loop genuinely
+   * moved — an advance, a resolved decision) always earns its tick, but the auxiliary tool calls of
+   * the same player turn (recordInteraction + diaryRoom + …) share one. Without the debounce a
+   * 4-tool-call turn ran 4 ticks — force-marching the house and flooding the record. Never fires
+   * pre-game (audit E2): the casting interview has no house to scheme in.
+   */
+  private maybeTurnDrivenTick(user: string, baseline: SessionSnapshot | undefined, candidate: SessionSnapshot): void {
+    if (!this.turnDriven) return;
+    if (!candidate.started) return; // E2: no off-screen life before move-in
+    // Did the live loop move? Beat commits change the loop state; aux commits (an interaction, a
+    // DR entry, a deal) never touch it. The loop state is small — this is NOT an events re-export.
+    const progressed = !baseline || !baseline.started
+      || baseline.week !== candidate.week
+      || baseline.phase !== candidate.phase
+      || JSON.stringify(baseline.live ?? null) !== JSON.stringify(candidate.live ?? null);
+    const now = this.clock.now();
+    const last = this.lastTurnTickAt.get(user);
+    if (!progressed && last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5
+    this.lastTurnTickAt.set(user, now);
+    this.advance(user, "offscreen-tick", { baseline: candidate }); // R3: the commit just exported this
   }
 
   /** Verify a candidate advance against the baseline — fail-closed (0031 §4.3). */
@@ -324,12 +418,14 @@ export class Orchestrator {
 /** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
 function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions = 3): number {
   const core = sandbox.session.snapshot();
-  // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment they
-  // go (no more scheming/confessing weeks after eviction). A real house ⇒ only the LIVING NPCs; with no
-  // live game (tests/edge) ⇒ a small synthetic pool. The fallback never resurrects a real evictee.
+  // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment
+  // they go (no more scheming/confessing weeks after eviction). Only the LIVING NPCs of the REAL
+  // house, ever: the old no-house synthetic pool (audit E2) fabricated hidden scenes + Vault
+  // confessionals for houseguests that didn't exist yet — pre-game intake commits recorded
+  // scheming dated before move-in, later humanized into the real cast's names. With no live house
+  // there is NO ONE to scheme (the tick is gated upstream; this is the belt to that suspender).
   const evicted = new Set(core.live?.evictionOrder ?? []);
-  const activeNpcs = (core.house?.npcs ?? []).filter((n) => !evicted.has(n.id)).map((n) => n.id);
-  const ids = core.house ? activeNpcs : [npc(1), npc(2), npc(3), npc(4)];
+  const ids = (core.house?.npcs ?? []).filter((n) => !evicted.has(n.id)).map((n) => n.id);
   const before = sandbox.engine.events.query().length;
 
   // House presence (0049): the tick re-seats the house FIRST (seeded, affinity-clustered, adjacent
@@ -345,13 +441,16 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     ? richOffscreenStretch({
         events: sandbox.engine.events, rng, npcs: ids, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
+        // E45 — motivated, co-present society: partners by tie strength, scenes need co-presence.
+        edgeOf: (a, b) => sandbox.engine.relationships.edge(a, b),
+        ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
     sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
     // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
-    sandbox.session.recordOffscreenSoul(s.initiator, s.type);
+    sandbox.session.recordOffscreenScene(s.initiator, s.partner, s.type); // E50 — both roles evolve
     // 0049: the scene happens WHERE its initiator is; anyone one room over — INCLUDING the player —
     // may catch a piece of it. A successful roll is a real, traceable `overheard:` pathway (0002),
     // partial and lower-confidence: eavesdropping is information-gathering, never narrative vibes.
@@ -371,7 +470,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // scene and never a number. Every retelling is a recorded, traceable event (0002).
   if (core.house && scenes.length > 0 && rng.next() < GOSSIP.riseProb) {
     const scene = scenes[rng.int(scenes.length)]!;
-    const everyone: EntityId[] = [core.house.player.id, ...activeNpcs];
+    const everyone: EntityId[] = [core.house.player.id, ...ids];
     const edges: Array<readonly [EntityId, EntityId]> = [];
     for (let i = 0; i < everyone.length; i++) {
       for (let j = i + 1; j < everyone.length; j++) {
@@ -390,6 +489,10 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
         rounds: GOSSIP.rounds,
         transmitProb: GOSSIP.transmitProb,
         decay: GOSSIP.decay,
+        // E44 — hearing a rumor moves the listener's read of its subjects (never the player's edges).
+        rel: sandbox.engine.relationships,
+        subjects: [scene.initiator, scene.partner],
+        sceneType: scene.type,
       });
     }
   }
@@ -411,7 +514,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       initiator: ids[0]!,
       witnessSet: [PLAYER, ids[0]!],
       hidden: false,
-      content: "A house meeting shifts the week.",
+      content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
     });
   }
   // Every recorded scene (+ the player-turn day) counts toward the advance.

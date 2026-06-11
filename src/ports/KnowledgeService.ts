@@ -22,11 +22,14 @@ export interface KnowledgeService {
 
   /**
    * Surface a hidden fact to an entity through an in-game pathway. The pathway must be ANCHORED to a
-   * real source (B39/audit A4): `told-by:<id>` where the claimed teller actually holds the fact (they
-   * were told it OR witnessed it), or `overheard:<eventId>` where that event exists. If anchored, it
-   * records a traceable surfacing event AND adds the fact to the entity's knowledge (returns the
-   * `KnowledgeFact`). If NOT anchored — the narrator inventing a source — it is **downgraded to a
-   * suspicion** (never knowledge) and returns `null`. The model cannot mint ground truth.
+   * real source on CONTENT LINEAGE (B39/audit A4 + E9/C2/C3): `told-by:<id>` where the claimed teller
+   * actually holds content the claim derives from (they were told it OR witnessed it), or
+   * `overheard:<eventId>` where that event exists AND the claim derives from ITS content (a strict
+   * fragment, as the engine's overhear roll produces). If anchored, it records a traceable surfacing
+   * event AND adds the fact to the entity's knowledge (returns the `KnowledgeFact`). If NOT anchored —
+   * the narrator inventing a source, padding a real one, or citing an unrelated event — it is
+   * **downgraded to a suspicion with capped confidence** (never knowledge) and returns `null`.
+   * The model cannot mint ground truth.
    */
   surfaceInformationTo(
     entity: EntityId,
@@ -34,8 +37,8 @@ export interface KnowledgeService {
     pathway: string,
   ): KnowledgeFact | null;
 
-  /** Give an entity a suspicion (no pathway, never promoted to knowledge here). */
-  addSuspicion(entity: EntityId, fact: { content: string; subject?: EntityId }): Suspicion;
+  /** Give an entity a suspicion (no pathway, never promoted to knowledge here). Confidence is capped. */
+  addSuspicion(entity: EntityId, fact: { content: string; subject?: EntityId; confidence?: number }): Suspicion;
 
   /**
    * The player's Diary Room: player-level, OOC. Its content becomes the PLAYER's

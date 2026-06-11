@@ -42,6 +42,9 @@ import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
 export type Beat =
   | "hoh-competition" | "nominations" | "veto-competition"
   | "veto-ceremony" | "eviction" | "final-eviction" | "finale" | "complete"
+  // the witnessed veto chip-draw ceremony (E35) — emitted on BeatEvent only; the structural
+  // beat stays `veto-competition` (the draw is its first stage, the comp its second).
+  | "veto-draw"
   // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
   | "twist-reveal"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
@@ -63,9 +66,13 @@ export type PendingDecision =
   | { kind: "tie-break"; by: EntityId; nominees: [EntityId, EntityId] }
   // --- Final 3 (0045): the final HOH personally evicts one of the other two ---
   | { kind: "final-eviction"; by: EntityId; options: [EntityId, EntityId] }
+  // --- eviction night (0047/E34): the player's own goodbye message to the evictee ---
+  | { kind: "goodbye-message"; by: EntityId; evictee: EntityId; tones: GoodbyeTone[] }
   // --- finale (0037) ---
   | { kind: "finale-statement"; by: EntityId }
   | { kind: "finale-answer"; by: EntityId; juror: EntityId; appeals: FinaleAppeal[] }
+  // --- finale (0037/E37): the player-JUROR's own question to a finalist (scoreless free text) ---
+  | { kind: "juror-question"; by: EntityId; finalist: EntityId }
   | { kind: "juror-vote"; by: EntityId; finalists: [EntityId, EntityId] };
 
 /** Which stage of the live finale sub-loop (0037) we are advancing. */
@@ -149,6 +156,13 @@ export interface LiveSeasonState {
    * management has genuine effect at the finale. ENGINE-ONLY: never crosses the wall.
    */
   mannerByEvictee?: Record<EntityId, Record<EntityId, EvictionManner>>;
+  /**
+   * The per-week eviction ballot record (E12): who voted to evict whom, kept ENGINE-ONLY for
+   * manner/deal reconciliation and for the 0048 retrospective UNSEALING. Eviction votes are
+   * secret ballots in Big Brother — no projection attributes a weekly vote to its voter while
+   * the season lives; the attribution surfaces only through the post-season retrospective.
+   */
+  voteRecord?: Array<{ week: number; evictee: EntityId; voteOf: Record<EntityId, EntityId> }>;
   /** The in-progress live finale sub-loop (0037); set when the finale begins. */
   finale?: FinaleProgress;
   /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
@@ -221,9 +235,13 @@ export type DecisionInput =
   | { kind: "eviction-vote"; vote: EntityId }
   | { kind: "tie-break"; evict: EntityId }
   | { kind: "final-eviction"; evict: EntityId }
+  // --- eviction night (E34): the tone is the player's CHOICE; the prose is the model's to voice ---
+  | { kind: "goodbye-message"; tone: GoodbyeTone; message?: string }
   // --- finale (0037) ---
   | { kind: "finale-statement"; statement: string }
   | { kind: "finale-answer"; appeal: FinaleAppeal }
+  // --- finale (E37): scoreless free text — the juror's moment, never a tally input ---
+  | { kind: "juror-question"; question?: string }
   | { kind: "juror-vote"; vote: EntityId };
 
 /** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
@@ -249,26 +267,6 @@ function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): 
   return { def, field, winner: winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete") };
 }
 
-/** Resolve the Power of Veto competition (no state mutation): the six-player field + the winner. */
-/** The veto draw resolves to a winner — UNLESS the player drew Houseguest's Choice, which DEFERS (B45). */
-type VetoResolution =
-  | { def: CompetitionDef; field: EntityId[]; winner: EntityId }
-  | { deferred: true; def: CompetitionDef; field: EntityId[]; candidates: EntityId[] };
-
-function resolveVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): VetoResolution {
-  // The comp is drawn FIRST (one rng draw) so `advance` and `peekCompetition` replay identically.
-  const def = drawFor(s, "veto", rng);
-  const draw = vetoParticipants(weekState(s, ctx), rng, {
-    houseguestsChoiceChip: true,
-    choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
-    playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
-  });
-  if (draw.houseguestsChoice && draw.houseguestsChoice.picked === undefined) {
-    return { deferred: true, def, field: draw.participants, candidates: draw.houseguestsChoice.candidates };
-  }
-  return { def, field: draw.participants, winner: winnerOf(draw.participants, def.type, ctx, rng, s.compIntent ?? "compete") };
-}
-
 /** Resolve the HOH competition beat (used by `advance` and the comp-intent resume); consumes the intent. */
 function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
   const finalThree = s.active.length === 3;
@@ -284,21 +282,57 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
   };
 }
 
-/** Resolve the Power of Veto beat — may pause for a Houseguest's Choice pick (B45); consumes the intent. */
-function resolveVetoBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
-  const r = resolveVeto(s, ctx, rng);
-  if ("deferred" in r) {
-    // The player drew Houseguest's Choice (B45): pause for THEM to pick the sixth player. The declared
-    // intent stays set; the houseguests-choice resume runs the SAME drawn comp (0042) with it.
-    s.vetoComp = r.def.id;
-    s.vetoField = r.field;
-    s.pending = { kind: "houseguests-choice", by: ctx.player, options: r.candidates };
-    return null;
+/**
+ * Stage A of the veto beat (E35): the chip draw is a WITNESSED ceremony of its own — the player
+ * experiences who plays and who held Houseguest's Choice, before any winner exists. Stores the
+ * drawn comp + the field; the competition itself resolves on a later advance (`resolveVetoComp`),
+ * after any player intent declaration. Pauses (pending set, event still returned) when the
+ * PLAYER drew the Houseguest's Choice chip (B45).
+ */
+function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  // The comp is drawn FIRST (one rng draw) and held in `vetoComp` so every later stage —
+  // including a restart mid-pause (0030) — resolves the SAME drawn competition (0042).
+  const def = drawFor(s, "veto", rng);
+  s.vetoComp = def.id;
+  const draw = vetoParticipants(weekState(s, ctx), rng, {
+    houseguestsChoiceChip: true,
+    choose: (holder, cands) => ctx.rel.chooseStrongestBond(holder, cands, rng),
+    playerChoosesOwn: ctx.player, // the player picks their own sixth player; the engine never reads their bonds
+  });
+  s.vetoField = draw.participants;
+  const hc = draw.houseguestsChoice;
+  if (hc && hc.picked === undefined) {
+    // The player drew Houseguest's Choice (B45): the draw is still a witnessed beat — the five
+    // drawn players and the chip in the player's hand are public — and the loop pauses for THEM
+    // to name the sixth. The candidates were snapshotted AFTER the full draw (C1).
+    s.pending = { kind: "houseguests-choice", by: ctx.player, options: hc.candidates };
+    return {
+      beat: "veto-draw",
+      content: `the veto players are drawn: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the final player`,
+      participants: [...draw.participants],
+    };
   }
-  recordDraw(s, "veto", r.def); // the comp resolved — the next veto draw avoids it (0042)
+  const hcNote = hc?.picked !== undefined
+    ? ` — ${hc.holder} draws Houseguest's Choice and picks ${hc.picked}`
+    : "";
+  return {
+    beat: "veto-draw",
+    content: `the veto players are drawn: ${draw.participants.join(", ")}${hcNote}`,
+    participants: [...draw.participants],
+  };
+}
+
+/** Stage B of the veto beat (E35): resolve the drawn competition over the COMPLETED field;
+ *  consumes the declared intent. The draw (`resolveVetoDraw`) always precedes this. */
+function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  const field = s.vetoField!;
+  // The SAME comp drawn at stage A (0042) — looked up, never re-drawn (restart-safe, 0030).
+  const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
+  const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
+  recordDraw(s, "veto", def); // the comp resolved — the next veto draw avoids it (0042)
   s.compIntent = undefined; // consumed
-  s.vetoField = r.field; s.vetoHolder = r.winner; s.beat = "veto-ceremony";
-  return { beat: "veto-competition", content: `${r.winner} wins the Power of Veto`, participants: r.field };
+  s.vetoHolder = holder; s.beat = "veto-ceremony";
+  return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
 }
 
 /** The current competition beat's deterministic outcome (single authority, B37) — or null if the
@@ -316,9 +350,14 @@ export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomn
   if (s.pending || s.finished) return null;
   if (s.beat === "hoh-competition") { const { def, field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: def.type, def, field, winner }; }
   if (s.beat === "veto-competition") {
-    const r = resolveVeto(s, ctx, rng);
-    if ("deferred" in r) return null; // the player must pick the sixth player first — no preview yet
-    return { beat: s.beat, type: r.def.type, def: r.def, field: r.field, winner: r.winner };
+    // E35: before the chips are drawn there IS no field — nothing to preview (the draw is a
+    // witnessed ceremony of its own). Once drawn, the preview replays stage B exactly: the same
+    // stored comp over the same completed field with the same per-beat rng from position zero.
+    if (!s.vetoField || !s.vetoComp) return null;
+    const def = competitionById(s.vetoComp);
+    if (!def) return null;
+    const winner = winnerOf(s.vetoField, def.type, ctx, rng, s.compIntent ?? "compete");
+    return { beat: s.beat, type: def.type, def, field: s.vetoField, winner };
   }
   return null;
 }
@@ -543,6 +582,9 @@ function seededShuffle<T>(items: readonly T[], rng: RandomnessSource): T[] {
  */
 export type GoodbyeTone = "warm" | "respectful" | "cold";
 
+/** The legal goodbye tones the PLAYER may choose for their own message (E34). */
+export const GOODBYE_TONES: readonly GoodbyeTone[] = ["warm", "respectful", "cold"];
+
 function goodbyeTone(sender: EntityId, evictee: EntityId, ctx: SeasonCtx): GoodbyeTone {
   const e = ctx.rel.edge(sender, evictee);
   if (e.affinity >= 0.6) return "warm";
@@ -556,9 +598,14 @@ export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
   return { disrespected: true }; // a cold send-off stings — the evictee weighs it against them
 }
 
-/** The seeded houseguests who leave a goodbye message (from the house remaining after the eviction). */
-function selectGoodbyeSenders(s: LiveSeasonState, evictee: EntityId, rng: RandomnessSource): EntityId[] {
-  const remaining = s.active.filter((h) => h !== evictee);
+/**
+ * The seeded houseguests who leave a goodbye message (from the house remaining after the eviction).
+ * E34: the PLAYER is never engine-selected here — the engine must not author the player's goodbye
+ * or assert a tone computed from their hidden edge. A surviving player is appended as the LAST
+ * sender by `commitStagedEviction`, where the goodbye stage pauses for their own decision.
+ */
+function selectGoodbyeSenders(s: LiveSeasonState, evictee: EntityId, player: EntityId, rng: RandomnessSource): EntityId[] {
+  const remaining = s.active.filter((h) => h !== evictee && h !== player);
   return seededShuffle(remaining, rng).slice(0, Math.min(GOODBYE_MESSAGE_COUNT, remaining.length));
 }
 
@@ -597,7 +644,10 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
         const voter = e.revealOrder[e.revealIx]!;
         const votedFor = e.voteOf[voter]!;
         e.revealIx += 1;
-        return { beat: "eviction-reveal", content: `${voter} votes to evict ${votedFor}`, participants: [voter, votedFor] };
+        // E12: eviction votes are SECRET BALLOTS — the reveal reads the ballot, never the voter
+        // ("a vote to evict X…"). `voteOf` stays engine-internal (manner/deal reconciliation);
+        // attributions unseal only in the 0048 post-season retrospective.
+        return { beat: "eviction-reveal", content: `a vote to evict ${votedFor}`, participants: [votedFor] };
       }
       // The last vote is read: the tally decides (HOH breaks a tie — the player HOH pauses, B44).
       const tally = revealedTally(e);
@@ -613,6 +663,12 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     case "goodbye": {
       if (e.goodbyeIx < e.goodbyeFrom.length) {
         const sender = e.goodbyeFrom[e.goodbyeIx]!;
+        if (sender === ctx.player) {
+          // E34: the engine NEVER authors the player's goodbye — no beat fires until the player
+          // chooses their own tone (the prose is the model's to voice from that choice).
+          s.pending = { kind: "goodbye-message", by: ctx.player, evictee: e.evictee!, tones: [...GOODBYE_TONES] };
+          return null;
+        }
         e.goodbyeIx += 1;
         const tone = goodbyeTone(sender, e.evictee!, ctx);
         // The tone folds into the evictee's manner toward the sender (merged — a goodbye is the last word).
@@ -636,10 +692,16 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
 function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: EntityId, rng: RandomnessSource): BeatEvent {
   const e = s.eviction!;
   e.evictee = evictee;
+  // E12: the ballots are recorded ENGINE-ONLY for the 0048 retrospective unsealing — the week's
+  // secret votes become tellable only once the season is over.
+  (s.voteRecord ??= []).push({ week: s.week, evictee, voteOf: { ...e.voteOf } });
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
   recordEvictionManner(s, evictee, [s.hoh!, ...votesToEvict], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
-  e.goodbyeFrom = selectGoodbyeSenders(s, evictee, rng);
+  e.goodbyeFrom = selectGoodbyeSenders(s, evictee, ctx.player, rng);
+  // E34: a SURVIVING player always gets jury management's signature lever — their own goodbye
+  // message, last, as a real pending decision (never engine-authored, never engine-toned).
+  if (s.active.includes(ctx.player)) e.goodbyeFrom.push(ctx.player);
   e.stage = "goodbye";
   return { beat: "eviction", content: `${evictee} is evicted`, participants: [evictee] };
 }
@@ -729,6 +791,12 @@ function advanceFinale(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource
         s.pending = { kind: "finale-answer", by: ctx.player, juror: q.juror, appeals: [...FINALE_APPEALS] };
         return null;
       }
+      if (q.juror === ctx.player) {
+        // E37: the player-JUROR asks their own question (scoreless free text) — their seat at the
+        // finale is a real beat, not a spectator slot the engine auto-fills.
+        s.pending = { kind: "juror-question", by: ctx.player, finalist: q.finalist };
+        return null;
+      }
       // NPC finalist answers optimally for this juror (deterministic argmax), recorded for the tally.
       const appeal = bestAppeal(edgeAsJuryRel(q.juror, q.finalist, ctx), mannerFor(s, q.juror, q.finalist));
       recordAppeal(f, q.finalist, q.juror, appeal);
@@ -809,19 +877,25 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
-      // B46: the player plays the veto if they're a puller (HOH or a nominee) — pause for intent first.
-      const pullers = [s.hoh, ...(s.nominees ?? [])].filter((id): id is EntityId => !!id);
-      if (s.compIntent === undefined && pullers.includes(ctx.player)) {
+      // E35 stage A: the chip draw is a witnessed ceremony of its own — it precedes any winner.
+      if (!s.vetoField) return resolveVetoDraw(s, ctx, rng);
+      // E35 + B46: ANY player in the drawn field — puller (HOH/nominee) or chip-drawn — declares
+      // the canonical compete/throw/play-safe intent before the comp resolves.
+      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
         s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
         return null;
       }
-      return resolveVetoBeat(s, ctx, rng);
+      return resolveVetoComp(s, ctx, rng);
     }
     case "veto-ceremony": {
       const nominees = s.nominees!;
       if (s.vetoHolder === ctx.player) {
-        // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable.
-        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable: [...nominees] };
+        // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable…
+        // …UNLESS no legal replacement exists (the Final-4 rule, E36): then "use" is not a real
+        // option and the legal set says so up front, instead of accepting a save and silently
+        // inverting it into "does not use the veto".
+        const saveable = selectableReplacements(weekState(s, ctx)).length > 0 ? [...nominees] : [];
+        s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable };
         return null;
       }
       // NPC veto holder: save self if nominated, else a strongly-trusted nominee.
@@ -918,10 +992,11 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       return { kind: "nominations", choice: [a, b] };
     }
     case "veto-decision": {
-      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee.
-      const saved = p.nominees.includes(p.by)
+      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee —
+      // from the LEGAL saveable set only (empty at Final 4, E36: using the veto is barred).
+      const saved = p.saveable.includes(p.by)
         ? p.by
-        : p.nominees.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
+        : p.saveable.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
       return saved ? { kind: "veto-decision", use: true, save: saved } : { kind: "veto-decision", use: false };
     }
     case "houseguests-choice":
@@ -934,10 +1009,15 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       return { kind: "tie-break", evict: voteChoice(p.by, p.nominees, ctx, currentBlocs(s, ctx)) };
     case "final-eviction":
       return { kind: "final-eviction", evict: byThreat(p.by, p.options) };
+    case "goodbye-message":
+      // The same relationship-derived tone an NPC sender would use (no second rulebook).
+      return { kind: "goodbye-message", tone: goodbyeTone(p.by, p.evictee, ctx) };
     case "finale-statement":
       return { kind: "finale-statement", statement: "" };
     case "finale-answer":
       return { kind: "finale-answer", appeal: bestAppeal(edgeAsJuryRel(p.juror, p.by, ctx), mannerFor(s, p.juror, p.by)) };
+    case "juror-question":
+      return { kind: "juror-question", question: "" };
     case "juror-vote": {
       const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(p.by, fin, ctx), mannerFor(s, p.by, fin));
       return { kind: "juror-vote", vote: lean(p.finalists[0]) >= lean(p.finalists[1]) ? p.finalists[0] : p.finalists[1] };
@@ -970,6 +1050,11 @@ export function applyDecision(
       // and leave the decision standing — the old order cleared `pending` first and stranded the loop.
       const save = input.use ? input.save : undefined;
       if (input.use && (!save || !nominees.includes(save))) throw new Error("can only veto a current nominee");
+      // E36: with no legal replacement (Final 4) "use" is refused with the decision STANDING —
+      // never accepted and then silently inverted into "does not use the veto".
+      if (input.use && selectableReplacements(weekState(s, ctx)).length === 0) {
+        throw new Error("the veto cannot be used — no legal replacement nominee exists, so the nominations stand");
+      }
       s.pending = undefined;
       if (!input.use) {
         s.vetoUsed = false; s.finalNominees = [nominees[0], nominees[1]]; s.beat = "eviction";
@@ -985,23 +1070,29 @@ export function applyDecision(
       s.compIntent = input.intent;
       s.pending = undefined;
       if (s.beat === "hoh-competition") return resolveHohBeat(s, ctx, rng);
-      const veto = resolveVetoBeat(s, ctx, rng);
-      // The veto may have deferred to a Houseguest's Choice pick (B45) — surface the declaration as the beat.
-      return veto ?? { beat: "veto-competition", content: `${ctx.player} sets their competition strategy`, participants: [ctx.player] };
+      // E35: at the veto the field is already drawn (the draw ceremony precedes intent) — resolve it.
+      return resolveVetoComp(s, ctx, rng);
     }
     case "houseguests-choice": {
       // The player drew Houseguest's Choice and picks the sixth veto player (B45/audit B4).
       const options = (s.pending as { options: EntityId[] }).options;
-      if (!options.includes(input.pick)) throw new Error("the Houseguest's Choice must pick an eligible candidate");
+      // C1: legality is RE-DERIVED at resume — the pick must be an offered candidate AND must not
+      // already stand in the drawn field (a stale offer can never produce a duplicate competitor).
+      if (!options.includes(input.pick) || s.vetoField!.includes(input.pick)) {
+        throw new Error("the Houseguest's Choice must pick an eligible candidate who is not already drawn");
+      }
       s.pending = undefined;
-      const field = [...s.vetoField!, input.pick]; // the player's pick completes the field
-      // The SAME comp drawn at the deferral (0042) — looked up, never re-drawn (restart-safe, 0030).
-      const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
-      const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
-      recordDraw(s, "veto", def);
-      s.compIntent = undefined; // the declared intent is consumed
-      s.vetoField = field; s.vetoHolder = holder; s.beat = "veto-ceremony";
-      return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
+      s.vetoField = [...s.vetoField!, input.pick]; // the player's pick completes the field
+      // E35: the completed field is the witnessed beat; the comp resolves on the NEXT advance —
+      // after the player (always in the field here: they drew the chip as a puller) declares intent.
+      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
+        s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
+      }
+      return {
+        beat: "veto-draw",
+        content: `${ctx.player} names ${input.pick} as the final veto player`,
+        participants: [...s.vetoField],
+      };
     }
     case "replacement": {
       const legal = new Set(selectableReplacements(weekState(s, ctx)).filter((h) => h !== s.saved));
@@ -1034,6 +1125,23 @@ export function applyDecision(
       applyEviction(s, input.evict, ctx, [s.hoh!]);
       return ev;
     }
+    case "goodbye-message": {
+      // E34: the player's OWN goodbye — the tone is their choice (the engine never computes it
+      // from their hidden edge), folded into the evictee's manner EXACTLY as NPC tones are.
+      const p = s.pending;
+      if (!p || p.kind !== "goodbye-message") throw new Error("no pending goodbye message");
+      if (!GOODBYE_TONES.includes(input.tone)) throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
+      const e = s.eviction!;
+      s.pending = undefined;
+      e.goodbyeIx += 1;
+      const row = (s.mannerByEvictee![e.evictee!] ??= {});
+      row[p.by] = { ...(row[p.by] ?? {}), ...goodbyeMannerFor(input.tone) };
+      return {
+        beat: "eviction-goodbye",
+        content: `${p.by} leaves ${e.evictee} a ${input.tone} goodbye message`,
+        participants: [p.by, e.evictee!],
+      };
+    }
     // --- finale (0037) ---------------------------------------------------------
     case "finale-statement": {
       const f = s.finale!;
@@ -1054,6 +1162,18 @@ export function applyDecision(
       s.pending = undefined;
       f.questionIx += 1;
       return { beat: "finale", content: `${p.by} answers ${p.juror}`, participants: [p.by, p.juror] };
+    }
+    case "juror-question": {
+      // E37: the player-juror's question is SCORELESS flavor — recording it changes no tally;
+      // the NPC finalist's answer is still engine-chosen exactly as for any juror.
+      const f = s.finale!;
+      const p = s.pending;
+      if (!p || p.kind !== "juror-question") throw new Error("no pending juror question");
+      s.pending = undefined;
+      const appeal = bestAppeal(edgeAsJuryRel(p.by, p.finalist, ctx), mannerFor(s, p.by, p.finalist));
+      recordAppeal(f, p.finalist, p.by, appeal);
+      f.questionIx += 1;
+      return { beat: "finale", content: `${p.by} questions ${p.finalist}; ${p.finalist} answers`, participants: [p.finalist, p.by] };
     }
     case "juror-vote": {
       const f = s.finale!;

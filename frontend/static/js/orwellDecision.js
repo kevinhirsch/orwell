@@ -25,6 +25,7 @@
     "tie-break": "vote",
     "final-eviction": "vote",
     "juror-vote": "vote",
+    "goodbye-message": "vote", // E34: the chosen tone rides `vote` (options are the tones)
     "replacement": "replacement",
   };
   const COMP_INTENTS = ["compete", "throw", "play-safe"];
@@ -84,6 +85,11 @@
   function buildPayload(kind, sel, freeText, useVeto) {
     if (kind === "nominations") return sel.length === 2 ? { kind, choice: sel } : null;
     if (kind === "finale-statement") return { kind, statement: freeText || "" };
+    if (kind === "juror-question") return { kind, statement: freeText || "" }; // E37: scoreless free text
+    if (kind === "goodbye-message") {
+      // E34: a tone is required; the optional message text rides `statement`.
+      return sel.length === 1 ? { kind, vote: sel[0], statement: freeText || "" } : null;
+    }
     if (kind === "finale-answer") return sel.length === 1 ? { kind, appeal: sel[0] } : null;
     if (kind === "comp-intent") return sel.length === 1 ? { kind, intent: sel[0] } : null;
     if (kind === "veto-decision") {
@@ -105,8 +111,10 @@
       "eviction-vote": "Eviction — cast your vote",
       "tie-break": "Tied vote — as HOH, you decide",
       "final-eviction": "Final 3 — you evict, personally",
+      "goodbye-message": "Goodbye message — your tone, your words",
       "finale-statement": "Finale — your statement to the jury",
       "finale-answer": "Jury question — choose your appeal",
+      "juror-question": "Your jury question — ask the finalist",
       "juror-vote": "Your jury vote — crown a winner",
     }[kind] || "Your decision";
   }
@@ -191,6 +199,20 @@
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
       confirm.disabled = false; // a statement may be short; engine treats it as flavor
+    } else if (kind === "juror-question") {
+      // E37: scoreless free text — the player-juror's own question to the finalist.
+      textarea = document.createElement("textarea");
+      textarea.placeholder = "Your question to the finalist…";
+      textarea.addEventListener("input", sync);
+      card.appendChild(textarea);
+      confirm.disabled = false; // free text; the engine scores nothing here
+    } else if (kind === "goodbye-message") {
+      // E34: pick a tone (the binding part) + optional message text (the model voices it).
+      (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
+      textarea = document.createElement("textarea");
+      textarea.placeholder = "Your goodbye message (optional — the tone is what binds)…";
+      textarea.addEventListener("input", sync);
+      card.appendChild(textarea);
     } else if (kind === "finale-answer") {
       (Array.isArray(pending.appeals) && pending.appeals.length ? pending.appeals : []).forEach((a) => addChip(String(a), String(a)));
     } else if (kind === "comp-intent") {

@@ -56,8 +56,8 @@ the core/Vault, only a sanitized result crosses the membrane — *new*):
 
 | Tool | Effect / returns |
 |---|---|
-| `recordInteraction(initiator, witnessSet, content)` | records a (player-witnessed) event; **initiator/witnesses must be LIVING houseguests** and per-call folds are capped (B39); returns its id/ack |
-| `resolveCompetition(type, participants, intents)` *(as built: `runCompetition`)* | the **engine-decided** outcome only — no stats, rankings, or Vault reasoning |
+| `recordInteraction(initiator, witnessSet, content)` | records a (player-witnessed) event; **initiator/witnesses must be LIVING houseguests**, the **witness set must include the player** (audit E21 — off-screen scenes are the engine's to mint), and folds are capped per call (B39) **and budgeted per beat per edge** (E21); returns its id/ack |
+| `runCompetition(type)` *(audit E20: the caller-supplied-stats `resolveCompetition` is REMOVED from the channel — one outcome authority)* | the **engine-decided** outcome over the LIVE house only — no stats, rankings, or Vault reasoning |
 | `surfaceInformationTo(entity, fact, pathway)` | moves a hidden fact into knowledge via an **anchored** pathway (B39/A4); an unanchored one is downgraded to a suspicion; returns `{ ok, surfaced }` |
 
 **Admin / God-Mode channel** (separate registry; non-Vault only):
@@ -104,9 +104,8 @@ buildOutwardChannels(deps) -> { player, admin, summary } # outward root; no Vaul
 
 # new for this feature
 EngineCommands (Vault-free port the engine implements; the MCP server depends on THIS, not the engine root):
-    recordInteraction(req) -> { eventId }
-    resolveCompetition(req) -> Result                    # outcome only (as built: runCompetition)
-    surfaceInformationTo(req) -> { ok }
+    recordInteraction(req) -> { eventId }               # player-witnessed only (E21); folds budgeted
+    surfaceInformationTo(req) -> { ok }                  # (E20: no resolveCompetition on the port — runCompetition is the session's)
 McpServer (outward adapter):
     serve(channel, transport)                            # mounts toolsFor(channel) over stdio|http
 ```
@@ -139,7 +138,7 @@ No implementer action remains.
 ## 11. Dependencies
 
 #1 (Vault Wall — the registry, `VisibleStateService`, the boundary it extends); the domain core
-(`resolveCompetition`), `KnowledgeService` (`surfaceInformationTo`), `EventStore`
+(competition resolution via the session's `runCompetition`), `KnowledgeService` (`surfaceInformationTo`), `EventStore`
 (`recordInteraction`). **Feeds** the Orwell agent integration (`frontend/INTEGRATION.md`), the
 MVP, and the Proxmox deploy/update scripts (topology).
 

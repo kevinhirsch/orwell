@@ -24,14 +24,6 @@ function sampleArgs(name: string): Record<string, unknown> {
     case "endOfSessionSummary": return {};
     case "runCompetition": return { type: "endurance" };
     case "recordInteraction": return { initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a kitchen chat" };
-    case "resolveCompetition": return {
-      type: "endurance",
-      participants: [
-        { id: PLAYER, stats: { physical: 0.5, mental: 0.5, social: 0.5 } },
-        { id: npc(1), stats: { physical: 0.6, mental: 0.5, social: 0.5 } },
-      ],
-      intents: [], seed: 1,
-    };
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "a surfaced fact" }, pathway: "told-by:npc:1" };
     case "inspectNonVaultState": return { query: "all" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
@@ -134,21 +126,25 @@ Then("it is never written to the Vault", function (this: BbWorld) {
   assert.ok(!this.sandbox!.engine.vault.readHidden().some((r) => r.content.includes("player-initiated chat")));
 });
 
-// --- resolveCompetition -------------------------------------------------------
+// --- resolveCompetition is gone (audit E20) -------------------------------------
 
-When("the player requests a competition resolution", async function (this: BbWorld) {
-  this.toolResult = await this.mcpPlayer!.callTool("resolveCompetition", sampleArgs("resolveCompetition"));
+Then("resolveCompetition is absent from the channel's tool list", function (this: BbWorld) {
+  assert.ok(!this.server!.listTools().some((t) => t.name === "resolveCompetition"));
 });
 
-Then("the result is the engine-decided outcome", function (this: BbWorld) {
-  const r = this.toolResult as { winner: string; type: string };
-  assert.ok([PLAYER, npc(1)].includes(r.winner));
-  assert.equal(r.type, "endurance");
+Then("calling resolveCompetition is refused", async function (this: BbWorld) {
+  await assert.rejects(
+    this.server!.callTool("resolveCompetition", {
+      type: "endurance",
+      participants: [{ id: PLAYER, stats: { physical: 0.5, mental: 0.5, social: 0.5 } }],
+      intents: [], seed: 1,
+    }),
+    /not available/,
+  );
 });
 
-Then("it contains no stat scores, rankings, or Vault-derived reasoning", function (this: BbWorld) {
-  assert.deepEqual(Object.keys(this.toolResult as object).sort(), ["type", "winner"]);
-  assertNoSentinels(JSON.stringify(this.toolResult), this.sandbox!.sentinels);
+Then("runCompetition remains on the channel's tool list", function (this: BbWorld) {
+  assert.ok(this.server!.listTools().some((t) => t.name === "runCompetition"));
 });
 
 // --- surfaceInformationTo -----------------------------------------------------
@@ -204,12 +200,20 @@ Given("an external MCP client on the player channel", function (this: BbWorld) {
 });
 
 When(
-  "it reads visible state, records an interaction, resolves a competition, and reads the summary",
+  "it reads visible state, records an interaction, is refused a direct competition resolution, and reads the summary",
   async function (this: BbWorld) {
     const responses: string[] = [];
     responses.push(JSON.stringify(await this.server!.callTool("getVisibleStateFor", sampleArgs("getVisibleStateFor"))));
     responses.push(JSON.stringify(await this.server!.callTool("recordInteraction", sampleArgs("recordInteraction"))));
-    responses.push(JSON.stringify(await this.server!.callTool("resolveCompetition", sampleArgs("resolveCompetition"))));
+    // E20: a direct caller-supplied-stats resolution is refused — and even the REFUSAL is Vault-free.
+    let refused: string | null = null;
+    try {
+      await this.server!.callTool("resolveCompetition", { type: "endurance", participants: [], intents: [], seed: 1 });
+    } catch (e) {
+      refused = (e as Error).message;
+    }
+    assert.ok(refused, "resolveCompetition must be refused on the player channel (E20)");
+    responses.push(JSON.stringify({ refused }));
     this.toolResult = await this.server!.callTool("endOfSessionSummary", {});
     responses.push(JSON.stringify(this.toolResult));
     this.lastOutput = responses.join("\n");

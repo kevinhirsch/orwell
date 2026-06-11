@@ -11,10 +11,12 @@ import { PLAYER, npc } from "../../src/domain/ids";
  * once the result is given. HARD rule: roles only — no names.
  */
 
-/** Does the player win the OPENING HOH competition with the given declared intent (deterministic per seed)? */
+/** Does the player win the OPENING HOH competition with the given declared intent (deterministic per seed)?
+ *  The player is cast as a comp-beast so wins are measurable (C6 made the NO-archetype default the
+ *  MEDIAN floater — a deliberate underdog who rarely takes the opening crown). */
 function playerWinsOpeningHoh(seed: number, intent: "compete" | "throw" | "play-safe"): boolean {
   const s = new GameSessionAdapter();
-  s.createCharacter({ playerName: "P", seed });
+  s.createCharacter({ playerName: "P", archetype: "comp-beast", seed });
   const intentPending = s.advanceGame();           // the loop pauses for the player's intent
   expect(intentPending.pending?.kind).toBe("comp-intent");
   const adv = s.submitDecision({ kind: "comp-intent", intent }); // the HOH comp resolves with it

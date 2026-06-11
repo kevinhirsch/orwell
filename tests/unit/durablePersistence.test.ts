@@ -77,9 +77,10 @@ describe("0030 — durable game persistence (survive engine restart)", () => {
     const before = new GameSessionRegistry(new FileSaveStore(dir));
     const sbA = before.sandboxFor(USER_A);
     sbA.session.createCharacter({ playerName: "Keeper", seed: 5 });
-    // Real mutations that fold into events + the hidden relationship layer (0023).
-    sbA.commands.recordInteraction({ initiator: "npc:1", witnessSet: ["npc:1", "npc:2"], content: "a quiet scheme", kind: "betrayal" });
-    sbA.commands.recordInteraction({ initiator: "npc:2", witnessSet: ["npc:2", "npc:3"], content: "an alliance forms", kind: "alliance" });
+    // Real mutations that fold into events + the hidden relationship layer (0023). The command seam
+    // is player-witnessed by rule (E21); off-screen scenes are the engine's to mint.
+    sbA.commands.recordInteraction({ initiator: "npc:1", witnessSet: ["npc:1", "player"], content: "a quiet warning", kind: "betrayal" });
+    sbA.commands.recordInteraction({ initiator: "player", witnessSet: ["player", "npc:2"], content: "an alliance forms", kind: "alliance" });
     const saved = new FileSaveStore(dir).loadLatest(USER_A)!;
 
     const after = new GameSessionRegistry(new FileSaveStore(dir));

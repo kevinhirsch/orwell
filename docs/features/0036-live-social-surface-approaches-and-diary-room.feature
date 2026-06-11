@@ -12,7 +12,7 @@ Feature: Live social surface (NPC approaches & the Diary Room)
   Scenario: NPCs approach the player on their own initiative
     Given a started game in which a houseguest is motivated to talk to the player
     When the player checks who wants to approach them
-    Then that houseguest is listed with a public-facing pretext
+    Then that houseguest is listed with a coarse public-safe motive
     And no hidden motive or relationship number is shown
 
   Scenario: Either side can open a scene

@@ -64,23 +64,38 @@ describe("B45 — the live loop pauses for the player's Houseguest's Choice", ()
       const s = newLiveSeason(sixHouse);
       s.beat = "veto-competition"; s.hoh = PLAYER; s.nominees = [npc(1), npc(2)];
       const rng = new SeededRandom(seed);
-      advance(s, ctx, rng); // B46: the player is a puller ⇒ a comp-intent pause comes first
-      if (s.pending?.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
-      if (s.pending?.kind === "houseguests-choice") return { s, ctx, rng: new SeededRandom(seed) };
+      // E35: the chip draw is the FIRST stage — a witnessed beat that may pause for the player's pick.
+      const draw = advance(s, ctx, rng);
+      if (s.pending?.kind === "houseguests-choice") {
+        expect(draw?.beat).toBe("veto-draw"); // the draw was witnessed even though the pick is pending
+        return { s, ctx, rng: new SeededRandom(seed) };
+      }
     }
     throw new Error("no seed produced a player Houseguest's Choice draw");
+  }
+
+  /** Resolve the post-pick stages: declare intent (the player is a puller), then the comp runs. */
+  function finishVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: SeededRandom): void {
+    if (s.pending?.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
+    while (!s.pending && s.beat === "veto-competition") advance(s, ctx, rng);
   }
 
   it("pauses on a houseguests-choice decision; refuses an illegal pick; a legal pick completes the field", () => {
     const { s, ctx } = pausedState();
     const options = (s.pending as { options: string[] }).options;
     expect(options.length).toBeGreaterThan(0);
+    // C1: every offered candidate is re-derivable as legal — none already stands in the drawn field.
+    for (const o of options) expect(s.vetoField).not.toContain(o);
 
     expect(() => applyDecision(s, { kind: "houseguests-choice", pick: npc(99) }, ctx)).toThrow(); // not a candidate
     const ev = applyDecision(s, { kind: "houseguests-choice", pick: options[0]! }, ctx, new SeededRandom(1));
-    expect(ev.beat).toBe("veto-competition");
+    expect(ev.beat).toBe("veto-draw");          // the completed field is the witnessed beat (E35)
     expect(s.vetoField).toContain(options[0]); // the player's pick is in the field
     expect(s.vetoField).toHaveLength(6);
+    expect(new Set(s.vetoField).size).toBe(6);  // C1: six DISTINCT competitors — never a duplicate
+    // E35: the player (a puller — they drew the chip) now declares intent; then the comp resolves.
+    expect(s.pending?.kind).toBe("comp-intent");
+    finishVeto(s, ctx, new SeededRandom(1));
     expect(s.vetoHolder).toBeTruthy();          // the veto winner resolved over the completed field
     expect(s.beat).toBe("veto-ceremony");
     expect(s.pending).toBeUndefined();
@@ -92,8 +107,52 @@ describe("B45 — the live loop pauses for the player's Houseguest's Choice", ()
     expect(restored.pending?.kind).toBe("houseguests-choice");
     const options = (restored.pending as { options: string[] }).options;
     const ev = applyDecision(restored, { kind: "houseguests-choice", pick: options[0]! }, ctx, new SeededRandom(1));
-    expect(ev.beat).toBe("veto-competition");
+    expect(ev.beat).toBe("veto-draw");
     expect(restored.vetoField).toHaveLength(6);
+    finishVeto(restored, ctx, new SeededRandom(1));
     expect(restored.beat).toBe("veto-ceremony");
+  });
+
+  it("C1: a stale candidate (drawn after the chip) can never produce a duplicate competitor", () => {
+    const { s, ctx } = pausedState();
+    // Every member of the already-drawn field is refused as a pick — re-derived legality at resume.
+    for (const member of s.vetoField!) {
+      expect(() => applyDecision(s, { kind: "houseguests-choice", pick: member }, ctx)).toThrow();
+      expect(s.pending?.kind).toBe("houseguests-choice"); // the decision stands after each refusal
+    }
+  });
+});
+
+// --- C1 (execution-confirmed audit bug): the deferred candidate list is never stale ----------
+
+describe("C1 — Houseguest's Choice deferral over seeds × house sizes (property)", () => {
+  it("the deferred candidates exclude every drawn participant; the resumed field is always legal", () => {
+    const ctx = ctxOf(new RelationshipModel(0.5));
+    let deferrals = 0;
+    for (let size = 5; size <= 16; size++) {
+      const house = [PLAYER, ...Array.from({ length: size - 1 }, (_, i) => npc(i + 1))];
+      for (let seed = 1; seed <= 120; seed++) {
+        // The player rotates through every puller seat (HOH / nominee) so each chip position defers.
+        for (const [hoh, n1, n2] of [
+          [PLAYER, npc(1), npc(2)], [npc(1), PLAYER, npc(2)], [npc(1), npc(2), PLAYER],
+        ] as const) {
+          const s = newLiveSeason(house);
+          s.beat = "veto-competition"; s.hoh = hoh; s.nominees = [n1, n2];
+          const rng = new SeededRandom(seed * 31 + size);
+          advance(s, ctx, rng);
+          if (s.pending?.kind !== "houseguests-choice") continue;
+          deferrals++;
+          const options = (s.pending as { options: string[] }).options;
+          // The candidate list is snapshotted AFTER the full draw: no offered candidate is drawn.
+          for (const o of options) expect(s.vetoField, `seed ${seed} size ${size}`).not.toContain(o);
+          // Resuming with the first candidate yields a duplicate-free field of the legal size.
+          applyDecision(s, { kind: "houseguests-choice", pick: options[0]! }, ctx, new SeededRandom(seed));
+          const field = s.vetoField!;
+          expect(new Set(field).size).toBe(field.length);
+          expect(field.length).toBe(Math.min(6, size));
+        }
+      }
+    }
+    expect(deferrals).toBeGreaterThan(50); // the property genuinely exercised the deferral path
   });
 });

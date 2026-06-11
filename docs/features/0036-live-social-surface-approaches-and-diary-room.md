@@ -27,8 +27,9 @@ Both are **tool-exposure + live-wiring** gaps, not missing logic.
 **In:** two Vault-free player-channel tools, wired into `GameSessionAdapter`/`EngineCommands`, added to
 `PLAYER_TOOLS` + the McpServer allowlist + the lever manifest (ties **B21**):
 1. **`socialInitiatives()`** (NPC approaches) — returns the houseguests who, by their soul motivation,
-   want to approach the player **now**, with a Vault-free framing of *why* (their public-facing pretext),
-   **no hidden numbers**. Sourced from `npcInitiatedApproaches()`; bidirectional with `recordInteraction`.
+   want to approach the player **now**, with a Vault-free COARSE motive category (`bond` | `probe` —
+   amended by audit E60, 2026-06-10: the fact the GM voices in its own words, never an engine-authored
+   pretext line), **no hidden numbers**. Sourced from `npcInitiatedApproaches()`; bidirectional with `recordInteraction`.
 2. **`diaryRoom(entry)`** — records a player Diary-Room entry as **OOC player knowledge** tagged
    `NO_NPC_PATHWAY` (via `recordDiaryRoom`). It **never** reaches any NPC (`deriveNpcKnowledge` already
    excludes it); it **may** inform the engine's read of player strategy, **never** NPC behavior. Optionally
@@ -53,7 +54,7 @@ Both are **tool-exposure + live-wiring** gaps, not missing logic.
 ## 4. Contracts (stack-agnostic)
 
 ```
-socialInitiatives(): { houseguest: name, pretext: string }[]   // readsVault:false, sentinel-clean
+socialInitiatives(): { houseguest: name, motive: "bond" | "probe" }[]   // readsVault:false, sentinel-clean (E60)
     source = npcInitiatedApproaches(live relationship/soul state); public framing only, no numbers
 diaryRoom(entry: string): { recorded: true }                   // readsVault:false, sentinel-clean
     = knowledge.recordDiaryRoom(player, entry, NO_NPC_PATHWAY)  // OOC; never reaches any NPC
@@ -62,7 +63,7 @@ diaryRoom(entry: string): { recorded: true }                   // readsVault:fal
 ## 5. Definition of Done
 
 - [ ] **Bidirectional scenes:** in the live game, `socialInitiatives` returns NPCs who want to approach the
-      player (driven by their soul motivation), with a Vault-free pretext — so scenes start from **either**
+      player (driven by their soul motivation), with a Vault-free coarse motive — so scenes start from **either**
       side, not only player→NPC.
 - [ ] **Diary Room usable + walled:** the player can record a DR entry on the live path; a test proves
       **no NPC** ever learns DR content (`deriveNpcKnowledge` excludes it) and NPCs act only on **public**
@@ -89,15 +90,16 @@ What remains is the player-facing UI in the vendored front-end (`frontend/`, the
 consuming **only** the Vault-free route payloads. Two surfaces:
 
 ### 7.1 NPC approach prompts ("X pulls you aside…")
-- **Source:** `GET /api/orwell/initiatives` → `{ "initiatives": [{ "houseguest": { "id", "name" }, "pretext" }] }`
+- **Source:** `GET /api/orwell/initiatives` → `{ "initiatives": [{ "houseguest": { "id", "name" }, "motive" }] }` (E60)
   (already routed → `orwell_engine.social_initiatives` → the `socialInitiatives` tool).
 - **UX:** when a game is in progress, surface the approachers **unobtrusively** in the main chat — e.g. a
-  small dismissible chip/affordance near the composer ("**{name}** {pretext}"). Acting on it **starts a
+  small dismissible chip/affordance near the composer ("**{name}** + short copy mapped from the motive).
+  Acting on it **starts a
   scene** the normal way (the player engages that houseguest; the existing chat turn / `recordInteraction`
   path records it). Approaches are **suggestions**, never forced — the player can ignore them.
 - **Refresh** on the same cadence as the status panel (the SSE/session-sync tick / after each advance),
-  so the list tracks the live game. Show **names + pretext only** — never any motive/number (the engine
-  already withholds the hidden drive).
+  so the list tracks the live game. Show **names + the coarse motive's UI copy only** — never any
+  relationship number (the engine already withholds the hidden drive).
 
 ### 7.2 The Diary Room entry point
 - **Source:** `POST /api/orwell/diary-room` `{ "entry": "…" }` → `{ "recorded": true }` (already routed →
@@ -117,7 +119,7 @@ consuming **only** the Vault-free route payloads. Two surfaces:
   must survive the front-end prune (don't reintroduce a dropped vertical).
 
 ### 7.4 Definition of Done (C10)
-- [ ] Approachers from `/api/orwell/initiatives` appear in the live game UI (names + pretext only) and can
+- [ ] Approachers from `/api/orwell/initiatives` appear in the live game UI (names + motive copy only) and can
       be acted on or dismissed; nothing shows pre-game or on error.
 - [ ] A Diary-Room entry point posts to `/api/orwell/diary-room`, confirms success, and is labelled clearly
       as private/OOC.

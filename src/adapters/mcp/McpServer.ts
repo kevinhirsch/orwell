@@ -3,7 +3,7 @@ import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/regist
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
-import type { EngineCommands, RecordInteractionReq, ResolveCompetitionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
+import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, UpdateCastingReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
 
@@ -84,8 +84,8 @@ export class McpServer {
         return this.deps.summary.endOfSession();
       case "recordInteraction":
         return this.deps.commands.recordInteraction(args as unknown as RecordInteractionReq);
-      case "resolveCompetition":
-        return this.deps.commands.resolveCompetition(args as unknown as ResolveCompetitionReq);
+      // E20: no "resolveCompetition" case — it is off the allowlist, so `allows()` refuses it
+      // before dispatch; runCompetition (the live-house session resolver) is the one authority.
       case "surfaceInformationTo":
         return this.deps.commands.surfaceInformationTo(args as unknown as SurfaceReq);
       case "diaryRoom":

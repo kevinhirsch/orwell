@@ -16,6 +16,8 @@ export interface EdgeRecord {
   threat: number;
   alignment: number;
   confidence: number;
+  /** Demonstrated loyalty (ADR 0002 / audit E54). Optional: pre-E54 saves load at baseline. */
+  reliability?: number;
 }
 
 /** Dynamic — grows over the game. */
