@@ -245,7 +245,10 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
             "name": "H2b Pool Source",
             "base_url": "http://192.0.2.20:9201/v1",
             "skip_probe": "true",
-            "pinned_models": json.dumps(["h2b-alpha-model", "h2b-beta-model", "h2b-tts-model"]),
+            # h2b-dall-e-3 is image-capable (G21 Image filter offers it) AND
+            # vision-excluded (the 'dall-e' keyword), so it exercises the Image
+            # select without disturbing the Vision assertion below.
+            "pinned_models": json.dumps(["h2b-alpha-model", "h2b-beta-model", "h2b-tts-model", "h2b-dall-e-3"]),
         })
         assert r.status_code == 200, r.text
         live_id = r.json()["id"]
@@ -336,7 +339,7 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
             browser.close()
 
         pool = {o["value"] for o in opts["chat"]} - {""}
-        assert pool == {"h2b-alpha-model", "h2b-beta-model", "h2b-tts-model"}, (
+        assert pool == {"h2b-alpha-model", "h2b-beta-model", "h2b-tts-model", "h2b-dall-e-3"}, (
             f"the chat pool must be the live endpoint's models, got {pool}"
         )
 
@@ -358,8 +361,11 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
         # offers exactly its models.
         assert {o["value"] for o in opts["research"]} - {""} == pool
         # Vision applies its capability filter (a narrowing of the pool only —
-        # the tts-flavored model is excluded, nothing is added).
+        # the tts-flavored AND dall-e models are excluded, nothing is added).
         assert {o["value"] for o in opts["vision"]} - {""} == {"h2b-alpha-model", "h2b-beta-model"}
+        # G21: the Image select applies its OWN capability filter — only the
+        # image-capable model is offered, the chat/tts models excluded.
+        assert {o["value"] for o in opts["img"]} - {""} == {"h2b-dall-e-3"}
         # TTS endpoint mode offers the endpoint's TTS-capable models, not the
         # markup fallback.
         assert {o["value"] for o in opts["tts"]} == {"h2b-tts-model"}

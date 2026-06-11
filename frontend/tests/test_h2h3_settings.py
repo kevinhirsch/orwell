@@ -64,7 +64,9 @@ def test_image_model_select_mirrors_the_chat_source_not_a_hardcoded_list():
     img = _block(js, "async function initImageSettings", "/* ── Vision ── */")
     # Same source as the Default Chat Model card…
     assert "_fetchModelEndpoints()" in img
-    assert "_availableModelIds(_endpoints)" in img
+    # …narrowed by the image-capability filter (G21 — parallel to Vision's), so a
+    # chat model can't be offered. Still the shared pool, just filtered.
+    assert "_availableModelIds(_endpoints, function(mid) { return _isImageModel(mid); })" in img
     # …and the saved selection is preserved when still available.
     assert "refreshModels(settings.image_model || '')" in img
     # The select stays fresh when endpoints change, keeping the current pick.
@@ -76,16 +78,24 @@ def test_image_model_select_mirrors_the_chat_source_not_a_hardcoded_list():
     assert "_imgInclude" not in img
 
 
-def test_no_hardcoded_image_model_names_anywhere_in_settings_js():
+def test_image_model_names_live_only_in_the_capability_filter():
+    """G21: the Image select gained its OWN capability filter (`_isImageModel`),
+    exactly parallel to the Vision card's `_vlExclude` — so a chat model can't be
+    picked. Image-family NAMES are therefore allowed, but ONLY inside that filter,
+    never as a hardcoded <option> or in the populate path (`initImageSettings`)."""
     js = _read("static/js/settings.js")
-    # The old include-list / "(not detected)" fallback names are gone wholesale…
-    for name in ("gpt-image", "stable-diffusion", "imagen", "midjourney", "kandinsky", "not detected"):
-        assert name not in js, f"hardcoded model name {name!r} must not be in settings.js"
-    # …and 'dall-e' survives in exactly one place: the Vision card's
-    # capability-EXCLUDE keyword (a filter that narrows the shared pool),
-    # never an offered option.
-    assert js.count("dall-e") == 1
+    assert "function _isImageModel(" in js
+    img_filter = _block(js, "function _isImageModel(", "/* ── Image Generation ── */")
+    img_block = _block(js, "async function initImageSettings", "/* ── Vision ── */")
+    for name in ("gpt-image", "dall-e", "stable-diffusion", "imagen", "ideogram", "flux"):
+        assert name in img_filter, f"{name!r} is an image-family token of the capability filter"
+        assert name not in img_block, f"{name!r} must not leak into the image populate path"
+    # The old synthetic "(not detected)" fallback stays gone wholesale.
+    assert "not detected" not in js
+    # 'dall-e' now lives in exactly two capability filters — Vision's EXCLUDE and the
+    # Image INCLUDE — never as an offered <option>.
     assert "dall-e" in _block(js, "var _vlExclude", "];")
+    assert "dall-e" in img_filter
 
 
 def test_vision_model_select_draws_from_the_same_pool():
@@ -211,9 +221,11 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
         # a DISABLED endpoint whose models must never be offered anywhere.
         r = httpx.post(base + "/api/model-endpoints", timeout=15, data={
             "name": "H2 Mirror Source",
+            # h2-dall-e-3 is image-capable (G21's Image filter offers it) so the Image
+            # select is populated; the chat-only models prove the filter narrows the pool.
             "base_url": "http://192.0.2.10:9101/v1",
             "skip_probe": "true",
-            "pinned_models": json.dumps(["h2-alpha-model", "h2-beta-model"]),
+            "pinned_models": json.dumps(["h2-alpha-model", "h2-beta-model", "h2-dall-e-3"]),
         })
         assert r.status_code == 200, r.text
         r = httpx.post(base + "/api/model-endpoints", timeout=15, data={
@@ -282,6 +294,11 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
         assert img_values, f"image select must be populated from the shared source ({opts})"
         assert img_values <= chat_values, (
             f"image options must be a subset of the chat options ({img_values} vs {chat_values})"
+        )
+        # G21: the Image filter narrows the shared pool to image-capable models — the
+        # chat-only models are offered in chat but NOT here.
+        assert img_values == {"h2-dall-e-3"}, (
+            f"image select must offer only the image-capable model ({img_values})"
         )
         assert "h2-ghost-model" not in img_values, "a disabled endpoint's models must not be offered"
         assert all("not detected" not in o["label"] for o in opts["img"]), (
