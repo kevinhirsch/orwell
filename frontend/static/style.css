@@ -21621,14 +21621,13 @@ body.gallery-selecting .gallery-dl-btn,
 .settings-appearance-panel:not(.hidden) {
   display: flex;
 }
-/* The Theme picker card is first in source and must render first; the remaining
-   cards keep their original designed order (Chat Area → Chat Bar → Sidebar).
-   Indices account for the prepended Theme card (nth-of-type counts every div). */
-.settings-appearance-panel > .admin-card:nth-of-type(1) { order: 0; } /* Theme picker */
-.settings-appearance-panel > .admin-card:nth-of-type(2) { order: 3; } /* Sidebar */
-.settings-appearance-panel > .admin-card:nth-of-type(3) { order: 1; } /* Chat Area */
-.settings-appearance-panel > .admin-card:nth-of-type(4) { order: 2; } /* Chat Bar */
-.settings-appearance-panel > .admin-card:nth-of-type(n+5) { order: 4; }
+/* The cards keep their original designed order (Chat Area → Chat Bar →
+   Sidebar). H3: the Theme picker card is gone (the picker's one home is the
+   sidebar entry), so indices count from the Sidebar card. */
+.settings-appearance-panel > .admin-card:nth-of-type(1) { order: 2; } /* Sidebar */
+.settings-appearance-panel > .admin-card:nth-of-type(2) { order: 0; } /* Chat Area */
+.settings-appearance-panel > .admin-card:nth-of-type(3) { order: 1; } /* Chat Bar */
+.settings-appearance-panel > .admin-card:nth-of-type(n+4) { order: 3; }
 
 /* Narrow settings (the viewport-600 layout copy is gone — the container tiers
    below are the ONE narrow-settings mechanism; S3/G6): compress the left rail
