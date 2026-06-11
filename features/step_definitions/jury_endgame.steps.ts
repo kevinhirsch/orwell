@@ -123,7 +123,7 @@ Then("a tie is broken by the last-evicted juror", function (this: BbWorld) {
     assert.equal(this.lastAdvance.winner!.id, this.juryFinalists![1], "the last-evicted juror broke the live tie");
     return;
   }
-  const w = { relationship: 1, manner: 1, finale: 0 };
+  const w = { relationship: 1, manner: 1, finale: 0, gameRespect: 0 };
   // Two jurors split 1-1; the last-evicted (npc(2)) leans B → B wins the tie-break.
   const leanTie = (j: string, f: string): number => (j === npc(1) ? (f === A ? 1 : 0) : (f === B ? 1 : 0));
   const winner = tallyJuryVote([npc(1), npc(2)], [A, B], leanTie, () => 0, [npc(1), npc(2)], new SeededRandom(1), w);

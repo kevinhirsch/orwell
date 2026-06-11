@@ -47,6 +47,15 @@ export const DECISION = {
      * shades near-ties, it never outweighs a real threat read.
      */
     juryManagementWeight: 0.1,
+    /**
+     * Keep your own (D4/E33 calibration, 2026-06-11): a voter protects the nominee THEY are bonded
+     * to — real-BB voters keep their people and cut the houseguest nobody is attached to. Without
+     * this term the threat-primary read systematically spared the UNATTACHED nominee (a passive
+     * player floated to jury in 18/20 measured seasons — an emergent shield, the anti-sycophancy
+     * failure inverted). Bounded: it shades the split between two nominees, never outweighs a
+     * runaway threat read. Discounts a nominee by this × the voter's own bondStrength toward them.
+     */
+    bondKeepWeight: 0.35,
   },
   /**
    * NPC↔NPC deal minting (audit E46): as a week's block goes up, the closest unbound NPC pair may

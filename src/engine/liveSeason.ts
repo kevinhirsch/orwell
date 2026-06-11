@@ -19,7 +19,7 @@ import type { Deal } from "../domain/deal";
 import type { RelationshipDisposition } from "./relationshipConstants";
 import type { RelationshipModel } from "./relationships";
 import {
-  runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal,
+  runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal, gameRespectTerm, JURY_WEIGHTS,
   FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
 import { MANNER_THRESHOLDS } from "./juryConstants";
@@ -182,6 +182,12 @@ export interface LiveSeasonState {
   firedTwists?: TwistEvent[];
   /** The drawn competitions so far, per phase (0042) — feeds the no-immediate-repeat draw; persisted (0030). */
   compHistory?: { hoh: string[]; veto: string[] };
+  /**
+   * Each houseguest's GAME RESUME — a public-facts tally (HOH reigns + veto wins) the finale jury
+   * weighs as "who played harder" (the gameRespect term, ruling 2026-06-11). Engine-internal
+   * bookkeeping of already-broadcast events; persisted (0030); legacy saves default to empty.
+   */
+  resume?: Record<EntityId, number>;
   /** This week's drawn veto comp (def id) — held across a Houseguest's-Choice pause so the resume runs the SAME comp. */
   vetoComp?: string;
 }
@@ -274,6 +280,7 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
   recordDraw(s, "hoh", def); // the comp resolved — the next hoh draw avoids it (0042)
   s.compIntent = undefined; // declared intent consumed (locks: it can't be re-declared after the result)
   s.hoh = hoh;
+  creditResume(s, hoh); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
   s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
   return {
     beat: "hoh-competition",
@@ -332,6 +339,7 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
   recordDraw(s, "veto", def); // the comp resolved — the next veto draw avoids it (0042)
   s.compIntent = undefined; // consumed
   s.vetoHolder = holder; s.beat = "veto-ceremony";
+  creditResume(s, holder); // a broadcast win — counts toward the jury's gameRespect read
   return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
 }
 
@@ -405,6 +413,12 @@ function otherNominee(s: LiveSeasonState): EntityId {
  * (0037). `votesToEvict` is filled with each voter who voted for the evictee — those voters,
  * plus the HOH who put the nominees up, are the "responsible" houseguests the evictee reads.
  */
+/** Tally one broadcast competition win into the holder's game resume (gameRespect, 2026-06-11). */
+function creditResume(s: LiveSeasonState, id: EntityId): void {
+  s.resume = s.resume ?? {};
+  s.resume[id] = (s.resume[id] ?? 0) + 1;
+}
+
 /** The house's CURRENT blocs (0043) — derived fresh per decision; [] when loyalty isn't wired. */
 function currentBlocs(s: LiveSeasonState, ctx: SeasonCtx): Bloc[] {
   if (!ctx.loyaltyOf) return [];
@@ -421,6 +435,8 @@ function currentBlocs(s: LiveSeasonState, ctx: SeasonCtx): Bloc[] {
  *                                           a strong enough opposing read still BREAKS it — and the ledger
  *                                           reconciles that betrayal with its full consequence downstream
  *   − juryMgmt × trust(nominee → voter)   — light jury management: don't make a bitter juror needlessly (0014)
+ *   − bondKeep × bond(voter → nominee)    — keep your own: voters protect the nominee THEY are bonded to,
+ *                                           so the unattached houseguest loses the split (D4/E33 calibration)
  *
  * Engine-decided + bounded: the terms shade the threat-primary read, never replace it; voting
  * blocs vote TOGETHER because every member computes the same derived bloc (decision 0002).
@@ -435,7 +451,8 @@ export function voteChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: Seaso
     ctx.rel.edge(voter, n).threat * (1 + paranoia * V.moodSelfProtectWeight) +
     blocTerm(blocs, voter, n) -
     (dealBound(n) ? V.dealHonorWeight : 0) -
-    V.juryManagementWeight * ctx.rel.edge(n, voter).trust;
+    V.juryManagementWeight * ctx.rel.edge(n, voter).trust -
+    V.bondKeepWeight * ctx.rel.bondStrength(voter, n);
   return score(fn[0]) >= score(fn[1]) ? fn[0] : fn[1];
 }
 
@@ -753,11 +770,21 @@ function beginFinale(s: LiveSeasonState): FinaleProgress {
  * BOUNDED finale performance (`appealEffect` of the appeal actually made). The player's own juror
  * vote, if any, is already recorded and is preserved. Deterministic for a given seed.
  */
+/** The other finalist in the pair. */
+function otherFinalist(finalists: [EntityId, EntityId], fin: EntityId): EntityId {
+  return finalists[0] === fin ? finalists[1] : finalists[0];
+}
+
 function precomputeVotes(s: LiveSeasonState, ctx: SeasonCtx, f: FinaleProgress, rng: RandomnessSource): Record<EntityId, EntityId> {
   const votes: Record<EntityId, EntityId> = { ...(f.votes ?? {}) };
   for (const juror of f.jury) {
     if (votes[juror]) continue; // the player's own vote (recorded interactively) is kept
-    const leanFor = (fin: EntityId): number => juryLean(edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
+    const leanFor = (fin: EntityId): number =>
+      juryLean(edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin)) +
+      // GAME RESPECT (ruling 2026-06-11): jurors weigh who actually PLAYED — the public resume
+      // (comp wins) splits the two finalists; a goat with no game starts every juror down a
+      // bounded notch. Grievance (manner) can still outvote it: bitter juries stay possible.
+      JURY_WEIGHTS.gameRespect * gameRespectTerm(s.resume?.[fin] ?? 0, s.resume?.[otherFinalist(f.finalists, fin)] ?? 0);
     // Each juror questioned BOTH finalists (18-Q&A), so each has a recorded appeal here — scored
     // symmetrically by the same `appealEffect`; the player's own answers are exactly as weighted as the NPC's.
     const perfFor = (fin: EntityId): number => appealEffect(appealMade(f, fin, juror, ctx, s), edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));

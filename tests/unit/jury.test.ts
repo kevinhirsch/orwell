@@ -65,7 +65,7 @@ describe("0014 — engine-decided tally with last-juror tie-break", () => {
   it("most votes wins", () => {
     // All jurors lean A.
     const winner = tallyJuryVote(jurors, [A, B], () => 0, () => 0.5, evictionOrder, new SeededRandom(1),
-      { relationship: 1, manner: 1, finale: 0 });
+      { relationship: 1, manner: 1, finale: 0, gameRespect: 0 });
     // finale weight 0 + equal leans → deterministic A (>= tie goes to finalists[0]).
     expect(winner).toBe(A);
   });
@@ -77,7 +77,7 @@ describe("0014 — engine-decided tally with last-juror tie-break", () => {
       if (j === npc(2)) return f === B ? 1 : 0;
       return f === A ? 1 : 0; // npc(3), last-evicted
     };
-    const w = { relationship: 1, manner: 1, finale: 0 };
+    const w = { relationship: 1, manner: 1, finale: 0, gameRespect: 0 };
     expect(tallyJuryVote(jurors, [A, B], leanOf, () => 0, evictionOrder, new SeededRandom(1), w)).toBe(A);
 
     // Now a real 1-1 tie with two jurors; last-evicted (npc(2)) leans B → B wins.
@@ -170,5 +170,22 @@ describe("0037 — engine-legible finale appeals (anti-sycophancy)", () => {
     const p = finalePerformance(parts);
     expect(p).toBeGreaterThan(0);
     expect(p).toBeLessThanOrEqual(1);
+  });
+});
+
+// ── gameRespect (D4/E33 ruling 2026-06-11) ─────────────────────────────────────
+import { gameRespectTerm } from "../../src/engine/jury";
+
+describe("gameRespectTerm — the jury weighs who actually played", () => {
+  it("splits the pair's resume share, signed and bounded", () => {
+    expect(gameRespectTerm(0, 0)).toBe(0);            // neither played: neutral
+    expect(gameRespectTerm(4, 0)).toBe(0.5);          // all the game: max credit
+    expect(gameRespectTerm(0, 4)).toBe(-0.5);         // the goat: max debit
+    expect(gameRespectTerm(2, 2)).toBe(0);            // even resumes: neutral
+    expect(gameRespectTerm(3, 1)).toBeCloseTo(0.25);  // bounded in (−0.5, 0.5)
+  });
+  it("a wronged jury can still outvote the resume (bitterness stays possible)", () => {
+    // betrayal manner (−0.6 × 0.8) outweighs the full respect split (0.5 × 0.9)
+    expect(0.8 * 0.6).toBeGreaterThan(0.9 * 0.5);
   });
 });

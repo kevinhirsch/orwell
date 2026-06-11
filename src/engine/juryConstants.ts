@@ -7,15 +7,22 @@
  * God-Mode knob, 0016) without touching the logic. The player never sees any of these (0020).
  */
 
-/** Relative weights of the three vote terms. The finale is deliberately small: it sways, never dominates. */
+/** Relative weights of the four vote terms. The finale is deliberately small: it sways, never dominates. */
 export interface JuryWeights {
   relationship: number;
   manner: number;
   /** Deliberately small vs relationship+manner: the finale sways, it doesn't dominate. */
   finale: number;
+  /**
+   * GAME RESPECT (D4/E33 ruling, 2026-06-11): how hard jurors weigh the public game resume
+   * (comp wins) between the two finalists. The signed term is bounded (±0.5 before the weight),
+   * sized so a no-game goat loses a neutral jury — while a deeply WRONGED jury (betrayal/blindside
+   * manners) can still go bitter and crown the goat: real-BB juries do both.
+   */
+  gameRespect: number;
 }
 
-export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3 };
+export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.9 };
 
 /**
  * How the MANNER of a finalist's eviction move shifts a juror's lean toward them (signed; `juryLean`).
