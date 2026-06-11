@@ -589,6 +589,86 @@ async function initUtilityModel() {
   });
 }
 
+/* ── Teacher Model (escalation) ── */
+async function initTeacherModel() {
+  var epSel = el('set-teacherEpSelect');
+  var modelSel = el('set-teacherModelSelect');
+  var msg = el('set-teacherChatMsg');
+  if (!epSel || !modelSel) return;
+  var _endpoints = [];
+
+  // The backend persists ONE spec string, `teacher_model` — "model" (resolved
+  // across every endpoint) or "model@endpointName" (src/ai_interaction.py
+  // _resolve_model). No teacher endpoint settings key exists: the endpoint
+  // select scopes the model list, and the chosen endpoint's NAME rides along
+  // inside the saved spec.
+  function parseSpec(spec) {
+    var s = String(spec || '');
+    var at = s.lastIndexOf('@');
+    if (at <= 0) return { model: s, endpointName: '' };
+    return { model: s.slice(0, at), endpointName: s.slice(at + 1) };
+  }
+  function selectedEndpoint() {
+    return _endpoints.find(function(e) { return e.id === epSel.value; });
+  }
+  function specFor(model, ep) {
+    if (!model) return '';
+    return ep ? model + '@' + ep.name : model;
+  }
+
+  // H2b: the same shared pool the Default Chat Model card offers — a chosen
+  // endpoint narrows to its models (the chat-picker mechanism, exactly like
+  // the Utility card); no endpoint means a bare spec resolved across every
+  // endpoint, so the union pool applies. Never a hardcoded list; the blank
+  // option keeps the "—" (unset) default.
+  function refreshModels(selectedModel) {
+    var ep = selectedEndpoint();
+    _fillModelSelect(modelSel, ep ? ep.models : _availableModelIds(_endpoints), selectedModel, true);
+  }
+
+  try {
+    _endpoints = await _fetchModelEndpoints();
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+  } catch (e) { console.warn('Failed to load endpoints for teacher model', e); }
+
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    var saved = parseSpec(settings.teacher_model || '');
+    if (saved.endpointName) {
+      var savedEp = _endpoints.find(function(e) {
+        return String(e.name || '').toLowerCase() === saved.endpointName.toLowerCase();
+      });
+      if (savedEp) epSel.value = savedEp.id;
+    }
+    refreshModels(saved.model);
+  } catch (e) { console.warn('Failed to load teacher model settings', e); }
+
+  // Empty model → teacher unset (the toggle's feature stays off; mirrors the
+  // utility card's "blank means unset" save path).
+  async function saveTeacher() {
+    try {
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teacher_model: specFor(modelSel.value || '', selectedEndpoint()) })
+      });
+      if (msg) {
+        msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+        setTimeout(function() { msg.textContent = ''; }, 1500);
+      }
+    } catch (e) { if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; } }
+  }
+
+  epSel.addEventListener('change', function() { refreshModels(''); saveTeacher(); });
+  modelSel.addEventListener('change', saveTeacher);
+
+  _registerAiEndpointRefresh(function(endpoints) {
+    _endpoints = endpoints;
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+    refreshModels(modelSel.value);
+  });
+}
+
 /* ── Image Generation ── */
 async function initImageSettings() {
   const modelSel = el('set-imgModelSelect');
@@ -1317,6 +1397,7 @@ var _SEARCH_PROVIDER_LOGOS = {
 /* ── Deep Research Model (AI tab) ── */
 async function initResearchSettings() {
   var epSel = el('set-researchEndpoint');
+  var modelSel = el('set-researchModel');
   var tokensInput = el('set-researchMaxTokens');
   var extractTimeoutInput = el('set-researchExtractTimeout');
   var extractConcurrencyInput = el('set-researchExtractConcurrency');
@@ -1329,10 +1410,21 @@ async function initResearchSettings() {
     _fillEndpointSelect(epSel, endpoints, epSel.value, true);
   } catch (e) { console.warn('Failed to load endpoints for research', e); }
 
+  // H2b: the model options come from the same endpoint source the Default
+  // Chat Model card uses — endpoint-scoped exactly like the Utility card
+  // (research_endpoint_id + research_model are a pair, see
+  // routes/model_routes.py:_ENDPOINT_SETTING_FIELDS), never a hardcoded
+  // list. The blank option keeps the "Same as chat" inherit.
+  function refreshModels(selectedModel) {
+    var ep = endpoints.find(function(e) { return e.id === epSel.value; });
+    _fillModelSelect(modelSel, ep ? ep.models : [], selectedModel, true);
+  }
+
   try {
     var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await res.json();
     if (settings.research_endpoint_id) epSel.value = settings.research_endpoint_id;
+    refreshModels(settings.research_model || '');
     if (settings.research_max_tokens) tokensInput.value = settings.research_max_tokens;
     if (settings.research_extraction_timeout_seconds) extractTimeoutInput.value = settings.research_extraction_timeout_seconds;
     if (settings.research_extraction_concurrency) extractConcurrencyInput.value = settings.research_extraction_concurrency;
@@ -1346,6 +1438,9 @@ async function initResearchSettings() {
     if (epSel.value) {
       var epName = epSel.options[epSel.selectedIndex].textContent;
       parts.push(epName);
+    }
+    if (modelSel.value) {
+      parts.push(String(modelSel.value).split('/').pop());
     }
     if (tokensInput.value) {
       parts.push('Max tokens: ' + tokensInput.value);
@@ -1375,6 +1470,7 @@ async function initResearchSettings() {
   async function saveResearch() {
     var payload = {
       research_endpoint_id: epSel.value,
+      research_model: modelSel.value || '',
     };
     var tv = parseInt(tokensInput.value, 10);
     if (tv && tv >= 1024) payload.research_max_tokens = tv;
@@ -1400,8 +1496,10 @@ async function initResearchSettings() {
   }
 
   epSel.addEventListener('change', async function() {
+    refreshModels('');
     saveResearch();
   });
+  modelSel.addEventListener('change', saveResearch);
   tokensInput.addEventListener('change', saveResearch);
   extractTimeoutInput.addEventListener('change', saveResearch);
   extractConcurrencyInput.addEventListener('change', saveResearch);
@@ -1410,6 +1508,7 @@ async function initResearchSettings() {
   _registerAiEndpointRefresh(function(nextEndpoints) {
     endpoints = nextEndpoints;
     _fillEndpointSelect(epSel, endpoints, epSel.value, true);
+    refreshModels(modelSel.value);
   });
 }
 
@@ -2096,6 +2195,7 @@ function initAll() {
   initialized = true;
   initDefaultChat();
   initUtilityModel();
+  initTeacherModel();
   initImageSettings();
   initVisionSettings();
   initTtsSettings();
