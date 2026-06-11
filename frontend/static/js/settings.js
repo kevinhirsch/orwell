@@ -577,27 +577,26 @@ async function initImageSettings() {
   try {
     const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
     const modelsData = await modelsRes.json();
-    // Inpaint-compat allowlist — image gen here is scoped to inpainting only,
-    // so DALL-E / GPT-Image-1 (no inpaint API) are excluded. Currently:
-    //   - any model with 'inpaint' in the id
-    //   - Stable Diffusion 3.5 Medium (inpaint via diffusers pipeline)
-    const _isInpaintModel = (mid) => {
+    // Text-to-image model filter: include models that have generation capability
+    // (dall-e, gpt-image, stable-diffusion, imagen, flux, etc.) and exclude
+    // models that are embedding, TTS, audio, realtime, search, or inpaint-only.
+    const _imgExclude = ['embedding', 'tts', 'audio', 'realtime', 'whisper', 'search', 'inpaint'];
+    const _imgInclude = ['dall-e', 'gpt-image', 'stable-diffusion', 'sd-', 'imagen', 'flux', 'midjourney', 'playground', 'kandinsky'];
+    const _isImageGenModel = (mid) => {
       const lower = String(mid || '').toLowerCase();
-      return lower.includes('inpaint')
-        || lower.includes('3.5-medium')
-        || lower.includes('3-5-medium')
-        || lower.includes('sd-3.5-med');
+      if (_imgExclude.some(kw => lower.includes(kw))) return false;
+      return _imgInclude.some(kw => lower.includes(kw));
     };
     const imageModels = [];
     (modelsData.items || []).forEach(item => {
       (item.models || []).forEach(mid => {
-        if (_isInpaintModel(mid)) imageModels.push(mid);
+        if (_isImageGenModel(mid)) imageModels.push(mid);
       });
     });
     sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
     // Hardcoded fallbacks shown as "(not detected)" so users know what to
-    // download/serve to enable inpaint here.
-    ['stable-diffusion-3.5-medium', 'stable-diffusion-inpainting'].forEach(mid => {
+    // configure to enable image generation here.
+    ['dall-e-3', 'dall-e-2', 'gpt-image-1', 'stable-diffusion-3.5-large'].forEach(mid => {
       if (!imageModels.includes(mid)) { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not detected)'; modelSel.appendChild(opt); }
     });
   } catch (e) { console.warn('Failed to load models for image settings', e); }
