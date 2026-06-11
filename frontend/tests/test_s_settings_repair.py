@@ -44,7 +44,12 @@ def _settings_region():
 
 
 def test_s3_single_layout_switch():
-    # Exactly one narrow-settings mechanism: the container query. No viewport copy.
+    # Exactly one narrow-settings mechanism: container queries. No viewport copy.
+    # Amended by G6 (2026-06-11, honest threshold move): the STACKING switch
+    # lives at the 480 token now — the user wants the LEFT rail to survive
+    # moderately narrow modals — and 620 became a rail-COMPRESS tier (the rail
+    # stays left, just tighter). Still one mechanism, two tiers of it.
+    assert "@container settings-modal (max-width: 480px)" in STYLE
     assert "@container settings-modal (max-width: 620px)" in STYLE
     assert "@media (max-width: 600px)" not in _settings_region(), \
         "the duplicate viewport copy must stay dead (S3)"

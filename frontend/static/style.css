@@ -21563,14 +21563,48 @@ body.gallery-selecting .gallery-dl-btn,
 .settings-appearance-panel > .admin-card:nth-of-type(4) { order: 2; } /* Chat Bar */
 .settings-appearance-panel > .admin-card:nth-of-type(n+5) { order: 4; }
 
-/* Mobile: stack tabs on top */
-/* (the viewport-600 layout copy is gone — the container-620 switch below is the
-   ONE narrow-settings mechanism; S3) */
+/* Narrow settings (the viewport-600 layout copy is gone — the container tiers
+   below are the ONE narrow-settings mechanism; S3/G6): compress the left rail
+   at the 620 token, stack tabs on top only below the 480 token. */
 
-/* Snapped/narrow Settings window: move the tab rail to the top. Viewport media
-   alone misses desktop right-half snapping, where the modal is narrow but the
-   browser window is not. */
+/* G6 — the LEFT rail is the settings window's identity (explicit user
+   preference: "I liked the settings window with the left hand panel on it").
+   Narrowing now degrades in TWO container tiers instead of jumping straight
+   to a top bar:
+
+   tier 1 (≤620 token): COMPRESS the rail in place — a tighter width clamp,
+   denser items, labels ellipsizing — so moderately narrow contexts (~1024
+   desktops behind the sidebar, right-half snaps) keep the left rail.
+   tier 2 (≤480 token): only a genuinely narrow modal stacks the rail on top
+   (the last resort). Container queries, not viewport media, because desktop
+   snapping makes the modal narrow while the browser window is not. */
 @container settings-modal (max-width: 620px) {
+  .settings-sidebar {
+    width: clamp(96px, 24cqw, 140px);
+    padding: 6px;
+  }
+  .settings-nav-item {
+    min-width: 0;
+    padding: 7px 8px;
+    gap: 6px;
+    font-size: var(--fs-xs);
+  }
+  /* Labels give way before the rail does — ellipsize, never overflow.
+     (min-width:0 lets the span flex-shrink below its content width.) */
+  .settings-nav-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .settings-panels {
+    padding: 14px 16px;
+  }
+}
+
+/* Snapped/genuinely-narrow Settings window: move the tab rail to the top.
+   (This block must follow the 620 compress tier in source — same specificity;
+   the stacked geometry has to win below 480.) */
+@container settings-modal (max-width: 480px) {
   .settings-layout {
     flex-direction: column;
   }
