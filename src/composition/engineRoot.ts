@@ -30,14 +30,30 @@ export interface EngineCore {
   soul: SoulProvider;
 }
 
+/**
+ * Process-wide runtime embedding override (ADR 0004 / E86a). The fastembed provider is a
+ * process SINGLETON (one ONNX worker serves every sandbox), warmed up once at boot by
+ * main.ts and injected here BEFORE any sandbox is built — so every index in the process
+ * lives in one vector space (mixing spaces inside an index breaks cosine recall; restarts
+ * re-derive all indexes via rebuildSoulIndex, so the space may differ per process, never
+ * within one). Tests and any environment without the model never set it and compose the
+ * deterministic fake — exactly the ADR's fallback semantics. Must be a SYNC embedder
+ * (the SoulStore seam is synchronous by design).
+ */
+let runtimeEmbedding: { embed(text: string): number[] } | null = null;
+export function setRuntimeEmbedding(provider: { embed(text: string): number[] } | null): void {
+  runtimeEmbedding = provider;
+}
+
 export function buildEngineCore(): EngineCore {
   const events = new InMemoryEventStore();
   const vault = new InMemoryVaultStore();
   const knowledge = new InMemoryKnowledgeService(events);
   const relationships = new RelationshipModel(0.5);
-  // Deterministic offline embedding (0024) so live recall is reproducible in seeded play/tests; a
-  // real embedding model behind EmbeddingProvider is the one still-open decision (CLAUDE.md §4).
-  const embedding = new DeterministicEmbedding();
+  // The injected runtime provider (fastembed, ADR 0004) when main.ts warmed one up at boot;
+  // otherwise the deterministic offline embedding (0024) — reproducible seeded recall, and
+  // the sanctioned whole-process fallback when the real model is unavailable.
+  const embedding = runtimeEmbedding ?? new DeterministicEmbedding();
   const soul = new SoulStore((text) => embedding.embed(text));
   return { events, vault, knowledge, relationships, soul };
 }

@@ -190,7 +190,7 @@ fi
 msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
 if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" -print0)
+    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" ! -name models -print0)
 else
   warn "engine save dir ${ENGINE_SAVE_DIR} absent — nothing to scrub there"
 fi
@@ -201,7 +201,7 @@ if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   msg "scrubbing config dir ${CONFIG_DIR} (keeping ${ENV_KEEP})"
   if [[ -d "$CONFIG_DIR" ]]; then
     while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d ! -name models -print0)
   fi
 fi
 

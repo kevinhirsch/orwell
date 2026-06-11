@@ -190,6 +190,12 @@ if ! (npm ci && npm run build); then
   exit 1
 fi
 
+# Refresh the pinned embedding model cache (ADR 0004 / E86a) — a no-op when already cached;
+# non-fatal on failure (the engine falls back to deterministic recall and retries at boot).
+echo "==> embedding model prefetch (no-op when cached)"
+node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/models" \
+  || echo "WARN: embedding model prefetch failed — engine will retry at boot"
+
 echo "==> refresh front-end deps"
 cd "${APP_DIR}/frontend"
 # Pinned lockfile first (audit E83): updates re-install exactly what CI tested, never a blind

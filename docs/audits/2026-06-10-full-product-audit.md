@@ -1570,9 +1570,10 @@ cheap to do so. This section is the authoritative open-items list going forward.
   mutation-verified; T10/T19 were already hardened in code by PR #221 and are verified +
   stamped here. (Originally open — Lane 10 lost two agents mid-work; only T8/T9/T12/T15–T17
   shipped then.)
-- **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter. Lane 11 took the
-  honest path: ADR 0004 amended to "Accepted — adapter not yet built." Engine souls run on
-  the deterministic fake at runtime. Open (now truthfully documented).
+- ✅ **E86(a)** — the real fastembed local-ONNX `EmbeddingProvider` adapter — **DONE (PR #226):**
+  `FastembedEmbedding` + `fastembedWorker` behind the synchronous `EmbeddingProvider` seam, loud
+  permanent degrade to the deterministic fake on failure. (Was: open — ADR 0004 had been amended
+  to "Accepted — adapter not yet built." See the "E86a — BUILT" section below.)
 
 ## B — Cross-lane tails that fell through (each verified absent on main)
 **✅ All five DONE — one "cross-lane tails" PR (PR #224, Lane A), each with its proving test.**
@@ -1618,12 +1619,90 @@ agent tool-call nodes; FE pytest-validated.
 1. ✅ **The cross-lane tails PR** (B1–B5; one PR, proving tests included) — **DONE, PR #224.**
 2. ✅ **The T-remainder batch** (A: T3–T7, T10, T11, T19, T20) — **DONE, PR #225.**
 3. ✅ **0053 admin transcripts** (ruling #14) — **DONE, PR #223.** **0051** still when ready.
-4. **E86(a)** fastembed adapter, or leave honestly deferred.
+4. ✅ **E86(a)** fastembed adapter — **DONE, PR #226** (see the "E86a — BUILT" section below).
 5. **The private-repo flip** — after a real-host verification pass of the A4 scripts (D).
 6. **The playtest-gated calibration revisit** (C) — gather real sessions first.
 
 > **Close-out update (2026-06-11):** the three dispatch-order-1/2/3 lanes landed as PRs
 > #224 (cross-lane tails), #225 (T-remainder), and #223 (0053 admin transcripts), merged to
-> `main` in that order atop the ledger PR #222. Items 4–6 remain deliberately deferred
-> (decision-gated): E86(a) fastembed, the private-repo flip (needs a real-host A4 verification),
-> and the playtest-gated calibration revisit.
+> `main` in that order atop the ledger PR #222. Dispatch item 4 (**E86(a) fastembed**) has since
+> landed too (PR #226 — see the "E86a — BUILT" section below). Items 5–6 remain deliberately
+> deferred (decision-gated): the private-repo flip (needs a real-host A4 verification) and the
+> playtest-gated calibration revisit.
+
+---
+
+# Post-campaign UI follow-ups (rulings #18–#20, 2026-06-11 — playtest feedback)
+
+## A5 [Ruling #18 · 0052 follow-up] Every house theme ships a creative particles.js background
+The five house themes lack the particles.js background treatment the inherited themes have;
+each must get one, in-theme: **The Feed** — sparse night-vision dust with an occasional
+horizontal scanline sweep; **Telescreen** — faint phosphor flicker points; **Room 101** —
+slow dust motes under a fluorescent stutter; **Memory Wall** — drifting bokeh/ember points
+like gallery backlighting; **Sequester** — heavy slow velvet motes in brass. Constraints:
+reuse the app's existing particles machinery; behind the chat (z-index), perf-budgeted;
+`prefers-reduced-motion` ⇒ static or off; pause on `document.hidden`. *Test:* per-theme
+particles config present + reduced-motion disables; browser smoke asserts the canvas mounts
+behind the chat column.
+
+## A6 [Bug · 0052/frost] Frosted transparency breaks at the top of open windows
+User-observed: the frost visibly breaks at each window's top edge. Likely cause family: the
+backdrop-filter living on a child/::before that doesn't span the header strip, or
+border-radius clipping applied on a different element than the one carrying the filter.
+*Fix spec:* the window ROOT carries `backdrop-filter` + radius + `overflow:hidden` as one
+surface (header included); no separately-painted opaque header backgrounds over the frost.
+*Test:* matrix/browser smoke samples computed styles — the element with backdrop-filter is
+the panel root and the header's background is transparent over it.
+
+## A7 [Ruling #19 · E97 follow-up] Close/minimize get a Windows-7-style fly-out
+The E97 contract specced minimize motion toward the dock; the ruling sharpens it: a
+**fly-out** — scale-down + translate along the path to the sidebar dock row on minimize,
+and a scale+fade fly-away on close, with pronounced easing (the Win7 feel). Open stays
+fade+scale-in. `prefers-reduced-motion` strips all of it. *Test:* the shared animation
+contract exposes distinct minimize/close keyframes; reduced-motion removes them.
+
+---
+
+# E86a — BUILT (2026-06-11) · and the round-7 verification sweep
+
+## E86a ✅ — the fastembed adapter (this PR)
+`FastembedEmbedding` + `fastembedWorker` (`src/adapters/embedding/`): real local-ONNX
+embeddings (fastembed pinned exact at 2.1.0; model pinned `fast-bge-small-en-v1.5`) behind
+the synchronous `EmbeddingProvider` seam via a worker-thread SharedArrayBuffer/Atomics
+bridge — the soul seam stays sync (the masked-race constraint), the vector space is
+committed once per process at boot warm-up (`setRuntimeEmbedding` before any sandbox;
+restore re-derives indexes via `rebuildSoulIndex`), and any failure degrades loudly +
+permanently (per process) to the deterministic provider — the game never breaks. Deploy:
+installer writes `ORWELL_EMBEDDINGS=fastembed` + `ORWELL_EMBED_CACHE=data/models` and
+prefetches the model; update re-prefetches (no-op when cached); both reset scripts preserve
+`data/models`. Tests: the bridge proven against protocol-faithful fake workers
+(`tests/unit/fastembedBridge.test.ts` — ok/stall-degrade/init-fail/composition); the real
+model only in the opt-in `ORWELL_TEST_FASTEMBED=1` integration test, per the ADR's
+no-test-depends-on-real-embeddings rule.
+
+## Round-7 verification sweep (origin/main @ 65cb5d4) — the campaign's claims, live-checked
+**15/16 CONFIRMED, 1 PARTIAL.** Confirmed live on the real engine: the restart family
+(season 2 survives reset + process kill; faults are 409s), the tick debounce (4 rapid calls
+⇒ one tick, +4 hidden events, was +16), knowledge anchoring (both invented-content channels
+refuse; genuine retellings pass), E20/E21, vote secrecy (13 staged evictions, `votedFor`-only
+reveals; attribution unseals post-season only), player goodbyes as pending decisions, the
+Houseguest's-Choice fix (seed-82 live repro: zero overlap, 6 distinct), 400s on malformed
+args, A1/A2, W1, P1/P2, E38 (real-name casts live: "Sage Carr, Ivan Ramirez, Natasha
+Lawrence…"), E22, E18 default-deny, and 3/3 doc stamps.
+**PARTIAL — R3 perf:** snapshot reuse landed and is tested (≤2 serializations/mutation, was
+~4), but late-season latency still grows linearly with the event log (~9× wk1→wk13, ~half
+the old curve) — improved, not eliminated. The remaining cost is the O(events) export
+itself; a future incremental-snapshot item if play feels it.
+
+### New defects from the sweep (open; small)
+- **A8 [LOW · Bug]** `humanize` mangles the English word "player(s)" in beat prose
+  (`GameSessionAdapter.ts:1379–1387` splits on the literal id `"player"`): live repro —
+  "the veto *Quinn Vales* are drawn… will name the final *Quinn Vale*" on every veto-draw
+  beat. Fix: word-boundary-aware substitution (the old E63 sub-item, still open in practice).
+- **A9 [LOW · Noise]** Late-season off-screen ticks log repeated
+  `integrity fault … kinds=no-daily-event` (21 lines/season observed; fail-closed, circuit
+  never opened, health ends ok) — quiet the expected-empty-tick case before it can ever
+  meet the circuit threshold.
+- **A10 [LOW · API]** The Houseguest's-Choice pending presents `options`+`pick:1` like
+  choice-shaped decisions but `submitDecision` expects the pick on `vote` — any non-FE
+  client trips. Align the field or document it on the pending view.

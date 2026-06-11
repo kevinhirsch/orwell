@@ -27,6 +27,36 @@ const port = parsePort(
 // house lives between the player's own turns (one bounded off-screen tick per turn) and does NOT
 // exist while the player is away. The wall-clock watcher (0031/0035) is an opt-in operator knob
 // (ORWELL_WATCHER_* env); data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
+// Semantic recall provider (ADR 0004 / E86a): ORWELL_EMBEDDINGS=fastembed (the deploy
+// default — orwell-install.sh writes it and prefetches the pinned model) warms up the real
+// local-ONNX provider BEFORE any sandbox exists, committing the whole process to one vector
+// space. Any warm-up failure (no model cache + no network, missing native runtime) falls
+// back to the deterministic provider for the WHOLE process — recall degrades gracefully,
+// the game never breaks, and the next restart may upgrade again. Unset/anything-else keeps
+// the deterministic provider (tests, dev).
+const embedMode = (process.env["ORWELL_EMBEDDINGS"] ?? "").trim().toLowerCase();
+if (embedMode === "fastembed") {
+  const dataDir =
+    process.env["ORWELL_DATA_DIR"] ?? process.env["BBAI_DATA_DIR"] ?? "./.orwell-data";
+  const cacheDir = process.env["ORWELL_EMBED_CACHE"] || `${dataDir.replace(/\/$/, "")}/models`;
+  try {
+    const { createFastembedEmbedding } = await import("./adapters/embedding/FastembedEmbedding");
+    const provider = await createFastembedEmbedding({
+      workerUrl: new URL("./embedWorker.js", import.meta.url),
+      cacheDir,
+    });
+    const { setRuntimeEmbedding } = await import("./composition/engineRoot");
+    setRuntimeEmbedding(provider);
+    console.log(`[orwell] semantic recall: fastembed (local ONNX, dim=${provider.dim}, cache=${cacheDir})`);
+  } catch (e) {
+    console.error(
+      `[orwell] fastembed warm-up failed (${e instanceof Error ? e.message : String(e)}); ` +
+        `semantic recall uses deterministic embeddings this run. ` +
+        `Prefetch the model (node dist/embedWorker.js --prefetch --cache-dir ${cacheDir}) and restart to upgrade.`,
+    );
+  }
+}
+
 const runtime = composeRuntime({ durable: true });
 
 // Network-edge guardrails (audit E1 / B34). Default to a trusted-loopback single-tenant deploy;
