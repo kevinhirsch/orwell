@@ -1671,6 +1671,24 @@ const SHORTCUT_CATEGORIES = [
   { name: 'Open Tools', keys: ['open_theme'] },
 ];
 
+// ── G13 (gating cascades): a binding whose action this BUILD trimmed is a
+// zombie row — the shortcuts list presents only bindings that can do
+// something here. Probes target the build's own seams (no name lists): the
+// voice vertical ships its JS only when the voice flag is on
+// (src/settings.py dropped_script_srcs strips the tts-ai.js <script> tag),
+// so the shipped tag IS the build's signal — the same way W1/W4 gate on the
+// build flag rather than re-listing verticals. Unknown actions stay visible.
+const SHORTCUT_REQUIRES = {
+  tts: () => !!document.querySelector('script[src*="tts-ai.js"]') ||
+             !!(window.aiTTSManager && window.aiTTSManager.available),
+};
+
+function _shortcutShipped(action) {
+  const probe = SHORTCUT_REQUIRES[action];
+  if (!probe) return true;
+  try { return !!probe(); } catch (_) { return false; }
+}
+
 function _formatKeyCaps(combo) {
   return combo.split('+').map(p => {
     let label;
@@ -1743,13 +1761,16 @@ async function initShortcuts() {
     const conflicts = _findConflicts();
 
     for (const cat of SHORTCUT_CATEGORIES) {
+      // G13: rows for trimmed verticals don't render — and a category header
+      // with zero rows under it is a zombie parent, so it hides with them.
+      const actions = cat.keys.filter(a => (a in keybinds) && _shortcutShipped(a));
+      if (actions.length === 0) continue;
       const catHeader = document.createElement('div');
       catHeader.className = 'shortcut-category';
       catHeader.textContent = cat.name;
       listEl.appendChild(catHeader);
 
-      for (const action of cat.keys) {
-        if (!(action in keybinds)) continue;
+      for (const action of actions) {
         const combo = keybinds[action];
         // Unbound shortcuts (empty combo) still render so the user can
         // assign one \u2014 they show a "Set" affordance instead of keycaps.
@@ -5093,6 +5114,19 @@ function syncAdminVisibility() {
   modalEl.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = isAdmin ? '' : 'none';
   });
+  // G13 (gating cascades): hiding a tab's every card must hide the tab's
+  // LAUNCHER too — a nav button that opens an empty page is a zombie
+  // affordance. Computed from the panel's own cards (no tab name list), so
+  // any tab that drifts to all-admin-only content auto-hides for players.
+  modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
+    if (btn.classList.contains('admin-only')) return; // already gated above
+    const panel = modalEl.querySelector(`[data-settings-panel="${btn.dataset.settingsTab}"]`);
+    if (!panel) return;
+    const cards = panel.querySelectorAll('.admin-card');
+    const allAdminOnly = cards.length > 0 &&
+      Array.from(cards).every(c => c.classList.contains('admin-only'));
+    btn.style.display = (allAdminOnly && !isAdmin) ? 'none' : '';
+  });
 }
 
 /* ═══════════════════════════════════════════
@@ -5112,7 +5146,11 @@ export function open(tab) {
   // never LAND on one — its panel would only 403. They default to `account` instead.
   const _tabVisible = (t) => {
     const b = modalEl.querySelector(`[data-settings-tab="${t}"]`);
-    return !!b && !(b.classList.contains('admin-only') && !window._isAdmin);
+    // G13: a launcher hidden by ANY gate — admin-only, the all-admin-cards
+    // cascade (syncAdminVisibility ran just above), or the game build's CSS
+    // trim (game-trim.css) — must not be landable either.
+    return !!b && getComputedStyle(b).display !== 'none' &&
+      !(b.classList.contains('admin-only') && !window._isAdmin);
   };
   let activeTab = tab
     || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab
