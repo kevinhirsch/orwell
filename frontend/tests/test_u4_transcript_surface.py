@@ -18,8 +18,13 @@ TOOLS = (FE / "src" / "tool_implementations.py").read_text(encoding="utf-8")
 # ── E65: the event finally has a dispatcher ───────────────────────────────────
 
 def test_e65_gamechanged_is_dispatched_from_the_tool_stream():
-    assert "new CustomEvent('orwell:gamechanged')" in CHAT
-    assert "json.tool === 'createCharacter' || json.tool === 'manageSandbox'" in CHAT
+    # G15: chat.js no longer hand-rolls the dispatch (the E65 inline one was nested
+    # under the advanceGame/submitDecision branch and could never fire) — the
+    # tool-result seam now routes every game-mutating tool, lifecycle ones
+    # included, through THE one debounced dispatcher in platform.js. The full
+    # dispatcher contract is pinned in test_g15_gamechanged.py.
+    assert "window.orwellGameChanged" in CHAT
+    assert "'createCharacter'" in CHAT and "'manageSandbox'" in CHAT
 
 
 def test_e65_restart_opens_a_fresh_session():

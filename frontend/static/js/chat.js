@@ -2249,14 +2249,20 @@ import { isNarrow } from './platform.js';
                     try {
                       const _adv = JSON.parse(json.output || '{}');
                       window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _adv && _adv.pending ? _adv.pending : null } }));
-                      // E65: a game lifecycle change (new season / reset) refreshes every
-                      // panel and clears per-game client state — the event finally has a
-                      // dispatcher to match its four listeners.
-                      if (json.tool === 'createCharacter' || json.tool === 'manageSandbox') {
-                        window.dispatchEvent(new CustomEvent('orwell:gamechanged'));
-                        if (window._orwellFreshSession && json.tool === 'createCharacter') window._orwellFreshSession();
-                      }
                     } catch (_) {}
+                  }
+                  // G15: every game-MUTATING tool result nudges the panels through THE one
+                  // debounced dispatcher (platform.js orwellGameChanged) — post-action UI
+                  // refreshes event-driven instead of waiting out a 20–30s poll. (E65's
+                  // inline dispatch was nested inside the advanceGame/submitDecision branch
+                  // above, so the lifecycle tools it keyed on could never reach it.)
+                  // runCompetition rides along: it is the single outcome authority, and a
+                  // comp result moves exactly what the status HUD shows (HOH/veto/phase).
+                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter',
+                             'updateCasting', 'manageSandbox', 'runCompetition'].includes(json.tool)) {
+                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
+                    // E65: a new season (createCharacter success mid-session) opens a FRESH chat.
+                    if (json.tool === 'createCharacter' && window._orwellFreshSession) window._orwellFreshSession();
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
                   // Preserve the user's .open choice across the innerHTML

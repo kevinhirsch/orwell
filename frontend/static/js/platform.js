@@ -72,3 +72,33 @@ export function isBelowMedium() { return BELOW_MEDIUM_QUERY.matches; }
 export function onNarrowChange(fn) {
   NARROW_QUERY.addEventListener('change', fn);
 }
+
+// ============================================
+// Game freshness (Lane G15)
+// ============================================
+// THE one dispatcher for `orwell:gamechanged`. The game panels (status HUD,
+// social, cast, finale, diary gate, engine banner, decision re-arm) already
+// subscribe; what they lacked was a dispatcher at every mutation seam — the
+// only inline dispatch was unreachable, so post-action UI waited out a
+// 20–30s poll ("the sidebar is behind"). Every FE path that mutates engine
+// game state calls this helper instead of dispatching ad hoc.
+//
+// Trailing debounce (~250ms): one agent turn can advance, record, and decide
+// back-to-back, so a burst of tool results coalesces into ONE refresh wave.
+// Exposed on window so classic-script surfaces and module code share the same
+// seam without import coupling; `detail.reason` (the last trigger) is debug
+// breadcrumb only — listeners must not branch on it.
+const GAMECHANGED_DEBOUNCE_MS = 250;
+let _gameChangedTimer = null;
+
+export function orwellGameChanged(reason) {
+  if (_gameChangedTimer) clearTimeout(_gameChangedTimer);
+  _gameChangedTimer = setTimeout(() => {
+    _gameChangedTimer = null;
+    try {
+      window.dispatchEvent(new CustomEvent('orwell:gamechanged', { detail: { reason: String(reason || '') } }));
+    } catch (_) { /* fail open — every panel keeps its poll fallback */ }
+  }, GAMECHANGED_DEBOUNCE_MS);
+}
+
+if (typeof window !== 'undefined') window.orwellGameChanged = orwellGameChanged;
