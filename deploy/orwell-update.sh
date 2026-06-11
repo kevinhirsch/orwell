@@ -116,6 +116,19 @@ wire_credential_helper() {
     '!f(){ echo username=x-access-token; echo "password=$(sed -n s/^GIT_TOKEN=//p '"${APP_DIR}"'/data/.env)"; };f'
 }
 
+# F4 self-heal (hit on a real box, 2026-06-11): the installer chowns the checkout to the
+# `orwell` user while this script runs git as ROOT — git >=2.35 refuses every fetch/reset with
+# "dubious ownership" unless the path is marked safe. The fixed installer wires this at install
+# time; the updater wires it too, BEFORE its first git call, so every box installed before the
+# fix heals on its next update. (A box already wedged needs the one manual bootstrap —
+# `git config --system --add safe.directory <APP_DIR>` — to fetch THIS version; never again
+# after that.) Idempotent: added once.
+wire_safe_directory() {
+  git config --system --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" \
+    || git config --system --add safe.directory "$APP_DIR"
+}
+wire_safe_directory
+
 # ── --set-token (A4): persist/rotate the deploy PAT, wire the helper, exit. ───────────────────
 if [[ "$SET_TOKEN" -eq 1 ]]; then
   TOKEN="${GIT_TOKEN:-}"
