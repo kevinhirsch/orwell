@@ -5417,6 +5417,7 @@ async function _cmdColor(args, ctx) {
 async function _cmdHelp(args, ctx) {
   const categories = {};
   for (const [name, def] of Object.entries(COMMANDS)) {
+    if (!isGameSlashAllowed(name)) continue; // W4: game build lists the keep-set only
     if (def.hidden) continue;
     const cat = def.category || 'Other';
     if (!categories[cat]) categories[cat] = [];
@@ -5451,7 +5452,9 @@ async function _cmdHelp(args, ctx) {
     }
   }
   lines.push('Tip: /<command> --help for details');
-  lines.push('Shortcuts: /new /rename /fork /web /bash /memories /forget');
+  lines.push(_gameBuildOn()
+    ? 'Shortcuts: /new /rename /fork /clear /export'
+    : 'Shortcuts: /new /rename /fork /web /bash /memories /forget');
   slashReply(`<pre style="line-height:1.7">${lines.join('\n')}</pre>`);
   return true;
 }
@@ -5885,6 +5888,31 @@ export const LEGACY_ALIASES = {
   'status':      { parent: 'toggle', sub: '_show' }
 };
 
+// ── Game-build slash keep-set (W4, 2026-06-10 audit) ──────────────
+// Under the game build the slash surface is the keep-set ONLY: session
+// management, theme, settings, help/shortcuts, conversation search, and the
+// pure client-side easter eggs. Everything else — /sh (shell), /toggle, /setup
+// (API keys), the dropped verticals (/email /gallery /cookbook /notes /memory
+// /rag /tasks /brain /library /research /compare), the /tour-* set, model/
+// endpoint meta (/models /ping /probe), and transcript rewriters (/compact) —
+// is refused at DISPATCH time with a game-framed reply (their backends are
+// gone server-side; this kills the parallel ungated UI into them).
+const GAME_SLASH_KEEP = new Set([
+  'chats', 'theme', 'settings', 'help', 'shortcuts', 'find',
+  // Pure-fun easter eggs: client-side only, no workspace/meta surface.
+  'flip', 'roll', '8ball', 'fortune', 'odyssey', 'ascii', 'matrix',
+  'cowsay', 'wisdom', 'uptime', 'color',
+]);
+
+function _gameBuildOn() {
+  return !!(document.body && document.body.dataset && document.body.dataset.gameBuild === '1');
+}
+
+/** Is this canonical COMMANDS key available in the current build? */
+function isGameSlashAllowed(cmdKey) {
+  return !_gameBuildOn() || GAME_SLASH_KEEP.has(cmdKey);
+}
+
 // ── Dispatch helpers ──────────────────────────────────────────────
 
 /** Build context object for handlers */
@@ -5940,9 +5968,12 @@ function _levenshtein(a, b) {
 /** Suggest close matches for a mistyped command */
 function _fuzzyMatch(typed, maxDist) {
   maxDist = maxDist || 2;
-  const candidates = Object.keys(_ALIAS_MAP);
+  // W4: never suggest a command the current build refuses.
+  let candidates = Object.keys(_ALIAS_MAP).filter(k => isGameSlashAllowed(_ALIAS_MAP[k]));
   // Also include legacy alias keys
-  Object.keys(LEGACY_ALIASES).forEach(k => { if (!candidates.includes(k)) candidates.push(k); });
+  Object.keys(LEGACY_ALIASES).forEach(k => {
+    if (!candidates.includes(k) && isGameSlashAllowed(LEGACY_ALIASES[k].parent)) candidates.push(k);
+  });
   const matches = [];
   for (const c of candidates) {
     const d = _levenshtein(typed, c);
@@ -5974,6 +6005,14 @@ async function handleSlashCommand(input) {
     // --- 1. Try direct command resolution ---
     let cmdKey = _resolveCommand(rawCmd);
     let cmdDef = cmdKey ? COMMANDS[cmdKey] : null;
+
+    // --- W4: game-build keep-set gate (covers direct AND legacy-alias paths) ---
+    const _canonical = cmdKey || (LEGACY_ALIASES[rawCmd] ? LEGACY_ALIASES[rawCmd].parent : null);
+    if (_canonical && !isGameSlashAllowed(_canonical)) {
+      _showUser();
+      slashReply('That control room isn’t part of the broadcast. Type <b>/help</b> for what works in the house.');
+      return true;
+    }
 
     // --- 2. Try legacy alias ---
     if (!cmdDef && LEGACY_ALIASES[rawCmd]) {
@@ -6202,7 +6241,7 @@ export function clearSetupMode(preservePendingState = false) {
   }
 }
 
-export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS };
+export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS, GAME_SLASH_KEEP, isGameSlashAllowed };
 
 const slashCommands = {
   initSlashCommands,

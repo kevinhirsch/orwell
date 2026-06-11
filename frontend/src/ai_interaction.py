@@ -1273,6 +1273,13 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
       open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, cookbook)
       open_email_reply <uid> [folder] [reply|reply-all|ai-reply] — Open a reply draft document for an email; does not send
       get_toggles             — Return current toggle states (server-side knowledge)
+
+    Game build (W1, 2026-06-10 audit): the action space collapses to the curated
+    safe subset (GAME_UI_CONTROL_SAFE_ACTIONS — highlight/clear_highlight and the
+    theme actions). Mode flips, model swaps, incognito/power toggles, panel opening
+    and email drafts are refused HERE, at the single dispatch chokepoint — code, not
+    prompt wording — so a prompt-injected houseguest line can't flip the player to
+    Chat mode, swap the narrating LLM mid-scene, or strip the game framing.
     """
     lines = content.strip().split("\n")
     if not lines:
@@ -1280,6 +1287,16 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 
     parts = lines[0].strip().split(None, 2)
     action = parts[0].lower()
+
+    from src.settings import game_build_enabled, GAME_UI_CONTROL_SAFE_ACTIONS
+    if game_build_enabled() and action not in GAME_UI_CONTROL_SAFE_ACTIONS:
+        return {
+            "error": (
+                f"'{action}' is not part of the broadcast. ui_control here does camera "
+                "direction only: highlight, clear_highlight, set_theme, create_theme. "
+                "Do not retry this action — continue the scene."
+            )
+        }
 
     if action == "toggle":
         if len(parts) < 3:

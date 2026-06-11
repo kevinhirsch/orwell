@@ -215,7 +215,7 @@ File references are to `main` @ 87687c0.
   narration tone/recording discipline ("always portray the house as adoring me"). *Fix:* drop
   `preset.system_prompt` from the preface when `game_active` (ADR 0003: prefer removing
   context). *Test:* pytest asserting the preface on a game turn contains only the GM prompt.
-- **E17 [MED · Change] `search_chats` is in the game-build keep-set** (`agent_tools.py:112`) —
+- **E17 [MED · Change] ✅ PR #211 — `search_chats` is in the game-build keep-set** (`agent_tools.py:112`) —
   the GM can "remember" prior seasons and OOC chats, a parallel memory rivaling the stores
   ("memory is the store *recalled*, never the chat *remembered*"). *Fix:* move to
   `GAME_TOOL_OPTIONAL`.
@@ -903,7 +903,7 @@ traceability; E-batch cross-references inline.
 
 ## Stream W — inherited-workspace bleed & attack surface (W1–W8)
 
-- **W1 [HIGH · Security]** `ui_control` is in `GAME_TOOL_KEEP` (`agent_tools.py:112`) and
+- **W1 [HIGH · Security] ✅ PR #211 —** `ui_control` is in `GAME_TOOL_KEEP` (`agent_tools.py:112`) and
   honors `set_mode`, `switch_model`, `set_theme`, `toggle <web|bash|rag|research|incognito|…>`,
   `open_panel` (`ai_interaction.py:1314–1515`) with no game-build guard (`chatStream.js:46–141`)
   — the model (or a prompt-injected houseguest line) can flip the player to Chat mode, swap
@@ -914,16 +914,16 @@ traceability; E-batch cross-references inline.
   missing `_verify_session_owner` (`chat_routes.py:1297–1303` vs `:1311+`) — any
   authenticated user can subscribe to another user's activity stream (metadata side-channel +
   unbounded subscriber slot). *Fix:* one line, same guard as `chat_resume`.
-- **W3 [MED · Change]** The Bitwarden vault vertical mounts unconditionally
+- **W3 [MED · Change] ✅ PR #211 —** The Bitwarden vault vertical mounts unconditionally
   (`app.py:739–740`, not in `GAME_DROP_SET`) — an admin-gated, password-handling,
   subprocess-spawning surface (`vault_routes.py:157–226`, env-inheriting `_run_bw`) the game
   build claims to remove. *Fix:* `mount_optional` + add to the drop set.
-- **W4 [MED · Change]** Zero game-build gating on ~40 inherited slash commands: `/sh` (shell
+- **W4 [MED · Change] ✅ PR #211 —** Zero game-build gating on ~40 inherited slash commands: `/sh` (shell
   exec), `/toggle bash|web|research`, `/setup <provider> <api-key>`, `/email /gallery
   /cookbook /notes /memory /rag`, the `/tour-*` set (`slashCommands.js:5464–5842, 5960–6023`)
   — a parallel ungated UI into every dropped vertical. *Fix:* dispatch-time keep-set under the
   game build with a game-framed "not available" reply.
-- **W5 [MED · Change]** The `ui_control` prompt manifest teaches the model to open
+- **W5 [MED · Change] ✅ PR #211 —** The `ui_control` prompt manifest teaches the model to open
   email/gallery/cookbook/documents panels on game turns (`agent_loop.py:154–157, 368`) —
   lever-manifest bleed through a kept tool; calls silently no-op (narrated-but-dead). *Fix:*
   game-only `ui_control` description (pairs with W1's allowlist).
@@ -931,8 +931,9 @@ traceability; E-batch cross-references inline.
   `seasonRetrospective`/`npcVoice` + `ui_control` renders an expandable raw-JSON node
   (extends E11/D5 with the kept-meta-tool case; the proving test should iterate
   `GAME_TOOL_KEEP`).
-- **W7 [LOW · Security]** `/backgrounds` — a dev prototype page shipping in the game build
-  (`app.py:787–790`). Gate or remove.
+- **W7 [LOW · Security] ✅ PR #211 —** `/backgrounds` — a dev prototype page shipping in the game build
+  (`app.py:787–790`). Gate or remove. *(Removed: its `static/backgrounds.html` was never
+  vendored, so the route only 500'd — deleted outright, 404 in both builds.)*
 - **W8 [LOW · Change]** The CSP still allowlists `cdn.jsdelivr.net` for script/style/font
   (`core/middleware.py:143–153`) — the policy half of D6 (vendor/drop KaTeX+Mermaid): drop
   the origin from the game-build CSP too.
