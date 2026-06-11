@@ -162,7 +162,23 @@ async def _post_tool(path: str, name: str, args: dict | None, user: str | None, 
     return data["result"]
 
 
+
 async def _call(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
+    """G1b: every engine call flows through the I/O tap — what was written and
+    what came back (or the failure) — feeding the /admin/status viewer."""
+    import time as _t
+    from src import log_rings as _rings
+    t0 = _t.monotonic()
+    try:
+        res = await _call_inner(name, args, user=user, timeout=timeout)
+        _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000), res)
+        return res
+    except Exception as e:
+        _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
+                         f"{type(e).__name__}: {e}")
+        raise
+
+async def _call_inner(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.
     `timeout` overrides the default for latency-sensitive FRAMING calls (C18: a hung engine must
     fail a turn's framing in ~2s, not stall it for the full default)."""

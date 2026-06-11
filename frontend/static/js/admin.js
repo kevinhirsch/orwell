@@ -2361,7 +2361,6 @@ function initHealthLogs() {
   const card = el('adm-health-card');
   if (!card) return;  // not rendered (non-admin DOM) — nothing to wire
   const rowsEl = el('adm-health-rows');
-  const failEl = el('adm-health-failures');
   const refreshBtn = el('adm-health-refresh');
   const msgEl = el('adm-health-msg');
 
@@ -2408,34 +2407,7 @@ function initHealthLogs() {
     }
     if (rowsEl) rowsEl.innerHTML = rows.join('');
 
-    // The failure log: the engine's G1 ring (tool / error class / timing — never game
-    // content) newest first, plus the FE tier's own recent engine error when present.
-    const failures = Array.isArray(eng.recentFailures) ? eng.recentFailures.slice().reverse() : [];
-    const feLast = (d.frontend || {}).lastError;
-    if (failEl) {
-      if (!failures.length && !feLast) {
-        failEl.innerHTML = '<div class="admin-toggle-sub" style="margin-top:8px;">No recent failures on record.</div>';
-      } else {
-        const fmtTs = (ms) => { try { return new Date(ms).toISOString().slice(0, 19).replace('T', ' '); } catch { return ''; } };
-        const trs = failures.map(f => `
-          <tr>
-            <td style="padding:3px 8px 3px 0;white-space:nowrap;">${esc(fmtTs(f.ts))}</td>
-            <td style="padding:3px 8px 3px 0;">${esc(f.tool || '')}</td>
-            <td style="padding:3px 8px 3px 0;">${esc(f.errorClass || '')}</td>
-            <td style="padding:3px 0;text-align:right;">${esc(String(f.durationMs ?? ''))} ms</td>
-          </tr>`).join('');
-        const feRow = feLast ? `<div class="admin-toggle-sub" style="margin-top:6px;">Front-end tier: ${esc(feLast.tool || '?')} — ${esc(feLast.kind || '')} — ${esc(feLast.error || '')} (${esc(String(feLast.ageSeconds ?? '?'))}s ago)</div>` : '';
-        failEl.innerHTML = `
-          <div class="admin-toggle-label" style="margin-top:10px;">Recent tool failures (engine)</div>
-          <table style="width:100%;border-collapse:collapse;font-size:0.85em;margin-top:4px;">
-            <thead><tr style="opacity:0.6;text-align:left;">
-              <th style="padding:3px 8px 3px 0;">Time (UTC)</th><th style="padding:3px 8px 3px 0;">Tool</th>
-              <th style="padding:3px 8px 3px 0;">Error</th><th style="padding:3px 0;text-align:right;">Duration</th>
-            </tr></thead>
-            <tbody>${trs || '<tr><td colspan="4" class="admin-toggle-sub">None.</td></tr>'}</tbody>
-          </table>${feRow}`;
-      }
-    }
+    // G1b: the failure log moved to the standalone /admin/status page.
   }
 
   async function load() {
