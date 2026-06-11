@@ -300,6 +300,31 @@ def main() -> int:
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
 
+            # T20: the social HUD's minimize-to-dock BEHAVIOR (the source-pins in
+            # tests/test_orwell_huds.py only prove the wiring is present — this proves it WORKS in
+            # the browser). Mount the panel, click its minimize control, and assert the panel hides
+            # AND a dock chip for it appears in the shared "Windows" dock; then restore via the chip
+            # and assert the panel returns. A regression that drops the dock wiring (reverting to an
+            # in-place collapse, or losing the chip) fails here, not just at the source grep.
+            page.evaluate("window._orwellSocialEnsure && window._orwellSocialEnsure()")
+            page.wait_for_selector("#orwell-social", timeout=3000)
+            check(page.evaluate("getComputedStyle(document.getElementById('orwell-social')).display !== 'none'") is True,
+                  "social HUD: mounts visible")
+            page.evaluate("document.querySelector('#orwell-social .osoc-min').click()")
+            page.wait_for_timeout(200)  # let the dock re-render
+            min_state = page.evaluate("""() => {
+              const el = document.getElementById('orwell-social');
+              const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]');
+              return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip };
+            }""")
+            check(min_state.get("hidden") is True, f"social HUD: minimize HIDES the panel ({min_state})")
+            check(min_state.get("chip") is True, f"social HUD: minimize parks a chip in the shared dock ({min_state})")
+            page.evaluate("document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id=\"orwell-social\"]').click()")
+            page.wait_for_timeout(200)
+            restored = page.evaluate(
+                "(function(){var e=document.getElementById('orwell-social');return !!e && getComputedStyle(e).display!=='none';})()")
+            check(restored is True, "social HUD: restoring from the dock chip re-opens the panel")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
