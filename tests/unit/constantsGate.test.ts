@@ -16,8 +16,15 @@ const read = (p: string): string => readFileSync(p, "utf8");
 describe("the constants grep gate (B59)", () => {
   it("the veto-save threshold lives ONLY in relationshipConstants", () => {
     const live = read("src/engine/liveSeason.ts");
+    const rel = read("src/engine/relationships.ts");
+    // The magic number is never inlined at the veto-save call sites…
     expect(live).not.toMatch(/trust > 0\.6/);
-    expect(live.match(/thresholds\.vetoSave/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(rel).not.toMatch(/vetoSave[^]{0,40}0\.6/);
+    expect(rel).not.toMatch(/0\.6[^]{0,40}vetoSave/);
+    // …and the threshold is consumed through the relationship model's `chooseVetoSave` (E54), which
+    // ranks the saveable nominees by trust shaded by demonstrated loyalty against the single knob.
+    expect(rel.match(/thresholds\.vetoSave/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(live.match(/chooseVetoSave/g)?.length).toBeGreaterThanOrEqual(2);
     expect(RELATIONSHIP_CONSTANTS.thresholds.vetoSave).toBeGreaterThan(0);
   });
 

@@ -725,10 +725,18 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
 
 // --- Live finale sub-loop (0037) ----------------------------------------------
 
-/** The juror's directed read of a finalist, as the jury math (0014) wants it. */
+/**
+ * The juror's directed read of a finalist, as the jury math (0014) wants it. The reliability term
+ * is CENTERED on the edge baseline (E54): a juror with no protective track record reads 0 (neutral),
+ * demonstrated loyalty reads positive, proven disloyalty negative — `juryLean` weights it below
+ * relationship+manner.
+ */
 function edgeAsJuryRel(juror: EntityId, finalist: EntityId, ctx: SeasonCtx): JuryRel {
   const e = ctx.rel.edge(juror, finalist);
-  return { trust: e.trust, affinity: e.affinity, threat: e.threat };
+  return {
+    trust: e.trust, affinity: e.affinity, threat: e.threat,
+    reliability: e.reliability - RELATIONSHIP_CONSTANTS.baseline.reliability,
+  };
 }
 
 /** The recorded manner the evictee/juror read toward a finalist (empty if none). */
@@ -925,10 +933,11 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         s.pending = { kind: "veto-decision", by: ctx.player, nominees, saveable };
         return null;
       }
-      // NPC veto holder: save self if nominated, else a strongly-trusted nominee.
+      // NPC veto holder: save self if nominated, else the most save-worthy nominee — trust shaded
+      // by demonstrated loyalty (E54), so a proven protector outranks an equally-liked stranger.
       const saved = nominees.includes(s.vetoHolder!)
         ? s.vetoHolder!
-        : nominees.find((n) => ctx.rel.edge(s.vetoHolder!, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
+        : ctx.rel.chooseVetoSave(s.vetoHolder!, nominees);
       if (!saved) {
         s.vetoUsed = false; s.finalNominees = [nominees[0], nominees[1]]; s.beat = "eviction";
         return { beat: "veto-ceremony", content: `${s.vetoHolder} does not use the veto`, participants: [s.vetoHolder!] };
@@ -1019,11 +1028,12 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       return { kind: "nominations", choice: [a, b] };
     }
     case "veto-decision": {
-      // Mirror the NPC veto holder: save self if nominated, else a strongly-trusted nominee —
-      // from the LEGAL saveable set only (empty at Final 4, E36: using the veto is barred).
+      // Mirror the NPC veto holder: save self if nominated, else the most save-worthy nominee
+      // (trust shaded by demonstrated loyalty, E54) — from the LEGAL saveable set only (empty at
+      // Final 4, E36: using the veto is barred).
       const saved = p.saveable.includes(p.by)
         ? p.by
-        : p.saveable.find((n) => ctx.rel.edge(p.by, n).trust > RELATIONSHIP_CONSTANTS.thresholds.vetoSave);
+        : ctx.rel.chooseVetoSave(p.by, p.saveable);
       return saved ? { kind: "veto-decision", use: true, save: saved } : { kind: "veto-decision", use: false };
     }
     case "houseguests-choice":

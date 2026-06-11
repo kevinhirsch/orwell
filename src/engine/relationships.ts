@@ -232,6 +232,36 @@ export class RelationshipModel {
       + this.constants.RELIABILITY_WEIGHT * (e.reliability - this.constants.baseline.reliability);
   }
 
+  /**
+   * The veto-save read (E54 consumption tail): an NPC veto holder weighs WHO to save by trust
+   * PLUS demonstrated loyalty — a nominee who has actually protected the holder (high reliability)
+   * outranks an equally-liked one with no track record. Centered on the edge baseline so a clean,
+   * unproven edge reads at its raw trust; evidence shades, never replaces (the `bondStrength` shape).
+   * Compared against `thresholds.vetoSave` at the veto-save call sites (B59 — one number).
+   */
+  vetoSaveScore(holder: EntityId, candidate: EntityId): number {
+    const e = this.edge(holder, candidate);
+    return e.trust
+      + this.constants.RELIABILITY_WEIGHT * (e.reliability - this.constants.baseline.reliability);
+  }
+
+  /**
+   * The veto holder's save pick (E54 consumption tail): of the candidates the holder reads as
+   * save-worthy (`vetoSaveScore` over `thresholds.vetoSave`), save the HIGHEST-scoring — so a
+   * nominee who actually had the holder's back (high reliability) outranks an equally-trusted one
+   * with no protective track record. Ties break by candidate order (deterministic). `undefined`
+   * when no candidate clears the bar (the holder keeps the veto in their pocket).
+   */
+  chooseVetoSave(holder: EntityId, candidates: readonly EntityId[]): EntityId | undefined {
+    let best: EntityId | undefined;
+    let bestScore = this.constants.thresholds.vetoSave;
+    for (const c of candidates) {
+      const score = this.vetoSaveScore(holder, c);
+      if (score > bestScore) { bestScore = score; best = c; }
+    }
+    return best;
+  }
+
   /** An alliance is "active" when the bond is mutual and over threshold. */
   allianceActive(a: EntityId, b: EntityId): boolean {
     return this.bondStrength(a, b) >= this.allianceThreshold && this.bondStrength(b, a) >= this.allianceThreshold;
