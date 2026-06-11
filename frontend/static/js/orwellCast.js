@@ -259,10 +259,21 @@
 
   function togglePanel(open) {
     if (open) {
+      const existed = !!document.getElementById(PANEL_ID);
       const el = ensurePanel();
       _open = true;
-      el.style.display = "block";
-      if (_win) { _win.restore(); _win.raise(); }
+      // G16/F2 (refresh-persistence audit): when ensurePanel() just MOUNTED the
+      // window and the kit honored a persisted parked flag (the player parked it
+      // last page-life), it lives in the dock — leave it parked; its dock chip
+      // restores it. An explicit toggle on an ALREADY-LIVE minimized window
+      // still restores, exactly as before. (The display write matters too:
+      // modalManager's launcher-agnostic observer treats any un-hide of a
+      // minimized window as a restore, which would silently un-park it.)
+      const bootParked = !existed && _win && _win.isMinimized && _win.isMinimized();
+      if (!bootParked) {
+        el.style.display = "block";
+        if (_win) { _win.restore(); _win.raise(); }
+      }
       refreshRoster();
       if (_timer) clearInterval(_timer);
       _timer = setInterval(() => { if (_open && !document.hidden) refreshRoster(); }, POLL_MS);

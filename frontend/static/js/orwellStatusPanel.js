@@ -49,6 +49,29 @@ import { onNarrowChange } from './platform.js';
     return base + ":" + _gameKey;
   }
 
+  // F1 (G5 refresh-persistence audit / Lane G16): the collapse used to be
+  // WRITTEN under the full per-user+game key but RESTORED under a half-built
+  // one — _gameKey was only assigned mid-render (renderRoster), AFTER
+  // ensurePanel()'s one-time boot read, so the persisted value was unreachable
+  // forever and the E71 "persists per user+game" promise was silently broken.
+  // The key is now derived from the payloads in hand BEFORE the panel build
+  // (render() assigns it ahead of ensurePanel()), and the persisted collapse
+  // re-applies whenever the key changes (game change / season 2) — E71
+  // scoping intact.
+  function computeGameKey(state) {
+    return ((state && state.player && state.player.name) || "") + ":" +
+           ((document.body && document.body.dataset.user) || "");
+  }
+  let _applyCollapsed = null;     // ensurePanel's setCollapsed, exposed for re-application
+  let _collapseKeyApplied = null; // the _gameKey whose persisted collapse was last applied
+  function reapplyPersistedCollapse() {
+    if (!_applyCollapsed || _collapseKeyApplied === _gameKey) return;
+    _collapseKeyApplied = _gameKey;
+    try {
+      _applyCollapsed(localStorage.getItem(storageKey("orwell-status-collapsed")) === "1");
+    } catch (_) {}
+  }
+
   // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
   // id-comparison, never a "safe/target" read (0020). Returns "" when the player is just a
   // houseguest, or their out-of-game seat ("Evicted" / "Jury") when they're out.
@@ -158,6 +181,10 @@ import { onNarrowChange } from './platform.js';
     try {
       if (localStorage.getItem(storageKey("orwell-status-collapsed")) === "1") setCollapsed(true);
     } catch (_) {}
+    // F1: the read above ran under the key render() computed BEFORE this build;
+    // expose the setter + record the key so a later key change re-applies.
+    _applyCollapsed = setCollapsed;
+    _collapseKeyApplied = _gameKey;
     return el;
   }
 
@@ -204,7 +231,9 @@ import { onNarrowChange } from './platform.js';
   }
 
   function render(st) {
+    if (st && st._state !== undefined) _gameKey = computeGameKey(st._state); // F1: key before the build
     const el = ensurePanel();
+    reapplyPersistedCollapse();
     // No active game (engine reports week 0 / setup) → genuinely hide (not a hiccup).
     if (!st || typeof st.week !== "number" || st.week < 1) {
       _shown = false;
@@ -244,9 +273,9 @@ import { onNarrowChange } from './platform.js';
     if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
     else { badgeEl.hidden = true; }
 
-    // E71: key panel state to this user's game.
-    _gameKey = ((state && state.player && state.player.name) || "") + ":" +
-               ((document.body && document.body.dataset.user) || "");
+    // E71: key panel state to this user's game (same derivation as render()'s
+    // pre-build assignment — computeGameKey is the single source, F1).
+    _gameKey = computeGameKey(state);
 
     const rosterEl = el.querySelector("#os-roster");
     const headEl = el.querySelector("#os-roster-h");
