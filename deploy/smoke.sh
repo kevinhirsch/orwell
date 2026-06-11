@@ -73,10 +73,16 @@ check  "createCharacter -> started"     "$(pcall '{"name":"createCharacter","arg
 state="$(pcall '{"name":"getGameState","args":{}}')"
 check  "getGameState -> started"        "$state" '"started":true'
 refute "house roster carries no soul"   "$state" '"soul"'
-# Hidden-layer refutes (audit E80): no relationship/stat number may reach a player surface —
-# the full key set, not just "physical".
-for leak in '"physical":' '"mental":' '"social":' '"trust":' '"affinity":' '"threat":'; do
-  refute "getGameState hides hidden layer (${leak})" "$state" "$leak"
+# Hidden-layer refutes (audit E80): no relationship/stat NUMBER may reach a player surface —
+# the full key set, not just "physical". The bare key is sanctioned in exactly one place: the
+# 0050 casting card's qualitative tier words ("physical":"standout") — so the refute targets
+# numeric values, the actual leak shape.
+for leak in physical mental social trust affinity threat; do
+  if printf '%s' "$state" | grep -Eq "\"${leak}\": *-?[0-9]"; then
+    fail "getGameState hides hidden layer (\"${leak}\": <number>)"
+  else
+    pass "getGameState hides hidden layer (\"${leak}\": <number>)"
+  fi
 done
 check  "getMomentPrompt -> systemPrompt" "$(pcall '{"name":"getMomentPrompt","args":{}}')" '"systemPrompt"'
 runcomp="$(pcall '{"name":"runCompetition","args":{"type":"endurance"}}')"
