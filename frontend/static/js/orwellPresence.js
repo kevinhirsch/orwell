@@ -56,8 +56,8 @@
     ].join(";");
     el.innerHTML =
       "<span data-role='text'></span>" +
-      "<button data-role='dismiss' aria-label='Hide the presence strip' title='Hide (returns when you change rooms)' " +
-      "style='margin-left:10px;background:none;border:none;color:inherit;opacity:0.6;cursor:pointer;font-size:13px'>×</button>";
+      "<button data-role='dismiss' class='ow-dismiss' aria-label='Hide the presence strip' " +
+      "title='Hide (returns when you change rooms)' style='margin-left:10px'>×</button>";
     el.querySelector("[data-role='dismiss']").addEventListener("click", () => {
       try { localStorage.setItem(DISMISS_KEY, el.dataset.room || ""); } catch (_) {}
       el.style.display = "none";

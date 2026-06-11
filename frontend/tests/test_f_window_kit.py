@@ -120,3 +120,36 @@ def test_sourcepin_wave2_finale_composes_the_kit():
     assert "ofin-min" not in js                     # bespoke minimize button deleted
     assert "modalManager.register(" not in js       # the kit registers, not the panel
     assert "POS_KEY" not in js                      # the F5 dual-persistence era is fully over
+
+
+# ── Lane F / F-2 wave 3 pins ──────────────────────────────────────────────
+
+def test_sourcepin_wave3_shared_dismiss_affordance():
+    kit = _read("static", "js", "orwellWindow.js")
+    assert ".ow-dismiss" in kit                      # the rule ships from the kit css
+    assert "DOMContentLoaded\", ensureCss" in kit or "ensureCss();" in kit  # injected at load
+    for f in ("orwellPresence.js", "orwellRetrospective.js", "orwellEngineStatus.js"):
+        js = _read("static", "js", f)
+        assert "ow-dismiss" in js, f                 # the three surfaces adopt it
+
+
+def test_sourcepin_wave3_modal_family_focus_return():
+    ui = _read("static", "js", "ui.js")
+    assert "_owOpener" in ui                         # opener stashed on hidden->visible
+    assert "_restoreFocus" in ui                     # restored on visible->hidden
+    assert "!m.contains(active)" in ui               # never yank focus the user moved
+
+
+def test_sourcepin_wave3_decision_card_escape_is_dismiss_only():
+    js = _read("static", "js", "orwellDecision.js")
+    assert 'e.key !== "Escape"' in js
+    assert "removeCard()" in js
+    # the Escape handler must not touch the submit path
+    snippet = js[js.index('e.key !== "Escape"'):js.index('e.key !== "Escape"') + 400]
+    assert "fetch" not in snippet and "confirm" not in snippet
+
+
+def test_smoke_exercises_wave3_for_real():
+    smoke = _read("scripts", "browser_smoke.py")
+    assert "F8: focus returns to the gear" in smoke
+    assert "F11: Escape dismisses the focused decision card" in smoke

@@ -64,7 +64,8 @@
 
     const head = el("div", "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px");
     head.appendChild(el("strong", "", "📼 The season, watched back"));
-    const close = el("button", "background:none;border:none;color:inherit;opacity:0.6;cursor:pointer;font-size:14px", "×");
+    const close = el("button", "", "×");
+    close.className = "ow-dismiss";
     close.setAttribute("aria-label", "Dismiss the retrospective panel");
     close.addEventListener("click", () => {
       try { sessionStorage.setItem("orwell-retro-dismissed", "1"); } catch (_) {}

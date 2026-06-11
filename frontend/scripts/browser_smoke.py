@@ -452,6 +452,49 @@ def main() -> int:
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
+            # F8 (wave 3): the WHOLE .modal family returns focus to its opener —
+            # focus the gear for real, open settings, Escape, focus is back.
+            page.focus("#user-bar-settings")
+            page.click("#user-bar-settings")
+            page.wait_for_timeout(400)
+            check(page.evaluate("__settings_open__ = !document.getElementById('settings-modal').classList.contains('hidden')") is True,
+                  "F8: settings opens from the focused gear")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+            f8 = page.evaluate("""() => ({
+              closed: document.getElementById('settings-modal').classList.contains('hidden'),
+              focusBack: document.activeElement && document.activeElement.id === 'user-bar-settings',
+            })""")
+            check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
+            check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
+
+            # F11 (wave 3): Escape while the decision card holds focus = the x path —
+            # dismissed, never submitted.
+            page.evaluate("""window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
+                kind: 'eviction-vote', pick: 1, prompt: 'Cast your vote.',
+                options: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'} ] }}}));""")
+            page.wait_for_selector("#orwell-decision-card", timeout=3000)
+            page.focus("#orwell-decision-card .odec-opt")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
+            check(page.evaluate("!document.getElementById('orwell-decision-card')") is True,
+                  "F11: Escape dismisses the focused decision card (never submits)")
+
+            # F6 tail (wave 3): the engine-down banner's dismiss is the shared
+            # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
+            page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
+            page.wait_for_timeout(600)
+            ban = page.evaluate("""() => {
+              const b = document.querySelector('#orwell-engine-status .oes-x');
+              if (!b) return { present: false };
+              const r = b.getBoundingClientRect();
+              return { present: true, owDismiss: b.classList.contains('ow-dismiss'),
+                       w: Math.round(r.width), h: Math.round(r.height) };
+            }""")
+            if ban.get("present"):
+                check(ban.get("owDismiss") is True and ban.get("w", 0) >= 24 and ban.get("h", 0) >= 24,
+                      f"F6: banner dismiss is the shared ow-dismiss affordance ({ban})")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.

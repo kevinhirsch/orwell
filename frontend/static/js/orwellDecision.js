@@ -136,6 +136,9 @@
     card.id = CARD_ID;
     card.setAttribute("role", "group");
     card.setAttribute("aria-label", titleFor(kind));
+    // Focused-context-first: while focus is in the card, Escape belongs to the
+    // card's own dismiss-only handler (the global arbiter stands down on this marker).
+    card.setAttribute("data-ow-escape-scope", "");
 
     const head = document.createElement("div");
     head.className = "odec-head";
@@ -147,6 +150,16 @@
     x.addEventListener("click", removeCard);
     head.appendChild(x);
     card.appendChild(head);
+    // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
+    // only, NEVER a submit (the prose path stays open; #233's "Escape is the
+    // keyboard way out" applied to the non-binding dismissal). Card-scoped so
+    // the global arbiter and composer Escape behaviors are untouched.
+    card.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      removeCard();
+    });
 
     if (pending.prompt) {
       const p = document.createElement("div");

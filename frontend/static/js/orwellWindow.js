@@ -66,13 +66,17 @@ function ensureCss() {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .ow-controls { display: flex; gap: 2px; flex-shrink: 0; }
-    .ow-controls button {
+    /* .ow-dismiss: non-window dismissible surfaces (strips, banners, panels —
+       ruling-#3/#4-class chrome) adopt the SAME control affordance without
+       becoming windows (audit F6 tail). */
+    .ow-controls button, .ow-dismiss {
       min-width: 24px; min-height: 24px; padding: 0;
       display: inline-flex; align-items: center; justify-content: center;
       border: none; background: none; color: inherit; cursor: pointer;
       opacity: .6; border-radius: 6px; font: inherit; font-size: var(--fs-sm, .8rem);
     }
-    .ow-controls button:hover, .ow-controls button:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
+    .ow-controls button:hover, .ow-controls button:focus-visible,
+    .ow-dismiss:hover, .ow-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
     .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); }
     @keyframes ow-open { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
     .ow-anim-open { animation: ow-open .18s ease-out; }
@@ -332,6 +336,14 @@ export function dismissTop() {
 }
 
 export function stackIds() { return _stack.map((w) => w.o.id); }
+
+// The .ow-* family is page-global chrome (the .ow-dismiss affordance is used by
+// non-window surfaces that may render before any window exists) — inject at load.
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", ensureCss, { once: true });
+} else {
+  ensureCss();
+}
 
 // The seam every consumer + the headless gate use.
 window.OrwellWindowKit = {
