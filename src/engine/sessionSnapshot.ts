@@ -111,6 +111,16 @@ export function toGameState(snap: SessionSnapshot): GameState {
       for (const fact of facts) knowledge.push({ entity, fact });
     }
   }
+  // Audit C4: suspicions + Vault records are persisted detail the checkpoint must see —
+  // previously the projection dropped both, so whole classes of degradation were invisible
+  // to the fail-closed 0031 gate. Vault crosses as IDS ONLY: the projection feeds the
+  // checkpoint's counting/superset math, never an outward surface.
+  const suspicions: NonNullable<GameState["suspicions"]> = [];
+  if (snap.knowledge) {
+    for (const [entity, list] of Object.entries(snap.knowledge.suspicions)) {
+      for (const s of list) suspicions.push({ entity, suspicion: { id: s.id, content: s.content, ts: s.ts } });
+    }
+  }
   return {
     coreVersion: 1,
     vaultVersion: 1,
@@ -120,5 +130,7 @@ export function toGameState(snap: SessionSnapshot): GameState {
     relationships: snap.relationships,
     souls,
     characters,
+    suspicions,
+    vaultIds: (snap.vault ?? []).map((r) => r.id),
   };
 }

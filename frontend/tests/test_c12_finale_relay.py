@@ -11,6 +11,8 @@ Three guards, name-agnostic, engine monkeypatched (no running engine needed):
 
 import importlib
 import json
+import os
+import re
 
 import pytest
 from fastapi import FastAPI
@@ -20,6 +22,30 @@ orwell_engine = importlib.import_module("src.orwell_engine")
 orwell_routes = importlib.import_module("routes.orwell_routes")
 tool_impl = importlib.import_module("src.tool_implementations")
 chat_helpers = importlib.import_module("routes.chat_helpers")
+
+FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(FRONTEND)
+
+# Hermetic guard: a few scenarios below exercise the REAL orwell_engine client functions
+# (the pre-game casting-voice turn calls get_moment_prompt unmonkeypatched) and rely on the
+# engine being UNREACHABLE to prove the fallback framing. The client's default endpoint is
+# the real deploy port (http://127.0.0.1:8765), so an actual engine running locally made
+# those "engine down" tests reach a LIVE engine and flip their assertions. Pin the whole
+# module to an unroutable endpoint (the discard port) so the file passes identically with
+# or without an engine listening on 8765.
+_HERMETIC_ENGINE_URL = "http://127.0.0.1:9"
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _hermetic_engine_url():
+    mp = pytest.MonkeyPatch()
+    mp.setenv("ORWELL_ENGINE_MCP_URL", _HERMETIC_ENGINE_URL)
+    mp.setenv("BBAI_ENGINE_MCP_URL", _HERMETIC_ENGINE_URL)  # the legacy fallback must not resurrect 8765
+    # ENGINE_URL is read at import time, so the env pin alone can't retarget the already-
+    # imported module — pin the attribute too.
+    mp.setattr(orwell_engine, "ENGINE_URL", _HERMETIC_ENGINE_URL)
+    yield
+    mp.undo()
 
 
 @pytest.fixture
@@ -35,13 +61,28 @@ def client(monkeypatch):
 
 # --- 1. the decision relay covers the engine's full contract ------------------------
 
-# Mirror of src/ports/GameSession.ts SubmitDecisionReq["kind"].
-ENGINE_KINDS = [
-    "nominations", "veto-decision", "comp-intent", "houseguests-choice",
-    "replacement", "eviction-vote", "tie-break", "final-eviction",
-    "goodbye-message", "finale-statement", "finale-answer",
-    "juror-question", "juror-vote",
-]
+def _engine_decision_kinds() -> list:
+    """Parse SubmitDecisionReq["kind"] out of the engine's TS port — the c13 cross-language
+    manifest pattern (T19). The relay's contract comes FROM src/ports/GameSession.ts, so a
+    new engine decision kind fails this file instead of silently drifting past it (the exact
+    drift class C12 exists to kill — a hand-mirrored list here was that drift waiting)."""
+    with open(os.path.join(REPO, "src", "ports", "GameSession.ts"), encoding="utf-8") as f:
+        ts = f.read()
+    start = ts.index("interface SubmitDecisionReq")
+    kind_start = ts.index("kind:", start)
+    union = ts[kind_start:ts.index(";", kind_start)]
+    kinds = re.findall(r'"([a-z][a-z-]*)"', union)
+    # Sanity: the parse must have found the real union, not an empty/garbled slice.
+    assert len(kinds) >= 10, (
+        f"parsed only {len(kinds)} decision kinds from GameSession.ts — "
+        f"the parser or the port changed shape: {kinds}"
+    )
+    assert len(set(kinds)) == len(kinds), f"duplicate kinds parsed: {kinds}"
+    return kinds
+
+
+# The engine's SubmitDecisionReq["kind"] union, parsed live from src/ports/GameSession.ts.
+ENGINE_KINDS = _engine_decision_kinds()
 
 
 @pytest.mark.parametrize("kind", ENGINE_KINDS)

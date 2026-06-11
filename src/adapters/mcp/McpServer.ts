@@ -1,4 +1,5 @@
 import { toolsFor } from "../../surfaces/tools/registry";
+import { EngineRefusal } from "../../domain/errors";
 import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/registry";
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
@@ -24,6 +25,64 @@ export interface McpDeps {
   session: GameSession;
 }
 
+/**
+ * Per-tool argument shape checks (audit E31/D10/R6): malformed args used to cast blindly into the
+ * adapters and die as 500 "internal error"s deep inside the engine (R6's live repro: a STRING
+ * `witnessSet` was iterated char-by-char — "non-living houseguest: p"). Each check throws a
+ * DELIBERATE `EngineRefusal` naming the offending field, which the HTTP edge maps to a 400.
+ * Checks are minimal required-field/shape guards — the engine's own domain validation (legality,
+ * liveness) stays where it is.
+ */
+const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+function requireShape(name: string, args: Record<string, unknown>): void {
+  const refuse = (field: string, want: string): never => {
+    throw new EngineRefusal(`invalid args for ${name}: "${field}" must be ${want}`);
+  };
+  switch (name) {
+    case "recordInteraction":
+      if (!isStr(args["initiator"])) refuse("initiator", "a houseguest id (string)");
+      if (!isStrArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids");
+      if (!isStr(args["content"])) refuse("content", "a non-empty string");
+      if (args["kind"] !== undefined && typeof args["kind"] !== "string") refuse("kind", "a string when present");
+      if (args["toward"] !== undefined && !isStrArray(args["toward"])) refuse("toward", "an array of houseguest ids when present");
+      return;
+    case "surfaceInformationTo": {
+      if (!isStr(args["entity"])) refuse("entity", "an entity id (string)");
+      const fact = args["fact"];
+      if (typeof fact !== "object" || fact === null || !isStr((fact as Record<string, unknown>)["content"])) {
+        refuse("fact.content", "a non-empty string");
+      }
+      if (!isStr(args["pathway"])) refuse("pathway", "a pathway string");
+      return;
+    }
+    case "diaryRoom":
+      if (!isStr(args["entry"])) refuse("entry", "a non-empty string");
+      return;
+    case "submitDecision":
+      if (!isStr(args["kind"])) refuse("kind", "a decision kind (string)");
+      if (args["choice"] !== undefined && !isStrArray(args["choice"])) refuse("choice", "an array of houseguest ids when present");
+      return;
+    case "makeDeal":
+      if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
+      if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
+      if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
+      return;
+    case "runCompetition":
+      if (args["type"] !== undefined && typeof args["type"] !== "string") refuse("type", "a string when present");
+      if (args["participantIds"] !== undefined && !isStrArray(args["participantIds"])) {
+        refuse("participantIds", "an array of houseguest ids when present");
+      }
+      return;
+    case "npcVoice":
+      if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
+      return;
+    default:
+      return; // read tools and free-text tools take no required structure
+  }
+}
+
 export class McpServer {
   constructor(private readonly channel: OutwardChannel, private readonly deps: McpDeps) {}
 
@@ -39,6 +98,7 @@ export class McpServer {
     if (!this.allows(name)) {
       throw new Error(`tool "${name}" is not available on channel "${this.channel}"`);
     }
+    requireShape(name, args); // E31: deliberate 400s with field names, never a 500 from a blind cast
     switch (name) {
       case "createCharacter":
         return this.deps.session.createCharacter(args as unknown as CreateCharacterReq);

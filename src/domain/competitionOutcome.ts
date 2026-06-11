@@ -67,6 +67,22 @@ export function resolveCompetition(
   /** Tunable temperature/outcome constants (0028); defaults to the single module. */
   constants: TemperatureConstants = TEMPERATURE_CONSTANTS,
 ): CompetitionResult {
+  // Audit C5: fail LOUDLY on malformed fields. An empty field used to die with a bare
+  // TypeError, and a NaN stat silently crowned competitors[0] (every NaN comparison is
+  // false, so the initial candidate never lost) — an anti-sycophancy hole: a data bug
+  // could quietly fix a competition. Outcomes are earned; malformed input is a refusal.
+  if (competitors.length === 0) throw new Error("resolveCompetition: empty competitor field");
+  for (const c of competitors) {
+    for (const key of ["physical", "mental", "social"] as const) {
+      if (!Number.isFinite(c.stats[key])) {
+        throw new Error(`resolveCompetition: non-finite ${key} stat for a competitor`);
+      }
+    }
+    if (c.emotionalState !== undefined && !Number.isFinite(c.emotionalState)) {
+      throw new Error("resolveCompetition: non-finite emotionalState for a competitor");
+    }
+  }
+
   const stat = RELEVANT[type];
   const w = constants.outcome;
   const span = constants.bound.max - constants.bound.min;

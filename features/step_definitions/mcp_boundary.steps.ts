@@ -27,13 +27,21 @@ function sampleArgs(name: string): Record<string, unknown> {
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "a surfaced fact" }, pathway: "told-by:npc:1" };
     case "inspectNonVaultState": return { query: "all" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
+    case "npcVoice": return { id: npc(1) };
     default: return {};
   }
 }
 
 async function callEveryTool(server: McpServer): Promise<string> {
   const out: string[] = [];
-  for (const t of server.listTools()) out.push(JSON.stringify(await server.callTool(t.name, sampleArgs(t.name))));
+  for (const t of server.listTools()) {
+    // E31 default-deny arg shapes: a typed refusal is a legitimate, Vault-free outcome — the
+    // sentinel sweep then checks the refusal MESSAGE too (a leaky error would still fail).
+    out.push(await server.callTool(t.name, sampleArgs(t.name)).then(
+      (r) => JSON.stringify(r),
+      (e: unknown) => String((e as Error).message ?? e),
+    ));
+  }
   return out.join("\n");
 }
 

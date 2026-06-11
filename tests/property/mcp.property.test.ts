@@ -21,6 +21,7 @@ function sampleArgs(name: string): Record<string, unknown> {
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
     case "inspectNonVaultState": return { query: "all" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
+    case "npcVoice": return { id: npc(1) };
     default: return {};
   }
 }
@@ -37,7 +38,12 @@ describe("MCP tool boundary — every tool is Vault-free across seeds", () => {
         const server = new McpServer(channel, deps);
         expect(server.listTools()).toEqual(toolsFor(channel));
         for (const t of server.listTools()) {
-          const blob = JSON.stringify(await server.callTool(t.name, sampleArgs(t.name)));
+          // E31 default-deny arg shapes: a typed refusal is a legitimate, Vault-free outcome —
+          // the property then asserts the refusal MESSAGE itself carries no sentinel either.
+          const blob = await server.callTool(t.name, sampleArgs(t.name)).then(
+            (out) => JSON.stringify(out),
+            (err: unknown) => String((err as Error).message ?? err),
+          );
           for (const s of sb.sentinels) {
             expect(blob.includes(s), `seed ${seed} tool ${t.name} leaked ${s}`).toBe(false);
           }

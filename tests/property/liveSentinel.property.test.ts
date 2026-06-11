@@ -99,7 +99,10 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         const adv = (await player.callTool("advanceGame", {})) as AdvanceView;
         swept.add("advanceGame");
         for (const s of sentinels) expect(JSON.stringify(adv).includes(s), `seed ${seed}: advanceGame leaked ${s}`).toBe(false);
-        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor", "finaleView"]) await sweep(player, name);
+        // E19: the per-beat re-sweep includes the knowledge-bearing reads (npcVoice/socialRead/
+        // whereabouts/seasonRecap) — they were previously swept only at week 1, before the house
+        // evolved any hidden history worth leaking.
+        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor", "finaleView", "npcVoice", "socialRead", "whereabouts", "seasonRecap"]) await sweep(player, name);
 
         // Finale projection lock (no pre-reveal tally): while the finale stages, no winner crosses, and
         // the precomputed votes / script are never serialized — only the reveals shown so far.
@@ -123,6 +126,30 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         finished = adv.finished;
       }
       expect(finished, `seed ${seed}: the game reached a winner`).toBe(true);
+
+      // E19: one FULL post-finish sweep — every tool against the terminal house, where a season's
+      // worth of hidden history exists to leak. Exclusions are principled, not convenient:
+      //  - seasonRetrospective is the SANCTIONED post-season unsealing (0048) — it returns hidden
+      //    content by design once the game is finished;
+      //  - advanceGame/submitDecision were swept at every single beat above;
+      //  - createCharacter/updateCasting are the start-of-game doors (swept pre-game) — calling
+      //    them again would restart the sandbox and void the terminal state under sweep.
+      const POST_FINISH_EXCLUDED = new Set(["seasonRetrospective", "advanceGame", "submitDecision", "createCharacter", "updateCasting"]);
+      // Action tools may deliberately REFUSE on a terminal house (e.g. recordInteraction naming an
+      // evicted houseguest) — a refusal is a legitimate outcome, but its error text is still an
+      // outward surface: it must be sentinel-free too.
+      const sweepOrRefuse = async (server: McpServer, name: string): Promise<void> => {
+        swept.add(name);
+        let payload: string;
+        try {
+          payload = JSON.stringify(await server.callTool(name, args(name)));
+        } catch (err) {
+          payload = String(err instanceof Error ? err.message : err); // the refusal text is the outward surface
+        }
+        for (const s of sentinels) expect(payload.includes(s), `seed ${seed}: post-finish ${name} leaked ${s}`).toBe(false);
+      };
+      for (const t of toolsFor("player")) if (!POST_FINISH_EXCLUDED.has(t.name)) await sweepOrRefuse(player, t.name);
+      for (const t of toolsFor("admin/God Mode")) await sweepOrRefuse(admin, t.name);
 
       // Coverage: every player AND admin tool name was actually swept against the live graph.
       const allNames = [...toolsFor("player"), ...toolsFor("admin/God Mode")].map((t) => t.name);

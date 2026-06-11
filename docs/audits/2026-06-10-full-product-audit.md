@@ -219,12 +219,12 @@ File references are to `main` @ 87687c0.
   the GM can "remember" prior seasons and OOC chats, a parallel memory rivaling the stores
   ("memory is the store *recalled*, never the chat *remembered*"). *Fix:* move to
   `GAME_TOOL_OPTIONAL`.
-- **E18 [MED · Test] The dependency-cruiser Vault rule is an enumerated denylist.**
+- **E18 [MED · Test] ✅ PR #221 — The dependency-cruiser Vault rule is an enumerated denylist.**
   `.dependency-cruiser.cjs:19–25` misses `characterFactory.ts` (generates `hiddenElements`),
   `emotionalArc`, `consequence`, `deals`, `decisions`, `jury`, `blocs`, `presence`,
   `competitionLibrary`. *Fix:* default-deny `OUTWARD → ^src/engine/` (+ engine/inmemory/
   embedding adapters, non-outward composition) with a narrow allowlist; lands green today.
-- **E19 [MED · Test] The live sentinel sweep covers most tools only at week 1.**
+- **E19 [MED · Test] ✅ PR #221 — The live sentinel sweep covers most tools only at week 1.**
   `liveSentinel.property.test.ts:94/:103` — per-beat re-sweep is 7 tools; `npcVoice`,
   `whereabouts`, `socialRead`, `seasonRecap`, goodbye/juror surfaces are never swept after the
   house evolves. *Fix:* add cheap reads to the per-beat list + one full post-finish sweep
@@ -267,12 +267,12 @@ File references are to `main` @ 87687c0.
 
 ### Theme 4 — Cross-user isolation & edge security
 
-- **E27 [HIGH · Security] One shared token grants any-user impersonation *and* God Mode.**
+- **E27 [HIGH · Security] ✅ PR #221 — One shared token grants any-user impersonation *and* God Mode.**
   `HttpMcpServer.ts:112–119` — the same bearer authorizes `/player/call` and `/admin/call` for
   any `x-orwell-user`; the installer writes a single `ORWELL_ENGINE_TOKEN`. *Fix:* separate
   `ORWELL_ENGINE_ADMIN_TOKEN` required on `/admin/*`; optionally HMAC the user id under the
   secret; `crypto.timingSafeEqual` for compares. *Test:* player token on `/admin/call` ⇒ 401.
-- **E28 [MED · Security] The B34 anti-spray gate is bypassable and sandbox-minting is
+- **E28 [MED · Security] ✅ PR #221 — The B34 anti-spray gate is bypassable and sandbox-minting is
   unbounded.** `GET /:channel/tools` resolves a sandbox for any asserted user
   (`HttpMcpServer.ts:122–124` → `registry.sandboxFor`), making them "known" for later POSTs;
   `SANDBOX_CREATING_TOOLS` lets `updateCasting` mint sandbox + durable disk file per sprayed id.
@@ -284,11 +284,11 @@ File references are to `main` @ 87687c0.
   `effective_user`) — two tokens from different owners share one game: a direct cross-user
   isolation break. *Fix:* resolve `api_token_owner` in game routes (or 403 bearer callers on
   `/api/orwell/*`). *Test:* two owners' tokens ⇒ two distinct `X-Orwell-User` values.
-- **E30 [MED · Bug] Unhandled-rejection crash window in the per-user HTTP queue.**
+- **E30 [MED · Bug] ✅ PR #221 — Unhandled-rejection crash window in the per-user HTTP queue.**
   `HttpMcpServer.ts:86–92` — a rejecting job on a drained queue (e.g. `send` on a
   timeout-destroyed socket) has no `.catch` ⇒ process exit on modern Node. *Fix:* wrap job
   bodies; `tail.catch(()=>{})` before `finally`.
-- **E31 [MED · Bug] Malformed tool args are 500s** (= **D10**, endorsed) — plus
+- **E31 [MED · Bug] ✅ PR #221 — Malformed tool args are 500s** (= **D10**, endorsed) — plus
   `McpServer.ts:43–101` casts blindly; add per-tool required-field/shape checks returning
   deliberate 400s with field names.
 - **E32 [LOW · Ops] ✅ PR #218 — Edge hygiene cluster.** Installer never sets `ORWELL_ENGINE_MULTIUSER=1`
@@ -644,10 +644,10 @@ consequence.*
   feature. *Fix:* re-point the steps at a registry-built sandbox (the
   `live_progression.steps.ts:151–168` restart pattern is reusable); fold through the sandbox's
   own session before sweeping.
-- **E77 [MED · Test] The `no-circular` dep-cruiser rule is enforced nowhere**
+- **E77 [MED · Test] ✅ PR #221 — The `no-circular` dep-cruiser rule is enforced nowhere**
   (`tests/support/architecture.ts:43` filters to the Vault rule; `npm test` and CI never run
   `test:arch`). *Fix:* assert all forbidden rules empty, or add the CLI step to CI.
-- **E78 [MED · Test] The "no secrets committed" guard scans almost nothing**
+- **E78 [MED · Test] ✅ PR #221 — The "no secrets committed" guard scans almost nothing**
   (`secrets.test.ts:18–23`: `deploy/` + root configs only — not `src/`, not the vendored
   `frontend/`). *Fix:* scan all `git ls-files` minus lockfiles/binaries.
 - **E79 [LOW · Test] `transportHardening.test.ts` vacuous/racy spots.** `:42` passes with zero
@@ -962,14 +962,14 @@ traceability; E-batch cross-references inline.
 - **C3 [HIGH · confirmed] ✅ PR #212 —** E9's `overheard:` hole verified by execution ("totally fabricated
   secret" surfaced as knowledge against an unrelated event id). The legitimate engine caller
   always passes a strict content fragment — make the anchor require it.
-- **C4 [MED · Bug]** `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
+- **C4 [MED · Bug]** ✅ PR #221 — `isSuperset` compares identity only (`saveState.ts:84–103`): events by id
   (content/witness truncation passes), knowledge by id, `emotionalHistory`/
   `relationshipBeliefs` by length, `characters` never compared, and `toGameState` drops
   suspicions + the Vault entirely — the fail-closed 0031 checkpoint cannot see whole classes
   of degradation. *Fix:* field-equality on shared ids, prefix-compare histories, byte-compare
   characters, add suspicion/vault terms to `counts()`. *Test:* property — any single
   mutated/dropped persisted item ⇒ `degradation` fault.
-- **C5 [MED · Bug]** NaN handling: a NaN stat makes `resolveCompetition` silently crown
+- **C5 [MED · Bug]** ✅ PR #221 — NaN handling: a NaN stat makes `resolveCompetition` silently crown
   `competitors[0]` (`competitionOutcome.ts:79–92`); empty field throws TypeError; `serialize`
   silently converts NaN → null ("lossless" becomes a type lie). *Fix:* finiteness asserts +
   empty-field throw; fast-check property.

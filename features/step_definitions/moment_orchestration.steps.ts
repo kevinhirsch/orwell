@@ -126,13 +126,15 @@ When("the system prompt is built for every moment", function (this: BbWorld) {
   this.lastOutput = ALL_MOMENTS.map((m) => buildSystemPrompt(m, view)).join("\n----\n");
 });
 
-Then("no hidden attribute appears in it", function (this: BbWorld) {
+// T16: ONE shared sweep — these two Thens had byte-identical bodies (god_mode.steps.ts
+// carried the same duplicate pair over `lastView`; both files are deduplicated locally).
+function sweepLastOutputForHiddenContent(this: BbWorld): void {
   assertNoneAppear(this.lastOutput, this.sandbox!.hiddenContents);
-});
+}
 
-Then("no off-screen event appears in it", function (this: BbWorld) {
-  assertNoneAppear(this.lastOutput, this.sandbox!.hiddenContents);
-});
+Then("no hidden attribute appears in it", sweepLastOutputForHiddenContent);
+
+Then("no off-screen event appears in it", sweepLastOutputForHiddenContent);
 
 Then("no Vault sentinel value appears in it", function (this: BbWorld) {
   assertNoSentinels(this.lastOutput, this.sandbox!.sentinels);

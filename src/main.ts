@@ -33,16 +33,19 @@ const runtime = composeRuntime({ durable: true });
 // any of these can be turned on for an exposed / multi-user deployment:
 //   ORWELL_ENGINE_HOST      bind address (default 127.0.0.1 — loopback, matching docs/INSTALL.md)
 //   ORWELL_ENGINE_TOKEN     shared secret required on every tool route (401 on mismatch)
+//   ORWELL_ENGINE_ADMIN_TOKEN  SEPARATE secret demanded on /admin/* (audit E27) — the player
+//                           token must not grant God Mode; admin's accepted on player routes
 //   ORWELL_ENGINE_MULTIUSER reject a missing x-orwell-user header (400) instead of routing to "default"
 const host = process.env["ORWELL_ENGINE_HOST"] ?? process.env["BBAI_ENGINE_HOST"] ?? "127.0.0.1";
 const token = process.env["ORWELL_ENGINE_TOKEN"] || process.env["BBAI_ENGINE_TOKEN"] || undefined;
+const adminToken = process.env["ORWELL_ENGINE_ADMIN_TOKEN"] || undefined;
 const requireUser = /^(1|true|yes|on)$/i.test(process.env["ORWELL_ENGINE_MULTIUSER"] ?? "");
 // A user is "known" once they have a live sandbox or a durable save — so an anonymous caller can't
 // spray ids to mint unlimited sandboxes (only createCharacter may start a fresh one).
 const knownUser = (user: string): boolean => runtime.knownUser(user);
 
 runtime.start();
-startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, requireUser, knownUser }, host);
+startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, adminToken, requireUser, knownUser }, host);
 // Tear the watcher down cleanly on shutdown (its interval is unref'd, so this is belt-and-suspenders).
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {

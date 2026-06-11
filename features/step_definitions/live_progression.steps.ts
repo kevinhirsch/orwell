@@ -206,6 +206,13 @@ Then("no advance or status output carries a Vault sentinel value", function (thi
 
 // --- S6: deterministic ---------------------------------------------------------
 
+/** T12: the FULL trails of the two same-seed runs — two diverged games typically still agree
+ *  on the final week/phase after 60 advances, so the Then compares the whole journey. */
+let liveTrailA: string[] = [];
+let liveTrailB: string[] = [];
+let liveEventsA: string[] = [];
+let liveEventsB: string[] = [];
+
 Given("two live games started from the same seed", async function (this: BbWorld) {
   const a = newLive("a", 2); const b = newLive("b", 2);
   this.registry = a.reg; this.registry2 = b.reg; this.livePlayer = a.player;
@@ -214,21 +221,38 @@ Given("two live games started from the same seed", async function (this: BbWorld
 });
 
 When("the same advances and decisions are applied to each", async function (this: BbWorld) {
-  const drive = async (p: Player) => {
+  const drive = async (p: Player, reg: GameSessionRegistry, user: string) => {
+    const trail: string[] = [];
     for (let i = 0; i < 60; i++) {
       const v = await adv(p);
+      // The per-advance trail: position + the beat the engine resolved + the decision it owed.
+      trail.push(
+        `${v.status.week}|${v.status.phase}|${v.event?.beat ?? ""}|${v.event?.content ?? ""}|${v.pending?.kind ?? ""}`,
+      );
       if (v.finished) break;
       if (v.pending) await resolveLegally(p, v.pending);
     }
-    return (await p.callTool("gameStatus", {})) as { week: number; phase: string };
+    // The full recorded event trail (kind + day-counter + visibility + content) — every event
+    // the run committed to its store, hidden off-screen life included.
+    const events = reg.sandboxFor(user).engine.events.query()
+      .map((e) => `${e.type}:${e.ts}:${e.hidden}:${e.initiator}:${e.content}`);
+    return { status: (await p.callTool("gameStatus", {})) as { week: number; phase: string }, trail, events };
   };
-  const a = await drive(this.livePlayer!);
-  const b = await drive(this.registry2!.resolver()("player", "b") as Player);
-  this.liveWeekA = a.week; this.livePhaseA = a.phase;
-  this.liveWeekB = b.week; this.livePhaseB = b.phase;
+  const a = await drive(this.livePlayer!, this.registry!, "a");
+  const b = await drive(this.registry2!.resolver()("player", "b") as Player, this.registry2!, "b");
+  this.liveWeekA = a.status.week; this.livePhaseA = a.status.phase;
+  this.liveWeekB = b.status.week; this.livePhaseB = b.status.phase;
+  liveTrailA = a.trail; liveTrailB = b.trail;
+  liveEventsA = a.events; liveEventsB = b.events;
 });
 
 Then("their resulting week and phase are identical", function (this: BbWorld) {
   assert.equal(this.liveWeekB, this.liveWeekA);
   assert.equal(this.livePhaseB, this.livePhaseA);
+  // T12: the final position agreeing is necessary but weak — the FULL advance-by-advance trail
+  // and the FULL committed event record must match (the strategic_decisions trail pattern).
+  assert.ok(liveTrailA.length >= 50, "the runs genuinely advanced (a long trail to compare)");
+  assert.deepEqual(liveTrailB, liveTrailA, "the two runs took the identical advance-by-advance journey");
+  assert.ok(liveEventsA.length > 0, "the runs recorded events to compare");
+  assert.deepEqual(liveEventsB, liveEventsA, "the two runs committed identical event records");
 });

@@ -11,7 +11,6 @@ import { buildSandbox } from "../../tests/support/sandbox";
 const PARTNER = npc(1);
 const SOMEONE_ELSE = npc(2);
 const NPC_A = npc(3);
-const NPC_B = npc(4);
 
 function sink(w: BbWorld) {
   w.dealJuryDemerits = [];
@@ -135,29 +134,52 @@ Then("a witnessed reveal event enters the wronged houseguest's knowledge", funct
 
 // --- Scenario: NPC↔NPC deals are Vault-held and reach the player only by rumor -
 
+// T15: the two off-screen deal-makers — the SAME parties the Vault fixture's `addNpcDeal`
+// pact names, so the tracked ledger deal and the sentinel-bearing Vault datum are one story.
+const OFFSCREEN_A = npc(6);
+const OFFSCREEN_B = npc(7);
+
 Given("two houseguests make a deal off-screen that the player does not witness", function (this: BbWorld) {
   // The off-screen society makes NPC↔NPC deals in the HIDDEN layer (the Vault), with a sentinel.
   this.sandbox = buildSandbox(39);
-  this.dealVault = this.sandbox.addNpcDeal(); // an NPC↔NPC deal in the Vault, sentinel-bearing
+  this.dealVault = this.sandbox.addNpcDeal(); // the same pact, Vault-held + sentinel-bearing
   this.ledger = new DealLedger();
-  this.madeDeal = this.ledger.make([NPC_A, NPC_B], "final-two", "off-screen pact");
+  this.madeDeal = this.ledger.make([OFFSCREEN_A, OFFSCREEN_B], "final-two", "off-screen pact");
 });
 
 When("one of them breaks it off-screen", function (this: BbWorld) {
   // The break is adjudicated in the hidden layer; no player witness, so no player-knowledge event.
-  this.ledger!.reconcile({ actor: NPC_A, kind: "vote-evict", targets: [NPC_B] });
+  const { broken } = this.ledger!.reconcile({ actor: OFFSCREEN_A, kind: "vote-evict", targets: [OFFSCREEN_B] });
+  assert.equal(broken[0]?.id, this.madeDeal!.id, "the ENGINE adjudicated this very deal broken");
 });
 
 Then("the deal and its break stay hidden from the player by default", function (this: BbWorld) {
   // The NPC↔NPC deal is not among the player's own deals.
   assert.equal(this.ledger!.forParty(PLAYER).length, 0);
   assert.ok(this.ledger!.npcOnly().length >= 1, "the deal lives in the NPC-only (hidden) set");
+  assert.equal(this.madeDeal!.status, "broken"); // broken — and STILL not the player's to see
 });
 
 Then("the player may only learn of it as a distorted rumor along an in-game pathway", function (this: BbWorld) {
-  // The only route to the player is an explicit surfacing pathway (gossip/diffusion), never the ledger.
-  const rumor = this.sandbox.surfaceHiddenFactToPlayer();
-  assert.ok(rumor && typeof rumor.content === "string" && rumor.content.length > 0);
+  // T15: the rumor must be ABOUT this broken deal — derived from its actual parties and kind —
+  // and reach the player only through the real anchored knowledge seam, never the ledger.
+  const deal = this.madeDeal!;
+  const [breaker, wronged] = deal.parties;
+  const knowledge = this.sandbox.engine.knowledge;
+  // The wronged party holds the truth of the break (they lived it, off-screen)...
+  const truth = `${breaker} turned on ${wronged} and broke their hidden ${deal.kind} pact`;
+  knowledge.seedBelief(wronged, { content: truth, factId: `deal-break:${deal.id}` }, "witnessed");
+  // ...and the player learns it only as that party's retelling along a told-by pathway.
+  const surfaced = knowledge.surfaceInformationTo(PLAYER, { content: truth }, `told-by:${wronged}`);
+  assert.ok(surfaced, "the anchored in-game pathway surfaced the rumor as player knowledge");
+  const known = knowledge.knownTo(PLAYER).find((k) => k.content === surfaced!.content);
+  assert.ok(known, "the rumor entered the player's knowledge state");
+  // The linkage the old step never made: the surfaced rumor names BOTH parties of the broken
+  // deal and its kind — not canned fixture gossip with `length > 0`.
+  assert.ok(known!.content.includes(breaker), "the rumor names the deal-breaker");
+  assert.ok(known!.content.includes(wronged), "the rumor names the wronged party");
+  assert.ok(known!.content.includes(deal.kind), "the rumor carries the broken pact's kind");
+  assert.ok(known!.pathway.startsWith("told-by:"), "the knowledge arrived along a traceable in-game pathway");
 });
 
 Then("no Vault sentinel value appears on any player surface", function (this: BbWorld) {

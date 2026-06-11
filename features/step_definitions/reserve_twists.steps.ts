@@ -4,11 +4,11 @@ import type { BbWorld } from "../support/world";
 import { buildSandbox } from "../../tests/support/sandbox";
 import {
   loadReserveTwists,
-  maybeFireTwist,
   firedTwists,
   isDramaticBeat,
   RESERVE_POOL,
 } from "../../src/engine/reserveTwists";
+import type { TwistEvent } from "../../src/engine/reserveTwists";
 import { selectableReplacements, evictionVoters } from "../../src/domain/eligibility";
 import type { WeekState } from "../../src/domain/eligibility";
 import { playSeason } from "../../src/engine/calibration";
@@ -78,60 +78,99 @@ Then("the admin cannot see when it will fire", function (this: BbWorld) {
 
 // --- Fires rarely & deterministically -----------------------------------------
 
+// T8: UN-FILTERED seed loops — the old step searched for a seed where exactly one twist fired,
+// then asserted "≤ the enabled count" against that pre-filtered pick (assuming the conclusion).
+// Now EVERY seed in the range is played out for every admin-enabled count, and the invariants
+// must hold across all of them.
+const TWIST_SEED_RANGE = 60;
+const TWIST_ENABLED_COUNTS = [1, 2, 3] as const;
+let twistFiresBy: Map<string, TwistEvent[]> | undefined;
+
 When("the game is played out under a fixed seed", function (this: BbWorld) {
-  // Pick the first seed that actually loads + fires a twist, so the scenario exercises a
-  // real fire while staying fully deterministic (reproducible by seed).
-  for (let s = 1; s <= 50; s++) {
-    const fires = firedTwists(loadReserveTwists(1, new SeededRandom(s)));
-    if (fires.length === 1) {
-      this.seed = s;
-      this.fires = fires;
-      break;
+  twistFiresBy = new Map();
+  for (const count of TWIST_ENABLED_COUNTS) {
+    for (let s = 1; s <= TWIST_SEED_RANGE; s++) {
+      twistFiresBy.set(`${count}:${s}`, firedTwists(loadReserveTwists(count, new SeededRandom(s))));
     }
   }
-  assert.ok(this.fires && this.fires.length === 1, "expected a firing seed in range");
 });
 
 Then("at most the admin-enabled count of twists fires", function (this: BbWorld) {
-  assert.ok(this.fires!.length <= 1, "no more than the enabled count may fire");
+  for (const [key, fires] of twistFiresBy!) {
+    const count = Number(key.split(":")[0]);
+    assert.ok(fires.length <= count, `enabled count ${count}, seed ${key.split(":")[1]}: ${fires.length} twists fired`);
+  }
+  // Not vacuous, and rare by construction: across the swept seeds some genuinely fire, some none.
+  const firedCounts = [...twistFiresBy!.values()].map((f) => f.length);
+  assert.ok(firedCounts.some((n) => n > 0), "some seed in the range actually fires a twist");
+  assert.ok(firedCounts.some((n) => n === 0), "some seed in the range fires none (rare by construction)");
 });
 
 Then("each fires at a dramatic beat", function (this: BbWorld) {
-  for (const f of this.fires!) assert.ok(isDramaticBeat(f.beat), `beat ${f.beat} is not dramatic`);
+  for (const [key, fires] of twistFiresBy!) {
+    for (const f of fires) assert.ok(isDramaticBeat(f.beat), `${key}: beat ${f.beat} is not dramatic`);
+  }
 });
 
 Then("the same seed reproduces the same twist and timing", function (this: BbWorld) {
-  const again = firedTwists(loadReserveTwists(1, new SeededRandom(this.seed!)));
-  assert.deepEqual(again, this.fires);
+  for (const [key, fires] of twistFiresBy!) {
+    const [count, s] = key.split(":").map(Number);
+    assert.deepEqual(
+      firedTwists(loadReserveTwists(count!, new SeededRandom(s!))),
+      fires,
+      `seed ${s} (count ${count}) must reproduce its twists and timing`,
+    );
+  }
 });
 
 // --- Firing makes it a witnessed event ----------------------------------------
 
+// T8: the old step recorded the "reveal" event ITSELF and then asserted it existed. Now the fire
+// and its reveal are the ENGINE's own doing — a sealed twist is restored into a LIVE game and the
+// real loop plays until IT fires the twist and records the witnessed reveal (a second live
+// twist-kind trace alongside the B53 season trace below). The step records nothing.
+let twistPreFireSightings = -1;
+
 When("a reserve twist fires", function (this: BbWorld) {
-  this.visibleBefore = this.sandbox!.engine.events.query({ witnessedBy: PLAYER }).length;
-  const fire = maybeFireTwist(5, this.reserve!); // the loaded twist fires at its sealed beat
-  assert.ok(fire, "the loaded twist fires at its sealed beat");
-  this.twistEventId = "evt:twist-fire";
-  // Reveal-as-event (0002/0018): a dramatic, WITNESSED house event the narrator can voice.
-  this.sandbox!.engine.events.record({
-    id: this.twistEventId,
-    ts: 999,
-    type: "house-event",
-    initiator: npc(1),
-    witnessSet: [PLAYER, npc(1)],
-    hidden: false,
-    content: `A production twist shakes the house — ${fire!.kind}.`,
-  });
+  const reg = new GameSessionRegistry();
+  const user = `twist-fire${twistUsers++}`;
+  const sb = reg.sandboxFor(user);
+  sb.session.createCharacter({ playerName: "The Player", seed: 7 });
+  const core = sb.session.snapshot();
+  core.live!.reserve = [{ kind: "double-eviction", fireAtBeat: TWIST_WEEK }];
+  sb.session.restore(core);
+  this.twistSandbox = sb;
+
+  const witnessedReveals = (): number =>
+    sb.engine.events.query({ witnessedBy: PLAYER }).filter((e) => /DOUBLE EVICTION/i.test(e.content)).length;
+
+  twistPreFireSightings = 0;
+  let fired = false;
+  for (let i = 0; i < 4000 && !fired; i++) {
+    twistPreFireSightings += witnessedReveals(); // sweep the player's record on EVERY pre-fire beat
+    const v = sb.session.advanceGame();
+    if (v.event?.beat === "twist-reveal") { fired = true; break; }
+    if (v.pending) {
+      const sv = resolveLive(sb.session, v.pending);
+      if (sv.event?.beat === "twist-reveal") { fired = true; break; }
+    }
+    if (v.finished) break;
+  }
+  assert.ok(fired, "the loaded twist fires at its sealed beat");
 });
 
 Then("it becomes a witnessed in-game event", function (this: BbWorld) {
-  const witnessed = this.sandbox!.engine.events.query({ witnessedBy: PLAYER });
-  assert.ok(witnessed.some((e) => e.id === this.twistEventId), "the fired twist is now witnessed");
-  assert.equal(witnessed.length, this.visibleBefore! + 1);
+  // The ENGINE recorded the reveal as a player-witnessed event — the step wrote nothing.
+  const reveal = this.twistSandbox!.engine.events
+    .query({ witnessedBy: PLAYER })
+    .find((e) => /DOUBLE EVICTION/i.test(e.content));
+  assert.ok(reveal, "the engine recorded the fired twist as a player-witnessed event");
+  assert.equal(reveal!.hidden, false);
+  this.twistEventId = reveal!.id;
 });
 
 Then("the narrator can voice it", function (this: BbWorld) {
-  const ctx = this.sandbox!.player.assembleNarrationContext("scene");
+  const ctx = this.twistSandbox!.player.assembleNarrationContext("scene");
   assert.ok(
     ctx.visibleEvents.some((e) => e.id === this.twistEventId),
     "the fired twist is in the narrator's Vault-free visible context",
@@ -139,9 +178,13 @@ Then("the narrator can voice it", function (this: BbWorld) {
 });
 
 Then("only then is it known", function (this: BbWorld) {
-  // It was not known before firing; the fire is exactly what introduced it to the player.
-  const now = this.sandbox!.engine.events.query({ witnessedBy: PLAYER }).length;
-  assert.equal(now, this.visibleBefore! + 1, "the twist became known exactly upon firing");
+  // The drive swept the player's witnessed record before EVERY pre-fire beat: zero sightings
+  // until the fire, exactly one after — the fire is what introduced it to the player.
+  assert.equal(twistPreFireSightings, 0, "no witnessed trace of the twist existed before it fired");
+  const now = this.twistSandbox!.engine.events
+    .query({ witnessedBy: PLAYER })
+    .filter((e) => /DOUBLE EVICTION/i.test(e.content)).length;
+  assert.equal(now, 1, "the twist became known exactly upon firing");
 });
 
 // --- Format-preserving (never breaks hard rules or the core arc) ---------------
