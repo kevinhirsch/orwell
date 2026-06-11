@@ -511,6 +511,34 @@ def main() -> int:
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
 
+            # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
+            # measures the SAME computed padding as the New Chat / Search rows (the
+            # .list-item standard), and no collapse chevron renders on a section with
+            # <=1 visible child — under the game build the Tools children are all
+            # trimmed away, so its chevron was a button that visibly did nothing.
+            g3 = page.evaluate("""() => {
+              const vis = el => el.getClientRects().length > 0;
+              const buttons = [...document.querySelectorAll(
+                '#sidebar .list-item, #sidebar .section-header-flex, ' +
+                '#sidebar .user-bar-btn, #sidebar .user-bar-left'
+              )].filter(vis);
+              const pads = [...new Set(buttons.map(el => {
+                const s = getComputedStyle(el);
+                return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft].join(' ');
+              }))];
+              const deadChevrons = [...document.querySelectorAll('#sidebar .section')]
+                .filter(sec => {
+                  const kids = [...sec.children].filter(c => !c.classList.contains('section-header-flex'));
+                  const shown = kids.filter(k => getComputedStyle(k).display !== 'none' && vis(k));
+                  return shown.length <= 1 && [...sec.querySelectorAll('.section-collapse-btn')].some(vis);
+                }).map(sec => sec.id || '(anonymous section)');
+              return { buttons: buttons.length, pads, deadChevrons };
+            }""")
+            check(g3.get("buttons", 0) >= 4 and g3.get("pads") == ["8px 8px 8px 8px"],
+                  f"G3: every visible sidebar button measures the one 8px padding standard ({g3})")
+            check(g3.get("deadChevrons") == [],
+                  f"G3: no collapse chevron renders on a <=1-visible-child section ({g3.get('deadChevrons')})")
+
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
