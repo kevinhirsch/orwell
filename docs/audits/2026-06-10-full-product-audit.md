@@ -298,7 +298,7 @@ File references are to `main` @ 87687c0.
 
 ### Theme 5 — Game design: calibration & player agency
 
-- **E33 [CRIT · Bug] The player never reaches the jury** (= **D4**, endorsed with the round-4
+- **E33 [CRIT · Bug] ✅ PR #220 — The player never reaches the jury** (= **D4**, endorsed with the round-4
   evidence: 62/62 passive seeded seasons evicted pre-jury; p ≈ (5/14)⁶² under fair play).
   Anti-sycophancy ("never protect the player") cannot mean "the player always loses pre-jury" —
   jury, finale, juror's seat, and eviction night are unreachable content. *Fix:* calibration
