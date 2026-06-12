@@ -20,6 +20,8 @@ export interface PublicAppearanceFacets {
   presentation: string;
 }
 
+import { EXPRESSION_VARIANTS, FRAMING_VARIANTS, BACKDROP_VARIANTS } from "./imageConstants";
+
 /** A generated portrait prompt ready to hand to an image provider. */
 export interface PortraitPromptResult {
   houseguestId: string;
@@ -28,9 +30,29 @@ export interface PortraitPromptResult {
 }
 
 /**
+ * FNV-1a 32-bit over a string — the stable per-subject shot key (G24). Pure and
+ * dependency-free: the same (houseguestId, season anchor) pair always yields the
+ * same hash, so a houseguest re-renders as the same shot across restarts and
+ * backfills, while different houseguests land on different picks.
+ */
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
  * Build a photorealistic portrait prompt for one houseguest using ONLY their
  * public appearance facets and the season-level style anchor. The output is
  * safe to send to any image provider — it carries no hidden game state.
+ *
+ * G24: expression, framing, and backdrop vary PER SUBJECT (hash-seeded off the
+ * houseguest id + the season anchor) instead of every portrait sharing one
+ * identical pose/crop — the cast stops looking like a grid of siblings while
+ * the season anchor keeps the set cohesive.
  *
  * The name is included in the prompt purely for identification of the subject
  * in the output; it is a public fact (the player knows every houseguest's name).
@@ -42,13 +64,18 @@ export function buildPortraitPrompt(
   styleAnchor: string,
 ): PortraitPromptResult {
   const { appearance, age, presentation } = facets;
+  const shot = fnv1a(`${houseguestId}|${styleAnchor}`);
+  const expression = EXPRESSION_VARIANTS[shot % EXPRESSION_VARIANTS.length]!;
+  const framing = FRAMING_VARIANTS[(shot >>> 8) % FRAMING_VARIANTS.length]!;
+  const backdrop = BACKDROP_VARIANTS[(shot >>> 16) % BACKDROP_VARIANTS.length]!;
   const prompt = [
     styleAnchor,
     `Subject: ${name}, ${age} years old`,
     `Physical appearance: ${appearance}`,
     `Presentation style: ${presentation}`,
-    "Expression: natural, in the moment",
-    "Framing: head-and-shoulders portrait, slightly off-center",
+    `Expression: ${expression}`,
+    `Framing: ${framing}`,
+    `Setting: ${backdrop}`,
   ].join(". ");
 
   return { houseguestId, name, prompt };

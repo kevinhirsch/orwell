@@ -197,16 +197,56 @@ function jittered(bias: { physical: number; mental: number; social: number }, rn
 const OCCUPATIONS = ["nurse", "bartender", "teacher", "athlete", "marketer", "chef", "engineer", "stylist", "realtor", "musician", "firefighter", "student", "barista", "trainer"];
 
 // --- Public appearance generation (0004 amendment): seed-stable, Vault-free facets ---
-const BUILDS = ["athletic", "lanky", "stocky", "willowy", "broad-shouldered", "petite", "average-build"];
-const HAIR = ["close-cropped hair", "long dark hair", "curly hair", "a buzzcut", "shoulder-length hair", "tied-back hair", "wavy hair"];
-const LOOKS = ["a warm smile", "a sharp gaze", "an easy grin", "a guarded expression", "bright eyes", "a confident stance"];
-const PRESENTATION = ["casual and laid-back", "polished and camera-ready", "sporty and energetic", "bohemian", "sharp and put-together", "approachable"];
+// G24: the pools were 7×7×6 short phrases that said nothing about complexion, hair color,
+// or distinguishing features — every unspecified slot fell to the image model's default
+// face and the cast converged. Widened with the axes that most differentiate real faces;
+// every entry is GENDER-NEUTRAL (names are sampled from a mixed-gender corpus with no
+// gender tag, so no facet may assume one). Real BB casts are visibly diverse — complexion
+// is a first-class facet, not an accident of the model's training prior.
+const BUILDS = [
+  "athletic", "lanky", "stocky", "willowy", "broad-shouldered", "petite", "average-build",
+  "compact and muscular", "tall and rangy", "solidly built", "slender", "soft and sturdy",
+];
+const COMPLEXIONS = [
+  "deep brown skin", "rich dark complexion", "warm brown skin", "olive complexion",
+  "golden tan complexion", "light olive skin", "fair freckled skin", "pale complexion",
+  "medium tan skin", "amber-toned complexion", "ebony complexion", "rosy fair skin",
+];
+const HAIR = [
+  "close-cropped black hair", "long dark waves", "tight natural curls", "a platinum-blond bob",
+  "shoulder-length auburn hair", "a sleek black ponytail", "short copper-red hair",
+  "a salt-and-pepper buzzcut", "loose chestnut curls", "braided dark hair",
+  "a silver-streaked undercut", "honey-blond beach waves", "jet-black slicked-back hair",
+  "dyed teal-tipped hair",
+];
+const FEATURES = [
+  "freckles across the nose", "a dimpled smile", "wire-rimmed glasses", "a small nose stud",
+  "strong cheekbones", "a gap-toothed grin", "thick expressive eyebrows",
+  "a faint scar above one eyebrow", "laugh lines", "a beauty mark on one cheek",
+  "a square jawline", "round soft features",
+];
+const LOOKS = [
+  "a warm smile", "a sharp gaze", "an easy grin", "a guarded expression", "bright eyes",
+  "a confident stance", "a restless energy", "a calm, unhurried bearing",
+];
+const PRESENTATION = [
+  "casual and laid-back", "polished and camera-ready", "sporty and energetic", "bohemian",
+  "sharp and put-together", "approachable", "athleisure and gym energy",
+  "vintage thrift-store style", "preppy and buttoned-up", "tattooed rocker edge",
+  "beachy and sun-faded", "minimalist monochrome",
+];
+
+/** The facet pools, exported for the G24 variety tests (same precedent as NAME_CORPORA). */
+export const APPEARANCE_POOLS = { BUILDS, COMPLEXIONS, HAIR, FEATURES, LOOKS, PRESENTATION } as const;
 
 function generateAppearance(rng: RandomnessSource): { appearance: string; age: number; presentation: string } {
+  // 21–52, skewed young (min of two draws): real casts cluster in the 20s–30s with a
+  // genuine handful of 40s/50s — a flat band read as one generation of near-twins.
+  const age = 21 + Math.min(rng.int(32), rng.int(32));
   return {
-    age: 21 + rng.int(20), // 21–40, a plausible contestant range
+    age,
     presentation: rng.pick(PRESENTATION),
-    appearance: `${rng.pick(BUILDS)}, ${rng.pick(HAIR)}, ${rng.pick(LOOKS)}`,
+    appearance: `${rng.pick(BUILDS)}, ${rng.pick(COMPLEXIONS)}, ${rng.pick(HAIR)}, ${rng.pick(FEATURES)}, ${rng.pick(LOOKS)}`,
   };
 }
 
