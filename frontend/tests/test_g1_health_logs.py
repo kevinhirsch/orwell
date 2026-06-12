@@ -227,9 +227,11 @@ def test_redaction_helper_covers_secret_shapes_and_url_credentials():
 
 def test_surface_is_read_only():
     # Amended by G19a: the HEALTH/LOG routes stay read-only (GET only); the ops
-    # subtree adds POST *triggers* by design — fixed-id allowlisted runs and the
-    # update flag — pinned separately in test_g19a_ops_page.py. No route here
-    # may ever mutate game or store state.
+    # subtree adds POST *triggers* by design — fixed-id allowlisted runs, the
+    # update flag, and the G25 portrait-regenerate lever (which touches ONLY the
+    # regenerable portrait cache, refuse-before-discard; pinned in
+    # test_g25_portrait_regen.py) — pinned separately in test_g19a_ops_page.py.
+    # No route here may ever mutate game or store state.
     router = ahr.setup_admin_health_routes()
     for r in router.routes:
         methods = getattr(r, "methods", set()) or set()

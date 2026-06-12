@@ -267,6 +267,49 @@ def setup_admin_health_routes() -> APIRouter:
         logger.info("[ops] admin triggered the updater (flag written)")
         return {"triggered": True, "installed": True, "log": "ops-update.log"}
 
+    @router.post("/ops/regenerate-portraits")
+    async def admin_portraits_regenerate(request: Request):
+        """G25 debug lever (the status-page button): discard EVERY stored cast portrait for
+        THIS admin's game and regenerate the full active set through the standard pipeline —
+        so a prompt/model change can be seen on the current cast without a season restart.
+
+        Refuse-before-discard: the engine, an active game, and a usable image model are all
+        verified FIRST — a refusal discards nothing (placeholders forever would be worse than
+        stale photos). The kick is force=True (an explicit act, like the cast-window lever)
+        and generation follows in portrait-log.jsonl, which this page's viewer can tail."""
+        require_admin(request)
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        from src import orwell_engine, orwell_portraits
+        from routes.orwell_routes import _roster_cards
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+        except Exception as e:
+            return {"regenerated": False, "reason": f"engine unreachable: {e}"}
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"regenerated": False, "reason": "no active game"}
+        try:
+            available = orwell_portraits.image_generation_available(user)
+        except Exception:
+            available = False
+        if not available:
+            return {"regenerated": False, "reason": "no usable image model configured"}
+        cards = _roster_cards(state, user)
+        # Discard the ACTIVE set only (same filter as missing_portrait_ids): the backfill
+        # never regenerates departed houseguests, so their photos must survive.
+        active_ids = [c.get("id") for c in cards
+                      if isinstance(c, dict) and (c.get("status") or "active") == "active" and c.get("id")]
+        discarded = orwell_portraits.discard_portraits(user, active_ids)
+        missing = orwell_portraits.missing_portrait_ids(user, cards)
+        kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
+        logger.info("[ops] admin portrait regeneration: discarded=%d queued=%d kicked=%s",
+                    discarded, len(missing), kicked)
+        return {"regenerated": True, "discarded": discarded, "queued": len(missing),
+                "kicked": bool(kicked), "log": "portrait-log.jsonl"}
+
     @router.get("/debug-bundle")
     async def debug_bundle(request: Request):
         require_admin(request)
@@ -338,6 +381,7 @@ _STATUS_PAGE = """<!doctype html>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
   <button type="button" class="btn" id="refresh-now">Refresh now</button>
+  <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
 </div>
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
@@ -478,6 +522,20 @@ async function triggerUpdate() {
     if (d.triggered) setTimeout(() => watchLog(d.log), 1500);
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
+// ── G25: the debug regenerate lever — discard + regenerate every cast portrait ──
+async function regenPortraits() {
+  if (!confirm("Discard EVERY stored cast portrait for your game and regenerate the full set now? (Refused safely if the engine or image model is unavailable.)")) return;
+  opsMsg.textContent = "Discarding portraits and queueing regeneration…";
+  try {
+    const r = await fetch("/api/admin/ops/regenerate-portraits", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    opsMsg.textContent = d.regenerated
+      ? "Discarded " + d.discarded + " — regenerating " + d.queued + " in the background; following portrait-log.jsonl."
+      : "Refused: " + (d.reason || "unknown") + " — nothing was discarded.";
+    if (d.regenerated) setTimeout(() => watchLog(d.log), 1200);
+  } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
+}
+document.getElementById("regen-portraits").addEventListener("click", regenPortraits);
 async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });
