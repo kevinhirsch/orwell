@@ -1002,6 +1002,38 @@ def ensure_reconciler_started() -> bool:
     return True
 
 
+def discard_portraits(user: Optional[str], houseguest_ids: list) -> int:
+    """Delete the stored portraits + manifest entries for THESE houseguests only (the G25
+    debug-regenerate lever); returns how many files were removed.
+
+    Selective on purpose — never the whole dir: the backfill regenerates ACTIVE houseguests
+    only, so wiping a departed houseguest's photo would leave a placeholder forever. Clears
+    the debounce stamp and the G20 retry budget so the regeneration can run immediately."""
+    manifest = load_manifest(user)
+    d = user_portrait_dir(user)
+    removed = 0
+    for hid in houseguest_ids or []:
+        sid = _safe_id(hid)
+        entry = manifest.pop(sid, None)
+        fname = entry.get("file") if isinstance(entry, dict) else None
+        if not fname:
+            continue
+        try:
+            p = d / os.path.basename(str(fname))
+            if p.exists():
+                p.unlink()
+                removed += 1
+        except OSError as e:
+            logger.info("[portraits] discard of %s failed: %s", sid, e)
+    try:
+        _save_manifest(user, manifest)
+    except OSError as e:
+        logger.info("[portraits] discard manifest write failed: %s", e)
+    _LAST_BACKFILL_AT.pop(_safe_user(user), None)
+    _clear_counters(_safe_user(user))
+    return removed
+
+
 def scrub_user(user: Optional[str]) -> None:
     """Delete one user's portrait set (used on a per-user new-season reset)."""
     import shutil
