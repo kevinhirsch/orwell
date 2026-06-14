@@ -46,6 +46,7 @@ def _img(fmt="JPEG", w=900, h=1200, color=(120, 80, 60)):
 @pytest.fixture
 def tmp_portraits(tmp_path, monkeypatch):
     monkeypatch.setattr(op, "PORTRAITS_DIR", tmp_path / "portraits")
+    monkeypatch.setattr(op, "AVATARS_DIR", tmp_path / "avatars")  # G27: isolate the account avatar too
     monkeypatch.setattr(op, "PORTRAIT_LOG_PATH", tmp_path / "portrait-log.jsonl")
     monkeypatch.setattr(op, "_LAST_BACKFILL_AT", {})
     return tmp_path / "portraits"
@@ -211,10 +212,12 @@ def test_reference_unsupported_provider_falls_back_to_text_to_image(tmp_portrait
 def test_route_stores_reports_and_clears(tmp_portraits, client):
     r = client.post("/api/orwell/portrait/intake",
                     files={"file": ("me.jpg", _img(), "image/jpeg")}, data={"mode": "exact"})
-    assert r.status_code == 200 and r.json() == {"ok": True, "mode": "exact"}
-    assert client.get("/api/orwell/portrait/intake").json() == {"present": True, "mode": "exact"}
+    assert r.status_code == 200 and r.json() == {"ok": True, "mode": "exact", "finalized": True}
+    st = client.get("/api/orwell/portrait/intake").json()
+    assert st["present"] is True and st["mode"] == "exact" and st["finalized"] is True
     assert client.request("DELETE", "/api/orwell/portrait/intake").json() == {"ok": True}
-    assert client.get("/api/orwell/portrait/intake").json() == {"present": False, "mode": None}
+    st = client.get("/api/orwell/portrait/intake").json()
+    assert st["present"] is False and st["mode"] is None
 
 
 def test_route_rejects_a_non_image(tmp_portraits, client):

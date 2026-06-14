@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # existing factory-reset scrub of data/ removes it; game-reset clears it explicitly).
 PORTRAITS_DIR = Path(DATA_DIR) / "portraits"
 
+# G27: the persistent USER AVATAR — the little circle profile pic attached to the account.
+# Account-level, NOT per-season: it survives a new-season scrub (a game-reset clears the cast
+# portraits, but your profile pic is you). Set when a casting headshot is finalized.
+AVATARS_DIR = Path(DATA_DIR) / "avatars"
+
 # ── G9 observability: the generation-attempt log ──────────────────────────────────────────
 # Every generation attempt/outcome lands here as one JSON line — {ts, houseguestId, ok,
 # errorClass, durationMs} — capped to the last PORTRAIT_LOG_MAX_ENTRIES so it can never
@@ -726,6 +731,140 @@ def clear_player_intake(user: Optional[str]) -> None:
         pass
 
 
+# ── G27: the interactive headshot studio + the persistent account avatar ────────────────────
+# The finalized headshot becomes the player's portrait AND the account's circle avatar. The
+# studio lets the player generate 3 AI options at a time off their uploaded photo, pick one (or
+# regenerate, indefinitely, or upload a new photo), then finalize.
+
+def _intake_final_path(user: Optional[str]) -> Path:
+    return _intake_dir(user) / "final.png"
+
+
+def _candidate_path(user: Optional[str], i: int) -> Path:
+    return _intake_dir(user) / f"cand-{int(i)}.png"
+
+
+def _read_intake_final(user: Optional[str]) -> Optional[bytes]:
+    try:
+        return _intake_final_path(user).read_bytes()
+    except OSError:
+        return None
+
+
+def _clear_candidates(user: Optional[str]) -> None:
+    d = _intake_dir(user)
+    try:
+        for p in d.glob("cand-*.png"):
+            p.unlink()
+    except OSError:
+        pass
+
+
+def candidate_count(user: Optional[str]) -> int:
+    try:
+        return len(list(_intake_dir(user).glob("cand-*.png")))
+    except OSError:
+        return 0
+
+
+def intake_status(user: Optional[str]) -> dict:
+    """What the casting headshot control needs: is something uploaded, the mode, is it
+    finalized, and how many studio candidates are waiting to be chosen."""
+    meta = load_player_intake(user)
+    return {
+        "present": bool(meta),
+        "mode": (meta or {}).get("mode"),
+        "finalized": _intake_final_path(user).exists(),
+        "candidates": candidate_count(user),
+    }
+
+
+# --- the account avatar (the circle profile pic) — survives a new-season scrub ---
+
+def user_avatar_path(user: Optional[str]) -> Optional[Path]:
+    p = AVATARS_DIR / (_safe_user(user) + ".png")
+    return p if p.exists() else None
+
+
+def set_user_avatar(user: Optional[str], png: bytes) -> None:
+    try:
+        AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+        (AVATARS_DIR / (_safe_user(user) + ".png")).write_bytes(png)
+    except OSError as e:
+        logger.info("[portraits] set_user_avatar failed: %s", e)
+
+
+def clear_user_avatar(user: Optional[str]) -> None:
+    try:
+        (AVATARS_DIR / (_safe_user(user) + ".png")).unlink()
+    except OSError:
+        pass
+
+
+def finalize_player_headshot(user: Optional[str], png: bytes) -> bool:
+    """The chosen headshot becomes the player's FINAL portrait: persisted in the intake (so a
+    season starting later uses it directly), written to the LIVE game portrait now when one
+    exists, and set as the account avatar (the circle updates immediately). Returns True on
+    success. Best-effort: never raises."""
+    if not png:
+        return False
+    d = _intake_dir(user)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        _intake_final_path(user).write_bytes(png)
+    except OSError as e:
+        logger.info("[portraits] finalize write failed: %s", e)
+        return False
+    set_user_avatar(user, png)
+    # Reflect it on the live game portrait immediately (source='upload' = locked).
+    try:
+        _write_portrait(user, PLAYER_PORTRAIT_ID, png, "", source="upload")
+    except Exception as e:  # pragma: no cover - defensive
+        logger.info("[portraits] finalize live-portrait write failed: %s", e)
+    _clear_candidates(user)
+    return True
+
+
+# --- the studio: generate N image-to-image options off the uploaded photo ---
+_STUDIO_BASE = ("photorealistic candid reality-TV cast portrait, natural unretouched skin "
+                "texture, soft practical lighting, head-and-shoulders")
+_STUDIO_VARIANTS = (
+    "a natural easy smile, soft window light, looking at camera",
+    "three-quarter angle, a relaxed confident look, warm practical light",
+    "a candid mid-laugh, bright natural light, slightly off-center",
+    "a thoughtful steady gaze, cooler even light, centered",
+)
+
+
+async def generate_studio_candidates(user: Optional[str], n: int = 3) -> dict:
+    """Generate up to `n` studio portrait OPTIONS off the player's uploaded photo (image-to-
+    image, likeness-preserving). Writes cand-0…N-1; returns {generated, reason?}. The player
+    picks one via finalize, or calls this again for a fresh set (back-and-forth, indefinitely)."""
+    src = _read_intake_source(user)
+    if not src:
+        return {"generated": 0, "reason": "upload a photo first"}
+    if not image_generation_available(user):
+        return {"generated": 0, "reason": "no image model is configured"}
+    _clear_candidates(user)
+    made = 0
+    for i in range(max(1, min(int(n), 4))):
+        # _generate_one prepends the identity-keep instruction when a reference is set.
+        prompt = _STUDIO_BASE + ". " + _STUDIO_VARIANTS[i % len(_STUDIO_VARIANTS)]
+        _consume_gen_error(); _consume_gen_detail()
+        png = await _generate_one(prompt, user, reference_png=src)
+        if png:
+            try:
+                _candidate_path(user, made).write_bytes(png)
+                made += 1
+                log_attempt("player:candidate", True, None, 0)
+            except OSError as e:
+                logger.info("[portraits] candidate write failed: %s", e)
+        else:
+            log_attempt("player:candidate", False, _consume_gen_error() or "generation-failed",
+                        0, detail=_consume_gen_detail())
+    return {"generated": made} if made else {"generated": 0, "reason": "generation failed — see the portrait log"}
+
+
 async def generate_and_store(prompts: list, user: Optional[str], *, record_beats: bool = True) -> dict:
     """Generate + persist a cast portrait set from the engine's `portraitPrompts`.
 
@@ -745,10 +884,22 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     skipped = 0
     newly_shown = []  # (houseguestId, ref) for beat recording
 
-    # G26 pre-pass: the player's EXACT uploaded photo needs no provider — apply it BEFORE the
-    # availability gate, so "untouched by AI" works even when no image model is configured.
+    # Player-portrait pre-pass (G26/G27): a player-chosen headshot needs NO provider — apply it
+    # BEFORE the availability gate, so it works even with no image model. Priority: the finalized
+    # studio/exact pick (final.png) → an 'exact' upload (cropped) → the persisted account avatar
+    # (a returning player keeps their face). Any of these writes the player portrait locked.
     intake = load_player_intake(user)
-    if intake and intake.get("mode") == "exact":
+    chosen = _read_intake_final(user)
+    if not chosen and intake and intake.get("mode") == "exact":
+        chosen = _normalize_upload(_read_intake_source(user) or b"", square=True)
+    if not chosen:
+        ap = user_avatar_path(user)
+        if ap is not None:
+            try:
+                chosen = ap.read_bytes()
+            except OSError:
+                chosen = None
+    if chosen:
         for entry in prompts:
             if not isinstance(entry, dict):
                 continue
@@ -757,15 +908,13 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 continue
             if portrait_file(user, hid) is not None:
                 break  # already on disk (generate-once)
-            cropped = _normalize_upload(_read_intake_source(user) or b"", square=True)
-            if cropped:
-                try:
-                    _write_portrait(user, str(hid), cropped, str(entry.get("name") or ""), source="upload")
-                    log_attempt(str(hid), True, None, 0)
-                    generated += 1
-                    newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
-                except Exception as e:
-                    logger.info("[portraits] failed to persist exact headshot: %s", e)
+            try:
+                _write_portrait(user, str(hid), chosen, str(entry.get("name") or ""), source="upload")
+                log_attempt(str(hid), True, None, 0)
+                generated += 1
+                newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
+            except Exception as e:
+                logger.info("[portraits] failed to persist chosen headshot: %s", e)
             break
 
     # Graceful absence: don't even probe the API per houseguest if generation is off (the exact

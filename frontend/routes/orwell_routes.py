@@ -297,11 +297,11 @@ def setup_orwell_routes() -> APIRouter:
             kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
 
-    # ── G26: the player's own casting headshot (their OWN portrait only) ──────────────────
-    # Player-channel (not admin): it sets the PLAYER's portrait, the same exposure as the
-    # backfill lever. Two modes — 'exact' (their cropped photo, no AI) / 'reference' (an
-    # image-to-image studio portrait that keeps their likeness). Applied when the player's
-    # portrait next generates (season start, or the regenerate lever).
+    # ── G26/G27: the player's own casting headshot + the account avatar ───────────────────
+    # Player-channel (not admin): it sets the PLAYER's OWN portrait and the account's circle
+    # avatar — the same exposure as the backfill lever. 'exact' = the cropped photo, finalized
+    # at once (no AI). 'reference' = stored, then the studio generates options to pick from.
+    # Vault-safe: only the player's own image, never game state.
     _MAX_HEADSHOT_BYTES = 12 * 1024 * 1024
 
     @router.post("/portrait/intake")
@@ -320,17 +320,72 @@ def setup_orwell_routes() -> APIRouter:
         meta = orwell_portraits.save_player_intake(user, raw, mode)
         if not meta:
             return JSONResponse(status_code=400, content={"error": "could not decode that image"})
-        return {"ok": True, "mode": meta["mode"]}
+        finalized = False
+        if meta["mode"] == "exact":
+            # No selection step — the cropped photo IS the portrait + avatar, applied now.
+            cropped = orwell_portraits._normalize_upload(orwell_portraits._read_intake_source(user) or b"", square=True)
+            finalized = bool(cropped) and orwell_portraits.finalize_player_headshot(user, cropped)
+        return {"ok": True, "mode": meta["mode"], "finalized": finalized}
 
     @router.get("/portrait/intake")
     async def orwell_portrait_intake_status(request: Request):
-        meta = orwell_portraits.load_player_intake(_current_user(request))
-        return {"present": bool(meta), "mode": (meta or {}).get("mode")}
+        return orwell_portraits.intake_status(_current_user(request))
 
     @router.delete("/portrait/intake")
     async def orwell_portrait_intake_clear(request: Request):
         orwell_portraits.clear_player_intake(_current_user(request))
         return {"ok": True}
+
+    @router.post("/portrait/studio/generate")
+    async def orwell_portrait_studio_generate(request: Request):
+        """Generate up to 3 AI studio OPTIONS off the uploaded photo (image-to-image). Call it
+        again for a fresh set (back-and-forth, indefinitely)."""
+        user = _current_user(request)
+        try:
+            res = await orwell_portraits.generate_studio_candidates(user, 3)
+        except Exception as e:
+            logger.warning(f"[orwell] studio generate failed: {e}")
+            return {"generated": 0, "reason": "the photo service is offline"}
+        cands = [{"index": i, "ref": f"/api/orwell/portrait/studio/candidate/{i}"}
+                 for i in range(res.get("generated", 0))]
+        return {"generated": res.get("generated", 0), "candidates": cands, "reason": res.get("reason")}
+
+    @router.get("/portrait/studio/candidate/{index}")
+    async def orwell_portrait_studio_candidate(index: int, request: Request):
+        user = _current_user(request)
+        p = orwell_portraits._candidate_path(user, index)
+        if not p.exists():
+            return Response(status_code=404)
+        return FileResponse(str(p), media_type="image/png")
+
+    @router.post("/portrait/studio/finalize")
+    async def orwell_portrait_studio_finalize(request: Request):
+        """Pick a studio candidate (by index) — it becomes the player portrait + the avatar."""
+        user = _current_user(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        index = body.get("index")
+        p = orwell_portraits._candidate_path(user, int(index)) if index is not None else None
+        if p is None or not p.exists():
+            return JSONResponse(status_code=400, content={"error": "no such candidate — generate options first"})
+        try:
+            png = p.read_bytes()
+        except OSError:
+            return JSONResponse(status_code=400, content={"error": "candidate could not be read"})
+        ok = orwell_portraits.finalize_player_headshot(user, png)
+        return {"ok": ok, "finalized": ok}
+
+    @router.get("/avatar")
+    async def orwell_user_avatar(request: Request):
+        """The account's circle profile pic (G27) — the finalized headshot. 404 ⇒ the UI shows
+        the initial. Player-channel: a user's OWN avatar only."""
+        p = orwell_portraits.user_avatar_path(_current_user(request))
+        if p is None:
+            return Response(status_code=404)
+        return FileResponse(str(p), media_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
 
     @router.get("/portraits/log")
     async def orwell_portraits_log(request: Request):
