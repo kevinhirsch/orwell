@@ -26,9 +26,19 @@ def test_control_posts_the_two_modes_to_the_intake_route():
     assert '"/api/orwell/portrait/intake"' in js
     assert "FormData" in js and 'fd.append("file"' in js and 'fd.append("mode"' in js
     assert 'method: "DELETE"' in js
-    # both modes exist, reference is the default (still-AI, likeness-keeping)
-    assert 'value="reference" checked' in js
-    assert 'value="exact"' in js
+    # both paths exist: exact (no AI) and the studio (AI options)
+    assert 'upload("exact")' in js
+    assert 'upload("reference")' in js
+
+
+def test_studio_flow_generates_options_picks_and_finalizes():
+    js = _read("static/js/orwellHeadshot.js")
+    assert "/api/orwell/portrait/studio/generate" in js   # 3 options at a time
+    assert "/api/orwell/portrait/studio/finalize" in js   # pick one
+    assert "Generate 3 more" in js                        # back-and-forth, indefinitely
+    assert "Upload a different photo" in js               # swap the source photo
+    # finalizing updates the circle avatar immediately
+    assert "orwell:avatarchanged" in js
 
 
 def test_control_is_pre_game_and_game_build_only():
@@ -38,10 +48,25 @@ def test_control_is_pre_game_and_game_build_only():
     assert 'orwell:gamechanged' in js                   # re-evaluated on season start/reset
 
 
-def test_control_is_vault_safe_reads_only_state_and_its_own_intake():
-    """It may only touch /api/orwell/state (started?) and its own /portrait/intake — never a
-    roster, status, or any surface that could carry game content."""
+def test_control_is_vault_safe_reads_only_its_own_portrait_surfaces():
+    """It may only touch /api/orwell/state (started?), its own /portrait/* (intake + studio),
+    and /avatar — never a roster, status, or any surface that could carry game content."""
     js = _read("static/js/orwellHeadshot.js")
     import re
-    endpoints = set(re.findall(r'/api/orwell/[a-z/\-{}]+', js))
-    assert endpoints <= {"/api/orwell/state", "/api/orwell/portrait/intake"}, endpoints
+    endpoints = set(re.findall(r'/api/orwell/[a-z/\-]+', js))
+    allowed = {
+        "/api/orwell/state", "/api/orwell/avatar",
+        "/api/orwell/portrait/intake",
+        "/api/orwell/portrait/studio/generate",
+        "/api/orwell/portrait/studio/finalize",
+    }
+    assert endpoints <= allowed, endpoints
+
+
+def test_avatar_module_paints_the_circle_from_the_finalized_headshot():
+    html = _read("static/index.html")
+    assert "/static/js/orwellAvatar.js" in html
+    js = _read("static/js/orwellAvatar.js")
+    assert "/api/orwell/avatar" in js
+    assert "user-bar-avatar" in js and "settings-account-avatar" in js   # both circles
+    assert "orwell:avatarchanged" in js                                  # live update seam
