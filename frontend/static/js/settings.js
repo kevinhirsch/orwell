@@ -2050,6 +2050,17 @@ function initAccount() {
       }
     }).catch(() => {});
 
+  // G28: the profile-picture studio — the SAME upload + 3-option AI flow as casting, here in
+  // the user area so you can change your pic anytime. The avatar circle updates on finalize.
+  try {
+    const host = el('settings-headshot');
+    if (host && window.OrwellHeadshotStudio && !host.dataset.mounted) {
+      host.dataset.mounted = '1';
+      window.OrwellHeadshotStudio.mount(host, {});
+    }
+    if (window.OrwellAvatar) window.OrwellAvatar.refresh();
+  } catch (_) {}
+
   // Change password
   const saveBtn = el('settings-pw-save');
   const msgEl = el('settings-pw-msg');
