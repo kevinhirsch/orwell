@@ -40,8 +40,15 @@ PORTRAITS_DIR = Path(DATA_DIR) / "portraits"
 
 # G27: the persistent USER AVATAR — the little circle profile pic attached to the account.
 # Account-level, NOT per-season: it survives a new-season scrub (a game-reset clears the cast
-# portraits, but your profile pic is you). Set when a casting headshot is finalized.
+# portraits, but your profile pic is you). It points at the CURRENT headshot.
 AVATARS_DIR = Path(DATA_DIR) / "avatars"
+
+# G30: the persistent HEADSHOT LIBRARY — every headshot the player has uploaded (exact) or
+# selected from the AI studio, cached as a reusable option. Account-level (survives a
+# new-season scrub), so at the start of each season the player can re-pick a past portrait,
+# upload new, or AI-create new. The avatar/season-portrait is whichever one is "current".
+HEADSHOTS_DIR = Path(DATA_DIR) / "headshots"
+HEADSHOT_LIBRARY_MAX = 24  # keep the most recent N (oldest non-current evicted)
 
 # ── G9 observability: the generation-attempt log ──────────────────────────────────────────
 # Every generation attempt/outcome lands here as one JSON line — {ts, houseguestId, ok,
@@ -801,28 +808,129 @@ def clear_user_avatar(user: Optional[str]) -> None:
         pass
 
 
-def finalize_player_headshot(user: Optional[str], png: bytes) -> bool:
-    """The chosen headshot becomes the player's FINAL portrait: persisted in the intake (so a
-    season starting later uses it directly), written to the LIVE game portrait now when one
-    exists, and set as the account avatar (the circle updates immediately). Returns True on
-    success. Best-effort: never raises."""
-    if not png:
-        return False
-    d = _intake_dir(user)
+# --- G30: the persistent headshot library (cached, reusable options) ---
+
+def _lib_dir(user: Optional[str]) -> Path:
+    return HEADSHOTS_DIR / _safe_user(user)
+
+
+def _lib_index_path(user: Optional[str]) -> Path:
+    return _lib_dir(user) / "index.json"
+
+
+def _load_lib_index(user: Optional[str]) -> list:
+    try:
+        data = json.loads(_lib_index_path(user).read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_lib_index(user: Optional[str], items: list) -> None:
+    d = _lib_dir(user)
     try:
         d.mkdir(parents=True, exist_ok=True)
-        _intake_final_path(user).write_bytes(png)
+        tmp = d / "index.json.tmp"
+        tmp.write_text(json.dumps(items), encoding="utf-8")
+        os.replace(tmp, _lib_index_path(user))
     except OSError as e:
-        logger.info("[portraits] finalize write failed: %s", e)
+        logger.info("[portraits] library index write failed: %s", e)
+
+
+def headshot_path(user: Optional[str], hid: str) -> Optional[Path]:
+    p = _lib_dir(user) / f"{_safe_id(hid)}.png"
+    return p if p.exists() else None
+
+
+def add_headshot_to_library(user: Optional[str], png: bytes, kind: str = "studio") -> Optional[str]:
+    """Cache a finalized headshot as a reusable option; return its id. Evicts the oldest
+    NON-current entry past HEADSHOT_LIBRARY_MAX. Best-effort."""
+    if not png:
+        return None
+    hid = f"{int(time.time() * 1000)}"
+    d = _lib_dir(user)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{_safe_id(hid)}.png").write_bytes(png)
+    except OSError as e:
+        logger.info("[portraits] library write failed: %s", e)
+        return None
+    items = _load_lib_index(user)
+    items.append({"id": hid, "ts": time.time(), "kind": kind if kind in ("upload", "studio") else "studio"})
+    # Evict oldest non-current beyond the cap.
+    while len(items) > HEADSHOT_LIBRARY_MAX:
+        victim = next((i for i in items if not i.get("current")), items[0])
+        items.remove(victim)
+        try:
+            vp = d / f"{_safe_id(victim['id'])}.png"
+            if vp.exists():
+                vp.unlink()
+        except OSError:
+            pass
+    _save_lib_index(user, items)
+    return hid
+
+
+def list_headshots(user: Optional[str]) -> list:
+    """The cached headshots, newest first: [{id, kind, current, ref}]."""
+    items = [i for i in _load_lib_index(user) if headshot_path(user, i.get("id")) is not None]
+    items.sort(key=lambda i: i.get("ts", 0), reverse=True)
+    return [{"id": i["id"], "kind": i.get("kind", "studio"), "current": bool(i.get("current")),
+             "ref": f"/api/orwell/portrait/library/{i['id']}"} for i in items]
+
+
+def select_headshot(user: Optional[str], hid: str) -> bool:
+    """Make a cached headshot CURRENT: it becomes the account avatar + the live game portrait,
+    and the season-start intake. Returns True when the id resolves."""
+    p = headshot_path(user, hid)
+    if p is None:
+        return False
+    try:
+        png = p.read_bytes()
+    except OSError:
         return False
     set_user_avatar(user, png)
-    # Reflect it on the live game portrait immediately (source='upload' = locked).
     try:
-        _write_portrait(user, PLAYER_PORTRAIT_ID, png, "", source="upload")
+        _intake_dir(user).mkdir(parents=True, exist_ok=True)
+        _intake_final_path(user).write_bytes(png)  # season-start seed (account avatar also seeds it)
+    except OSError:
+        pass
+    try:
+        _write_portrait(user, PLAYER_PORTRAIT_ID, png, "", source="upload")  # live portrait, locked
     except Exception as e:  # pragma: no cover - defensive
-        logger.info("[portraits] finalize live-portrait write failed: %s", e)
+        logger.info("[portraits] select live-portrait write failed: %s", e)
+    items = _load_lib_index(user)
+    for i in items:
+        i["current"] = (i.get("id") == hid)
+    _save_lib_index(user, items)
     _clear_candidates(user)
     return True
+
+
+def delete_headshot(user: Optional[str], hid: str) -> bool:
+    items = _load_lib_index(user)
+    keep = [i for i in items if i.get("id") != hid]
+    if len(keep) == len(items):
+        return False
+    try:
+        p = _lib_dir(user) / f"{_safe_id(hid)}.png"
+        if p.exists():
+            p.unlink()
+    except OSError:
+        pass
+    _save_lib_index(user, keep)
+    return True
+
+
+def finalize_player_headshot(user: Optional[str], png: bytes, kind: str = "studio") -> bool:
+    """A new chosen headshot: cache it in the library, then make it CURRENT (account avatar +
+    live game portrait + season-start seed). Returns True on success. Best-effort: never raises."""
+    if not png:
+        return False
+    hid = add_headshot_to_library(user, png, kind)
+    if not hid:
+        return False
+    return select_headshot(user, hid)
 
 
 # --- the studio: generate N image-to-image options off the uploaded photo ---

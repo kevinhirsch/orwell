@@ -59,8 +59,20 @@ def test_control_is_vault_safe_reads_only_its_own_portrait_surfaces():
         "/api/orwell/portrait/intake",
         "/api/orwell/portrait/studio/generate",
         "/api/orwell/portrait/studio/finalize",
+        "/api/orwell/portrait/library",          # G30 list / select
+        "/api/orwell/portrait/library/select",
+        "/api/orwell/portrait/library/",         # DELETE base (id appended)
     }
     assert endpoints <= allowed, endpoints
+
+
+def test_studio_shows_the_cached_headshot_library():
+    js = _read("static/js/orwellHeadshot.js")
+    # the cached options strip + select/delete seams (G30)
+    assert "/api/orwell/portrait/library" in js
+    assert "/api/orwell/portrait/library/select" in js
+    assert "Your headshots" in js                 # the cached-options strip
+    assert "selectFromLibrary" in js and "deleteFromLibrary" in js
 
 
 def test_avatar_module_paints_the_circle_from_the_finalized_headshot():
