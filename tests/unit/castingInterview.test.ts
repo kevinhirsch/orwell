@@ -40,6 +40,14 @@ describe("the casting-interview moment prompt (0050)", () => {
   it("ships no quoted reveal line for the model to recite", () => {
     expect(prompt).not.toContain("walks into that house");
   });
+
+  // G29: the producer actively pushes the cast-photo headshot (the FE 'Casting headshot' panel),
+  // framed as optional and never blocking the premiere.
+  it("directs the producer to push the headshot panel, optionally", () => {
+    expect(prompt).toMatch(/headshot/i);
+    expect(prompt).toMatch(/cast photo|profile pic/i);
+    expect(prompt).toMatch(/NOT required|never block/i);
+  });
 });
 
 describe("strength tiers (words, never numbers)", () => {
