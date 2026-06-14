@@ -400,6 +400,11 @@ def _chat_text_hint(data: dict) -> Optional[str]:
     return None
 
 
+def _data_url_png(png: bytes) -> str:
+    """A `data:image/png;base64,…` URL for a reference image part (G26)."""
+    return "data:image/png;base64," + base64.b64encode(png).decode()
+
+
 async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
     """Decode a data: URL or fetch an https: URL to raw image bytes. None on any failure."""
     try:
@@ -412,16 +417,73 @@ async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
         return None
 
 
+# G26: prepended to the portrait prompt in 'reference' mode — the player wants their own
+# likeness, lightly restyled. Instructs the model toward minimal facial alteration ("as low
+# adulteration as possible but still AI generated").
+REFERENCE_PROMPT_PREFIX = (
+    "Recreate the person in the provided photo as a reality-TV cast portrait. Preserve their "
+    "facial identity, bone structure, skin tone, hair, and distinguishing features as "
+    "faithfully as possible — keep the face clearly recognizable as the same person, with "
+    "minimal alteration. Restyle only the lighting, framing, and background to match: "
+)
+
+
+async def _generate_via_images_edit(client, base_url: str, model_id: str, prompt: str,
+                                    headers: dict, reference_png: bytes,
+                                    quality: str) -> Optional[bytes]:
+    """OpenAI gpt-image image-to-image via /images/edits (multipart). The reference image
+    conditions the result. Best-effort: returns None and records a reason on failure."""
+    edits_url = base_url + "/images/edits"
+    # httpx sets the multipart Content-Type (with boundary) itself — drop any JSON one.
+    h = {k: v for k, v in (headers or {}).items() if k.lower() != "content-type"}
+    files = {"image": ("headshot.png", reference_png, "image/png")}
+    data = {"model": model_id, "prompt": prompt, "size": "1024x1024"}
+    if quality in ("low", "medium", "high", "auto"):
+        data["quality"] = quality
+    try:
+        resp = await client.post(edits_url, data=data, files=files, headers=h)
+        if resp.status_code != 200:
+            logger.info("[portraits] images/edits %s: %s", resp.status_code, resp.text[:200])
+            _note_gen_error(f"http-{resp.status_code}", _provider_error_reason(resp))
+            return None
+        body = resp.json()
+        imgs = body.get("data", []) if isinstance(body, dict) else []
+        if imgs and imgs[0].get("b64_json"):
+            return base64.b64decode(imgs[0]["b64_json"])
+        if imgs and imgs[0].get("url"):
+            ir = await client.get(imgs[0]["url"])
+            return ir.content if ir.status_code == 200 else None
+        _note_gen_error("empty-response")
+        return None
+    except Exception as e:
+        logger.info("[portraits] images/edits failed: %s", e)
+        _note_gen_error(type(e).__name__)
+        return None
+
+
 async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
-                                         prompt: str, headers: dict) -> Optional[bytes]:
+                                         prompt: str, headers: dict,
+                                         reference_png: Optional[bytes] = None) -> Optional[bytes]:
     """OpenRouter (and compatible) image generation over /chat/completions.
 
     Two mechanisms, tried in order: native image-output via `modalities: [image, text]`
     (the image-collection models), then the `openrouter:image_generation` server tool (any
     model orchestrates and returns an image URL). The image is extracted from the assistant
     message (data: or https:) and decoded. Best-effort: returns None and records the most
-    informative reason on failure."""
-    base_msg = {"model": model_id, "messages": [{"role": "user", "content": prompt}]}
+    informative reason on failure.
+
+    G26: when `reference_png` is set (the player's uploaded headshot), it rides along as an
+    image part in the user message — the model recreates THAT person in the requested style
+    (image-to-image / likeness preservation), the prompt already carrying the identity-keep
+    instruction."""
+    if reference_png:
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": _data_url_png(reference_png)}},
+        ]
+    else:
+        content = prompt
+    base_msg = {"model": model_id, "messages": [{"role": "user", "content": content}]}
     attempts = (
         {**base_msg, "modalities": ["image", "text"]},
         {**base_msg, "tools": [{"type": "openrouter:image_generation"}]},
@@ -454,13 +516,20 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
     return None
 
 
-async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
+async def _generate_one(prompt: str, user: Optional[str],
+                        reference_png: Optional[bytes] = None) -> Optional[bytes]:
     """Generate a single image from `prompt`; return PNG bytes, or None on any failure.
 
     Best-effort: every failure path returns None (never raises) so a flaky image API can
     never break game start or leak an error to the player. OpenRouter endpoints generate
     via /chat/completions (see _generate_via_chat_completions); others use the OpenAI
     Images API (/images/generations).
+
+    G26: when `reference_png` is set (the player's uploaded headshot, 'reference' mode) the
+    prompt is prefixed with an identity-preservation instruction and the image is sent to the
+    provider's image-to-image path — OpenRouter chat with the image part, OpenAI /images/edits.
+    A provider with no img2img path falls back to plain text-to-image (logged) so a portrait
+    still lands; the likeness is best-effort, never a hard failure.
     """
     import httpx
     from src.ai_interaction import _resolve_model
@@ -468,6 +537,8 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
         return None
+    if reference_png:
+        prompt = REFERENCE_PROMPT_PREFIX + prompt
 
     # Ignore a configured CHAT model (it can't generate — it would 400) and fall back to
     # image auto-detect, mirroring image_generation_available so a stale/mis-set model never
@@ -514,7 +585,17 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
             timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
         ) as client:
             if is_openrouter:
-                return await _generate_via_chat_completions(client, url, model_id, prompt, headers)
+                # OpenRouter does image-to-image natively via the chat image part (G26).
+                return await _generate_via_chat_completions(client, url, model_id, prompt,
+                                                            headers, reference_png=reference_png)
+            if reference_png:
+                if is_gpt_image:
+                    # OpenAI gpt-image edits: the reference image conditions the result.
+                    return await _generate_via_images_edit(client, base_url, model_id, prompt,
+                                                           headers, reference_png, quality)
+                # No img2img path for this provider — render text-to-image so a portrait still
+                # lands (likeness is best-effort), and say so in the log.
+                logger.info("[portraits] reference mode unsupported by %s — text-to-image fallback", model_id)
             resp = await client.post(images_url, json=payload, headers=headers)
             if resp.status_code != 200:
                 logger.info("[portraits] image API %s: %s", resp.status_code, resp.text[:200])
@@ -543,16 +624,106 @@ async def _generate_one(prompt: str, user: Optional[str]) -> Optional[bytes]:
         return None
 
 
-def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: str) -> str:
-    """Persist one portrait + update the manifest; return its stored filename."""
+def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: str,
+                    source: str = "generated") -> str:
+    """Persist one portrait + update the manifest; return its stored filename.
+
+    `source` (G26) records HOW the portrait was made: 'generated' (text-to-image, the default),
+    'reference' (image-to-image off the player's headshot — still AI, re-creatable), or 'upload'
+    (the player's literal cropped photo — LOCKED: the regenerate lever never discards it)."""
     d = user_portrait_dir(user)
     d.mkdir(parents=True, exist_ok=True)
     filename = f"{_safe_id(houseguest_id)}.png"
     (d / filename).write_bytes(png)
     manifest = load_manifest(user)
-    manifest[_safe_id(houseguest_id)] = {"file": filename, "name": name}
+    manifest[_safe_id(houseguest_id)] = {"file": filename, "name": name, "source": source}
     _save_manifest(user, manifest)
     return filename
+
+
+# ── G26: the player's own headshot — uploaded during casting, applied as their portrait ─────
+# Two modes (player's choice): 'exact' = their cropped photo stored verbatim (no AI); 'reference'
+# = an image-to-image studio portrait that keeps their likeness. The upload lives under the
+# user's portrait dir so a new-season scrub clears it (casting re-asks); the source image
+# PERSISTS so 'reference' mode can re-render on a regenerate.
+PLAYER_PORTRAIT_ID = "player"
+
+
+def _intake_dir(user: Optional[str]) -> Path:
+    return user_portrait_dir(user) / "_intake"
+
+
+def _normalize_upload(raw: bytes, *, square: bool) -> Optional[bytes]:
+    """Decode an uploaded image, honor EXIF orientation, optionally center-square-crop (biased
+    slightly up — faces sit high in a frame), bound the long edge to 1024, re-encode PNG.
+    Returns PNG bytes, or None on any failure (a bad upload never raises)."""
+    try:
+        import io
+        from PIL import Image, ImageOps
+
+        im = Image.open(io.BytesIO(raw))
+        im = ImageOps.exif_transpose(im)
+        im = im.convert("RGB")
+        if square:
+            w, h = im.size
+            s = min(w, h)
+            left = (w - s) // 2
+            top = max(0, (h - s) // 2 - int(h * 0.06))
+            im = im.crop((left, top, left + s, top + s))
+        im.thumbnail((1024, 1024), Image.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, format="PNG")
+        return out.getvalue()
+    except Exception as e:
+        logger.info("[portraits] upload normalize failed: %s", e)
+        return None
+
+
+def save_player_intake(user: Optional[str], raw_image: bytes, mode: str) -> Optional[dict]:
+    """Store the player's uploaded headshot + chosen mode ('exact'|'reference'). The source is
+    normalized to an oriented, bounded PNG; returns the saved meta, or None if it couldn't be
+    read as an image."""
+    mode = mode if mode in ("exact", "reference") else "reference"
+    norm = _normalize_upload(raw_image, square=False)
+    if not norm:
+        return None
+    d = _intake_dir(user)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "source.png").write_bytes(norm)
+    meta = {"mode": mode, "ts": time.time()}
+    try:
+        (d / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    except OSError as e:
+        logger.info("[portraits] intake meta write failed: %s", e)
+        return None
+    return meta
+
+
+def load_player_intake(user: Optional[str]) -> Optional[dict]:
+    """The player's pending headshot meta ({mode, ts}) when both meta + source exist, else None."""
+    d = _intake_dir(user)
+    try:
+        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        if isinstance(meta, dict) and (d / "source.png").exists():
+            return meta
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _read_intake_source(user: Optional[str]) -> Optional[bytes]:
+    try:
+        return (_intake_dir(user) / "source.png").read_bytes()
+    except OSError:
+        return None
+
+
+def clear_player_intake(user: Optional[str]) -> None:
+    import shutil
+    try:
+        shutil.rmtree(_intake_dir(user))
+    except OSError:
+        pass
 
 
 async def generate_and_store(prompts: list, user: Optional[str], *, record_beats: bool = True) -> dict:
@@ -570,14 +741,41 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     if not isinstance(prompts, list) or not prompts:
         return {"generated": 0, "skipped": 0, "total": 0}
 
-    # Graceful absence: don't even probe the API per houseguest if generation is off.
-    if not image_generation_available(user):
-        logger.info("[portraits] image generation unavailable — skipping cast portraits")
-        return {"generated": 0, "skipped": len(prompts), "total": len(prompts)}
-
     generated = 0
     skipped = 0
     newly_shown = []  # (houseguestId, ref) for beat recording
+
+    # G26 pre-pass: the player's EXACT uploaded photo needs no provider — apply it BEFORE the
+    # availability gate, so "untouched by AI" works even when no image model is configured.
+    intake = load_player_intake(user)
+    if intake and intake.get("mode") == "exact":
+        for entry in prompts:
+            if not isinstance(entry, dict):
+                continue
+            hid = entry.get("houseguestId") or entry.get("id")
+            if not hid or _safe_id(str(hid)) != PLAYER_PORTRAIT_ID:
+                continue
+            if portrait_file(user, hid) is not None:
+                break  # already on disk (generate-once)
+            cropped = _normalize_upload(_read_intake_source(user) or b"", square=True)
+            if cropped:
+                try:
+                    _write_portrait(user, str(hid), cropped, str(entry.get("name") or ""), source="upload")
+                    log_attempt(str(hid), True, None, 0)
+                    generated += 1
+                    newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
+                except Exception as e:
+                    logger.info("[portraits] failed to persist exact headshot: %s", e)
+            break
+
+    # Graceful absence: don't even probe the API per houseguest if generation is off (the exact
+    # player photo, if any, already landed above).
+    if not image_generation_available(user):
+        logger.info("[portraits] image generation unavailable — skipping cast portraits")
+        if record_beats and newly_shown:
+            await _record_image_beats(newly_shown, user)
+        total = len(prompts)
+        return {"generated": generated, "skipped": total - generated, "total": total}
 
     for entry in prompts:
         if not isinstance(entry, dict):
@@ -595,17 +793,25 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
 
+        # G26: the PLAYER may have chosen 'reference' mode — image-to-image off their headshot
+        # (exact mode already landed in the pre-pass above). NPCs always text-to-image.
+        is_player = _safe_id(str(hid)) == PLAYER_PORTRAIT_ID
+        ref = _read_intake_source(user) if (is_player and intake and intake.get("mode") == "reference") else None
+        source = "reference" if ref else "generated"
+
         _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail
         t0 = time.monotonic()
-        png = await _generate_one(str(prompt), user)
+        png = await _generate_one(str(prompt), user, reference_png=ref)
         duration_ms = int((time.monotonic() - t0) * 1000)
+        if ref and not png:
+            source = "generated"  # reference failed; the log carries the reason
         if not png:
             log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
                         duration_ms, detail=_consume_gen_detail())
             skipped += 1
             continue
         try:
-            _write_portrait(user, str(hid), png, str(name))
+            _write_portrait(user, str(hid), png, str(name), source=source)
             log_attempt(str(hid), True, None, duration_ms)
             generated += 1
             newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
@@ -1014,6 +1220,11 @@ def discard_portraits(user: Optional[str], houseguest_ids: list) -> int:
     removed = 0
     for hid in houseguest_ids or []:
         sid = _safe_id(hid)
+        entry = manifest.get(sid)
+        # G26: a player's LITERAL uploaded photo ('upload') is locked — regenerate never
+        # discards it. 'reference' (still AI off their headshot) re-renders like any other.
+        if isinstance(entry, dict) and entry.get("source") == "upload":
+            continue
         entry = manifest.pop(sid, None)
         fname = entry.get("file") if isinstance(entry, dict) else None
         if not fname:

@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
@@ -296,6 +296,41 @@ def setup_orwell_routes() -> APIRouter:
             # debounce (it still stamps the window so a roster poll can't pile on).
             kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
+
+    # ── G26: the player's own casting headshot (their OWN portrait only) ──────────────────
+    # Player-channel (not admin): it sets the PLAYER's portrait, the same exposure as the
+    # backfill lever. Two modes — 'exact' (their cropped photo, no AI) / 'reference' (an
+    # image-to-image studio portrait that keeps their likeness). Applied when the player's
+    # portrait next generates (season start, or the regenerate lever).
+    _MAX_HEADSHOT_BYTES = 12 * 1024 * 1024
+
+    @router.post("/portrait/intake")
+    async def orwell_portrait_intake(request: Request,
+                                     file: UploadFile = File(...),
+                                     mode: str = Form("reference")):
+        user = _current_user(request)
+        try:
+            raw = await file.read()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "could not read the upload"})
+        if not raw or len(raw) > _MAX_HEADSHOT_BYTES:
+            return JSONResponse(status_code=413, content={"error": "image missing or too large (max 12MB)"})
+        if not (file.content_type or "").lower().startswith("image/"):
+            return JSONResponse(status_code=400, content={"error": "that file is not an image"})
+        meta = orwell_portraits.save_player_intake(user, raw, mode)
+        if not meta:
+            return JSONResponse(status_code=400, content={"error": "could not decode that image"})
+        return {"ok": True, "mode": meta["mode"]}
+
+    @router.get("/portrait/intake")
+    async def orwell_portrait_intake_status(request: Request):
+        meta = orwell_portraits.load_player_intake(_current_user(request))
+        return {"present": bool(meta), "mode": (meta or {}).get("mode")}
+
+    @router.delete("/portrait/intake")
+    async def orwell_portrait_intake_clear(request: Request):
+        orwell_portraits.clear_player_intake(_current_user(request))
+        return {"ok": True}
 
     @router.get("/portraits/log")
     async def orwell_portraits_log(request: Request):
