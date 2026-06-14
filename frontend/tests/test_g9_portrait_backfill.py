@@ -114,7 +114,7 @@ def test_backfill_fetches_prompts_and_persists_portraits(tmp_portraits, monkeypa
         return {"houseguestId": hid, "name": f"HG {hid}", "prompt": f"photoreal {hid}"}
     monkeypatch.setattr(orwell_engine, "get_portrait_prompt", fake_prompt)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"\x89PNG-" + prompt.encode()[:8]
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
@@ -140,7 +140,7 @@ def test_backfill_prompt_fetch_failure_is_logged_and_skipped(tmp_portraits, monk
         return {"houseguestId": hid, "name": "HG", "prompt": "photoreal"}
     monkeypatch.setattr(orwell_engine, "get_portrait_prompt", fake_prompt)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
@@ -357,7 +357,7 @@ def test_attempt_log_ring_caps_at_max_entries(tmp_portraits):
 def test_generate_and_store_logs_each_attempt_outcome(tmp_portraits, monkeypatch):
     _stub_provider(monkeypatch, True)
 
-    async def flaky_gen(prompt, user):
+    async def flaky_gen(prompt, user, reference_png=None):
         if "fail" in prompt:
             orwell_portraits._note_gen_error("http-503")
             return None
@@ -380,7 +380,7 @@ def test_generate_and_store_logs_each_attempt_outcome(tmp_portraits, monkeypatch
 def test_failure_with_no_noted_class_falls_back_to_generation_failed(tmp_portraits, monkeypatch):
     _stub_provider(monkeypatch, True)
 
-    async def silent_fail(prompt, user):
+    async def silent_fail(prompt, user, reference_png=None):
         return None  # a monkeypatched/legacy failure path that noted no class
     monkeypatch.setattr(orwell_portraits, "_generate_one", silent_fail)
 

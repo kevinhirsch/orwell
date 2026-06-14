@@ -119,7 +119,7 @@ class _Gen:
         self.ok = ok
         self.calls = []
 
-    async def __call__(self, prompt, user):
+    async def __call__(self, prompt, user, reference_png=None):
         self.calls.append((prompt, user))
         if not self.ok:
             orwell_portraits._note_gen_error("http-503")

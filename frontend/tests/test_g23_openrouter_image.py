@@ -147,7 +147,7 @@ def test_generate_one_routes_openrouter_to_chat(monkeypatch):
                                                   "google/gemini-2.5-flash-image", {}))
     seen = {}
 
-    async def fake_chat(client, url, model_id, prompt, headers):
+    async def fake_chat(client, url, model_id, prompt, headers, reference_png=None):
         seen["url"] = url
         return b"CHATPNG"
     monkeypatch.setattr(op, "_generate_via_chat_completions", fake_chat)

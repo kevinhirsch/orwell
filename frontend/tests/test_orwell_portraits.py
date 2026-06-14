@@ -54,7 +54,7 @@ _PROMPTS = [
 def test_generate_and_store_writes_files_and_manifest(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"PNGBYTES-" + prompt.encode()[:4]
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
@@ -95,7 +95,7 @@ def test_skips_silently_when_generation_unavailable(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: False)
 
     # If it ever tried to generate, this would error the test (it must NOT be called).
-    async def boom(prompt, user):
+    async def boom(prompt, user, reference_png=None):
         raise AssertionError("generation must not run when unavailable")
     monkeypatch.setattr(orwell_portraits, "_generate_one", boom)
 
@@ -118,7 +118,7 @@ def test_not_regenerated_when_already_stored(tmp_portraits, monkeypatch):
 
     calls = {"n": 0}
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         calls["n"] += 1
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
@@ -134,7 +134,7 @@ def test_not_regenerated_when_already_stored(tmp_portraits, monkeypatch):
 def test_portrait_ref_points_at_route_only_when_file_exists(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
@@ -230,7 +230,7 @@ def test_roster_fails_open_on_engine_error(tmp_portraits, client, monkeypatch):
 def test_portrait_route_serves_stored_png(tmp_portraits, client, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"\x89PNG\r\n\x1a\n-fake"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
     _run(orwell_portraits.generate_and_store([_PROMPTS[1]], "default", record_beats=False))
@@ -251,7 +251,7 @@ def test_portrait_route_404_when_missing(tmp_portraits, client):
 def test_records_image_beat_for_each_shown_portrait(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
@@ -276,7 +276,7 @@ def test_records_image_beat_for_each_shown_portrait(tmp_portraits, monkeypatch):
 def test_scrub_user_and_scrub_all_remove_portraits(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user):
+    async def fake_gen(prompt, user, reference_png=None):
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 
