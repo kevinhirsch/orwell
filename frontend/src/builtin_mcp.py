@@ -172,7 +172,23 @@ async def register_builtin_servers(mcp_manager):
             except BaseException as e:
                 logger.warning(f"Built-in NPX server {cfg['name']} error: {type(e).__name__}: {e}")
 
-    asyncio.create_task(_start_npx_servers())
+    # The optional NPX/browser MCP (Playwright) is irrelevant to the Big Brother game and pulls a
+    # heavy dependency; the game build does NOT register it (so a fresh box never logs the
+    # "@playwright/mcp not in the npx cache" WARNING). The full workspace still offers it.
+    if _npx_servers_enabled():
+        asyncio.create_task(_start_npx_servers())
+    else:
+        logger.info("Game build: skipping optional NPX MCP servers (browser).")
+
+
+def _npx_servers_enabled() -> bool:
+    """Register the optional NPX/browser MCP only in the FULL workspace — the game build skips
+    it (irrelevant tool + heavy Playwright dep, and the missing-package WARNING was just noise)."""
+    try:
+        from src.settings import game_build_enabled
+        return not game_build_enabled()
+    except Exception:  # pragma: no cover - defensive: never block startup on this probe
+        return True
 
 
 def _npx_package_from_args(args):
