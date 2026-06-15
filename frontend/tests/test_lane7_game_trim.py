@@ -225,20 +225,12 @@ def test_w3_vault_router_unmounted_under_game_build(monkeypatch):
     _set_game_build(monkeypatch, False)
     app2 = FastAPI()
     assert settings.mount_optional(app2, "vault", setup_vault_routes()) is True
-    # Flatten the route tree: newer FastAPI keeps an included router as a nested wrapper in
-    # app.routes (no top-level `.path`) rather than copying its routes up — so collect paths
-    # recursively, version-robustly (the loose `fastapi` pin lets CI drift ahead of the lock).
-    paths = set()
-    stack = list(app2.routes)
-    while stack:
-        r = stack.pop()
-        p = getattr(r, "path", None)
-        if isinstance(p, str):
-            paths.add(p)
-        sub = getattr(r, "routes", None)
-        if sub:
-            stack.extend(sub)
-    assert any(p.startswith("/api/vault") for p in paths)
+    # Behavioral check (version-robust): mounted ⇒ the path RESOLVES to a real route, not a 404.
+    # Don't introspect app.routes — newer FastAPI keeps an included router as a nested, prefixed
+    # wrapper, so a flat `r.path` scan crashes and a recursive one sees only the relative child
+    # paths. The TestClient sees the effective routing on any FastAPI version (the loose `fastapi`
+    # pin lets CI drift ahead of the lock); the game-build half above asserts the same path 404s.
+    assert TestClient(app2).get("/api/vault/config", headers=admin_headers).status_code != 404
 
 
 def test_w3_app_wires_vault_through_the_gate():
