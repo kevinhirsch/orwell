@@ -149,6 +149,13 @@
       status = (await jget("/api/orwell/portrait/intake")) || status;
       const lib = await jget("/api/orwell/portrait/library");
       st.library = (lib && lib.headshots) || [];
+      // G32: a generated-but-unpicked photoset must survive a refresh/new session. The
+      // candidate images persist server-side (intake reports the count) — rebuild the picker
+      // from that count so the options reappear, instead of dropping to the upload chooser.
+      if (!status.finalized && (status.candidates || 0) > 0 && !st.candidates.length) {
+        st.candidates = Array.from({ length: status.candidates },
+          (_, i) => ({ index: i, ref: "/api/orwell/portrait/studio/candidate/" + i }));
+      }
       render();
     }
 

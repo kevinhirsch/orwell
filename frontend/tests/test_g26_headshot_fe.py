@@ -59,6 +59,7 @@ def test_control_is_vault_safe_reads_only_its_own_portrait_surfaces():
         "/api/orwell/portrait/intake",
         "/api/orwell/portrait/studio/generate",
         "/api/orwell/portrait/studio/finalize",
+        "/api/orwell/portrait/studio/candidate/",  # G32 restore the picker on refresh
         "/api/orwell/portrait/library",          # G30 list / select
         "/api/orwell/portrait/library/select",
         "/api/orwell/portrait/library/",         # DELETE base (id appended)
