@@ -33,7 +33,10 @@ MUST compose the kit.)* The game is **folded into the main chat**: the player-fa
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
 `docs/features/` (through **0053**; 0052 — the house themes — shipped FE-side from the audit
-spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235). **New work starts as a new spec/queue
+spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
+follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
+backfill, the casting headshot studio + player-uploaded/AI account avatar, portrait variety, and
+the game-build provider gating (OpenRouter image models via `/chat/completions`)). **New work starts as a new spec/queue
 item** — the remaining known deferrals are listed under [Current status](#current-status); the
 governing design rulings are `docs/audits/2026-06-09-product-audit.md` ("Remediation
 principles"), the **product-owner rulings #1–#21** in `docs/audits/2026-06-10-full-product-audit.md`,
@@ -52,7 +55,7 @@ are authoritative and reference each other as companions.
 | `docs/decisions/` | **Decision records (ADRs)** — accepted refinements to the canonical mechanics (drop Luck → emotional modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"). |
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
-| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). |
+| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. Same rule for the vendored v1 transcripts in `docs/legacy/meta-feedback/`. |
 
 ## The non-negotiable mandate
@@ -308,18 +311,23 @@ included). Datastore is
 
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`,
 `VectorIndex`, `EmbeddingProvider`, `SoulProvider` are **engine-only**; outward ports include
-`EngineCommands`, `GameSession`, `NarrativePort`/`StreamingNarrativePort`, `SaveStore`/
-`UserSaveStore`) · `src/services` (`VisibleStateService` / `SummaryService` — outward-safe) ·
+`EngineCommands`, `GameSession`, `NarrativePort`/`StreamingNarrativePort`, `ImageGenerationPort`
+(0051 — **outward by construction**: the engine emits only Vault-free portrait prompts, the FE owns
+the concrete provider), `SaveStore`/`UserSaveStore`) · `src/services` (`VisibleStateService` / `SummaryService` — outward-safe) ·
 `src/surfaces` (`player/`, `admin/`, `tools/` — no Vault handle by construction) · `src/adapters`
 (`inmemory/`, `engine/` (the live `GameSessionAdapter` / `EngineCommandsAdapter`, `FileSaveStore`,
 `SoulStore`), `mcp/` (`McpServer` / `HttpMcpServer`), `narrative/` (`LlmNarrativePort`,
 `DeterministicNarrator`, `Echo…`), `embedding/` (`FastembedEmbedding` + its worker-thread bridge,
-`DeterministicEmbedding` — the test adapter and runtime fallback), `random/`, `time/`) ·
+`DeterministicEmbedding` — the test adapter and runtime fallback), `image/`
+(`NoopImageGenerationPort` — the null adapter used when no image-capable provider is wired; 0051),
+`random/`, `time/`) ·
 `src/engine` (the season loop `season.ts` + the live loop `liveSeason.ts`, plus `conversation.ts`,
 `relationships.ts`, `consequence.ts` (the original 0023 hidden-impact fold module — the **live**
 folds run in `GameSessionAdapter`/`EngineCommandsAdapter`), `gossip.ts`, `offscreen.ts`,
 `confessionals.ts`, `deals.ts`, `blocs.ts`, `presence.ts`, `emotionalArc.ts`,
-`competitionLibrary.ts`, `houseEvents.ts`, `castingIntake.ts`, `momentPrompts.ts`, `data/` (the
+`competitionLibrary.ts`, `houseEvents.ts`, `castingIntake.ts`, `momentPrompts.ts`,
+`portraitPrompts.ts` (the Vault-free, public-facets-only portrait-prompt builder) +
+`imageConstants.ts` (0051 per-turn/-week generation budget caps), `data/` (the
 vendored real-name corpora), and tunable constants) · `src/composition`
 (`engineRoot` wires the Vault; `outwardRoot`/`appRoot` never do; `orchestrator.ts` is the
 per-sandbox **commit/integrity spine** with a fail-closed checkpoint — game advances also flow
