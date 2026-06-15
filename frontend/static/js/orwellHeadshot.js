@@ -57,7 +57,17 @@
         border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; }
       .ow-headshot-studio .hs-cand.sel { border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      @media (prefers-reduced-motion: reduce) { #${ID} .hs-head .hs-chev { transition: none; } }`;
+      .ow-headshot-studio .hs-lib { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border, #355a66); }
+      .ow-headshot-studio .hs-libstrip { display: flex; gap: 8px; flex-wrap: wrap; }
+      .ow-headshot-studio .hs-libitem { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; cursor: pointer;
+        border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; flex: none; }
+      .ow-headshot-studio .hs-libitem.cur { border-color: var(--brand-color, var(--accent, #4a9)); }
+      .ow-headshot-studio .hs-libitem img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .ow-headshot-studio .hs-libdel { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 14px;
+        border-radius: 50%; border: none; cursor: pointer; font-size: 12px; padding: 0;
+        background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .12s; }
+      .ow-headshot-studio .hs-libitem:hover .hs-libdel { opacity: 1; }
+      @media (prefers-reduced-motion: reduce) { #${ID} .hs-head .hs-chev, .ow-headshot-studio .hs-libdel { transition: none; } }`;
     document.head.appendChild(s);
   }
 
@@ -70,7 +80,7 @@
     opts = opts || {};
     body.classList.add("ow-headshot-studio");
 
-    const st = { file: null, fileUrl: null, candidates: [], selected: null, busy: false };
+    const st = { file: null, fileUrl: null, candidates: [], selected: null, busy: false, library: [] };
     let _msg = "";
     let status = { present: false, finalized: false, mode: null };
     const msg = (m) => { _msg = m || ""; };
@@ -135,29 +145,71 @@
       avatarChanged(); msg("Removed."); await refreshStatus();
     }
 
-    async function refreshStatus() { status = (await jget("/api/orwell/portrait/intake")) || status; render(); }
+    async function refreshStatus() {
+      status = (await jget("/api/orwell/portrait/intake")) || status;
+      const lib = await jget("/api/orwell/portrait/library");
+      st.library = (lib && lib.headshots) || [];
+      render();
+    }
+
+    // G30: pick a cached headshot — it becomes the current avatar + season portrait.
+    async function selectFromLibrary(id) {
+      setBusy(true);
+      try {
+        const r = await fetch("/api/orwell/portrait/library/select", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+        st.busy = false;
+        if (r.ok) { avatarChanged(); status.finalized = true; await refreshStatus(); }
+        else { msg("Couldn't use that one — try again."); render(); }
+      } catch (e) { st.busy = false; msg("The photo service is offline right now."); render(); }
+    }
+    async function deleteFromLibrary(id) {
+      try { await fetch("/api/orwell/portrait/library/" + encodeURIComponent(id), { method: "DELETE", credentials: "same-origin" }); } catch (_) {}
+      await refreshStatus();
+    }
+
+    // The cached-headshots strip — shown above every state so a past portrait is always one tap away.
+    function libraryHtml() {
+      if (!st.library.length) return "";
+      return `<div class="hs-lib"><div class="hs-msg" style="margin-bottom:6px">Your headshots — tap one to use it</div>
+        <div class="hs-libstrip">${st.library.map((h) =>
+          `<div class="hs-libitem${h.current ? " cur" : ""}" data-pick="${esc(h.id)}" title="${h.current ? "current" : "use this headshot"}">
+             <img src="${esc(h.ref)}" alt="headshot"><button type="button" class="hs-libdel" data-del="${esc(h.id)}" title="Remove" aria-label="Remove">×</button></div>`).join("")}</div></div>`;
+    }
+    function wireLibrary() {
+      body.querySelectorAll("[data-pick]").forEach((d) => d.addEventListener("click", (e) => {
+        if (e.target && e.target.closest("[data-del]")) return; // the × handles itself
+        selectFromLibrary(d.dataset.pick);
+      }));
+      body.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", (e) => {
+        e.stopPropagation(); deleteFromLibrary(b.dataset.del);
+      }));
+    }
 
     function render() {
       summary(status.finalized ? "set ✓" : (st.candidates.length ? "pick an option" : "make your portrait"));
       if (st.busy) { body.innerHTML = `<div class="hs-msg">${esc(_msg || "Working…")}</div>`; return; }
+      const lib = libraryHtml();
 
       if (status.finalized) {
-        body.innerHTML = `
+        body.innerHTML = lib + `
           <div class="hs-row">
             <div class="hs-preview" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
             <div class="hs-opts"><div>Your headshot is set — it's your houseguest portrait and your profile pic.</div>
               <div class="hs-actions">
-                <button type="button" class="hs-btn hs-btn-ghost" id="hs-redo">Change it</button>
+                <button type="button" class="hs-btn hs-btn-ghost" id="hs-redo">Make another</button>
                 <button type="button" class="hs-btn hs-btn-ghost" id="hs-remove">Remove</button>
                 <span class="hs-msg">${esc(_msg)}</span>
               </div></div></div>`;
         body.querySelector("#hs-redo").addEventListener("click", () => { status.finalized = false; render(); });
         body.querySelector("#hs-remove").addEventListener("click", removeAll);
+        wireLibrary();
         return;
       }
 
       if (st.candidates.length) {
-        body.innerHTML = `
+        body.innerHTML = lib + `
           <div>${esc(_msg || "Pick your favorite — or generate 3 more.")}</div>
           <div class="hs-grid">${st.candidates.map((c) =>
             `<div class="hs-cand${st.selected === c.index ? " sel" : ""}" data-i="${c.index}"><img src="${esc(c.ref)}" alt="option"></div>`).join("")}</div>
@@ -170,12 +222,13 @@
         body.querySelector("#hs-use").addEventListener("click", finalizeSelected);
         body.querySelector("#hs-more").addEventListener("click", studioGenerate);
         body.querySelector("#hs-new").addEventListener("click", () => { st.candidates = []; st.selected = null; st.file = null; render(); });
+        wireLibrary();
         return;
       }
 
       const previewBg = st.fileUrl ? `style="background-image:url('${st.fileUrl}')"` : "";
-      body.innerHTML = `
-        <div class="hs-msg" style="margin-bottom:8px">Make your houseguest's portrait — and your profile pic — from a photo of yourself.</div>
+      body.innerHTML = lib + `
+        <div class="hs-msg" style="margin-bottom:8px">${st.library.length ? "…or make a new one from a photo of yourself." : "Make your houseguest's portrait — and your profile pic — from a photo of yourself."}</div>
         <div class="hs-row">
           <div class="hs-preview" ${previewBg}>${st.fileUrl ? "" : "👤"}</div>
           <div class="hs-opts">
@@ -195,6 +248,7 @@
       });
       body.querySelector("#hs-studio").addEventListener("click", studioGenerate);
       body.querySelector("#hs-exact").addEventListener("click", useExact);
+      wireLibrary();
     }
 
     refreshStatus();

@@ -324,7 +324,7 @@ def setup_orwell_routes() -> APIRouter:
         if meta["mode"] == "exact":
             # No selection step — the cropped photo IS the portrait + avatar, applied now.
             cropped = orwell_portraits._normalize_upload(orwell_portraits._read_intake_source(user) or b"", square=True)
-            finalized = bool(cropped) and orwell_portraits.finalize_player_headshot(user, cropped)
+            finalized = bool(cropped) and orwell_portraits.finalize_player_headshot(user, cropped, kind="upload")
         return {"ok": True, "mode": meta["mode"], "finalized": finalized}
 
     @router.get("/portrait/intake")
@@ -374,8 +374,39 @@ def setup_orwell_routes() -> APIRouter:
             png = p.read_bytes()
         except OSError:
             return JSONResponse(status_code=400, content={"error": "candidate could not be read"})
-        ok = orwell_portraits.finalize_player_headshot(user, png)
+        ok = orwell_portraits.finalize_player_headshot(user, png, kind="studio")
         return {"ok": ok, "finalized": ok}
+
+    # ── G30: the persistent headshot library (cached, reusable options) ───────────────────
+    @router.get("/portrait/library")
+    async def orwell_portrait_library(request: Request):
+        """The player's cached headshots — pick any to make it current, anytime."""
+        return {"headshots": orwell_portraits.list_headshots(_current_user(request))}
+
+    @router.get("/portrait/library/{hid}")
+    async def orwell_portrait_library_item(hid: str, request: Request):
+        p = orwell_portraits.headshot_path(_current_user(request), hid)
+        if p is None:
+            return Response(status_code=404)
+        return FileResponse(str(p), media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+    @router.post("/portrait/library/select")
+    async def orwell_portrait_library_select(request: Request):
+        """Make a cached headshot the CURRENT one (avatar + season portrait)."""
+        user = _current_user(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        hid = body.get("id")
+        ok = orwell_portraits.select_headshot(user, str(hid)) if hid is not None else False
+        if not ok:
+            return JSONResponse(status_code=400, content={"error": "no such headshot"})
+        return {"ok": True, "selected": str(hid)}
+
+    @router.delete("/portrait/library/{hid}")
+    async def orwell_portrait_library_delete(hid: str, request: Request):
+        return {"ok": orwell_portraits.delete_headshot(_current_user(request), hid)}
 
     @router.get("/avatar")
     async def orwell_user_avatar(request: Request):
