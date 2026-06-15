@@ -1,4 +1,9 @@
-fastapi
+# Pin the web framework to the lock (requirements.lock.txt). CI installs requirements.txt, so
+# an UNPINNED fastapi drifted ahead of prod and changed FastAPI's app.routes internals (an
+# included router became a nested, prefixed wrapper) — which broke a test that introspected
+# routes while prod (on the lock) was unaffected. Keep CI == prod for the routing stack.
+fastapi==0.136.3
+starlette==1.2.1
 uvicorn
 python-multipart
 python-dotenv
