@@ -57,6 +57,34 @@ After editing: `systemctl restart orwell-engine orwell-frontend`.
 
 ---
 
+## Control panel — the `orwell` command
+
+Inside the container, **`orwell`** opens a whiptail menu over every maintenance task — no need to
+remember script paths or flags:
+
+```bash
+orwell            # menu: update · doctor · backup · restore · reset (game/factory) · readiness
+```
+
+It dispatches to the scripts below, collecting input through dialogs (a deploy-token password box,
+a backup picker, a type-`RESET` confirmation for the destructive resets). Direct subcommands skip
+the menu — handy over SSH or in scripts:
+
+```bash
+orwell update             # = orwell-update.sh        orwell doctor --status
+orwell backup             # orwell restore [FILE]     orwell ready
+orwell reset-game --yes   # destructive: --yes required off the menu
+orwell reset-factory --yes
+```
+
+The individual scripts (`deploy/orwell-*.sh`) also show these dialogs when run directly on a
+terminal, and stay fully non-interactive (today's flags/env) for automation, CI, and the
+host→container bridge. whiptail is installed by the installer; without it (or off a TTY) the
+scripts fall back to plain prompts. The launcher is `deploy/orwell-menu.sh`; the shared dialog
+helpers live in `deploy/orwell-tui.sh`.
+
+---
+
 ## Update
 
 Run the **local checked-out copy** — no script fetches from GitHub anymore (the repo is private;

@@ -121,6 +121,27 @@ else
   pass "orwell-update.sh never deletes data/ (save preserved)"
 fi
 
+# ── whiptail control panel (orwell-menu.sh + orwell-tui.sh) ────────────────────────────────────
+# The shared lib must source cleanly and export the helpers; the menu must degrade to plain help
+# off a TTY, so CI / automation / the pct-exec bridge (no PTY) never block on a dialog.
+if bash -c 'set -e; . deploy/orwell-tui.sh; type tui_active wt_menu wt_password wt_confirm_phrase >/dev/null'; then
+  pass "orwell-tui.sh sources and exports the whiptail helpers"
+else
+  fail "orwell-tui.sh failed to source / is missing a helper"
+fi
+if ORWELL_NONINTERACTIVE=1 bash deploy/orwell-menu.sh --help >/dev/null 2>&1 \
+   && ORWELL_NONINTERACTIVE=1 bash deploy/orwell-menu.sh </dev/null >/dev/null 2>&1; then
+  pass "orwell-menu.sh degrades to help off a TTY (no dialog blocks automation)"
+else
+  fail "orwell-menu.sh did not run headlessly"
+fi
+# The destructive resets must still refuse to run unattended without --yes (the TUI is opt-in).
+if ORWELL_NONINTERACTIVE=1 APP_DIR="$PWD" bash deploy/orwell-menu.sh reset-game </dev/null >/dev/null 2>&1; then
+  fail "orwell-menu.sh reset-game ran WITHOUT --yes (must refuse unattended)"
+else
+  pass "orwell-menu.sh reset-game refuses unattended without --yes"
+fi
+
 # ── [A4] private-repo credential helper: git reads GIT_TOKEN from data/.env at use time ────────
 # Proves the EXACT helper line the installer/update wire: against a token-required remote, git
 # asks the helper and gets x-access-token + the .env token — no URL or .git/config credential.

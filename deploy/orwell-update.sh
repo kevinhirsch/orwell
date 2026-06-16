@@ -27,6 +27,35 @@ ROLLBACK=0; SET_TOKEN=0
 CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-name fallback
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
+# ── Optional whiptail TUI (deploy/orwell-tui.sh) ───────────────────────────────────────────────
+# Used for the action menu + token entry when run on a TTY with whiptail present. Absent (e.g.
+# the /tmp copy this script pushes into the container, which runs over pct exec with no PTY) →
+# tui_active is false and the plain-text prompts below run unchanged. The lib is searched beside
+# this file first, then the installed checkout, so even the pushed copy finds it.
+__here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bbai/deploy/orwell-tui.sh; do
+  if [[ -n "${__lib:-}" && -r "$__lib" ]]; then . "$__lib"; break; fi
+done
+type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
+
+# Interactive front door: with no action chosen and a TTY, offer the same actions as the flags.
+# Automation (flags / env / no TTY) is completely unaffected — this block is skipped entirely.
+if [[ $ROLLBACK -eq 0 && $SET_TOKEN -eq 0 && -z "${REF:-}" && $# -eq 0 ]] && tui_active; then
+  ORWELL_TUI_TITLE="Orwell — update"
+  __act=""
+  wt_menu __act "Update / maintenance for this Orwell install:" \
+    tip      "Update to the latest build (branch tip)" \
+    ref      "Update to a pinned commit or tag…" \
+    rollback "Roll back to the previous build" \
+    token    "Set / rotate the deploy token…" \
+    || { echo "cancelled."; exit 0; }
+  case "$__act" in
+    ref)      wt_input REF "Commit SHA or tag to deploy:" "" || { echo "cancelled."; exit 0; } ;;
+    rollback) ROLLBACK=1 ;;
+    token)    SET_TOKEN=1 ;;
+  esac
+fi
+
 # First install dir found here: an explicit override, then the current path, then the legacy one.
 find_app() {
   local d
@@ -53,8 +82,12 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   # --set-token: capture the token on the host (prompt if interactive), then forward it via a
   # pushed root-only file — never on a pct exec command line (host ps) and never in a URL.
   if [[ $SET_TOKEN -eq 1 ]]; then
-    if [[ -z "${GIT_TOKEN:-}" && -t 0 ]]; then
-      read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " GIT_TOKEN; echo
+    if [[ -z "${GIT_TOKEN:-}" ]]; then
+      if tui_active; then
+        wt_password GIT_TOKEN "Deploy token (fine-grained PAT, Contents: Read-only on the repo):" || { echo "cancelled."; exit 0; }
+      elif [[ -t 0 ]]; then
+        read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " GIT_TOKEN; echo
+      fi
     fi
     [[ -n "${GIT_TOKEN:-}" ]] || { echo "ERROR: --set-token needs GIT_TOKEN=<pat> (or a TTY to prompt)." >&2; exit 1; }
     TMP_TOKEN="$(mktemp /tmp/orwell-token-XXXXXX)"
@@ -136,8 +169,12 @@ if [[ "$SET_TOKEN" -eq 1 ]]; then
     TOKEN="$(sed -n 's/^GIT_TOKEN=//p' /tmp/orwell-token | tail -1)"
     rm -f /tmp/orwell-token
   fi
-  if [[ -z "$TOKEN" && -t 0 ]]; then
-    read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " TOKEN; echo
+  if [[ -z "$TOKEN" ]]; then
+    if tui_active; then
+      wt_password TOKEN "Deploy token (fine-grained PAT, Contents: Read-only on the repo):" || { echo "cancelled."; exit 0; }
+    elif [[ -t 0 ]]; then
+      read -rs -p "Deploy token (fine-grained PAT, Contents: Read-only on the repo): " TOKEN; echo
+    fi
   fi
   [[ -n "$TOKEN" ]] || { echo "ERROR: --set-token needs GIT_TOKEN=<pat> (or a TTY to prompt)." >&2; exit 1; }
   mkdir -p "${APP_DIR}/data"
@@ -234,6 +271,14 @@ if ! grep -qs 'orwell-panel' /etc/bash.bashrc; then
 case $- in *i*) [ -z "${ORWELL_PANEL_SHOWN:-}" ] && export ORWELL_PANEL_SHOWN=1 && /usr/local/bin/orwell-panel 2>/dev/null || true ;; esac
 PANEL
 fi
+
+# Control-panel launcher: `orwell` opens the whiptail maintenance menu (deploy/orwell-menu.sh).
+# Installed here too so a box provisioned before the menu existed gains it on its next update.
+cat > /usr/local/bin/orwell <<LAUNCH
+#!/usr/bin/env bash
+exec bash "${APP_DIR}/deploy/orwell-menu.sh" "\$@"
+LAUNCH
+chmod 0755 /usr/local/bin/orwell
 
 # Privileged UI port (<1024): reconcile the CAP_NET_BIND_SERVICE drop-in against the CURRENT
 # ORWELL_PORT in data/.env (mirrors orwell-install.sh — the install may predate this fix, or the

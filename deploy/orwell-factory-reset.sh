@@ -30,6 +30,15 @@ msg()  { echo -e "==> $*"; }
 warn() { echo -e "WARN: $*" >&2; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
+# ── Optional whiptail TUI (deploy/orwell-tui.sh) — see orwell-update.sh for the rationale. The
+# destructive confirmation below uses it on a TTY; absent / off a TTY it falls back to the plain
+# type-RESET prompt (a host→container `pct exec` run has no PTY, so it expects --yes, as before).
+__here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bbai/deploy/orwell-tui.sh; do
+  if [[ -n "${__lib:-}" && -r "$__lib" ]]; then . "$__lib"; break; fi
+done
+type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
+
 # Collect flags so they can be forwarded to the in-container run.
 ASSUME_YES=0; DRY_RUN=0; RESTART=1; EXTRA_FLAGS=()
 while [[ $# -gt 0 ]]; do
@@ -159,15 +168,31 @@ SANDBOXES="$(count_dirs "$ENGINE_SAVE_DIR")"
 
 # ── Confirmation (skipped by --yes / --dry-run) ───────────────────────────────────────────────
 if [[ "$DRY_RUN" -eq 0 && "$ASSUME_YES" -eq 0 ]]; then
-  cat <<EOF
+  if tui_active; then
+    ORWELL_TUI_TITLE="Orwell — factory reset"
+    wt_confirm_phrase "RESET" "FACTORY RESET — back to first-run onboarding.
+
+PERMANENTLY DELETES all orwell game + user data:
+  • ${SANDBOXES} game sandbox(es) under ${ENGINE_SAVE_DIR}/<user>/
+    (saves, souls, the hidden Vault layer)
+  • the entire front-end store ${FE_DATA_DIR}/
+    (database, settings, uploads, app key)
+
+PRESERVED (config only): ${CONFIG_DIR}/${ENV_KEEP}
+
+The next visit starts at first-run onboarding (OOBE)." \
+      || die "aborted — no changes made."
+  else
+    cat <<EOF
 This PERMANENTLY DELETES all orwell game + user data:
   • ${SANDBOXES} game sandbox(es)  under ${ENGINE_SAVE_DIR}/<user>/   (saves, souls, hidden Vault layer)
   • the entire front-end store     ${FE_DATA_DIR}/                    (database, settings, uploads, app key)
 Preserved (config only):           ${CONFIG_DIR}/${ENV_KEEP}
 The next visit will start at first-run onboarding (OOBE).
 EOF
-  read -r -p "Type 'RESET' to proceed: " ans
-  [[ "$ans" == "RESET" ]] || die "aborted — no changes made."
+    read -r -p "Type 'RESET' to proceed: " ans
+    [[ "$ans" == "RESET" ]] || die "aborted — no changes made."
+  fi
 fi
 
 # ── Helpers (dry-run aware) ───────────────────────────────────────────────────────────────────

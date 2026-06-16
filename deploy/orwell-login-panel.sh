@@ -71,6 +71,6 @@ echo -e "  recall   ${EMBED}"
 echo -e "  saves    ${SAVES} sandbox(es)   ${dim}load${off} ${LOAD}   ${dim}mem${off} ${MEM}"
 [[ -n "$IP" ]] && echo -e "  play     ${bold}http://${IP}:${FE_PORT}${off}"
 echo -e "  ─────────────────────────────────────────────"
-echo -e "  ${dim}doctor:${off} bash ${APP_DIR}/deploy/orwell-doctor.sh   ${dim}update:${off} bash ${APP_DIR}/deploy/orwell-update.sh"
+echo -e "  ${dim}manage:${off} ${bold}orwell${off} ${dim}(menu)${off}   ${dim}or:${off} orwell doctor · orwell update · orwell ready"
 echo -e ""
 exit 0
