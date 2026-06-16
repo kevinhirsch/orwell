@@ -55,6 +55,30 @@ if you renamed the container or run more than one. A container provisioned **bef
 — the engine and front-end still honor the deprecated `BBAI_*` env, so its `data/.env` keeps working
 untouched.
 
+## Control panel — the `orwell` menu
+
+After install, **`orwell`** (a launcher for `orwell-menu.sh`, installed to `/usr/local/bin/orwell`)
+opens a **whiptail** menu over every task below — update, doctor, backup, restore, the two reset
+tiers, and the readiness check — so you don't have to remember script paths or flags. The login
+health panel advertises it.
+
+```bash
+orwell                      # the interactive menu (inside the container)
+orwell doctor --status      # or a direct subcommand (skips the menu — good over SSH / in scripts)
+orwell reset-game --yes     # destructive subcommands require --yes off the menu
+```
+
+The menu only **dispatches** to the scripts in this directory (the single source of truth for each
+task), collecting input through dialogs — a deploy-token password box, a backup picker, a
+type-`RESET` confirmation for the resets. The scripts themselves also show inline whiptail dialogs
+when run directly on a terminal (the updater's action menu + token box, the doctor's mode picker,
+the resets' confirm) and remain **fully non-interactive** for automation, CI, and the
+host→container `pct exec` bridge (which has no PTY) — exactly today's flags/env. `whiptail` is
+installed by `orwell-install.sh`; without it (or off a TTY) every prompt falls back to plain text.
+Shared dialog helpers live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh`
+(the curl-bootstrapped installer) keeps its own inline whiptail copies — it must stay one
+standalone file.
+
 ### Factory reset (back to OOBE)
 
 To scrub **all** game + user data and start over as if freshly installed — every sandbox (saves,

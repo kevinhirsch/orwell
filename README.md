@@ -381,6 +381,13 @@ lives under `/opt/orwell/data` and is **preserved across updates**; a separate
 `orwell-factory-reset.sh` scrubs everything back to first-run. The LLM provider (Ollama or
 an API key) and ports are set in `/opt/orwell/data/.env`.
 
+Inside the container, a single **`orwell`** command opens a **whiptail control panel** — update /
+rollback / deploy-token rotation, the doctor, backup & restore, the two reset tiers, and a
+readiness check — and the maintenance scripts themselves show the same dialogs when run directly
+on a terminal (a deploy-token password box, a destructive-reset confirm, a doctor mode picker).
+All of it stays fully non-interactive for automation. The login shell greets you with a live
+health panel that points at `orwell`.
+
 **Full guide** — install, configuration, manual / non-Proxmox install, updates, services,
 backups, and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals in
 [`deploy/README.md`](deploy/README.md)).

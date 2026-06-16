@@ -36,6 +36,25 @@ CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-na
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# ── Optional whiptail TUI (deploy/orwell-tui.sh) — see orwell-update.sh for the rationale. When
+# absent / off a TTY (e.g. the pushed copy run over pct exec) tui_active is false and the flag
+# below stands. The lib is searched beside this file first, then the installed checkout. ────────
+__here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bbai/deploy/orwell-tui.sh; do
+  if [[ -n "${__lib:-}" && -r "$__lib" ]]; then . "$__lib"; break; fi
+done
+type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
+
+# Interactive mode picker: no flag + a TTY → choose status/fix/bounce. Flags/automation unchanged.
+if [[ $# -eq 0 ]] && tui_active; then
+  ORWELL_TUI_TITLE="Orwell — doctor"
+  wt_menu MODE "Doctor — diagnose & repair:" \
+    --fix    "Diagnose, then fix anything unhealthy (default)" \
+    --status "Diagnose only — no restarts" \
+    --bounce "Force-restart the engine + front-end" \
+    || { echo "cancelled."; exit 0; }
+fi
+
 # First REAL install found: an explicit override, then the current path, then the legacy one.
 # The marker is the git checkout (`<app>/.git`), exactly like orwell-update.sh /
 # orwell-factory-reset.sh — a bare directory is NOT an install (a leftover empty /opt/orwell

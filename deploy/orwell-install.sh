@@ -61,7 +61,7 @@ apt_deps() {
   # One retry: a transient mirror/DNS hiccup at the very first step shouldn't kill an install.
   apt-get update -qq || { echo "apt update failed — retrying in 5s"; sleep 5; apt-get update -qq; }
   apt-get install -y -qq curl git gnupg build-essential ca-certificates \
-    python3 python3-venv python3-pip qemu-guest-agent
+    python3 python3-venv python3-pip qemu-guest-agent whiptail
 }
 
 git_credential() {
@@ -312,6 +312,13 @@ login_panel() {
 case $- in *i*) [ -z "${ORWELL_PANEL_SHOWN:-}" ] && export ORWELL_PANEL_SHOWN=1 && /usr/local/bin/orwell-panel 2>/dev/null || true ;; esac
 PANEL
   fi
+
+  # Control-panel launcher: `orwell` opens the whiptail maintenance menu (deploy/orwell-menu.sh).
+  cat > /usr/local/bin/orwell <<LAUNCH
+#!/usr/bin/env bash
+exec bash "${APP_DIR}/deploy/orwell-menu.sh" "\$@"
+LAUNCH
+  chmod 0755 /usr/local/bin/orwell
 }
 
 verify_install() {
