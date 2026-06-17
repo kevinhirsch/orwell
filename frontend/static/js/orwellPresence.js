@@ -34,8 +34,19 @@
 
   function roomLabel(room) {
     // "living-room" → "Living room" (the engine's ids are kebab-case room names).
-    const words = String(room || "").replace(/-/g, " ");
-    return words.charAt(0).toUpperCase() + words.slice(1);
+    // A lone trailing letter is a room identifier, not a word ("bedroom-b"), so it
+    // must read "Bedroom B", not "Bedroom b" — sentence case otherwise.
+    const s = String(room || "").replace(/-/g, " ").trim();
+    if (!s) return s;
+    return s
+      .split(" ")
+      .map((w, i) =>
+        w.length === 1
+          ? w.toUpperCase()
+          : i === 0
+            ? w.charAt(0).toUpperCase() + w.slice(1)
+            : w)
+      .join(" ");
   }
 
   function ensureEl() {

@@ -10,3 +10,6 @@ coverage/
 .orwell-data/
 /data/
 .claude/worktrees/
+
+# audit visual-telemetry sandbox (never commit)
+.audit-telemetry/
