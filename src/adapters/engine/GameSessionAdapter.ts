@@ -485,6 +485,9 @@ export class GameSessionAdapter implements GameSession {
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
       veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+      // The live pending (Vault-free legal options) so the decision card re-arms from engine truth
+      // on reload — not the FE's process-local last-seen cache, which a FE restart wipes.
+      pending: this.pendingView(),
     };
   }
 
