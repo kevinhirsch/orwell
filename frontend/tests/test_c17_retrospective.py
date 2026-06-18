@@ -76,6 +76,17 @@ def test_panel_is_mounted_render_only_and_gated():
     assert "recap.finished" in js              # the affordance exists only post-season
 
 
+def test_panel_unseals_per_voter_eviction_attribution_by_name():
+    # E12 (play-through gap, 2026-06-18): the eviction ballots were anonymous all season; the
+    # retrospective is the ONE place per-voter attribution unseals — the "who really voted against
+    # you" payoff. The data was present but the panel never rendered it. Render NAMES, never raw ids.
+    js = open(os.path.join(FRONTEND, "static", "js", "orwellRetrospective.js"), encoding="utf-8").read()
+    assert "unsealed.evictionVotes" in js
+    assert "How the votes really fell" in js
+    assert "v.voter && v.voter.name" in js     # voter NAME, not id
+    assert "wk.evictee.id" in js               # matched against the evictee by id internally (not shown)
+
+
 # --- the C18 gap fixes, pinned -----------------------------------------------------------
 
 def test_framing_calls_use_a_short_timeout():

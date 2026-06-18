@@ -95,6 +95,22 @@
         story.appendChild(el("li", "", "[" + h.type + "] " + h.content));
       }
       vaultWrap.appendChild(story);
+      // E12: eviction ballots were anonymous all season ("a vote to evict …"); the retrospective is
+      // the ONE place per-voter attribution unseals — the "who really voted against you" payoff.
+      // Names only (the data pairs id+name; a raw id is never rendered).
+      if (unsealed.evictionVotes && unsealed.evictionVotes.length) {
+        vaultWrap.appendChild(el("strong", "display:block;margin-top:8px", "🗳 How the votes really fell"));
+        const votes = el("ul", "margin:6px 0;padding-left:18px;opacity:0.8;font-size:12.5px");
+        for (const wk of unsealed.evictionVotes) {
+          const against = (wk.votes || [])
+            .filter((v) => v.votedFor && wk.evictee && v.votedFor.id === wk.evictee.id)
+            .map((v) => v.voter && v.voter.name).filter(Boolean);
+          const who = against.length ? against.join(", ") : "no one on the record";
+          votes.appendChild(el("li", "",
+            `Week ${wk.week}: ${(wk.evictee && wk.evictee.name) || "—"} was sent out by ${who}.`));
+        }
+        vaultWrap.appendChild(votes);
+      }
     } else {
       const open = el("button", [
         "margin-top:4px", "padding:6px 10px", "border-radius:8px", "cursor:pointer",
