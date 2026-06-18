@@ -2091,7 +2091,8 @@ function initAccount() {
             if (!r.ok) throw new Error('reset failed');
             if (rpMsg) { rpMsg.textContent = 'Done — casting begins again.'; rpMsg.style.color = 'var(--green)'; }
             try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
-            try { window.dispatchEvent(new CustomEvent('orwell:gamechanged')); } catch (_) {}
+            // G15: refresh every surface through THE one shared dispatcher (never an ad-hoc CustomEvent).
+            try { window.orwellGameChanged && window.orwellGameChanged('reset-progress'); } catch (_) {}
           } catch (e) {
             if (rpMsg) { rpMsg.textContent = 'Reset failed — try again.'; rpMsg.style.color = 'var(--red)'; }
             rpBtn.disabled = false;

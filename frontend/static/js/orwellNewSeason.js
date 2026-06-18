@@ -129,11 +129,12 @@
         return;
       }
       // The new season committed. Tear the panel down, open a FRESH chat session (so the dead
-      // season's transcript never rides as narrator context — E65), and let every surface refresh.
+      // season's transcript never rides as narrator context — E65), and let every surface refresh
+      // through THE one shared dispatcher (platform.js orwellGameChanged — G15: never an ad-hoc
+      // CustomEvent). The avatar refresh rides the same wave (the cast/portrait surfaces re-read).
       destroy();
       try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
-      try { window.dispatchEvent(new CustomEvent("orwell:gamechanged")); } catch (_) {}
-      try { window.dispatchEvent(new CustomEvent("orwell:avatarchanged")); } catch (_) {}
+      try { window.orwellGameChanged && window.orwellGameChanged("next-season"); } catch (_) {}
     } catch (e) {
       if (window.OrwellReport) window.OrwellReport.fail("new-season", "next-season", e);
       setMsg("The producers couldn't reach you — try again.", true);
