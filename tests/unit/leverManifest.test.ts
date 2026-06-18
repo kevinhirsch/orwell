@@ -103,6 +103,15 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/Julie Chen/); // the exact failure, pinned as the example
   });
 
+  // Cross-week confabulation (audit 2026-06-18): the model jumped from a goodbye straight to "RILEY
+  // CORTEZ — you are the new Head of Household" with the engine still at week-1 eviction — inventing
+  // the PLAYER winning a comp the game never ran (the worst break). A sharp transition rule is pinned.
+  it("forbids narrating a new week's HOH before advancing into it", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/A NEW WEEK DOES NOT EXIST until you advanceGame into it/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/you are the new HOH/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/it may well be someone else/i);
+  });
+
   // Anti-leak (audit 2026-06-18, owner rulings): the model is steeped in "the engine" all day and
   // echoes it to the player ("the engine has everything…"), and it recites archetype labels as a
   // cast scouting report ("X is the mastermind"). Both are scrubbed at the source.

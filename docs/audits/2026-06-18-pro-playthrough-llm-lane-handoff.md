@@ -40,6 +40,26 @@ the scene but doesn't reliably `advanceGame`.
 The new previewed-but-uncommitted guard must compose with — NOT revert — those; in particular it
 should bypass the `_stale`/lull gate for this specific previewed-outcome case.
 
+## 1b. [HIGH · RESIDUAL] Cross-week / no-tool comp-result confabulation — esp. the PLAYER winning
+**Symptom (clean-run verification, 2026-06-18):** the model submitted a goodbye message, then in the
+SAME turn narrated "RILEY CORTEZ — you are the new Head of Household" while the engine was still at
+`week:1, phase:eviction, hoh:Krista` — it invented the PLAYER winning a week-2 HOH the engine never
+ran, firing NO `runCompetition` (so the #1 guard cannot catch it). This is the FLAVOR-vs-OUTCOMES
+"single worst break" (player wins because the story flows that way).
+**Root cause:** broader than #1 — the model narrates a ceremony OUTCOME with NO tool basis at all (not
+even a preview), jumping multiple beats past the engine after resolving a decision.
+**Done this PR (prompt mitigation):** a sharp FLAVOR-vs-OUTCOMES bullet — "A NEW WEEK DOES NOT EXIST
+until you advanceGame into it… NEVER announce a new HOH/nominees/next-week result — ABOVE ALL the
+PLAYER winning — before the game has run that comp… if you catch yourself typing 'you are the new
+HOH', STOP." Guard test in `leverManifest`.
+**STILL OPEN (structural):** prompt alone is uncertain (the model already violated the general rule).
+A structural backstop is the next step but is RISKY in the hot path (must not over-fire on a player
+legitimately lingering in an advance-phase). Candidate: when a turn fired `submitDecision` (a decision
+resolved) and left the engine at a NON-terminal advance-phase with NO new pending decision, fire a
+forceful "advanceGame to the next beat before narrating it" nudge (bypassing the lull/`_progressed`
+gate, like #1) so the engine catches up to the real result. Needs careful gating + a play-test before
+shipping. Owner ruling stands: nudge, do not auto-advance.
+
 ## 2. [MED] Preview/commit lag at every ceremony beat
 The model narrates the comp result one turn before it commits (Week-1 veto: "Kaitlyn… you have won
 the Power of Veto" while `veto.holder=null`; committed next turn). If the HUD is read between the
