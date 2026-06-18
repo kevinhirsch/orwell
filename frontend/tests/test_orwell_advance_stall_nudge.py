@@ -83,7 +83,9 @@ def test_previewed_but_uncommitted_ceremony_is_a_hard_stall(self_check=None):
     js = _read("src", "agent_loop.py")
     assert '_PREVIEW_TOOLS = {"runCompetition"}' in js
     assert "_PREVIEW_COMMIT_NUDGE" in js
-    assert "_previewed_uncommitted = bool(_tool_names & _PREVIEW_TOOLS) and not _progressed" in js
+    # ORDER-based, not `not _progressed`: last beat-tool == runCompetition ⇒ uncommitted preview.
+    # (A turn that advances the roll AND then previews the next comp still left it uncommitted.)
+    assert '_previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"' in js
     # the forceful nudge is chosen for the previewed case (not the gentle graduated one)
     assert "_nudge, _why = _PREVIEW_COMMIT_NUDGE" in js
 
@@ -95,8 +97,8 @@ def test_undelivered_decision_result_is_a_hard_stall():
     # the forceful deliver nudge regardless of lull (it fires even though the turn "progressed").
     js = _read("src", "agent_loop.py")
     assert "_DECISION_DELIVER_NUDGE" in js
-    assert '_prog_order[-1] == "submitDecision"' in js
-    assert "_decision_undelivered = bool(_prog_order)" in js
+    assert "_BEAT_TOOLS = _PROGRESSION_TOOLS | _PREVIEW_TOOLS" in js
+    assert '_decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"' in js
     assert "elif _decision_undelivered:" in js
 
 

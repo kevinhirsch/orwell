@@ -1379,6 +1379,10 @@ _PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
 # "narrated the winner, the board never moved, chat contradicts the HUD" desync (audit 2026-06-18
 # hand-off #1). We nudge it IMMEDIATELY, bypassing the lull/staleness gate.
 _PREVIEW_TOOLS = {"runCompetition"}
+# Every tool that touches a beat's outcome. The LAST one in a turn's sequence decides whether the
+# turn ended with the beat COMMITTED (advanceGame) or with an uncommitted preview / undelivered
+# decision the model may have narrated ahead of the engine.
+_BEAT_TOOLS = _PROGRESSION_TOOLS | _PREVIEW_TOOLS
 _PREVIEW_COMMIT_NUDGE = (
     "(Production note, not for the player.) You previewed a competition result but never called "
     "advanceGame — so NOTHING is official: the winner you just named does not hold the power, the "
@@ -2637,16 +2641,18 @@ async def stream_agent_loop(
                     _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
                 _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
                 _is_lull = _player_turn_is_lull(messages)
-                # Previewed a ceremony OUTCOME (runCompetition) but did not commit it — a hard stall
-                # that bypasses the lull/staleness gate (hand-off #1): you must advanceGame to commit.
-                _previewed_uncommitted = bool(_tool_names & _PREVIEW_TOOLS) and not _progressed
-                # Resolved a decision (submitDecision) but never advanceGame'd AFTER it to deliver the
-                # result — the model likely narrated an undelivered/invented outcome (hand-off 1b). The
-                # ORDER decides: if the last progression tool of the turn was submitDecision, the
-                # result was never delivered. Fires even though the turn "progressed".
-                _prog_order = [t for t in (ev.get("tool") if isinstance(ev, dict) else None for ev in tool_events)
-                               if t in _PROGRESSION_TOOLS]
-                _decision_undelivered = bool(_prog_order) and _prog_order[-1] == "submitDecision"
+                # The ORDER of the turn's beat-tools decides whether it left an uncommitted/undelivered
+                # OUTCOME the model may have narrated ahead of the engine (#1 + 1b). The LAST beat-tool:
+                #   runCompetition → previewed a winner, never advanceGame'd to COMMIT it (#1);
+                #   submitDecision → resolved a decision, never advanceGame'd to DELIVER its result (1b);
+                #   advanceGame    → committed/delivered — fine.
+                # (Order-based, NOT `not _progressed`: a turn that advances the roll AND then previews
+                # the next comp without committing it still left an uncommitted outcome — the live-play
+                # bug the first cut missed.) Both bypass the lull/staleness gate.
+                _beat_seq = [t for t in (ev.get("tool") if isinstance(ev, dict) else None for ev in tool_events)
+                             if t in _BEAT_TOOLS]
+                _previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"
+                _decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
