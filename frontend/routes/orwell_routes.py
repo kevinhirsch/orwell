@@ -151,11 +151,14 @@ def setup_orwell_routes() -> APIRouter:
         try:
             st = await orwell_engine.game_status(user=_current_user(request))
             # D3/E66: the current pending decision rides along so the decision card can re-arm after
-            # a reload. PREFER the engine's own `pending` (now on gameStatus — robust to a FE restart
-            # / out-of-band advance); fall back to the FE-cached last-seen only if the engine omitted
-            # it (older engine). A status poll NEVER advances the game (ADR 0003).
-            if isinstance(st, dict):
-                st["pending"] = st.get("pending") or orwell_engine.last_pending(_current_user(request))
+            # a reload. The engine's own `pending` (now on gameStatus, persisted 0030) is AUTHORITATIVE
+            # — a present value, INCLUDING null, is engine truth and is trusted as-is. Only fall back to
+            # the FE-cached last-seen when the engine OMITS the key entirely (an older engine that never
+            # exposed it). R9-FE-1: the old `or` treated a present null as "missing" and re-surfaced a
+            # stale card from the FE cache after a decision the model resolved via its own tool path (which
+            # never refreshes that cache). A status poll NEVER advances the game (ADR 0003).
+            if isinstance(st, dict) and "pending" not in st:
+                st["pending"] = orwell_engine.last_pending(_current_user(request))
             return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
