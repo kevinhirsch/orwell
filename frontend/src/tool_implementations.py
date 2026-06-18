@@ -4632,8 +4632,19 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             private_strategy=args.get("privateStrategy"),
             interview_notes=args.get("interviewNotes"),
             seed=args.get("seed"),
+            # The ONE sanctioned player-channel restart door (D1/R1): a confirmed play-again over a
+            # finished/abandoned season delegates through the engine's registry.resetUser hinge.
+            # Without this flag createCharacter no-ops on a started game (B36 guard), which left the
+            # player unable to start season 2 from chat — the relay used to drop the confirm.
+            confirm_restart=bool(args.get("confirmRestart")),
             user=owner,
         )
+        # D3/E66 + restart-door hygiene: a NEW season must not inherit the finished season's
+        # decision card. The casting card carries no `pending`, so this clears _LAST_PENDING for
+        # the user — without it, the restart door (createCharacter → registry.resetUser) leaves a
+        # phantom card (e.g. last season's juror-vote, even under the old player's name) armed on
+        # GET /api/orwell/status until the first advanceGame of season 2 overwrites it.
+        orwell_engine.remember_pending(res, user=owner)
         # 0051: move-in cast portraits. The engine returns Vault-free portrait prompts on
         # season start; kick off generation in the background so game start NEVER blocks on
         # images, and so a missing image model is a silent no-op (graceful absence).

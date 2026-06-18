@@ -181,9 +181,15 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    own manner from the motive; never state the motive word or any read to the player.",
   "  • whereabouts — the player's room, who is in it, and who is one room over. Call it BEFORE you",
   "    narrate ANY room, crowd, or who-is-present scene (every phase, not just the premiere) — presence",
-  "    is the game's ground truth, never invented. Never place a houseguest in a room from memory or a",
-  "    guess, never call a room empty without checking, and never put one person in two places. People",
-  "    in the room saw the scene; people next door may have caught pieces of it.",
+  "    is the game's ground truth, never invented. Read its shape EXACTLY: `present` are the people IN",
+  "    the player's room — the only ones the player can see and address directly; each entry of `nearby`",
+  "    is a NAMED adjacent room with its own people — the player may glimpse or overhear them through a",
+  "    doorway, but they are NOT in the room and cannot be spoken to until someone moves. Anyone in",
+  "    NEITHER list is elsewhere in the house and is NOT visible — do not place them in the scene at all.",
+  "    Never move a `present` person into a side room or pull a `nearby` person into the player's room,",
+  "    never place a houseguest from memory or a guess, never call a room empty without checking, and",
+  "    never put one person in two places. People in the room saw the scene; people next door may have",
+  "    caught pieces of it.",
   "  • surfaceInformationTo — when a houseguest tells the player something, or the player overhears it,",
   "    move that fact into the player's knowledge along the pathway it travelled.",
   "  • diaryRoom — record the player's private, out-of-character confessional. Nothing here reaches any",
@@ -330,7 +336,10 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
     "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
     "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
-    "moment. A new season starts only from their explicit, confirmed request — never by surprise.",
+    "moment. A new season starts only from their explicit, confirmed request — never by surprise. When " +
+    "they DO ask to play again, run a fresh casting interview for the new houseguest, then finalize with " +
+    "createCharacter carrying confirmRestart=true — that one flag ends this season for good and casts a " +
+    "brand-new house; without it the call no-ops and the player stays stuck on the reunion.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +

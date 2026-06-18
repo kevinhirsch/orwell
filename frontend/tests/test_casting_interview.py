@@ -147,6 +147,33 @@ def test_do_create_character_forwards_the_deepeners(monkeypatch):
     assert received["interview_notes"] == DEEPENERS["interviewNotes"]
 
 
+def test_do_create_character_forwards_confirm_restart(monkeypatch):
+    # Play-through bug (2026-06-18, season-1 finale → season 2): the engine's ONE sanctioned
+    # restart door (D1/R1) is a confirmed createCharacter, but the relay never forwarded the
+    # confirm flag — so over a finished season the call no-op'd (B36 guard) and the player could
+    # never start season 2 from chat. The relay must pass confirmRestart through, and default it
+    # OFF so a normal first-time casting never wipes anything.
+    received = {}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    import json
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "P", "confirmRestart": True}), owner="u"))
+    assert received["confirm_restart"] is True
+    received.clear()
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "P"}), owner="u"))
+    assert received["confirm_restart"] is False  # absent ⇒ never a surprise restart
+
+
+def test_createcharacter_schema_exposes_confirm_restart():
+    props = _tool_schema("createCharacter")["parameters"]["properties"]
+    assert "confirmRestart" in props
+    assert props["confirmRestart"]["type"] == "boolean"
+
+
 def test_do_create_character_allows_a_missing_name(monkeypatch):
     # 0050: the name may already be on file from the interview — the ENGINE validates.
     received = {}

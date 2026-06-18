@@ -529,6 +529,10 @@ def setup_orwell_routes() -> APIRouter:
                 confirm_restart=body.confirm,
                 user=user,
             )
+            # Restart-door hygiene (D3/E66): a fresh season wipes the prior season's cached
+            # decision card so no phantom pending bleeds onto the status route until season 2's
+            # first advance. The casting card has no `pending`, so this clears _LAST_PENDING.
+            orwell_engine.remember_pending(res, user=user)
             # Kick off move-in cast portraits (0051) — background, never blocks the response,
             # silent no-op when no image model is configured (graceful absence).
             try:

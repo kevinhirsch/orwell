@@ -1519,6 +1519,16 @@ FUNCTION_TOOL_SCHEMAS = [
                         "description": "3-8 short notes of the best get-to-know material from the interview.",
                     },
                     "seed": {"type": "integer", "description": "Optional RNG seed for reproducibility."},
+                    "confirmRestart": {
+                        "type": "boolean",
+                        "description": (
+                            "Set true ONLY to start a BRAND-NEW season over an existing one — when the "
+                            "current season is finished (a winner was crowned) or the player has clearly "
+                            "asked to abandon it and play again. This PERMANENTLY ends the current season "
+                            "(its cast, its history) and casts a fresh house. Without it, createCharacter "
+                            "no-ops on any started game, so omit it during a normal first-time casting."
+                        ),
+                    },
                 },
                 "required": [],
             },

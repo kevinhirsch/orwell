@@ -67,6 +67,17 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/never put one person in two places/i);
   });
 
+  it("the whereabouts shape (present vs nearby) is mapped so rooms are not scrambled (#4)", () => {
+    // Play-through bug (2026-06-18, S2 premiere): the model called whereabouts, then narrated a
+    // `present` houseguest into a side room, pulled a `nearby` one into the player's room, and
+    // invented a third into a room they were not in. The lever must bind the JSON shape, not just
+    // forbid "guessing".
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/`present` are the people IN/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/is a NAMED adjacent room/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/NEITHER list is elsewhere/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Never move a `present` person|pull a `nearby` person/);
+  });
+
   it("player knowledge must come through a recorded pathway (#5)", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/GROUNDED KNOWLEDGE/);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/only KNOWS what a/i);
