@@ -2442,7 +2442,10 @@ async def stream_agent_loop(
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
                 _is_lull = _player_turn_is_lull(messages)
                 _want_advance = (not _progressed) and _is_lull and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
-                _want_record = (not _recorded) and (not _is_lull) and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN
+                # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
+                # social exchange — its houseguest mentions are comp players, not a scene to bank.
+                _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
+                                and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN)
                 if _want_advance or _want_record:
                     _phase, _house = None, []
                     try:

@@ -80,8 +80,8 @@ def test_record_nudge_banks_engaged_houseguest_scenes():
     assert "_scene_touched_houseguest" in js
     assert "_MAX_RECORD_NUDGES_PER_TURN" in js
     assert "_RECORD_STALL_LEVEL" in js
-    # gated on engagement (not a lull) + a houseguest scene + nothing recorded
-    assert "_want_record = (not _recorded) and (not _is_lull)" in js
+    # gated on engagement (not a lull) + a houseguest scene + nothing recorded + NOT a beat-advance
+    assert "(not _recorded) and (not _is_lull) and (not _progressed)" in js
     assert "_want_record and _scene_touched_houseguest(cleaned_round, messages, _house)" in js
     # escalation resets when a recording tool fires
     assert "block.tool_type in _RECORD_TOOLS and owner:" in js
