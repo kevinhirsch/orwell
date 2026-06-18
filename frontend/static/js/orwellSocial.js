@@ -149,12 +149,18 @@
           margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
         }
         #orwell-social .osoc-chip {
-          display: flex; align-items: center; gap: .35rem; margin: .25rem 0;
+          /* flex-start so the dismiss × stays top-aligned when the label wraps to
+             multiple lines in the narrow sidebar column (E… overflow fix). */
+          display: flex; align-items: flex-start; gap: .35rem; margin: .25rem 0;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
           border-radius: 8px; padding: .25rem .4rem;
         }
         #orwell-social .osoc-chip .osoc-go {
-          flex: 1; cursor: pointer; text-align: left; min-height: 24px;
+          /* a <button> won't grow to fit wrapped text on its own — its box stayed
+             ~2 lines while the label needed 3, spilling out and overlapping the next
+             chip. Let it size to content and wrap cleanly. */
+          flex: 1; cursor: pointer; text-align: left; min-height: 24px; height: auto;
+          line-height: 1.4; white-space: normal; overflow-wrap: anywhere;
           border: none; background: none; color: inherit; font: inherit; padding: 0;
         }
         #orwell-social .osoc-chip .osoc-go b { color: var(--fg, #9cdef2); }

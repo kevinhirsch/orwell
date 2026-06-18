@@ -62,9 +62,12 @@ def test_presence_strip_is_mounted_and_ambient():
     assert "orwellPresence.js" in html
 
     js = open(os.path.join(FRONTEND, "static", "js", "orwellPresence.js"), encoding="utf-8").read()
-    # Ambient, never click-to-act: the ONLY interactive control is the dismiss button, and the
-    # module never POSTs anywhere (reads state + whereabouts only).
-    assert js.count("addEventListener(\"click\"") == 1 and "dismiss" in js
+    # Ambient, never click-to-act: it is now docked as sidebar chrome ("Where you are"),
+    # mirroring the status HUD / "Wants a word" gadgets — NO interactive control at all (the old
+    # floating dismiss strip covered the composer/chat), and the module never POSTs anywhere
+    # (reads state + whereabouts only).
+    assert js.count("addEventListener(\"click\"") == 0
+    assert "getElementById(\"sidebar\")" in js          # mounted INTO #sidebar, not a fixed strip
     assert "POST" not in js and "method:" not in js
     assert "/api/orwell/whereabouts" in js and "/api/orwell/state" in js
     # Game-build gated + fail-open.
