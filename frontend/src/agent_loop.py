@@ -1537,6 +1537,93 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# A STRUCK DEAL (0039) is a structured commitment, not just a scene: the model reliably narrates one
+# ("you have my word", a final-two, a no-nominate pact) but skips makeDeal, so the deal binds no one,
+# never reconciles against later noms/votes, and the deals surface stays empty. _auto_record_scene
+# only back-fills a GENERIC recordInteraction — the relationship moves but the deal is lost. So when an
+# engaged turn's narration seals a deal and makeDeal was NOT called, we back-fill makeDeal too. The
+# pre-filter keeps the extra extraction rare; the extraction itself is the gatekeeper (HIGH bar) so
+# loose "let's work together" chatter never becomes a phantom commitment.
+_DEAL_KINDS = {"safety", "vote", "final-two", "target-other"}
+# A deliberately BROAD pre-filter — deal-sealing language is varied (a handshake, "bloc vote", "no
+# nominations", "ride or die"), and a missed signal means a lost deal, while a false hit only costs a
+# rare extraction call that returns struck=false. So we err wide here and let the HIGH-bar extraction
+# be the real gatekeeper. (The "shake" alternatives exclude "shake … head" so a head-shake isn't a deal.)
+_DEAL_SIGNAL_RE = re.compile(
+    r"\b(deals?|pact|alliance|agreement|agree(?:d|s)?|promise|"
+    r"(?:my|your|his|her) word|final[\s-]?(?:two|2)|f2|ride[\s-]?or[\s-]?die|work together|"
+    r"watch (?:your|my|each ?other'?s?) back|got (?:your|my) back|"
+    r"(?:won'?t|will not|don'?t|do not|never) (?:put you up|nominate|target)|no[\s-]?nominat\w*|"
+    r"keep (?:you|each other) safe|protect (?:you|each other)|"
+    r"(?:you|we|they|i) shake(?! (?:your |my |his |her )?heads?)|"
+    r"shakes? (?:on it|hands|your hand|her hand|his hand)|shook (?:on it|hands|your hand|her hand|his hand)|"
+    r"(?:sticks?|stuck|extends?|extended|offers?|holds?|held|puts?|put) (?:out )?(?:a|her|his|your|the) hand|"
+    r"handshake|swear|vote (?:with you|together|as a bloc)|bloc|"
+    r"we have a deal|i'?m with you|stick together|lock(?:ed)? (?:it )?in)\b", re.I)
+
+
+async def _auto_record_deal(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE a struck deal is RECORDED (0039 back-fill). When an engaged turn's narration seals a
+    deal but the model skipped makeDeal, a constrained extraction proposes {withId, kind, terms} and
+    we call makeDeal ourselves — so the promise is real, reconciles against later play, and shows on
+    the deals surface. HIGH BAR: a deal is created ONLY for a clear, explicit, MUTUAL agreement (both
+    sides committed to concrete terms); loose talk / a one-sided pitch / a maybe returns struck=false,
+    so no phantom deal binds the player. Model-driven makeDeal always takes precedence; this only fills
+    the gap. Fail-closed: any hiccup just skips. Player↔ONE-houseguest only (the engine's deal shape)."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = "\n".join(f'{h.get("id")} = {h.get("name")}'
+                           for h in house if h.get("id") and h.get("name"))
+        if not roster:
+            return False
+        # Focus the extraction on the deal moment: in a multi-round turn (one that also advanced a
+        # ceremony) the handshake may sit anywhere in the narration, so center the window on the first
+        # deal-signal hit rather than blindly taking the head (which could be a comp/eviction beat).
+        _m = _DEAL_SIGNAL_RE.search(narration or "")
+        scene = (narration[max(0, _m.start() - 600): _m.start() + 1200] if _m else (narration or "")[:1500])
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the player and ONE houseguest just struck a BINDING DEAL in this Big "
+                "Brother scene. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no thinking, "
+                "no prose, no code fence:\n"
+                '{"struck":<true|false>,"withId":"<the houseguest id from the roster>",'
+                '"kind":"<one of: safety, vote, final-two, target-other>",'
+                '"terms":"<one short clause of what was promised>"}\n'
+                "struck=true ONLY when BOTH sides explicitly AGREED to a concrete commitment. If it was "
+                "loose talk, a one-sided pitch, a 'maybe', or a refusal, struck=false. kind: safety = "
+                "won't nominate / will protect; vote = how to vote; final-two = go to the end together; "
+                "target-other = agree to come after a third person."},
+            {"role": "user", "content":
+                f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
+                f"WHAT HAPPENED:\n{scene}\n\nJSON:"},
+        ]
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=500, timeout=45) or ""
+        obj = None
+        for cand in reversed(re.findall(r"\{[^{}]*\"struck\"[^{}]*\}", raw, re.DOTALL)):
+            try:
+                obj = json.loads(cand); break
+            except Exception:
+                continue
+        logger.info(f"[orwell] deal back-fill extraction: parsed={obj} (raw_len={len(raw)}) user={owner}")
+        if not obj or not obj.get("struck"):
+            return False
+        valid = {h.get("id") for h in house}
+        with_id = obj.get("withId")
+        if with_id not in valid:
+            logger.info(f"[orwell] deal back-fill: withId {with_id!r} not on roster — skipped user={owner}")
+            return False
+        kind = obj.get("kind") if obj.get("kind") in _DEAL_KINDS else "safety"
+        terms = (obj.get("terms") or "").strip()[:200] or "a mutual protection deal"
+        await _oe.make_deal(with_id, kind, terms, user=owner)
+        logger.info(f"[orwell] auto-recorded deal (kind={kind}, with={with_id}) user={owner}")
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-record deal failed: {_e}")
+        return False
+
+
 # ── Operator-aside scrub (audit 2026-06-18) ───────────────────────────────────────────
 # In a LIVE game the narration model sometimes leaks its PLANNING into the visible channel —
 # "I should record this interaction, then advance the game", "The advanceGame call will move us to
@@ -2235,6 +2322,7 @@ async def stream_agent_loop(
         _scrub_active = _is_live_game
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
+    _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
@@ -2730,11 +2818,22 @@ async def stream_agent_loop(
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
                                 and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN)
+                # 0039 deal back-fill: the turn narrated a struck deal but never called makeDeal. Gated
+                # on a cheap deal-language pre-filter over the WHOLE turn's narration (a deal struck in
+                # an early round of a turn that also advanced a ceremony still counts) and the per-turn
+                # cap (`_turn_deal_nudges` is set to 1 when the model calls makeDeal itself, so model-
+                # driven deals always win). Deliberately NOT gated on `_progressed`/`_is_lull`/`_recorded`:
+                # a deal commonly gets struck on the same turn the player also advances a beat or records
+                # a generic scene — the high-bar extraction (struck=false for loose talk) is the real
+                # gatekeeper against phantom deals, not these gates.
+                _turn_narration = "\n".join(t for t in round_texts if t)
+                _want_deal = (_turn_deal_nudges < 1
+                              and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
                 # The re-approach can fire on ANY finishing live turn (it watches the post-season
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_reapproach:
+                if _want_advance or _want_record or _want_deal or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     try:
                         from src import orwell_engine as _oe
@@ -2798,7 +2897,18 @@ async def stream_agent_loop(
                     # Model-driven recording always takes precedence (if it had recorded, _recorded
                     # would be True and we'd never get here). Invisible to the player (hidden weights).
                     _touched = _scene_touched_houseguest(cleaned_round, messages, [h.get("name") for h in _house])
-                    if _want_record and _touched:
+                    # 0039: a deal the model narrated but never made — back-fill makeDeal so it binds
+                    # and shows on the deals surface. Runs first; a struck deal already banks the
+                    # consequence (makeDeal records a witnessed event + folds impact), so it also
+                    # satisfies the generic scene-record below (no double fold). HIGH-bar extraction —
+                    # struck=false (loose talk) creates nothing.
+                    _touched_deal = _scene_touched_houseguest(_turn_narration, messages, [h.get("name") for h in _house])
+                    if _want_deal and _touched_deal:
+                        _turn_deal_nudges += 1  # once per turn
+                        if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
+                                                   _house, endpoint_url, model, headers, owner):
+                            _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
+                    if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
                                                  _house, endpoint_url, model, headers, owner)
@@ -3183,6 +3293,8 @@ async def stream_agent_loop(
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
                 _turn_record_nudges = 1  # model recorded organically — don't also auto-record
+            if _is_live_game and block.tool_type == "makeDeal":
+                _turn_deal_nudges = 1  # model struck the deal itself — don't also back-fill one
 
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
