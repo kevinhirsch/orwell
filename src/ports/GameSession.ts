@@ -240,6 +240,13 @@ export interface PublicGameStatus {
   hoh: { id: EntityId; name: string } | null;
   nominees: Array<{ id: EntityId; name: string }>;
   veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+  /**
+   * The CURRENT binding decision the loop is blocked on (the same Vault-free legal-options view the
+   * advance returns), or null when the engine isn't waiting on the player. Surfaced here so the
+   * decision card can re-arm from ENGINE TRUTH after a reload — robust to a front-end restart or an
+   * out-of-band advance (the FE's last-seen cache is process-local and goes stale; this never does).
+   */
+  pending: PendingDecisionView | null;
 }
 
 /** A named houseguest reference for decisions/options (Vault-free — id + name only). */

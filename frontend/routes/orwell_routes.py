@@ -133,12 +133,12 @@ def setup_orwell_routes() -> APIRouter:
         (field bug: the panel's poll logged a 502 per refresh on a healthy, game-less box)."""
         try:
             st = await orwell_engine.game_status(user=_current_user(request))
-            # D3/E66: the last-seen pending decision rides along so the decision card
-            # can re-arm after a reload — the engine's own Vault-free legal-options
-            # view, cached at the AdvanceView chokepoints. A status poll NEVER
-            # advances the game (ADR 0003: progressing is always an explicit act).
+            # D3/E66: the current pending decision rides along so the decision card can re-arm after
+            # a reload. PREFER the engine's own `pending` (now on gameStatus — robust to a FE restart
+            # / out-of-band advance); fall back to the FE-cached last-seen only if the engine omitted
+            # it (older engine). A status poll NEVER advances the game (ADR 0003).
             if isinstance(st, dict):
-                st["pending"] = orwell_engine.last_pending(_current_user(request))
+                st["pending"] = st.get("pending") or orwell_engine.last_pending(_current_user(request))
             return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
