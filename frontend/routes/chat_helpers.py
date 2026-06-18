@@ -135,6 +135,81 @@ _CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"
 _VETO_DRAW_PHASE = "veto-competition"
 
 
+# ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
+#
+# Found in live play: the engine sat BLOCKED on a player decision (its `pending` — e.g. a
+# week-2 goodbye-message the player must author) while the GM role-played PAST it, narrating
+# into week 3. The engine is the SOURCE OF TRUTH; the fiction must NEVER advance past an
+# unresolved player decision. Unlike C-02 (an NPC ceremony with NO player step, which we
+# pre-resolve for real), this is the OPPOSITE case — a PLAYER pending the engine is rightly
+# waiting on. We cannot resolve it for the player (that would steal their agency), so we instead
+# HARD-BLOCK the model: a forceful system directive that pins the model to THIS decision and
+# forbids narrating any beat past it (no new day / ceremony / week / comp / eviction / time-skip).
+# This is a prompt directive, not a UI change — the decision card already surfaces the pending,
+# but the MODEL still narrates past it, so the error-correction belongs in the GM frame.
+
+# Per-kind hints — one line steering the model to the SPECIFIC choice the player owes. The
+# general fallback covers every other kind (nominations is HOH-only; comp-intent/veto-decision/
+# replacement/votes/tie-break/final-eviction/finale-* fall through to it where unlisted).
+_PENDING_KIND_HINTS = {
+    "goodbye-message": (
+        "The player must author their GOODBYE MESSAGE to the houseguest who was just evicted. "
+        "Bring them to the moment, prompt them for their farewell words (the tone and message are "
+        "THEIRS — never speak it for them), then submit it via submitDecision."
+    ),
+    "eviction-vote": (
+        "The player must CAST THEIR EVICTION VOTE against the two nominees. Bring them into the "
+        "Diary Room / vote moment and take their explicit pick, then submit it via submitDecision "
+        "(the ballot is secret — do not reveal the tally early)."
+    ),
+    "nominations": (
+        "The player is HOH and must NAME TWO NOMINEES for eviction. Bring them to the nomination "
+        "ceremony in the fiction and take their two explicit picks from the legal options, then "
+        "submit them via submitDecision."
+    ),
+}
+
+# The general fallback hint for every other player pending (votes, veto decision, replacement,
+# the finale beats, etc.): name the choice from the engine's own prompt and take it.
+_PENDING_GENERAL_HINT = (
+    "The player must make THIS decision before the game can move. Bring them to it in the fiction "
+    "and take their explicit choice over the legal options (for free-text beats — a statement, a "
+    "question — prompt them for their own words first), then submit it via submitDecision."
+)
+
+
+def _pending_barrier_directive(pending) -> Optional[str]:
+    """Build the forceful GM directive that HARD-BLOCKS narrating past an open player decision
+    (the desync class above). Returns None when there is no player pending — the turn is then
+    framed exactly as before.
+
+    The engine is the source of truth: when its live `pending` is set, the player owes a decision
+    and the fiction must NOT advance past it. The directive (a) names the decision and that the
+    player is the decider, quoting the engine's own prompt; (b) HARD-FORBIDS narrating any beat
+    past it (no new day, ceremony, week, competition result, eviction, or time-skip); and (c) pins
+    the model's only job this turn to bringing the player to THIS decision and taking their choice
+    via submitDecision. Narrating anything past it is a DESYNC and is forbidden."""
+    if not pending or not isinstance(pending, dict):
+        return None
+    kind = str(pending.get("kind") or "").strip() or "this decision"
+    by = pending.get("by") if isinstance(pending.get("by"), dict) else {}
+    who = (by.get("name") or "the player").strip() or "the player"
+    prompt = str(pending.get("prompt") or "").strip()
+    hint = _PENDING_KIND_HINTS.get(kind, _PENDING_GENERAL_HINT)
+    quoted = f' The engine\'s instruction is: "{prompt}".' if prompt else ""
+    return (
+        "STOP — THE GAME IS WAITING ON A PLAYER DECISION (do not narrate past it). The engine "
+        f"(the source of truth) is BLOCKED on an unresolved decision of kind `{kind}` that {who} "
+        f"— the player — must make right now.{quoted}\n"
+        "You are FORBIDDEN from narrating any beat past this decision: do NOT start a new day, run "
+        "or announce any competition or its result, hold a new ceremony, evict anyone, advance to "
+        "the next week, or skip ahead in time in ANY way. Narrating anything past this decision is "
+        "a DESYNC from the engine and is not allowed.\n"
+        f"Your ONLY job this turn is to bring the player to THIS decision in the fiction and take "
+        f"their explicit choice. {hint}"
+    )
+
+
 async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
     """If the live game sits at an unresolved NPC-driven ceremony with NO player decision pending,
     resolve that single beat (one advanceGame) so the moment prompt carries the engine's real
@@ -295,6 +370,18 @@ async def apply_game_framing(
             gm_prompt = FALLBACK_GM_PROMPT
         if session_id is not None:
             _SESSION_GAME_FRAMED.add(session_id)
+        # The pending-decision BARRIER (a chat↔engine desync class): if the engine is BLOCKED on a
+        # player decision, HARD-BLOCK the model from narrating past it (no new day/ceremony/week/
+        # comp/eviction) and pin it to bringing the player to THAT decision. The engine is the
+        # source of truth; the fiction must not advance past an unresolved player pending. Best-
+        # effort / fail-open: any hiccup must not break the turn.
+        try:
+            _status = await orwell_engine.game_status(user=user)
+            _barrier = _pending_barrier_directive((_status or {}).get("pending")) if isinstance(_status, dict) else None
+            if _barrier:
+                gm_prompt = gm_prompt + "\n\n" + _barrier
+        except Exception as e:
+            logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
