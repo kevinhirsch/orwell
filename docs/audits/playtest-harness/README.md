@@ -272,3 +272,33 @@ consistent NPC voices across turns (Taylor warm/perceptive, Cassandra cold/analy
 the GM tracks threads and honors the player's backstory, and with the fixes there were **zero machinery leaks** in
 a clean 7-turn run. The dynamic, nuanced DM quality is the thing worth protecting — the fix must add guardrails
 **around** it, not replace it.
+
+### Update — batch-fix verification (2026-06-18, later)
+
+After the season-1 fixes, a guardrail was added (`FLAVOR vs OUTCOMES` + "runCompetition only previews — you
+MUST advanceGame") and the model default set to `deepseek-v4-pro`. Verified across season-1 (flash) and a
+season-2 attempt:
+
+- **B6 — substantially FIXED.** With the guardrail, the model sources the comp winner from the engine
+  (`runCompetition`) and **no longer hands the player the win** (flash crowned the player; guardrailed flash
+  crowned a real roster member — Karl Duncan — with the player mid-pack). Anti-sycophancy restored. ✅
+- **B5 — still OPEN.** Even with the strengthened guardrail, **flash never calls `advanceGame`** (0 calls all
+  session) — `runCompetition` previews but the board never formally moves (phase stuck at `premiere`). The
+  prompt is not enough on flash.
+- **B4 — still OPEN on flash.** Rampant cast invention persists (Dante Cross, Angela, Niki).
+- **Two confounders that block a clean PRO test (fix these in the harness first):**
+  1. **Model-picker inheritance** — new chat sessions reuse the *last-used* model (flash), ignoring the server
+     `default_model` (pro). Drive the model picker to select pro, or create the session via the API with
+     `model=deepseek/deepseek-v4-pro` explicitly (the API path honors it — confirmed).
+  2. **Admin-door casting desync** — when the season is created via the debug `new-game` door behind a fresh
+     chat session, the model tries to run the *casting interview* first (updateCasting/createCharacter) and
+     burns the turn before reaching the comp — so play tests stall in casting and surface reasoning-as-text.
+     **Fix:** test through the AUTHENTIC flow — let the model run the in-chat casting interview to
+     `createCharacter` (don't pre-create via the door), then play. Or extend the moment prompt so a
+     door-created (already-cast) game skips re-casting.
+
+- **Flash-vs-pro verdict (the original question):** flash's prose is excellent and leak-free, but it fails
+  engine *discipline* (won't `advanceGame`, invents cast). That justifies escalating to **pro** for grounding-
+  critical play. Pro's discipline is **not yet cleanly confirmed** — the clean pro run is blocked by the two
+  confounders above; do that next (authentic casting + pinned pro), checking `advanceGame` is called and the
+  engine advances comp → nominations with real roster names.
