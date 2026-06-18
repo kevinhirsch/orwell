@@ -315,7 +315,7 @@ function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     s.pending = { kind: "houseguests-choice", by: ctx.player, options: hc.candidates };
     return {
       beat: "veto-draw",
-      content: `the veto players are drawn: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the final player`,
+      content: `the veto players are drawn: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the sixth houseguest to play`,
       participants: [...draw.participants],
     };
   }
@@ -1127,7 +1127,7 @@ export function applyDecision(
       }
       return {
         beat: "veto-draw",
-        content: `${ctx.player} names ${input.pick} as the final veto player`,
+        content: `${ctx.player} names ${input.pick} to fill the final veto spot`,
         participants: [...s.vetoField],
       };
     }
