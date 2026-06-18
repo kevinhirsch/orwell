@@ -4,6 +4,7 @@ import { VisibleStateService } from "../../services/VisibleStateService";
 import { SummaryService } from "../../services/SummaryService";
 import { toPlayerCompetitionView } from "../../domain/competition";
 import type { PlayerCompetitionView } from "../../domain/competition";
+import { pathwayLabel } from "../../domain/humanize";
 import { InterrogationHandler } from "./InterrogationHandler";
 
 export type PlayerSurfaceType =
@@ -111,9 +112,13 @@ export class PlayerSurface {
 
   renderLog(): string {
     const vs = this.visible.getVisibleStateFor(this.player);
+    const roster = this.visible.publicRoster();
+    // The pathway is internal plumbing (`overheard:offscreen:…`, `told-by:npc:3`) — never echo it
+    // raw into a player-facing log; render a friendly source label instead (audit R4-03). Content
+    // is already scrubbed by the visible projection.
     return [
       ...vs.visibleEvents.map((e) => `[${e.ts}] ${e.type}: ${e.content}`),
-      ...vs.knowledge.map((k) => `[${k.ts}] known (${k.pathway}): ${k.content}`),
+      ...vs.knowledge.map((k) => `[${k.ts}] known (${pathwayLabel(k.pathway, roster)}): ${k.content}`),
     ].join("\n");
   }
 

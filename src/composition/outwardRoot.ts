@@ -20,6 +20,9 @@ export interface OutwardChannels {
   player: PlayerSurface;
   admin: AdminPort;
   summary: SummaryService;
+  /** The player's visible projection. Exposed so the registry can wire its public-roster resolver
+   *  (id → name) for the player-facing content scrub — audit R4-03 / C-01. Still Vault-free. */
+  visible: VisibleStateService;
 }
 
 export interface OutwardDeps {
@@ -36,5 +39,5 @@ export function buildOutwardChannels(deps: OutwardDeps): OutwardChannels {
   const narrator = deps.narrator ?? new EchoNarrativePort();
   const player = new PlayerSurface(deps.player, visible, narrator, summary);
   const admin = new AdminPort(deps.adminState);
-  return { player, admin, summary };
+  return { player, admin, summary, visible };
 }

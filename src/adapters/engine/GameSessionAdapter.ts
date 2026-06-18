@@ -505,6 +505,20 @@ export class GameSessionAdapter implements GameSession {
     return this.house.npcs.find((n) => n.id === id)?.name;
   }
 
+  /**
+   * The PUBLIC house roster (id → public name) — non-Vault: names are public roster facts, nothing
+   * else crosses. Wired into the outward `VisibleStateService` (registry) so player-facing event /
+   * knowledge content names houseguests instead of echoing raw `npc:N` ids (audit R4-03 / C-01).
+   * Empty before the house exists.
+   */
+  publicRoster(): { id: EntityId; name: string }[] {
+    if (!this.house) return [];
+    return [
+      { id: this.house.player.id, name: this.house.player.name },
+      ...this.house.npcs.map((n) => ({ id: n.id, name: n.name })),
+    ];
+  }
+
   private card(id?: EntityId): { id: EntityId; name: string } | null {
     return id ? { id, name: this.nameOf(id) } : null;
   }

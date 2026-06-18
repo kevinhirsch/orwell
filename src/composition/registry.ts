@@ -58,6 +58,10 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // Name resolution for outward prose (non-Vault: names are public): the player surface uses this
   // so socialRead names the houseguest instead of echoing a raw `npc:N` id into the read.
   outward.player.setNameResolver((id) => session.publicName(id));
+  // The PLAYER-FACING CONTENT scrub (audit R4-03 / C-01): the visible projection's event/knowledge
+  // content also interpolates raw ids + pathway slugs — wire the live public roster so the narrator
+  // receives names ("Ada and Bo are getting close"), never `npc:8 and npc:14 are … · more or less#7`.
+  outward.visible.setRoster(() => session.publicRoster());
   // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
   // knows who's still in the house (player + non-evicted NPCs).
   commands.setLivingProvider(() => session.livingIds());
