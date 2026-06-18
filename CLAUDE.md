@@ -292,7 +292,7 @@ included). Datastore is
 | `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run build` | Bundle the engine to `dist/main.js` + the embedding worker to `dist/embedWorker.js` (esbuild; `fastembed` stays external). |
-| `npm start` | Run the built engine — the HTTP MCP server (a plain HTTP tool API; it does **not** yet speak MCP/JSON-RPC — that envelope is a known deferral). `ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks. |
+| `npm start` | Run the built engine — the HTTP MCP server: the REST-ish tool API (`/:channel/{tools,call}`) **plus** an additive MCP/JSON-RPC 2.0 envelope (`POST /:channel/rpc` — `initialize`/`tools/list`/`tools/call`, notifications + batch; same auth/isolation guardrails). The SSE server-push stream is unimplemented and unneeded (no server-initiated messages). `ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks. |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
@@ -487,7 +487,10 @@ the authoritative open-items list going forward.
 open-items list): **0022** MVP-2 (the one deferred feature); 0010's container smoke on a real Proxmox host — which is also the
 real-host verification the A4 single-PAT deploy design still needs (do it during the
 private-repo flip); the deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector
-— souls/vectors run in-memory + file today); full MCP/JSON-RPC over the current HTTP transport;
+— souls/vectors run in-memory + file today); the MCP/JSON-RPC envelope is **now built** (an
+additive `POST /:channel/rpc` doing `initialize`/`tools/list`/`tools/call` + notifications/batch
+over the same guardrails — `src/adapters/mcp/jsonRpc.ts`; only the SSE server-push stream is left,
+and it is **unneeded** here — the engine emits no server-initiated messages);
 the **playtest-gated calibration revisit** (passive players coast to Final 2 in ~half of seasons
 and lose there — ruled emergent realism for now; the largest open game-feel question); the
 post-campaign UI follow-ups **A5–A7** (per-theme particles backgrounds, the frosted-top fix, the

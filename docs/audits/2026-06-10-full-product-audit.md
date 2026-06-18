@@ -1610,8 +1610,11 @@ pytest/browser-smoke/matrix green.*
 0022 (player-experience MVP-2) · 0010's container smoke on a real Proxmox host — which
 means **the A4 single-PAT deploy design has never been verified on a real deployed box**,
 only via simulated smoke probes; verify it during the private-repo flip · the real
-relational adapters (SQLite/Postgres, sqlite-vec/pgvector) · full MCP/JSON-RPC over the
-HTTP transport · the specced-not-built 0051 (in-character images). **0053 (admin transcripts)
+relational adapters (SQLite/Postgres, sqlite-vec/pgvector) · ~~full MCP/JSON-RPC over the
+HTTP transport~~ — **the JSON-RPC 2.0 envelope is now ✅ built** (additive `POST /:channel/rpc`:
+`initialize`/`tools/list`/`tools/call` + notifications/batch, same guardrails; `jsonRpc.ts`);
+only the unneeded SSE server-push stream remains (no server-initiated messages) ·
+the specced-not-built 0051 (in-character images). **0053 (admin transcripts)
 is now ✅ built (PR #223, Lane C)** — read-only admin-gated transcript retrieval incl. the
 agent tool-call nodes; FE pytest-validated.
 

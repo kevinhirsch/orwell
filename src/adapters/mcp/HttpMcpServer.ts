@@ -5,17 +5,22 @@ import type { McpServer } from "./McpServer";
 import { toolsFor } from "../../surfaces/tools/registry";
 import { EngineRefusal, TurnRefusedError, PersistFailureError } from "../../domain/errors";
 import { HealthMetrics, errorClassOf } from "./healthMetrics";
+import { handleRpcPayload, rpcIdOf, RPC } from "./jsonRpc";
+import type { ToolGateway } from "./jsonRpc";
 
 /**
  * A minimal HTTP transport over the permissioned `McpServer` routers — the
  * networked seam the orwell front-end calls (feature 0009 allows MCP over
  * stdio or HTTP). It is outward-facing: it depends only on `McpServer`, never on
- * the Vault. The full MCP/JSON-RPC protocol wrapper can layer on top later; this
- * is the runnable entrypoint the deploy scripts (0010) build and start.
+ * the Vault. Two envelopes ride the SAME router and the SAME guardrails: the
+ * REST-ish `/call` shape the front-end uses, and the additive MCP / JSON-RPC 2.0
+ * `/rpc` endpoint (`jsonRpc.ts`) for standard MCP clients. This is the runnable
+ * entrypoint the deploy scripts (0010) build and start.
  *
  *   GET  /health
- *   GET  /:channel/tools           -> { tools }
- *   POST /:channel/call { name, args } -> { result }   (:channel = player | admin)
+ *   GET  /:channel/tools                  -> { tools }
+ *   POST /:channel/call { name, args }     -> { result }              (:channel = player | admin)
+ *   POST /:channel/rpc  <JSON-RPC 2.0>     -> <JSON-RPC 2.0 response>  (initialize | tools/list | tools/call)
  */
 export interface HttpMcpDeps {
   player: McpServer;
@@ -178,7 +183,7 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
         return send(200, { ok: true, ...metrics.snapshot(), embeddings });
       }
 
-      const match = url.pathname.match(/^\/(player|admin)\/(tools|call)$/);
+      const match = url.pathname.match(/^\/(player|admin)\/(tools|call|rpc)$/);
       if (!match) return send(404, { error: "not found" });
       const channel = match[1] as "player" | "admin";
 
@@ -278,6 +283,75 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
               const deliberate = e instanceof EngineRefusal || (e instanceof Error && e.constructor === Error);
               if (deliberate) send(400, { error: (e as Error).message });
               else send(500, { error: "internal error" });
+            }
+          });
+        });
+        return;
+      }
+
+      // The additive MCP / JSON-RPC 2.0 envelope (the deferral noted at the top of this file).
+      // It rides the SAME auth (above), per-user routing, body cap, serialization, and metrics as
+      // /call — it is just another envelope over the same permissioned router, so the Vault Wall
+      // and isolation hold identically. `initialize` / `tools/list` answer statically (never mint
+      // a sandbox); `tools/call` routes to the per-user McpServer behind the same anti-spray gate.
+      if (req.method === "POST" && match[2] === "rpc") {
+        let body = "";
+        let oversize = false;
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (!oversize && body.length > MAX_BODY_BYTES) {
+            oversize = true;
+            send(413, { error: "request body too large" });
+            req.destroy();
+          }
+        });
+        req.on("end", () => {
+          if (oversize) return;
+          enqueue(user, async () => {
+            let payload: unknown;
+            try {
+              payload = JSON.parse(body || "{}");
+            } catch {
+              // JSON-RPC parse error: the id is unknowable ⇒ null (spec).
+              return send(200, { jsonrpc: "2.0", id: null, error: { code: RPC.PARSE_ERROR, message: "parse error" } });
+            }
+            const dispatchStart = Date.now();
+            const gateway: ToolGateway = {
+              // Static allowlist — `initialize`/`tools/list` never resolve (and so never mint) a
+              // sandbox, closing the same spray vector the REST GET /tools route closes (E28).
+              listTools: () => toolsFor(channel === "player" ? "player" : "admin/God Mode"),
+              callTool: async (name, args) => {
+                // E28: an unknown user may mint a sandbox only via a sandbox-creating tool.
+                if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
+                  throw new EngineRefusal("no active game for this user");
+                }
+                let srv: McpServer;
+                try {
+                  srv = pick(channel, user);
+                } catch {
+                  // E7: a resolve failure must not leak the data-dir path into isError content.
+                  metrics.recordFailure(name, "SandboxResolveError", Date.now() - dispatchStart);
+                  throw new Error("internal error");
+                }
+                return srv.callTool(name, args);
+              },
+            };
+            try {
+              const out = await handleRpcPayload(gateway, payload);
+              metrics.recordSuccess("rpc", Date.now() - dispatchStart);
+              if (out === null) {
+                // A lone/all-notification payload gets NO response body (MCP Streamable HTTP: 202).
+                if (!res.writableEnded && !res.destroyed) {
+                  try { res.writeHead(202); res.end(); } catch { /* socket torn down */ }
+                }
+                return;
+              }
+              return send(200, out);
+            } catch (e) {
+              // dispatch swallows tool failures into isError content; here is an unexpected
+              // transport fault ⇒ a JSON-RPC internal error, never a leak.
+              metrics.recordFailure("rpc", errorClassOf(e), Date.now() - dispatchStart);
+              return send(200, { jsonrpc: "2.0", id: rpcIdOf(payload), error: { code: RPC.INTERNAL_ERROR, message: "internal error" } });
             }
           });
         });
