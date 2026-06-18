@@ -1487,7 +1487,10 @@ FUNCTION_TOOL_SCHEMAS = [
                 "archetype and returns the Vault-free game state with the player's casting card "
                 "(character type, strategy, qualitative strengths) — reveal the card in the "
                 "producer's voice, never any number. A recorded name is required (the engine "
-                "rejects creation without one)."
+                "rejects creation without one). This is ALSO the restart door: to start a NEW season "
+                "after one has ENDED (a winner crowned) or that the player wants to abandon, call it "
+                "again with confirmRestart=true and the new player's details — that flag is REQUIRED "
+                "to play again; without it the call silently no-ops on any started season."
             ),
             "parameters": {
                 "type": "object",

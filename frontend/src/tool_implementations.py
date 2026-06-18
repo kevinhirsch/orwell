@@ -4618,6 +4618,21 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
     # 0050: the name may already be on file from the interview (updateCasting) — the engine
     # finalizes from its intake and rejects with a clear message if no name exists anywhere.
     player_name = (args.get("playerName") or "").strip() or None
+    confirm_restart = bool(args.get("confirmRestart"))
+    # Restart-door backstop — error-correct the model the way the stall-nudge / auto-record do.
+    # The model reliably FAILS to pass confirmRestart when the player asks to "play again" after a
+    # season ends: it calls createCharacter repeatedly and every call no-ops (B36 guard), stranding
+    # the player on the finished season (observed live — 6 no-op calls, then it gave up). When the
+    # season is OVER (a winner was crowned — the moment is "post-season", so there is nothing left to
+    # lose), a createCharacter IS the restart: confirm it. NEVER auto-confirm over a LIVE/unfinished
+    # season — that would wipe an ongoing game out from under the player; there the flag stays explicit.
+    if not confirm_restart:
+        try:
+            state = await orwell_engine.get_game_state(user=owner)
+            if isinstance(state, dict) and state.get("started") and state.get("moment") == "post-season":
+                confirm_restart = True
+        except Exception:
+            pass  # state probe is best-effort; never block a legitimate first-time creation
     try:
         res = await orwell_engine.create_character(
             player_name,
@@ -4636,7 +4651,7 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             # finished/abandoned season delegates through the engine's registry.resetUser hinge.
             # Without this flag createCharacter no-ops on a started game (B36 guard), which left the
             # player unable to start season 2 from chat — the relay used to drop the confirm.
-            confirm_restart=bool(args.get("confirmRestart")),
+            confirm_restart=confirm_restart,
             user=owner,
         )
         # D3/E66 + restart-door hygiene: a NEW season must not inherit the finished season's

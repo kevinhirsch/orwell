@@ -9,6 +9,7 @@ engine's ARCHETYPES table (the bug class C13 closed, applied to creation).
 
 import asyncio
 import importlib
+import json
 import os
 import re
 
@@ -172,6 +173,44 @@ def test_createcharacter_schema_exposes_confirm_restart():
     props = _tool_schema("createCharacter")["parameters"]["properties"]
     assert "confirmRestart" in props
     assert props["confirmRestart"]["type"] == "boolean"
+    # the description itself names the restart use (the model under-uses a param-only hint)
+    assert "confirmRestart=true" in _tool_schema("createCharacter")["description"]
+
+
+def test_restart_backstop_auto_confirms_over_a_finished_season(monkeypatch):
+    # Live bug (S2→S3): asked to "play again" post-finale, the model called createCharacter SIX times
+    # without confirmRestart — every call no-op'd and it gave up. The FE error-corrects (like the
+    # stall-nudge): when the season is OVER (moment == "post-season"), a createCharacter IS the restart.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Old", "status": "evicted"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True, "week": 1}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "New"}), owner="u"))
+    assert received["confirm_restart"] is True, "a post-season createCharacter must auto-confirm the restart"
+
+
+def test_restart_backstop_never_fires_mid_season(monkeypatch):
+    # The backstop must NEVER wipe a LIVE season out from under the player — only a finished one.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "nominations", "player": {"name": "Live", "status": "active"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "X"}), owner="u"))
+    assert received["confirm_restart"] is False, "an ongoing season is never silently wiped"
 
 
 def test_do_create_character_allows_a_missing_name(monkeypatch):
