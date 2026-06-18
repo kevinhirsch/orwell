@@ -1,0 +1,64 @@
+import { describe, it, expect } from "vitest";
+import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import type { AdvanceView } from "../../src/ports/GameSession";
+
+/**
+ * C8-04 (round-8 playtest) — the live ceremony state (HOH / nominees / veto holder) must ride in
+ * the model's persistent GAME CONTEXT, not only on the lightweight gameStatus(). The narrator was
+ * inventing ceremonies because the per-turn context carried week/phase/roster but NO HOH or
+ * nominee line — while the nominations prompt told it the marks were "already in your GAME CONTEXT".
+ * Roles only — no fixture names asserted.
+ */
+function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
+  if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "throw" }); // throw → an NPC tends to take HOH
+  else if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+  else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
+}
+
+/** Advance until the week's nominations are on the board. */
+function driveToNominations(s: GameSessionAdapter) {
+  for (let i = 0; i < 400; i++) {
+    const v = s.advanceGame();
+    if (v.pending) resolve(s, v.pending);
+    if (s.getGameState().ceremony.nominees.length >= 2) break;
+  }
+  return s.getGameState();
+}
+
+describe("C8-04 — the ceremony state is in the model's persistent context", () => {
+  it("getGameState projects the live HOH, nominees, and veto (the gameStatus facts)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", archetype: "social", seed: 81000 });
+    const gs = driveToNominations(s);
+
+    expect(gs.ceremony.hoh).not.toBeNull();          // an HOH is crowned
+    expect(gs.ceremony.nominees.length).toBe(2);     // two on the block
+    // The view's ceremony matches the lightweight status projection exactly (one source of truth).
+    const st = s.gameStatus();
+    expect(gs.ceremony.hoh!.id).toBe(st.hoh!.id);
+    expect(gs.ceremony.nominees.map((n) => n.id).sort()).toEqual(st.nominees.map((n) => n.id).sort());
+  });
+
+  it("the moment prompt renders the engine's HOH and nominees so the model can't invent them", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", archetype: "social", seed: 81000 });
+    const gs = driveToNominations(s);
+
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("THIS WEEK'S CEREMONY");
+    expect(prompt).toContain("ON THE BLOCK");
+    expect(prompt).toContain(gs.ceremony.hoh!.name);                 // the real HOH, by name
+    for (const nom of gs.ceremony.nominees) expect(prompt).toContain(nom.name); // both real nominees
+  });
+
+  it("pre-game and pre-ceremony carry an empty ceremony (no invented marks)", () => {
+    const s = new GameSessionAdapter();
+    expect(s.getGameState().ceremony).toEqual({ hoh: null, nominees: [], veto: { holder: null, used: false } });
+    s.createCharacter({ playerName: "P", seed: 7 });
+    // Right after creation (premiere), no HOH/nominees exist yet — the block stays empty, not invented.
+    const gs = s.getGameState();
+    expect(gs.ceremony.nominees).toEqual([]);
+    expect(s.getMomentPrompt({}).systemPrompt).not.toContain("THIS WEEK'S CEREMONY");
+  });
+});

@@ -419,15 +419,36 @@ export function renderGameContext(view: GameStateView): string {
   // B61: each ACTIVE houseguest's curated public facets ride along — the voice anchor the
   // model narrates from (seed-stable, so voices stay consistent across the whole season).
   // The departed are name + seat only; their voices return at the finale via the jury.
+  // C8-04: this week's PUBLIC ceremony state, the engine truth the model voices instead of inventing.
+  const cer = view.ceremony;
+  const nomIds = new Set(cer.nominees.map((n) => n.id));
+  const ceremonyMark = (id: string): string => {
+    const tags: string[] = [];
+    if (cer.hoh && cer.hoh.id === id) tags.push("HOH");
+    if (nomIds.has(id)) tags.push("ON THE BLOCK");
+    if (cer.veto.holder && cer.veto.holder.id === id) tags.push("holds the veto");
+    return tags.length ? ` [${tags.join(", ")}]` : "";
+  };
   const roster = view.house.map((h) => {
-    if (h.status !== "active" || !h.archetype) return `  - ${h.name} (${h.status})`;
+    const mark = ceremonyMark(h.id);
+    if (h.status !== "active" || !h.archetype) return `  - ${h.name} (${h.status})${mark}`;
     const vibe = [
       `${h.archetype}, plays ${h.strategyStyle}`,
       h.background,
       [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
-    return `  - ${h.name} — ${vibe}`;
+    return `  - ${h.name}${mark} — ${vibe}`;
   }).join("\n");
+  // The ceremony status block — engine truth for the HOH / nominations / veto this week. Present only
+  // once something has been set (premiere/pre-ceremony has none), so the model never invents these.
+  const hasCeremony = !!(cer.hoh || cer.nominees.length || cer.veto.holder);
+  const ceremonyLines = !hasCeremony ? [] : [
+    "- THIS WEEK'S CEREMONY (engine truth — voice EXACTLY this; never name a different HOH, nominee, or",
+    "  veto holder, and never tell anyone they are safe or on the block against it):",
+    `    HOH: ${cer.hoh ? cer.hoh.name : "not yet crowned"}`,
+    `    On the block: ${cer.nominees.length ? cer.nominees.map((n) => n.name).join(" and ") : "no nominations yet"}`,
+    `    Veto: ${cer.veto.holder ? `held by ${cer.veto.holder.name}${cer.veto.used ? " (already used)" : ""}` : "not yet played"}`,
+  ];
   // E58: the in-game day index, derived from the ceremony cadence (Day 1 HOH → Day 5 eviction),
   // grounds the model's sense of the week — a week is five beats, never seven invented days.
   const day = dayOfWeek(view.phase);
@@ -443,7 +464,8 @@ export function renderGameContext(view: GameStateView): string {
     `- Phase: ${view.phase}${day === null ? "" : ` (day ${day} of the week)`}`,
     `- Houseguests remaining: ${remaining} of ${total} (use THIS exact number for any count — never`,
     "  do your own arithmetic about how many are left, on podiums, etc.).",
-    `- You are playing as: ${view.player.name} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
+    ...ceremonyLines,
+    `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
     `- The house (${view.house.length} other houseguests) — each line is YOUR PRIVATE voice cue (how to`,
     "  play them); describe people ONLY by what is observable and never say an archetype, a strategy, or",
     "  a danger label out loud — the player discovers who everyone is by watching them play:",

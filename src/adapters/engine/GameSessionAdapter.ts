@@ -1658,6 +1658,7 @@ export class GameSessionAdapter implements GameSession {
       // says which building blocks are in and what the next step is.
       return {
         started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
+        ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false } },
         player: null, house: [], casting: castingStatusOf(this.intake),
       };
     }
@@ -1672,6 +1673,13 @@ export class GameSessionAdapter implements GameSession {
     return {
       started: true,
       finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
+      // C8-04: the live ceremony state in the model's persistent context (the same Vault-free public
+      // facts gameStatus() exposes), so the narrator voices the REAL HOH/nominees/veto, never invents.
+      ceremony: {
+        hoh: this.card(this.ceremony.hoh),
+        nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+        veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+      },
       week: this.week,
       phase: this.phase,
       moment,

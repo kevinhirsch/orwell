@@ -102,6 +102,18 @@ export interface GameStateView {
   finished: boolean;
   /** The current beat key (drives which managed prompt fragment is injected). */
   moment: string;
+  /**
+   * This week's ceremony state — the HOH, the nominees, and the veto. All PUBLIC ceremony facts the
+   * whole house knows (Vault-free; mirrors `PublicGameStatus`). Surfaced into the model's persistent
+   * GAME CONTEXT (audit C8-04) so the narrator voices the REAL HOH / nominations / veto holder
+   * instead of inventing them when it narrates a ceremony without separately fetching the status.
+   * Empty/null pre-game and between ceremonies.
+   */
+  ceremony: {
+    hoh: { id: EntityId; name: string } | null;
+    nominees: Array<{ id: EntityId; name: string }>;
+    veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+  };
   player: PlayerCard | null;
   house: HouseguestCard[];
   /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
