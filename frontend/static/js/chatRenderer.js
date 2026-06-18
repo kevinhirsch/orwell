@@ -1079,7 +1079,8 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
 
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = (model || 'image').split('/').pop();
+  // Immersion: image bubbles (in-character portraits) never show the raw image-model name.
+  role.textContent = isGameBuild() ? "Big Brother" : (model || 'image').split('/').pop();
   wrap.appendChild(role);
 
   const body = document.createElement('div');
@@ -1920,7 +1921,9 @@ export function addMessage(role, content, modelName, metadata) {
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
           const contModel = pair.actualModel || pair.requestedModel;
-          roleEl.textContent = modelRouteLabel(pair.requestedModel, contModel);
+          // C14/immersion: never render the raw LLM model name as the sender in the game
+          // build — the narrator is the show (matches the live path's _setRoleModelLabel).
+          roleEl.textContent = isGameBuild() ? "Big Brother" : modelRouteLabel(pair.requestedModel, contModel);
           if (pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }

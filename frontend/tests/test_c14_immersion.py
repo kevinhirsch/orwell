@@ -148,6 +148,16 @@ def test_game_tool_nodes_suppress_raw_payloads():
     assert "_beatOut || json.tool" in js
 
 
+def test_game_build_never_labels_messages_with_the_model_name():
+    # Immersion (visual audit): every AI message was labelled with the raw LLM model name
+    # ("deepseek-v4-pro → …") — the narrator is the show, not a model. The game build uses a
+    # diegetic sender on BOTH the live and reload paths.
+    chat = _read("static", "js", "chat.js")
+    assert "data-game-build" in chat and "label = 'Big Brother'" in chat
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert renderer.count('isGameBuild() ? "Big Brother"') >= 2   # main reply + image bubble
+
+
 def test_reload_path_applies_production_beats():
     # The history-reload render (chatRenderer.js) was NOT applying the diegetic treatment
     # the live stream did — so re-opening a session leaked raw camelCase tool names and raw

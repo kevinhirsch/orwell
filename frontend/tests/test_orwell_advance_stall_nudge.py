@@ -53,3 +53,32 @@ def test_stall_escalation_resets_when_the_game_advances():
     # a fired progression tool clears the persisted escalation for that game
     assert "block.tool_type in _PROGRESSION_TOOLS and owner:" in js
     assert "_ADVANCE_STALL_LEVEL.pop(owner, None)" in js
+
+
+def test_nudge_only_seizes_a_lull_not_substantive_play():
+    # Pacing is engagement, not a turn count (owner ruling): substantive social play runs
+    # indefinitely; we only nudge progression on a LULL (short/closing reply or an explicit
+    # readiness signal) that the model failed to seize.
+    js = _read("src", "agent_loop.py")
+    assert "_player_turn_is_lull" in js
+    assert "_LULL_READY_RE" in js
+    assert "_LULL_SHORT_CHARS" in js
+    # the nudge is gated on the lull check, alongside the advance-phase + no-progress gates
+    assert "_phase in _ADVANCE_PHASES and _player_turn_is_lull(messages)" in js
+
+
+def test_lull_detection_engagement_vs_lull():
+    # Behavioral: load the helper and check it reads engagement, not length-as-count.
+    import importlib
+    al = importlib.import_module("src.agent_loop")
+    mk = lambda txt: [{"role": "user", "content": txt}]
+    # lulls / readiness
+    assert al._player_turn_is_lull(mk("ok"))
+    assert al._player_turn_is_lull(mk("let's go"))
+    assert al._player_turn_is_lull(mk("what's next?"))
+    assert al._player_turn_is_lull(mk("alright, I'm ready — bring it on"))
+    # substantive social play is NOT a lull
+    rich = ("I find Dawn away from the noise and make my case quietly: she barely knows me, "
+            "Ava put me up as a number not a threat, and using the veto on me costs her nothing "
+            "but buys someone who remembers it. I want to read how she takes that before I push.")
+    assert not al._player_turn_is_lull(mk(rich))

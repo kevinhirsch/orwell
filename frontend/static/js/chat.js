@@ -65,6 +65,10 @@ import { isNarrow } from './platform.js';
     let label = _modelRouteLabel(req, actual);
     if (opts.suffix) label += ' (' + opts.suffix + ')';
     if (opts.characterName) label = opts.characterName;
+    // C14/immersion: the player must never see the raw LLM model name as the sender —
+    // in the game build the narrator IS the show. Use a diegetic label unless a specific
+    // speaker name was supplied.
+    else if (document.body.hasAttribute('data-game-build')) label = 'Big Brother';
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     if (req && actual && !_sameModelName(req, actual)) {

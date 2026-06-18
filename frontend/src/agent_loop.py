@@ -1396,6 +1396,33 @@ _ADVANCE_NUDGES = [
 _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptive, so a beat of
 # legitimate social play at a ceremony phase isn't shoved. Forcefulness escalates ACROSS turns
 # via the persisted _ADVANCE_STALL_LEVEL, not by stacking nudges within a single turn.
+
+# Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
+# as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
+# closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
+# A rich, substantive player message is engagement — never nudged.
+_LULL_READY_RE = re.compile(
+    r"\b(what'?s next|let'?s (go|move|do this|see it|get|roll)|move (on|it along|ahead)|"
+    r"i'?m (ready|done|good)|bring it on|get on with it|run it|start it|let'?s start|kick it off|"
+    r"continue|proceed|come on|on with it|skip ahead|fast.?forward|next (one|round|comp|beat)?|"
+    r"that'?s? (it|all)|nothing else|no more|wrap (it )?up|enough( of)? (this|that)?)\b",
+    re.IGNORECASE,
+)
+_LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
+
+
+def _player_turn_is_lull(messages) -> bool:
+    """A lull = the player disengaged or signalled readiness on THEIR last message — the
+    cue to seize the moment and advance. Substantive play (long, strategic, scheming) is
+    engagement and is never a lull."""
+    last = _extract_last_user_message(messages) or ""
+    s = last.strip()
+    if not s:
+        return True
+    if _LULL_READY_RE.search(s):
+        return True
+    # short and non-substantial: a stripped reply under the threshold with no question/scheme
+    return len(s) <= _LULL_SHORT_CHARS
 # Persistent per-game escalation: a turn that ends still stalled starts the next turn's
 # nudges one rung higher, so repeated stalls get "progressively more forceful". Keyed by
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
@@ -2376,7 +2403,11 @@ async def stream_agent_loop(
                         _phase = (_st or {}).get("phase")
                     except Exception as _e:
                         logger.warning(f"[orwell] stall-nudge phase fetch failed: {_e}")
-                    if _phase in _ADVANCE_PHASES:
+                    # Only seize a LULL — substantive social play runs as long as it has juice
+                    # (pacing is engagement, not a turn count). A rich, engaged player turn is
+                    # never nudged; we step in when they disengaged/signalled ready and the model
+                    # didn't move.
+                    if _phase in _ADVANCE_PHASES and _player_turn_is_lull(messages):
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _nudge = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
                         _turn_advance_nudges += 1
