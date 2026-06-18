@@ -1665,7 +1665,7 @@ export class GameSessionAdapter implements GameSession {
       // says which building blocks are in and what the next step is.
       return {
         started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
-        ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false } },
+        ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         player: null, house: [], casting: castingStatusOf(this.intake),
       };
     }
@@ -1685,7 +1685,11 @@ export class GameSessionAdapter implements GameSession {
       ceremony: {
         hoh: this.card(this.ceremony.hoh),
         nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
-        veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+        veto: {
+          holder: this.card(this.ceremony.vetoHolder),
+          used: this.ceremony.vetoUsed,
+          players: (this.live?.vetoField ?? []).map((id) => ({ id, name: this.nameOf(id) })), // R9-AGENCY-1: the drawn six
+        },
       },
       week: this.week,
       phase: this.phase,

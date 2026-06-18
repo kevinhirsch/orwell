@@ -112,7 +112,13 @@ export interface GameStateView {
   ceremony: {
     hoh: { id: EntityId; name: string } | null;
     nominees: Array<{ id: EntityId; name: string }>;
-    veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+    /**
+     * The veto: who holds it + whether it was used, AND the SIX drawn to play the veto comp
+     * (`players` — the witnessed chip draw, E35/C-03; empty before the draw). Surfaced so the
+     * narrator voices who actually competes (and never tells the player they're benched when the
+     * engine drew them IN — audit R9-AGENCY-1) instead of inventing the field.
+     */
+    veto: { holder: { id: EntityId; name: string } | null; used: boolean; players: Array<{ id: EntityId; name: string }> };
   };
   player: PlayerCard | null;
   house: HouseguestCard[];

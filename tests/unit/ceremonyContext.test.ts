@@ -26,6 +26,16 @@ function driveToNominations(s: GameSessionAdapter) {
   return s.getGameState();
 }
 
+/** Advance until the veto field (the drawn six) is on the board. */
+function driveToVetoField(s: GameSessionAdapter) {
+  for (let i = 0; i < 400; i++) {
+    const v = s.advanceGame();
+    if (v.pending) resolve(s, v.pending);
+    if (s.getGameState().ceremony.veto.players.length > 0) break;
+  }
+  return s.getGameState();
+}
+
 describe("C8-04 — the ceremony state is in the model's persistent context", () => {
   it("getGameState projects the live HOH, nominees, and veto (the gameStatus facts)", () => {
     const s = new GameSessionAdapter();
@@ -52,13 +62,30 @@ describe("C8-04 — the ceremony state is in the model's persistent context", ()
     for (const nom of gs.ceremony.nominees) expect(prompt).toContain(nom.name); // both real nominees
   });
 
+  it("the veto FIELD (the drawn six) rides in the view and the prompt (R9-AGENCY-1)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", archetype: "social", seed: 81000 });
+    const gs = driveToVetoField(s);
+
+    // The drawn field is the engine truth (the same six gameStatus() exposes), one source.
+    const field = gs.ceremony.veto.players;
+    expect(field.length).toBeGreaterThan(0);
+    expect(field.map((p) => p.id).sort()).toEqual(s.gameStatus().veto.players.map((p) => p.id).sort());
+
+    // The prompt names the drawn field so the model never tells a drawn houseguest they aren't playing.
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("Playing the veto:");
+    for (const p of field) expect(prompt).toContain(p.name); // every drawn player, by name
+  });
+
   it("pre-game and pre-ceremony carry an empty ceremony (no invented marks)", () => {
     const s = new GameSessionAdapter();
-    expect(s.getGameState().ceremony).toEqual({ hoh: null, nominees: [], veto: { holder: null, used: false } });
+    expect(s.getGameState().ceremony).toEqual({ hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } });
     s.createCharacter({ playerName: "P", seed: 7 });
     // Right after creation (premiere), no HOH/nominees exist yet — the block stays empty, not invented.
     const gs = s.getGameState();
     expect(gs.ceremony.nominees).toEqual([]);
+    expect(gs.ceremony.veto.players).toEqual([]);
     expect(s.getMomentPrompt({}).systemPrompt).not.toContain("THIS WEEK'S CEREMONY");
   });
 });
