@@ -54,9 +54,20 @@ export function foldHiddenImpact(
   kind: InteractionType,
   toward?: readonly EntityId[],
   cap = Number.POSITIVE_INFINITY,
+  bystanders?: readonly EntityId[],
 ): void {
-  const others = (toward ?? witnessSet.filter((w) => w !== initiator)).slice(0, cap);
-  for (const o of others) rel.applyDirected(o, initiator, kind, rng);
+  // PARTNERS — those the initiator actually engaged: the full directed fold.
+  const partners = (toward ?? witnessSet.filter((w) => w !== initiator)).slice(0, cap);
+  for (const o of partners) rel.applyDirected(o, initiator, kind, rng);
+  // BYSTANDERS — co-present witnesses who merely SAW it (audit 2026-06-18): each reacts by their
+  // OWN beliefs, small and individuated, never the partner's full bond and never a uniform step.
+  if (bystanders) {
+    const seen = new Set(partners);
+    for (const b of bystanders) {
+      if (b === initiator || seen.has(b)) continue;
+      rel.applyObservation(b, initiator, partners, kind, rng);
+    }
+  }
 }
 
 export class ConsequenceEngine {

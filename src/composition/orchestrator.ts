@@ -456,6 +456,12 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
     sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+    // NOTE (audit 2026-06-18): whole-house transitivity for OFF-SCREEN NPC↔NPC scenes (co-present
+    // bystanders reading a scene by structural balance) was prototyped here but destabilized the
+    // tuned jury-reach calibration gate (a passive player's finale wins crept past the cap) — the
+    // per-tick ripple compounds over a full season. The PLAYER-witnessed transitivity ships
+    // (recordInteraction bystander fold); the off-screen whole-house ripple needs its own
+    // calibration pass against tests/property/juryReach.property.test.ts before it returns.
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
     // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
     sandbox.session.recordOffscreenScene(s.initiator, s.partner, s.type); // E50 — both roles evolve

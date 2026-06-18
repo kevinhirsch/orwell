@@ -4,6 +4,7 @@ import { TEMPERATURE_CONSTANTS } from "../domain/temperatureConstants";
 import {
   RELATIONSHIP_CONSTANTS,
   clamp01 as clamp,
+  scaleImpact,
   type EdgeSignals,
   type InteractionType,
   type RelationshipConstants,
@@ -141,6 +142,57 @@ export class RelationshipModel {
    */
   applyImpactDirected(holder: EntityId, other: EntityId, impact: Partial<EdgeSignals>, rng: RandomnessSource): void {
     this.applyOneDirection(holder, other, impact, rng);
+  }
+
+  /**
+   * A BYSTANDER's read of a scene they witnessed but were NOT part of (audit 2026-06-18 owner
+   * ruling: social play must move each witness by THEIR OWN beliefs — never the partner's full
+   * bond, never a uniform group step). `observer`'s edge toward `actor` shifts a SMALL amount,
+   * SIGNED by structural balance (how `observer` already feels about the `partners` the actor
+   * engaged) and shaded by `observer`'s existing wariness of the actor:
+   *   • likes the partner + a warm act → warms slightly to the actor;
+   *   • dislikes the partner + a warm act → cools, and reads a forming threat;
+   *   • already distrusts the actor → reads even a warm scene as scheming (threat ▲);
+   *   • neutral on everyone → barely moves.
+   * For an ADVERSE act the sign flips (siding against your friend cools you; hitting your rival
+   * warms you). A witnessed BETRAYAL is the "universally human" exception — it chills the room
+   * toward the actor directly (a small fraction of the real shock). Runs through the same proven
+   * update rule (disposition × jitter × clamp); magnitudes are all config.
+   */
+  applyObservation(
+    observer: EntityId, actor: EntityId, partners: readonly EntityId[], type: InteractionType, rng: RandomnessSource,
+  ): void {
+    if (observer === actor) return;
+    const C = this.constants;
+    const OB = C.OBSERVATION;
+    const base = C.IMPACT[type];
+    // Universally-human shock: the witnessed betrayal moves the room directly, scaled down.
+    if (OB.universal.includes(type)) {
+      this.applyImpactDirected(observer, actor, scaleImpact(base, OB.scale), rng);
+      return;
+    }
+    // Structural-balance tilt ∈ [-1,1]: how the observer feels about who the actor engaged,
+    // centered on baseline affinity. No partners (a solo/ambient beat) ⇒ no tilt ⇒ ~no move.
+    let tilt = 0;
+    if (partners.length) {
+      let s = 0;
+      for (const p of partners) s += this.edge(observer, p).affinity;
+      const meanAff = s / partners.length;
+      tilt = Math.max(-1, Math.min(1, (meanAff - C.baseline.affinity) / (1 - C.baseline.affinity)));
+    }
+    const warm = (base.affinity ?? 0) >= 0; // bonding/alliance/showmance/strategy/gossip warm; conflict adverse
+    const valence = warm ? 1 : -1;
+    const eo = this.edge(observer, actor);
+    const wary = Math.max(0, eo.threat - eo.trust); // existing suspicion of the actor
+    const imp: Partial<EdgeSignals> = {
+      affinity: OB.scale * OB.refAffinity * tilt * valence,
+      trust: OB.scale * OB.refTrust * tilt * valence,
+      // Threat rises when the observer is wary of a warm overture, OR the actor moved against
+      // someone the observer likes (tilt·valence < 0 ⇒ "you went at my friend / cozied to my rival").
+      threat: OB.scale * OB.refThreat
+        * ((warm ? wary * OB.suspicionWeight : 0) + Math.max(0, -tilt * valence)),
+    };
+    this.applyImpactDirected(observer, actor, imp, rng);
   }
 
   /**

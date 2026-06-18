@@ -126,9 +126,18 @@ export class EngineCommandsAdapter implements EngineCommands {
     // AND per beat per edge (E21) — repeating an identical call can't pump an edge without bound.
     if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
       this.rollBeatWindow();
-      const toward = (req.toward ?? witnessSet.filter((w) => w !== req.initiator))
-        .filter((o) => this.spendFoldBudget(o, req.initiator));
-      foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType, toward, MAX_FOLDS_PER_INTERACTION);
+      // PARTNERS — only those the initiator actually ENGAGED (the caller-named witnesses, or an
+      // explicit `toward`) take the full directed fold. Presence-grounding adds co-present
+      // bystanders to the witness set, but a private bond must never bond the whole room (audit
+      // 2026-06-18): bystanders only OBSERVE, reacting by their own beliefs (foldHiddenImpact).
+      const named = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
+      const namedSet = new Set(named);
+      const partners = named.filter((o) => o !== req.initiator && this.spendFoldBudget(o, req.initiator));
+      const bystanders = witnessSet.filter(
+        (w) => w !== req.initiator && !namedSet.has(w) && this.spendFoldBudget(w, req.initiator),
+      );
+      foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
+        partners, MAX_FOLDS_PER_INTERACTION, bystanders);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };

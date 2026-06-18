@@ -78,6 +78,25 @@ export interface RelationshipConstants {
    * starts BELOW `thresholds.knowledge` — a move-in read is a HUNCH, never day-one knowledge.
    */
   MOVE_IN: { confidence: number; spread: number; threatWeight: number };
+  /**
+   * The BYSTANDER observation fold (audit 2026-06-18, owner ruling). A houseguest who merely
+   * WITNESSED a scene they were not part of must move by THEIR OWN beliefs — never the partner's
+   * full bond, and never a uniform group step. Their edge toward the actor shifts a small amount,
+   * SIGNED by structural balance (how they feel about who the actor engaged) and shaded by their
+   * existing suspicion of the actor. A neutral bystander barely moves; one who dislikes the partner
+   * cools/worries; one who already distrusts the actor reads warmth as scheming (threat ▲). A
+   * witnessed BETRAYAL is the "universally human" exception — it chills the room more directly.
+   */
+  OBSERVATION: {
+    /** Overall fraction of a direct fold a bystander can feel (keeps observation small). */
+    scale: number;
+    /** Reference magnitudes the structural-balance tilt scales (affinity/trust/threat). */
+    refAffinity: number; refTrust: number; refThreat: number;
+    /** How hard an already-wary bystander reads a warm scene as a developing threat. */
+    suspicionWeight: number;
+    /** Interaction kinds that move bystanders directly (a witnessed shock) — the human exception. */
+    universal: InteractionType[];
+  };
 }
 
 // Betrayal-shock: a LARGE single step — the competitive, realistic core, and the single biggest
@@ -109,6 +128,14 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
   },
   thresholds: { alliance: 0.5, ally: 0.35, enemy: 0.3, knowledge: 0.3, vetoSave: 0.6 },
   MOVE_IN: { confidence: 0.15, spread: 0.15, threatWeight: 0.35 },
+  // Bystanders feel ~half a reference move at most, signed by their own beliefs — so a witnessed
+  // bond never bonds the room, and the spread across witnesses is wide (some up, some down, most ~0).
+  OBSERVATION: {
+    scale: 0.5,
+    refAffinity: 0.12, refTrust: 0.06, refThreat: 0.1,
+    suspicionWeight: 0.6,
+    universal: ["betrayal"],
+  },
 };
 
 export const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));

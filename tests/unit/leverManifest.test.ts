@@ -20,12 +20,16 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     }
   });
 
-  it("states the engine decides outcomes and the model only voices them", () => {
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/engine\s+decides/i);
+  it("states the game decides outcomes and the model only voices them", () => {
+    // The machinery is never named to the model (owner ruling 2026-06-18): the prompt says the
+    // GAME decides, never "the engine" — and the only literal "engine" left is the prohibition list.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/game itself decides/i);
     expect(BASE_GAME_MASTER_PROMPT.toLowerCase()).toContain("never invent");
+    // the forbidden-words rule is the ONLY place "engine" may still appear (as a banned token).
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never write the words "engine"/i);
   });
 
-  it("a competition moment directs resolving through the engine, no inventing/scores", () => {
+  it("a competition moment directs resolving through the game, no inventing/scores", () => {
     const view = { started: true, week: 1, phase: "hoh-competition", moment: "hoh-competition",
       player: { id: "p", name: "P", archetype: "a", strategyStyle: "s" }, house: [] } as unknown as GameStateView;
     const prompt = buildSystemPrompt("hoh-competition", view).toLowerCase();
@@ -42,11 +46,22 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
   });
 
   // P4: levers are silent production machinery — the model must never ask permission to pull
-  // one, and ask_user is scoped to the engine's pending BINDING decisions only.
+  // one, and ask_user is scoped to the game's pending BINDING decisions only.
   it("P4: declares levers silent and scopes ask_user to pending binding decisions", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/SILENT production\s*machinery/i);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/never ask the player's permission/i);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the engine's\s*pending BINDING decision options/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the game's\s*pending BINDING decision options/i);
+  });
+
+  // Anti-leak (audit 2026-06-18, owner rulings): the model is steeped in "the engine" all day and
+  // echoes it to the player ("the engine has everything…"), and it recites archetype labels as a
+  // cast scouting report ("X is the mastermind"). Both are scrubbed at the source.
+  it("never names 'the engine' as prose, and forbids announcing archetype/strategy labels", () => {
+    // The ONLY surviving "engine" is the banned-words rule itself (in quotes); no "the engine" prose.
+    expect(/\bthe engine\b/i.test(BASE_GAME_MASTER_PROMPT)).toBe(false);
+    // Archetype/strategy are a PRIVATE voice cue — never announced to the player.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/houseguest's archetype, strategy, or threat level/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/discover/i);
   });
 
   // P6: runCompetition PREVIEWS the loop's already-decided winner; only advanceGame commits.

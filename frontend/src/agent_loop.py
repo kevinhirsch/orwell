@@ -1396,6 +1396,12 @@ _ADVANCE_NUDGES = [
 _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptive, so a beat of
 # legitimate social play at a ceremony phase isn't shoved. Forcefulness escalates ACROSS turns
 # via the persisted _ADVANCE_STALL_LEVEL, not by stacking nudges within a single turn.
+# Grace before the FIRST nudge (owner ruling, 2026-06-18): "during good productive engaging social
+# play, auto-nudge should not happen ... it should naturally notice the lulls and nudge at those
+# times IF movement hasn't happened in a while." So a lull alone is not enough — the beat must also
+# have gone STALE (this many live turns with no progression tool fired). Engaging play never nudges
+# (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
+_ADVANCE_GRACE_TURNS = 2
 
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
@@ -1520,6 +1526,10 @@ def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
 # game actually advances (a progression tool fires).
 _ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+# Per-game staleness: live turns elapsed since the last progression tool fired. Climbs while the
+# night sits on one beat; resets to 0 the moment the game advances. The lull-nudge only fires once
+# this passes _ADVANCE_GRACE_TURNS, so good engaging play (and a fresh beat) is left to breathe.
+_TURNS_SINCE_PROGRESS: Dict[str, int] = {}
 
 
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
@@ -2487,8 +2497,16 @@ async def stream_agent_loop(
                 _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
+                # Track staleness: this finishing block runs once per player turn. A turn that
+                # advanced resets the clock; otherwise the beat has sat one more turn. The lull-nudge
+                # waits until the night has genuinely stopped moving (>= grace), so engaging play and
+                # a just-started beat are never shoved (owner ruling 2026-06-18).
+                if owner:
+                    _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
+                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
                 _is_lull = _player_turn_is_lull(messages)
-                _want_advance = (not _progressed) and _is_lull and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
+                _want_advance = ((not _progressed) and _is_lull and _stale
+                                 and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN)
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -2887,6 +2905,7 @@ async def stream_agent_loop(
             # next stall (if any) starts gentle again.
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
                 _ADVANCE_STALL_LEVEL.pop(owner, None)
+                _TURNS_SINCE_PROGRESS[owner] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
                 _turn_record_nudges = 1  # model recorded organically — don't also auto-record
