@@ -1360,6 +1360,120 @@ _VERIFIER_EFFECTFUL_TOOLS = {
 }
 _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 
+# ── Game progression error-correction (engine stall-nudge) ────────────────────
+# The GM reliably narrates a beat — a competition, a ceremony, the premiere move-in —
+# WITHOUT ever calling advanceGame, leaving the season frozen (the #1 playthrough
+# blocker, robust even on strong models). These phases exist to be DRIVEN FORWARD:
+# lingering in them with no progression tool fired is a stall. We catch it in the
+# loop and nudge the model — non-disruptive first, escalating — rather than auto-
+# advancing (the owner's call: keep the dynamic DM, error-correct the omission).
+# The phase set + cap + nudge texts are deliberately tunable.
+_ADVANCE_PHASES = {
+    "premiere", "hoh-competition", "nominations", "veto-competition",
+    "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
+}
+_PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
+# Graduated, in-loop. Index by how many times we've nudged THIS encounter (persisted
+# per game so the escalation carries across turns until the model finally advances).
+_ADVANCE_NUDGES = [
+    # 1 — gentle: a reminder, not a shove (a beat of lingering is fine).
+    "(Production note, not for the player: this beat is still open. When you're ready "
+    "to move the night along, resolve it by calling advanceGame — that is the ONLY way "
+    "the real outcome is decided and the season moves on. If you've just put a binding "
+    "choice to the player, their decision card already holds it, so simply say you're "
+    "waiting on their move and stop.)",
+    # 2 — firmer.
+    "The season is not moving. You narrated this beat but never called advanceGame, so "
+    "nothing actually happened — no winner, no nominees, no eviction was decided, and the "
+    "player is stuck. Call advanceGame NOW to resolve it, then voice the engine's real "
+    "result. (If and ONLY if you are waiting on the player's decision card, say so in one "
+    "sentence and stop instead.)",
+    # 3 — forceful, last rung before we give the turn back.
+    "STOP. The game is FROZEN on this beat and the player cannot continue. Your very next "
+    "action THIS turn must be the advanceGame function call — do not write more narration, "
+    "do not restate the scene, just make the call. Narrating around it does nothing.",
+]
+_MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptive, so a beat of
+# legitimate social play at a ceremony phase isn't shoved. Forcefulness escalates ACROSS turns
+# via the persisted _ADVANCE_STALL_LEVEL, not by stacking nudges within a single turn.
+
+# Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
+# as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
+# closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
+# A rich, substantive player message is engagement — never nudged.
+_LULL_READY_RE = re.compile(
+    r"\b(what'?s next|let'?s (go|move|do this|see it|get|roll)|move (on|it along|ahead)|"
+    r"i'?m (ready|done|good)|bring it on|get on with it|run it|start it|let'?s start|kick it off|"
+    r"continue|proceed|come on|on with it|skip ahead|fast.?forward|next (one|round|comp|beat)?|"
+    r"that'?s? (it|all)|nothing else|no more|wrap (it )?up|enough( of)? (this|that)?)\b",
+    re.IGNORECASE,
+)
+_LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
+
+
+def _player_turn_is_lull(messages) -> bool:
+    """A lull = the player disengaged or signalled readiness on THEIR last message — the
+    cue to seize the moment and advance. Substantive play (long, strategic, scheming) is
+    engagement and is never a lull."""
+    last = _extract_last_user_message(messages) or ""
+    s = last.strip()
+    if not s:
+        return True
+    if _LULL_READY_RE.search(s):
+        return True
+    # short and non-substantial: a stripped reply under the threshold with no question/scheme
+    return len(s) <= _LULL_SHORT_CHARS
+
+
+# ── Consequence-loop error-correction (record social play → move the weights) ─────────
+# Owner ruling (feature 0055): the politicking IS the game — substantive social play MUST fold
+# into the hidden relationship/perception weights. In live play the GM under-calls the recording
+# tools: it narrates a real player↔houseguest scene (a bond, a pitch, a promise) and logs nothing,
+# so the scene has zero consequence. When an ENGAGED turn touched a houseguest and nothing was
+# recorded, nudge the model to bank it — gentle first, escalating across turns, capped, tunable.
+_RECORD_TOOLS = {"recordInteraction", "makeDeal", "surfaceInformationTo"}
+_RECORD_NUDGES = [
+    "(Production note, not for the player: that scene with a houseguest landed only in the "
+    "telling — the house's actual read of the player has NOT moved, because nothing was recorded. "
+    "If a real beat passed between them (a bond, a pitch, a promise, a seed of doubt), log it with "
+    "recordInteraction — or makeDeal for a promise — so it folds into how that houseguest sees the "
+    "player. A scene the game never received changes no one's mind.)",
+    "You played a real social beat with a houseguest and recorded nothing, so it has ZERO "
+    "consequence — what the player just built or broke didn't move an inch in the house's memory. "
+    "Record it NOW with recordInteraction (player + the houseguest in the witness set), or makeDeal "
+    "if a promise was struck. The politics IS the game; an unrecorded scene is make-believe.",
+    "STOP — that houseguest scene must be recorded or it never happened. Call recordInteraction now "
+    "with the player and the houseguest(s) so the engine folds its impact, then continue.",
+]
+_MAX_RECORD_NUDGES_PER_TURN = 1
+_RECORD_STALL_LEVEL: Dict[str, int] = {}
+
+
+def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
+    """True when this turn was a scene with a houseguest — the player's line or the narration
+    names someone on the roster (full name or first name). Cheap, name-based; good enough to
+    tell a social scene from a solo/diary/decision beat."""
+    if not house_names:
+        return False
+    hay = ((narration or "") + " " + (_extract_last_user_message(messages) or "")).lower()
+    if not hay.strip():
+        return False
+    for name in house_names:
+        if not name:
+            continue
+        n = name.lower()
+        if n in hay:
+            return True
+        first = n.split(" ")[0]
+        if len(first) >= 3 and re.search(r"\b" + re.escape(first) + r"\b", hay):
+            return True
+    return False
+# Persistent per-game escalation: a turn that ends still stalled starts the next turn's
+# nudges one rung higher, so repeated stalls get "progressively more forceful". Keyed by
+# the engine user (game) so it survives across the per-turn agent loop. Reset when the
+# game actually advances (a progression tool fires).
+_ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+
 
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
@@ -1887,6 +2001,14 @@ async def stream_agent_loop(
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
 
+    # Game progression stall-nudge state. The PER-TURN counter caps in-loop retries so an
+    # intractable model can't pin a single turn; the PERSISTED level (_ADVANCE_STALL_LEVEL,
+    # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
+    # stay maximally forceful instead of resetting to gentle each turn.
+    _is_live_game = game_mode in (True, "game")
+    _turn_advance_nudges = 0
+    _turn_record_nudges = 0
+
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
     # "Let me tail the output to see the error" and then ends the turn with
@@ -2308,6 +2430,54 @@ async def stream_agent_loop(
                 # Visible signal in the stream so the user knows we caught it.
                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                 continue
+            # ── Live-game error-correction: advance a lull, OR record an engaged scene ────
+            # The GM is finishing its turn. Two complementary nudges, both in-loop, escalating,
+            # capped, persisted per game:
+            #   • LULL + an advance-phase + no progression tool → seize the moment, advanceGame.
+            #   • ENGAGEMENT + a houseguest scene + no recording tool → bank the consequence
+            #     (recordInteraction/makeDeal) so the social play moves the hidden weights (0055).
+            if _is_live_game:
+                _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
+                _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
+                _recorded = bool(_tool_names & _RECORD_TOOLS)
+                _is_lull = _player_turn_is_lull(messages)
+                _want_advance = (not _progressed) and _is_lull and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
+                # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
+                # social exchange — its houseguest mentions are comp players, not a scene to bank.
+                _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
+                                and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN)
+                if _want_advance or _want_record:
+                    _phase, _house = None, []
+                    try:
+                        from src import orwell_engine as _oe
+                        _gs = await _oe.get_game_state(owner)
+                        _phase = (_gs or {}).get("phase")
+                        _house = [h.get("name") for h in ((_gs or {}).get("house") or [])
+                                  if isinstance(h, dict) and h.get("name")
+                                  and h.get("status", "active") == "active"]
+                    except Exception as _e:
+                        logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                    # advance a lull
+                    if _want_advance and _phase in _ADVANCE_PHASES:
+                        _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
+                        _turn_advance_nudges += 1
+                        if owner:
+                            _ADVANCE_STALL_LEVEL[owner] = _level + 1
+                        logger.info(f"[orwell] advance stall-nudge (level {_level}, phase={_phase}) "
+                                    f"round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]})
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
+                    # bank an engaged houseguest scene
+                    if _want_record and _scene_touched_houseguest(cleaned_round, messages, _house):
+                        _level = _RECORD_STALL_LEVEL.get(owner or "", 0)
+                        _turn_record_nudges += 1
+                        if owner:
+                            _RECORD_STALL_LEVEL[owner] = _level + 1
+                        logger.info(f"[orwell] record stall-nudge (level {_level}) round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _RECORD_NUDGES[min(_level, len(_RECORD_NUDGES) - 1)]})
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -2665,6 +2835,14 @@ async def stream_agent_loop(
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
+            # The game advanced: clear any persisted stall escalation for this game so the
+            # next stall (if any) starts gentle again.
+            if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
+                _ADVANCE_STALL_LEVEL.pop(owner, None)
+                _turn_advance_nudges = 0
+            if _is_live_game and block.tool_type in _RECORD_TOOLS and owner:
+                _RECORD_STALL_LEVEL.pop(owner, None)
+                _turn_record_nudges = 0
 
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)

@@ -10,6 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -64,6 +65,10 @@ import { isNarrow } from './platform.js';
     let label = _modelRouteLabel(req, actual);
     if (opts.suffix) label += ' (' + opts.suffix + ')';
     if (opts.characterName) label = opts.characterName;
+    // C14/immersion: the player must never see the raw LLM model name as the sender —
+    // in the game build the narrator IS the show. Use a diegetic label unless a specific
+    // speaker name was supplied.
+    else if (document.body.hasAttribute('data-game-build')) label = 'Big Brother';
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     if (req && actual && !_sameModelName(req, actual)) {
@@ -1124,49 +1129,9 @@ import { isNarrow } from './platform.js';
         const docBtn = document.getElementById('export-doc-btn');
         if (docBtn) docBtn.remove();
       }
-      const _orwellToolBeats = {
-        'createCharacter': '\ud83c\udfac Casting',
-        'getGameState': '\ud83d\udccb Production notes',
-        'gameStatus': '\ud83d\udccb Production notes',
-        'getVisibleStateFor': '\ud83d\udccb Production notes',
-        'getMomentPrompt': '\ud83d\udccb Production notes',
-        'runCompetition': '\ud83c\udfc6 Competition',
-        'advanceGame': '\ud83d\udcfa Production',
-        'submitDecision': '\ud83d\uddf3 Your move',
-        'recordInteraction': '\ud83c\udfac Scene log',
-        'surfaceInformationTo': '\ud83e\udd2b Word travels',
-        'socialRead': '\ud83d\udc40 Reading the room',
-        'socialInitiatives': '\ud83d\udeaa Who wants a word',
-        'diaryRoom': '\ud83d\udcd4 Diary Room',
-        'makeDeal': '\ud83e\udd1d Handshake',
-        'askProducers': '\ud83c\udf99 Producers',
-        'renderScene': '\ud83d\udcfa Production',
-        'endOfSessionSummary': '\ud83d\udcfc Tape check',
-        'finaleView': '\ud83d\udc51 Finale',
-        // D5/W6: EVERY keep-set tool the agent can pull renders diegetically —
-        // raw camelCase names in the transcript are the C14/C19 immersion bleed.
-        'updateCasting': '\u{1F3AC} Casting notes',
-        'whereabouts': '\u{1F9ED} Around the house',
-        'seasonRecap': '\u{1F4DC} The season so far',
-        'seasonRetrospective': '\u{1F513} The producers\u2019 vault',
-        'npcVoice': '\u{1F3AD} In their head',
-        'inspectNonVaultState': '\u{1F50E} Control room',
-        'overrideMechanic': '\u{1F39B} Control room',
-        'configureGame': '\u{1F39B} Control room',
-        'manageSandbox': '\u{1F39B} Control room',
-        'sandboxHealth': '\u{1F39B} Control room',
-        'web_search': '\u{1F4E1} Checking the feeds',
-        'ask_user': '\u{1F399} A question for you',
-        'update_plan': '\u{1F4CB} Production notes',
-        'ui_control': '\u{1F4FA} Camera direction',
-        'generate_image': '\u{1F4F8} Photo booth',
-        'search_chats': '\u{1F4DC} The archive',
-        'list_models': '\u{1F4E1} Checking the feeds',
-        'manage_settings': '\u{1F39B} Control room',
-        'manage_endpoints': '\u{1F39B} Control room',
-        'manage_tokens': '\u{1F39B} Control room',
-        'manage_mcp': '\u{1F39B} Control room',
-      };
+      // _orwellToolBeats now lives in ./orwellToolBeats.js (single source of truth,
+      // imported at module top, shared with the history-reload path in
+      // chatRenderer.js so the live + reload renders cannot drift).
       const _toolLabels = {
         'web_search': _searchIcon + 'Searching',
         'bash': 'Running',

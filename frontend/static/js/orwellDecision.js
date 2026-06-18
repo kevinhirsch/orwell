@@ -77,6 +77,13 @@
       #${CARD_ID} .odec-note { opacity: .65; font-size: .78em; flex: 1; }
       #${CARD_ID} .odec-err { color: var(--red, #e06c75); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
+      /* Narrow: the note must not squeeze into a thin column beside the button —
+         stack it full-width above a full-width Confirm. */
+      @media (max-width: 480px) {
+        #${CARD_ID} .odec-row { flex-direction: column; align-items: stretch; gap: .5rem; }
+        #${CARD_ID} .odec-note { flex: none; order: -1; }
+        #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
+      }
     `;
     document.head.appendChild(st);
   }
@@ -147,7 +154,7 @@
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
     x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", removeCard);
+    x.addEventListener("click", () => { _userDismissed = true; removeCard(); });
     head.appendChild(x);
     card.appendChild(head);
     // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
@@ -158,6 +165,7 @@
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
+      _userDismissed = true;
       removeCard();
     });
 
@@ -255,7 +263,7 @@
     row.className = "odec-row";
     const note = document.createElement("span");
     note.className = "odec-note";
-    note.textContent = multi ? `Select ${pick}. The engine validates legality.` : "Your selection only — never read from prose.";
+    note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
     row.appendChild(note);
     row.appendChild(confirm);
     card.appendChild(row);
@@ -272,6 +280,7 @@
           body: JSON.stringify(payload),
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
+        _userDismissed = true;   // this pending is handled — stop any boot re-assert loop
         // G15: a bound decision mutates the game — nudge every panel through the
         // shared debounced dispatcher NOW, not at the next 20–30s poll.
         if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind);
@@ -296,7 +305,7 @@
           err.className = "odec-err";
           card.appendChild(err);
         }
-        err.textContent = "That didn't go through (illegal pick or the feed glitched). Adjust and try again, or decide in conversation.";
+        err.textContent = "That didn't go through (your move wasn't allowed, or the feed glitched). Adjust and try again, or decide in conversation.";
       }
     });
 
@@ -309,13 +318,31 @@
   // on live turns; on boot (and on a game change) we re-arm it from the status
   // route's cached `pending` — the engine's own legal-options view. Without this,
   // refreshing mid-decision left the player with no card and no signal.
+  let _userDismissed = false;   // set when the player explicitly dismisses (×/Escape)
   async function rearmFromStatus() {
     try {
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
       if (!r.ok) return;
       const st = await r.json();
-      if (st && st.pending && st.pending.kind) {
-        window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending: st.pending } }));
+      const pending = st && st.pending && st.pending.kind ? st.pending : null;
+      if (!pending) return;
+      _userDismissed = false;   // a fresh pending arrived — honor it again
+      // The game build mounts #chat-history ASYNCHRONOUSLY and then renders the session's
+      // history INTO it after DOMContentLoaded — a boot rearm that fired early either had
+      // no host or got wiped when the history re-rendered, so a refresh mid-decision left
+      // the player with no card (the E66 path was a no-op in practice). Re-assert the card
+      // until it is STABLY mounted (survives the boot history render), then stop — never
+      // fight an explicit dismissal or a submit (both set _userDismissed).
+      let stable = 0;
+      for (let i = 0; i < 25 && !_userDismissed; i++) {
+        const host = document.getElementById("chat-history");
+        if (host && !document.getElementById(CARD_ID)) {
+          window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
+          stable = 0;
+        } else if (document.getElementById(CARD_ID)) {
+          if (++stable >= 3) break;   // survived ~600ms → boot settled, stop re-asserting
+        }
+        await new Promise((res) => setTimeout(res, 200));
       }
     } catch (_) { /* fail open */ }
   }
