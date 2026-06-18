@@ -87,6 +87,25 @@ describe("B62 — the terminal beat (the season closes with the result, from the
     const winner = s.seasonRecap().winner!;
     expect(systemPrompt).toContain(winner.name);
   });
+
+  // R4-04: the post-season prompt must forbid improvising a NEW season in this chat (the model was
+  // observed running a fictional casting interview while the engine stayed at the old finale) and
+  // redirect a "run it back" to the menu — paired with the engine's honest refusal (R4-05).
+  it("the post-season prompt forbids a fresh casting/new-season here and points to the menu", () => {
+    const { sb } = liveGame("runitback", 9);
+    const s = sb.session;
+    for (let i = 0; i < 4000; i++) {
+      const v = s.advanceGame();
+      if (v.pending) resolve(s, v.pending);
+      if (v.finished) break;
+    }
+    expect(s.getGameState().moment).toBe("post-season");
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toMatch(/do NOT run a casting interview/i);
+    expect(prompt).toContain("createCharacter");
+    expect(prompt).toMatch(/menu/i);
+    expect(prompt).toMatch(/never improvise/i);
+  });
 });
 
 describe("B63 — the memory wall's facts are already public (verification)", () => {
