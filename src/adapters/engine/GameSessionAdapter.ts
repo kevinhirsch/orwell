@@ -505,6 +505,20 @@ export class GameSessionAdapter implements GameSession {
     return this.house.npcs.find((n) => n.id === id)?.name;
   }
 
+  /**
+   * The PUBLIC house roster (id → public name) — non-Vault: names are public roster facts, nothing
+   * else crosses. Wired into the outward `VisibleStateService` (registry) so player-facing event /
+   * knowledge content names houseguests instead of echoing raw `npc:N` ids (audit R4-03 / C-01).
+   * Empty before the house exists.
+   */
+  publicRoster(): { id: EntityId; name: string }[] {
+    if (!this.house) return [];
+    return [
+      { id: this.house.player.id, name: this.house.player.name },
+      ...this.house.npcs.map((n) => ({ id: n.id, name: n.name })),
+    ];
+  }
+
   private card(id?: EntityId): { id: EntityId; name: string } | null {
     return id ? { id, name: this.nameOf(id) } : null;
   }
@@ -1665,7 +1679,7 @@ export class GameSessionAdapter implements GameSession {
       // says which building blocks are in and what the next step is.
       return {
         started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
-        ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false } },
+        ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         player: null, house: [], casting: castingStatusOf(this.intake),
       };
     }
@@ -1685,7 +1699,11 @@ export class GameSessionAdapter implements GameSession {
       ceremony: {
         hoh: this.card(this.ceremony.hoh),
         nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
-        veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+        veto: {
+          holder: this.card(this.ceremony.vetoHolder),
+          used: this.ceremony.vetoUsed,
+          players: (this.live?.vetoField ?? []).map((id) => ({ id, name: this.nameOf(id) })), // R9-AGENCY-1: the drawn six
+        },
       },
       week: this.week,
       phase: this.phase,

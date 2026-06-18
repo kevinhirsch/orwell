@@ -433,13 +433,15 @@ export function renderGameContext(view: GameStateView): string {
   // The departed are name + seat only; their voices return at the finale via the jury.
   // C8-04: this week's PUBLIC ceremony state, the engine truth the model voices instead of inventing.
   // Default an empty ceremony so the prompt builder never crashes on a partial/legacy view.
-  const cer = view.ceremony ?? { hoh: null, nominees: [], veto: { holder: null, used: false } };
+  const cer = view.ceremony ?? { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } };
   const nomIds = new Set(cer.nominees.map((n) => n.id));
+  const vetoPlayerIds = new Set((cer.veto.players ?? []).map((p) => p.id));
   const ceremonyMark = (id: string): string => {
     const tags: string[] = [];
     if (cer.hoh && cer.hoh.id === id) tags.push("HOH");
     if (nomIds.has(id)) tags.push("ON THE BLOCK");
     if (cer.veto.holder && cer.veto.holder.id === id) tags.push("holds the veto");
+    else if (vetoPlayerIds.has(id)) tags.push("playing the veto");
     return tags.length ? ` [${tags.join(", ")}]` : "";
   };
   const roster = view.house.map((h) => {
@@ -454,12 +456,17 @@ export function renderGameContext(view: GameStateView): string {
   }).join("\n");
   // The ceremony status block — engine truth for the HOH / nominations / veto this week. Present only
   // once something has been set (premiere/pre-ceremony has none), so the model never invents these.
-  const hasCeremony = !!(cer.hoh || cer.nominees.length || cer.veto.holder);
+  const vetoPlayers = cer.veto.players ?? [];
+  const hasCeremony = !!(cer.hoh || cer.nominees.length || cer.veto.holder || vetoPlayers.length);
   const ceremonyLines = !hasCeremony ? [] : [
     "- THIS WEEK'S CEREMONY (engine truth — voice EXACTLY this; never name a different HOH, nominee, or",
-    "  veto holder, and never tell anyone they are safe or on the block against it):",
+    "  veto holder, never tell anyone they are safe or on the block against it, and never tell a houseguest",
+    "  they are or aren't playing the veto against the drawn field below):",
     `    HOH: ${cer.hoh ? cer.hoh.name : "not yet crowned"}`,
     `    On the block: ${cer.nominees.length ? cer.nominees.map((n) => n.name).join(" and ") : "no nominations yet"}`,
+    // R9-AGENCY-1: the engine draws the six who play the veto (HOH, both noms, three by chip) — surface
+    // the field so the model never tells a drawn houseguest (the player included) they aren't playing.
+    `    Playing the veto: ${vetoPlayers.length ? vetoPlayers.map((p) => p.name).join(", ") : "not yet drawn"}`,
     `    Veto: ${cer.veto.holder ? `held by ${cer.veto.holder.name}${cer.veto.used ? " (already used)" : ""}` : "not yet played"}`,
   ];
   // E58: the in-game day index, derived from the ceremony cadence (Day 1 HOH → Day 5 eviction),

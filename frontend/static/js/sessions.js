@@ -344,11 +344,15 @@ function createSessionItem(s) {
   let chatTitle = s.name || '';
   if (_isFork) chatTitle = chatTitle.replace(/^Fork:\s*/, '').replace(/^\u2ADD\s*/, '');
   if (_isGroup) chatTitle = chatTitle.replace(/^\[GRP\]\s*/, '');
+  // OBS-RENDER-1 (sidebar follow-up): in the game build the player never sees the raw model
+  // name — the voice is "Big Brother," not "deepseek-v4-pro." Suppress the `· model` chrome on
+  // the session list label and title (kept verbatim in the full inherited workspace).
+  const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
   let label = chatTitle;
-  if (s.model) label += ' · ' + s.model.split('/').pop();
+  if (s.model && !_gameBuild) label += ' · ' + s.model.split('/').pop();
   if (s.archived) label += ' [archived]';
   span.textContent = label;
-  span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
+  span.title = (s.model && !_gameBuild ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
   span.classList.add('text-ellipsis');
 
   // Double-click to rename (only when session is already selected)

@@ -3,6 +3,7 @@ import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { EntityId } from "../domain/ids";
 import type { GameEvent } from "../domain/event";
 import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
+import { humanizeForPlayer } from "../domain/humanize";
 
 export interface VisibleState {
   forEntity: EntityId;
@@ -10,23 +11,56 @@ export interface VisibleState {
   knowledge: KnowledgeFact[];
 }
 
+/** A public houseguest roster entry (id → public display name). Non-Vault: names are public facts. */
+export type RosterEntry = { id: EntityId; name: string };
+
 /**
  * The ONLY state source for outward channels. It reads the non-Vault
  * `EventStore` (filtered to events the entity witnessed) plus the entity's
  * `KnowledgeState`. It has no handle to the Vault — there is no method, and no
  * dependency, by which Vault data could enter the visible projection.
+ *
+ * Player-facing CONTENT scrub (audit R4-03 / C-01): the raw stores interpolate machine tokens —
+ * entity ids (`npc:8`) and pathway/diffusion slugs (`overheard:offscreen:alliance:1:594987875`,
+ * a gossip drift suffix ` · more or less#754`) — into event/knowledge content. The narrator
+ * receives this content as context, so it must read as PROSE, not plumbing. An optional public
+ * roster resolver (wired from the live session — names are public, never Vault) lets this service
+ * substitute ids → names and neutralize slug noise via the pure `humanizeForPlayer`. With no roster
+ * (the pure in-memory composition has no live cast) it still scrubs slug noise; it just can't name.
  */
 export class VisibleStateService {
+  /** Optional public-roster provider. Pure/Vault-free: returns id→name pairs for the live cast. */
+  private roster: () => readonly RosterEntry[] = () => [];
+
   constructor(
     private readonly events: EventStore,
     private readonly knowledge: KnowledgeService,
   ) {}
 
+  /** Wire the public roster so player-facing content names houseguests instead of echoing ids. */
+  setRoster(fn: () => readonly RosterEntry[]): void {
+    this.roster = fn;
+  }
+
+  /** The live public roster (id → public name). Vault-free — names only; for surface-side scrubs. */
+  publicRoster(): readonly RosterEntry[] {
+    return this.roster();
+  }
+
+  /** The player-facing content scrub: ids → names + slug-noise neutralized (Vault-free, pure). */
+  private clean(content: string): string {
+    return humanizeForPlayer(content, this.roster());
+  }
+
   getVisibleStateFor(entity: EntityId): VisibleState {
     return {
       forEntity: entity,
-      visibleEvents: this.events.query({ witnessedBy: entity }),
-      knowledge: this.knowledge.knownTo(entity),
+      visibleEvents: this.events
+        .query({ witnessedBy: entity })
+        .map((e) => ({ ...e, content: this.clean(e.content) })),
+      knowledge: this.knowledge
+        .knownTo(entity)
+        .map((k) => ({ ...k, content: this.clean(k.content) })),
     };
   }
 
@@ -36,6 +70,6 @@ export class VisibleStateService {
    * (0012) may hint at these without naming any off-screen event.
    */
   suspicionsFor(entity: EntityId): Suspicion[] {
-    return this.knowledge.suspicionsOf(entity);
+    return this.knowledge.suspicionsOf(entity).map((s) => ({ ...s, content: this.clean(s.content) }));
   }
 }

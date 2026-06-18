@@ -91,9 +91,11 @@ def test_restart_door_clears_the_stale_decision_card(monkeypatch):
 
 def test_d3_status_route_serves_the_cached_pending():
     # The pending rides the status response so the decision card re-arms after a reload.
-    # PREFER the engine's own `pending` (now on gameStatus — robust to a FE restart / multi-worker),
-    # falling back to the FE-cached last-seen only when the engine omitted it (older engine).
-    assert 'st["pending"] = st.get("pending") or orwell_engine.last_pending' in ROUTES
+    # R9-FE-1: the engine's own `pending` (on gameStatus, persisted 0030) is AUTHORITATIVE —
+    # a present value, INCLUDING null, is trusted as-is; the FE cache is consulted ONLY when the
+    # engine OMITS the key (an older engine). The old `or` re-surfaced a stale card on present-null.
+    assert 'if isinstance(st, dict) and "pending" not in st:' in ROUTES
+    assert 'st["pending"] = orwell_engine.last_pending' in ROUTES
     # The poll must never advance the game (ADR 0003) — the route reads, only.
     assert not re.search(r'def orwell_status.*?advance_game', ROUTES, re.S)
 
