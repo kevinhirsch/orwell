@@ -187,6 +187,13 @@ def setup_orwell_routes() -> APIRouter:
         as a 404 — the unseal affordance does not exist mid-season."""
         try:
             retro = await orwell_engine.season_retrospective(user=_current_user(request))
+        except orwell_engine.EngineToolError as e:
+            # No active game (never started) — there is simply no season to unseal yet. Same 404 as
+            # a live season, never a false "engine unreachable" 502 (the engine answered, it refused).
+            if e.no_game:
+                return JSONResponse(status_code=404, content={"error": "No season to unseal — there is no active game."})
+            logger.warning(f"[orwell] retrospective failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] retrospective failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
@@ -453,6 +460,13 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": "entry is required"})
         try:
             return await orwell_engine.diary_room(body.entry.strip(), user=_current_user(request))
+        except orwell_engine.EngineToolError as e:
+            # "No active game" is a benign pre/post-game state (the engine is reachable; it refused),
+            # NOT an outage — return a clean 409 so the FE never shows a false "engine unreachable".
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] diary-room failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] diary-room failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
@@ -488,6 +502,13 @@ def setup_orwell_routes() -> APIRouter:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
             return res
+        except orwell_engine.EngineToolError as e:
+            # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
+            # because there is no active game. Benign 409, not a false "engine unreachable" 502.
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] decision failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] decision failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
