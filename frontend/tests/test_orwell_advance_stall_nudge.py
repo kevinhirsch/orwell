@@ -64,9 +64,10 @@ def test_nudge_only_seizes_a_lull_not_substantive_play():
     assert "_player_turn_is_lull" in js
     assert "_LULL_READY_RE" in js
     assert "_LULL_SHORT_CHARS" in js
-    # the advance-nudge fires on a lull, OR on a previewed-but-uncommitted outcome (hand-off #1)
-    assert "_want_advance = ((not _progressed)" in js
-    assert "(_previewed_uncommitted or (_is_lull and _stale))" in js
+    # the advance-nudge fires on a lull, OR a previewed-but-uncommitted outcome (#1), OR an
+    # undelivered decision result (1b) — the latter two bypass the lull gate.
+    assert "_want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (" in js
+    assert "(not _progressed) and _is_lull and _stale" in js
     assert "if _want_advance and _phase in _ADVANCE_PHASES" in js
     # …and only once the beat has gone STALE (owner ruling 2026-06-18): a lull alone is not enough,
     # so good engaging play and a just-started beat are never shoved.
@@ -84,7 +85,19 @@ def test_previewed_but_uncommitted_ceremony_is_a_hard_stall(self_check=None):
     assert "_PREVIEW_COMMIT_NUDGE" in js
     assert "_previewed_uncommitted = bool(_tool_names & _PREVIEW_TOOLS) and not _progressed" in js
     # the forceful nudge is chosen for the previewed case (not the gentle graduated one)
-    assert "_PREVIEW_COMMIT_NUDGE if _previewed_uncommitted" in js
+    assert "_nudge, _why = _PREVIEW_COMMIT_NUDGE" in js
+
+
+def test_undelivered_decision_result_is_a_hard_stall():
+    # Hand-off 1b: resolving a decision (submitDecision) but never advanceGame'ing AFTER it leaves the
+    # result undelivered — the model narrated an invented/cross-week outcome ("you are the new HOH"
+    # with the engine at last week's eviction). The ORDER of progression tools decides it, and it gets
+    # the forceful deliver nudge regardless of lull (it fires even though the turn "progressed").
+    js = _read("src", "agent_loop.py")
+    assert "_DECISION_DELIVER_NUDGE" in js
+    assert '_prog_order[-1] == "submitDecision"' in js
+    assert "_decision_undelivered = bool(_prog_order)" in js
+    assert "elif _decision_undelivered:" in js
 
 
 def test_consequence_loop_auto_records_engaged_scenes():

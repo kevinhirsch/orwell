@@ -1386,6 +1386,19 @@ _PREVIEW_COMMIT_NUDGE = (
     "next action MUST be the advanceGame function call to COMMIT that result (it resolves to the "
     "SAME winner you previewed) and bring up the next beat. Do not narrate anything further until "
     "you have made that call.")
+# After a submitDecision (a comp-intent, a vote, a goodbye…) the game has a RESULT to deliver — the
+# comp's winner, the next week, the next card — and ONLY advanceGame delivers it. If the model
+# resolved a decision but never advanced to deliver that result (e.g. submitted a goodbye, then
+# narrated "you are the new HOH" while the engine sat at the eviction), it has narrated an outcome
+# it never received: the structural twin of #1 for the NO-tool / cross-week case (hand-off 1b). We
+# nudge it to advance and re-voice from the real result — bypassing the lull/staleness gate.
+_DECISION_DELIVER_NUDGE = (
+    "(Production note, not for the player.) You resolved a decision but never advanceGame'd to "
+    "DELIVER its result — so any competition winner, new Head of Household, or next week you just "
+    "described is INVENTED, not the game's. The board is still where it was and your narration now "
+    "contradicts it. Call advanceGame NOW to get the real next beat (it may name a DIFFERENT winner "
+    "than you guessed — above all, the player has NOT won anything you did not pull from the game), "
+    "then voice ONLY what it returns.")
 # Graduated, in-loop. Index by how many times we've nudged THIS encounter (persisted
 # per game so the escalation carries across turns until the model finally advances).
 _ADVANCE_NUDGES = [
@@ -2627,8 +2640,17 @@ async def stream_agent_loop(
                 # Previewed a ceremony OUTCOME (runCompetition) but did not commit it — a hard stall
                 # that bypasses the lull/staleness gate (hand-off #1): you must advanceGame to commit.
                 _previewed_uncommitted = bool(_tool_names & _PREVIEW_TOOLS) and not _progressed
-                _want_advance = ((not _progressed) and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
-                                 and (_previewed_uncommitted or (_is_lull and _stale)))
+                # Resolved a decision (submitDecision) but never advanceGame'd AFTER it to deliver the
+                # result — the model likely narrated an undelivered/invented outcome (hand-off 1b). The
+                # ORDER decides: if the last progression tool of the turn was submitDecision, the
+                # result was never delivered. Fires even though the turn "progressed".
+                _prog_order = [t for t in (ev.get("tool") if isinstance(ev, dict) else None for ev in tool_events)
+                               if t in _PROGRESSION_TOOLS]
+                _decision_undelivered = bool(_prog_order) and _prog_order[-1] == "submitDecision"
+                _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
+                    _previewed_uncommitted
+                    or _decision_undelivered
+                    or ((not _progressed) and _is_lull and _stale)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -2651,12 +2673,15 @@ async def stream_agent_loop(
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
-                        # A previewed-but-uncommitted outcome gets the FORCEFUL commit nudge straight
-                        # away (it is not a gentle "lingering beat" — an outcome is on the table).
-                        _nudge = (_PREVIEW_COMMIT_NUDGE if _previewed_uncommitted
-                                  else _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)])
-                        logger.info(f"[orwell] advance nudge ({'preview-commit' if _previewed_uncommitted else f'stall L{_level}'}, "
-                                    f"phase={_phase}) round {round_num} user={owner}")
+                        # A previewed-but-uncommitted outcome (or an undelivered decision result) gets
+                        # the FORCEFUL nudge straight away (it is not a gentle "lingering beat").
+                        if _previewed_uncommitted:
+                            _nudge, _why = _PREVIEW_COMMIT_NUDGE, "preview-commit"
+                        elif _decision_undelivered:
+                            _nudge, _why = _DECISION_DELIVER_NUDGE, "decision-deliver"
+                        else:
+                            _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
+                        logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
