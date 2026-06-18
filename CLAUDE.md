@@ -508,9 +508,10 @@ and it is **unneeded** here — the engine emits no server-initiated messages);
 the **playtest-gated calibration revisit** (passive players coast to Final 2 in ~half of seasons
 and lose there — ruled emergent realism for now; the largest open game-feel question); the
 post-campaign UI follow-ups **A5–A7** (per-theme particles backgrounds, the frosted-top fix, the
-fly-out minimize/close animation); the low-priority sweep defects **A8–A10** (`humanize` mangles
-the word "player(s)" in beat prose; expected-empty-tick integrity-fault log noise; the
-Houseguest's-Choice pending presents `options` but expects the pick on `vote`); and the R3
+fly-out minimize/close animation); the low-priority sweep defects **A8–A10** are **now closed
+(PR #292)** — `humanizeIds` substitutes entity ids as whole tokens (no more mangled "player(s)"
+in beat prose), a turn-driven *supplementary* off-screen tick no longer faults on an empty society,
+and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; and the R3
 partial (late-season latency still grows with the O(events) snapshot export — improved, not
 eliminated; an incremental-snapshot item if play feels it); and **0054 Phase 2** — docking the
 finale / cast / retrospective windows INTO the control-room gadget rail (Phase 1 — the right-side
