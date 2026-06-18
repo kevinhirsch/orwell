@@ -24,6 +24,7 @@ from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.agent_tools import (
     parse_tool_blocks,
     strip_tool_blocks,
+    tool_call_opener_index,
     execute_tool_block,
     format_tool_result,
     set_active_document,
@@ -2378,6 +2379,12 @@ async def stream_agent_loop(
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
+        # Once a tool-call OPENER appears in the visible text (e.g. deepseek's DSML pipe markup
+        # `<｜DSML｜tool_calls>` emitted as text), stop streaming visible deltas for the rest of
+        # this round — the raw markup must never reach the client. The actual tool call is still
+        # parsed post-round from round_response; this only governs what the player SEES mid-stream.
+        _visible_halted = False
+        _visible_emitted_len = 0  # length of round_response already streamed as visible content
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
         _doc_acc = ""
@@ -2548,7 +2555,16 @@ async def stream_agent_loop(
                             # CLEANED narration. Buffer to a sentence boundary so we judge whole
                             # sentences, then emit the clean part.
                             round_response += data["delta"]
-                            _game_buf += data["delta"]
+                            # DSML/tool-call OPENER guard: once raw tool markup begins in the visible
+                            # stream, stop emitting visible content for the round (the post-round
+                            # strip still parses the call). round_response keeps the raw text.
+                            if not _visible_halted and tool_call_opener_index(round_response) >= 0:
+                                _visible_halted = True
+                                _flush = round_response[:tool_call_opener_index(round_response)]
+                                _game_buf = _flush[_visible_emitted_len:]  # only the not-yet-flushed tail
+                            if not _visible_halted:
+                                _game_buf += data["delta"]
+                                _visible_emitted_len = len(round_response)
                             _complete, _game_buf = _split_complete_sentences(_game_buf)
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
@@ -2557,13 +2573,32 @@ async def stream_agent_loop(
                                     if _clean.strip():
                                         _emitted_visible = True
                                     yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                            if _visible_halted:
+                                _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
                         else:
                             round_response += data["delta"]
-                            full_response += data["delta"]
-                            if data["delta"].strip():
-                                _emitted_visible = True
-                            yield chunk  # Stream all rounds
+                            # DSML/tool-call OPENER guard (non-scrub path): truncate the visible
+                            # stream at the first tool-call opener and stop emitting further visible
+                            # deltas this round, so raw markup (e.g. `<｜DSML｜tool_calls>`) never
+                            # reaches the client. round_response still holds the raw text for the
+                            # post-round parser.
+                            if not _visible_halted:
+                                _op = tool_call_opener_index(round_response)
+                                if _op >= 0:
+                                    _visible_halted = True
+                                    _visible_part = round_response[_visible_emitted_len:_op]
+                                    if _visible_part:
+                                        full_response += _visible_part
+                                        if _visible_part.strip():
+                                            _emitted_visible = True
+                                        yield f'data: {json.dumps({"delta": _visible_part})}\n\n'
+                                else:
+                                    full_response += data["delta"]
+                                    _visible_emitted_len = len(round_response)
+                                    if data["delta"].strip():
+                                        _emitted_visible = True
+                                    yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
                         if (
@@ -3388,6 +3423,20 @@ async def stream_agent_loop(
     if _exhausted_rounds:
         logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
         yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
+
+    # BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): now the live-game turn has
+    # finished, compare its FULL narration against the engine board's before→after delta. If the
+    # GM narrated an outcome the engine never committed (an eviction/winner/HOH/tally a beat
+    # early), the check stashes a re-ground directive that apply_game_framing injects NEXT turn.
+    # The pending-barrier catches narrating past an open PLAYER decision; this catches narrating
+    # past an advanceGame beat with no pending. Once per turn, fail-open — never breaks the turn.
+    if _is_live_game and owner:
+        try:
+            from routes.chat_helpers import record_post_turn_desync_check
+            _turn_narration_full = "\n".join(t for t in round_texts if t)
+            await record_post_turn_desync_check(owner, _turn_narration_full)
+        except Exception as _desync_err:
+            logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

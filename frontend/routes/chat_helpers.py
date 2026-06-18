@@ -210,6 +210,178 @@ def _pending_barrier_directive(pending) -> Optional[str]:
     )
 
 
+# ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
+#
+# The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
+# decision. It cannot catch the OTHER class — a desync at an advanceGame-driven beat with NO
+# pending, where the GM narrated an OUTCOME the engine never committed: "X is evicted" or
+# crowning the finale winner a beat early, or misnarrating an eviction tally. Those slip past
+# the barrier (no pending) AND the lull-nudge (rich prose, not a lull). So this is a second,
+# AFTER-the-turn layer: snapshot the engine board before/after the turn, compare the turn's
+# full narration against that delta, and when the narration ASSERTS an outcome the board did
+# not move on, stash a forceful RE-GROUND directive to inject on the NEXT turn — pinning the
+# model back to the engine as the source of truth before it digs the desync deeper.
+#
+# Conservative + field-specific by design: only a narrow set of outcome claims trips it, and
+# each is checked against the exact signature field that would have moved had the outcome been
+# real. The whole thing is best-effort / fail-open — it never breaks or blocks a turn.
+
+# Per-user store of the LAST beat signature captured (at the START of the most recent framed
+# turn). The post-turn check diffs the post-turn signature against this. Process-local.
+_LAST_BEAT_SIG: dict = {}
+
+# Per-user store of a pending RE-GROUND directive — set by the post-turn check when it detects a
+# narrated-but-uncommitted outcome, consumed (popped) by apply_game_framing on the NEXT turn.
+_DESYNC_REGROUND: dict = {}
+
+
+def _beat_signature(status: dict, state: dict) -> dict:
+    """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
+    of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
+    phase/hoh/noms/veto/pending) + getGameState (finished + the evicted count). Fail-safe on
+    every field: a missing/odd shape degrades to a neutral value, never raises."""
+    status = status if isinstance(status, dict) else {}
+    state = state if isinstance(state, dict) else {}
+
+    def _id(node):
+        return node.get("id") if isinstance(node, dict) else None
+
+    hoh = _id(status.get("hoh"))
+    noms = sorted(
+        n.get("id") for n in (status.get("nominees") or [])
+        if isinstance(n, dict) and n.get("id")
+    )
+    veto = status.get("veto") if isinstance(status.get("veto"), dict) else {}
+    pending = status.get("pending")
+    pending_kind = pending.get("kind") if isinstance(pending, dict) else None
+    house = state.get("house") if isinstance(state.get("house"), list) else []
+    evicted = sum(
+        1 for h in house
+        if isinstance(h, dict) and (h.get("status") or "active") != "active"
+    )
+    return {
+        "week": status.get("week"),
+        "phase": (status.get("phase") or state.get("phase")),
+        "pending": pending_kind,
+        "hoh": hoh,
+        "noms": noms,
+        "vetoHolder": _id(veto.get("holder")),
+        "vetoUsed": bool(veto.get("used")),
+        "evicted": evicted,
+        "finished": bool(state.get("finished")),
+    }
+
+
+async def _capture_beat_signature(user) -> Optional[dict]:
+    """Fetch gameStatus + getGameState and reduce them to a beat signature. Fail-open: any
+    hiccup (engine blip, odd shape) returns None so the caller simply skips the checkpoint."""
+    from src import orwell_engine
+    try:
+        status = await orwell_engine.game_status(user=user)
+        state = await orwell_engine.get_game_state(user=user)
+        return _beat_signature(status if isinstance(status, dict) else {},
+                               state if isinstance(state, dict) else {})
+    except Exception as e:
+        logger.warning("[orwell] beat-signature capture skipped for user=%s: %s", user, e)
+        return None
+
+
+# Outcome-claim patterns over the FULL turn narration. Each is paired (in
+# _narration_claims_outcome) with the signature field whose movement would confirm it really
+# happened. Deliberately narrow — a false positive nags the model on a clean turn, so every
+# pattern targets unambiguous outcome language, not mere mention ("if you're evicted…").
+_CLAIM_EVICTED_RE = re.compile(r"\b(?:is|been|was)\s+evicted\b|\bevicted\s+from\b", re.IGNORECASE)
+_CLAIM_WINNER_RE = re.compile(
+    r"\b(?:winner of (?:big brother|the season)|wins the season|is crowned|crowned the winner)\b",
+    re.IGNORECASE,
+)
+_CLAIM_NEW_HOH_RE = re.compile(
+    r"\bwins (?:the )?(?:head of household|hoh)\b|\bnew (?:head of household|hoh)\b",
+    re.IGNORECASE,
+)
+_CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.IGNORECASE)
+# Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
+# which we don't police here — the eviction claim does that).
+_FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
+
+
+def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
+    """Compare the turn's narration against the before→after board delta. Return a SPECIFIC
+    re-ground directive when the narration asserts an outcome the engine did NOT commit; else
+    None. Field-specific + conservative — the engine is the source of truth and a false alarm is
+    worse than a missed one, so each claim must contradict its own signature field."""
+    text = narration or ""
+    before = before_sig if isinstance(before_sig, dict) else {}
+    after = after_sig if isinstance(after_sig, dict) else {}
+    if not text.strip() or not after:
+        return None
+
+    desync = None  # the specific outcome the narration claimed that the board never moved on
+
+    # (1) An eviction was narrated, but the evicted count didn't move → no one actually left.
+    if _CLAIM_EVICTED_RE.search(text) and after.get("evicted") == before.get("evicted"):
+        desync = "an EVICTION (a houseguest leaving the house)"
+    # (2) A season winner / crowning was narrated, but the game isn't finished → premature crown.
+    elif _CLAIM_WINNER_RE.search(text) and not after.get("finished"):
+        desync = "the SEASON WINNER being crowned"
+    # (3) A finale vote TALLY was narrated, but the game isn't finished → narrated the count
+    #     before the engine revealed all the jury votes.
+    elif (_CLAIM_TALLY_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
+          and not after.get("finished")):
+        desync = "a FINAL VOTE TALLY (the jury count)"
+    # (4) A new HOH was narrated, but the HOH id didn't change → no new reign was committed.
+    #     `after.hoh` must equal `before.hoh` AND not be a fresh crown (before was empty).
+    elif (_CLAIM_NEW_HOH_RE.search(text)
+          and after.get("hoh") == before.get("hoh")
+          and not (before.get("hoh") is None and after.get("hoh") is not None)):
+        desync = "a NEW HEAD OF HOUSEHOLD being crowned"
+
+    if not desync:
+        return None
+
+    # Describe the REAL board so the model can reconcile to it, then forbid repeating the
+    # un-happened outcome. Forceful, but not panicky — it's a correction, not an alarm.
+    week = after.get("week")
+    phase = after.get("phase")
+    evicted = after.get("evicted")
+    pending = after.get("pending")
+    board = (
+        f"week {week if week is not None else '?'}, "
+        f"phase {phase or '?'}, "
+        f"{evicted if evicted is not None else '?'} houseguest(s) evicted so far, "
+        f"{'the season is FINISHED' if after.get('finished') else 'the season is NOT finished'}"
+        + (f", and the engine is waiting on a `{pending}` decision" if pending else "")
+    )
+    return (
+        "RE-GROUND ON THE BOARD — last turn you narrated " + desync + ", but the engine (the "
+        "source of truth) never committed it. The live board still shows: " + board + ". "
+        "Reconcile your NEXT beat to the board: do NOT repeat or build on that outcome as if it "
+        "happened — it did not. Treat the engine as the source of truth, re-read the live state, "
+        "and pick up from where the game actually is."
+    )
+
+
+async def record_post_turn_desync_check(user, narration: str) -> None:
+    """Post-turn layer of the desync spine: capture the AFTER signature, diff it against the
+    BEFORE signature stored at the start of this turn, and when the narration asserted an outcome
+    the engine never committed, stash a re-ground directive for the next turn. Fail-open — never
+    raises, never blocks the turn that's finishing."""
+    try:
+        after = await _capture_beat_signature(user)
+        before = _LAST_BEAT_SIG.get(user)
+        if not before or not after:
+            return
+        directive = _narration_claims_outcome(narration or "", before, after)
+        if directive:
+            _DESYNC_REGROUND[user] = directive
+            logger.warning(
+                "[orwell] beat-signature desync detected for user=%s — re-grounding next turn", user,
+            )
+    except Exception as e:
+        logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
+
+
 async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
     """If the live game sits at an unresolved NPC-driven ceremony with NO player decision pending,
     resolve that single beat (one advanceGame) so the moment prompt carries the engine's real
@@ -382,6 +554,18 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _barrier
         except Exception as e:
             logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
+        # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
+        # re-ground directive the previous turn's post-turn check stashed for this user (the
+        # model narrated an outcome the engine never committed — pin it back to the board), then
+        # snapshot the CURRENT board so the next post-turn check has a baseline to diff against.
+        # Best-effort / fail-open: any hiccup leaves the turn framed exactly as before.
+        try:
+            _reground = _DESYNC_REGROUND.pop(user, None)
+            if _reground:
+                gm_prompt = gm_prompt + "\n\n" + _reground
+            _LAST_BEAT_SIG[user] = await _capture_beat_signature(user)
+        except Exception as e:
+            logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
