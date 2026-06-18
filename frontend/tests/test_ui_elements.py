@@ -133,7 +133,7 @@ class TestOnboardingOverlay:
             return {"started": False}  # fresh sandbox: no confirm needed (C12 guard)
 
         async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
-                              confirm_restart=False, user=None):
+                              confirm_restart=False, keep_character=False, user=None):
             return {"ok": True}
 
         client = _build_client(monkeypatch, {"create_character": fake_create, "get_game_state": fake_state})
@@ -147,7 +147,7 @@ class TestOnboardingOverlay:
             return {"started": False}
 
         async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
-                              confirm_restart=False, user=None):
+                              confirm_restart=False, keep_character=False, user=None):
             captured["archetype"] = archetype
             captured["strategy_style"] = strategy_style
             return {"ok": True}

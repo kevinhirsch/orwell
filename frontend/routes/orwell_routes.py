@@ -76,13 +76,18 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
 
 
 class NewGameRequest(BaseModel):
-    playerName: str
+    # 0056: optional when keepCharacter is set — the engine carries the prior player's name.
+    playerName: str = ""
     archetype: Optional[str] = None
     strategyStyle: Optional[str] = None
     seed: Optional[int] = None
     # Required to restart over a STARTED game (C12 / audit A2): without it the route 409s and
     # the engine-side B36 guard would no-op anyway. UI must ask the player explicitly.
     confirm: bool = False
+    # 0056 — season-to-season continuity: on a confirmed restart, KEEP the existing houseguest
+    # (carry their CHARACTER into the new season) instead of running fresh casting. The engine
+    # re-supplies the prior player's authored fields, so no playerName is needed here when set.
+    keepCharacter: bool = False
 
 
 def setup_orwell_routes() -> APIRouter:
@@ -522,7 +527,8 @@ def setup_orwell_routes() -> APIRouter:
         # survives only as a debug/ops door: the deploy smoke and the responsive-matrix harness use
         # it (both run with AUTH_ENABLED=false, which require_admin honors). Raises 403 otherwise.
         require_admin(request)
-        if not body.playerName.strip():
+        # 0056: a name is required UNLESS keeping the existing character (the engine carries it).
+        if not body.playerName.strip() and not body.keepCharacter:
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         user = _current_user(request)
         try:
@@ -543,11 +549,12 @@ def setup_orwell_routes() -> APIRouter:
             except Exception:
                 pass
             res = await orwell_engine.create_character(
-                body.playerName.strip(),
+                body.playerName.strip() or None,
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
                 seed=body.seed,
                 confirm_restart=body.confirm,
+                keep_character=body.keepCharacter,  # 0056: carry the prior character into the new season
                 user=user,
             )
             # Kick off move-in cast portraits (0051) — background, never blocks the response,
