@@ -20,6 +20,16 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     }
   });
 
+  it("makes makeDeal as non-optional as recordInteraction (play-through: deals struck but never tracked)", () => {
+    // Live S3: the model struck an explicit handshake deal ("you've got a deal") and called only
+    // whereabouts — no makeDeal — so the promise never entered the ledger (deals: []), the panel
+    // stayed empty, and nothing could pay off or break. The lever must push makeDeal as hard as
+    // recordInteraction: a deal only narrated binds no one.
+    expect(BASE_GAME_MASTER_PROMPT).toContain("NOT optional either");
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/MOMENT the player and a houseguest AGREE to terms/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/binds no one and never comes due/);
+  });
+
   it("states the game decides outcomes and the model only voices them", () => {
     // The machinery is never named to the model (owner ruling 2026-06-18): the prompt says the
     // GAME decides, never "the engine" — and the only literal "engine" left is the prohibition list.
