@@ -188,6 +188,17 @@ def test_game_build_uses_diegetic_sender_on_placeholder_and_continuation():
     assert "if (!isGameBuild()) {\n                        _rEl.textContent = _ansM + ' (fallback) ';" in chat
 
 
+def test_game_build_suppresses_model_name_in_session_list():
+    # OBS-RENDER-1 (sidebar follow-up): the session list appended "· deepseek-v4-pro" to every
+    # chat's label AND its hover title — the same raw model machinery the chat header now hides.
+    # In the game build the sidebar must stay diegetic too: title/label carry the chat name only.
+    js = _read("static", "js", "sessions.js")
+    assert "data-game-build" in js  # the list builder detects the build
+    # the `· model` suffix on BOTH the visible label and the hover title is build-gated
+    assert "if (s.model && !_gameBuild) label += ' · ' + s.model.split('/').pop();" in js
+    assert "(s.model && !_gameBuild ? s.model.split('/').pop() + ' · ' : '')" in js
+
+
 def test_reload_path_applies_production_beats():
     # The history-reload render (chatRenderer.js) was NOT applying the diegetic treatment
     # the live stream did — so re-opening a session leaked raw camelCase tool names and raw
