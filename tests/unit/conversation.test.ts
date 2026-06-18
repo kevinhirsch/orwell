@@ -89,4 +89,22 @@ describe("0012 — social read is honest and Vault-free", () => {
     // Even with the hunch present, no off-screen Vault content is named.
     for (const c of sb.hiddenContents) expect(hinted.includes(c)).toBe(false);
   });
+
+  it("names the target houseguest, never echoes a raw id (play-through fix)", () => {
+    // Bug: socialRead(target) interpolated the raw EntityId into player prose ("your read on
+    // npc:3"). The live registry wires a public name resolver; the surface must use it and never
+    // surface an `npc:N` id. Without a resolver it falls back to a generic noun, still no raw id.
+    const sb = buildSandbox(1);
+    const noResolver = sb.player.socialRead(npc(3));
+    expect(noResolver).not.toMatch(/npc:\d/);
+
+    sb.player.setNameResolver((id) => (id === npc(3) ? "A Houseguest Name" : undefined));
+    const named = sb.player.socialRead(npc(3));
+    expect(named).toContain("A Houseguest Name");
+    expect(named).not.toMatch(/npc:\d/);
+
+    // A resolver that (wrongly) returns an id-shaped string is still scrubbed to the generic noun.
+    sb.player.setNameResolver(() => "npc:9");
+    expect(sb.player.socialRead(npc(3))).not.toMatch(/npc:\d/);
+  });
 });

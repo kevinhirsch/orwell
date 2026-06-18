@@ -55,6 +55,9 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // Wire the engine-only soul store (0024) into the live session so consequential beats + off-screen
   // scenes deepen each NPC's arc and ground their later voice (the 0041 linchpin).
   session.setSoul(engine.soul);
+  // Name resolution for outward prose (non-Vault: names are public): the player surface uses this
+  // so socialRead names the houseguest instead of echoing a raw `npc:N` id into the read.
+  outward.player.setNameResolver((id) => session.publicName(id));
   // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
   // knows who's still in the house (player + non-evicted NPCs).
   commands.setLivingProvider(() => session.livingIds());

@@ -494,6 +494,17 @@ export class GameSessionAdapter implements GameSession {
     return this.house.npcs.find((n) => n.id === id)?.name ?? id;
   }
 
+  /**
+   * PUBLIC roster name → outward name resolver (non-Vault: names are public). Returns undefined
+   * for an id NOT on the live roster, so outward prose can fall back rather than echo a raw id.
+   * Wired into the player surface (registry) so socialRead names the houseguest instead of "npc:N".
+   */
+  publicName(id: EntityId): string | undefined {
+    if (!this.house) return undefined;
+    if (this.house.player.id === id) return this.house.player.name;
+    return this.house.npcs.find((n) => n.id === id)?.name;
+  }
+
   private card(id?: EntityId): { id: EntityId; name: string } | null {
     return id ? { id, name: this.nameOf(id) } : null;
   }
