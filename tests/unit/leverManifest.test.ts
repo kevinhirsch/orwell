@@ -53,6 +53,38 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the game's\s*pending BINDING decision options/i);
   });
 
+  // LLM-discipline cluster (audit 2026-06-18 hand-off): the model raced past decision cards, invented
+  // player knowledge with no pathway, drifted whereabouts, and miscounted the cast. Pinned out.
+  it("decision cards are hard stops, incl. the goodbye-message gate (#3)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/DECISION CARDS ARE HARD STOPS/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/GOODBYE-MESSAGE card/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never narrate past it/i);
+  });
+
+  it("whereabouts must be read before any room scene, every phase (#4)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Call it BEFORE you/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/every phase, not just the premiere/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never put one person in two places/i);
+  });
+
+  it("player knowledge must come through a recorded pathway (#5)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/GROUNDED KNOWLEDGE/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/only KNOWS what a/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/surfaceInformationTo/);
+  });
+
+  it("the game context surfaces the exact remaining count so the model never does arithmetic (#6)", () => {
+    const view = { started: true, week: 1, phase: "social", moment: "social",
+      player: { id: "player", name: "P", archetype: "a", strategyStyle: "s", status: "active" },
+      house: [
+        { id: "npc:1", name: "A", status: "active", archetype: "x", strategyStyle: "y" },
+        { id: "npc:2", name: "B", status: "evicted" },
+      ] } as unknown as GameStateView;
+    const prompt = buildSystemPrompt("social", view);
+    expect(prompt).toMatch(/Houseguests remaining: 2 of 3/); // player + 1 active NPC of 3 total
+    expect(prompt).toMatch(/do your own arithmetic/i);
+  });
+
   // Eviction fidelity (audit 2026-06-18): a play-through caught the model inventing a flattering
   // vote tally ("nine to one, your name only came up once") that did NOT match the engine's actual
   // staged ballots, and naming a real-world host ("Julie Chen"). Both are pinned out.

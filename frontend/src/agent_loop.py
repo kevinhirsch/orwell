@@ -1373,6 +1373,19 @@ _ADVANCE_PHASES = {
     "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
 }
 _PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
+# A PREVIEW (runCompetition) reports a ceremony's already-decided winner but commits NOTHING. Previewing
+# an OUTCOME in an advance-phase and then not advanceGame'ing is a HARD stall regardless of lull or
+# engagement (FLAVOR-vs-OUTCOMES: a previewed outcome MUST be committed) — the #1 cause of the
+# "narrated the winner, the board never moved, chat contradicts the HUD" desync (audit 2026-06-18
+# hand-off #1). We nudge it IMMEDIATELY, bypassing the lull/staleness gate.
+_PREVIEW_TOOLS = {"runCompetition"}
+_PREVIEW_COMMIT_NUDGE = (
+    "(Production note, not for the player.) You previewed a competition result but never called "
+    "advanceGame — so NOTHING is official: the winner you just named does not hold the power, the "
+    "board has not moved, and the player's status panel now CONTRADICTS your narration. Your very "
+    "next action MUST be the advanceGame function call to COMMIT that result (it resolves to the "
+    "SAME winner you previewed) and bring up the next beat. Do not narrate anything further until "
+    "you have made that call.")
 # Graduated, in-loop. Index by how many times we've nudged THIS encounter (persisted
 # per game so the escalation carries across turns until the model finally advances).
 _ADVANCE_NUDGES = [
@@ -2611,8 +2624,11 @@ async def stream_agent_loop(
                     _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
                 _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
                 _is_lull = _player_turn_is_lull(messages)
-                _want_advance = ((not _progressed) and _is_lull and _stale
-                                 and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN)
+                # Previewed a ceremony OUTCOME (runCompetition) but did not commit it — a hard stall
+                # that bypasses the lull/staleness gate (hand-off #1): you must advanceGame to commit.
+                _previewed_uncommitted = bool(_tool_names & _PREVIEW_TOOLS) and not _progressed
+                _want_advance = ((not _progressed) and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
+                                 and (_previewed_uncommitted or (_is_lull and _stale)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -2629,15 +2645,19 @@ async def stream_agent_loop(
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
                         logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
-                    # advance a lull
+                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1)
                     if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
-                        logger.info(f"[orwell] advance stall-nudge (level {_level}, phase={_phase}) "
-                                    f"round {round_num} user={owner}")
-                        messages.append({"role": "system", "content": _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]})
+                        # A previewed-but-uncommitted outcome gets the FORCEFUL commit nudge straight
+                        # away (it is not a gentle "lingering beat" — an outcome is on the table).
+                        _nudge = (_PREVIEW_COMMIT_NUDGE if _previewed_uncommitted
+                                  else _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)])
+                        logger.info(f"[orwell] advance nudge ({'preview-commit' if _previewed_uncommitted else f'stall L{_level}'}, "
+                                    f"phase={_phase}) round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
                     # bank an engaged houseguest scene — the model skipped recording it, so the FE

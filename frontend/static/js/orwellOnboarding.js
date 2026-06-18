@@ -244,6 +244,18 @@
   // pre-game state runs the casting flow again.
   window._orwellFreshSession = () => {
     try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
+    // FE-render #7: createCharacter fires mid-stream at the casting→game cutover, so the
+    // fresh-session click (createDirectChat) blanks #chat-history + shows the welcome splash
+    // WHILE the still-finalizing tool beat / casting card is re-painting the old transcript.
+    // For one beat the most important transition reads as "the chat lost my conversation".
+    // Mark the transition so showWelcomeScreen suppresses the splash until the swap settles
+    // (it only suppresses while the OLD transcript still has bubbles — a genuinely empty new
+    // session still gets its welcome once this clears). Self-clearing so nothing stays stuck.
+    try {
+      window._orwellCastingTransition = true;
+      clearTimeout(window._orwellCastingTransitionTimer);
+      window._orwellCastingTransitionTimer = setTimeout(() => { window._orwellCastingTransition = false; }, 1500);
+    } catch (_) {}
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();

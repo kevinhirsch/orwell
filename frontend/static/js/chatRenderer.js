@@ -1221,6 +1221,16 @@ export function hideWelcomeScreen() {
 export function showWelcomeScreen() {
   const ws = document.getElementById('welcome-screen');
   const cc = document.getElementById('chat-container');
+  // FE-render #7: during the casting→game cutover (createCharacter fires mid-stream,
+  // opening a fresh session) the still-finalizing tool beat / casting card keeps the OLD
+  // transcript mounted while createDirectChat tries to blank it to the welcome splash —
+  // for a beat the conversation appears to vanish at the most important moment. While the
+  // transition flag is set AND the history still holds real bubbles, suppress the splash;
+  // the post-swap render (a truly empty new session) re-runs this and shows welcome then.
+  if (window._orwellCastingTransition) {
+    const _box = document.getElementById('chat-history');
+    if (_box && _box.querySelector('.msg')) return;
+  }
   if (ws) ws.classList.remove('hidden');
   if (cc) cc.classList.add('welcome-active');
   // Entering the New Chat / welcome state: discard any stale draft left in the
