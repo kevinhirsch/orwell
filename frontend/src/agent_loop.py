@@ -1423,6 +1423,51 @@ def _player_turn_is_lull(messages) -> bool:
         return True
     # short and non-substantial: a stripped reply under the threshold with no question/scheme
     return len(s) <= _LULL_SHORT_CHARS
+
+
+# ── Consequence-loop error-correction (record social play → move the weights) ─────────
+# Owner ruling (feature 0055): the politicking IS the game — substantive social play MUST fold
+# into the hidden relationship/perception weights. In live play the GM under-calls the recording
+# tools: it narrates a real player↔houseguest scene (a bond, a pitch, a promise) and logs nothing,
+# so the scene has zero consequence. When an ENGAGED turn touched a houseguest and nothing was
+# recorded, nudge the model to bank it — gentle first, escalating across turns, capped, tunable.
+_RECORD_TOOLS = {"recordInteraction", "makeDeal", "surfaceInformationTo"}
+_RECORD_NUDGES = [
+    "(Production note, not for the player: that scene with a houseguest landed only in the "
+    "telling — the house's actual read of the player has NOT moved, because nothing was recorded. "
+    "If a real beat passed between them (a bond, a pitch, a promise, a seed of doubt), log it with "
+    "recordInteraction — or makeDeal for a promise — so it folds into how that houseguest sees the "
+    "player. A scene the game never received changes no one's mind.)",
+    "You played a real social beat with a houseguest and recorded nothing, so it has ZERO "
+    "consequence — what the player just built or broke didn't move an inch in the house's memory. "
+    "Record it NOW with recordInteraction (player + the houseguest in the witness set), or makeDeal "
+    "if a promise was struck. The politics IS the game; an unrecorded scene is make-believe.",
+    "STOP — that houseguest scene must be recorded or it never happened. Call recordInteraction now "
+    "with the player and the houseguest(s) so the engine folds its impact, then continue.",
+]
+_MAX_RECORD_NUDGES_PER_TURN = 1
+_RECORD_STALL_LEVEL: Dict[str, int] = {}
+
+
+def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
+    """True when this turn was a scene with a houseguest — the player's line or the narration
+    names someone on the roster (full name or first name). Cheap, name-based; good enough to
+    tell a social scene from a solo/diary/decision beat."""
+    if not house_names:
+        return False
+    hay = ((narration or "") + " " + (_extract_last_user_message(messages) or "")).lower()
+    if not hay.strip():
+        return False
+    for name in house_names:
+        if not name:
+            continue
+        n = name.lower()
+        if n in hay:
+            return True
+        first = n.split(" ")[0]
+        if len(first) >= 3 and re.search(r"\b" + re.escape(first) + r"\b", hay):
+            return True
+    return False
 # Persistent per-game escalation: a turn that ends still stalled starts the next turn's
 # nudges one rung higher, so repeated stalls get "progressively more forceful". Keyed by
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
@@ -1962,6 +2007,7 @@ async def stream_agent_loop(
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
     _turn_advance_nudges = 0
+    _turn_record_nudges = 0
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -2384,40 +2430,49 @@ async def stream_agent_loop(
                 # Visible signal in the stream so the user knows we caught it.
                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                 continue
-            # ── Game progression error-correction (engine stall-nudge) ────
-            # The GM is finishing its turn. If the live season is sitting in a
-            # phase that exists to be DRIVEN FORWARD and the model fired no
-            # progression tool (advanceGame/submitDecision) this whole turn, the
-            # game is frozen. Nudge in-loop, escalating, capped. The escalation
-            # rung persists per game so repeated stalls get more forceful.
-            if _is_live_game and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN:
-                _progressed = any(
-                    (ev.get("tool") if isinstance(ev, dict) else None) in _PROGRESSION_TOOLS
-                    for ev in tool_events
-                )
-                if not _progressed:
-                    _phase = None
+            # ── Live-game error-correction: advance a lull, OR record an engaged scene ────
+            # The GM is finishing its turn. Two complementary nudges, both in-loop, escalating,
+            # capped, persisted per game:
+            #   • LULL + an advance-phase + no progression tool → seize the moment, advanceGame.
+            #   • ENGAGEMENT + a houseguest scene + no recording tool → bank the consequence
+            #     (recordInteraction/makeDeal) so the social play moves the hidden weights (0055).
+            if _is_live_game:
+                _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
+                _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
+                _recorded = bool(_tool_names & _RECORD_TOOLS)
+                _is_lull = _player_turn_is_lull(messages)
+                _want_advance = (not _progressed) and _is_lull and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
+                _want_record = (not _recorded) and (not _is_lull) and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN
+                if _want_advance or _want_record:
+                    _phase, _house = None, []
                     try:
                         from src import orwell_engine as _oe
-                        _st = await _oe.game_status(owner)
-                        _phase = (_st or {}).get("phase")
+                        _gs = await _oe.get_game_state(owner)
+                        _phase = (_gs or {}).get("phase")
+                        _house = [h.get("name") for h in ((_gs or {}).get("house") or [])
+                                  if isinstance(h, dict) and h.get("name")
+                                  and h.get("status", "active") == "active"]
                     except Exception as _e:
-                        logger.warning(f"[orwell] stall-nudge phase fetch failed: {_e}")
-                    # Only seize a LULL — substantive social play runs as long as it has juice
-                    # (pacing is engagement, not a turn count). A rich, engaged player turn is
-                    # never nudged; we step in when they disengaged/signalled ready and the model
-                    # didn't move.
-                    if _phase in _ADVANCE_PHASES and _player_turn_is_lull(messages):
+                        logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                    # advance a lull
+                    if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
-                        _nudge = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
-                        logger.info(
-                            f"[orwell] advance stall-nudge (turn #{_turn_advance_nudges}, "
-                            f"level {_level}, phase={_phase}) on round {round_num} for user={owner}"
-                        )
-                        messages.append({"role": "system", "content": _nudge})
+                        logger.info(f"[orwell] advance stall-nudge (level {_level}, phase={_phase}) "
+                                    f"round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]})
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
+                    # bank an engaged houseguest scene
+                    if _want_record and _scene_touched_houseguest(cleaned_round, messages, _house):
+                        _level = _RECORD_STALL_LEVEL.get(owner or "", 0)
+                        _turn_record_nudges += 1
+                        if owner:
+                            _RECORD_STALL_LEVEL[owner] = _level + 1
+                        logger.info(f"[orwell] record stall-nudge (level {_level}) round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _RECORD_NUDGES[min(_level, len(_RECORD_NUDGES) - 1)]})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
             break  # no tools — done
@@ -2782,6 +2837,9 @@ async def stream_agent_loop(
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
                 _ADVANCE_STALL_LEVEL.pop(owner, None)
                 _turn_advance_nudges = 0
+            if _is_live_game and block.tool_type in _RECORD_TOOLS and owner:
+                _RECORD_STALL_LEVEL.pop(owner, None)
+                _turn_record_nudges = 0
 
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
