@@ -18,7 +18,25 @@
   const REDUCED = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   const GAP = 10;
   const TOP_BASE = 52;     // below the app header
-  const BOTTOM_BASE = 12;  // above the composer's inset
+  const BOTTOM_BASE = 12;  // fallback only — the live value tracks the composer
+
+  // The composer is a fixed bottom bar; bottom-anchored slots (the presence strip,
+  // the Windows dock) must clear it or they cover the textbox. init.js keeps
+  // --composer-clearance synced to the composer's height (ResizeObserver) — the same
+  // var the modal dock uses — so read it instead of pinning to a hardcoded 12px.
+  function bottomBase() {
+    // In the welcome (empty) state the composer is lifted ~30vh up the page, so a
+    // bottom-anchored strip never collides with it — keep the small base there.
+    // Only the active, bottom-pinned composer needs clearing.
+    try {
+      const cc = document.querySelector(".chat-container");
+      if (cc && cc.classList.contains("welcome-active")) return BOTTOM_BASE;
+    } catch (_) {}
+    let v = 0;
+    try { v = parseInt(getComputedStyle(document.documentElement)
+      .getPropertyValue("--composer-clearance"), 10); } catch (_) {}
+    return Number.isFinite(v) && v > BOTTOM_BASE ? v + 4 : BOTTOM_BASE;
+  }
 
   // slot → [{ el, key, draggable }]
   const slots = { "top-right": [], "top-left": [], "bottom-center": [], "bottom-right": [] };
@@ -98,7 +116,7 @@
     if (NARROW.matches) { restackNarrowSheets(); return; } // F3: the sheet host owns narrow
     if (dragInProgress()) return; // F2: the gesture owns the position until drop
     const list = slots[name];
-    const safeT = TOP_BASE, safeB = BOTTOM_BASE;
+    const safeT = TOP_BASE, safeB = bottomBase();
     let cursor = name.startsWith("top") ? safeT : safeB;
     for (const entry of list) {
       const el = entry.el;

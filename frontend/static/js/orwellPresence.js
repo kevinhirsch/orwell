@@ -52,38 +52,50 @@
   function ensureEl() {
     let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("div");
+    // Sidebar chrome, NOT a floating strip (user verdict): a fixed bottom-center bar
+    // covered the composer/chat. Dock it in #sidebar next to the game gadgets, mirroring
+    // #orwell-status / #orwell-social (ruling #3/E64/H5) — static flow, full sidebar
+    // width, no z-index, in the sidebar drawer on mobile like every other section.
+    if (!document.getElementById("orwell-presence-css")) {
+      const st = document.createElement("style");
+      st.id = "orwell-presence-css";
+      st.textContent = `
+        #orwell-presence {
+          display: none;
+          margin: var(--space-2) var(--space-2) 0;
+          padding: var(--space-2) var(--space-3);
+          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
+          color: var(--fg, #9cdef2);
+          border: 1px solid var(--border, #355a66); border-radius: 10px;
+          font-family: 'Fira Code', ui-monospace, monospace;
+          font-size: var(--fs-xs); line-height: 1.5;
+        }
+        #orwell-presence .opres-hd {
+          color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
+          margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
+        }
+        #orwell-presence .opres-body { overflow-wrap: anywhere; }`;
+      document.head.appendChild(st);
+    }
+    el = document.createElement("section");
     el.id = ID;
     el.setAttribute("role", "status");
     el.setAttribute("aria-live", "polite");
-    el.style.cssText = [
-      "position:fixed", /* E91/S11: the bottom-center slot owns the coordinates */
-      "max-width:min(720px, calc(100vw - 24px))", "z-index:40",
-      "background:var(--surface-2, rgba(24,24,28,0.92))", "color:var(--text-1, #ddd)",
-      "border:1px solid var(--border-1, rgba(255,255,255,0.12))", "border-radius:10px",
-      "padding:6px 12px", "font-size:12.5px", "line-height:1.45",
-      "box-shadow:0 4px 14px rgba(0,0,0,0.35)", "display:none",
-      "backdrop-filter:blur(6px)",
-    ].join(";");
-    el.innerHTML =
-      "<span data-role='text'></span>" +
-      "<button data-role='dismiss' class='ow-dismiss' aria-label='Hide the presence strip' " +
-      "title='Hide (returns when you change rooms)' style='margin-left:10px'>×</button>";
-    el.querySelector("[data-role='dismiss']").addEventListener("click", () => {
-      try { localStorage.setItem(DISMISS_KEY, el.dataset.room || ""); } catch (_) {}
-      el.style.display = "none";
-    });
-    document.body.appendChild(el);
-    if (window.OrwellSlots) window.OrwellSlots.register(el, "bottom-center", { key: "presence" });
+    el.innerHTML = `<div class="opres-hd">Where you are</div>` +
+      `<div class="opres-body" data-role="text"></div>`;
+    // Mount inside the sidebar, beside the other game gadgets (the status HUD /
+    // "Wants a word"). Fall back to the session list, then the sidebar, then body.
+    const sidebar = document.getElementById("sidebar");
+    const anchor = document.getElementById("orwell-status") || document.getElementById("orwell-social");
+    if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);
+    else if (sidebar) sidebar.appendChild(el);
+    else document.body.appendChild(el);
     return el;
   }
 
   function render(w) {
     const el = ensureEl();
     if (!w || !w.room) { el.style.display = "none"; return; }
-    let dismissedRoom = null;
-    try { dismissedRoom = localStorage.getItem(DISMISS_KEY); } catch (_) {}
-    if (dismissedRoom === w.room) { el.style.display = "none"; return; } // hidden until the room changes
     el.dataset.room = w.room;
 
     const names = (list) => list.map((p) => p.name).join(", ");

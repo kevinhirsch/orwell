@@ -181,6 +181,9 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
     }
     const clearance = Math.max(12, Math.ceil(window.innerHeight - top + 8));
     root.style.setProperty('--composer-clearance', clearance + 'px');
+    // Bottom-anchored slots (presence strip, Windows dock) base off this clearance —
+    // re-stack so they follow the composer when it grows/shrinks (never cover it).
+    try { window.OrwellSlots && window.OrwellSlots.restackAll && window.OrwellSlots.restackAll(); } catch (_) {}
   };
   requestAnimationFrame(_syncComposerClearance);
   if (typeof ResizeObserver !== 'undefined') {
