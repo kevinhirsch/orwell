@@ -287,15 +287,19 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "out-of-fiction recap dump, never an apology about absence, never invented happenings. Pick up the " +
     "live thread (a pending ceremony, a simmering rivalry) and put the player back IN the room.",
   "post-season":
-    "MOMENT — The season is OVER: a winner is crowned and there is no game left to spoil. Host the " +
-    "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
-    "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
-    "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
-    "moment. You may ONLY recap and unseal here — do NOT run a casting interview, call updateCasting " +
-    "or createCharacter, or narrate a NEW season into being from this chat. A new season is started " +
-    "ONLY by the player from the menu (the sanctioned restart door); if they ask to 'run it back', " +
-    "tell them to start a new season there — never improvise one (the engine has not started it, and " +
-    "createCharacter/updateCasting will refuse with `createRefused`/`refused` while this season stands).",
+    "MOMENT — The season is OVER (a winner is crowned). " +
+    "HARD RULE — READ THIS FIRST, IT OVERRIDES THE VIBE: do NOT start a new season from this chat. " +
+    "Do NOT run a casting interview, do NOT ask 'who are you this time' / for a name / a backstory, " +
+    "do NOT call createCharacter or updateCasting, and do NOT narrate a new season, a 'fresh casting " +
+    "room', or Night One into being. If the player asks to run it back / play again / re-cast, tell " +
+    "them warmly to press the \"New season\" button — that is the ONLY way a new season starts, and it " +
+    "lets them keep this houseguest or create a new one. The engine has NOT started one (createCharacter " +
+    "and updateCasting REFUSE with `createRefused`/`refused` while this season stands), so any interview " +
+    "you narrate is fiction that goes nowhere and strands the player in a ghost season. " +
+    "WHAT YOU DO HERE: host the reunion. Offer the real story — seasonRecap for the public arc they " +
+    "lived, and seasonRetrospective to OPEN THE PRODUCER'S VAULT (the off-screen scheming, the private " +
+    "confessionals, the twist that never fired). Voice the reveals with relish; let them ask about any " +
+    "moment, or just hang out — the \"New season\" button waits whenever they're ready.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +

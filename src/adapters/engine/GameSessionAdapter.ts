@@ -1370,8 +1370,10 @@ export class GameSessionAdapter implements GameSession {
         if (!evict) throw new Error("a final-eviction target is required");
         return { kind: "final-eviction", evict };
       }
-      case "goodbye-message": { // E34: the tone rides `vote` (like comp-intent's `intent ?? vote` seam).
-        const tone = req.vote as GoodbyeTone | undefined;
+      case "goodbye-message": { // E34: the tone is surfaced as options/pick, so accept `vote` OR `choice`
+        // (B6-02 — `singlePickId` is the shared parity helper; a client using the generic `choice`
+        // shape was hard-looping on a rejection, like comp-intent before R4-02).
+        const tone = singlePickId(req) as GoodbyeTone | undefined;
         if (!tone || !(GOODBYE_TONES as readonly string[]).includes(tone)) {
           throw new Error("a legal goodbye tone is required (warm / respectful / cold)");
         }
@@ -1623,7 +1625,7 @@ export class GameSessionAdapter implements GameSession {
       // Pre-game, the view carries the interview's status (0050): the engine — not the model —
       // says which building blocks are in and what the next step is.
       return {
-        started: false, week: 0, phase: this.phase, moment: "character-creation",
+        started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
         player: null, house: [], casting: castingStatusOf(this.intake),
       };
     }
@@ -1637,6 +1639,7 @@ export class GameSessionAdapter implements GameSession {
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
+      finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
       week: this.week,
       phase: this.phase,
       moment,

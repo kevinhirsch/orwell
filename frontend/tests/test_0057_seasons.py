@@ -117,6 +117,25 @@ def test_next_season_refused_until_season_over(tmp_path, monkeypatch):
     assert orwell_seasons.get_season("default") == 1  # no skipping ahead — the level isn't cleared
 
 
+def test_next_season_accepts_post_season_moment_without_finished_field(tmp_path, monkeypatch):
+    """B6-01 robustness: the engine signals 'over' via `finished` (added) AND, as a fallback for
+    version skew, via `moment == 'post-season'`. A finished game lacking the bool is still advanceable."""
+    monkeypatch.setattr(orwell_seasons, "SEASONS_PATH", tmp_path / "s.json")
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season"}  # finished, but no `finished` key (old engine)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    async def fake_create(name, **kwargs):
+        return {"started": True}
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    monkeypatch.setattr(importlib.import_module("src.orwell_portraits"), "scrub_user", lambda u: None)
+
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.post("/api/orwell/next-season", json={"keep": True, "confirm": True})
+    assert r.status_code == 200 and r.json()["season"] == 2
+
+
 # ── POST /reset-progress ─────────────────────────────────────────────────────────────────────
 
 def test_reset_progress_resets_without_incrementing(tmp_path, monkeypatch):
