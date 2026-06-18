@@ -144,9 +144,11 @@ def test_w6_every_keep_set_tool_has_a_diegetic_beat_label():
     import re
     from pathlib import Path
     fe = Path(__file__).resolve().parents[1]
-    chat = (fe / "static" / "js" / "chat.js").read_text(encoding="utf-8")
-    m = re.search(r"_orwellToolBeats = \{(.*?)\};", chat, re.S)
-    assert m, "_orwellToolBeats map missing from chat.js"
+    # The map now lives in the single-source module ./orwellToolBeats.js (shared by the
+    # live + reload render paths). Iterate it so a new keep-set tool can't ship unlabeled.
+    beats = (fe / "static" / "js" / "orwellToolBeats.js").read_text(encoding="utf-8")
+    m = re.search(r"ORWELL_TOOL_BEATS = \{(.*?)\};", beats, re.S)
+    assert m, "ORWELL_TOOL_BEATS map missing from orwellToolBeats.js"
     labeled = set(re.findall(r"'([A-Za-z_]+)':", m.group(1)))
     from src.agent_tools import GAME_TOOL_KEEP
     missing = sorted(set(GAME_TOOL_KEEP) - labeled)

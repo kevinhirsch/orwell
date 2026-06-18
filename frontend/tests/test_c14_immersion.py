@@ -123,11 +123,20 @@ def test_agent_loop_receives_game_mode():
 # --- 3. diegetic tool nodes -------------------------------------------------------------
 
 def test_game_tools_have_production_beat_labels():
-    js = _read("static", "js", "chat.js")
-    assert "_orwellToolBeats" in js
+    # Single source of truth (./orwellToolBeats.js), shared by the live + reload paths so
+    # they cannot drift — a tool labelled live but not on reload was leaking raw names + JSON.
+    beats = _read("static", "js", "orwellToolBeats.js")
+    assert "export const ORWELL_TOOL_BEATS" in beats
     for tool in ("advanceGame", "submitDecision", "runCompetition", "diaryRoom",
-                 "makeDeal", "socialInitiatives", "recordInteraction", "finaleView"):
-        assert f"'{tool}':" in js, f"{tool} missing a diegetic beat label"
+                 "makeDeal", "socialInitiatives", "recordInteraction", "finaleView",
+                 "updateCasting", "getGameState"):
+        assert f"'{tool}':" in beats, f"{tool} missing a diegetic beat label"
+    # both render paths consume the shared map, neither redefines it
+    chat = _read("static", "js", "chat.js")
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert "from './orwellToolBeats.js'" in chat
+    assert "from './orwellToolBeats.js'" in renderer
+    assert "const _orwellToolBeats = {" not in chat   # the inline copy is gone
 
 
 def test_game_tool_nodes_suppress_raw_payloads():
@@ -137,3 +146,19 @@ def test_game_tool_nodes_suppress_raw_payloads():
     assert "if (_beatOut) { cmd = ''; outHtml = ''; }" in js
     # the rendered label is the beat, not the raw tool name
     assert "_beatOut || json.tool" in js
+
+
+def test_reload_path_applies_production_beats():
+    # The history-reload render (chatRenderer.js) was NOT applying the diegetic treatment
+    # the live stream did — so re-opening a session leaked raw camelCase tool names and raw
+    # engine JSON output on every reload (a Vault-Wall / refresh-persistence break).
+    js = _read("static", "js", "chatRenderer.js")
+    assert "import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';" in js
+    assert "const _gbBeat = isGameBuild();" in js
+    assert "const _beat = _gbBeat ? ORWELL_TOOL_BEATS[ev.tool] : null;" in js
+    # a production beat suppresses output, screenshot, diff, and raw args, and relabels the pill
+    assert "if (!_beat && ev.output && ev.output.trim())" in js
+    assert "_beat ? null : safeToolScreenshotSrc(ev.screenshot)" in js
+    assert "if (!_beat && ev.diff && ev.diff.text)" in js
+    assert "!_beat && ev.command" in js
+    assert "esc(_beat || ev.tool)" in js
