@@ -1,9 +1,33 @@
 # 0057 — Seasons as levels: the finale, the next-season invite & progression
 
-> **Status:** SPEC (2026-06-18). New work per CLAUDE.md ("new work starts as a new spec/queue
-> item"). Builds on **0056** (keep/recreate character continuity), **0048** (post-season
-> retrospective/reunion), **0049** (lingering play), **0029** (the account tier), and the FE
-> **agent-loop engagement nudges** (`_player_turn_is_lull` / `_ADVANCE_STALL_LEVEL`).
+> **Status:** SPEC + **chunks 1–4 built** (FE, 2026-06-18). New work per CLAUDE.md ("new work
+> starts as a new spec/queue item"). Builds on **0056** (keep/recreate character continuity),
+> **0048** (post-season retrospective/reunion), **0049** (lingering play), **0029** (the account
+> tier), and the FE **agent-loop engagement nudges** (`_player_turn_is_lull` /
+> `_ADVANCE_STALL_LEVEL`).
+>
+> **Built:**
+> - **Chunk 1** (foundation) — the per-user FE season store (`frontend/src/orwell_seasons.py`),
+>   `GET /api/orwell/season`, `POST /api/orwell/next-season` (finished-season-gated; increments)
+>   and `POST /api/orwell/reset-progress` (no increment), both through the one sanctioned reset.
+>   Gate: `frontend/tests/test_0057_seasons.py`.
+> - **Chunk 2** (the two HUD indicators) — `frontend/static/js/orwellSeasonProgress.js`: the ≤5px
+>   bottom-of-viewport accent **season progress bar** (cadence-driven 0→100%, FE-computed from the
+>   Vault-free `/status` + `/state`, monotone within a season, forced full at `post-season`,
+>   reset per new season, reduced-motion-aware) + the quiet **"Season N" chip** (shown ≥ 2).
+> - **Chunk 3** (the finale "New season" surface) — `frontend/static/js/orwellNewSeason.js`: the
+>   PERSISTENT post-season panel (composed on the OrwellWindow kit; gated on `moment ===
+>   "post-season"`), keep/recreate → `/next-season`, the per-season portrait via the shared G26/G27
+>   studio, a gentle in-reunion nudge. Plus the settings **red-zone reset-progress** control. This
+>   **subsumes the 0056 FE keep/recreate UX.**
+> - **Chunk 4** (the producers re-approach) — the post-season-only agent-loop nudge
+>   (`frontend/src/agent_loop.py`): engagement-driven (off-finale post-escape turns, never a
+>   wall-clock timer), escalating, capped, persisted per user; it has the GM re-invite OUT OF
+>   FICTION and points the player at the sanctioned "New season" button.
+> - Gates: `frontend/tests/test_0057_ui.py`, `frontend/tests/test_0057_reapproach.py`.
+>
+> **Owed:** live browser validation of the progress-% fill behavior and the panel placement
+> (the parent's browser-smoke / responsive-matrix jobs).
 
 ## Concept — a completed season is a "level"
 
@@ -84,25 +108,30 @@ number; never shows Vault data.
 
 ## Implementation chunks (queue)
 
-1. **Season-number foundation** *(this PR)* — the per-user FE season store (get / increment /
+1. ✅ **Season-number foundation** — the per-user FE season store (get / increment /
    reset-to-1), a player-reachable **next-season** endpoint (gated on a finished season; increments)
    and a **reset-progress** endpoint (any time; no increment), both through the engine's one
-   sanctioned reset, + `GET /api/orwell/season`. FE pytest.
-2. **The two HUD indicators** — the **season progress bar** (≤5px, bottom-of-viewport, accent,
-   cadence-driven 0→100%, resets per season; FE-computed from Vault-free state) + the quiet **"Season
-   N" chip** (shown ≥ 2). Browser-smoke validated.
-3. **The finale "New season" surface** — the persistent post-season panel/button with keep/recreate
-   (0056) + the portrait keep/upload/regenerate toggle, wired to the next-season endpoint; the
-   in-reunion UI nudge.
-4. **The producers re-approach** — the engagement-driven, post-season-only agent-loop nudge that has
-   the GM re-invite to the next season after the player escapes the reunion (mirrors the stall-nudge:
-   escalating, capped, persisted per user).
+   sanctioned reset, + `GET /api/orwell/season`. FE pytest (`test_0057_seasons.py`).
+2. ✅ **The two HUD indicators** — the **season progress bar** (4px ≤ 5px, bottom-of-viewport,
+   accent, cadence-driven 0→100%, resets per season; FE-computed from Vault-free state) + the quiet
+   **"Season N" chip** (shown ≥ 2). `orwellSeasonProgress.js`; source/route-gated by
+   `test_0057_ui.py`; live browser-smoke validation owed.
+3. ✅ **The finale "New season" surface** — the persistent post-season panel/button with
+   keep/recreate (0056) + the portrait keep/upload/regenerate toggle (shared G26/G27 studio), wired
+   to the next-season endpoint; the in-reunion UI nudge. Plus the settings **red-zone**
+   reset-progress control. `orwellNewSeason.js` + the account-panel card; `test_0057_ui.py`.
+4. ✅ **The producers re-approach** — the engagement-driven, post-season-only agent-loop nudge that
+   has the GM re-invite to the next season after the player escapes the reunion (mirrors the
+   stall-nudge: escalating, capped, persisted per user). `agent_loop.py`; `test_0057_reapproach.py`.
 
 ## Open assumptions (flagged for review)
 
 - **Season number = FE-owned, per-username.** (Resolved above; the engine stays season-scoped.)
 - **Re-approach trigger = engagement-driven** (a couple of post-escape, off-finale player turns),
   tunable, mirroring the stall-nudge — not a wall-clock timer (the game clock is the play-clock,
-  per the 2026-06-10 ruling).
-- **"Finished" = the engine's terminal season state** (`getGameState().finished` / a terminal
-  `player.status`), the same gate `seasonRetrospective` already uses.
+  per the 2026-06-10 ruling). *(Built: `_player_escaped_reunion` counts off-finale turns;
+  `_POSTSEASON_OFFTOPIC_TURNS_BEFORE_REAPPROACH` is the threshold.)*
+- **"Finished" = the engine's terminal season state.** *(Built: the FE reads the Vault-free
+  `getGameState().moment === "post-season"` — the same terminal gate `seasonRetrospective` uses;
+  `view()` does not surface a top-level `finished`, so `moment` is the FE's post-season signal,
+  while the `/recap` projection still carries `finished` for the retrospective.)*

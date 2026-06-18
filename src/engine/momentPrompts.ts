@@ -338,19 +338,21 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "out-of-fiction recap dump, never an apology about absence, never invented happenings. Pick up the " +
     "live thread (a pending ceremony, a simmering rivalry) and put the player back IN the room.",
   "post-season":
-    "MOMENT — The season is OVER: a winner is crowned and there is no game left to spoil. Host the " +
-    "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
-    "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
-    "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
-    "moment. The player may linger in this post-season lobby as long as they like. Do NOT run a casting " +
-    "interview, call updateCasting, or narrate a NEW season into being from this chat — never improvise " +
-    "a season the game has not started (it sits at the finale, and updateCasting refuses with `refused` " +
-    "while this season stands). The primary way on is the persistent 'New season' surface in the menu " +
-    "(keep the houseguest or recreate them, per 0056). BUT if the player simply asks to run it back " +
-    "right here, you MAY finalize the restart directly: call createCharacter with confirmRestart=true " +
-    "(add keepCharacter=true to carry the SAME houseguest forward) — that one flag ends this season for " +
-    "good and the front-end starts the next; without it the call is refused (`createRefused`) and the " +
-    "season stands.",
+    "MOMENT — The season is OVER (a winner is crowned). " +
+    "HARD RULE — READ THIS FIRST, IT OVERRIDES THE VIBE: do NOT IMPROVISE a new season into being. " +
+    "Do NOT run a casting interview, do NOT ask 'who are you this time' / for a name / a backstory as " +
+    "fiction, and do NOT narrate a 'fresh casting room' or Night One that the game has not actually " +
+    "started — a season you only NARRATE is a ghost season that goes nowhere and strands the player. " +
+    "A new season starts for REAL one of two ways, and BOTH are fine: the player presses the \"New " +
+    "season\" button, OR they simply ask you to run it back / play again right here and you finalize " +
+    "the restart directly — call createCharacter with confirmRestart=true (add keepCharacter=true to " +
+    "carry the SAME houseguest forward, or omit it to recast). That flag makes it a REAL restart the " +
+    "front-end completes and counts as the next season; WITHOUT it createCharacter/updateCasting REFUSE " +
+    "(`createRefused`/`refused`) while this season stands — so never narrate around a refusal. " +
+    "WHAT YOU DO HERE otherwise: host the reunion. Offer the real story — seasonRecap for the public " +
+    "arc they lived, and seasonRetrospective to OPEN THE PRODUCER'S VAULT (the off-screen scheming, the " +
+    "private confessionals, the twist that never fired). Voice the reveals with relish; let them ask " +
+    "about any moment, or just hang out — the \"New season\" button waits whenever they're ready.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +

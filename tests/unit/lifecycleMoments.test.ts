@@ -81,6 +81,9 @@ describe("B62 — the terminal beat (the season closes with the result, from the
     }
     const view = s.getGameState();
     expect(view.moment).toBe("post-season"); // the engine itself frames the terminal beat
+    // B6-01: getGameState carries the real `finished` over-signal the FE season lifecycle (0057)
+    // gates on — it must be a true engine field, not a shape only a test mock produces.
+    expect(view.finished).toBe(true);
     const { systemPrompt } = s.getMomentPrompt({});
     expect(systemPrompt).toContain("THE RESULT:");
     expect(systemPrompt).toContain("won the season");
@@ -94,9 +97,10 @@ describe("B62 — the terminal beat (the season closes with the result, from the
   });
 
   // R4-04: the post-season prompt must forbid improvising a NEW season in this chat (the model was
-  // observed running a fictional casting interview while the engine stayed at the old finale) and
-  // redirect a "run it back" to the menu — paired with the engine's honest refusal (R4-05).
-  it("the post-season prompt forbids a fresh casting/new-season here and points to the menu", () => {
+  // observed running a fictional casting interview while the engine stayed at the old finale, and
+  // STILL did on stronger models with the guard buried at the end — round-6 A1). The guard now LEADS
+  // with a hard rule and points at the sanctioned "New season" button (0057), paired with R4-05.
+  it("the post-season prompt LEADS with a hard no-new-season rule and points at the New season button", () => {
     const { sb } = liveGame("runitback", 9);
     const s = sb.session;
     for (let i = 0; i < 4000; i++) {
@@ -106,10 +110,16 @@ describe("B62 — the terminal beat (the season closes with the result, from the
     }
     expect(s.getGameState().moment).toBe("post-season");
     const prompt = s.getMomentPrompt({}).systemPrompt;
+    // The hard rule must come BEFORE the reunion-hosting copy, not be buried after it (A1).
+    const hardRuleAt = prompt.search(/HARD RULE/i);
+    const reunionAt = prompt.search(/host the reunion/i);
+    expect(hardRuleAt).toBeGreaterThanOrEqual(0);
+    expect(reunionAt).toBeGreaterThan(hardRuleAt);
     expect(prompt).toMatch(/do NOT run a casting interview/i);
+    expect(prompt).toMatch(/who are you this time/i);       // the exact improvisation we saw
     expect(prompt).toContain("createCharacter");
-    expect(prompt).toMatch(/menu/i);
-    expect(prompt).toMatch(/never improvise/i);
+    expect(prompt).toMatch(/New season/);                   // points at the sanctioned button (0057)
+    expect(prompt).toMatch(/ghost season|goes nowhere/i);   // names the player-experience harm
   });
 });
 
