@@ -41,6 +41,23 @@ describe("B46 — a declared throw measurably lowers the player's win rate", () 
     expect(view.pending?.kind).toBe("comp-intent");
     expect(view.pending!.options.map((o) => o.id)).toEqual(["compete", "throw", "play-safe"]);
   });
+
+  // R4-02: the pending presents comp-intent as a generic options/pick decision, so a caller may
+  // submit the intent as `choice` (like every other options/pick decision) — not only `intent`/`vote`.
+  it("accepts the intent submitted as `choice` (the generic options/pick shape)", () => {
+    const viaChoice = new GameSessionAdapter();
+    viaChoice.createCharacter({ playerName: "P", archetype: "comp-beast", seed: 1 });
+    viaChoice.advanceGame();
+    const a = viaChoice.submitDecision({ kind: "comp-intent", choice: ["throw"] });
+
+    const viaIntent = new GameSessionAdapter();
+    viaIntent.createCharacter({ playerName: "P", archetype: "comp-beast", seed: 1 });
+    viaIntent.advanceGame();
+    const b = viaIntent.submitDecision({ kind: "comp-intent", intent: "throw" });
+
+    // `choice:["throw"]` and `intent:"throw"` resolve identically (same seed ⇒ same outcome).
+    expect(a.status.hoh?.id ?? null).toBe(b.status.hoh?.id ?? null);
+  });
 });
 
 describe("B46 — intent is immutable once the result is given (the lock)", () => {

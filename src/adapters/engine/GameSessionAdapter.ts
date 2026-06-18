@@ -16,7 +16,7 @@ import { HOUSE_ADJACENCY } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
-import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
+import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
@@ -623,7 +623,10 @@ export class GameSessionAdapter implements GameSession {
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
     // call, a network caller) is a no-op returning the current state — the prior save is left intact.
     if (this.house) {
-      if (!req.confirmRestart) return this.view();
+      // The no-op returns the PRIOR season's view — but now SIGNALS the refusal (audit R4-05) so the
+      // caller can tell "created" from "left untouched". Without it the model read the unchanged view
+      // as success and narrated a new season the engine never started.
+      if (!req.confirmRestart) return { ...this.view(), createRefused: this.live?.finished ? "over" : "in-progress" };
       // A CONFIRMED restart routes through the ONE sanctioned door (audit E1/D1/R1): the registry's
       // reset delegate — the SAME hinge the admin reset uses — forgets the orchestrator baseline,
       // rotates the dead season's saves, and creates season 2 in a clean sandbox. Without that the
@@ -731,17 +734,27 @@ export class GameSessionAdapter implements GameSession {
    * the (complete) status — a stray call can never disturb a live game.
    */
   updateCasting(req: UpdateCastingReq): CastingStatusView {
-    // Season already running: casting is over; a stray call records nothing and reports done.
-    if (this.house) return { known: {}, missing: [], next: null, ready: true };
+    // Season already running: casting is CLOSED. Refuse HONESTLY (audit R4-05) instead of the old
+    // fake `ready:true` that recorded nothing yet looked like success — that silent success let the
+    // model narrate a fresh casting interview post-season while the engine never started one. The
+    // refusal names whether a season is live (`in-progress`) or already crowned (`over`).
+    if (this.house) {
+      return { known: {}, missing: [], next: null, ready: false, refused: this.live?.finished ? "over" : "in-progress" };
+    }
     const before = this.intake;
     // C8: which already-captured scalars this update replaces — computed against the PRIOR intake,
     // surfaced so the producer confirms the change rather than silently clobbering an answer.
     const overwrote = overwrittenScalars(before, req);
+    // R4-01: keys that are NOT casting fields (a recording filed under `name`/`notes`/a typo would
+    // otherwise vanish). Echo them so the producer re-files rather than stalling on a lost answer.
+    const ignoredKeys = ignoredCastingKeys(req);
     this.intake = mergeCastingUpdate(this.intake, req);
     if (JSON.stringify(before) !== JSON.stringify(this.intake)) {
       this.persist(); // a half-done interview is durable state (0030)
     }
-    return castingStatusOf(this.intake, overwrote);
+    const status = castingStatusOf(this.intake, overwrote);
+    if (ignoredKeys.length > 0) status.ignoredKeys = ignoredKeys;
+    return status;
   }
 
   /**
@@ -1286,8 +1299,11 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
-      case "comp-intent": { // B46: the player declares compete/throw/play-safe (via `intent` or `vote`).
-        const intent = (req.intent ?? req.vote) as Intent | undefined;
+      case "comp-intent": { // B46: the player declares compete/throw/play-safe.
+        // The pending presents this as a generic options/pick decision (id = the intent value), so a
+        // caller may submit it as `intent`, `vote`, OR `choice` like every other options/pick decision.
+        // `singlePickId` covers `vote`/`choice`; `intent` stays first (R4-02 — `choice` was rejected).
+        const intent = (req.intent ?? singlePickId(req)) as Intent | undefined;
         if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
         return { kind: "comp-intent", intent };
       }

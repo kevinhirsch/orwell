@@ -72,7 +72,13 @@ no game started
 ```
 
 A `createCharacter` before any name is recorded is **rejected** (the engine, not the model,
-gates the start); an `updateCasting` after the season starts records nothing and reports done.
+gates the start); once a season exists, casting is **closed** and both tools **refuse honestly**
+rather than no-op silently (audit R4-05): `updateCasting` returns `ready:false` with
+`refused: "in-progress" | "over"`, and a `createCharacter` without `confirmRestart` returns the
+prior season's view flagged `createRefused` — so the model can never read an unchanged view as a
+fresh season (a new season starts only through the sanctioned restart door — the menu / a
+confirmed restart). `updateCasting` also echoes any `ignoredKeys` it didn't understand (R4-01),
+so an answer filed under the wrong field — `name` instead of `playerName` — is never silently lost.
 There is **no separate data-entry surface**: every building block arrives through the
 conversation (ADR 0003 — UI may augment the chat, never replace the interaction).
 

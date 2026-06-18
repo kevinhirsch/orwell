@@ -291,7 +291,11 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
     "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
     "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
-    "moment. A new season starts only from their explicit, confirmed request — never by surprise.",
+    "moment. You may ONLY recap and unseal here — do NOT run a casting interview, call updateCasting " +
+    "or createCharacter, or narrate a NEW season into being from this chat. A new season is started " +
+    "ONLY by the player from the menu (the sanctioned restart door); if they ask to 'run it back', " +
+    "tell them to start a new season there — never improvise one (the engine has not started it, and " +
+    "createCharacter/updateCasting will refuse with `createRefused`/`refused` while this season stands).",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
