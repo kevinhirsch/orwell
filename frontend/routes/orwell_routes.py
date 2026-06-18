@@ -181,14 +181,13 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] tagline failed: {e}")
             return {"text": "The house is waiting."}
 
-    @router.get("/initiatives")
-    async def orwell_initiatives(request: Request):
-        """Houseguests who want to approach the player now (0036). Vault-free; empty on error."""
-        try:
-            return {"initiatives": await orwell_engine.social_initiatives(user=_current_user(request))}
-        except Exception as e:
-            logger.warning(f"[orwell] initiatives failed: {e}")
-            return {"initiatives": []}
+    # NOTE: there is deliberately NO player-facing /initiatives route. An NPC wanting to approach is
+    # IN-FICTION INTENT, not a fact the player may learn from a UI notification — surfacing it would
+    # hand NPCs a one-way "notification" advantage the player's own social play never gets (the game
+    # is dialogical: connections form through chat). The socialInitiatives engine lever stays GM-only
+    # (the model voices the approach organically in the narration); it must never reach the player
+    # through a route/panel. New connections surface through chat; the deals surface only RECORDS
+    # locked-in deals after the fact. (Owner ruling 2026-06-18.)
 
     @router.get("/recap")
     async def orwell_recap(request: Request):

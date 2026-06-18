@@ -34,8 +34,6 @@ def test_a4_no_opacity_dimmed_text_in_huds():
     sp = _read("static", "js", "orwellStatusPanel.js")
     assert "color-mix" in sp
     assert ".os-k { opacity" not in sp and ".os-out { opacity" not in sp
-    so = _read("static", "js", "orwellSocial.js")
-    assert ".osoc-hd { opacity" not in so and ".osoc-note { opacity" not in so
 
 
 def test_a5_streaming_log_gated_by_aria_busy():
@@ -45,7 +43,7 @@ def test_a5_streaming_log_gated_by_aria_busy():
 
 
 def test_c18_polling_pauses_hidden_and_backs_off():
-    for f in ("orwellStatusPanel.js", "orwellSocial.js"):
+    for f in ("orwellStatusPanel.js",):
         js = _read("static", "js", f)
         assert "document.hidden" in js, f
         assert "_pollDelay" in js and "Math.pow(2, _failures)" in js, f
