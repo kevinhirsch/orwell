@@ -2137,6 +2137,8 @@ async def stream_agent_loop(
         _scrub_active = _is_live_game
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
+    _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
+    _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -2346,11 +2348,15 @@ async def stream_agent_loop(
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
                                     full_response += _clean
+                                    if _clean.strip():
+                                        _emitted_visible = True
                                     yield f'data: {json.dumps({"delta": _clean})}\n\n'
                             continue  # narration, not a document — skip the doc-fence path
                         else:
                             round_response += data["delta"]
                             full_response += data["delta"]
+                            if data["delta"].strip():
+                                _emitted_visible = True
                             yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
@@ -2417,6 +2423,8 @@ async def stream_agent_loop(
             _game_buf = ""
             if _clean:
                 full_response += _clean
+                if _clean.strip():
+                    _emitted_visible = True
                 yield f'data: {json.dumps({"delta": _clean})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
@@ -2642,6 +2650,21 @@ async def stream_agent_loop(
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
                                                  _house, endpoint_url, model, headers, owner)
                         # the scene is banked (or was genuinely solo) — end the turn normally.
+                # BLANK-TURN GUARD (audit 2026-06-18): the model sometimes emits only planning-as-
+                # content ("Let me get the lay of the land…") and stops with no tools — the scrub
+                # strips it, leaving the player a BLANK turn. If nothing was shown, re-prompt once
+                # for the actual in-character scene rather than ending on silence.
+                if (not _emitted_visible and _turn_narrate_nudges < 1
+                        and not (tool_policy and tool_policy.blocks("ask_user"))):
+                    _turn_narrate_nudges += 1
+                    logger.info(f"[orwell] blank-turn guard: re-prompting for narration round {round_num} user={owner}")
+                    messages.append({"role": "system", "content": (
+                        "Your last turn produced no narration the player could see — only private "
+                        "planning. Write the SCENE NOW, fully in character: what the houseguest says "
+                        "and does, what happens in the room. No meta, no mention of your process or "
+                        "any tool — just the moment, in your narrator voice.")})
+                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                    continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────

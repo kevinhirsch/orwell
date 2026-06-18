@@ -53,6 +53,24 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the game's\s*pending BINDING decision options/i);
   });
 
+  // Eviction fidelity (audit 2026-06-18): a play-through caught the model inventing a flattering
+  // vote tally ("nine to one, your name only came up once") that did NOT match the engine's actual
+  // staged ballots, and naming a real-world host ("Julie Chen"). Both are pinned out.
+  it("the eviction moment drives the staged secret-ballot reveal and forbids an invented tally", () => {
+    const view = { started: true, week: 1, phase: "eviction", moment: "eviction",
+      player: { id: "p", name: "P", archetype: "a", strategyStyle: "s" }, house: [] } as unknown as GameStateView;
+    const prompt = buildSystemPrompt("eviction", view);
+    expect(prompt).toMatch(/secret ballot/i);
+    expect(prompt).toMatch(/staged/i);
+    expect(prompt).toMatch(/never invent the tally/i);
+    expect(prompt).toMatch(/never WHO cast it/i); // anonymity preserved
+  });
+
+  it("the base prompt forbids naming a real-world host or person (no Julie Chen)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never name a real-world host/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Julie Chen/); // the exact failure, pinned as the example
+  });
+
   // Anti-leak (audit 2026-06-18, owner rulings): the model is steeped in "the engine" all day and
   // echoes it to the player ("the engine has everything…"), and it recites archetype labels as a
   // cast scouting report ("X is the mastermind"). Both are scrubbed at the source.
