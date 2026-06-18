@@ -2061,6 +2061,46 @@ function initAccount() {
     if (window.OrwellAvatar) window.OrwellAvatar.refresh();
   } catch (_) {}
 
+  // 0057: the "red zone" reset-progress control — restart the CURRENT season from casting
+  // (no season-number change). Game-build only; the card is hidden otherwise (its route 404s
+  // off the game build). Routes through the engine's one sanctioned reset.
+  try {
+    const rpCard = el('settings-reset-progress-card');
+    const rpBtn = el('settings-reset-progress-btn');
+    const isGameBuild = document.body && document.body.hasAttribute('data-game-build');
+    if (rpCard && rpBtn && isGameBuild) {
+      rpCard.style.display = '';
+      if (!rpBtn.dataset.wired) {
+        rpBtn.dataset.wired = '1';
+        rpBtn.addEventListener('click', async () => {
+          const rpMsg = el('settings-reset-progress-msg');
+          const ok = window.styledConfirm
+            ? await window.styledConfirm(
+                'Reset this season?\n\nThis wipes your current game and restarts it from casting. Your season number is unchanged. This cannot be undone.',
+                { confirmText: 'Reset', cancelText: 'Cancel', danger: true })
+            : window.confirm('Reset this season? This cannot be undone.');
+          if (!ok) return;
+          rpBtn.disabled = true;
+          if (rpMsg) { rpMsg.textContent = 'Resetting…'; rpMsg.style.color = ''; }
+          try {
+            const r = await fetch('/api/orwell/reset-progress', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ confirm: true }),
+            });
+            if (!r.ok) throw new Error('reset failed');
+            if (rpMsg) { rpMsg.textContent = 'Done — casting begins again.'; rpMsg.style.color = 'var(--green)'; }
+            try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
+            try { window.dispatchEvent(new CustomEvent('orwell:gamechanged')); } catch (_) {}
+          } catch (e) {
+            if (rpMsg) { rpMsg.textContent = 'Reset failed — try again.'; rpMsg.style.color = 'var(--red)'; }
+            rpBtn.disabled = false;
+          }
+        });
+      }
+    }
+  } catch (_) {}
+
   // Change password
   const saveBtn = el('settings-pw-save');
   const msgEl = el('settings-pw-msg');
