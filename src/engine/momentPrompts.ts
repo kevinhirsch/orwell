@@ -420,7 +420,8 @@ export function renderGameContext(view: GameStateView): string {
   // model narrates from (seed-stable, so voices stay consistent across the whole season).
   // The departed are name + seat only; their voices return at the finale via the jury.
   // C8-04: this week's PUBLIC ceremony state, the engine truth the model voices instead of inventing.
-  const cer = view.ceremony;
+  // Default an empty ceremony so the prompt builder never crashes on a partial/legacy view.
+  const cer = view.ceremony ?? { hoh: null, nominees: [], veto: { holder: null, used: false } };
   const nomIds = new Set(cer.nominees.map((n) => n.id));
   const ceremonyMark = (id: string): string => {
     const tags: string[] = [];
