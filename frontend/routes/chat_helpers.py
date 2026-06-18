@@ -121,18 +121,21 @@ async def _fetch_game_state(user, *, retry: bool):
 # and the lull-based stall-nudge misses a ceremony narrated in rich prose (not a lull) AND fires
 # only next turn (it cannot un-narrate). So we RESOLVE the beat for real BEFORE the model's turn and
 # hand it the engine's outcome to voice ("facts to voice, never scripts to recite", ADR 0003).
-# Scope: only the ceremonies with NO player-intent step. The full COMPETITIONS are excluded — their
-# comp-intent and runCompetition flow owns them. The pending gate means we NEVER force the player's
-# own decision.
 _CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"})
 
-# C-03 (same class, found in live play): the veto CHIP DRAW (E35) — WHO plays the Power of Veto
-# (HOH + the two nominees + three by chip draw) — is a witnessed ceremony of its OWN, decided
-# deterministically, with no player-intent step. The GM invents the field ("Selena, Emilio…")
-# because nothing grounds who plays before it narrates. The veto COMPETITION that follows is still
-# the model's to build and resolve (comp-intent + advanceGame). So we pre-resolve EXACTLY the draw —
-# and only when it has not run yet — then hand off; the model voices the real six from gameStatus.
-_VETO_DRAW_PHASE = "veto-competition"
+# OWNER RULING (2026-06-18): "the engine should make ALL game decisions; the LLM can narrate (and
+# propose influencing characteristics for the weights) — but that's it." So the COMPETITIONS are
+# engine-DRIVEN too, not left to the model. Live play (round-9 + a post-#313 probe) reproduced the
+# failure both ways: (a) the week FREEZES at hoh-competition — the model under-calls advanceGame, so
+# the comp-intent decision never surfaces and the season is dead (10+ turns, no card, no progress);
+# and (b) on an NPC-only comp (the player not in the field) the model INVENTS a winner the engine
+# never decided. The earlier C-03 scoping ("the veto competition belongs to the model") is superseded
+# by the ruling. We DRIVE the comp one beat per turn — the engine's advance never auto-decides a
+# player choice, it only SURFACES it: so when the player is in the field the advance sets the
+# comp-intent pending (the pending gate below then waits for the player's card — agency preserved),
+# and when they are not it RESOLVES the NPC comp for real. The veto CHIP DRAW (E35) is just the first
+# beat of veto-competition and is driven the same way (the model then voices the real six).
+_COMP_DRIVE_PHASES = frozenset({"hoh-competition", "veto-competition"})
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -211,36 +214,39 @@ def _pending_barrier_directive(pending) -> Optional[str]:
 
 
 async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
-    """If the live game sits at an unresolved NPC-driven ceremony with NO player decision pending,
-    resolve that single beat (one advanceGame) so the moment prompt carries the engine's real
+    """If the live game sits at an unresolved engine-driven beat with NO player decision pending,
+    advance that single beat (one advanceGame) so the moment prompt carries the engine's real
     outcome. Returns the (possibly re-fetched) game state. Best-effort: any hiccup leaves the turn
-    exactly as it was — this never blocks or fails a turn, it only prevents an invented ceremony.
+    exactly as it was — this never blocks or fails a turn, it only prevents an invented/stalled beat.
 
-    Covers the intent-free ceremonies (nominations, veto ceremony, eviction reveal) AND the veto
-    chip draw (C-03): the draw is an NPC ceremony, but the veto competition after it is the model's,
-    so the draw fires only while it is unrun (no drawn players) and never advances into the comp.
+    Covers the intent-free CEREMONIES (nominations, veto ceremony, eviction reveal) AND the
+    COMPETITIONS (hoh-competition, veto-competition incl. the chip draw) — owner ruling 2026-06-18:
+    the engine makes every game decision. A comp advance either SURFACES the player's comp-intent
+    (player in the field) or RESOLVES an NPC-only comp; either way the engine decides, not the model.
 
     Safety: advanceGame auto-resolves NPC beats but only SURFACES a player decision as a pending —
     it never auto-decides one. We still check the pending first and skip when the player is the
-    decider (HOH naming noms, veto holder, an eligible voter, the Houseguest's-Choice picker), so the
-    player keeps their agency and their decision card. One advance per turn preserves the staged
+    decider (HOH naming noms, veto holder, an eligible voter, the Houseguest's-Choice picker, a
+    comp-intent), so the player keeps their agency and their decision card. One advance per turn
+    preserves the staged
     eviction-vote reveal (E12)."""
     from src import orwell_engine
     try:
         phase = (game_state.get("phase") or "").lower()
-        is_ceremony = phase in _CEREMONY_RESOLVE_PHASES
-        is_veto_draw = phase == _VETO_DRAW_PHASE
-        if not is_ceremony and not is_veto_draw:
+        if phase not in _CEREMONY_RESOLVE_PHASES and phase not in _COMP_DRIVE_PHASES:
             return game_state
         status = await orwell_engine.game_status(user=user)
         if not isinstance(status, dict) or status.get("pending") is not None:
-            return game_state  # the player is the decider (or status unknown) — wait for them
-        if is_veto_draw:
-            # Only the DRAW, and only once: if the six are already drawn, the comp is the model's.
-            veto = status.get("veto") if isinstance(status.get("veto"), dict) else {}
-            if veto and veto.get("players"):
-                return game_state  # the chip draw already happened — leave the competition to the model
-        await orwell_engine.advance_game(user=user)  # resolve the one NPC ceremony / chip-draw beat, for real
+            # The player is the decider (comp-intent, Houseguest's Choice, nominations, a vote, the
+            # goodbye message…) — never auto-resolve their own decision; their card is waiting.
+            return game_state
+        adv = await orwell_engine.advance_game(user=user)  # advance ONE beat for real: surface the player's
+        # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
+        # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
+        # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
+        # is indistinguishable from a true stall in the logs. Record the beat we just committed.
+        _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
+        logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         refreshed = await _fetch_game_state(user, retry=retry)
         return refreshed if isinstance(refreshed, dict) else game_state
     except Exception as e:

@@ -56,13 +56,36 @@ def test_never_forces_a_player_decision(monkeypatch):
     assert out is state
 
 
-def test_only_fires_at_a_ceremony_phase(monkeypatch):
-    # A comp / social / premiere beat is owned by its own flow (comp-intent, runCompetition) — skip.
+@pytest.mark.parametrize("phase", ["hoh-competition", "veto-competition"])
+def test_drives_a_competition_with_no_player_pending(monkeypatch, phase):
+    # OWNER RULING (2026-06-18): the engine makes every game decision. A competition with NO player
+    # pending is advanced FOR REAL — the engine either surfaces the player's comp-intent (it pauses,
+    # never auto-decides) or resolves an NPC-only comp — so the model can neither stall the week
+    # (the hoh-competition freeze) nor invent a winner the engine never decided.
     calls = []
-    _wire(monkeypatch, phase="hoh-competition", pending=None, calls=calls)
+    _wire(monkeypatch, phase=phase, pending=None, calls=calls)
+    state = {"started": True, "phase": phase, "moment": phase}
+    _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert "advance" in calls, phase
+
+
+def test_never_forces_a_comp_intent(monkeypatch):
+    # The player is in the field and owes a comp-intent → a pending is present → DO NOT advance.
+    calls = []
+    _wire(monkeypatch, phase="hoh-competition", pending={"kind": "comp-intent"}, calls=calls)
     state = {"started": True, "phase": "hoh-competition", "moment": "hoh-competition"}
     out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
-    assert calls == [], "no status probe / advance off a non-ceremony phase"
+    assert "advance" not in calls, "must never auto-resolve the player's own comp-intent"
+    assert out is state
+
+
+def test_does_not_fire_off_a_driven_phase(monkeypatch):
+    # premiere / finale / twist beats are the model's to set the scene — not engine-driven here.
+    calls = []
+    _wire(monkeypatch, phase="premiere", pending=None, calls=calls)
+    state = {"started": True, "phase": "premiere", "moment": "premiere"}
+    out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert calls == [], "no status probe / advance off a non-driven phase"
     assert out is state
 
 
@@ -103,14 +126,15 @@ def test_veto_draw_runs_when_no_field_is_drawn_yet(monkeypatch):
     assert "advance" in calls, "an unrun veto chip draw must be resolved so the field is grounded"
 
 
-def test_veto_draw_does_not_fire_once_the_field_is_drawn(monkeypatch):
-    # The six are already drawn → the COMPETITION is the model's to build/resolve; never advance it.
+def test_drives_the_veto_competition_after_the_field_is_drawn(monkeypatch):
+    # OWNER RULING (2026-06-18) supersedes the old "the comp belongs to the model once the chips are
+    # drawn": with the six drawn and NO player pending, advance for real — the engine surfaces the
+    # comp-intent (player in the field) or resolves the NPC comp; the model never invents the winner.
     calls = []
     _wire_veto(monkeypatch, players=[{"id": "npc:1", "name": "A"}], pending=None, calls=calls)
     state = {"started": True, "phase": "veto-competition", "moment": "veto-competition"}
-    out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
-    assert "advance" not in calls, "the comp belongs to the model once the chips are drawn"
-    assert out is state
+    _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert "advance" in calls, "the engine drives the veto competition (ruling: the engine decides)"
 
 
 def test_veto_draw_never_overrides_a_player_pending(monkeypatch):
