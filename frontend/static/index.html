@@ -1217,6 +1217,26 @@
 
 
   </main>
+  <!-- 0054: the control-room gadget rail — a right-side collapsible column for the live
+       house HUD (status, "wants a word", whereabouts). Game-build only; hidden until a
+       season is active. On narrow it becomes a slide-over drawer. -->
+  <aside class="gadget-rail" id="gadget-rail" aria-label="Control room" data-collapsed="false" hidden>
+    <div class="gadget-rail-head">
+      <button class="gadget-rail-toggle" id="gadget-rail-toggle" type="button" title="Collapse the control room" aria-label="Collapse the control room" aria-expanded="true">
+        <span class="grail-chevron" aria-hidden="true">›</span>
+      </button>
+      <span class="gadget-rail-title">The house</span>
+      <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side">⇄</button>
+      <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
+    </div>
+    <div class="gadget-rail-body" id="gadget-rail-body"></div>
+    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-hidden="true">
+      <button class="grail-ico" type="button" data-grail-expand title="House status" aria-label="House status">📋</button>
+      <button class="grail-ico" type="button" data-grail-expand title="Wants a word" aria-label="Wants a word">🚪</button>
+      <button class="grail-ico" type="button" data-grail-expand title="Where you are" aria-label="Where you are">🧭</button>
+    </div>
+  </aside>
+  <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The house" aria-label="Open the control room" hidden>📋</button>
   <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
   <script nonce="{{CSP_NONCE}}">
   (function(){
@@ -2233,6 +2253,7 @@
 <script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: char creation before chat -->
 <script src="/static/js/orwellSlots.js"></script>  <!-- BB anchor slots: floaters position by slot, never coordinate (E91/S11) -->
 <script type="module" src="/static/js/orwellWindow.js"></script>  <!-- THE window kit (Lane F): one window class + .ow-* family every surface composes -->
+<script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <script type="module" src="/static/js/orwellSocial.js"></script>  <!-- BB social: NPC approaches (Vault-free, 0036) -->
 <script src="/static/js/orwellDiaryRoom.js"></script>  <!-- BB Diary Room: standing sidebar button + composer mode (E88, ruling #4) -->

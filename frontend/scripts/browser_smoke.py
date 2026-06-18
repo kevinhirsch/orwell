@@ -298,24 +298,23 @@ def main() -> int:
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
 
-            # H5/G7 (the user verdict on "The House"): the approaches surface is SIDEBAR
-            # CHROME now — a <section> injected into #sidebar on the ruling #3/E64
-            # status-panel pattern, NOT a window. No kit chrome, no dock chip, no fixed
-            # position; and while no approach is pending the section shows NOTHING (the
-            # "useless empty window" the verdict retired can never render at all).
+            # H5/G7 + 0054: the approaches surface is a <section> of CHROME (NOT a window) —
+            # no kit chrome, no dock chip, no fixed position; while no approach is pending it
+            # shows NOTHING (the "useless empty window" the verdict retired can never render).
+            # 0054 relocated it from #sidebar into the control-room gadget rail (#gadget-rail-body).
             page.evaluate("window._orwellSocialEnsure && window._orwellSocialEnsure()")
             page.wait_for_selector("#orwell-social", state="attached", timeout=3000)
             h5 = page.evaluate("""() => {
               const el = document.getElementById('orwell-social');
-              const sb = document.getElementById('sidebar');
+              const rail = document.getElementById('gadget-rail-body');
               const cs = getComputedStyle(el);
-              return { tag: el.tagName, inSidebar: !!(sb && sb.contains(el)),
+              return { tag: el.tagName, inRail: !!(rail && rail.contains(el)),
                        fixed: cs.position === 'fixed', kit: el.hasAttribute('data-ow-window'),
                        chrome: !!el.querySelector('.ow-titlebar, .ow-controls'),
                        emptyHidden: cs.display === 'none' };
             }""")
-            check(h5.get("tag") == "SECTION" and h5.get("inSidebar") is True,
-                  f"H5: The House mounts as a sidebar section ({h5})")
+            check(h5.get("tag") == "SECTION" and h5.get("inRail") is True,
+                  f"0054: The House mounts as a section in the gadget rail ({h5})")
             check(h5.get("kit") is False and h5.get("chrome") is False and h5.get("fixed") is False,
                   f"H5: no window chrome — not kit-managed, never fixed ({h5})")
             check(h5.get("emptyHidden") is True,
@@ -327,11 +326,11 @@ def main() -> int:
               ]);
               const el = document.getElementById('orwell-social');
               return { count: r.count, visible: getComputedStyle(el).display !== 'none',
-                       inSidebar: document.getElementById('sidebar').contains(el) };
+                       inRail: document.getElementById('gadget-rail-body').contains(el) };
             }""")
             check(h5_chips.get("count") == 2 and h5_chips.get("visible") is True
-                  and h5_chips.get("inSidebar") is True,
-                  f"H5: approach chips render inside the sidebar section ({h5_chips})")
+                  and h5_chips.get("inRail") is True,
+                  f"0054: approach chips render inside the gadget rail section ({h5_chips})")
             h5_empty = page.evaluate("""() => {
               window._orwellSocialDriveApproaches(true, []);
               return getComputedStyle(document.getElementById('orwell-social')).display === 'none';
@@ -985,26 +984,26 @@ def main() -> int:
             hud_geo = mob.evaluate("""() => {
               if (window._orwellStatusEnsure) window._orwellStatusEnsure();
               const el = document.getElementById('orwell-status');
-              const sb = document.getElementById('sidebar');
-              if (!el || !sb) return { ok: false, why: 'missing' };
+              const rail = document.getElementById('gadget-rail-body');
+              if (!el || !rail) return { ok: false, why: 'missing' };
               const cs = getComputedStyle(el);
-              return { ok: true, inSidebar: sb.contains(el), fixed: cs.position === 'fixed' };
+              return { ok: true, inRail: rail.contains(el), fixed: cs.position === 'fixed' };
             }""")
-            check(hud_geo.get("inSidebar") is True, f"mobile: status panel is sidebar chrome ({hud_geo})")
+            check(hud_geo.get("inRail") is True, f"mobile: status panel lives in the gadget rail ({hud_geo})")
             check(hud_geo.get("fixed") is False, f"mobile: status panel is never fixed-position ({hud_geo})")
-            # H5: The House (approaches) is sidebar chrome too — on a phone it lives
-            # inside the off-canvas drawer like the status panel, so it can never cover
-            # the composer (the D2 collision rule holds structurally).
+            # 0054: The House (approaches) lives in the gadget rail too — on a phone the rail
+            # is an off-canvas drawer, so the gadget itself is never fixed and can never cover
+            # the composer (the D2 collision rule holds structurally — the drawer owns position).
             soc_geo = mob.evaluate("""() => {
               if (window._orwellSocialEnsure) window._orwellSocialEnsure();
               const el = document.getElementById('orwell-social');
-              const sb = document.getElementById('sidebar');
-              if (!el || !sb) return { ok: false, why: 'missing' };
+              const rail = document.getElementById('gadget-rail-body');
+              if (!el || !rail) return { ok: false, why: 'missing' };
               const cs = getComputedStyle(el);
-              return { ok: true, inSidebar: sb.contains(el), fixed: cs.position === 'fixed',
+              return { ok: true, inRail: rail.contains(el), fixed: cs.position === 'fixed',
                        dockChip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]') };
             }""")
-            check(soc_geo.get("inSidebar") is True, f"mobile: The House is sidebar chrome (lives in the drawer) ({soc_geo})")
+            check(soc_geo.get("inRail") is True, f"mobile: The House lives in the gadget rail drawer ({soc_geo})")
             check(soc_geo.get("fixed") is False, f"mobile: The House is never fixed-position ({soc_geo})")
             check(soc_geo.get("dockChip") is False, f"mobile: no orwell-social dock chip exists ({soc_geo})")
 
@@ -1412,6 +1411,9 @@ def main() -> int:
             g17.evaluate("""window._orwellSocialDriveApproaches(true, [
               { houseguest: { id: 'npc:7', name: 'A Houseguest' }, motive: 'bond' },
             ])""")
+            # 0054: the gadget now lives in the rail; wait for the content-driven rail to reveal
+            # the chip before clicking (the rail un-hides when a gadget gains visible content).
+            g17.wait_for_selector("#orwell-social .osoc-chip .osoc-go", state="visible", timeout=5000)
             g17.click("#orwell-social .osoc-chip .osoc-go")  # real chip click → prefill + pending
             g17.wait_for_timeout(600)
             check(g17.evaluate("window._orwellPendingApproach.get()") == "npc:7",
