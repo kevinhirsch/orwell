@@ -64,8 +64,13 @@ def test_nudge_only_seizes_a_lull_not_substantive_play():
     assert "_LULL_READY_RE" in js
     assert "_LULL_SHORT_CHARS" in js
     # the advance-nudge only wants to fire on a lull; substantive engagement is never advanced
-    assert "_want_advance = (not _progressed) and _is_lull" in js
+    assert "_want_advance = ((not _progressed) and _is_lull" in js
     assert "if _want_advance and _phase in _ADVANCE_PHASES" in js
+    # …and only once the beat has gone STALE (owner ruling 2026-06-18): a lull alone is not enough,
+    # so good engaging play and a just-started beat are never shoved.
+    assert "_ADVANCE_GRACE_TURNS" in js
+    assert "_TURNS_SINCE_PROGRESS" in js
+    assert "and _stale" in js
 
 
 def test_consequence_loop_auto_records_engaged_scenes():

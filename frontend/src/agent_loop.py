@@ -1502,6 +1502,68 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# ── Operator-aside scrub (audit 2026-06-18) ───────────────────────────────────────────
+# In a LIVE game the narration model sometimes leaks its PLANNING into the visible channel —
+# "I should record this interaction, then advance the game", "The advanceGame call will move us to
+# the nominations phase", "The player, Sam, has finished his conversation". That is third-person
+# player reference + tool-process narration the prompt forbids (and re-forbids) but the model emits
+# as content anyway. We strip such sentences before they reach the player. HIGH-PRECISION only:
+# tool names, "let me/I'll record|advance…", "advance the game", "record this/the interaction", and
+# "the player, <name> has/is…" — markers that never occur in real in-character BB narration, so
+# ordinary scene prose is never touched.
+_GAME_TOOL_WORDS = (
+    "advanceGame", "recordInteraction", "submitDecision", "runCompetition", "getGameState",
+    "gameStatus", "updateCasting", "createCharacter", "surfaceInformationTo", "npcVoice",
+    "whereabouts", "socialRead", "makeDeal", "getVisibleStateFor",
+)
+_GAME_LEAK_SENTENCE_RE = re.compile(
+    r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
+    # machinery NOUNS that never appear in in-character narration
+    r"|\bthe (?:engine|system)\b"
+    r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
+    r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
+    # first-person operator asides (process talk)
+    r"|\blet me\s+(?:record|advance|note|log|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider)\b"
+    r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
+      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|log|note|resolve|call|use|pull|fetch|present|re-?read|reconsider)\b"
+    r"|\b(?:advance|move|push) the game\b"
+    r"|\brecord (?:this|the|that) (?:interaction|scene)\b"
+    r"|\bthe (?:player|user)\b(?:,?\s+\w+,)?\s+(?:has|is|was|will|'ll|wants|said|finished|just|now|needs|should)\b",
+    re.IGNORECASE,
+)
+
+# Sentence-START operator openers: in real GM narration the host/NPCs address the player as "you"
+# and never begin a sentence narrating their OWN process ("Actually wait, let me…", "I should…",
+# "Then I'll…"). Anchored to the sentence start so quoted NPC dialogue mid-sentence is untouched.
+_GAME_LEAK_START_RE = re.compile(
+    r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"
+    r"(?:i'?ll|i'?d|i should|i need to|i have to|i must|i am going to|i'?m going to|i can|"
+    r"let me|then,?\s+i|first,?\s+i|now,?\s+i|next,?\s+i)\b",
+    re.IGNORECASE,
+)
+
+
+def _split_complete_sentences(buf: str):
+    """Split a streaming buffer into (complete_prefix, remainder) at the LAST sentence boundary —
+    so we only ever judge whole sentences, never a half-streamed one. A newline also ends a unit."""
+    last = -1
+    for m in re.finditer(r"[.!?](?=\s|$)|\n", buf):
+        last = m.end()
+    return (buf[:last], buf[last:]) if last >= 0 else ("", buf)
+
+
+def _scrub_game_leak(text: str) -> str:
+    """Drop whole sentences that are operator asides / tool-process narration; keep the rest
+    verbatim (delimiters preserved). Used both on the live stream and on the saved message."""
+    if not text:
+        return text
+    parts = re.split(r"(?<=[.!?\n])", text)
+    return "".join(
+        p for p in parts
+        if not _GAME_LEAK_SENTENCE_RE.search(p) and not _GAME_LEAK_START_RE.match(p)
+    )
+
+
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
     """True when this turn was a scene with a houseguest — the player's line or the narration
     names someone on the roster (full name or first name). Cheap, name-based; good enough to
@@ -2063,6 +2125,16 @@ async def stream_agent_loop(
     # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
+    # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
+    # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
+    # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
+    # a restart drops game_mode to False, which otherwise silently disables the scrub). Scrubbing is
+    # safe there because the game build has no legitimate "let me check the file" workspace prose.
+    try:
+        from src.settings import game_build_enabled as _gbe
+        _scrub_active = _is_live_game or _gbe()
+    except Exception:
+        _scrub_active = _is_live_game
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
 
@@ -2097,6 +2169,7 @@ async def stream_agent_loop(
     for round_num in range(1, max_rounds + 1):
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
+        _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
         _doc_acc = ""
@@ -2259,10 +2332,26 @@ async def stream_agent_loop(
                         # round_response unchanged.
                         if data.get("thinking"):
                             round_reasoning += data["delta"]
+                            yield chunk  # reasoning is filtered downstream; pass through
+                        elif _scrub_active:
+                            # LIVE game: scrub operator-aside / tool-process leaks before they reach
+                            # the player. round_response keeps the RAW text (tool parsing + stall
+                            # detection are unaffected); the player + the saved message get only the
+                            # CLEANED narration. Buffer to a sentence boundary so we judge whole
+                            # sentences, then emit the clean part.
+                            round_response += data["delta"]
+                            _game_buf += data["delta"]
+                            _complete, _game_buf = _split_complete_sentences(_game_buf)
+                            if _complete:
+                                _clean = _scrub_game_leak(_complete)
+                                if _clean:
+                                    full_response += _clean
+                                    yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                            continue  # narration, not a document — skip the doc-fence path
                         else:
                             round_response += data["delta"]
                             full_response += data["delta"]
-                        yield chunk  # Stream all rounds
+                            yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
                         if (
@@ -2320,6 +2409,15 @@ async def stream_agent_loop(
                 # Forward error events to frontend as visible text
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
+
+        # Flush the scrub buffer: emit the trailing (possibly unterminated) sentence, cleaned, so
+        # nothing the round produced is left unshown or leaks through.
+        if _scrub_active and _game_buf:
+            _clean = _scrub_game_leak(_game_buf)
+            _game_buf = ""
+            if _clean:
+                full_response += _clean
+                yield f'data: {json.dumps({"delta": _clean})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
