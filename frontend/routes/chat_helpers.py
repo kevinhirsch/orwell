@@ -114,6 +114,44 @@ async def _fetch_game_state(user, *, retry: bool):
             raise
 
 
+# C-02 (critical — engine bypass): an NPC-driven CEREMONY (nominations, the veto ceremony, an
+# eviction-vote reveal) is decided deterministically by the engine, but the GM reliably narrates it
+# WITHOUT calling advanceGame — inventing nominees/outcomes that never happened and desyncing the
+# chat from the board. Unlike a competition (gated by runCompetition) these have no preview lever,
+# and the lull-based stall-nudge misses a ceremony narrated in rich prose (not a lull) AND fires
+# only next turn (it cannot un-narrate). So we RESOLVE the beat for real BEFORE the model's turn and
+# hand it the engine's outcome to voice ("facts to voice, never scripts to recite", ADR 0003).
+# Scope: only the ceremonies with NO player-intent step. Comps are excluded — their comp-intent and
+# runCompetition flow owns them. The pending gate means we NEVER force the player's own decision.
+_CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"})
+
+
+async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
+    """If the live game sits at an unresolved NPC-driven ceremony with NO player decision pending,
+    resolve that single beat (one advanceGame) so the moment prompt carries the engine's real
+    outcome. Returns the (possibly re-fetched) game state. Best-effort: any hiccup leaves the turn
+    exactly as it was — this never blocks or fails a turn, it only prevents an invented ceremony.
+
+    Safety: advanceGame auto-resolves NPC beats but only SURFACES a player decision as a pending —
+    it never auto-decides one. We still check the pending first and skip when the player is the
+    decider (HOH naming noms, veto holder, an eligible voter), so the player keeps their agency and
+    their decision card. One advance per turn preserves the staged eviction-vote reveal (E12)."""
+    from src import orwell_engine
+    try:
+        phase = (game_state.get("phase") or "").lower()
+        if phase not in _CEREMONY_RESOLVE_PHASES:
+            return game_state
+        status = await orwell_engine.game_status(user=user)
+        if not isinstance(status, dict) or status.get("pending") is not None:
+            return game_state  # the player is the decider (or status unknown) — wait for them
+        await orwell_engine.advance_game(user=user)  # resolve the one NPC ceremony beat, for real
+        refreshed = await _fetch_game_state(user, retry=retry)
+        return refreshed if isinstance(refreshed, dict) else game_state
+    except Exception as e:
+        logger.warning("[orwell] C-02 pre-resolve skipped for user=%s: %s", user, e)
+        return game_state
+
+
 def _slim_framed_preface(preface: list) -> None:
     """P8 (ADR 0003 §1): a framed game turn must not pay for context it cannot use.
     Drops the standalone date/time system message (the agent loop prepends its own — the
@@ -215,6 +253,10 @@ async def apply_game_framing(
     if game_state.get("started"):
         game_active = True
         _GAME_WAS_ACTIVE.add(_gkey)
+        # C-02: resolve an unresolved NPC-driven ceremony FOR REAL before building the moment prompt,
+        # so the model voices the engine's actual nominees/outcome instead of inventing one. No-op
+        # unless the game sits at such a beat with no player decision pending (best-effort).
+        game_state = await _pre_resolve_npc_ceremony(user, game_state, retry=game_build)
         # P2: a session this process has never framed is a FRESH CONTEXT — request the
         # re-entry moment so the engine's prompt carries THE RECORD (ADR 0003 §6: long-term
         # memory is the store recalled, never the chat remembered). Subsequent turns in the

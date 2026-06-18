@@ -31,6 +31,13 @@ SANCTIONED = {
     "submit_decision": ("routes/orwell_routes.py", "orwell_decision", "_DECISION_KINDS"),
     "create_character": ("routes/orwell_routes.py", "orwell_new_game", "409"),
     "record_interaction": ("routes/chat_helpers.py", "ensure_turn_recorded", "GAME_ENGINE_WRITE_TOOLS"),
+    # C-02 (engine bypass): pre-resolving an NPC-driven ceremony is a sanctioned FE-side
+    # progression. It resolves a beat the player is NOT part of (the pending gate guarantees no
+    # player decision is pending) so the model voices the engine's REAL outcome instead of
+    # inventing one. It never touches a player decision and never replaces a player interaction
+    # (ADR 0003 §4 intact); it only error-corrects the model's documented engine bypass. Its guard
+    # marker is the ceremony-phase allowlist that scopes the advance.
+    "advance_game": ("routes/chat_helpers.py", "_pre_resolve_npc_ceremony", "_CEREMONY_RESOLVE_PHASES"),
 }
 
 
