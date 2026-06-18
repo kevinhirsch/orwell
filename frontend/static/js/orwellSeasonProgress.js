@@ -168,46 +168,35 @@
     return chip;
   }
 
-  // The chip floats top-right, but the 0054 gadget rail also lives on the right edge (full height),
-  // so a naive right:10px overlaps its header (swap/close). Sit the chip just LEFT of the rail when
-  // the rail is on the right and shown; fall back to the corner when it's collapsed-thin, swapped to
-  // the left, a mobile drawer, or absent. Recomputed on show, on resize, and when the rail toggles.
+  // The chip floats top-right, but the top row is shared: the 0054 gadget rail (right edge, full
+  // height, desktop), the chat-top-bar "More"/export control, and the chat title (#current-meta).
+  // Sit the chip just LEFT of any obstacle its box truly intersects; if the row is too crowded to
+  // fit it (mobile: title + export leave no 80px gap), DROP it just below the top bar instead of
+  // jamming it over the title. Recomputed on show, on resize, and when the rail toggles.
   function positionChip(chip) {
     const W = window.innerWidth;
-    const cr = chip.getBoundingClientRect();
-    const chipW = cr.width || 80;
-    const top = cr.top || 8, bot = cr.bottom || 27;
-    // Right-side obstacles that share the chip's ROW: the 0054 gadget rail (right edge, desktop) and
-    // the chat-top-bar "More"/export control. Store BOTH edges so we shift left of an obstacle only
-    // when the chip's box truly intersects it — a control sitting far to the left never drags it in.
-    const obstacles = [];
+    chip.style.top = "8px";
+    chip.style.right = "10px";
     const narrow = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+    if (narrow) {
+      // The mobile top bar (hamburger + chat title + export, across ~375px) has no reliable 80px
+      // gap — drop the chip just BELOW the bar at the right corner rather than thread/jam it among
+      // the controls (where it had grazed the chat title). It rides quietly over the chat scroll.
+      const bar = document.querySelector(".chat-top-bar");
+      const barBottom = bar ? Math.round(bar.getBoundingClientRect().bottom) : 44;
+      chip.style.top = (barBottom + 6) + "px";
+      return;
+    }
+    // Desktop: the only right-edge obstacle is the 0054 gadget rail (full height). Sit the chip just
+    // LEFT of it when it holds the right edge; otherwise the right corner is clear.
     const onLeft = document.body && document.body.getAttribute("data-gadget-side") === "left";
     const rail = document.getElementById("gadget-rail");
-    if (rail && !narrow && !onLeft) {
+    if (rail && !onLeft) {
       const r = rail.getBoundingClientRect();
-      if (r.width > 0 && r.right >= W - 2 && r.top < bot && r.bottom > top) obstacles.push([r.left, r.right]);
-    }
-    const exp = document.getElementById("export-dropdown-wrap");
-    if (exp) {
-      const er = exp.getBoundingClientRect();
-      if (er.width > 0 && er.top < bot && er.bottom > top) obstacles.push([er.left, er.right]);
-    }
-    // Start in the corner; shift left past any obstacle the chip's box ACTUALLY intersects.
-    let rightPx = 10;
-    for (let iter = 0; iter < 4; iter++) {
-      const chipRight = W - rightPx, chipLeft = chipRight - chipW;
-      let moved = false;
-      for (const [oLeft, oRight] of obstacles) {
-        if (chipRight > oLeft && chipLeft < oRight) { // true box intersection
-          rightPx = Math.round(W - oLeft) + 8;
-          moved = true;
-        }
+      if (r.width > 0 && r.right >= W - 2 && r.left < W - 4 && r.top < 27) {
+        chip.style.right = (Math.round(W - r.left) + 8) + "px";
       }
-      if (!moved) break;
     }
-    // A quiet corner indicator never marches past mid-screen.
-    chip.style.right = Math.min(rightPx, Math.round(W * 0.5)) + "px";
   }
 
   function paintChip(season) {
