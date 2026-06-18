@@ -68,24 +68,27 @@ def test_nudge_only_seizes_a_lull_not_substantive_play():
     assert "if _want_advance and _phase in _ADVANCE_PHASES" in js
 
 
-def test_record_nudge_banks_engaged_houseguest_scenes():
-    # Feature 0055: substantive social play MUST fold into the hidden weights. When an ENGAGED
-    # turn touched a houseguest but recorded nothing, nudge the model to bank it (the complement
-    # of the lull-gated advance-nudge).
+def test_consequence_loop_auto_records_engaged_scenes():
+    # Feature 0055: substantive social play MUST fold into the hidden weights. The model under-calls
+    # recordInteraction even when nudged, so when an ENGAGED turn touched a houseguest and recorded
+    # nothing, the FE GUARANTEES the fold itself via a constrained extraction + recordInteraction.
     js = _read("src", "agent_loop.py")
     assert "_RECORD_TOOLS" in js
     for tool in ('"recordInteraction"', '"makeDeal"', '"surfaceInformationTo"'):
         assert tool in js, tool
-    assert "_RECORD_NUDGES = [" in js
     assert "_scene_touched_houseguest" in js
-    assert "_MAX_RECORD_NUDGES_PER_TURN" in js
-    assert "_RECORD_STALL_LEVEL" in js
+    assert "async def _auto_record_scene" in js
+    # the auto-record proposes a model kind + validates ids, then records via the engine
+    assert "_RECORD_KINDS" in js
+    assert "record_interaction(content" in js
+    assert "_oe.record_interaction" in js
     # gated on engagement (not a lull) + a houseguest scene + nothing recorded + NOT a beat-advance
     assert "(not _recorded) and (not _is_lull) and (not _progressed)" in js
-    assert "_want_record and _scene_touched_houseguest(cleaned_round, messages, _house)" in js
-    # escalation resets when a recording tool fires
-    assert "block.tool_type in _RECORD_TOOLS and owner:" in js
-    assert "_RECORD_STALL_LEVEL.pop(owner, None)" in js
+    assert "_scene_touched_houseguest(" in js
+    assert "_want_record and _touched" in js
+    assert "await _auto_record_scene(" in js
+    # model-driven recording takes precedence (a fired record tool suppresses the auto path)
+    assert "block.tool_type in _RECORD_TOOLS" in js
 
 
 def test_scene_touched_houseguest_detection():

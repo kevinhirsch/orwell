@@ -56,16 +56,17 @@ Complementary to the advance-nudge by design:
   GM (deepseek-v4-pro) called recordInteraction **zero** times, even under a forceful nudge — it
   avoids the tool entirely (not an args failure). So a player can "build an alliance" in chat with
   no weight movement at all.
-- **Mitigation shipped:** the consequence-loop nudge (fires correctly on engagement + a houseguest
-  scene + nothing recorded; escalates across turns) + a prompt that makes recording non-optional.
-  Compliance is still low — the nudge is necessary but not sufficient with this model.
-- **Recommended robust fix (follow-up):** a CONSTRAINED EXTRACTION final rung — when the model
-  finishes a player↔houseguest scene without recording, the FE makes a separate, forced
-  structured-output call that extracts ONLY `{withIds, kind, content}` from the just-played scene
-  and calls recordInteraction itself. This GUARANTEES the fold with a model-proposed (so
-  direction-correct) kind, without depending on the model to volunteer the tool. (Simpler partials:
-  put houseguest IDs in the GAME CONTEXT roster so `withIds` is fillable; or resolve names→ids
-  server-side so the model can record with the names it already knows.)
+- **FIX SHIPPED — FE-guaranteed auto-record (`_auto_record_scene`, agent_loop.py).** A prompt nudge
+  proved insufficient (the model avoids the tool), so the front-end now GUARANTEES the fold: when a
+  live-game turn was an engaged player↔houseguest scene (engagement, not a lull, not a beat-advance)
+  and the model recorded nothing, the FE makes a separate CONSTRAINED EXTRACTION call that returns
+  ONLY `{withIds, kind, content}` (the model proposes a direction-correct `kind`; the engine owns the
+  magnitude), validates the ids against the roster, and calls recordInteraction itself. Model-driven
+  recording always takes precedence (a fired record tool suppresses the auto path). The recording is
+  invisible to the player (hidden weights — Vault Wall intact). Verified live: a bonding scene with a
+  houseguest auto-recorded `{withIds:[npc], kind:bonding}` and folded. Robustness notes: the extract
+  call gives reasoning models headroom (max_tokens) and scans the whole response for the answer JSON,
+  since an early/stripped parse returned empty on deepseek-v4-pro.
 
 ## Testability
 

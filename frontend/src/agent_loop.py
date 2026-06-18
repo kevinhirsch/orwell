@@ -1427,26 +1427,73 @@ def _player_turn_is_lull(messages) -> bool:
 
 # ── Consequence-loop error-correction (record social play → move the weights) ─────────
 # Owner ruling (feature 0055): the politicking IS the game — substantive social play MUST fold
-# into the hidden relationship/perception weights. In live play the GM under-calls the recording
-# tools: it narrates a real player↔houseguest scene (a bond, a pitch, a promise) and logs nothing,
-# so the scene has zero consequence. When an ENGAGED turn touched a houseguest and nothing was
-# recorded, nudge the model to bank it — gentle first, escalating across turns, capped, tunable.
+# into the hidden relationship/perception weights. In live play the GM reliably UNDER-calls the
+# recording tools: it narrates a real player↔houseguest scene (a bond, a pitch, a promise) and
+# logs nothing, so the scene has zero consequence (a prompt nudge proved insufficient — the model
+# avoids the tool). So when an ENGAGED turn touched a houseguest and nothing was recorded, the FE
+# GUARANTEES the fold itself via a constrained extraction (_auto_record_scene). Model-driven
+# recording always takes precedence; this only fills the gap when the model skips it.
 _RECORD_TOOLS = {"recordInteraction", "makeDeal", "surfaceInformationTo"}
-_RECORD_NUDGES = [
-    "(Production note, not for the player: that scene with a houseguest landed only in the "
-    "telling — the house's actual read of the player has NOT moved, because nothing was recorded. "
-    "If a real beat passed between them (a bond, a pitch, a promise, a seed of doubt), log it with "
-    "recordInteraction — or makeDeal for a promise — so it folds into how that houseguest sees the "
-    "player. A scene the game never received changes no one's mind.)",
-    "You played a real social beat with a houseguest and recorded nothing, so it has ZERO "
-    "consequence — what the player just built or broke didn't move an inch in the house's memory. "
-    "Record it NOW with recordInteraction (player + the houseguest in the witness set), or makeDeal "
-    "if a promise was struck. The politics IS the game; an unrecorded scene is make-believe.",
-    "STOP — that houseguest scene must be recorded or it never happened. Call recordInteraction now "
-    "with the player and the houseguest(s) so the engine folds its impact, then continue.",
-]
-_MAX_RECORD_NUDGES_PER_TURN = 1
-_RECORD_STALL_LEVEL: Dict[str, int] = {}
+_MAX_RECORD_NUDGES_PER_TURN = 1  # at most one auto-record per finishing turn
+
+
+_RECORD_KINDS = {"bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"}
+
+
+async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE the consequence loop fires (0055). When the model narrated a player↔houseguest
+    scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
+    and we call recordInteraction ourselves — so the hidden trust/affinity/threat weights actually
+    move. The model OWNS the magnitude; we only supply a direction-correct kind it proposed.
+    Fail-closed: any hiccup just skips (the prompt nudge + E22 fallback still apply). The recording
+    is invisible to the player (hidden consequence), exactly as the Vault Wall requires."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = "\n".join(f'{h.get("id")} = {h.get("name")}'
+                           for h in house if h.get("id") and h.get("name"))
+        if not roster:
+            return False
+        msgs = [
+            {"role": "system", "content":
+                "Extract the recordable consequence of a Big Brother scene the player just had with "
+                "other houseguests. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no "
+                "thinking, no prose, no code fence:\n"
+                '{"withIds":[<ids of houseguests the player actually interacted WITH, from the roster>],'
+                '"kind":"<one of: bonding, betrayal, conflict, strategy, alliance, gossip, showmance>",'
+                '"content":"<one concise past-tense sentence of what passed between them>"}\n'
+                "Pick the kind matching the emotional/strategic direction. If no houseguest was genuinely "
+                'engaged (a solo/internal beat), reply {"withIds":[]}.'},
+            {"role": "user", "content":
+                f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
+                f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.2, max_tokens=700, timeout=45)
+        raw = raw or ""
+        # The JSON may sit after a reasoning block OR inside it — scan the WHOLE response and take
+        # the LAST object carrying withIds (reasoning models emit the answer last).
+        obj = None
+        for cand in reversed(re.findall(r"\{[^{}]*\"withIds\"[^{}]*\}", raw, re.DOTALL)):
+            try:
+                obj = json.loads(cand); break
+            except Exception:
+                continue
+        if obj is None:
+            logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
+            return False
+        valid = {h.get("id") for h in house}
+        ids = [i for i in (obj.get("withIds") or []) if i in valid]
+        if not ids:
+            return False
+        kind = obj.get("kind") if obj.get("kind") in _RECORD_KINDS else "strategy"
+        content = (obj.get("content") or "").strip() or "The player and a houseguest had a private exchange."
+        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind, user=owner)
+        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}) user={owner}")
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-record failed: {_e}")
+        return False
 
 
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
@@ -2452,8 +2499,9 @@ async def stream_agent_loop(
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
-                        _house = [h.get("name") for h in ((_gs or {}).get("house") or [])
-                                  if isinstance(h, dict) and h.get("name")
+                        _house = [{"id": h.get("id"), "name": h.get("name")}
+                                  for h in ((_gs or {}).get("house") or [])
+                                  if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
                         logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
@@ -2468,16 +2516,16 @@ async def stream_agent_loop(
                         messages.append({"role": "system", "content": _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
-                    # bank an engaged houseguest scene
-                    if _want_record and _scene_touched_houseguest(cleaned_round, messages, _house):
-                        _level = _RECORD_STALL_LEVEL.get(owner or "", 0)
-                        _turn_record_nudges += 1
-                        if owner:
-                            _RECORD_STALL_LEVEL[owner] = _level + 1
-                        logger.info(f"[orwell] record stall-nudge (level {_level}) round {round_num} user={owner}")
-                        messages.append({"role": "system", "content": _RECORD_NUDGES[min(_level, len(_RECORD_NUDGES) - 1)]})
-                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
-                        continue
+                    # bank an engaged houseguest scene — the model skipped recording it, so the FE
+                    # GUARANTEES the fold itself (0055): a constrained extraction + recordInteraction.
+                    # Model-driven recording always takes precedence (if it had recorded, _recorded
+                    # would be True and we'd never get here). Invisible to the player (hidden weights).
+                    _touched = _scene_touched_houseguest(cleaned_round, messages, [h.get("name") for h in _house])
+                    if _want_record and _touched:
+                        _turn_record_nudges += 1  # once per turn
+                        await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
+                                                 _house, endpoint_url, model, headers, owner)
+                        # the scene is banked (or was genuinely solo) — end the turn normally.
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -2840,9 +2888,8 @@ async def stream_agent_loop(
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
                 _ADVANCE_STALL_LEVEL.pop(owner, None)
                 _turn_advance_nudges = 0
-            if _is_live_game and block.tool_type in _RECORD_TOOLS and owner:
-                _RECORD_STALL_LEVEL.pop(owner, None)
-                _turn_record_nudges = 0
+            if _is_live_game and block.tool_type in _RECORD_TOOLS:
+                _turn_record_nudges = 1  # model recorded organically — don't also auto-record
 
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
