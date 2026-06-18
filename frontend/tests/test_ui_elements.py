@@ -523,30 +523,32 @@ class TestRemainingOrwellRoutes:
         resp = client.get("/api/orwell/moment")
         assert resp.status_code == 502
 
+    # The /health route reads engine_health_detail() (a dict), not the older engine_health() bool —
+    # mock the function the route actually calls, so the test is independent of any real engine.
     def test_health_returns_engine_field(self, monkeypatch):
-        async def fake_health():
-            return True
+        async def fake_detail():
+            return {"ok": True, "engineUrl": "http://127.0.0.1:8765"}
 
-        client = _build_client(monkeypatch, {"engine_health": fake_health})
+        client = _build_client(monkeypatch, {"engine_health_detail": fake_detail})
         resp = client.get("/api/orwell/health")
         assert resp.status_code == 200
         data = resp.json()
         assert "engine" in data
 
     def test_health_reports_false_when_engine_down(self, monkeypatch):
-        async def fake_health():
-            return False
+        async def fake_detail():
+            return {"ok": False, "error": "refused"}
 
-        client = _build_client(monkeypatch, {"engine_health": fake_health})
+        client = _build_client(monkeypatch, {"engine_health_detail": fake_detail})
         resp = client.get("/api/orwell/health")
         assert resp.status_code == 200
         assert resp.json()["engine"] is False
 
     def test_health_reports_engine_url(self, monkeypatch):
-        async def fake_health():
-            return True
+        async def fake_detail():
+            return {"ok": True, "engineUrl": "http://127.0.0.1:8765"}
 
-        client = _build_client(monkeypatch, {"engine_health": fake_health})
+        client = _build_client(monkeypatch, {"engine_health_detail": fake_detail})
         resp = client.get("/api/orwell/health")
         data = resp.json()
         assert "engineUrl" in data or "engine_url" in data or "url" in data
