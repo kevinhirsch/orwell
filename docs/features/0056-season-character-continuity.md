@@ -1,7 +1,10 @@
 # 0056 — Season-to-season character continuity (the soft re-run of casting)
 
-> **Status:** Engine carry-over **built** (TDD; the "keep" path + D1/R1 hinge reuse). FE choice
-> surface + per-season portrait (§4) to follow. Extends **0050** (the casting interview) and the **one
+> **Status:** Engine carry-over **built** (TDD; the "keep" path + D1/R1 hinge reuse) and the FE
+> **restart-door relay** threads `keepCharacter` through (`/new-game` + `orwell_engine.create_character`;
+> `playerName` optional when keeping). The in-chat **keep/recreate UX** + the per-season **portrait**
+> keep/upload toggle (§4) are the remaining FE follow-up (the portrait regen + headshot/avatar studio
+> already exist, G25/G27). Extends **0050** (the casting interview) and the **one
 > sanctioned restart door** (audit D1/R1) so that starting a **new season** offers the player a
 > **soft re-run of character creation**: **keep the existing houseguest** (the same person
 > returns to a brand-new cast) or **recreate** (run the casting interview again from scratch),
