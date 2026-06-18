@@ -68,31 +68,39 @@
     closeDrawer();
   });
 
-  // ── show only while a season is live (mirrors the gadgets' own gating) ─────
-  var _started = false;
+  // ── visibility is CONTENT-DRIVEN (robust; no status-fetch race) ────────────
+  // The HUD gadgets self-gate: they set display:none when they have nothing to show and
+  // display:block when a game is live. The rail shows exactly when at least one gadget
+  // has visible content (a child whose OWN computed display isn't none — that holds even
+  // while the rail itself is hidden), and hides when the rail is empty. This is what the
+  // browser-smoke keep-set drives (it injects chips, then expects the rail visible).
+  var body = document.getElementById("gadget-rail-body");
   function _isNarrow() { return window.matchMedia("(max-width: 768px)").matches; }
+  function _hasContent() {
+    if (!body) return false;
+    return Array.prototype.some.call(body.children, function (c) {
+      try { return getComputedStyle(c).display !== "none"; } catch (_) { return false; }
+    });
+  }
   function _refreshOpener() {
-    // the floating opener is only meaningful on narrow with a live game and the drawer closed
     if (!opener) return;
-    var show = _started && _isNarrow() && !rail.classList.contains("grail-open");
+    var show = !rail.hasAttribute("hidden") && _isNarrow() && !rail.classList.contains("grail-open");
     if (show) opener.removeAttribute("hidden"); else opener.setAttribute("hidden", "");
   }
-  function setStarted(on) {
-    _started = !!on;
-    if (_started) rail.removeAttribute("hidden"); else { rail.setAttribute("hidden", ""); rail.classList.remove("grail-open"); }
+  function syncVisibility() {
+    if (_hasContent()) rail.removeAttribute("hidden");
+    else { rail.setAttribute("hidden", ""); rail.classList.remove("grail-open"); }
     _refreshOpener();
   }
-  async function refreshGate() {
-    try {
-      var r = await fetch("/api/orwell/status", { credentials: "same-origin" });
-      if (!r.ok) return;
-      var st = await r.json();
-      setStarted(!!(st && (st.started || st.phase) && st.phase !== "setup"));
-    } catch (_) { /* fail closed: leave hidden */ }
+  if (body && window.MutationObserver) {
+    var _obs = new MutationObserver(function () { syncVisibility(); });
+    _obs.observe(body, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ["style", "class", "hidden"] });
   }
-  window.addEventListener("orwell:gamechanged", refreshGate);
+  window.addEventListener("orwell:gamechanged", syncVisibility);
   window.addEventListener("resize", _refreshOpener);
+  setInterval(syncVisibility, 4000);  // belt-and-suspenders fallback
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", refreshGate, { once: true });
-  } else { refreshGate(); }
+    document.addEventListener("DOMContentLoaded", syncVisibility, { once: true });
+  } else { syncVisibility(); }
 })();
