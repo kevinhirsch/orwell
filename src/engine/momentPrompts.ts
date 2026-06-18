@@ -289,8 +289,11 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
     "authority on who wins; runCompetition merely PREVIEWS that same winner, it never decides a second.)",
   nominations:
-    "MOMENT — Nomination ceremony. The HOH names two nominees from the game's LEGAL options; " +
-    "play the dread, the speeches, the table reactions. Record the ceremony with recordInteraction.",
+    "MOMENT — Nomination ceremony. The two nominees are DECIDED BY THE GAME and are already in your " +
+    "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
+    "never invent, guess, or substitute a nominee. If no nominees are shown, the ceremony has not been " +
+    "run yet: do NOT narrate any names — you do not know them. Once you have them, play the dread, the " +
+    "speeches, the table reactions, and record the ceremony with recordInteraction.",
   "veto-competition":
     "MOMENT — Power of Veto competition. Six play; call advanceGame to RESOLVE it; announce the " +
     "winner only, no scores. Let the drama of who is and isn't playing breathe.",
