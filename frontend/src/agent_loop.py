@@ -1360,6 +1360,46 @@ _VERIFIER_EFFECTFUL_TOOLS = {
 }
 _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 
+# ── Game progression error-correction (engine stall-nudge) ────────────────────
+# The GM reliably narrates a beat — a competition, a ceremony, the premiere move-in —
+# WITHOUT ever calling advanceGame, leaving the season frozen (the #1 playthrough
+# blocker, robust even on strong models). These phases exist to be DRIVEN FORWARD:
+# lingering in them with no progression tool fired is a stall. We catch it in the
+# loop and nudge the model — non-disruptive first, escalating — rather than auto-
+# advancing (the owner's call: keep the dynamic DM, error-correct the omission).
+# The phase set + cap + nudge texts are deliberately tunable.
+_ADVANCE_PHASES = {
+    "premiere", "hoh-competition", "nominations", "veto-competition",
+    "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
+}
+_PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
+# Graduated, in-loop. Index by how many times we've nudged THIS encounter (persisted
+# per game so the escalation carries across turns until the model finally advances).
+_ADVANCE_NUDGES = [
+    # 1 — gentle: a reminder, not a shove (a beat of lingering is fine).
+    "(Production note, not for the player: this beat is still open. When you're ready "
+    "to move the night along, resolve it by calling advanceGame — that is the ONLY way "
+    "the real outcome is decided and the season moves on. If you've just put a binding "
+    "choice to the player, their decision card already holds it, so simply say you're "
+    "waiting on their move and stop.)",
+    # 2 — firmer.
+    "The season is not moving. You narrated this beat but never called advanceGame, so "
+    "nothing actually happened — no winner, no nominees, no eviction was decided, and the "
+    "player is stuck. Call advanceGame NOW to resolve it, then voice the engine's real "
+    "result. (If and ONLY if you are waiting on the player's decision card, say so in one "
+    "sentence and stop instead.)",
+    # 3 — forceful, last rung before we give the turn back.
+    "STOP. The game is FROZEN on this beat and the player cannot continue. Your very next "
+    "action THIS turn must be the advanceGame function call — do not write more narration, "
+    "do not restate the scene, just make the call. Narrating around it does nothing.",
+]
+_MAX_ADVANCE_NUDGES_PER_TURN = 3  # in-loop cap so an intractable model can't pin the turn
+# Persistent per-game escalation: a turn that ends still stalled starts the next turn's
+# nudges one rung higher, so repeated stalls get "progressively more forceful". Keyed by
+# the engine user (game) so it survives across the per-turn agent loop. Reset when the
+# game actually advances (a progression tool fires).
+_ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+
 
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
@@ -1887,6 +1927,13 @@ async def stream_agent_loop(
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
 
+    # Game progression stall-nudge state. The PER-TURN counter caps in-loop retries so an
+    # intractable model can't pin a single turn; the PERSISTED level (_ADVANCE_STALL_LEVEL,
+    # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
+    # stay maximally forceful instead of resetting to gentle each turn.
+    _is_live_game = game_mode in (True, "game")
+    _turn_advance_nudges = 0
+
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
     # "Let me tail the output to see the error" and then ends the turn with
@@ -2308,6 +2355,38 @@ async def stream_agent_loop(
                 # Visible signal in the stream so the user knows we caught it.
                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                 continue
+            # ── Game progression error-correction (engine stall-nudge) ────
+            # The GM is finishing its turn. If the live season is sitting in a
+            # phase that exists to be DRIVEN FORWARD and the model fired no
+            # progression tool (advanceGame/submitDecision) this whole turn, the
+            # game is frozen. Nudge in-loop, escalating, capped. The escalation
+            # rung persists per game so repeated stalls get more forceful.
+            if _is_live_game and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN:
+                _progressed = any(
+                    (ev.get("tool") if isinstance(ev, dict) else None) in _PROGRESSION_TOOLS
+                    for ev in tool_events
+                )
+                if not _progressed:
+                    _phase = None
+                    try:
+                        from src import orwell_engine as _oe
+                        _st = await _oe.game_status(owner)
+                        _phase = (_st or {}).get("phase")
+                    except Exception as _e:
+                        logger.warning(f"[orwell] stall-nudge phase fetch failed: {_e}")
+                    if _phase in _ADVANCE_PHASES:
+                        _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
+                        _nudge = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
+                        _turn_advance_nudges += 1
+                        if owner:
+                            _ADVANCE_STALL_LEVEL[owner] = _level + 1
+                        logger.info(
+                            f"[orwell] advance stall-nudge (turn #{_turn_advance_nudges}, "
+                            f"level {_level}, phase={_phase}) on round {round_num} for user={owner}"
+                        )
+                        messages.append({"role": "system", "content": _nudge})
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -2665,6 +2744,11 @@ async def stream_agent_loop(
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
+            # The game advanced: clear any persisted stall escalation for this game so the
+            # next stall (if any) starts gentle again.
+            if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
+                _ADVANCE_STALL_LEVEL.pop(owner, None)
+                _turn_advance_nudges = 0
 
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)

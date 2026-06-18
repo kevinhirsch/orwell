@@ -217,8 +217,18 @@ const CASTING_INTERVIEW_PROMPT = [
 export const MOMENT_PROMPTS: Record<string, string> = {
   "character-creation": CASTING_INTERVIEW_PROMPT,
   premiere:
-    "MOMENT — Premiere. Read the cast with getGameState, then introduce the house and move-in " +
-    "energy. Establish first impressions and friction; reveal no one's hidden game.",
+    "MOMENT — Premiere. Introduce the house and the move-in energy; establish first impressions and " +
+    "friction; reveal no one's hidden game. GROUND EVERY PERSON IN THE ROSTER: the GAME CONTEXT below " +
+    "lists the EXACT houseguests — when you populate a room, a crowd, or a first impression, you name " +
+    "ONLY those people, by those exact names, and you may lean on their listed vibe. NEVER invent a " +
+    "houseguest, a name, or a face to fill a scene — a made-up name is an instant, immersion-shattering " +
+    "contradiction with the cast wall. If you are unsure who is around the player, call whereabouts " +
+    "(presence is engine truth) before you describe the room. " +
+    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: give the move-in its real " +
+    "moment — a beat or two of meeting the house — then DRIVE there. Once the house has met and the " +
+    "player has had a scene or two, call advanceGame to bring up the first HOH competition; do not let " +
+    "the premiere drift indefinitely. When the player signals they're ready for the game to start, that " +
+    "is your cue to advanceGame, not to keep milling.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the engine's winner — never scores or rankings. (advanceGame is the sole " +

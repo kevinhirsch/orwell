@@ -92,3 +92,21 @@ def test_card_module_is_script_tagged_and_chat_dispatches():
     assert "Confirm — this is binding" in card
     # dismissal keeps the conversation path open (ADR 0003: a guardrail, not a gate)
     assert "Dismiss" in card
+
+
+def test_card_rearms_on_reload_after_async_chat_mount():
+    # A refresh mid-decision must still show the card. The game build mounts #chat-history
+    # asynchronously and then renders history into it, so the boot rearm has to wait for the
+    # host AND survive the history re-render (which wiped an early mount) — re-asserting until
+    # the card is stably present, but never fighting an explicit dismiss/submit.
+    import os
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(base, "static", "js", "orwellDecision.js"), encoding="utf-8") as f:
+        card = f.read()
+    assert "rearmFromStatus" in card
+    assert "/api/orwell/status" in card                 # rearm reads the engine's pending
+    assert "_userDismissed" in card                     # dismiss/submit suppress re-assert
+    assert "getElementById(CARD_ID)" in card            # re-assert only while the card is missing
+    assert "if (++stable >= 3) break" in card           # stop once stably mounted
+    # explicit dismiss (×/Escape) and submit all set the suppress flag
+    assert card.count("_userDismissed = true") >= 3
