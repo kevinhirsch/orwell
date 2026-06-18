@@ -138,9 +138,11 @@ def test_sourcepin_wave3_shared_dismiss_affordance():
     kit = _read("static", "js", "orwellWindow.js")
     assert ".ow-dismiss" in kit                      # the rule ships from the kit css
     assert "DOMContentLoaded\", ensureCss" in kit or "ensureCss();" in kit  # injected at load
-    for f in ("orwellPresence.js", "orwellRetrospective.js", "orwellEngineStatus.js"):
+    # orwellPresence.js no longer adopts it: the presence strip was relocated from a floating
+    # banner to docked sidebar chrome ("Where you are"), which has no dismiss affordance.
+    for f in ("orwellRetrospective.js", "orwellEngineStatus.js"):
         js = _read("static", "js", f)
-        assert "ow-dismiss" in js, f                 # the three surfaces adopt it
+        assert "ow-dismiss" in js, f                 # the dismissable banner surfaces adopt it
 
 
 def test_sourcepin_wave3_modal_family_focus_return():
