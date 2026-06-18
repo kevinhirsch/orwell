@@ -1522,6 +1522,69 @@ def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
 _ADVANCE_STALL_LEVEL: Dict[str, int] = {}
 
 
+# ── Post-season re-approach (feature 0057, chunk 4) ───────────────────────────────────
+# A season is over and the player landed in the reunion (moment === "post-season"). They may
+# inhabit that lobby indefinitely (0049): open the Producer's Vault, mess around with the model,
+# wander off into free chat. The "New season" surface is always there (chunk 3) — but if the
+# player ESCAPES the reunion into off-finale free chat and lingers, the producers re-approach
+# OUT OF FICTION ("the real world") and naturally re-invite them to the next season.
+#
+# Engagement-driven, NEVER a wall-clock timer (the game clock is the play-clock, 2026-06-10
+# ruling): we count the player's OFF-FINALE post-season turns — turns where they've clearly
+# wandered off the reunion topic — and once they've taken a couple, nudge the GM to extend the
+# out-of-fiction invite. Escalating across turns, capped, persisted per user. A turn where the
+# player is plainly engaging the reunion (asking about the season, the Vault, a moment) is NOT
+# an escape and never counts.
+_POSTSEASON_OFFTOPIC_TURNS_BEFORE_REAPPROACH = 2  # a couple of escaped turns before the invite
+
+# Cues the player is STILL in the reunion (engaging the season just past) — these do NOT count
+# as an escape, so the re-approach holds while they're paying off the season.
+_REUNION_TOPIC_RE = re.compile(
+    r"\b(season|finale|jury|vote|votes|evict|eviction|winner|won|win|lose|lost|"
+    r"vault|retrospective|recap|reunion|nominat|veto|hoh|week \d|who (did|got)|"
+    r"why did|what happened|looking back|replay|watch.?back)\b",
+    re.IGNORECASE,
+)
+
+# Graduated, post-season, OUT-OF-FICTION. Indexed by the persisted re-approach level so the
+# invite escalates across turns until the player starts a season (or keeps ignoring it, capped).
+_REAPPROACH_NUDGES = [
+    # 1 — light, natural: the producers reach back out, no pressure.
+    "(Production note, not for the player to see verbatim: the season is over and the player has "
+    "drifted off into free chat. In character as the show's producer — OUT of fiction, in the "
+    "real world, NOT as a houseguest — naturally reach back out and let them know the next season "
+    "is theirs whenever they want it. Warm and low-pressure; mention they can hit the 'New season' "
+    "button to bring this houseguest back or recast. Do NOT improvise a new season in chat — the "
+    "only way forward is that sanctioned button.)",
+    # 2 — a touch more direct.
+    "(Production note: the player keeps wandering and hasn't started the next season. As the "
+    "producer, out of fiction, check in again — a little more directly this time — and remind "
+    "them the casting door is open: the 'New season' button starts the next one (keep their "
+    "houseguest or recast). Never start a season yourself; point them at the button.)",
+    # 3 — the standing offer, plainly.
+    "(Production note: make the standing offer plain. Out of fiction, as the producer: the show "
+    "would love to have them back, the next season is one click away on the 'New season' button, "
+    "and you'll be here whenever they're ready. Then let them be — do not nag further this turn.)",
+]
+_MAX_REAPPROACH_NUDGES_PER_TURN = 1  # at most one re-approach injected per finishing turn
+
+# Persisted per-user post-season state: how many off-finale turns the player has taken, and how
+# many times we've re-approached (sets escalation). Cleared when the user leaves the post-season
+# (a new season starts → moment is no longer "post-season").
+_POSTSEASON_OFFTOPIC_TURNS: Dict[str, int] = {}
+_REAPPROACH_LEVEL: Dict[str, int] = {}
+
+
+def _player_escaped_reunion(messages) -> bool:
+    """True when the player's last message has wandered OFF the reunion — i.e. they're in free
+    chat, not paying off the season just played. A message that's still about the season / the
+    Vault / a moment is engagement with the reunion and is NOT an escape."""
+    last = (_extract_last_user_message(messages) or "").strip()
+    if not last:
+        return True  # silence/an empty nudge reads as drift
+    return not _REUNION_TOPIC_RE.search(last)
+
+
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
     verifier to judge against. One block per tool execution: the command and
@@ -2055,6 +2118,7 @@ async def stream_agent_loop(
     _is_live_game = game_mode in (True, "game")
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
+    _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -2493,18 +2557,51 @@ async def stream_agent_loop(
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
                                 and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN)
-                if _want_advance or _want_record:
-                    _phase, _house = None, []
+                # The re-approach can fire on ANY finishing live turn (it watches the post-season
+                # state, not a tool gap), so we always need the game state to know if the season is
+                # over — fetch it whenever any nudge MIGHT fire.
+                _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
+                if _want_advance or _want_record or _want_reapproach:
+                    _phase, _house, _moment = None, [], None
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
+                        _moment = (_gs or {}).get("moment")
                         _house = [{"id": h.get("id"), "name": h.get("name")}
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
                         logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                    # ── Post-season re-approach (0057): the season is over and the player wandered
+                    # off into free chat. Count their off-finale turns; once they've taken a couple,
+                    # have the producer re-invite OUT OF FICTION to the next season (escalating,
+                    # capped, persisted). Checked BEFORE advance/record: post-season has no
+                    # advance-phase, and a re-invite is the right beat, not a banked scene.
+                    if _moment == "post-season":
+                        _key = owner or ""
+                        if _player_escaped_reunion(messages):
+                            _off = _POSTSEASON_OFFTOPIC_TURNS.get(_key, 0) + 1
+                            _POSTSEASON_OFFTOPIC_TURNS[_key] = _off
+                            _level = _REAPPROACH_LEVEL.get(_key, 0)
+                            _ready = _off >= _POSTSEASON_OFFTOPIC_TURNS_BEFORE_REAPPROACH
+                            if (_want_reapproach and _ready
+                                    and _level < len(_REAPPROACH_NUDGES)):
+                                _turn_reapproach_nudges += 1
+                                _REAPPROACH_LEVEL[_key] = _level + 1
+                                logger.info(f"[orwell] post-season re-approach (level {_level}, "
+                                            f"off-turns={_off}) round {round_num} user={owner}")
+                                messages.append({"role": "system",
+                                                 "content": _REAPPROACH_NUDGES[min(_level, len(_REAPPROACH_NUDGES) - 1)]})
+                                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                continue
+                        break  # post-season: no comp/ceremony to advance, nothing to bank — done
+                    elif _moment is not None:
+                        # Not post-season (a new season started, or the season is live again):
+                        # forget the per-user re-approach state so the NEXT post-season starts clean.
+                        _POSTSEASON_OFFTOPIC_TURNS.pop(owner or "", None)
+                        _REAPPROACH_LEVEL.pop(owner or "", None)
                     # advance a lull
                     if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)

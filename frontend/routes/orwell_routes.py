@@ -606,7 +606,10 @@ def setup_orwell_routes() -> APIRouter:
             if not isinstance(state, dict) or not state.get("started"):
                 return JSONResponse(status_code=409, content={"started": False, "error": "no season to advance from"})
             # The level must be CLEARED before the next one: the season must be over (any ending).
-            if not state.get("finished"):
+            # Gate on the engine's `finished` over-signal (B6-01), with the post-season MOMENT as a
+            # robust fallback for engine version skew (the same terminal state the retrospective uses).
+            is_over = bool(state.get("finished")) or state.get("moment") == "post-season"
+            if not is_over:
                 return JSONResponse(status_code=409, content={"error": "the current season is not over yet"})
             # A new season is a new cast: scrub the prior portrait set before generating (0051).
             try:

@@ -3,8 +3,10 @@
 > **Status:** Engine carry-over **built** (TDD; the "keep" path + D1/R1 hinge reuse) and the FE
 > **restart-door relay** threads `keepCharacter` through (`/new-game` + `orwell_engine.create_character`;
 > `playerName` optional when keeping). The in-chat **keep/recreate UX** + the per-season **portrait**
-> keep/upload toggle (§4) are the remaining FE follow-up (the portrait regen + headshot/avatar studio
-> already exist, G25/G27). Extends **0050** (the casting interview) and the **one
+> keep/upload toggle (§4) **shipped via 0057 chunk 3** — the persistent post-season "New season"
+> surface (`frontend/static/js/orwellNewSeason.js`) is the keep/recreate choice + the shared G26/G27
+> portrait studio; it routes "keep" through `POST /api/orwell/next-season {keep:true}`. Extends
+> **0050** (the casting interview) and the **one
 > sanctioned restart door** (audit D1/R1) so that starting a **new season** offers the player a
 > **soft re-run of character creation**: **keep the existing houseguest** (the same person
 > returns to a brand-new cast) or **recreate** (run the casting interview again from scratch),

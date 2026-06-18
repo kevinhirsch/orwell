@@ -93,6 +93,13 @@ export interface GameStateView {
   started: boolean;
   week: number;
   phase: string;
+  /**
+   * The season is OVER — a winner is crowned (audit B6-01). Vault-free (whether the game ended is
+   * public). Lets the FE gate the season lifecycle (0057 next-season) and fill the progress bar to
+   * 100% without inferring it from `moment`/`phase`. `finished` lives on `AdvanceView`/`SeasonRecap`
+   * too; surfacing it here keeps every read consistent.
+   */
+  finished: boolean;
   /** The current beat key (drives which managed prompt fragment is injected). */
   moment: string;
   player: PlayerCard | null;

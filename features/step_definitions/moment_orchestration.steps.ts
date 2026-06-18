@@ -22,7 +22,7 @@ import { join } from "node:path";
 
 function startedView(phase: string): GameStateView {
   return {
-    started: true, week: 2, phase, moment: momentForPhase(phase),
+    started: true, finished: false, week: 2, phase, moment: momentForPhase(phase),
     player: { id: PLAYER, name: "Player One", archetype: "mastermind", strategyStyle: "strategic", status: "active" },
     house: [
       { id: npc(1), name: "Houseguest One", status: "active" },
