@@ -159,6 +159,46 @@ def test_game_build_never_labels_messages_with_the_model_name():
     assert "(isGameBuild() && role === 'assistant') ? 'Big Brother'" in renderer  # the _roleText path
 
 
+def test_game_build_suppresses_the_model_name_tooltip():
+    # OBS-RENDER-1: the visible sender said "Big Brother", but the role header still carried a
+    # hover TOOLTIP with the raw "alias -> dated-version" model string ("deepseek-v4-pro ->
+    # deepseek-v4-pro-20260423"). The model machinery must be INVISIBLE in the game build —
+    # including the tooltip — on BOTH the live stream and the history-reload path.
+    chat = _read("static", "js", "chat.js")
+    renderer = _read("static", "js", "chatRenderer.js")
+    # live path: the central _setRoleModelLabel helper strips the tooltip in the game build
+    assert "if (isGameBuild()) {\n      roleEl.removeAttribute('title');" in chat
+    # reload path: both the continuation-round and the main-reply title sites gate on the build
+    assert "if (!isGameBuild() && pair.requestedModel" in renderer   # reload continuation round
+    assert "if (!isGameBuild() && !isSlash && !isCompacted" in renderer  # reload main reply
+
+
+def test_game_build_uses_diegetic_sender_on_placeholder_and_continuation():
+    # The model name also flashed as the SENDER on the initial placeholder bubble, on stream
+    # resume/reconnect, and on continuation rounds — before the resolved-model label landed.
+    # A single source (_senderLabel) keeps every placeholder diegetic in the game build.
+    chat = _read("static", "js", "chat.js")
+    assert "function _senderLabel(" in chat
+    assert "isGameBuild() ? 'Big Brother'" in chat
+    # the placeholder/resume/reconnect sites route their model label through _senderLabel
+    assert chat.count("_senderLabel(") >= 4
+    # the continuation-round streaming label is diegetic in the game build
+    assert "newRole.textContent = isGameBuild() ? 'Big Brother'" in chat
+    # a provider fallback stays diegetic too (no raw "(fallback)" model name reaches the player)
+    assert "if (!isGameBuild()) {\n                        _rEl.textContent = _ansM + ' (fallback) ';" in chat
+
+
+def test_game_build_suppresses_model_name_in_session_list():
+    # OBS-RENDER-1 (sidebar follow-up): the session list appended "· deepseek-v4-pro" to every
+    # chat's label AND its hover title — the same raw model machinery the chat header now hides.
+    # In the game build the sidebar must stay diegetic too: title/label carry the chat name only.
+    js = _read("static", "js", "sessions.js")
+    assert "data-game-build" in js  # the list builder detects the build
+    # the `· model` suffix on BOTH the visible label and the hover title is build-gated
+    assert "if (s.model && !_gameBuild) label += ' · ' + s.model.split('/').pop();" in js
+    assert "(s.model && !_gameBuild ? s.model.split('/').pop() + ' · ' : '')" in js
+
+
 def test_reload_path_applies_production_beats():
     # The history-reload render (chatRenderer.js) was NOT applying the diegetic treatment
     # the live stream did — so re-opening a session leaked raw camelCase tool names and raw

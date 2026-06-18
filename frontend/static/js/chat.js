@@ -56,6 +56,13 @@ import { isNarrow } from './platform.js';
   var _modelRouteLabel = chatRenderer.modelRouteLabel;
   var _sameModelName = chatRenderer.sameModelName;
   var _applyModelColor = chatRenderer.applyModelColor;
+  // C14/immersion: the single source for an AI message's SENDER label. In the game build the
+  // narrator is the show ("Big Brother"), never the raw LLM model name — used at every
+  // placeholder / resume / continuation site so the model machinery stays invisible to the
+  // player (mirrors _setRoleModelLabel for the resolved-model path).
+  function _senderLabel(modelLabel) {
+    return isGameBuild() ? 'Big Brother' : (modelLabel || '');
+  }
   function _setRoleModelLabel(roleEl, requestedModel, actualModel, opts) {
     if (!roleEl) return;
     opts = opts || {};
@@ -71,7 +78,11 @@ import { isNarrow } from './platform.js';
     else if (document.body.hasAttribute('data-game-build')) label = 'Big Brother';
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
-    if (req && actual && !_sameModelName(req, actual)) {
+    // C14/immersion: the raw "alias -> dated-version" model string must never reach the
+    // player in the game build — not as the sender label and not as the hover tooltip.
+    if (isGameBuild()) {
+      roleEl.removeAttribute('title');
+    } else if (req && actual && !_sameModelName(req, actual)) {
       roleEl.title = req + ' -> ' + actual + (opts.reason ? ': ' + opts.reason : '');
     } else if (!opts.reason) {
       roleEl.removeAttribute('title');
@@ -917,7 +928,7 @@ import { isNarrow } from './platform.js';
         loadingText = 'Processing request...';
       }
 
-      var roleLabel = _modelRouteLabel(modelName, modelName);
+      var roleLabel = _senderLabel(_modelRouteLabel(modelName, modelName));
       var _charNameInit = presetsModule.getCharacterName ? presetsModule.getCharacterName() : '';
       if (_charNameInit) roleLabel = _charNameInit;
       const roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
@@ -1870,9 +1881,15 @@ import { isNarrow } from './platform.js';
                     var _rEl = holder.querySelector('.role');
                     if (_rEl) {
                       var _tsS = _rEl.querySelector('.role-timestamp');
-                      _rEl.textContent = _ansM + ' (fallback) ';
-                      _rEl.title = (json.selected_model || '') + ' failed' +
-                        (json.reason ? ': ' + json.reason : '') + ' — answered by ' + (json.answered_by || '');
+                      // C14/immersion: in the game build the sender is the show, never a
+                      // model name — even a provider fallback stays diegetic (the toast above
+                      // still surfaces the misconfig out-of-fiction). _setRoleModelLabel below
+                      // re-labels to "Big Brother" and strips the tooltip.
+                      if (!isGameBuild()) {
+                        _rEl.textContent = _ansM + ' (fallback) ';
+                        _rEl.title = (json.selected_model || '') + ' failed' +
+                          (json.reason ? ': ' + json.reason : '') + ' — answered by ' + (json.answered_by || '');
+                      }
                       _applyModelColor(_rEl, json.answered_by);
                       if (_tsS) _rEl.appendChild(_tsS);
                       holder._requestedModel = json.selected_model || holder._requestedModel || modelName;
@@ -2523,7 +2540,9 @@ import { isNarrow } from './platform.js';
                 const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
                 const _roundRequested = holder?._requestedModel || metaS?.model;
                 const _roundActual = holder?._actualModel || _roundRequested;
-                newRole.textContent = _modelRouteLabel(_roundRequested, _roundActual) || '';
+                // C14/immersion: a continuation round in the game build is still the show —
+                // never the raw model name as the sender.
+                newRole.textContent = isGameBuild() ? 'Big Brother' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
                 _applyModelColor(newRole, _roundActual);
                 newWrap.appendChild(newRole);
                 const newBody = document.createElement('div');
@@ -3512,7 +3531,7 @@ import { isNarrow } from './platform.js';
     const holder = document.createElement('div');
     holder.className = 'msg msg-ai';
     const meta = sessionModule.getSessions().find(s => s.id === sessionId);
-    const roleLabel = _shortModel(meta && meta.model);
+    const roleLabel = _senderLabel(_shortModel(meta && meta.model));
     const roleTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) +
       ' <span class="role-timestamp">' + roleTs + '</span></div>' +
@@ -3668,7 +3687,7 @@ import { isNarrow } from './platform.js';
       var holder = document.createElement('div');
       holder.className = 'msg msg-ai';
       var meta = sessionModule.getSessions().find(function(s) { return s.id === sessionId; });
-      var roleLabel = _shortModel(meta && meta.model);
+      var roleLabel = _senderLabel(_shortModel(meta && meta.model));
       var roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) + ' <span class="role-timestamp">' + roleTs + '</span></div><div class="body"></div>';
       _applyModelColor(holder.querySelector('.role'), meta && meta.model);
@@ -4471,7 +4490,7 @@ import { isNarrow } from './platform.js';
       holder.dataset.researchSession = sessionId;
       const roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       const agentMeta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
-      const agentModelLabel = _shortModel(agentMeta?.model);
+      const agentModelLabel = _senderLabel(_shortModel(agentMeta?.model));
       holder.innerHTML = `<div class="role">${uiModule.esc(agentModelLabel)} <span class="role-timestamp">${roleTs}</span></div><div class="body"></div>`;
       _applyModelColor(holder.querySelector('.role'), agentMeta?.model);
       box.appendChild(holder);
