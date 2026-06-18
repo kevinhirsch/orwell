@@ -92,6 +92,11 @@ def test_card_module_is_script_tagged_and_chat_dispatches():
     assert "Confirm — this is binding" in card
     # dismissal keeps the conversation path open (ADR 0003: a guardrail, not a gate)
     assert "Dismiss" in card
+    # C14 immersion: the card's PLAYER-VISIBLE copy never names the machinery or uses
+    # rules-lawyer jargon (the proofreading audit caught "The engine validates legality"
+    # and "illegal pick" rendered to the player).
+    assert "The engine validates" not in card
+    assert "illegal pick" not in card
 
 
 def test_card_rearms_on_reload_after_async_chat_mount():

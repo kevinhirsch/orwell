@@ -1393,7 +1393,9 @@ _ADVANCE_NUDGES = [
     "action THIS turn must be the advanceGame function call — do not write more narration, "
     "do not restate the scene, just make the call. Narrating around it does nothing.",
 ]
-_MAX_ADVANCE_NUDGES_PER_TURN = 3  # in-loop cap so an intractable model can't pin the turn
+_MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptive, so a beat of
+# legitimate social play at a ceremony phase isn't shoved. Forcefulness escalates ACROSS turns
+# via the persisted _ADVANCE_STALL_LEVEL, not by stacking nudges within a single turn.
 # Persistent per-game escalation: a turn that ends still stalled starts the next turn's
 # nudges one rung higher, so repeated stalls get "progressively more forceful". Keyed by
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the

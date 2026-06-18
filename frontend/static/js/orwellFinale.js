@@ -134,7 +134,11 @@ import * as modalManager from "./modalManager.js";
   }
 
   function nameOf(ref) { return (ref && ref.name) || "A houseguest"; }
-  let _lastRevealCount = 0;
+  // -1 = not yet rendered this page load. The FIRST render (live OR after a refresh) syncs
+  // the count WITHOUT announcing — otherwise a reload mid-finale re-announced every vote
+  // already on screen through the aria-live region (reload-persistence audit). Only reveals
+  // that land DURING this page session are announced.
+  let _lastRevealCount = -1;
 
   function render(finale) {
     const el = ensureUI();
@@ -160,7 +164,7 @@ import * as modalManager from "./modalManager.js";
     // The reveal, in the order the engine read it (revealed votes only). New reveals
     // are ANNOUNCED politely (E67): the vote reading is the season's loudest moment.
     const ann = document.getElementById("ofin-announce");
-    if (ann && reveals.length > _lastRevealCount) {
+    if (ann && _lastRevealCount >= 0 && reveals.length > _lastRevealCount) {
       const fresh = reveals.slice(_lastRevealCount)
         .map((r) => nameOf(r.juror) + " votes for " + nameOf(r.votedFor) + ".");
       ann.textContent = fresh.join(" ");

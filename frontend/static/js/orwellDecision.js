@@ -256,7 +256,7 @@
     row.className = "odec-row";
     const note = document.createElement("span");
     note.className = "odec-note";
-    note.textContent = multi ? `Select ${pick}. The engine validates legality.` : "Your selection only — never read from prose.";
+    note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
     row.appendChild(note);
     row.appendChild(confirm);
     card.appendChild(row);
@@ -298,7 +298,7 @@
           err.className = "odec-err";
           card.appendChild(err);
         }
-        err.textContent = "That didn't go through (illegal pick or the feed glitched). Adjust and try again, or decide in conversation.";
+        err.textContent = "That didn't go through (your move wasn't allowed, or the feed glitched). Adjust and try again, or decide in conversation.";
       }
     });
 
