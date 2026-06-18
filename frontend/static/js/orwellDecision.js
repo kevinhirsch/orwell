@@ -77,6 +77,13 @@
       #${CARD_ID} .odec-note { opacity: .65; font-size: .78em; flex: 1; }
       #${CARD_ID} .odec-err { color: var(--red, #e06c75); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
+      /* Narrow: the note must not squeeze into a thin column beside the button —
+         stack it full-width above a full-width Confirm. */
+      @media (max-width: 480px) {
+        #${CARD_ID} .odec-row { flex-direction: column; align-items: stretch; gap: .5rem; }
+        #${CARD_ID} .odec-note { flex: none; order: -1; }
+        #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
+      }
     `;
     document.head.appendChild(st);
   }
