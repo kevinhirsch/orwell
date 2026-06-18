@@ -133,7 +133,10 @@ Then("it names every player-channel lever the agent can call", function (this: B
 });
 
 Then("it states that the engine decides outcomes and the model only voices them", function (this: BbWorld) {
-  assert.match(this.lastOutput, /engine\s+decides/i);
+  // The authority line says the GAME decides (the machinery-scrub: prompts name "the game", not
+  // "the engine", per the owner ruling) — tolerate either wording so the assertion tracks the intent
+  // (an explicit authority statement), not one literal word.
+  assert.match(this.lastOutput, /\b(?:game|engine)\b[^.\n]{0,15}decides/i);
   assert.match(this.lastOutput, /never invent/i);
 });
 
