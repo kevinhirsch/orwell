@@ -16,7 +16,7 @@ import { HOUSE_ADJACENCY } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
-import { castingStatusOf, emptyIntake, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
+import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
@@ -517,6 +517,9 @@ export class GameSessionAdapter implements GameSession {
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
       veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+      // The live pending (Vault-free legal options) so the decision card re-arms from engine truth
+      // on reload — not the FE's process-local last-seen cache, which a FE restart wipes.
+      pending: this.pendingView(),
     };
   }
 
@@ -648,25 +651,35 @@ export class GameSessionAdapter implements GameSession {
   }
 
   createCharacter(req: CreateCharacterReq): GameStateView {
+    // 0056 — "keep the existing character": on a CONFIRMED restart with `keepCharacter`, capture the
+    // prior player's AUTHORED fields HERE (the only point the prior season still exists, before any
+    // reset) and fold them under the explicit req. The static CHARACTER is seed-independent, so re-
+    // supplying these regenerates the SAME houseguest in the new season; explicit fields still win,
+    // so the player may tweak on the way through. No hidden number is read.
+    const carried = (this.house && req.confirmRestart && req.keepCharacter) ? this.carryOverFields() : null;
+    const effReq: CreateCharacterReq = carried ? { ...carried, ...req, keepCharacter: false } : req;
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
     // call, a network caller) is a no-op returning the current state — the prior save is left intact.
     if (this.house) {
-      if (!req.confirmRestart) return this.view();
+      // The no-op returns the PRIOR season's view — but now SIGNALS the refusal (audit R4-05) so the
+      // caller can tell "created" from "left untouched". Without it the model read the unchanged view
+      // as success and narrated a new season the engine never started.
+      if (!req.confirmRestart) return { ...this.view(), createRefused: this.live?.finished ? "over" : "in-progress" };
       // A CONFIRMED restart routes through the ONE sanctioned door (audit E1/D1/R1): the registry's
       // reset delegate — the SAME hinge the admin reset uses — forgets the orchestrator baseline,
       // rotates the dead season's saves, and creates season 2 in a clean sandbox. Without that the
       // fresh week-1 snapshot read as a count regression against the finished season ⇒ a degradation
       // fault on every commit, nothing persisted, and the dead season resurrected on engine restart.
-      if (this.onRestart) return this.onRestart({ ...req, confirmRestart: false });
+      if (this.onRestart) return this.onRestart({ ...effReq, confirmRestart: false });
       // Standalone (no registry composed — tests/onboarding fixtures): legacy in-place restart.
     }
     // Finalize FROM the interview's incremental intake (0050): everything updateCasting recorded
     // is the base; explicit args override field-by-field. OOBE can arrive half-done or fully done —
     // the one hard requirement is a name from SOMEWHERE.
     const merged = mergeCastingUpdate(this.intake, {
-      ...req,
-      ...(req.interviewNotes ? { interviewNotes: req.interviewNotes } : {}),
+      ...effReq,
+      ...(effReq.interviewNotes ? { interviewNotes: effReq.interviewNotes } : {}),
     });
     const playerName = merged.playerName;
     if (!playerName) {
@@ -678,7 +691,7 @@ export class GameSessionAdapter implements GameSession {
     // name must never replay the byte-identical season (incl. its hidden elements and twist
     // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
     // first-class for tests and replays.
-    const seed = req.seed ?? entropySeed();
+    const seed = effReq.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     // 0051: draw ONE per-season portrait style anchor, seeded off the game seed — same seed always
     // draws the same anchor, so the house looks like itself across restarts and through the season.
@@ -736,6 +749,37 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0056 — the prior player's AUTHORED, Vault-free fields: everything needed to recreate the SAME
+   * static CHARACTER next season. The character is seed-independent (aptitudes = the authored
+   * archetype's bias, appearance = hash of the authored name), so re-supplying these regenerates the
+   * identical houseguest under a new cast. The dynamic SOUL is deliberately NOT carried — the new
+   * season starts at move-in — but the ORIGINAL casting-interview material (motivation + notes) is
+   * reconstructed from the seeded Soul memory so the new season's memory re-seeds identically. No
+   * hidden number is read or returned.
+   */
+  private carryOverFields(): CreateCharacterReq {
+    const p = this.house!.player;
+    // The interview seeded Soul memory as "casting interview — <note>" entries (and one
+    // "casting interview — why I came: <motivation>"); reconstruct the original notes, dropping the
+    // motivation line (carried separately) and any non-casting memory accrued during the season.
+    const PREFIX = "casting interview — ";
+    const notes = (p.soul?.memory ?? [])
+      .filter((m) => typeof m === "string" && m.startsWith(PREFIX) && !m.startsWith(`${PREFIX}why I came: `))
+      .map((m) => m.slice(PREFIX.length));
+    return {
+      playerName: p.name,
+      archetype: p.character.archetype,
+      strategyStyle: p.character.strategyStyle,
+      ...(p.persona?.archetype ? { personaArchetype: p.persona.archetype } : {}),
+      ...(p.persona?.strategyStyle ? { personaStrategyStyle: p.persona.strategyStyle } : {}),
+      ...(p.character.background ? { backstory: p.character.background } : {}),
+      ...(p.privateStrategy ? { privateStrategy: p.privateStrategy } : {}),
+      ...(p.motivation ? { motivation: p.motivation } : {}),
+      ...(notes.length ? { interviewNotes: notes } : {}),
+    };
+  }
+
+  /**
    * Build the Vault-free cast portrait prompts (0051) from the PUBLIC house facets — the same
    * fields the visible projection exports on the HouseguestCard. No stats, no soul, no hidden
    * elements ever reach `buildCastPortraitPrompts`.
@@ -760,17 +804,27 @@ export class GameSessionAdapter implements GameSession {
    * the (complete) status — a stray call can never disturb a live game.
    */
   updateCasting(req: UpdateCastingReq): CastingStatusView {
-    // Season already running: casting is over; a stray call records nothing and reports done.
-    if (this.house) return { known: {}, missing: [], next: null, ready: true };
+    // Season already running: casting is CLOSED. Refuse HONESTLY (audit R4-05) instead of the old
+    // fake `ready:true` that recorded nothing yet looked like success — that silent success let the
+    // model narrate a fresh casting interview post-season while the engine never started one. The
+    // refusal names whether a season is live (`in-progress`) or already crowned (`over`).
+    if (this.house) {
+      return { known: {}, missing: [], next: null, ready: false, refused: this.live?.finished ? "over" : "in-progress" };
+    }
     const before = this.intake;
     // C8: which already-captured scalars this update replaces — computed against the PRIOR intake,
     // surfaced so the producer confirms the change rather than silently clobbering an answer.
     const overwrote = overwrittenScalars(before, req);
+    // R4-01: keys that are NOT casting fields (a recording filed under `name`/`notes`/a typo would
+    // otherwise vanish). Echo them so the producer re-files rather than stalling on a lost answer.
+    const ignoredKeys = ignoredCastingKeys(req);
     this.intake = mergeCastingUpdate(this.intake, req);
     if (JSON.stringify(before) !== JSON.stringify(this.intake)) {
       this.persist(); // a half-done interview is durable state (0030)
     }
-    return castingStatusOf(this.intake, overwrote);
+    const status = castingStatusOf(this.intake, overwrote);
+    if (ignoredKeys.length > 0) status.ignoredKeys = ignoredKeys;
+    return status;
   }
 
   /**
@@ -1315,8 +1369,11 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
-      case "comp-intent": { // B46: the player declares compete/throw/play-safe (via `intent` or `vote`).
-        const intent = (req.intent ?? req.vote) as Intent | undefined;
+      case "comp-intent": { // B46: the player declares compete/throw/play-safe.
+        // The pending presents this as a generic options/pick decision (id = the intent value), so a
+        // caller may submit it as `intent`, `vote`, OR `choice` like every other options/pick decision.
+        // `singlePickId` covers `vote`/`choice`; `intent` stays first (R4-02 — `choice` was rejected).
+        const intent = (req.intent ?? singlePickId(req)) as Intent | undefined;
         if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
         return { kind: "comp-intent", intent };
       }
@@ -1325,12 +1382,16 @@ export class GameSessionAdapter implements GameSession {
         if (!pick) throw new Error("a Houseguest's Choice pick is required");
         return { kind: "houseguests-choice", pick };
       }
-      case "replacement":
-        if (!req.replacement) throw new Error("a replacement nominee is required");
-        return { kind: "replacement", replacement: req.replacement };
-      case "eviction-vote":
-        if (!req.vote) throw new Error("an eviction vote is required");
-        return { kind: "eviction-vote", vote: req.vote };
+      case "replacement": { // D5-1: accept `replacement`, `vote`, OR `choice` (the generic options/pick shape).
+        const replacement = req.replacement ?? singlePickId(req);
+        if (!replacement) throw new Error("a replacement nominee is required");
+        return { kind: "replacement", replacement };
+      }
+      case "eviction-vote": { // D5-1: the most-repeated decision now accepts `vote` OR `choice` (A10/R4-02 parity).
+        const vote = singlePickId(req);
+        if (!vote) throw new Error("an eviction vote is required");
+        return { kind: "eviction-vote", vote };
+      }
       case "tie-break": { // B44: the player HOH breaks a tied eviction vote (A10: `vote` or `choice`).
         const evict = singlePickId(req);
         if (!evict) throw new Error("a tie-break vote is required");
@@ -1359,9 +1420,11 @@ export class GameSessionAdapter implements GameSession {
         }
         return { kind: "finale-answer", appeal: req.appeal as FinaleAppeal };
       }
-      case "juror-vote":
-        if (!req.vote) throw new Error("a juror vote is required");
-        return { kind: "juror-vote", vote: req.vote };
+      case "juror-vote": { // D5-1: the player-juror's finale vote accepts `vote` OR `choice` (A10 parity).
+        const vote = singlePickId(req);
+        if (!vote) throw new Error("a juror vote is required");
+        return { kind: "juror-vote", vote };
+      }
     }
   }
 

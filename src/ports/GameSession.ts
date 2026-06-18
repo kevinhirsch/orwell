@@ -103,6 +103,14 @@ export interface GameStateView {
   casting?: CastingStatusView;
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
+  /**
+   * A `createCharacter` that was REFUSED rather than honored (audit R4-05): a game already exists
+   * and no `confirmRestart` was given, so the prior season is intact and untouched (this view IS
+   * that prior season, not a new one). `in-progress` (a season is live) or `over` (a winner is
+   * crowned). The producer must NOT narrate a new season — direct the player to the menu / a
+   * confirmed restart. Absent on a real (fresh or confirmed) creation.
+   */
+  createRefused?: "in-progress" | "over";
 }
 
 /**
@@ -148,6 +156,20 @@ export interface CastingStatusView {
    * silently clobbering an answer. Empty/absent when nothing captured was changed.
    */
   overwrote?: string[];
+  /**
+   * Keys the caller passed that are NOT casting fields (audit R4-01) — e.g. `name` (the field is
+   * `playerName`), `notes`, or a typo. Echoed so a recording is never silently dropped: the
+   * producer learns the answer didn't land and can re-file it under the right field. Absent when
+   * every key was understood.
+   */
+  ignoredKeys?: string[];
+  /**
+   * Casting is CLOSED — there is already a game (audit R4-05). An honest refusal instead of a
+   * fake "ready": `in-progress` (a season is live) or `over` (a winner is crowned). The producer
+   * must NOT keep interviewing or claim a season started; a new season begins only through the
+   * sanctioned restart door (the menu / a confirmed `createCharacter`). Absent pre-game.
+   */
+  refused?: "in-progress" | "over";
 }
 
 /** The player makes a deal WITH a houseguest (player↔NPC). NPC↔NPC deals are off-screen/Vault-held. */
@@ -187,6 +209,15 @@ export interface CreateCharacterReq {
    * reset path) — it is NOT part of the player tool's documented schema.
    */
   confirmRestart?: boolean;
+  /**
+   * Season-to-season continuity (0056): on a CONFIRMED restart, KEEP the prior player's character —
+   * carry their authored fields (name/archetype/strategy/persona/backstory/motivation/private
+   * strategy/interview notes) into the new season so the SAME static CHARACTER returns to a NEW cast
+   * (a fresh seed). Explicit fields here still override field-by-field (a player may tweak on the way
+   * through). The dynamic SOUL/relationships reset at move-in. Ignored without `confirmRestart`, and
+   * a no-op on a fresh (no prior game) creation. Absent/false ⇒ a normal fresh creation (re-run casting).
+   */
+  keepCharacter?: boolean;
 }
 
 export interface MomentPromptReq {
@@ -240,6 +271,13 @@ export interface PublicGameStatus {
   hoh: { id: EntityId; name: string } | null;
   nominees: Array<{ id: EntityId; name: string }>;
   veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+  /**
+   * The CURRENT binding decision the loop is blocked on (the same Vault-free legal-options view the
+   * advance returns), or null when the engine isn't waiting on the player. Surfaced here so the
+   * decision card can re-arm from ENGINE TRUTH after a reload — robust to a front-end restart or an
+   * out-of-band advance (the FE's last-seen cache is process-local and goes stale; this never does).
+   */
+  pending: PendingDecisionView | null;
 }
 
 /** A named houseguest reference for decisions/options (Vault-free — id + name only). */

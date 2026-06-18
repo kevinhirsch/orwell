@@ -76,12 +76,29 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
 
 
 class NewGameRequest(BaseModel):
-    playerName: str
+    # 0056: optional when keepCharacter is set — the engine carries the prior player's name.
+    playerName: str = ""
     archetype: Optional[str] = None
     strategyStyle: Optional[str] = None
     seed: Optional[int] = None
     # Required to restart over a STARTED game (C12 / audit A2): without it the route 409s and
     # the engine-side B36 guard would no-op anyway. UI must ask the player explicitly.
+    confirm: bool = False
+    # 0056 — season-to-season continuity: on a confirmed restart, KEEP the existing houseguest
+    # (carry their CHARACTER into the new season) instead of running fresh casting. The engine
+    # re-supplies the prior player's authored fields, so no playerName is needed here when set.
+    keepCharacter: bool = False
+
+
+class NextSeasonRequest(BaseModel):
+    # 0057: keep the existing houseguest (0056) into the new cast, or recreate from casting.
+    keep: bool = True
+    # Explicit confirm — starting a new season ends the current one (mirrors /new-game's guard).
+    confirm: bool = False
+
+
+class ResetProgressRequest(BaseModel):
+    # 0057: the settings 'red zone' — explicit confirm to wipe progress toward the current season.
     confirm: bool = False
 
 
@@ -133,12 +150,12 @@ def setup_orwell_routes() -> APIRouter:
         (field bug: the panel's poll logged a 502 per refresh on a healthy, game-less box)."""
         try:
             st = await orwell_engine.game_status(user=_current_user(request))
-            # D3/E66: the last-seen pending decision rides along so the decision card
-            # can re-arm after a reload — the engine's own Vault-free legal-options
-            # view, cached at the AdvanceView chokepoints. A status poll NEVER
-            # advances the game (ADR 0003: progressing is always an explicit act).
+            # D3/E66: the current pending decision rides along so the decision card can re-arm after
+            # a reload. PREFER the engine's own `pending` (now on gameStatus — robust to a FE restart
+            # / out-of-band advance); fall back to the FE-cached last-seen only if the engine omitted
+            # it (older engine). A status poll NEVER advances the game (ADR 0003).
             if isinstance(st, dict):
-                st["pending"] = orwell_engine.last_pending(_current_user(request))
+                st["pending"] = st.get("pending") or orwell_engine.last_pending(_current_user(request))
             return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
@@ -187,6 +204,13 @@ def setup_orwell_routes() -> APIRouter:
         as a 404 — the unseal affordance does not exist mid-season."""
         try:
             retro = await orwell_engine.season_retrospective(user=_current_user(request))
+        except orwell_engine.EngineToolError as e:
+            # No active game (never started) — there is simply no season to unseal yet. Same 404 as
+            # a live season, never a false "engine unreachable" 502 (the engine answered, it refused).
+            if e.no_game:
+                return JSONResponse(status_code=404, content={"error": "No season to unseal — there is no active game."})
+            logger.warning(f"[orwell] retrospective failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] retrospective failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
@@ -453,6 +477,13 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": "entry is required"})
         try:
             return await orwell_engine.diary_room(body.entry.strip(), user=_current_user(request))
+        except orwell_engine.EngineToolError as e:
+            # "No active game" is a benign pre/post-game state (the engine is reachable; it refused),
+            # NOT an outage — return a clean 409 so the FE never shows a false "engine unreachable".
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] diary-room failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] diary-room failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
@@ -488,6 +519,13 @@ def setup_orwell_routes() -> APIRouter:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
             return res
+        except orwell_engine.EngineToolError as e:
+            # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
+            # because there is no active game. Benign 409, not a false "engine unreachable" 502.
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] decision failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] decision failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
@@ -501,7 +539,8 @@ def setup_orwell_routes() -> APIRouter:
         # survives only as a debug/ops door: the deploy smoke and the responsive-matrix harness use
         # it (both run with AUTH_ENABLED=false, which require_admin honors). Raises 403 otherwise.
         require_admin(request)
-        if not body.playerName.strip():
+        # 0056: a name is required UNLESS keeping the existing character (the engine carries it).
+        if not body.playerName.strip() and not body.keepCharacter:
             return JSONResponse(status_code=400, content={"error": "playerName is required"})
         user = _current_user(request)
         try:
@@ -522,11 +561,12 @@ def setup_orwell_routes() -> APIRouter:
             except Exception:
                 pass
             res = await orwell_engine.create_character(
-                body.playerName.strip(),
+                body.playerName.strip() or None,
                 archetype=body.archetype,
                 strategy_style=body.strategyStyle,
                 seed=body.seed,
                 confirm_restart=body.confirm,
+                keep_character=body.keepCharacter,  # 0056: carry the prior character into the new season
                 user=user,
             )
             # Restart-door hygiene (D3/E66): a fresh season wipes the prior season's cached
@@ -546,7 +586,80 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
-    # ── G11: the front-end failure ring ──────────────────────────────────────────
+    # ── 0057: seasons as levels — the per-user season number + the two restart actions ──────
+    @router.get("/season")
+    async def orwell_season(request: Request):
+        """Feature 0057: the user's current season number ('level', 1-based). Vault-free; a count
+        carries no game secret, and the store always answers (a corrupt/missing store ⇒ season 1)."""
+        from src import orwell_seasons
+        return {"season": orwell_seasons.get_season(_current_user(request))}
+
+    @router.post("/next-season")
+    async def orwell_next_season(body: NextSeasonRequest, request: Request):
+        """Feature 0057: start the NEXT season once this one has ENDED (any ending). Increments the
+        user's season number (a cleared level). Player-reachable for the caller's OWN game only —
+        `_current_user` scopes every engine call to their sandbox; it routes through the engine's
+        ONE sanctioned reset door (createCharacter+confirmRestart for keep; manageSandbox reset for
+        recreate). Not admin-gated (ruling: anyone may advance their own season, 0057)."""
+        from src import orwell_seasons
+        user = _current_user(request)
+        if not body.confirm:
+            return JSONResponse(status_code=400, content={"error": "confirm=true is required to start a new season"})
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+            if not isinstance(state, dict) or not state.get("started"):
+                return JSONResponse(status_code=409, content={"started": False, "error": "no season to advance from"})
+            # The level must be CLEARED before the next one: the season must be over (any ending).
+            if not state.get("finished"):
+                return JSONResponse(status_code=409, content={"error": "the current season is not over yet"})
+            # A new season is a new cast: scrub the prior portrait set before generating (0051).
+            try:
+                orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            if body.keep:
+                # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
+                res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
+            else:
+                # Recreate: reset to OOBE so the casting interview (0050) runs fresh for the new season.
+                res = await orwell_engine.manage_sandbox("reset", user=user)
+            # D3/E66 restart-door hygiene: clear the prior season's cached decision card so no phantom
+            # pending (e.g. last season's juror-vote) rides the status route into the new season.
+            orwell_engine.remember_pending(res, user=user)
+            season = orwell_seasons.increment_season(user)  # the level is cleared — advance the counter
+            try:
+                prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
+                if prompts:
+                    orwell_portraits.kickoff_generation(prompts, user)
+            except Exception:
+                pass
+            return {"season": season, "kept": bool(body.keep), "state": res}
+        except Exception as e:
+            logger.warning(f"[orwell] next-season failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    @router.post("/reset-progress")
+    async def orwell_reset_progress(body: ResetProgressRequest, request: Request):
+        """Feature 0057: the settings 'red zone' — wipe progress toward the CURRENT season and start
+        it over from casting. Does NOT increment the season number (you restart the level, you never
+        skip ahead). Player-reachable for the caller's OWN game only; routes through the engine's one
+        sanctioned reset (manageSandbox reset ⇒ OOBE)."""
+        user = _current_user(request)
+        if not body.confirm:
+            return JSONResponse(status_code=400, content={"error": "confirm=true is required to reset progress"})
+        try:
+            try:
+                orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
+            orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
+            return {"reset": True, "state": res}  # season number is deliberately UNTOUCHED
+        except Exception as e:
+            logger.warning(f"[orwell] reset-progress failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+
     # The FE's house style for user-facing feature failure is fail-OPEN (the panel
     # simply isn't there) — correct UX, structurally SILENT. This is the beacon sink
     # that makes those silences observable: orwellReport.js POSTs {surface, errorClass,

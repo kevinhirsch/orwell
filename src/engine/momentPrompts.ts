@@ -342,10 +342,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "reunion special. Offer the player the real story: seasonRecap for the public arc they lived, and " +
     "seasonRetrospective to OPEN THE PRODUCER'S VAULT — the off-screen scheming, the private " +
     "confessionals, the twist that never fired. Voice the reveals with relish; let them ask about any " +
-    "moment. A new season starts only from their explicit, confirmed request — never by surprise. When " +
-    "they DO ask to play again, run a fresh casting interview for the new houseguest, then finalize with " +
-    "createCharacter carrying confirmRestart=true — that one flag ends this season for good and casts a " +
-    "brand-new house; without it the call no-ops and the player stays stuck on the reunion.",
+    "moment. The player may linger in this post-season lobby as long as they like. Do NOT run a casting " +
+    "interview, call updateCasting, or narrate a NEW season into being from this chat — never improvise " +
+    "a season the game has not started (it sits at the finale, and updateCasting refuses with `refused` " +
+    "while this season stands). The primary way on is the persistent 'New season' surface in the menu " +
+    "(keep the houseguest or recreate them, per 0056). BUT if the player simply asks to run it back " +
+    "right here, you MAY finalize the restart directly: call createCharacter with confirmRestart=true " +
+    "(add keepCharacter=true to carry the SAME houseguest forward) — that one flag ends this season for " +
+    "good and the front-end starts the next; without it the call is refused (`createRefused`) and the " +
+    "season stands.",
   jury:
     "MOMENT — The jury seat. The player has been evicted but sits on the jury. From sequester they watch " +
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +

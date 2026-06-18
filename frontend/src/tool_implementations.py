@@ -4619,20 +4619,25 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
     # finalizes from its intake and rejects with a clear message if no name exists anywhere.
     player_name = (args.get("playerName") or "").strip() or None
     confirm_restart = bool(args.get("confirmRestart"))
+    keep_character = bool(args.get("keepCharacter"))  # 0056: carry the same houseguest into the next season
     # Restart-door backstop — error-correct the model the way the stall-nudge / auto-record do.
     # The model reliably FAILS to pass confirmRestart when the player asks to "play again" after a
     # season ends: it calls createCharacter repeatedly and every call no-ops (B36 guard), stranding
     # the player on the finished season (observed live — 6 no-op calls, then it gave up). When the
     # season is OVER (a winner was crowned — the moment is "post-season", so there is nothing left to
     # lose), a createCharacter IS the restart: confirm it. NEVER auto-confirm over a LIVE/unfinished
-    # season — that would wipe an ongoing game out from under the player; there the flag stays explicit.
-    if not confirm_restart:
-        try:
-            state = await orwell_engine.get_game_state(user=owner)
-            if isinstance(state, dict) and state.get("started") and state.get("moment") == "post-season":
-                confirm_restart = True
-        except Exception:
-            pass  # state probe is best-effort; never block a legitimate first-time creation
+    # season — that would wipe an ongoing game out from under the player; there the flag stays explicit
+    # (a mid-season "reset progress" is red-zone-only, never from chat). A chat "run it back" is a
+    # NEXT season exactly like the menu's button — so when it fires we advance the per-user season
+    # counter too (0057 parity), keeping the two paths consistent.
+    restarting_post_season = False
+    try:
+        state = await orwell_engine.get_game_state(user=owner)
+        if isinstance(state, dict) and state.get("started") and state.get("moment") == "post-season":
+            restarting_post_season = True  # a chat "run it back" = a next season → advance the counter
+            confirm_restart = True          # post-season createCharacter IS the restart
+    except Exception:
+        pass  # state probe is best-effort; never block a legitimate first-time creation
     try:
         res = await orwell_engine.create_character(
             player_name,
@@ -4652,6 +4657,7 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             # Without this flag createCharacter no-ops on a started game (B36 guard), which left the
             # player unable to start season 2 from chat — the relay used to drop the confirm.
             confirm_restart=confirm_restart,
+            keep_character=keep_character,  # 0056: carry the same houseguest forward when asked
             user=owner,
         )
         # D3/E66 + restart-door hygiene: a NEW season must not inherit the finished season's
@@ -4660,6 +4666,16 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # phantom card (e.g. last season's juror-vote, even under the old player's name) armed on
         # GET /api/orwell/status until the first advanceGame of season 2 overwrites it.
         orwell_engine.remember_pending(res, user=owner)
+        # 0057 parity: a chat "run it back" cleared the level exactly like the menu's New-season
+        # button, so advance the per-user season counter too (the engine reset does NOT track it —
+        # it lives in the FE store and survives the sandbox rotation). Mid-season resets never reach
+        # here (they are red-zone-only), so this only ever counts a genuine next-season.
+        if restarting_post_season and isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+            try:
+                from src import orwell_seasons
+                orwell_seasons.increment_season(owner)
+            except Exception:
+                pass  # the counter is best-effort meta-progression; never fail the restart over it
         # 0051: move-in cast portraits. The engine returns Vault-free portrait prompts on
         # season start; kick off generation in the background so game start NEVER blocks on
         # images, and so a missing image model is a silent no-op (graceful absence).

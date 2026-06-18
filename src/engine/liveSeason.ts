@@ -999,7 +999,7 @@ function resolveReplacement(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   s.replacement = replacement; s.finalNominees = [otherNominee(s), replacement]; s.beat = "eviction";
   return {
     beat: "veto-ceremony",
-    content: `${s.vetoHolder} uses the veto on ${s.saved}; ${s.hoh} names ${replacement} as the replacement`,
+    content: `${s.vetoHolder} uses the veto on ${s.vetoHolder === s.saved ? "themselves" : s.saved}; ${s.hoh} names ${replacement} as the replacement`,
     participants: [s.vetoHolder!, s.saved!, s.hoh!, replacement],
   };
 }
@@ -1100,7 +1100,7 @@ export function applyDecision(
       s.vetoUsed = true; s.saved = save!;
       // The HOH names the replacement. If the player is ALSO HOH, that's the next decision.
       const ev = resolveReplacement(s, ctx);
-      return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${save}`, participants: [ctx.player, save!] };
+      return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${ctx.player === save ? "themselves" : save}`, participants: [ctx.player, save!] };
     }
     case "comp-intent": {
       // B46/audit B5: the player declares compete/throw/play-safe; the comp then resolves with it.

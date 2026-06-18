@@ -78,4 +78,50 @@ describe("A10 — the live decision parser wires `choice` through to a real pend
     }
     expect(proven, "a houseguests-choice pending was reached and resolved via `choice`").toBe(true);
   });
+
+  // D5-1: eviction-vote (the most-repeated weekly decision) and replacement missed the A10
+  // standardization — they read `vote`/`replacement` directly and STALLED when a client sent the
+  // documented `choice`. Prove both now resolve via `choice` (driving real seasons; the player
+  // always USES the veto so a replacement pending is reached).
+  it("eviction-vote and replacement pendings resolve when the pick rides on `choice`", () => {
+    let evictionProven = false, replacementProven = false;
+    for (let seed = 1; seed <= 200 && !(evictionProven && replacementProven); seed++) {
+      const session = new GameSessionAdapter();
+      session.createCharacter({ playerName: "P", seed });
+      for (let i = 0; i < 8000; i++) {
+        const adv = session.advanceGame();
+        const p: Pending | null = adv.pending;
+        if (p?.kind === "eviction-vote" && !evictionProven) {
+          session.submitDecision({ kind: "eviction-vote", choice: [p.options[0]!.id] }); // pick via `choice`
+          expect(session.snapshot().live!.pending?.kind).not.toBe("eviction-vote"); // consumed, not stalled
+          evictionProven = true;
+          continue;
+        }
+        if (p?.kind === "replacement" && !replacementProven) {
+          session.submitDecision({ kind: "replacement", choice: [p.options[0]!.id] }); // pick via `choice`
+          expect(session.snapshot().live!.pending?.kind).not.toBe("replacement");
+          replacementProven = true;
+          continue;
+        }
+        if (p) {
+          switch (p.kind) {
+            case "nominations": session.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] }); break;
+            // ALWAYS use the veto when the player holds it, to reach a replacement pending.
+            case "veto-decision": session.submitDecision(p.options[0]
+              ? { kind: "veto-decision", use: true, save: p.options[0].id }
+              : { kind: "veto-decision", use: false }); break;
+            case "comp-intent": session.submitDecision({ kind: "comp-intent", intent: "compete" }); break;
+            case "goodbye-message": session.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id, statement: "x" }); break;
+            case "finale-statement": session.submitDecision({ kind: "finale-statement", statement: "x" }); break;
+            case "finale-answer": session.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! }); break;
+            case "juror-question": session.submitDecision({ kind: "juror-question", statement: "?" }); break;
+            default: session.submitDecision({ kind: p.kind, choice: [p.options?.[0]?.id] } as never); break;
+          }
+        }
+        if (adv.finished) break;
+      }
+    }
+    expect(evictionProven, "an eviction-vote pending was reached and resolved via `choice`").toBe(true);
+    expect(replacementProven, "a replacement pending was reached and resolved via `choice`").toBe(true);
+  });
 });

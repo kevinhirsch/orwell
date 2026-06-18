@@ -223,7 +223,8 @@ def creating_in_flight() -> bool:
 
 
 async def create_character(player_name: str | None = None, *, archetype=None, strategy_style=None,
-                           seed=None, confirm_restart: bool = False, user: str | None = None,
+                           seed=None, confirm_restart: bool = False, keep_character: bool = False,
+                           user: str | None = None,
                            persona_archetype=None, persona_strategy_style=None,
                            backstory=None, motivation=None, private_strategy=None,
                            interview_notes=None) -> dict:
@@ -261,6 +262,10 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
         args["seed"] = seed
     if confirm_restart:
         args["confirmRestart"] = True
+    if keep_character:
+        # 0056: on a confirmed restart, carry the prior player's CHARACTER into the new season
+        # (the engine re-supplies their authored fields; the same houseguest returns to a new cast).
+        args["keepCharacter"] = True
     global _CREATING_IN_FLIGHT
     _CREATING_IN_FLIGHT += 1  # G8: /health reports busy="creating" while this runs
     try:

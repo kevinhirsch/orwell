@@ -240,12 +240,35 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
     expect(s.getGameState().casting!.known["motivation"]).toBe("to win");
   });
 
-  it("after the season starts, updateCasting records nothing and reports done", () => {
+  it("after the season starts, updateCasting REFUSES honestly and records nothing (R4-05)", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Interviewee", seed: 5 });
     const st = s.updateCasting({ playerName: "Somebody Else" });
-    expect(st).toEqual({ known: {}, missing: [], next: null, ready: true });
+    // The old fake `ready:true` looked like success and let the model narrate a fresh interview;
+    // now it refuses with `ready:false` + a reason, and the live game is untouched.
+    expect(st).toEqual({ known: {}, missing: [], next: null, ready: false, refused: "in-progress" });
     expect(s.getGameState().player!.name).toBe("The Interviewee");
+  });
+
+  it("a refused createCharacter (no confirmRestart) returns the PRIOR season, flagged (R4-05)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Interviewee", seed: 5 });
+    const again = s.createCharacter({ playerName: "Someone New" });
+    // The no-op now SIGNALS the refusal so a caller can't read the unchanged view as a fresh season.
+    expect(again.createRefused).toBe("in-progress");
+    expect(again.player!.name).toBe("The Interviewee"); // the prior season stands, untouched
+    expect(s.getGameState().player!.name).toBe("The Interviewee");
+  });
+
+  it("updateCasting echoes keys it did not understand instead of silently dropping them (R4-01)", () => {
+    const s = new GameSessionAdapter();
+    // `name` is not a casting field (the field is `playerName`); a model filing under it would
+    // otherwise have its answer vanish and casting would stall. The ignored keys are surfaced.
+    const st = s.updateCasting({ name: "Wrong Field", bogus: 1, playerName: "The Interviewee" } as never);
+    expect(st.ignoredKeys).toEqual(expect.arrayContaining(["name", "bogus"]));
+    expect(st.known["playerName"]).toBe("The Interviewee"); // the understood key still lands
+    // A clean update reports no ignored keys at all.
+    expect(s.updateCasting({ motivation: "to win" }).ignoredKeys).toBeUndefined();
   });
 
   it("the pre-game view carries the casting status (the engine, not the model, owns next)", () => {

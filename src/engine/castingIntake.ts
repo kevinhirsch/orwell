@@ -104,6 +104,18 @@ export function overwrittenScalars(intake: CastingIntake, req: UpdateCastingReq)
   return hits;
 }
 
+/** The recognized casting fields — exactly the `UpdateCastingReq` keys (the coverage set). */
+const CASTING_FIELDS: ReadonlySet<string> = new Set<string>(CASTING_COVERAGE.map(({ field }) => field));
+
+/**
+ * Keys the caller passed that are NOT casting fields (audit R4-01). A model that records under
+ * `name` (the field is `playerName`), `notes`, or a typo would otherwise have its answer SILENTLY
+ * dropped and casting would stall. Echoing these lets the producer re-file under the right field.
+ */
+export function ignoredCastingKeys(req: object): string[] {
+  return Object.keys(req).filter((k) => !CASTING_FIELDS.has(k));
+}
+
 /** True when a field has been captured (notes: at least one recorded). */
 function captured(intake: CastingIntake, field: keyof CastingIntake): boolean {
   if (field === "interviewNotes") return intake.interviewNotes.length > 0;

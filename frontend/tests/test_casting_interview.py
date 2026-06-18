@@ -196,6 +196,43 @@ def test_restart_backstop_auto_confirms_over_a_finished_season(monkeypatch):
     assert received["confirm_restart"] is True, "a post-season createCharacter must auto-confirm the restart"
 
 
+def test_chat_restart_advances_the_season_counter(monkeypatch):
+    # 0057 parity (merge reconciliation): a chat "run it back" is a NEXT season exactly like the
+    # menu's New-season button, so it must advance the per-user season counter too — otherwise the
+    # two restart paths disagree on how many levels were cleared.
+    import importlib
+    orwell_seasons = importlib.import_module("src.orwell_seasons")
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Old", "status": "jury"}}
+
+    async def fake_create(player_name, **kwargs):
+        return {"started": True, "week": 1}  # a fresh season
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    before = orwell_seasons.get_season("season-counter-test-user")
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "New"}), owner="season-counter-test-user"))
+    assert orwell_seasons.get_season("season-counter-test-user") == before + 1
+
+
+def test_chat_restart_forwards_keep_character(monkeypatch):
+    # 0056 via chat: the model may carry the same houseguest forward (keepCharacter) on a chat restart.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Keep Me", "status": "jury"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"keepCharacter": True}), owner="u"))
+    assert received["keep_character"] is True and received["confirm_restart"] is True
+
+
 def test_restart_backstop_never_fires_mid_season(monkeypatch):
     # The backstop must NEVER wipe a LIVE season out from under the player — only a finished one.
     received = {}

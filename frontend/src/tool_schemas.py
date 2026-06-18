@@ -1525,11 +1525,20 @@ FUNCTION_TOOL_SCHEMAS = [
                     "confirmRestart": {
                         "type": "boolean",
                         "description": (
-                            "Set true ONLY to start a BRAND-NEW season over an existing one — when the "
-                            "current season is finished (a winner was crowned) or the player has clearly "
-                            "asked to abandon it and play again. This PERMANENTLY ends the current season "
-                            "(its cast, its history) and casts a fresh house. Without it, createCharacter "
-                            "no-ops on any started game, so omit it during a normal first-time casting."
+                            "Set true ONLY to start the NEXT season once the current one has ENDED (a "
+                            "winner was crowned — the post-season reunion) and the player asks to run it "
+                            "back in chat. This ends the finished season and starts a fresh one; the front "
+                            "end advances their season counter. Omit it during a normal first-time casting "
+                            "(it no-ops/refuses on a started game). Never use it to reset a LIVE season — "
+                            "a mid-season restart is a settings 'red zone' action, never a chat one."
+                        ),
+                    },
+                    "keepCharacter": {
+                        "type": "boolean",
+                        "description": (
+                            "With confirmRestart, carry the SAME houseguest (their name + authored "
+                            "character) into the next season instead of casting a new one (0056). Use it "
+                            "when the player wants to keep playing as who they are; omit to recreate fresh."
                         ),
                     },
                 },
