@@ -1934,7 +1934,9 @@ export function addMessage(role, content, modelName, metadata) {
           // C14/immersion: never render the raw LLM model name as the sender in the game
           // build — the narrator is the show (matches the live path's _setRoleModelLabel).
           roleEl.textContent = isGameBuild() ? "Big Brother" : modelRouteLabel(pair.requestedModel, contModel);
-          if (pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
+          // C14/immersion: the "alias -> dated-version" tooltip is a model-name leak too —
+          // suppressed in the game build (mirrors the live path's _setRoleModelLabel).
+          if (!isGameBuild() && pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }
           applyModelColor(roleEl, contModel);
@@ -2083,7 +2085,9 @@ export function addMessage(role, content, modelName, metadata) {
     }
     r.textContent = _roleText;
     if (role !== 'user') {
-      if (!isSlash && !isCompacted && replyModels.requestedModel && resolvedModel && !sameModelName(replyModels.requestedModel, resolvedModel)) {
+      // C14/immersion: suppress the "alias -> dated-version" tooltip in the game build —
+      // the raw model name must never reach the player, not even on hover.
+      if (!isGameBuild() && !isSlash && !isCompacted && replyModels.requestedModel && resolvedModel && !sameModelName(replyModels.requestedModel, resolvedModel)) {
         r.title = replyModels.requestedModel + ' -> ' + resolvedModel;
       }
       if (!isSlash && !isCompacted) applyModelColor(r, resolvedModel);
