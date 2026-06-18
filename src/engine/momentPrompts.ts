@@ -287,7 +287,10 @@ export const MOMENT_PROMPTS: Record<string, string> = {
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
-    "authority on who wins; runCompetition merely PREVIEWS that same winner, it never decides a second.)",
+    "authority on who wins; runCompetition merely PREVIEWS that same winner, it never decides a second.) " +
+    "RESOLVE BEFORE YOU NARRATE THE RESULT: read who actually won from the game FIRST, then reveal ONLY " +
+    "that exact winner — never put a winner on the page you have not read back, and never announce one " +
+    "winner and then 'correct' it.",
   nominations:
     "MOMENT — Nomination ceremony. The two nominees are DECIDED BY THE GAME and are already in your " +
     "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
@@ -299,10 +302,13 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "GAME — the drawn six are in gameStatus (veto.players: HOH + the two nominees + three by chip " +
     "draw, including any Houseguest's Choice pick). Name THOSE EXACT players; never invent, guess, " +
     "or substitute who is competing. If gameStatus shows no veto players yet, the chip draw has NOT " +
-    "run — call advanceGame to draw them and do NOT narrate any names you do not have. Once they " +
-    "are drawn, let the drama of who is and isn't playing breathe, then call advanceGame to RESOLVE " +
-    "the comp; announce the WINNER only (no scores), and NEVER announce a winner before the game " +
-    "has actually resolved the competition.",
+    "run — call advanceGame to draw them and do NOT narrate any names you do not have. " +
+    "RESOLVE BEFORE YOU NARRATE THE RESULT: the winner is the GAME's to decide, NEVER yours to guess, " +
+    "and the HOH-comp winner is NOT automatically the veto winner. Call advanceGame to RESOLVE the comp " +
+    "(or runCompetition to preview the same winner) and READ who actually won FIRST; only THEN write the " +
+    "competition, revealing ONLY that exact winner (no scores). Never put a winner on the page before you " +
+    "have read it back from the game, and never announce one winner and then 'correct' it — resolve first " +
+    "so there is nothing to take back. Let the drama of who is and isn't playing breathe.",
   "veto-ceremony":
     "MOMENT — Veto ceremony. The veto holder uses it or not; if used, the HOH names a replacement " +
     "from the game's legal options. Maximize the suspense of the chess move; you voice the result.",
