@@ -23,7 +23,6 @@ HTML_SRC = (FRONTEND_DIR / "static" / "index.html").read_text(encoding="utf-8")
 CSS_TRIM = (FRONTEND_DIR / "static" / "css" / "game-trim.css").read_text(encoding="utf-8")
 JS_ONBOARDING = (FRONTEND_DIR / "static" / "js" / "orwellOnboarding.js").read_text(encoding="utf-8")
 JS_STATUS = (FRONTEND_DIR / "static" / "js" / "orwellStatusPanel.js").read_text(encoding="utf-8")
-JS_SOCIAL = (FRONTEND_DIR / "static" / "js" / "orwellSocial.js").read_text(encoding="utf-8")
 JS_DIARY = (FRONTEND_DIR / "static" / "js" / "orwellDiaryRoom.js").read_text(encoding="utf-8")
 
 
@@ -273,32 +272,17 @@ class TestStatusHUD:
 
 
 # ===========================================================================
-# TestSocialSurface
+# TestDiaryRoomSurface
 # ===========================================================================
 
-class TestSocialSurface:
+class TestDiaryRoomSurface:
     """
-    The social surface panel (orwellSocial.js):
-      - Shows NPC approach chips with "pull aside" and dismiss actions
-      - Opens a Diary Room modal for player confessionals
-      - Diary Room: clears textarea on open, disables send during submit,
-        re-enables on error, shows "Recorded" confirmation on success
-      - Approach chips: dismiss is session-only (in-memory Set, no server call)
-      - startScene prefills the chat composer with "I pull <name> aside..."
-      - Modal backdrop click closes the Diary Room
-      - Hidden when no game is active (st.started is false)
-      - Refreshes on orwell:gamechanged
+    The Diary Room surface (orwellDiaryRoom.js) — a sidebar button plus a
+    composer mode for player confessionals (E88, ruling #4: no floating dialog).
+      - Standing trigger lives in the sidebar; composer enters DR mode
+      - The confessional is intercepted in the capture phase (never a chat turn)
+      - Shows a "Recorded" confirmation on success; guards an empty entry
     """
-
-    def test_social_panel_root_id(self):
-        assert "orwell-social" in JS_SOCIAL
-
-    def test_social_has_no_diary_room(self):
-        # E88 (ruling #4): the social HUD keeps only approaches.
-        assert "osoc-dr-open" not in JS_SOCIAL
-
-    def test_social_has_no_dr_modal(self):
-        assert "orwell-dr-modal" not in JS_SOCIAL
 
     def test_dr_module_is_a_sidebar_button_plus_composer_mode(self):
         # E88 (ruling #4): the standing trigger + the composer mode live in orwellDiaryRoom.js.
@@ -315,58 +299,11 @@ class TestSocialSurface:
         assert "stopImmediatePropagation" in JS_DIARY
         assert '}, true)' in JS_DIARY
 
-    def test_social_approach_header(self):
-        # Header element shown/hidden based on approach count
-        assert "osoc-appr-hd" in JS_SOCIAL
-
-    def test_social_approach_list(self):
-        # Container where approach chips are rendered
-        assert "osoc-appr" in JS_SOCIAL
-
-    def test_social_dismiss_uses_session_set(self):
-        # Dismiss must NOT POST to server — purely in-memory
-        src = JS_SOCIAL
-        assert "dismissed" in src and ("new Set" in src or "Set(" in src)
-
-    def test_social_dr_clears_textarea_on_open(self):
-        src = JS_SOCIAL
-        assert "value" in src and ("= ''" in src or '= ""' in src or ".value = " in src)
-
-    def test_dr_send_is_intercepted_in_capture_phase(self):
-        # The confessional must never reach the chat pipeline as a turn.
-        assert "stopImmediatePropagation" in JS_DIARY
-        assert '}, true)' in JS_DIARY
-
-    def test_social_dr_reenables_on_error(self):
-        assert "catch" in JS_SOCIAL or "finally" in JS_SOCIAL
-
     def test_dr_shows_confirmation_on_success(self):
-        assert "Recorded" in JS_DIARY or "recorded" in JS_SOCIAL
-
-    def test_social_start_scene_prefills_composer(self):
-        assert "pull" in JS_SOCIAL and "aside" in JS_SOCIAL
-
-    def test_social_backdrop_closes_modal(self):
-        src = JS_SOCIAL
-        assert "backdrop" in src.lower() or "click" in src
-
-    def test_social_hidden_when_no_game(self):
-        # Social surface gates on st.started (not week) and hides when engine is down
-        src = JS_SOCIAL
-        assert "started" in src and ("display" in src or "hidden" in src.lower())
-
-    def test_social_listens_for_gamechanged(self):
-        assert "orwell:gamechanged" in JS_SOCIAL
-
-    def test_social_polls_periodically(self):
-        assert "setInterval" in JS_SOCIAL or "setTimeout" in JS_SOCIAL
+        assert "Recorded" in JS_DIARY or "recorded" in JS_DIARY
 
     def test_dr_empty_entry_guard(self):
         assert ".trim" in JS_DIARY
-
-    def test_social_dr_modal_accessibility(self):
-        src = JS_SOCIAL + HTML_SRC
-        assert "dialog" in src or "aria-modal" in src
 
 
 # ===========================================================================

@@ -63,7 +63,7 @@ def test_presence_strip_is_mounted_and_ambient():
 
     js = open(os.path.join(FRONTEND, "static", "js", "orwellPresence.js"), encoding="utf-8").read()
     # Ambient, never click-to-act: it is now docked as sidebar chrome ("Where you are"),
-    # mirroring the status HUD / "Wants a word" gadgets — NO interactive control at all (the old
+    # mirroring the status HUD gadget — NO interactive control at all (the old
     # floating dismiss strip covered the composer/chat), and the module never POSTs anywhere
     # (reads state + whereabouts only).
     assert js.count("addEventListener(\"click\"") == 0

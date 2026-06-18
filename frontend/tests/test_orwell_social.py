@@ -44,24 +44,6 @@ def test_tagline_fails_open_to_default(client, monkeypatch):
     assert r.json()["text"] == "The house is waiting."  # never blank, never blocks
 
 
-# --- approaches (0036): pass through, fail open -------------------------------
-
-def test_initiatives_passthrough(client, monkeypatch):
-    async def fake(user=None):
-        return [{"houseguest": {"id": "npc:1", "name": "A Houseguest"}, "pretext": "wants a word with you"}]
-    monkeypatch.setattr(orwell_engine, "social_initiatives", fake)
-    r = client.get("/api/orwell/initiatives")
-    assert r.status_code == 200
-    assert r.json()["initiatives"][0]["houseguest"]["name"] == "A Houseguest"
-
-
-def test_initiatives_fails_open_to_empty(client, monkeypatch):
-    monkeypatch.setattr(orwell_engine, "social_initiatives", _raise)
-    r = client.get("/api/orwell/initiatives")
-    assert r.status_code == 200
-    assert r.json() == {"initiatives": []}  # no chips on error — never block the chat
-
-
 # --- diary room (0036): requires an entry; records; surfaces engine failure ---
 
 def test_diary_room_requires_entry(client):

@@ -116,7 +116,7 @@ def test_backfill_is_wired_into_the_finishing_block():
     assert "_want_deal = (_turn_deal_nudges < 1" in js
     assert "_DEAL_SIGNAL_RE.search(_turn_narration)" in js
     assert "_turn_narration = " in js and "for t in round_texts if t" in js
-    assert "if _want_advance or _want_record or _want_deal or _want_reapproach:" in js
+    assert "_want_advance or _want_record or _want_deal or" in js and "_want_reapproach:" in js
     assert "await _auto_record_deal(_turn_narration" in js
     # model-driven makeDeal always wins — it suppresses the back-fill for the turn
     assert 'block.tool_type == "makeDeal"' in js

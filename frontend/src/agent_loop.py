@@ -1761,6 +1761,24 @@ _REAPPROACH_NUDGES = [
     "and you'll be here whenever they're ready. Then let them be — do not nag further this turn.)",
 ]
 _MAX_REAPPROACH_NUDGES_PER_TURN = 1  # at most one re-approach injected per finishing turn
+_MAX_APPROACH_NUDGES_PER_TURN = 1    # at most one NPC-approach nudge per finishing turn (non-disruptive)
+
+
+def _approach_nudge(name: str, motive) -> str:
+    """The GM-facing nudge to voice an NPC drifting over to start a scene (0036/0049). The motive
+    (bond | probe) shades HOW they approach but is never named to the player. The scene that follows
+    is real social play — it folds into the hidden weights via recordInteraction / the 0055 belt."""
+    manner = ("warm, looking to bond" if motive == "bond"
+              else "guarded, sizing you up" if motive == "probe"
+              else "wanting a word")
+    return (
+        f"The house has gone quiet, and {name} has been waiting for a chance to catch the player "
+        f"({manner}). NPCs play their OWN game and come to the player, not only the other way around — "
+        f"so have {name} drift over and START the scene now, in their own voice and manner. Do NOT "
+        "announce their intent or any read out of character (no 'they want to talk to you' narration, "
+        "never name a motive) — just play the approach as it happens. Record the scene with "
+        "recordInteraction so it moves where it should."
+    )
 
 # Persisted per-user post-season state: how many off-finale turns the player has taken, and how
 # many times we've re-approached (sets escalation). Cleared when the user leaves the post-season
@@ -2323,6 +2341,7 @@ async def stream_agent_loop(
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
+    _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
@@ -2829,11 +2848,22 @@ async def stream_agent_loop(
                 _turn_narration = "\n".join(t for t in round_texts if t)
                 _want_deal = (_turn_deal_nudges < 1
                               and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
+                # NPC-approach nudge (0036/0049): the house lives between the player's beats — NPCs play
+                # THEIR game and come to the player, not only the other way around. With the "Wants a
+                # word" notification panel removed (owner ruling 2026-06-18 — that intent must never reach
+                # the player through a UI), the GM is the only door for an organic approach, and it under-
+                # uses the socialInitiatives lever. So in the LINGERING window — the player turn was a lull
+                # AND the beat is NOT yet stale enough to advance — if a houseguest wants the player, we
+                # nudge the GM to voice THAT NPC drifting over to start a scene (in chat, where the weights
+                # actually move: the scene then folds via recordInteraction / the 0055 belt). When the lull
+                # persists past the grace window, the advance-nudge takes over and the week moves on.
+                _want_approach = (_is_lull and (not _progressed) and (not _stale)
+                                  and _turn_approach_nudges < _MAX_APPROACH_NUDGES_PER_TURN)
                 # The re-approach can fire on ANY finishing live turn (it watches the post-season
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_deal or _want_reapproach:
+                if _want_advance or _want_record or _want_deal or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     try:
                         from src import orwell_engine as _oe
@@ -2892,6 +2922,27 @@ async def stream_agent_loop(
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
+                    # NPC approach in the lingering window: the lull hasn't gone stale (so we're not yet
+                    # advancing the week) — if a houseguest wants the player, bring THEM over in chat now,
+                    # so the social life stays alive without a notification panel ever telling the player.
+                    if _want_approach and _phase in _ADVANCE_PHASES:
+                        _inits = []
+                        try:
+                            from src import orwell_engine as _oe2
+                            _inits = await _oe2.social_initiatives(owner)
+                        except Exception as _e:
+                            logger.warning(f"[orwell] social-initiatives fetch failed: {_e}")
+                        _inits = _inits if isinstance(_inits, list) else []
+                        if _inits:
+                            _top = _inits[0] or {}
+                            _hg = (_top.get("houseguest") or {})
+                            _name = _hg.get("name")
+                            if _name:
+                                _turn_approach_nudges += 1
+                                logger.info(f"[orwell] approach nudge ({_name}, phase={_phase}) round {round_num} user={owner}")
+                                messages.append({"role": "system", "content": _approach_nudge(_name, _top.get("motive"))})
+                                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                continue
                     # bank an engaged houseguest scene — the model skipped recording it, so the FE
                     # GUARANTEES the fold itself (0055): a constrained extraction + recordInteraction.
                     # Model-driven recording always takes precedence (if it had recorded, _recorded

@@ -12,7 +12,7 @@ will not persist." Lane G17 ships the fix the audit specified:
     confessional text is WITHHELD. A restored confessional must never be sendable to
     the house (the Diary Room's "no in-game pathway to any NPC" contract).
   * F7 — the pending approach chip's accent + send-dismisses contract ride the record
-    (the orwellSocial.js seam).
+    (the pending-approach seam).
   * F4 — the casting-seat marker used to one-shot at PREFILL time, stranding an empty
     composer forever after a pre-send refresh; the seated path now RE-ARMS the prefill
     (never the fresh-session click) when nothing has been spoken and no draft came back.
@@ -42,7 +42,6 @@ def _read_root(*parts) -> str:
 
 SRC = _read("orwellComposerDraft.js")
 DR = _read("orwellDiaryRoom.js")
-SOC = _read("orwellSocial.js")
 OB = _read("orwellOnboarding.js")
 CHAT = _read("chat.js")
 
@@ -142,21 +141,6 @@ def test_diary_room_announces_every_mode_change():
 
 # ── 3. F7: the pending approach rides the record ───────────────────────────────
 
-def test_social_exposes_the_pending_seam():
-    assert "window._orwellPendingApproach" in SOC
-    seam = SOC[SOC.index("window._orwellPendingApproach"):]
-    assert "get:" in seam[:200] and "restore:" in seam[:300]
-    assert '"orwell:approachpending"' in SOC  # live changes notify the draft module
-
-
-def test_every_live_pending_mutation_goes_through_the_notifying_door():
-    # startScene / send / the chip's X / the new-game reset all use the setter; the
-    # bare assignment survives only inside the setter and the silent boot restore.
-    assert SOC.count("pendingApproachId = id") == 2  # setPendingApproach + restore
-    assert "setPendingApproach(id)" in SOC           # startScene
-    assert SOC.count("setPendingApproach(null)") >= 3  # send, X, clearDismissed
-
-
 def test_restore_hands_the_id_back_to_social():
     assert "window._orwellPendingApproach.restore" in SRC
 
@@ -199,5 +183,4 @@ def test_browser_smoke_drives_the_draft_for_real():
     smoke = _read_root("scripts", "browser_smoke.py")
     assert "G17/F3: the typed draft is restored into the composer after reload" in smoke
     assert "G17/F5: DR mode was active BEFORE the restored text landed" in smoke
-    assert "G17/F7: pendingApproachId survives the reload" in smoke
     assert "G17/F4: with the marker set and no draft, the seat prefill RE-ARMS" in smoke

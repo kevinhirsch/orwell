@@ -1,4 +1,4 @@
-"""Game HUDs (status + social) — sidebar-chrome SOURCE-PINS (T20, refit by E64 + H5).
+"""Game HUDs (status panel) — sidebar-chrome SOURCE-PINS (T20, refit by E64).
 
 EXPLICIT SOURCE-PINS, NOT BEHAVIOR COVERAGE. Every assertion in this file greps the static JS
 source; a passing grep proves the wiring is *present*, never that it *works*. The real
@@ -8,11 +8,9 @@ window, this file goes red in the fast pytest gate before the browser smoke even
 each `test_*` below as "the source still wires X", not "X behaves correctly".
 
 History: T20 originally pinned the HUDs' minimize-to-dock wiring. Ruling #3/E64 moved the
-status panel to sidebar chrome; H5/G7 (2026-06-11, user verdict on "The House") then folded
-the social/approaches surface into the sidebar the same way — so NO game HUD remains on the
-floating-window/dock contract here. The finale (still a kit window) is pinned in
-test_f_window_kit.py and exercised for real (T20/F1/F2) in browser_smoke.py; the H5 sidebar
-contract for the social section is pinned in test_h5_house_in_sidebar.py and mirrored below.
+status panel to sidebar chrome — so NO game HUD remains on the floating-window/dock contract
+here. The finale (still a kit window) is pinned in test_f_window_kit.py and exercised for real
+(T20/F1/F2) in browser_smoke.py.
 
 Name-agnostic; no game state required.
 """
@@ -25,38 +23,6 @@ STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 def _read(name: str) -> str:
     with open(os.path.join(STATIC, name), encoding="utf-8") as f:
         return f.read()
-
-
-# ── H5/G7 (user verdict): the social surface is a sidebar section, never a window ──
-# SOURCE-PINS: these grep orwellSocial.js for "is sidebar chrome" markers, mirroring the
-# E64 status-panel pins below. The BEHAVIORAL counterpart — the section actually mounts
-# inside #sidebar, shows nothing while empty, and is never fixed-position — is asserted
-# in browser_smoke.py (the H5 block).
-
-def test_sourcepin_social_is_sidebar_chrome_not_a_window():
-    src = _read("orwellSocial.js")
-    assert "position: fixed" not in src, "H5: the social section must not be fixed-position"
-    assert "makeWindowDraggable" not in src, "H5: no drag"
-    assert "modalManager" not in src, "H5: no dock/minimize"
-    assert "OrwellWindowKit" not in src, "H5: the window kit is composed by WINDOWS — this is chrome"
-    assert "OrwellSlots" not in src, "H5: no slot placement — static sidebar flow"
-    assert 'getElementById("sidebar")' in src, "H5: mounts inside #sidebar"
-    assert '"sessions-section"' in src, "H5: anchors near the session list / status section"
-
-
-def test_sourcepin_social_keeps_poll_render_and_seams():
-    src = _read("orwellSocial.js")
-    for keep in ("orwell:gamechanged", "_orwellSocialEnsure", "_orwellSocialDriveApproaches",
-                 "MOTIVE_FRAMING", "firstCeremonyResolved", "MAX_APPROACHES"):
-        assert keep in src, f"H5 keeps the poll/render/seam logic: {keep}"
-
-
-def test_sourcepin_social_dropped_dock_state_bookkeeping():
-    # The dock-era state (isMinimized guards, the C26 mobile auto-park) is gone with the
-    # window; the sidebar drawer owns narrow viewports like every other section.
-    src = _read("orwellSocial.js")
-    assert "isMinimized" not in src, "H5: no minimized-state bookkeeping for a sidebar section"
-    assert "_mobileParkedOnce" not in src, "H5: no mobile auto-park — the drawer owns narrow"
 
 
 # ── E64 (ruling #3): the status panel is a sidebar section, never a window ──
