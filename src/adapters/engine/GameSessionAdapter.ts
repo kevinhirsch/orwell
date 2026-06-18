@@ -7,6 +7,8 @@ import type {
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
+import { humanizeIds } from "./humanize";
+import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { dayOfWeek } from "../../engine/houseEvents";
@@ -1286,21 +1288,27 @@ export class GameSessionAdapter implements GameSession {
         if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
         return { kind: "comp-intent", intent };
       }
-      case "houseguests-choice": // B45: the player picks the sixth veto player; `vote` carries the pick.
-        if (!req.vote) throw new Error("a Houseguest's Choice pick is required");
-        return { kind: "houseguests-choice", pick: req.vote };
+      case "houseguests-choice": { // B45: the player picks the sixth veto player (A10: `vote` or `choice`).
+        const pick = singlePickId(req);
+        if (!pick) throw new Error("a Houseguest's Choice pick is required");
+        return { kind: "houseguests-choice", pick };
+      }
       case "replacement":
         if (!req.replacement) throw new Error("a replacement nominee is required");
         return { kind: "replacement", replacement: req.replacement };
       case "eviction-vote":
         if (!req.vote) throw new Error("an eviction vote is required");
         return { kind: "eviction-vote", vote: req.vote };
-      case "tie-break": // B44: the player HOH breaks a tied eviction vote; `vote` carries the evictee.
-        if (!req.vote) throw new Error("a tie-break vote is required");
-        return { kind: "tie-break", evict: req.vote };
-      case "final-eviction": // Final 3 (0045): the final HOH evicts; `vote` carries the evictee.
-        if (!req.vote) throw new Error("a final-eviction target is required");
-        return { kind: "final-eviction", evict: req.vote };
+      case "tie-break": { // B44: the player HOH breaks a tied eviction vote (A10: `vote` or `choice`).
+        const evict = singlePickId(req);
+        if (!evict) throw new Error("a tie-break vote is required");
+        return { kind: "tie-break", evict };
+      }
+      case "final-eviction": { // Final 3 (0045): the final HOH evicts (A10: `vote` or `choice`).
+        const evict = singlePickId(req);
+        if (!evict) throw new Error("a final-eviction target is required");
+        return { kind: "final-eviction", evict };
+      }
       case "goodbye-message": { // E34: the tone rides `vote` (like comp-intent's `intent ?? vote` seam).
         const tone = req.vote as GoodbyeTone | undefined;
         if (!tone || !(GOODBYE_TONES as readonly string[]).includes(tone)) {
@@ -1442,15 +1450,12 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
-  /** Replace raw entity ids in a loop event string with the houseguests' public names. */
+  /** Replace raw entity ids in a loop event string with the houseguests' public names.
+   *  Delegates to the whole-token substituter so beat prose like "the veto players are drawn"
+   *  is never mangled by the player's bare-word id "player" (audit A8). */
   private humanize(content: string): string {
     const all = this.house ? [this.house.player, ...this.house.npcs] : [];
-    let out = content;
-    // Longest ids first so "npc:1" never clobbers part of "npc:15".
-    for (const h of [...all].sort((a, b) => b.id.length - a.id.length)) {
-      out = out.split(h.id).join(h.name);
-    }
-    return out;
+    return humanizeIds(content, all);
   }
 
   getGameState(): GameStateView {

@@ -435,7 +435,9 @@ export interface RetrospectiveView {
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
-  /** nominations: exactly two houseguest ids. */
+  /** nominations: exactly two houseguest ids. For houseguests-choice / tie-break / final-eviction
+   *  a single pick may ride here as a 1-element array (the FE tool schema's convention) — the
+   *  engine accepts it interchangeably with `vote` (audit A10). */
   choice?: EntityId[];
   /** veto-decision: whether to use the veto. */
   use?: boolean;

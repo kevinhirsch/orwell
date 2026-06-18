@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,5 +195,32 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     for (const c of hidden(sb)) expect(json.includes(c)).toBe(false); // no off-screen content
     // The player has no access to the health surface.
     expect((sb.player as unknown as Record<string, unknown>)["sandboxHealth"]).toBeUndefined();
+  });
+});
+
+describe("A9 — a supplementary turn-driven off-screen tick with an empty society is not a fault", () => {
+  const emptyApply = (): number => 0; // the off-screen society legitimately had nothing to add
+
+  it("a supplementary tick stays integrity-ok (no no-daily-event fault); a direct tick still flags it", () => {
+    const registry = new GameSessionRegistry();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const orch = new Orchestrator(registry, new FakeClock(), { seed: 4, apply: emptyApply });
+      registry.sandboxFor(U).session.createCharacter({ playerName: "P", seed: 4 });
+
+      // Supplementary (the turn-driven path, A9): an empty society this tick is a clean no-op —
+      // the daily-event invariant belongs to the live loop's own beats, not this background tick.
+      const supp = orch.advance(U, "offscreen-tick", { supplementary: true });
+      expect(supp.integrity).toBe("ok");
+      expect(supp.faults).toEqual([]);
+
+      // A non-supplementary off-screen tick (the watcher/direct path) still flags the empty tick —
+      // that daily-event guard is what opsHardening relies on to trip the circuit breaker.
+      const direct = orch.advance(U, "offscreen-tick");
+      expect(direct.integrity).toBe("fault");
+      expect(direct.faults.some((f) => f.kind === "no-daily-event")).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });

@@ -192,8 +192,13 @@ export class Orchestrator {
     );
   }
 
-  /** The one advance spine. `audit` verifies only (no progression). */
-  advance(user: string, trigger: Trigger, opts: { baseline?: SessionSnapshot } = {}): AdvanceResult {
+  /** The one advance spine. `audit` verifies only (no progression).
+   *  `supplementary` (A9): a turn-driven off-screen tick that rides ON TOP of a player turn the
+   *  live loop already moved — it is pure society enrichment, so a tick that legitimately has
+   *  nothing to add is a clean no-op, not a `no-daily-event` fault (the daily-event invariant is
+   *  the live loop's own beats, not this background tick). Non-degradation and the Vault Wall are
+   *  still enforced. A watcher/direct off-screen tick (no flag) keeps the daily-event check. */
+  advance(user: string, trigger: Trigger, opts: { baseline?: SessionSnapshot; supplementary?: boolean } = {}): AdvanceResult {
     // The circuit breaker (B58/E6): after repeated identical faults, off-screen ticks SKIP this
     // sandbox instead of blindly retrying — the flag shows in health; a good player turn resets it.
     if (trigger === "offscreen-tick" && this.circuitOpen(user)) {
@@ -220,7 +225,8 @@ export class Orchestrator {
     }
 
     const candidate = this.registry.snapshot(user);
-    const faults = this.checkpoint(baseline, candidate, sandbox, trigger);
+    const faults = this.checkpoint(baseline, candidate, sandbox, trigger,
+      opts.supplementary ? { requireDailyEvent: false } : {});
     const when = this.clock.now();
 
     if (faults.length === 0) {
@@ -325,7 +331,9 @@ export class Orchestrator {
     const last = this.lastTurnTickAt.get(user);
     if (!progressed && last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5
     this.lastTurnTickAt.set(user, now);
-    this.advance(user, "offscreen-tick", { baseline: candidate }); // R3: the commit just exported this
+    // R3: the commit just exported this. A9: a supplementary tick — an empty society this tick is
+    // a clean no-op, not a daily-event fault (the live loop owns that invariant via its beats).
+    this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
   }
 
   /** Verify a candidate advance against the baseline — fail-closed (0031 §4.3). */
