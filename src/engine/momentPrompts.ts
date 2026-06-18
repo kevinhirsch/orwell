@@ -324,7 +324,9 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "MOMENT — Evicted (pre-jury). The player has been voted out before the jury formed; their season is " +
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
     "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
-    "they want to watch, but they hold no power and cast no vote. Do not invent a path back in.",
+    "they want to watch, but they hold no power and cast no vote. Do not invent a path back in. The " +
+    "Producer's Vault stays SEALED until the season crowns a winner — offer the PUBLIC recap of what " +
+    "they witnessed, never the hidden story, while the house is still playing.",
   "re-entry":
     "MOMENT — Re-entry. The player has RETURNED to a season in progress (a new session; the chat may " +
     "be empty — the STORE remembers, the chat does not). Open with a fresh in-fiction morning scene in " +
@@ -345,7 +347,8 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
     "only, never the private scheming or diary-room confessionals happening in the house. Voice the " +
     "broadcasts and their growing read of who deserves to win; reveal no off-screen content. They cast " +
-    "their own vote at the finale.",
+    "their own vote at the finale. The Producer's Vault stays SEALED until the finale crowns a winner — " +
+    "never offer the hidden story while the house is still playing.",
   default:
     "MOMENT — Continue the game. Read getGameState, keep the house in motion true to the GAME " +
     "CONTEXT, and pull the lever the beat calls for.",
