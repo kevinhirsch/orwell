@@ -340,7 +340,12 @@ async def surface_information(information: str, pathway: str, user: str | None =
 
 
 async def game_status(user: str | None = None) -> dict:
-    """Vault-free public ceremony status for the status panel: week/phase/HOH/nominees/veto."""
+    """Vault-free public ceremony status for the status panel: week/phase/HOH/nominees/veto.
+
+    `veto` carries `{holder, used, players}` — `players` is the drawn six (E35: who plays the
+    Power of Veto this week), empty before the chip draw runs, so a narrator names the real field
+    instead of inventing who competes.
+    """
     return await _call("gameStatus", {}, user=user)
 
 

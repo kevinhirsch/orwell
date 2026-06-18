@@ -295,8 +295,14 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "run yet: do NOT narrate any names — you do not know them. Once you have them, play the dread, the " +
     "speeches, the table reactions, and record the ceremony with recordInteraction.",
   "veto-competition":
-    "MOMENT — Power of Veto competition. Six play; call advanceGame to RESOLVE it; announce the " +
-    "winner only, no scores. Let the drama of who is and isn't playing breathe.",
+    "MOMENT — Power of Veto competition. SIX houseguests play, and WHO plays is DECIDED BY THE " +
+    "GAME — the drawn six are in gameStatus (veto.players: HOH + the two nominees + three by chip " +
+    "draw, including any Houseguest's Choice pick). Name THOSE EXACT players; never invent, guess, " +
+    "or substitute who is competing. If gameStatus shows no veto players yet, the chip draw has NOT " +
+    "run — call advanceGame to draw them and do NOT narrate any names you do not have. Once they " +
+    "are drawn, let the drama of who is and isn't playing breathe, then call advanceGame to RESOLVE " +
+    "the comp; announce the WINNER only (no scores), and NEVER announce a winner before the game " +
+    "has actually resolved the competition.",
   "veto-ceremony":
     "MOMENT — Veto ceremony. The veto holder uses it or not; if used, the HOH names a replacement " +
     "from the game's legal options. Maximize the suspense of the chess move; you voice the result.",

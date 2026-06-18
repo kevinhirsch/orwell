@@ -516,7 +516,14 @@ export class GameSessionAdapter implements GameSession {
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
-      veto: { holder: this.card(this.ceremony.vetoHolder), used: this.ceremony.vetoUsed },
+      veto: {
+        holder: this.card(this.ceremony.vetoHolder),
+        used: this.ceremony.vetoUsed,
+        // E35/audit C-03: the drawn six (the witnessed chip draw) — empty before the draw, so the
+        // narrator names THESE exact players rather than inventing who competes. Read straight off
+        // the live field (persisted, 0030); cleared with the rest of the week's ceremony state.
+        players: (this.live?.vetoField ?? []).map((id) => ({ id, name: this.nameOf(id) })),
+      },
       // The live pending (Vault-free legal options) so the decision card re-arms from engine truth
       // on reload — not the FE's process-local last-seen cache, which a FE restart wipes.
       pending: this.pendingView(),

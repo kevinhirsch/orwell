@@ -277,7 +277,18 @@ export interface PublicGameStatus {
   day: number | null;
   hoh: { id: EntityId; name: string } | null;
   nominees: Array<{ id: EntityId; name: string }>;
-  veto: { holder: { id: EntityId; name: string } | null; used: boolean };
+  veto: {
+    holder: { id: EntityId; name: string } | null;
+    used: boolean;
+    /**
+     * The drawn six (E35): WHO plays the Power of Veto this week — the witnessed chip draw is a
+     * public ceremony of its own (HOH + the two nominees + three by chip, incl. any Houseguest's-
+     * Choice pick). Empty before the draw has run and after the week rolls. Vault-free: the field
+     * is public the moment the chips are pulled, so the narrator names THESE exact players instead
+     * of inventing who competes (parallels the nominee grounding, audit C-03).
+     */
+    players: Array<{ id: EntityId; name: string }>;
+  };
   /**
    * The CURRENT binding decision the loop is blocked on (the same Vault-free legal-options view the
    * advance returns), or null when the engine isn't waiting on the player. Surfaced here so the
