@@ -34,12 +34,16 @@ def test_rail_is_game_build_gated_and_responsive():
     assert ".gadget-rail-body > #orwell-status { order: 1; }" in css
 
 
-def test_controller_persists_state_and_gates_on_active_game():
+def test_controller_persists_state_and_gates_on_content():
     js = _read("static", "js", "orwellGadgetRail.js")
     assert "data-game-build" in js                 # never in the full workspace
     assert "orwell-gadget-rail-collapsed" in js     # persisted collapse
     assert "orwell-gadget-side" in js               # persisted side
-    assert "/api/orwell/status" in js               # show only while a season is live
+    # visibility is CONTENT-driven (a gadget with visible content reveals the rail) — no
+    # status-fetch race; this is what the browser-smoke keep-set relies on.
+    assert "MutationObserver" in js
+    assert "_hasContent" in js
+    assert "syncVisibility" in js
     assert "orwell:gamechanged" in js
     # Escape is NOT handled per-surface (flows through ui.js's arbiter — F3 ratchet)
     assert '"Escape"' not in js and "'Escape'" not in js

@@ -122,11 +122,14 @@ def test_keeps_the_poll_loop_and_fail_open():
 
 # ── 4. the gates moved with the surface ────────────────────────────────────────
 
-def test_browser_smoke_asserts_the_sidebar_reality():
+def test_browser_smoke_asserts_the_rail_reality():
+    # 0054 relocated The House from #sidebar into the control-room gadget rail; the smoke
+    # asserts it mounts as a (non-window) section in the rail, still shows nothing while
+    # empty, and renders chips there.
     smoke = _read_root("scripts", "browser_smoke.py")
-    assert "H5: The House mounts as a sidebar section" in smoke
+    assert "0054: The House mounts as a section in the gadget rail" in smoke
     assert "H5: with no pending approach the section shows nothing" in smoke
-    assert "H5: approach chips render inside the sidebar section" in smoke
+    assert "0054: approach chips render inside the gadget rail section" in smoke
     assert "H5: no orwell-social dock chip exists" in smoke
     # the window-era social assertions are gone
     assert 'page.click("#orwell-social .ow-min")' not in smoke
