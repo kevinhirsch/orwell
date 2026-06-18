@@ -1,8 +1,14 @@
 # 0054 — The control-room gadget rail (right-side HUD + dockable game windows)
 
-**Status:** design note (queued to build after the 2026-06-18 surface-hardening pass).
-**Owner ruling:** product owner, 2026-06-18 (described twice in session). Build as its own
-low-blast-radius PR — it must not destabilise the "usable by tomorrow" ship.
+**Status:** **Phase 1 BUILT (2026-06-18)** — the right-side collapsible HUD rail ships: the
+status / "wants a word" / "where you are" gadgets now mount into `#gadget-rail-body` (sidebar
+fallback preserved), with a collapse→icon-strip toggle, a **side-swap** toggle (flex `order`),
+a **mobile slide-over drawer** (768px token) with a floating opener, game-build + game-active
+gating, and persisted collapse/side state (`orwellGadgetRail.js`). Browser-verified desktop +
+mobile. **Deferred to Phase 2:** docking the finale / cast / retrospective windows INTO the rail
+(they still float via the Lane-F kit), and per-gadget icons in the collapsed strip.
+**Owner ruling:** product owner, 2026-06-18 (described twice in session). Built as its own
+low-blast-radius PR.
 
 ## Why
 

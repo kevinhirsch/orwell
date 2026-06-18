@@ -155,10 +155,13 @@ import { onNarrowChange } from './platform.js';
       </div>
       <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
 
-    // E64: mount INSIDE the sidebar, below the session list — never document.body.
+    // 0054: prefer the control-room gadget rail; fall back to the sidebar (E64) then body.
+    const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
     const sessions = document.getElementById("sessions-section");
-    if (sessions && sessions.parentElement) {
+    if (rail) {
+      rail.appendChild(el);
+    } else if (sessions && sessions.parentElement) {
       sessions.parentElement.insertBefore(el, sessions.nextSibling);
     } else if (sidebar) {
       sidebar.appendChild(el);

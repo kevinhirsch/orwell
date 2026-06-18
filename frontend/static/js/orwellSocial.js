@@ -189,10 +189,16 @@
     // Mount INSIDE the sidebar, directly under the game-status section (or under the
     // session list before the status panel has mounted — the two orderings converge:
     // sessions → status → approaches). Never document.body, never floating.
+    // 0054: prefer the control-room gadget rail (under the status panel when it's there).
+    const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
-    const anchor = document.getElementById("orwell-status") ||
-                   document.getElementById("sessions-section");
-    if (anchor && anchor.parentElement) {
+    const status = document.getElementById("orwell-status");
+    const anchor = status || document.getElementById("sessions-section");
+    if (rail && status && status.parentElement === rail) {
+      rail.insertBefore(el, status.nextSibling);
+    } else if (rail) {
+      rail.appendChild(el);
+    } else if (anchor && anchor.parentElement) {
       anchor.parentElement.insertBefore(el, anchor.nextSibling);
     } else if (sidebar) {
       sidebar.appendChild(el);

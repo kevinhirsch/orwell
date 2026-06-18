@@ -85,9 +85,13 @@
       `<div class="opres-body" data-role="text"></div>`;
     // Mount inside the sidebar, beside the other game gadgets (the status HUD /
     // "Wants a word"). Fall back to the session list, then the sidebar, then body.
+    // 0054: prefer the control-room gadget rail (under the other gadgets when present).
+    const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
-    const anchor = document.getElementById("orwell-status") || document.getElementById("orwell-social");
-    if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);
+    const anchor = document.getElementById("orwell-social") || document.getElementById("orwell-status");
+    if (rail && anchor && anchor.parentElement === rail) rail.insertBefore(el, anchor.nextSibling);
+    else if (rail) rail.appendChild(el);
+    else if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);
     else if (sidebar) sidebar.appendChild(el);
     else document.body.appendChild(el);
     return el;

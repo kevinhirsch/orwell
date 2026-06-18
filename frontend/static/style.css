@@ -1826,6 +1826,86 @@ body.bg-pattern-sparkles {
       transition: margin-left 160ms cubic-bezier(0.22, 0.61, 0.36, 1),
                   margin-right 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
     }
+
+    /* ── 0054: the control-room gadget rail (right-side HUD column) ───────────── */
+    .gadget-rail {
+      width: 300px; flex-shrink: 0; min-height: 0;
+      display: flex; flex-direction: column;
+      background: var(--sidebar-bg, var(--panel));
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 12px rgba(0,0,0,0.08);
+      overflow: hidden;
+      transition: width 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+    .gadget-rail[hidden] { display: none; }
+    .gadget-rail-head {
+      display: flex; align-items: center; gap: .4rem;
+      padding: .55rem .6rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .gadget-rail-title { font-weight: 700; letter-spacing: .03em; font-size: .82rem; flex: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gadget-rail-toggle, .gadget-rail-swap, .gadget-rail-close {
+      background: transparent; border: none; color: var(--fg); cursor: pointer;
+      font-size: 1rem; line-height: 1; padding: .25rem .35rem; border-radius: 6px; opacity: .7;
+    }
+    .gadget-rail-toggle:hover, .gadget-rail-swap:hover, .gadget-rail-close:hover {
+      opacity: 1; background: color-mix(in srgb, var(--fg) 10%, transparent); }
+    .grail-chevron { display: inline-block; transition: transform .22s ease; }
+    .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
+      display: flex; flex-direction: column; }
+    /* canonical stacking regardless of which gadget mounted first */
+    .gadget-rail-body > #orwell-status { order: 1; }
+    .gadget-rail-body > #orwell-social { order: 2; }
+    .gadget-rail-body > #orwell-presence { order: 3; }
+    .gadget-rail-strip { display: none; flex-direction: column; align-items: center; gap: .3rem; padding: .5rem 0; }
+    .grail-ico { background: transparent; border: none; cursor: pointer; font-size: 1.1rem;
+      padding: .35rem; border-radius: 8px; line-height: 1; }
+    .grail-ico:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+    /* collapsed: a thin icon strip; the body + most chrome hide, the chevron flips */
+    .gadget-rail[data-collapsed="true"] { width: 50px; }
+    .gadget-rail[data-collapsed="true"] .gadget-rail-body,
+    .gadget-rail[data-collapsed="true"] .gadget-rail-title,
+    .gadget-rail[data-collapsed="true"] .gadget-rail-swap,
+    .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: none; }
+    .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: flex; }
+    .gadget-rail[data-collapsed="true"] .grail-chevron { transform: rotate(180deg); }
+    .gadget-rail[data-collapsed="true"] .gadget-rail-head { justify-content: center; padding: .55rem 0; }
+    /* the floating mobile opener (hidden on desktop) */
+    .gadget-rail-open {
+      position: fixed; right: 12px; bottom: calc(var(--composer-clearance, 84px) + 8px); z-index: 46;
+      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--accent, #e06c75); color: #fff; font-size: 1.1rem; cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,.3); display: none;
+    }
+    .gadget-rail-open[hidden] { display: none !important; }
+    /* side-swap: gadget rail to the LEFT, nav sidebar to the RIGHT (flex order) */
+    body[data-gadget-side="left"] #gadget-rail { order: -1; border-left: none;
+      border-right: 1px solid var(--border); box-shadow: 4px 0 12px rgba(0,0,0,0.08); }
+    body[data-gadget-side="left"] #sidebar { order: 1; }
+    /* game-build gate: no rail in the full inherited workspace */
+    body:not([data-game-build]) #gadget-rail,
+    body:not([data-game-build]) #gadget-rail-open { display: none !important; }
+    /* ── mobile: the rail is a right slide-over drawer ───────────────────────── */
+    @media (max-width: 768px) {
+      .gadget-rail {
+        position: fixed; top: 0; right: 0; height: 100%; height: 100dvh;
+        width: min(300px, 86vw); z-index: 60; flex-shrink: 0;
+        transform: translateX(102%); box-shadow: -6px 0 20px rgba(0,0,0,.35);
+        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      .gadget-rail.grail-open { transform: translateX(0); }
+      /* the drawer always shows its full body on mobile — no icon-strip mode */
+      .gadget-rail[data-collapsed="true"] { width: min(300px, 86vw); }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-body { display: block; }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-title,
+      .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: inline; }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
+      .gadget-rail-toggle, .gadget-rail-swap { display: none; }
+      body[data-game-build] .gadget-rail-open { display: block; }
+      body[data-gadget-side="left"] #gadget-rail { left: 0; right: auto;
+        transform: translateX(-102%); border: none; border-right: 1px solid var(--border); }
+      body[data-gadget-side="left"] #gadget-rail.grail-open { transform: translateX(0); }
+    }
     .chat-meta { font-size:12px; color:color-mix(in srgb, var(--fg) 60%, transparent); margin-bottom:6px; }
     .chat-history {
       flex:1;

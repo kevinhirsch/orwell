@@ -156,6 +156,7 @@ def test_game_build_never_labels_messages_with_the_model_name():
     assert "data-game-build" in chat and "label = 'Big Brother'" in chat
     renderer = _read("static", "js", "chatRenderer.js")
     assert renderer.count('isGameBuild() ? "Big Brother"') >= 2   # main reply + image bubble
+    assert "(isGameBuild() && role === 'assistant') ? 'Big Brother'" in renderer  # the _roleText path
 
 
 def test_reload_path_applies_production_beats():
