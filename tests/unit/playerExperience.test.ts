@@ -24,7 +24,7 @@ describe("0020 — player experience", () => {
     const s = new GameSessionAdapter().gameStatus();
     expect(s.hoh).toBeNull();
     expect(s.nominees).toEqual([]);
-    expect(s.veto).toEqual({ holder: null, used: false });
+    expect(s.veto).toEqual({ holder: null, used: false, players: [] });
   });
 
   it("portraitDescriptorFor uses public facets only and is seed-stable", () => {

@@ -75,6 +75,54 @@ def test_covers_every_intent_free_ceremony(monkeypatch, phase):
     assert "advance" in calls, phase
 
 
+def _wire_veto(monkeypatch, *, players, pending, calls):
+    """C-03: a veto-competition beat. `players` is the drawn-six list gameStatus reports."""
+    async def fake_status(user=None):
+        calls.append("status")
+        return {"phase": "veto-competition", "pending": pending, "veto": {"holder": None, "used": False, "players": players}}
+
+    async def fake_advance(user=None):
+        calls.append("advance")
+        return {"event": {"content": "the veto players are drawn: A, B, C, D, E, F"}}
+
+    async def fake_state(user=None, **kw):
+        calls.append("state")
+        return {"started": True, "phase": "veto-competition", "moment": "veto-competition"}
+
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "advance_game", fake_advance)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+
+def test_veto_draw_runs_when_no_field_is_drawn_yet(monkeypatch):
+    # The chip draw has not run (no drawn players) and no player decision is pending → draw for real.
+    calls = []
+    _wire_veto(monkeypatch, players=[], pending=None, calls=calls)
+    state = {"started": True, "phase": "veto-competition", "moment": "veto-competition"}
+    _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert "advance" in calls, "an unrun veto chip draw must be resolved so the field is grounded"
+
+
+def test_veto_draw_does_not_fire_once_the_field_is_drawn(monkeypatch):
+    # The six are already drawn → the COMPETITION is the model's to build/resolve; never advance it.
+    calls = []
+    _wire_veto(monkeypatch, players=[{"id": "npc:1", "name": "A"}], pending=None, calls=calls)
+    state = {"started": True, "phase": "veto-competition", "moment": "veto-competition"}
+    out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert "advance" not in calls, "the comp belongs to the model once the chips are drawn"
+    assert out is state
+
+
+def test_veto_draw_never_overrides_a_player_pending(monkeypatch):
+    # The player drew Houseguest's Choice (or owes a comp-intent) → a pending is present → never advance.
+    calls = []
+    _wire_veto(monkeypatch, players=[], pending={"kind": "houseguests-choice"}, calls=calls)
+    state = {"started": True, "phase": "veto-competition", "moment": "veto-competition"}
+    out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    assert "advance" not in calls, "must never auto-resolve the player's own veto decision"
+    assert out is state
+
+
 def test_is_best_effort_never_raises(monkeypatch):
     # An engine hiccup mid-resolve must leave the turn exactly as it was, never blow up the frame.
     async def boom(user=None):
