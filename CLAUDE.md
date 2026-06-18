@@ -174,6 +174,20 @@ persists each turn with a fail-closed integrity checkpoint (0031). Hold the line
 work: **never ship an action that is narrated but never recorded** — it has no consequence and no
 memory.
 
+**The front-end error-corrects the model (`frontend/src/agent_loop.py`).** A real, recurring gap:
+the narration LLM reliably **under-calls** the engine tools — it won't `advanceGame` (the game
+freezes at a beat) and won't `recordInteraction` for the player's social scenes (they fold zero
+impact). The engine is fine; the *model* skips the call. So the FE agent loop carries two in-loop
+guardrails (the owner's ruling: keep the dynamic DM, error-correct the omission — never engine-
+author content): (1) a **progression stall-nudge** that, when the live game sits in an advance-
+phase and the player turn is a *lull* (engagement-driven, never a turn count — pacing is "seize the
+lull, let substantive play run"), nudges the model to `advanceGame`; and (2) **`_auto_record_scene`
+(feature 0055)** — when an engaged player↔houseguest turn recorded nothing, the FE makes a
+constrained extraction call (`{withIds, kind, content}`, model-proposed direction) and calls
+`recordInteraction` itself, GUARANTEEING the social play moves the hidden weights. Model-driven
+recording always takes precedence. When debugging "the game won't advance" or "social play has no
+consequence," look here, not only at the engine.
+
 ## Characters, souls & per-moment temperature
 
 - **Only the player's profile is human-authored** (first-run OOBE). **All NPC profiles are
@@ -498,10 +512,20 @@ fly-out minimize/close animation); the low-priority sweep defects **A8–A10** (
 the word "player(s)" in beat prose; expected-empty-tick integrity-fault log noise; the
 Houseguest's-Choice pending presents `options` but expects the pick on `vote`); and the R3
 partial (late-season latency still grows with the O(events) snapshot export — improved, not
-eliminated; an incremental-snapshot item if play feels it). *(The ADR 0004 fastembed adapter is
-now BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side narrator is
-`EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
+eliminated; an incremental-snapshot item if play feels it); and **0054 Phase 2** — docking the
+finale / cast / retrospective windows INTO the control-room gadget rail (Phase 1 — the right-side
+HUD rail — shipped 2026-06-18; those panels still float via the Lane-F kit). *(The ADR 0004
+fastembed adapter is now BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
+narrator is `EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
 `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
+
+**Session 2026-06-18 — two new FE features shipped (specs in `docs/features/`):** **0054** (the
+control-room **gadget rail** — Phase 1: the right-side collapsible HUD; status / "wants a word" /
+"where you are" mount into `#gadget-rail-body`, with collapse→icon-strip, side-swap, mobile drawer,
+content-driven visibility, persisted layout — `frontend/static/js/orwellGadgetRail.js`) and **0055**
+(**social play moves the weights** — the FE `_auto_record_scene` guarantee documented in the
+consequence-loop section above; *Big Brother is politics*, so ongoing role-play must move other
+houseguests' hidden perceptions, and it now structurally does).
 
 ## Open decisions (remaining)
 
