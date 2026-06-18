@@ -168,14 +168,84 @@
     return chip;
   }
 
+  // The chip floats top-right, but the 0054 gadget rail also lives on the right edge (full height),
+  // so a naive right:10px overlaps its header (swap/close). Sit the chip just LEFT of the rail when
+  // the rail is on the right and shown; fall back to the corner when it's collapsed-thin, swapped to
+  // the left, a mobile drawer, or absent. Recomputed on show, on resize, and when the rail toggles.
+  function positionChip(chip) {
+    const W = window.innerWidth;
+    const cr = chip.getBoundingClientRect();
+    const chipW = cr.width || 80;
+    const top = cr.top || 8, bot = cr.bottom || 27;
+    // Right-side obstacles that share the chip's ROW: the 0054 gadget rail (right edge, desktop) and
+    // the chat-top-bar "More"/export control. Store BOTH edges so we shift left of an obstacle only
+    // when the chip's box truly intersects it — a control sitting far to the left never drags it in.
+    const obstacles = [];
+    const narrow = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+    const onLeft = document.body && document.body.getAttribute("data-gadget-side") === "left";
+    const rail = document.getElementById("gadget-rail");
+    if (rail && !narrow && !onLeft) {
+      const r = rail.getBoundingClientRect();
+      if (r.width > 0 && r.right >= W - 2 && r.top < bot && r.bottom > top) obstacles.push([r.left, r.right]);
+    }
+    const exp = document.getElementById("export-dropdown-wrap");
+    if (exp) {
+      const er = exp.getBoundingClientRect();
+      if (er.width > 0 && er.top < bot && er.bottom > top) obstacles.push([er.left, er.right]);
+    }
+    // Start in the corner; shift left past any obstacle the chip's box ACTUALLY intersects.
+    let rightPx = 10;
+    for (let iter = 0; iter < 4; iter++) {
+      const chipRight = W - rightPx, chipLeft = chipRight - chipW;
+      let moved = false;
+      for (const [oLeft, oRight] of obstacles) {
+        if (chipRight > oLeft && chipLeft < oRight) { // true box intersection
+          rightPx = Math.round(W - oLeft) + 8;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    // A quiet corner indicator never marches past mid-screen.
+    chip.style.right = Math.min(rightPx, Math.round(W * 0.5)) + "px";
+  }
+
   function paintChip(season) {
     const chip = ensureChip();
     if (typeof season === "number" && season >= 2) {
       chip.textContent = "Season " + season;
       chip.style.display = "block";
+      positionChip(chip); // clear the gadget rail (avoids the reported header overlap)
     } else {
       chip.style.display = "none"; // season 1 shows nothing (B)
     }
+  }
+
+  // Reposition the chip live when the rail toggles (collapse / side-swap) or the window resizes,
+  // so it never drifts back under the rail. The gadget rail can MOUNT LATER than our first paint,
+  // so: (a) a settle-ramp re-places the chip as layout lands, and (b) the rail observer is attached
+  // the first time the rail exists (not just at init, when it may still be null).
+  let _railObserved = false;
+  function _ensureRailObserver(reflow) {
+    if (_railObserved || typeof MutationObserver === "undefined") return;
+    const rail = document.getElementById("gadget-rail");
+    if (!rail) return;
+    const mo = new MutationObserver(reflow);
+    mo.observe(rail, { attributes: true, attributeFilter: ["data-collapsed", "style", "class"] });
+    if (document.body) mo.observe(document.body, { attributes: true, attributeFilter: ["data-gadget-side"] });
+    _railObserved = true;
+  }
+  function _watchChipPosition() {
+    const reflow = () => {
+      const c = document.getElementById(CHIP_ID);
+      if (c && c.style.display !== "none") positionChip(c);
+      _ensureRailObserver(reflow); // attach once the rail has mounted
+    };
+    window.addEventListener("resize", reflow);
+    // The rail usually mounts within the first second; re-place across the settle so the chip
+    // never gets stuck at the default corner because it measured before the rail existed.
+    [120, 500, 1200, 3000].forEach((ms) => setTimeout(reflow, ms));
+    _ensureRailObserver(reflow);
   }
 
   // ── the refresh cycle ─────────────────────────────────────────────────────
@@ -213,6 +283,7 @@
   }
 
   function start() {
+    _watchChipPosition();
     refresh();
     if (_timer) clearInterval(_timer);
     const tick = async () => {
