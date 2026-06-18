@@ -84,24 +84,11 @@ def test_smoke_exercises_the_kit_for_real():
 
 # ── Lane F / F-2 wave 1 pins ──────────────────────────────────────────────
 
-def test_sourcepin_wave1_social_superseded_by_h5():
-    # Wave 1 moved the social panel ONTO the kit; H5/G7 (2026-06-11, the user verdict
-    # on "The House") then retired the window outright — approaches are SIDEBAR CHROME
-    # now (the ruling #3/E64 pattern; pinned in test_h5_house_in_sidebar.py). What this
-    # pin still owes Lane F: none of the audit's bespoke-chrome findings may regrow here.
-    js = _read("static", "js", "orwellSocial.js")
-    assert "OrwellWindowKit" not in js              # not a window — composes NO chrome
-    assert "makeWindowDraggable" not in js          # bespoke drag wiring stays deleted
-    assert "osoc-hdr" not in js                     # bespoke titlebar stays deleted
-    assert "osoc-min" not in js                     # bespoke minimize button stays deleted
-    assert "modalManager.register(" not in js       # never registers with the dock
-
-
 def test_sourcepin_wave1_sheet_host_owns_narrow():
     slots = _read("static", "js", "orwellSlots.js")
     assert "restackNarrowSheets" in slots           # the F3 sheet host exists
     # (H5: social left the sheet world for the sidebar; finale is the game sheet.)
-    for f in ("orwellSocial.js", "orwellFinale.js"):
+    for f in ("orwellFinale.js",):
         js = _read("static", "js", f)
         assert "top: 44px !important" not in js, f  # per-panel pins are gone
         assert "left: 0 !important" not in js, f

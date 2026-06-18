@@ -146,10 +146,9 @@ def test_ratchet_no_new_per_surface_escape_handlers():
 
 def test_ratchet_game_panels_stay_on_the_kit():
     # The migrated end state, pinned: no orwell* game panel re-grows bespoke chrome.
-    # H5/G7 (2026-06-11, user verdict): orwellSocial.js is no longer a window AT ALL —
+    # H5/G7 (2026-06-11, user verdict): the approaches surface is no longer a window AT ALL —
     # "The House" approaches surface is sidebar chrome now (the ruling #3/E64 status-panel
-    # pattern; pinned in test_h5_house_in_sidebar.py), so the finale is the remaining
-    # kit game panel.
+    # pattern), so the finale is the remaining kit game panel.
     for f in ("orwellFinale.js",):
         with open(os.path.join(JS_DIR, f), encoding="utf-8") as fh:
             src = fh.read()

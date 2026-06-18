@@ -155,7 +155,7 @@ def test_decision_card_success_branch_calls_the_helper():
 
 # ── 4. listeners untouched — they already subscribe ──────────────────────────
 
-LISTENERS = ["orwellStatusPanel.js", "orwellSocial.js", "orwellCast.js",
+LISTENERS = ["orwellStatusPanel.js", "orwellCast.js",
              "orwellFinale.js", "orwellEngineStatus.js", "orwellDiaryRoom.js",
              "orwellDecision.js"]
 

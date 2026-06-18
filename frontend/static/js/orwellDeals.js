@@ -106,12 +106,11 @@
       <div class="odl-hd">🤝 Your deals</div>
       <div id="odl-list"></div>`;
     // Mount into the control-room gadget rail (0054), under the status panel; fall back to the
-    // sidebar (then body) exactly as orwellSocial does — never floating, never document.body first.
+    // sidebar (then body) — never floating, never document.body first.
     const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
     const status = document.getElementById("orwell-status");
-    const social = document.getElementById("orwell-social");
-    const anchor = social || status || document.getElementById("sessions-section");
+    const anchor = status || document.getElementById("sessions-section");
     if (rail && anchor && anchor.parentElement === rail) {
       rail.insertBefore(el, anchor.nextSibling);
     } else if (rail) {

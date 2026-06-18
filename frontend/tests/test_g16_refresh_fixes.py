@@ -197,7 +197,7 @@ def test_sourcepin_f2_cast_toggle_keeps_a_boot_parked_mount_docked():
 
 def test_sourcepin_f2_no_per_panel_parked_persistence():
     # The F-3 ratchet: parked persistence lives in the kit, nowhere else.
-    for panel in ("orwellCast.js", "orwellFinale.js", "orwellSocial.js"):
+    for panel in ("orwellCast.js", "orwellFinale.js"):
         js = _read("static", "js", panel)
         assert "orwell-win-parked" not in js, f"{panel} must not mint its own parked key"
 

@@ -88,7 +88,7 @@
     // 0054: prefer the control-room gadget rail (under the other gadgets when present).
     const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
-    const anchor = document.getElementById("orwell-social") || document.getElementById("orwell-status");
+    const anchor = document.getElementById("orwell-status");
     if (rail && anchor && anchor.parentElement === rail) rail.insertBefore(el, anchor.nextSibling);
     else if (rail) rail.appendChild(el);
     else if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);

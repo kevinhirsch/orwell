@@ -19,7 +19,10 @@ export const ORWELL_TOOL_BEATS = {
   'recordInteraction': '🎬 Scene log',
   'surfaceInformationTo': '🤫 Word travels',
   'socialRead': '👀 Reading the room',
-  'socialInitiatives': '🚪 Who wants a word',
+  // Owner ruling 2026-06-18: NPC approach-INTENT never surfaces to the player — not even as a
+  // beat label that says someone "wants a word". The GM reads the house's social pull privately and
+  // voices any approach organically in chat, so this reads as a neutral "reading the house" beat.
+  'socialInitiatives': '🏠 Reading the house',
   'diaryRoom': '📔 Diary Room',
   'makeDeal': '🤝 Handshake',
   'askProducers': '🎙 Producers',

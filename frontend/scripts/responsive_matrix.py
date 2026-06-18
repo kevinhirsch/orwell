@@ -100,7 +100,7 @@ def stage_game():
         return False
 
 
-GAME_SURFACES = ["#orwell-status", "#orwell-social", "#orwell-presence",
+GAME_SURFACES = ["#orwell-status", "#orwell-presence",
                  "#orwell-retro", "[id*='ofin']", "[class*='odec']"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
@@ -154,7 +154,7 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
     crowd = page.evaluate(f"""
       (() => {{
         const out = [];
-        const els = document.querySelectorAll('#settings-modal *, .settings-layout *, #orwell-status *, #orwell-social *, #chat-form *');
+        const els = document.querySelectorAll('#settings-modal *, .settings-layout *, #orwell-status *, #chat-form *');
         let i = 0;
         for (const el of els) {{
           if (i++ > 2500) break;

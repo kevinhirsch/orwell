@@ -227,8 +227,6 @@ def main() -> int:
             # E88 (ruling #4): no floating dialog — the composer enters DR mode.
             check(page.evaluate("!document.getElementById('orwell-dr-modal')") is True,
                   "diary room: no floating dialog exists")
-            check(page.evaluate("!document.querySelector('.osoc-box')") is True,
-                  "diary room: no dialog box node is created")
             check(page.evaluate("window._orwellDiaryRoomActive && window._orwellDiaryRoomActive()") is True,
                   "diary room: composer mode engages via the seam")
             check(page.evaluate("document.body.classList.contains('orwell-dr-mode')") is True,
@@ -297,49 +295,6 @@ def main() -> int:
                   f"sidebar Theme entry is visible under the game build ({sidebar_theme})")
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
-
-            # H5/G7 + 0054: the approaches surface is a <section> of CHROME (NOT a window) —
-            # no kit chrome, no dock chip, no fixed position; while no approach is pending it
-            # shows NOTHING (the "useless empty window" the verdict retired can never render).
-            # 0054 relocated it from #sidebar into the control-room gadget rail (#gadget-rail-body).
-            page.evaluate("window._orwellSocialEnsure && window._orwellSocialEnsure()")
-            page.wait_for_selector("#orwell-social", state="attached", timeout=3000)
-            h5 = page.evaluate("""() => {
-              const el = document.getElementById('orwell-social');
-              const rail = document.getElementById('gadget-rail-body');
-              const cs = getComputedStyle(el);
-              return { tag: el.tagName, inRail: !!(rail && rail.contains(el)),
-                       fixed: cs.position === 'fixed', kit: el.hasAttribute('data-ow-window'),
-                       chrome: !!el.querySelector('.ow-titlebar, .ow-controls'),
-                       emptyHidden: cs.display === 'none' };
-            }""")
-            check(h5.get("tag") == "SECTION" and h5.get("inRail") is True,
-                  f"0054: The House mounts as a section in the gadget rail ({h5})")
-            check(h5.get("kit") is False and h5.get("chrome") is False and h5.get("fixed") is False,
-                  f"H5: no window chrome — not kit-managed, never fixed ({h5})")
-            check(h5.get("emptyHidden") is True,
-                  f"H5: with no pending approach the section shows nothing ({h5})")
-            h5_chips = page.evaluate("""() => {
-              const r = window._orwellSocialDriveApproaches(true, [
-                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
-                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
-              ]);
-              const el = document.getElementById('orwell-social');
-              return { count: r.count, visible: getComputedStyle(el).display !== 'none',
-                       inRail: document.getElementById('gadget-rail-body').contains(el) };
-            }""")
-            check(h5_chips.get("count") == 2 and h5_chips.get("visible") is True
-                  and h5_chips.get("inRail") is True,
-                  f"0054: approach chips render inside the gadget rail section ({h5_chips})")
-            h5_empty = page.evaluate("""() => {
-              window._orwellSocialDriveApproaches(true, []);
-              return getComputedStyle(document.getElementById('orwell-social')).display === 'none';
-            }""")
-            check(h5_empty is True, "H5: clearing the approaches collapses the section again")
-            check(page.evaluate("!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id=\"orwell-social\"]')") is True,
-                  "H5: no orwell-social dock chip exists (it is not a window)")
-            check(page.evaluate("!document.getElementById('orwell-social').querySelector('[title=\"Drag to move\"]')") is True,
-                  "H5: the section advertises no drag affordance")
 
             # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
             # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
@@ -675,7 +630,6 @@ def main() -> int:
             g16.route("**/api/orwell/status", _g16_json(g16_status))
             g16.route("**/api/orwell/roster", _g16_json(g16_roster))
             g16.route("**/api/orwell/health", _g16_json('{"engine": true}'))
-            g16.route("**/api/orwell/initiatives", _g16_json('{"initiatives": []}'))
             g16.route("**/api/orwell/finale", _g16_json('{"finale": null}'))
 
             def _g16_wait_js(expr, label, tries=75):
@@ -793,8 +747,6 @@ def main() -> int:
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
             # bespoke-chrome marker ('Drag to move' titlebars outside the kit) is extinct.
-            # (H5: orwell-social is no longer a window — it is sidebar chrome and must
-            # stay OUT of the kit, asserted alongside.)
             ratchet = page.evaluate("""() => {
               const panels = ['orwell-finale']
                 .map(id => document.getElementById(id)).filter(Boolean);
@@ -802,17 +754,12 @@ def main() -> int:
               const bespoke = [...document.querySelectorAll('[title="Drag to move"]')]
                 .filter(el => !el.closest('[data-ow-window]')).length;
               const kitStack = window.OrwellWindowKit ? window.OrwellWindowKit.stackIds() : null;
-              const soc = document.getElementById('orwell-social');
-              const socWindowish = !!soc && (soc.hasAttribute('data-ow-window') ||
-                getComputedStyle(soc).position === 'fixed');
               return { panels: panels.length, unkitted, bespoke,
-                       kitStack: Array.isArray(kitStack), socWindowish };
+                       kitStack: Array.isArray(kitStack) };
             }""")
             check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
-            check(ratchet.get("socWindowish") is False,
-                  f"H5: the social section stays sidebar chrome — never kit-managed or fixed ({ratchet})")
 
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
@@ -991,54 +938,6 @@ def main() -> int:
             }""")
             check(hud_geo.get("inRail") is True, f"mobile: status panel lives in the gadget rail ({hud_geo})")
             check(hud_geo.get("fixed") is False, f"mobile: status panel is never fixed-position ({hud_geo})")
-            # 0054: The House (approaches) lives in the gadget rail too — on a phone the rail
-            # is an off-canvas drawer, so the gadget itself is never fixed and can never cover
-            # the composer (the D2 collision rule holds structurally — the drawer owns position).
-            soc_geo = mob.evaluate("""() => {
-              if (window._orwellSocialEnsure) window._orwellSocialEnsure();
-              const el = document.getElementById('orwell-social');
-              const rail = document.getElementById('gadget-rail-body');
-              if (!el || !rail) return { ok: false, why: 'missing' };
-              const cs = getComputedStyle(el);
-              return { ok: true, inRail: rail.contains(el), fixed: cs.position === 'fixed',
-                       dockChip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-social"]') };
-            }""")
-            check(soc_geo.get("inRail") is True, f"mobile: The House lives in the gadget rail drawer ({soc_geo})")
-            check(soc_geo.get("fixed") is False, f"mobile: The House is never fixed-position ({soc_geo})")
-            check(soc_geo.get("dockChip") is False, f"mobile: no orwell-social dock chip exists ({soc_geo})")
-
-            # E89 belt: even if the engine FAILS OPEN and hands the UI approaches before the first
-            # ceremony resolves, the FE renders NO chip. We drive the belt CLOSED and feed it two
-            # approaches; the strip must stay empty.
-            belt = mob.evaluate("""() => {
-              if (!window._orwellSocialDriveApproaches) return { ok: false };
-              const early = window._orwellSocialDriveApproaches(false, [
-                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
-                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
-              ]);
-              // The belt helper itself: the premiere HOH competition reads pre-ceremony.
-              const preHoh = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'hoh-competition' });
-              const postNoms = window._orwellFirstCeremonyResolved({ started: true, week: 1, phase: 'nominations' });
-              return { ok: true, earlyCount: early.count, preHoh, postNoms };
-            }""")
-            check(belt.get("ok") is True, "social belt: the test seam is present")
-            check(belt.get("earlyCount") == 0, f"E89: no chip renders on engine fail-open before the first ceremony ({belt})")
-            check(belt.get("preHoh") is False, "E89: the premiere HOH competition reads pre-ceremony")
-            check(belt.get("postNoms") is True, "E89: the first nominations beat opens the belt")
-
-            # E60: once the belt is OPEN, bond vs probe render DISTINCT, motive-tagged chips.
-            motive = mob.evaluate("""() => {
-              const r = window._orwellSocialDriveApproaches(true, [
-                { houseguest: { id: 'npc:1', name: 'A Houseguest' }, motive: 'bond' },
-                { houseguest: { id: 'npc:2', name: 'Another' }, motive: 'probe' },
-              ]);
-              return r;
-            }""")
-            check(motive.get("count") == 2, f"E60: both approaches render once the belt opens ({motive})")
-            check(motive.get("motives") == ["bond", "probe"], f"E60: chips are tagged by motive ({motive})")
-            classes = motive.get("classes") or []
-            check(len(set(classes)) == 2 and None not in classes,
-                  f"E60: bond and probe carry DISTINCT framing classes ({motive})")
             # F3 (wave 1, amended by H5): with The House folded into the sidebar, the
             # finale is the one mobile game sheet — the slot engine's narrow sheet host
             # still owns its position: full-width, below the top bar, clear of the
@@ -1115,8 +1014,6 @@ def main() -> int:
             # Collapse the sidebar for REAL (the hamburger), then compare
             # per-entry drawing signatures between the two states.
             page.evaluate("""() => {  // clear floaters that could sit over the hamburger
-              const soc = document.getElementById('orwell-social');
-              if (soc) { const c = soc.querySelector('.ow-close'); if (c) c.click(); }
               const ban = document.querySelector('#orwell-engine-status .oes-x');
               if (ban) ban.click();
             }""")
@@ -1400,39 +1297,6 @@ def main() -> int:
                   "G17/F5: the DR pill is visible with the restored draft")
             check(g17.input_value("#message").startswith("Confessional:"),
                   "G17/F5: the confessional text itself is restored")
-
-            # F7: an approach prefill keeps its pending chip across a reload.
-            g17.click("#message")
-            g17.keyboard.press("Escape")  # the player's own exit from the Diary Room
-            check(g17.evaluate("!(window._orwellDiaryRoomActive && window._orwellDiaryRoomActive())") is True,
-                  "G17/F7 setup: Escape leaves Diary-Room mode")
-            g17.keyboard.press("Control+a")
-            g17.keyboard.press("Delete")
-            g17.evaluate("""window._orwellSocialDriveApproaches(true, [
-              { houseguest: { id: 'npc:7', name: 'A Houseguest' }, motive: 'bond' },
-            ])""")
-            # 0054: the gadget now lives in the rail; wait for the content-driven rail to reveal
-            # the chip before clicking (the rail un-hides when a gadget gains visible content).
-            g17.wait_for_selector("#orwell-social .osoc-chip .osoc-go", state="visible", timeout=5000)
-            g17.click("#orwell-social .osoc-chip .osoc-go")  # real chip click → prefill + pending
-            g17.wait_for_timeout(600)
-            check(g17.evaluate("window._orwellPendingApproach.get()") == "npc:7",
-                  "G17/F7 setup: the chip click marks the approach pending")
-            g17.reload(wait_until="load")
-            g17_settle(g17)
-            check("A Houseguest" in g17.input_value("#message"),
-                  f"G17/F7: the approach prefill is restored after reload ({g17.input_value('#message')!r})")
-            check(g17.evaluate("window._orwellPendingApproach.get()") == "npc:7",
-                  "G17/F7: pendingApproachId survives the reload (send still dismisses the chip)")
-            g17_chip = g17.evaluate("""() => {
-              const r = window._orwellSocialDriveApproaches(true, [
-                { houseguest: { id: 'npc:7', name: 'A Houseguest' }, motive: 'bond' },
-              ]);
-              const chip = document.querySelector('#orwell-social .osoc-chip');
-              return { count: r.count, pending: !!(chip && chip.classList.contains('osoc-chip-pending')) };
-            }""")
-            check(g17_chip.get("count") == 1 and g17_chip.get("pending") is True,
-                  f"G17/F7: the restored pending approach re-accents its chip ({g17_chip})")
             g17.close()
 
             # F4: the casting-seat prefill re-arms after a refresh (the marker used to

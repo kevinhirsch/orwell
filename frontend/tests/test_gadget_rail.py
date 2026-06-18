@@ -51,7 +51,7 @@ def test_controller_persists_state_and_gates_on_content():
 
 def test_hud_gadgets_prefer_the_rail():
     # each HUD gadget mounts into the rail when present, with the sidebar as fallback
-    for f in ("orwellStatusPanel.js", "orwellSocial.js", "orwellPresence.js"):
+    for f in ("orwellStatusPanel.js", "orwellPresence.js"):
         js = _read("static", "js", f)
         assert 'getElementById("gadget-rail-body")' in js, f
         assert 'getElementById("sidebar")' in js, f   # fallback preserved

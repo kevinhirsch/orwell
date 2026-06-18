@@ -165,7 +165,7 @@ def test_index_loads_the_reporter_before_the_orwell_panels():
     tag = '<script src="/static/js/orwellReport.js"></script>'
     assert tag in html, "index.html must load the reporter"
     pos = html.index(tag)
-    for panel in ("orwellOnboarding.js", "orwellStatusPanel.js", "orwellSocial.js",
+    for panel in ("orwellOnboarding.js", "orwellStatusPanel.js",
                   "orwellCast.js", "orwellPresence.js", "orwellRetrospective.js",
                   "orwellFinale.js", "orwellEngineStatus.js", "orwellDecision.js"):
         assert html.index(panel) > pos, f"the reporter must load before {panel}"
@@ -173,10 +173,9 @@ def test_index_loads_the_reporter_before_the_orwell_panels():
 
 # ── source pins: the sweep — every fail-open surface reports ───────────────────
 
-# file → minimum number of OrwellReport.fail call sites (social: poll + initiatives;
-# cast: roster + backfill; retrospective: recap poll + vault open).
+# file → minimum number of OrwellReport.fail call sites (cast: roster + backfill;
+# retrospective: recap poll + vault open).
 SWEPT = {
-    "orwellSocial.js": 2,
     "orwellFinale.js": 1,
     "orwellPresence.js": 1,
     "orwellRetrospective.js": 2,
