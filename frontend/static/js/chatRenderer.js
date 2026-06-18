@@ -10,6 +10,7 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
+import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
@@ -1078,7 +1079,8 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
 
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = (model || 'image').split('/').pop();
+  // Immersion: image bubbles (in-character portraits) never show the raw image-model name.
+  role.textContent = isGameBuild() ? "Big Brother" : (model || 'image').split('/').pop();
   wrap.appendChild(role);
 
   const body = document.createElement('div');
@@ -1919,7 +1921,9 @@ export function addMessage(role, content, modelName, metadata) {
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
           const contModel = pair.actualModel || pair.requestedModel;
-          roleEl.textContent = modelRouteLabel(pair.requestedModel, contModel);
+          // C14/immersion: never render the raw LLM model name as the sender in the game
+          // build — the narrator is the show (matches the live path's _setRoleModelLabel).
+          roleEl.textContent = isGameBuild() ? "Big Brother" : modelRouteLabel(pair.requestedModel, contModel);
           if (pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }
@@ -1970,20 +1974,27 @@ export function addMessage(role, content, modelName, metadata) {
             if (txt) threadWrap.classList.add('has-top');
             box.appendChild(threadWrap);
           }
+          const _gbBeat = isGameBuild();
           for (const ev of roundTools) {
             const ok = (ev.exit_code === 0 || ev.exit_code == null);
+            // C14/C19 immersion: in the game build a recognised engine/agent tool
+            // renders as a quiet production beat — label + status only, never its raw
+            // name, args, output JSON, screenshots, or diffs. The live path (chat.js)
+            // already did this; the reload path was leaking all of it on every session
+            // re-open. Single-sourced via ORWELL_TOOL_BEATS.
+            const _beat = _gbBeat ? ORWELL_TOOL_BEATS[ev.tool] : null;
             let outHtml = '';
-            if (ev.output && ev.output.trim()) {
+            if (!_beat && ev.output && ev.output.trim()) {
               outHtml = `<details class="agent-tool-output"><summary>Output</summary><pre>${esc(ev.output)}</pre></details>`;
             }
-            const screenshotSrc = safeToolScreenshotSrc(ev.screenshot);
+            const screenshotSrc = _beat ? null : safeToolScreenshotSrc(ev.screenshot);
             if (screenshotSrc) {
               outHtml += `<details class="agent-tool-output"><summary>Screenshot</summary><img src="${esc(screenshotSrc)}" style="max-width:100%;border-radius:6px;margin-top:6px;border:1px solid var(--border)" /></details>`;
             }
             // File-write/edit diff (persisted in the tool event) \u2014 re-render it
             // so it survives reload, matching the live stream.
             let evDiffHtml = '';
-            if (ev.diff && ev.diff.text) {
+            if (!_beat && ev.diff && ev.diff.text) {
               const d = ev.diff;
               const stat = [
                 d.new_file ? '<span class="diff-stat-new">new</span>' : '',
@@ -2004,9 +2015,10 @@ export function addMessage(role, content, modelName, metadata) {
             }
             const node = document.createElement('div');
             node.className = 'agent-thread-node' + (ok ? '' : ' error');
-            // Hide the raw JSON command when a diff says it better (same as live).
-            const evCmdHtml = (ev.command && !(ev.diff && ev.diff.text)) ? `<pre class="agent-thread-cmd">${esc(ev.command)}</pre>` : '';
-            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(ev.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${evCmdHtml}${outHtml}${evDiffHtml}</div>`;
+            // Hide the raw JSON command when a diff says it better (same as live);
+            // production beats never show raw args at all.
+            const evCmdHtml = (!_beat && ev.command && !(ev.diff && ev.diff.text)) ? `<pre class="agent-thread-cmd">${esc(ev.command)}</pre>` : '';
+            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beat || ev.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${evCmdHtml}${outHtml}${evDiffHtml}</div>`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }

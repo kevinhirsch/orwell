@@ -1,0 +1,78 @@
+# 0055 — Social play MUST move the weights (the politics is the game)
+
+**Status:** spec requirement (owner ruling, 2026-06-18). Extends the consequence loop (0023) /
+relationship math (0026). Surfaced by live play-through: substantive social scenes were being
+NARRATED but never RECORDED, so they folded zero impact into the hidden relationship model.
+
+## The requirement (owner, verbatim spirit)
+
+> Ongoing social play can change weights in the game engine — the roleplay/politicking
+> **manipulates the outcome of the game**. That is a huge part of the game, if not most of it.
+> Since Big Brother is politics, this game is politics. The ongoing social play and role-playing
+> element **must have an impact on the weights/perceptions other houseguests hold, in relational
+> ways** — and through those perceptions, on who wins comps thrown their way, who gets nominated,
+> and who is voted out.
+
+So: a conversation in which the player works an ally, reads a threat, makes a promise, plants a
+seed, or burns a bridge is **not flavor** — it must move the directed, graded relationship beliefs
+(trust / affinity / threat) the engine holds NPC→player and player→NPC, drift third-party reads
+through gossip, and thereby bend the deterministic outcomes the engine computes. The change stays
+**hidden** (Vault Wall): the player never sees a number, only the later behavior. That is the point
+of the game (CLAUDE.md, "the consequence & memory loop").
+
+## The mechanism already exists (0023) — the gap is reliability
+
+`EngineCommandsAdapter.recordInteraction` already folds hidden impact into the relationship model
+(`foldHiddenImpact(this.rel, …)`), `makeDeal` records binding promises, and `surfaceInformationTo`
+moves a fact along its pathway. The weights→outcomes wiring (0006/0026/0028/0044) is built and green.
+
+**The gap:** in live play the GM reliably **under-calls** these recording tools. It narrates a
+real scene — the player builds a shield alliance, campaigns a veto holder — and logs NOTHING, so
+the scene has **zero consequence and no memory**. This is the exact failure CLAUDE.md forbids
+("never ship an action that is narrated but never recorded"), and it is the same class as the
+advance-stall (the model knows the tool, the prompt instructs it, the model skips it).
+
+## The fix — consequence-loop error-correction (mirrors the advance-nudge)
+
+Per the owner's progression ruling (engine error-correction in the loop, not engine-authored
+content): when a LIVE-game turn is **substantive social play that engaged a houseguest** and the
+model narrated a scene but fired **no** recording tool (`recordInteraction` / `makeDeal` /
+`surfaceInformationTo`), nudge the model in-loop to log the scene so its impact folds — gentle
+first, escalating across turns, capped, tunable. Plus a prompt reinforcement that recording a
+player↔houseguest scene is **not optional**: a scene the engine never received cannot change a
+single mind.
+
+Complementary to the advance-nudge by design:
+- a **lull** + an advance-phase + no progress → *advance* the beat (seize the moment);
+- **engagement** + a houseguest scene + no record → *record* the scene (bank the consequence).
+
+## Status / diagnosis (2026-06-18 play-through)
+
+- The mechanism is built (0023): recordInteraction → `foldHiddenImpact` moves the weights; the
+  schema lets the model PROPOSE a `kind` (bonding/betrayal/conflict/strategy/alliance/gossip/
+  showmance) and the engine owns the magnitude. **Ceremony/vote/off-screen beats already fold
+  automatically** (engine-driven), so the relationship model DOES evolve over a season.
+- The gap is **specifically the player's ad-hoc social scenes**: across ~6 substantive scenes the
+  GM (deepseek-v4-pro) called recordInteraction **zero** times, even under a forceful nudge — it
+  avoids the tool entirely (not an args failure). So a player can "build an alliance" in chat with
+  no weight movement at all.
+- **Mitigation shipped:** the consequence-loop nudge (fires correctly on engagement + a houseguest
+  scene + nothing recorded; escalates across turns) + a prompt that makes recording non-optional.
+  Compliance is still low — the nudge is necessary but not sufficient with this model.
+- **Recommended robust fix (follow-up):** a CONSTRAINED EXTRACTION final rung — when the model
+  finishes a player↔houseguest scene without recording, the FE makes a separate, forced
+  structured-output call that extracts ONLY `{withIds, kind, content}` from the just-played scene
+  and calls recordInteraction itself. This GUARANTEES the fold with a model-proposed (so
+  direction-correct) kind, without depending on the model to volunteer the tool. (Simpler partials:
+  put houseguest IDs in the GAME CONTEXT roster so `withIds` is fillable; or resolve names→ids
+  server-side so the model can record with the names it already knows.)
+
+## Testability
+
+- Unit/source-pin: the recording-tool set, the substantive-engagement gate (the inverse of the
+  lull gate), the cap + cross-turn escalation, and the reset-on-record.
+- Behavioral (play-through harness): a substantive player↔NPC scene results in a recordInteraction
+  (or makeDeal) call, and a follow-up read of that NPC reflects the moved belief in BEHAVIOR
+  (never a number) — e.g. the ally later acts on the bond, the burned bridge later bites.
+- Vault-Wall: the fold stays hidden; no number or secret crosses to the player surface (the
+  2026-06-18 Vault-leak audit confirmed the boundary is clean — keep it so).
