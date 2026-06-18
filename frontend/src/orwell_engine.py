@@ -490,6 +490,12 @@ async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict
     return await _admin_call("manageSandbox", args, user=user)
 
 
+async def sandbox_health(user: str | None = None) -> dict:
+    """God Mode: Vault-free sandbox health for THIS user's sandbox (B58) — week/phase, last advance,
+    integrity status, recent faults, circuit state. Metadata only, never game content or the Vault."""
+    return await _admin_call("sandboxHealth", {}, user=user)
+
+
 async def engine_health_detail() -> dict:
     """Engine reachability plus a human-readable reason when something is wrong — for VISIBLE
     front-end error reporting. ``{"ok": bool, "engineUrl": str, "error"?: str, "lastError"?: dict}``.

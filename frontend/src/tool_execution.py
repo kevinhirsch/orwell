@@ -500,6 +500,7 @@ _ADMIN_TOOLS = {
     "overrideMechanic",
     "configureGame",
     "manageSandbox",
+    "sandboxHealth",
 }
 
 
@@ -1164,7 +1165,7 @@ async def execute_tool_block(
         do_game_status, do_get_visible_state, do_social_read, do_ask_producers,
         do_render_scene, do_end_of_session_summary,
         do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
-        do_manage_sandbox,
+        do_manage_sandbox, do_sandbox_health,
         do_create_character, do_update_casting, do_advance_game, do_submit_decision,
         do_social_initiatives, do_diary_room, do_make_deal, do_whereabouts,
         do_season_recap, do_season_retrospective, do_npc_voice,
@@ -1518,6 +1519,9 @@ async def execute_tool_block(
     elif tool == "manageSandbox":
         desc = "manageSandbox"
         result = await do_manage_sandbox(content, owner=owner)
+    elif tool == "sandboxHealth":
+        desc = "sandboxHealth"
+        result = await do_sandbox_health(content, owner=owner)
     elif tool == "socialInitiatives":
         desc = "socialInitiatives"
         result = await do_social_initiatives(content, owner=owner)

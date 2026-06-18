@@ -1154,6 +1154,7 @@ import { isNarrow } from './platform.js';
         'overrideMechanic': '\u{1F39B} Control room',
         'configureGame': '\u{1F39B} Control room',
         'manageSandbox': '\u{1F39B} Control room',
+        'sandboxHealth': '\u{1F39B} Control room',
         'web_search': '\u{1F4E1} Checking the feeds',
         'ask_user': '\u{1F399} A question for you',
         'update_plan': '\u{1F4CB} Production notes',
