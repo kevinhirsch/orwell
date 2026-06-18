@@ -1427,6 +1427,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "sandboxHealth",
+            "description": "GOD MODE (admin only): Vault-free health of the current sandbox (B58) — week/phase, last advance time, integrity status, recent faults, and circuit-breaker state. Metadata only; never returns game content or Vault data.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "overrideMechanic",
             "description": "GOD MODE (admin only): override a non-Vault game mechanic in the sandbox. Returns the updated non-Vault state.",
             "parameters": {

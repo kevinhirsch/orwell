@@ -65,7 +65,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
-             "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
+             "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
              # Weekly loop (0011): advance beats and resolve player decisions.
              "createCharacter", "updateCasting", "advanceGame", "submitDecision",
              # Generic loopback to any UI-button endpoint (cookbook,
@@ -103,7 +103,7 @@ GAME_TOOL_KEEP = frozenset({
     # Weekly loop (0011).
     "createCharacter", "updateCasting", "advanceGame", "submitDecision",
     # God Mode (0016): admin-gated non-Vault levers.
-    "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox",
+    "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
     # In-fiction real-world lookups (C32, amends 0032): the model quietly searches when the
     # player references something real and replies in the houseguest's voice. Flavor only —
     # never game truth (the engine tools above stay the sole authority on game facts).

@@ -4713,6 +4713,15 @@ async def do_inspect_non_vault_state(content: str, owner: Optional[str] = None) 
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
 
 
+async def do_sandbox_health(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.sandbox_health(user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine unreachable: {e}", "exit_code": 1}
+
+
 async def do_override_mechanic(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
