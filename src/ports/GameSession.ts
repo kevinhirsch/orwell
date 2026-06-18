@@ -209,6 +209,15 @@ export interface CreateCharacterReq {
    * reset path) — it is NOT part of the player tool's documented schema.
    */
   confirmRestart?: boolean;
+  /**
+   * Season-to-season continuity (0056): on a CONFIRMED restart, KEEP the prior player's character —
+   * carry their authored fields (name/archetype/strategy/persona/backstory/motivation/private
+   * strategy/interview notes) into the new season so the SAME static CHARACTER returns to a NEW cast
+   * (a fresh seed). Explicit fields here still override field-by-field (a player may tweak on the way
+   * through). The dynamic SOUL/relationships reset at move-in. Ignored without `confirmRestart`, and
+   * a no-op on a fresh (no prior game) creation. Absent/false ⇒ a normal fresh creation (re-run casting).
+   */
+  keepCharacter?: boolean;
 }
 
 export interface MomentPromptReq {
