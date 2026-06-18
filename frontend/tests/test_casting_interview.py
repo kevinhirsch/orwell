@@ -9,6 +9,7 @@ engine's ARCHETYPES table (the bug class C13 closed, applied to creation).
 
 import asyncio
 import importlib
+import json
 import os
 import re
 
@@ -145,6 +146,108 @@ def test_do_create_character_forwards_the_deepeners(monkeypatch):
     assert received["motivation"] == DEEPENERS["motivation"]
     assert received["private_strategy"] == DEEPENERS["privateStrategy"]
     assert received["interview_notes"] == DEEPENERS["interviewNotes"]
+
+
+def test_do_create_character_forwards_confirm_restart(monkeypatch):
+    # Play-through bug (2026-06-18, season-1 finale → season 2): the engine's ONE sanctioned
+    # restart door (D1/R1) is a confirmed createCharacter, but the relay never forwarded the
+    # confirm flag — so over a finished season the call no-op'd (B36 guard) and the player could
+    # never start season 2 from chat. The relay must pass confirmRestart through, and default it
+    # OFF so a normal first-time casting never wipes anything.
+    received = {}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    import json
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "P", "confirmRestart": True}), owner="u"))
+    assert received["confirm_restart"] is True
+    received.clear()
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "P"}), owner="u"))
+    assert received["confirm_restart"] is False  # absent ⇒ never a surprise restart
+
+
+def test_createcharacter_schema_exposes_confirm_restart():
+    props = _tool_schema("createCharacter")["parameters"]["properties"]
+    assert "confirmRestart" in props
+    assert props["confirmRestart"]["type"] == "boolean"
+    # the description itself names the restart use (the model under-uses a param-only hint)
+    assert "confirmRestart=true" in _tool_schema("createCharacter")["description"]
+
+
+def test_restart_backstop_auto_confirms_over_a_finished_season(monkeypatch):
+    # Live bug (S2→S3): asked to "play again" post-finale, the model called createCharacter SIX times
+    # without confirmRestart — every call no-op'd and it gave up. The FE error-corrects (like the
+    # stall-nudge): when the season is OVER (moment == "post-season"), a createCharacter IS the restart.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Old", "status": "evicted"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True, "week": 1}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "New"}), owner="u"))
+    assert received["confirm_restart"] is True, "a post-season createCharacter must auto-confirm the restart"
+
+
+def test_chat_restart_advances_the_season_counter(monkeypatch):
+    # 0057 parity (merge reconciliation): a chat "run it back" is a NEXT season exactly like the
+    # menu's New-season button, so it must advance the per-user season counter too — otherwise the
+    # two restart paths disagree on how many levels were cleared.
+    import importlib
+    orwell_seasons = importlib.import_module("src.orwell_seasons")
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Old", "status": "jury"}}
+
+    async def fake_create(player_name, **kwargs):
+        return {"started": True, "week": 1}  # a fresh season
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    before = orwell_seasons.get_season("season-counter-test-user")
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "New"}), owner="season-counter-test-user"))
+    assert orwell_seasons.get_season("season-counter-test-user") == before + 1
+
+
+def test_chat_restart_forwards_keep_character(monkeypatch):
+    # 0056 via chat: the model may carry the same houseguest forward (keepCharacter) on a chat restart.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "post-season", "player": {"name": "Keep Me", "status": "jury"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"keepCharacter": True}), owner="u"))
+    assert received["keep_character"] is True and received["confirm_restart"] is True
+
+
+def test_restart_backstop_never_fires_mid_season(monkeypatch):
+    # The backstop must NEVER wipe a LIVE season out from under the player — only a finished one.
+    received = {}
+
+    async def fake_state(user=None):
+        return {"started": True, "moment": "nominations", "player": {"name": "Live", "status": "active"}}
+
+    async def fake_create(player_name, **kwargs):
+        received.update(kwargs)
+        return {"started": True}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+    _run(tool_impl.do_create_character(json.dumps({"playerName": "X"}), owner="u"))
+    assert received["confirm_restart"] is False, "an ongoing season is never silently wiped"
 
 
 def test_do_create_character_allows_a_missing_name(monkeypatch):

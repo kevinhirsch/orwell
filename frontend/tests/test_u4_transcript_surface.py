@@ -57,9 +57,36 @@ def test_d3_pending_cache_round_trips():
 
 
 def test_d3_every_advanceview_chokepoint_feeds_the_cache():
-    assert TOOLS.count("orwell_engine.remember_pending(res") == 2, \
-        "do_advance_game AND do_submit_decision must record the pending"
-    assert "orwell_engine.remember_pending(res" in ROUTES, "the decision route too"
+    # Three chokepoints now: do_advance_game + do_submit_decision RECORD the pending, and
+    # do_create_character CLEARS it (a casting card carries no `pending`) — the restart-door
+    # hygiene that stops a finished season's decision card bleeding into season 2.
+    assert TOOLS.count("orwell_engine.remember_pending(res") == 3, \
+        "advance + submit record the pending; createCharacter clears it on a new season"
+    assert "orwell_engine.remember_pending(res" in ROUTES, "the decision route + new-game route too"
+
+
+def test_restart_door_clears_the_stale_decision_card(monkeypatch):
+    # Play-through bug (2026-06-18, live finale → next season): the FE caches the last pending so
+    # the decision card survives a reload (D3/E66). But createCharacter — the restart door — never
+    # cleared it, so a finished season's card (e.g. a juror-vote, under the OLD player's name)
+    # stayed armed on /api/orwell/status through the whole of season 2's premiere. createCharacter
+    # must wipe the cache for the user.
+    import asyncio
+    oe = importlib.import_module("src.orwell_engine")
+    ti = importlib.import_module("src.tool_implementations")
+
+    # Season 1 left a phantom card armed for this user.
+    oe.remember_pending({"pending": {"kind": "juror-vote", "options": [{"id": "npc:5"}]}}, user="u")
+    assert oe.last_pending(user="u") is not None
+
+    async def fake_create(*a, **k):
+        return {"playerName": "P", "characterType": "x", "portraitPrompts": []}  # a casting card, no `pending`
+    monkeypatch.setattr(oe, "create_character", fake_create)
+
+    res = asyncio.get_event_loop().run_until_complete(
+        ti.do_create_character('{"playerName": "P"}', owner="u"))
+    assert res["exit_code"] == 0
+    assert oe.last_pending(user="u") is None, "the restart door must clear the prior season's card"
 
 
 def test_d3_status_route_serves_the_cached_pending():

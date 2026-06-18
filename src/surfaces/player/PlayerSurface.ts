@@ -20,6 +20,15 @@ export type PlayerSurfaceType =
  */
 export class PlayerSurface {
   private readonly interrogation = new InterrogationHandler();
+  /**
+   * Resolve a houseguest id → PUBLIC display name (non-Vault: names are public roster facts).
+   * Optional because the pure in-memory composition has no live roster; the live registry wires
+   * it from the session so player-facing prose never echoes a raw `npc:N` id.
+   */
+  private nameResolver?: (id: EntityId) => string | undefined;
+  setNameResolver(fn: (id: EntityId) => string | undefined): void {
+    this.nameResolver = fn;
+  }
 
   constructor(
     private readonly player: EntityId,
@@ -64,7 +73,15 @@ export class PlayerSurface {
   socialRead(target?: EntityId): string {
     const vs = this.visible.getVisibleStateFor(this.player);
     const suspicions = this.visible.suspicionsFor(this.player);
-    const focus = target ? `your read on ${target}` : "the energy in the room";
+    // Resolve the target to a NAME — never echo the raw `npc:N` id into player-facing prose
+    // (a real immersion break the play-through caught). Falls back to a generic noun when the
+    // name can't be resolved (e.g. the resolver is unwired or returns an id-shaped string).
+    let who: string | undefined;
+    if (target) {
+      const resolved = this.nameResolver?.(target);
+      who = resolved && !/^(npc:|player\b)/.test(resolved) ? resolved : "that houseguest";
+    }
+    const focus = who ? `your read on ${who}` : "the energy in the room";
     // Hint is derived from suspicion COUNT only — never suspicion content — so no
     // off-screen event can be named and no sentinel can ride out.
     const hint = suspicions.length > 0

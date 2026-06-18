@@ -569,6 +569,10 @@ def setup_orwell_routes() -> APIRouter:
                 keep_character=body.keepCharacter,  # 0056: carry the prior character into the new season
                 user=user,
             )
+            # Restart-door hygiene (D3/E66): a fresh season wipes the prior season's cached
+            # decision card so no phantom pending bleeds onto the status route until season 2's
+            # first advance. The casting card has no `pending`, so this clears _LAST_PENDING.
+            orwell_engine.remember_pending(res, user=user)
             # Kick off move-in cast portraits (0051) — background, never blocks the response,
             # silent no-op when no image model is configured (graceful absence).
             try:
@@ -622,6 +626,9 @@ def setup_orwell_routes() -> APIRouter:
             else:
                 # Recreate: reset to OOBE so the casting interview (0050) runs fresh for the new season.
                 res = await orwell_engine.manage_sandbox("reset", user=user)
+            # D3/E66 restart-door hygiene: clear the prior season's cached decision card so no phantom
+            # pending (e.g. last season's juror-vote) rides the status route into the new season.
+            orwell_engine.remember_pending(res, user=user)
             season = orwell_seasons.increment_season(user)  # the level is cleared — advance the counter
             try:
                 prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
@@ -649,6 +656,7 @@ def setup_orwell_routes() -> APIRouter:
             except Exception:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
+            orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
             return {"reset": True, "state": res}  # season number is deliberately UNTOUCHED
         except Exception as e:
             logger.warning(f"[orwell] reset-progress failed: {e}")

@@ -78,6 +78,10 @@ describe("0046 — player eviction & the juror's seat", () => {
     expect(view.player?.status).toBe("evicted");
     expect(view.moment).toBe("evicted"); // the spectator/closure framing, not the ceremony phase they can't act in
     expect(playerIdx(sb.session)).toBeLessThan(5);
+    // Play-through fix (2026-06-18): an evicted player in an ONGOING season was offered the Vault,
+    // which the engine then refused (it unseals only post-winner). The prompt must seal it itself so
+    // the model never makes the premature offer.
+    expect(sb.session.getMomentPrompt({}).systemPrompt).toMatch(/Vault stays SEALED until the season crowns/);
   });
 
   it("marks the player JURY when evicted into the last-9 jury and frames the jury seat", () => {
@@ -86,6 +90,7 @@ describe("0046 — player eviction & the juror's seat", () => {
     expect(view.player?.status).toBe("jury");
     expect(view.moment).toBe("jury");
     expect(playerIdx(sb.session)).toBeGreaterThanOrEqual(5);
+    expect(sb.session.getMomentPrompt({}).systemPrompt).toMatch(/Vault stays SEALED until the finale crowns/);
   });
 
   it("a season completes to a Final 2 + a winner no matter when the player is evicted", () => {

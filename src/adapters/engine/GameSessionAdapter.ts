@@ -285,6 +285,20 @@ export class GameSessionAdapter implements GameSession {
   private static readonly VOICE_KNOWS_CAP = 20;
   private static readonly VOICE_SUSPECTS_CAP = 8;
 
+  /** Resolve a houseguest id by id, else exact name, else an UNAMBIGUOUS first name (audit 2026-06-18
+   *  — the model calls npcVoice with a name as often as an id; tolerate both, but never guess between
+   *  two people who share a first name). Returns null when unknown/ambiguous. */
+  private resolveHouseguestVoiceId(key: string): EntityId | null {
+    if (!this.house) return null;
+    const npcs = this.house.npcs;
+    if (npcs.some((n) => n.id === key)) return key as EntityId;
+    const k = key.trim().toLowerCase();
+    const byName = npcs.filter((n) => n.name.toLowerCase() === k);
+    if (byName.length === 1) return byName[0]!.id;
+    const byFirst = npcs.filter((n) => n.name.toLowerCase().split(" ")[0] === k);
+    return byFirst.length === 1 ? byFirst[0]!.id : null;
+  }
+
   /**
    * The knowledge-bounded voicing projection for ONE active houseguest (B65 / ADR 0003 §8). The
    * model is HANDED a bounded person: their stable public persona (byte-stable, B61), their room +
@@ -293,10 +307,17 @@ export class GameSessionAdapter implements GameSession {
    * disposition — never a number). Everything any OTHER houseguest privately knows, the Vault,
    * and the souls stay out by construction — the model cannot voice what this NPC never learned.
    */
-  npcVoice(id: EntityId): NpcVoiceView | null {
+  npcVoice(idOrName: EntityId): NpcVoiceView | null {
     if (!this.house) return null;
-    const npc = this.house.npcs.find((n) => n.id === id);
-    if (!npc || this.seatOf(id) !== "active") return null; // only the living are voiced from inside
+    // Name-tolerant lookup (audit 2026-06-18): the narration model reliably calls this with a
+    // NAME ("Griffin Suarez") instead of the id ("npc:8"); a strict id-only match returned null and
+    // the model then narrated the dead call out loud to the player ("the voice report didn't come
+    // back"). Resolve by id first, then exact name, then an unambiguous first-name — so a sensible
+    // call always lands and never leaks a backstage miss into the fiction.
+    const rid = this.resolveHouseguestVoiceId(idOrName);
+    const npc = rid ? this.house.npcs.find((n) => n.id === rid) : undefined;
+    if (!npc || this.seatOf(npc.id) !== "active") return null; // only the living are voiced from inside
+    const id = npc.id;
 
     const room = this.presence?.get(id) ?? null;
     const present: NamedRef[] = [];
@@ -471,6 +492,17 @@ export class GameSessionAdapter implements GameSession {
     if (!this.house) return id;
     if (this.house.player.id === id) return this.house.player.name;
     return this.house.npcs.find((n) => n.id === id)?.name ?? id;
+  }
+
+  /**
+   * PUBLIC roster name → outward name resolver (non-Vault: names are public). Returns undefined
+   * for an id NOT on the live roster, so outward prose can fall back rather than echo a raw id.
+   * Wired into the player surface (registry) so socialRead names the houseguest instead of "npc:N".
+   */
+  publicName(id: EntityId): string | undefined {
+    if (!this.house) return undefined;
+    if (this.house.player.id === id) return this.house.player.name;
+    return this.house.npcs.find((n) => n.id === id)?.name;
   }
 
   private card(id?: EntityId): { id: EntityId; name: string } | null {

@@ -1373,6 +1373,36 @@ _ADVANCE_PHASES = {
     "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
 }
 _PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
+# A PREVIEW (runCompetition) reports a ceremony's already-decided winner but commits NOTHING. Previewing
+# an OUTCOME in an advance-phase and then not advanceGame'ing is a HARD stall regardless of lull or
+# engagement (FLAVOR-vs-OUTCOMES: a previewed outcome MUST be committed) — the #1 cause of the
+# "narrated the winner, the board never moved, chat contradicts the HUD" desync (audit 2026-06-18
+# hand-off #1). We nudge it IMMEDIATELY, bypassing the lull/staleness gate.
+_PREVIEW_TOOLS = {"runCompetition"}
+# Every tool that touches a beat's outcome. The LAST one in a turn's sequence decides whether the
+# turn ended with the beat COMMITTED (advanceGame) or with an uncommitted preview / undelivered
+# decision the model may have narrated ahead of the engine.
+_BEAT_TOOLS = _PROGRESSION_TOOLS | _PREVIEW_TOOLS
+_PREVIEW_COMMIT_NUDGE = (
+    "(Production note, not for the player.) You previewed a competition result but never called "
+    "advanceGame — so NOTHING is official: the winner you just named does not hold the power, the "
+    "board has not moved, and the player's status panel now CONTRADICTS your narration. Your very "
+    "next action MUST be the advanceGame function call to COMMIT that result (it resolves to the "
+    "SAME winner you previewed) and bring up the next beat. Do not narrate anything further until "
+    "you have made that call.")
+# After a submitDecision (a comp-intent, a vote, a goodbye…) the game has a RESULT to deliver — the
+# comp's winner, the next week, the next card — and ONLY advanceGame delivers it. If the model
+# resolved a decision but never advanced to deliver that result (e.g. submitted a goodbye, then
+# narrated "you are the new HOH" while the engine sat at the eviction), it has narrated an outcome
+# it never received: the structural twin of #1 for the NO-tool / cross-week case (hand-off 1b). We
+# nudge it to advance and re-voice from the real result — bypassing the lull/staleness gate.
+_DECISION_DELIVER_NUDGE = (
+    "(Production note, not for the player.) You resolved a decision but never advanceGame'd to "
+    "DELIVER its result — so any competition winner, new Head of Household, or next week you just "
+    "described is INVENTED, not the game's. The board is still where it was and your narration now "
+    "contradicts it. Call advanceGame NOW to get the real next beat (it may name a DIFFERENT winner "
+    "than you guessed — above all, the player has NOT won anything you did not pull from the game), "
+    "then voice ONLY what it returns.")
 # Graduated, in-loop. Index by how many times we've nudged THIS encounter (persisted
 # per game so the escalation carries across turns until the model finally advances).
 _ADVANCE_NUDGES = [
@@ -1396,6 +1426,12 @@ _ADVANCE_NUDGES = [
 _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptive, so a beat of
 # legitimate social play at a ceremony phase isn't shoved. Forcefulness escalates ACROSS turns
 # via the persisted _ADVANCE_STALL_LEVEL, not by stacking nudges within a single turn.
+# Grace before the FIRST nudge (owner ruling, 2026-06-18): "during good productive engaging social
+# play, auto-nudge should not happen ... it should naturally notice the lulls and nudge at those
+# times IF movement hasn't happened in a while." So a lull alone is not enough — the beat must also
+# have gone STALE (this many live turns with no progression tool fired). Engaging play never nudges
+# (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
+_ADVANCE_GRACE_TURNS = 2
 
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
@@ -1496,6 +1532,68 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# ── Operator-aside scrub (audit 2026-06-18) ───────────────────────────────────────────
+# In a LIVE game the narration model sometimes leaks its PLANNING into the visible channel —
+# "I should record this interaction, then advance the game", "The advanceGame call will move us to
+# the nominations phase", "The player, Sam, has finished his conversation". That is third-person
+# player reference + tool-process narration the prompt forbids (and re-forbids) but the model emits
+# as content anyway. We strip such sentences before they reach the player. HIGH-PRECISION only:
+# tool names, "let me/I'll record|advance…", "advance the game", "record this/the interaction", and
+# "the player, <name> has/is…" — markers that never occur in real in-character BB narration, so
+# ordinary scene prose is never touched.
+_GAME_TOOL_WORDS = (
+    "advanceGame", "recordInteraction", "submitDecision", "runCompetition", "getGameState",
+    "gameStatus", "updateCasting", "createCharacter", "surfaceInformationTo", "npcVoice",
+    "whereabouts", "socialRead", "makeDeal", "getVisibleStateFor",
+)
+_GAME_LEAK_SENTENCE_RE = re.compile(
+    r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
+    # machinery NOUNS that never appear in in-character narration
+    r"|\bthe (?:engine|system)\b"
+    r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
+    r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
+    # first-person operator asides (process talk)
+    r"|\blet me\s+(?:record|advance|note|log|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider)\b"
+    r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
+      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|log|note|resolve|call|use|pull|fetch|present|re-?read|reconsider)\b"
+    r"|\b(?:advance|move|push) the game\b"
+    r"|\brecord (?:this|the|that) (?:interaction|scene)\b"
+    r"|\bthe (?:player|user)\b(?:,?\s+\w+,)?\s+(?:has|is|was|will|'ll|wants|said|finished|just|now|needs|should)\b",
+    re.IGNORECASE,
+)
+
+# Sentence-START operator openers: in real GM narration the host/NPCs address the player as "you"
+# and never begin a sentence narrating their OWN process ("Actually wait, let me…", "I should…",
+# "Then I'll…"). Anchored to the sentence start so quoted NPC dialogue mid-sentence is untouched.
+_GAME_LEAK_START_RE = re.compile(
+    r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"
+    r"(?:i'?ll|i'?d|i should|i need to|i have to|i must|i am going to|i'?m going to|i can|"
+    r"let me|then,?\s+i|first,?\s+i|now,?\s+i|next,?\s+i)\b",
+    re.IGNORECASE,
+)
+
+
+def _split_complete_sentences(buf: str):
+    """Split a streaming buffer into (complete_prefix, remainder) at the LAST sentence boundary —
+    so we only ever judge whole sentences, never a half-streamed one. A newline also ends a unit."""
+    last = -1
+    for m in re.finditer(r"[.!?](?=\s|$)|\n", buf):
+        last = m.end()
+    return (buf[:last], buf[last:]) if last >= 0 else ("", buf)
+
+
+def _scrub_game_leak(text: str) -> str:
+    """Drop whole sentences that are operator asides / tool-process narration; keep the rest
+    verbatim (delimiters preserved). Used both on the live stream and on the saved message."""
+    if not text:
+        return text
+    parts = re.split(r"(?<=[.!?\n])", text)
+    return "".join(
+        p for p in parts
+        if not _GAME_LEAK_SENTENCE_RE.search(p) and not _GAME_LEAK_START_RE.match(p)
+    )
+
+
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
     """True when this turn was a scene with a houseguest — the player's line or the narration
     names someone on the roster (full name or first name). Cheap, name-based; good enough to
@@ -1520,6 +1618,10 @@ def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
 # game actually advances (a progression tool fires).
 _ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+# Per-game staleness: live turns elapsed since the last progression tool fired. Climbs while the
+# night sits on one beat; resets to 0 the moment the game advances. The lull-nudge only fires once
+# this passes _ADVANCE_GRACE_TURNS, so good engaging play (and a fresh beat) is left to breathe.
+_TURNS_SINCE_PROGRESS: Dict[str, int] = {}
 
 
 # ── Post-season re-approach (feature 0057, chunk 4) ───────────────────────────────────
@@ -2116,8 +2218,20 @@ async def stream_agent_loop(
     # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
+    # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
+    # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
+    # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
+    # a restart drops game_mode to False, which otherwise silently disables the scrub). Scrubbing is
+    # safe there because the game build has no legitimate "let me check the file" workspace prose.
+    try:
+        from src.settings import game_build_enabled as _gbe
+        _scrub_active = _is_live_game or _gbe()
+    except Exception:
+        _scrub_active = _is_live_game
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
+    _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
+    _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
@@ -2151,6 +2265,7 @@ async def stream_agent_loop(
     for round_num in range(1, max_rounds + 1):
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
+        _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
         _doc_acc = ""
@@ -2313,10 +2428,30 @@ async def stream_agent_loop(
                         # round_response unchanged.
                         if data.get("thinking"):
                             round_reasoning += data["delta"]
+                            yield chunk  # reasoning is filtered downstream; pass through
+                        elif _scrub_active:
+                            # LIVE game: scrub operator-aside / tool-process leaks before they reach
+                            # the player. round_response keeps the RAW text (tool parsing + stall
+                            # detection are unaffected); the player + the saved message get only the
+                            # CLEANED narration. Buffer to a sentence boundary so we judge whole
+                            # sentences, then emit the clean part.
+                            round_response += data["delta"]
+                            _game_buf += data["delta"]
+                            _complete, _game_buf = _split_complete_sentences(_game_buf)
+                            if _complete:
+                                _clean = _scrub_game_leak(_complete)
+                                if _clean:
+                                    full_response += _clean
+                                    if _clean.strip():
+                                        _emitted_visible = True
+                                    yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                            continue  # narration, not a document — skip the doc-fence path
                         else:
                             round_response += data["delta"]
                             full_response += data["delta"]
-                        yield chunk  # Stream all rounds
+                            if data["delta"].strip():
+                                _emitted_visible = True
+                            yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
                         if (
@@ -2374,6 +2509,17 @@ async def stream_agent_loop(
                 # Forward error events to frontend as visible text
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
+
+        # Flush the scrub buffer: emit the trailing (possibly unterminated) sentence, cleaned, so
+        # nothing the round produced is left unshown or leaks through.
+        if _scrub_active and _game_buf:
+            _clean = _scrub_game_leak(_game_buf)
+            _game_buf = ""
+            if _clean:
+                full_response += _clean
+                if _clean.strip():
+                    _emitted_visible = True
+                yield f'data: {json.dumps({"delta": _clean})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
@@ -2551,8 +2697,30 @@ async def stream_agent_loop(
                 _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
+                # Track staleness: this finishing block runs once per player turn. A turn that
+                # advanced resets the clock; otherwise the beat has sat one more turn. The lull-nudge
+                # waits until the night has genuinely stopped moving (>= grace), so engaging play and
+                # a just-started beat are never shoved (owner ruling 2026-06-18).
+                if owner:
+                    _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
+                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
                 _is_lull = _player_turn_is_lull(messages)
-                _want_advance = (not _progressed) and _is_lull and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN
+                # The ORDER of the turn's beat-tools decides whether it left an uncommitted/undelivered
+                # OUTCOME the model may have narrated ahead of the engine (#1 + 1b). The LAST beat-tool:
+                #   runCompetition → previewed a winner, never advanceGame'd to COMMIT it (#1);
+                #   submitDecision → resolved a decision, never advanceGame'd to DELIVER its result (1b);
+                #   advanceGame    → committed/delivered — fine.
+                # (Order-based, NOT `not _progressed`: a turn that advances the roll AND then previews
+                # the next comp without committing it still left an uncommitted outcome — the live-play
+                # bug the first cut missed.) Both bypass the lull/staleness gate.
+                _beat_seq = [t for t in (ev.get("tool") if isinstance(ev, dict) else None for ev in tool_events)
+                             if t in _BEAT_TOOLS]
+                _previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"
+                _decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"
+                _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
+                    _previewed_uncommitted
+                    or _decision_undelivered
+                    or ((not _progressed) and _is_lull and _stale)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -2602,15 +2770,22 @@ async def stream_agent_loop(
                         # forget the per-user re-approach state so the NEXT post-season starts clean.
                         _POSTSEASON_OFFTOPIC_TURNS.pop(owner or "", None)
                         _REAPPROACH_LEVEL.pop(owner or "", None)
-                    # advance a lull
+                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1)
                     if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
-                        logger.info(f"[orwell] advance stall-nudge (level {_level}, phase={_phase}) "
-                                    f"round {round_num} user={owner}")
-                        messages.append({"role": "system", "content": _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]})
+                        # A previewed-but-uncommitted outcome (or an undelivered decision result) gets
+                        # the FORCEFUL nudge straight away (it is not a gentle "lingering beat").
+                        if _previewed_uncommitted:
+                            _nudge, _why = _PREVIEW_COMMIT_NUDGE, "preview-commit"
+                        elif _decision_undelivered:
+                            _nudge, _why = _DECISION_DELIVER_NUDGE, "decision-deliver"
+                        else:
+                            _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
+                        logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
                     # bank an engaged houseguest scene — the model skipped recording it, so the FE
@@ -2623,6 +2798,21 @@ async def stream_agent_loop(
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
                                                  _house, endpoint_url, model, headers, owner)
                         # the scene is banked (or was genuinely solo) — end the turn normally.
+                # BLANK-TURN GUARD (audit 2026-06-18): the model sometimes emits only planning-as-
+                # content ("Let me get the lay of the land…") and stops with no tools — the scrub
+                # strips it, leaving the player a BLANK turn. If nothing was shown, re-prompt once
+                # for the actual in-character scene rather than ending on silence.
+                if (not _emitted_visible and _turn_narrate_nudges < 1
+                        and not (tool_policy and tool_policy.blocks("ask_user"))):
+                    _turn_narrate_nudges += 1
+                    logger.info(f"[orwell] blank-turn guard: re-prompting for narration round {round_num} user={owner}")
+                    messages.append({"role": "system", "content": (
+                        "Your last turn produced no narration the player could see — only private "
+                        "planning. Write the SCENE NOW, fully in character: what the houseguest says "
+                        "and does, what happens in the room. No meta, no mention of your process or "
+                        "any tool — just the moment, in your narrator voice.")})
+                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                    continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -2984,6 +3174,7 @@ async def stream_agent_loop(
             # next stall (if any) starts gentle again.
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
                 _ADVANCE_STALL_LEVEL.pop(owner, None)
+                _TURNS_SINCE_PROGRESS[owner] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
                 _turn_record_nudges = 1  # model recorded organically — don't also auto-record

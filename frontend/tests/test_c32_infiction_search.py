@@ -57,8 +57,9 @@ def test_moment_prompt_carries_the_real_world_clause():
     assert "web_search" in ts
     # silent, in-voice synthesis — never raw results, never fiction breaks
     assert "Never show search results, never mention searching" in ts
-    # the hard guardrail: flavor only, game truth stays with the engine
-    assert "game truth comes only from the engine's tools" in ts
+    # the hard guardrail: flavor only, game truth stays with the game's own levers (the machinery
+    # is never NAMED to the model — "engine" was scrubbed to diegetic terms, audit 2026-06-18).
+    assert "game truth comes only from your levers" in ts
     # fiction consistency: the house has no internet (phrase spans two prompt lines)
     assert "a houseguest can know the movie, not this week's box office" in ts
     # fail-soft: no provider → improvise in character

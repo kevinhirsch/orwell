@@ -31,6 +31,8 @@ JS_DIR = FE / "static" / "js"
 PLATFORM = (JS_DIR / "platform.js").read_text(encoding="utf-8")
 CHAT = (JS_DIR / "chat.js").read_text(encoding="utf-8")
 DECISION = (JS_DIR / "orwellDecision.js").read_text(encoding="utf-8")
+ONBOARDING = (JS_DIR / "orwellOnboarding.js").read_text(encoding="utf-8")
+RENDERER = (JS_DIR / "chatRenderer.js").read_text(encoding="utf-8")
 
 # Every static JS file, the root app.js included — the "exists once" sweep.
 ALL_JS = sorted((FE / "static").rglob("*.js"))
@@ -99,6 +101,42 @@ def test_chat_keeps_the_fresh_session_hook_reachable():
     # actually fire on createCharacter success.
     block = _chat_g15_block()
     assert "_orwellFreshSession" in block
+
+
+# ── 3b. FE-render #7: no welcome-splash flash at the casting→game cutover ──────
+# createCharacter fires mid-stream and opens a fresh session, so createDirectChat
+# blanks #chat-history + shows the welcome splash WHILE the still-finalizing tool
+# beat / casting card re-paints the OLD transcript. The conversation appears to
+# vanish for a beat. The fresh-session hook arms a self-clearing transition flag
+# and showWelcomeScreen suppresses the splash while the old bubbles are still up.
+
+def test_fresh_session_arms_a_self_clearing_casting_transition_flag():
+    m = re.search(r"window\._orwellFreshSession\s*=\s*\(\)\s*=>\s*\{(.*?)\n  \};",
+                  ONBOARDING, re.S)
+    assert m, "orwellOnboarding.js must define window._orwellFreshSession"
+    body = m.group(1)
+    assert "window._orwellCastingTransition = true" in body, \
+        "the casting→game cutover must mark the transition so the welcome splash is suppressed"
+    assert "setTimeout" in body and "_orwellCastingTransition = false" in body, \
+        "the flag must self-clear so a stuck flag can never permanently hide the welcome screen"
+    assert "clearTimeout" in body, "re-entry must reset the self-clear timer"
+
+
+def test_show_welcome_suppresses_the_splash_only_during_transition_with_bubbles():
+    m = re.search(r"export function showWelcomeScreen\(\)\s*\{(.*?)\n\}", RENDERER, re.S)
+    assert m, "chatRenderer.js must export showWelcomeScreen()"
+    body = m.group(1)
+    # The guard reads the transition flag, checks the history still has a real
+    # message bubble, and bails BEFORE un-hiding the welcome screen.
+    flag = body.find("window._orwellCastingTransition")
+    bubble = body.find(".msg")
+    unhide = body.find("classList.remove('hidden')")
+    assert flag != -1, "showWelcomeScreen must consult the casting-transition flag"
+    assert bubble != -1, "the guard must require the old transcript still has a .msg bubble"
+    assert "return" in body[flag:unhide if unhide != -1 else len(body)], \
+        "the guard must early-return (skip the splash) before the welcome screen is shown"
+    assert unhide != -1 and flag < unhide, \
+        "the suppression guard must run BEFORE the welcome screen is un-hidden"
 
 
 def test_decision_card_success_branch_calls_the_helper():

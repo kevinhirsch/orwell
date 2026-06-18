@@ -1487,7 +1487,10 @@ FUNCTION_TOOL_SCHEMAS = [
                 "archetype and returns the Vault-free game state with the player's casting card "
                 "(character type, strategy, qualitative strengths) — reveal the card in the "
                 "producer's voice, never any number. A recorded name is required (the engine "
-                "rejects creation without one)."
+                "rejects creation without one). This is ALSO the restart door: to start a NEW season "
+                "after one has ENDED (a winner crowned) or that the player wants to abandon, call it "
+                "again with confirmRestart=true and the new player's details — that flag is REQUIRED "
+                "to play again; without it the call silently no-ops on any started season."
             ),
             "parameters": {
                 "type": "object",
@@ -1519,6 +1522,25 @@ FUNCTION_TOOL_SCHEMAS = [
                         "description": "3-8 short notes of the best get-to-know material from the interview.",
                     },
                     "seed": {"type": "integer", "description": "Optional RNG seed for reproducibility."},
+                    "confirmRestart": {
+                        "type": "boolean",
+                        "description": (
+                            "Set true ONLY to start the NEXT season once the current one has ENDED (a "
+                            "winner was crowned — the post-season reunion) and the player asks to run it "
+                            "back in chat. This ends the finished season and starts a fresh one; the front "
+                            "end advances their season counter. Omit it during a normal first-time casting "
+                            "(it no-ops/refuses on a started game). Never use it to reset a LIVE season — "
+                            "a mid-season restart is a settings 'red zone' action, never a chat one."
+                        ),
+                    },
+                    "keepCharacter": {
+                        "type": "boolean",
+                        "description": (
+                            "With confirmRestart, carry the SAME houseguest (their name + authored "
+                            "character) into the next season instead of casting a new one (0056). Use it "
+                            "when the player wants to keep playing as who they are; omit to recreate fresh."
+                        ),
+                    },
                 },
                 "required": [],
             },

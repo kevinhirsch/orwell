@@ -20,12 +20,26 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     }
   });
 
-  it("states the engine decides outcomes and the model only voices them", () => {
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/engine\s+decides/i);
-    expect(BASE_GAME_MASTER_PROMPT.toLowerCase()).toContain("never invent");
+  it("makes makeDeal as non-optional as recordInteraction (play-through: deals struck but never tracked)", () => {
+    // Live S3: the model struck an explicit handshake deal ("you've got a deal") and called only
+    // whereabouts — no makeDeal — so the promise never entered the ledger (deals: []), the panel
+    // stayed empty, and nothing could pay off or break. The lever must push makeDeal as hard as
+    // recordInteraction: a deal only narrated binds no one.
+    expect(BASE_GAME_MASTER_PROMPT).toContain("NOT optional either");
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/MOMENT the player and a houseguest AGREE to terms/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/binds no one and never comes due/);
   });
 
-  it("a competition moment directs resolving through the engine, no inventing/scores", () => {
+  it("states the game decides outcomes and the model only voices them", () => {
+    // The machinery is never named to the model (owner ruling 2026-06-18): the prompt says the
+    // GAME decides, never "the engine" — and the only literal "engine" left is the prohibition list.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/game itself decides/i);
+    expect(BASE_GAME_MASTER_PROMPT.toLowerCase()).toContain("never invent");
+    // the forbidden-words rule is the ONLY place "engine" may still appear (as a banned token).
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never write the words "engine"/i);
+  });
+
+  it("a competition moment directs resolving through the game, no inventing/scores", () => {
     const view = { started: true, week: 1, phase: "hoh-competition", moment: "hoh-competition",
       player: { id: "p", name: "P", archetype: "a", strategyStyle: "s" }, house: [] } as unknown as GameStateView;
     const prompt = buildSystemPrompt("hoh-competition", view).toLowerCase();
@@ -42,11 +56,92 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
   });
 
   // P4: levers are silent production machinery — the model must never ask permission to pull
-  // one, and ask_user is scoped to the engine's pending BINDING decisions only.
+  // one, and ask_user is scoped to the game's pending BINDING decisions only.
   it("P4: declares levers silent and scopes ask_user to pending binding decisions", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/SILENT production\s*machinery/i);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/never ask the player's permission/i);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the engine's\s*pending BINDING decision options/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the game's\s*pending BINDING decision options/i);
+  });
+
+  // LLM-discipline cluster (audit 2026-06-18 hand-off): the model raced past decision cards, invented
+  // player knowledge with no pathway, drifted whereabouts, and miscounted the cast. Pinned out.
+  it("decision cards are hard stops, incl. the goodbye-message gate (#3)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/DECISION CARDS ARE HARD STOPS/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/GOODBYE-MESSAGE card/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never narrate past it/i);
+  });
+
+  it("whereabouts must be read before any room scene, every phase (#4)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Call it BEFORE you/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/every phase, not just the premiere/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never put one person in two places/i);
+  });
+
+  it("the whereabouts shape (present vs nearby) is mapped so rooms are not scrambled (#4)", () => {
+    // Play-through bug (2026-06-18, S2 premiere): the model called whereabouts, then narrated a
+    // `present` houseguest into a side room, pulled a `nearby` one into the player's room, and
+    // invented a third into a room they were not in. The lever must bind the JSON shape, not just
+    // forbid "guessing".
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/`present` are the people IN/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/is a NAMED adjacent room/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/NEITHER list is elsewhere/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Never move a `present` person|pull a `nearby` person/);
+  });
+
+  it("player knowledge must come through a recorded pathway (#5)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/GROUNDED KNOWLEDGE/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/only KNOWS what a/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/surfaceInformationTo/);
+  });
+
+  it("the game context surfaces the exact remaining count so the model never does arithmetic (#6)", () => {
+    const view = { started: true, week: 1, phase: "social", moment: "social",
+      player: { id: "player", name: "P", archetype: "a", strategyStyle: "s", status: "active" },
+      house: [
+        { id: "npc:1", name: "A", status: "active", archetype: "x", strategyStyle: "y" },
+        { id: "npc:2", name: "B", status: "evicted" },
+      ] } as unknown as GameStateView;
+    const prompt = buildSystemPrompt("social", view);
+    expect(prompt).toMatch(/Houseguests remaining: 2 of 3/); // player + 1 active NPC of 3 total
+    expect(prompt).toMatch(/do your own arithmetic/i);
+  });
+
+  // Eviction fidelity (audit 2026-06-18): a play-through caught the model inventing a flattering
+  // vote tally ("nine to one, your name only came up once") that did NOT match the engine's actual
+  // staged ballots, and naming a real-world host ("Julie Chen"). Both are pinned out.
+  it("the eviction moment drives the staged secret-ballot reveal and forbids an invented tally", () => {
+    const view = { started: true, week: 1, phase: "eviction", moment: "eviction",
+      player: { id: "p", name: "P", archetype: "a", strategyStyle: "s" }, house: [] } as unknown as GameStateView;
+    const prompt = buildSystemPrompt("eviction", view);
+    expect(prompt).toMatch(/secret ballot/i);
+    expect(prompt).toMatch(/staged/i);
+    expect(prompt).toMatch(/never invent the tally/i);
+    expect(prompt).toMatch(/never WHO cast it/i); // anonymity preserved
+  });
+
+  it("the base prompt forbids naming a real-world host or person (no Julie Chen)", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never name a real-world host/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Julie Chen/); // the exact failure, pinned as the example
+  });
+
+  // Cross-week confabulation (audit 2026-06-18): the model jumped from a goodbye straight to "RILEY
+  // CORTEZ — you are the new Head of Household" with the engine still at week-1 eviction — inventing
+  // the PLAYER winning a comp the game never ran (the worst break). A sharp transition rule is pinned.
+  it("forbids narrating a new week's HOH before advancing into it", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/A NEW WEEK DOES NOT EXIST until you advanceGame into it/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/you are the new HOH/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/it may well be someone else/i);
+  });
+
+  // Anti-leak (audit 2026-06-18, owner rulings): the model is steeped in "the engine" all day and
+  // echoes it to the player ("the engine has everything…"), and it recites archetype labels as a
+  // cast scouting report ("X is the mastermind"). Both are scrubbed at the source.
+  it("never names 'the engine' as prose, and forbids announcing archetype/strategy labels", () => {
+    // The ONLY surviving "engine" is the banned-words rule itself (in quotes); no "the engine" prose.
+    expect(/\bthe engine\b/i.test(BASE_GAME_MASTER_PROMPT)).toBe(false);
+    // Archetype/strategy are a PRIVATE voice cue — never announced to the player.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/houseguest's archetype, strategy, or threat level/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/discover/i);
   });
 
   // P6: runCompetition PREVIEWS the loop's already-decided winner; only advanceGame commits.

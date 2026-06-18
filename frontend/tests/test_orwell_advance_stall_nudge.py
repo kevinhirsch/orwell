@@ -45,7 +45,8 @@ def test_stall_nudge_fires_only_for_live_game_at_a_beat_with_no_progress():
     assert "_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN" in js
     assert "_ADVANCE_STALL_LEVEL.get(owner" in js
     # nudging continues the loop (gives the model another step), it does not auto-advance
-    assert '"content": _ADVANCE_NUDGES[min(_level' in js
+    assert "_ADVANCE_NUDGES[min(_level" in js
+    assert '"content": _nudge' in js
 
 
 def test_stall_escalation_resets_when_the_game_advances():
@@ -63,9 +64,42 @@ def test_nudge_only_seizes_a_lull_not_substantive_play():
     assert "_player_turn_is_lull" in js
     assert "_LULL_READY_RE" in js
     assert "_LULL_SHORT_CHARS" in js
-    # the advance-nudge only wants to fire on a lull; substantive engagement is never advanced
-    assert "_want_advance = (not _progressed) and _is_lull" in js
+    # the advance-nudge fires on a lull, OR a previewed-but-uncommitted outcome (#1), OR an
+    # undelivered decision result (1b) — the latter two bypass the lull gate.
+    assert "_want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (" in js
+    assert "(not _progressed) and _is_lull and _stale" in js
     assert "if _want_advance and _phase in _ADVANCE_PHASES" in js
+    # …and only once the beat has gone STALE (owner ruling 2026-06-18): a lull alone is not enough,
+    # so good engaging play and a just-started beat are never shoved.
+    assert "_ADVANCE_GRACE_TURNS" in js
+    assert "_TURNS_SINCE_PROGRESS" in js
+    assert "and _stale" in js
+
+
+def test_previewed_but_uncommitted_ceremony_is_a_hard_stall(self_check=None):
+    # Hand-off #1 (HIGH): previewing a ceremony OUTCOME (runCompetition) in an advance-phase and not
+    # committing it (advanceGame) is a hard stall — it bypasses the lull/staleness gate and gets the
+    # forceful commit nudge immediately, because the board now contradicts the narration.
+    js = _read("src", "agent_loop.py")
+    assert '_PREVIEW_TOOLS = {"runCompetition"}' in js
+    assert "_PREVIEW_COMMIT_NUDGE" in js
+    # ORDER-based, not `not _progressed`: last beat-tool == runCompetition ⇒ uncommitted preview.
+    # (A turn that advances the roll AND then previews the next comp still left it uncommitted.)
+    assert '_previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"' in js
+    # the forceful nudge is chosen for the previewed case (not the gentle graduated one)
+    assert "_nudge, _why = _PREVIEW_COMMIT_NUDGE" in js
+
+
+def test_undelivered_decision_result_is_a_hard_stall():
+    # Hand-off 1b: resolving a decision (submitDecision) but never advanceGame'ing AFTER it leaves the
+    # result undelivered — the model narrated an invented/cross-week outcome ("you are the new HOH"
+    # with the engine at last week's eviction). The ORDER of progression tools decides it, and it gets
+    # the forceful deliver nudge regardless of lull (it fires even though the turn "progressed").
+    js = _read("src", "agent_loop.py")
+    assert "_DECISION_DELIVER_NUDGE" in js
+    assert "_BEAT_TOOLS = _PROGRESSION_TOOLS | _PREVIEW_TOOLS" in js
+    assert '_decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"' in js
+    assert "elif _decision_undelivered:" in js
 
 
 def test_consequence_loop_auto_records_engaged_scenes():

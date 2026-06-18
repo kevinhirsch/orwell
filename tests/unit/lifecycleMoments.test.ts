@@ -89,6 +89,11 @@ describe("B62 — the terminal beat (the season closes with the result, from the
     expect(systemPrompt).toContain("won the season");
     const winner = s.seasonRecap().winner!;
     expect(systemPrompt).toContain(winner.name);
+    // Play-through gap (2026-06-18): the prompt told the model a new season needs a confirmed
+    // request but never the MECHANISM — so on "play again" the model fired createCharacter without
+    // confirmRestart and the call no-op'd, stranding the player on the reunion. The prompt must name
+    // the restart door.
+    expect(systemPrompt).toContain("confirmRestart=true");
   });
 
   // R4-04: the post-season prompt must forbid improvising a NEW season in this chat (the model was
