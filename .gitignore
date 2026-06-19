@@ -13,3 +13,8 @@ coverage/
 
 # audit visual-telemetry sandbox (never commit)
 .audit-telemetry/
+
+# heavy-sim shard artifacts (local default *_RESULTS_DIR under tmp/ + CI's collected dirs)
+tmp/
+jury-results/
+gradient-results/

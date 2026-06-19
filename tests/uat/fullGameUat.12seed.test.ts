@@ -9,6 +9,13 @@
  * former single fullGameUat.test.ts was split into so its independent `it` blocks fan
  * out across separate CI runners; seeds and assertions are unchanged.
  *
+ * **Seed-sharding (structural only):** this block asserts PER-SEED properties only (each game
+ * finishes, no anomalies, ≥1 week played, and — over a non-empty slice — total player decisions
+ * > 0); it runs NO cross-seed aggregate. So with `UAT12_SHARDS=N` (`UAT12_SHARD=k`) it plays ONLY
+ * its contiguous seed slice and asserts INDEPENDENTLY over it — the union of the shards is the
+ * full 12 seeds, each played exactly once, no assertion weakened. Unset (the local
+ * `npm run test:heavy:uat-12seed` path) plays all 12. See {@link resolveUatSeedShard}.
+ *
  * See tests/uat/fullGameUatHarness.ts for the shared driver + invariant checkers.
  */
 
@@ -16,11 +23,16 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   startUatHarness,
   runFullGameDirect,
+  resolveUatSeedShard,
   type UatHarness,
   type RunResult,
 } from "./fullGameUatHarness";
 
-describe("full-game UAT — 12 seeds (never-use-veto)", () => {
+// The full seed set this block owns, and this process's shard slice of it (env-driven).
+const ALL_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const { seeds: SEEDS, label: SHARD_LABEL } = resolveUatSeedShard(ALL_SEEDS);
+
+describe(`full-game UAT — 12 seeds (never-use-veto) — ${SHARD_LABEL}`, () => {
   let harness: UatHarness;
 
   beforeAll(async () => {
@@ -31,12 +43,12 @@ describe("full-game UAT — 12 seeds (never-use-veto)", () => {
     await harness.close();
   });
 
-  // ── Primary run: 12 seeds, never-use-veto ──────────────────────────────────
+  // ── Primary run: 12 seeds, never-use-veto (this shard's slice) ─────────────
 
   it(
-    "plays 12 seeds to completion (never-use-veto) — no anomalies detected",
+    `plays ${SEEDS.length} seeds to completion (never-use-veto) — no anomalies detected — ${SHARD_LABEL}`,
     async () => {
-      const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+      const seeds = SEEDS;
       // Uses direct callTool (no HTTP) for reliability: the transport layer added
       // non-deterministic overhead that caused stale-loop failures in CI for some seeds.
       const runs: RunResult[] = [];
@@ -69,9 +81,10 @@ describe("full-game UAT — 12 seeds (never-use-veto)", () => {
       // All games must have played at least 1 week.
       expect(runs.every((r) => r.weeksPlayed >= 1), "each game played ≥ 1 week").toBe(true);
 
-      // At least some games must have produced player decisions.
+      // At least some games must have produced player decisions (asserted independently over this
+      // shard's non-empty slice — a clean shard partition never yields an empty slice here).
       const decisionsTotal = runs.reduce((n, r) => n + Object.values(r.decisionCounts).reduce((a, b) => a + b, 0), 0);
-      expect(decisionsTotal, "total player decisions across all runs").toBeGreaterThan(0);
+      expect(decisionsTotal, "total player decisions across this shard's runs").toBeGreaterThan(0);
     },
     { timeout: 120_000 },
   );
