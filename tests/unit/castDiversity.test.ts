@@ -149,6 +149,37 @@ describe("L28/C — non-mirroring & player-INDEPENDENCE", () => {
   });
 });
 
+describe("L18c — the age floor (BB-eligible): no NPC is younger than 21", () => {
+  it("every generated NPC is at least 21 across many seeds", () => {
+    for (const seed of [1, 7, 42, 101, 256, 777, 1009, 4242, 90210]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      for (const n of npcs) {
+        expect(n.character.age).toBeGreaterThanOrEqual(21);
+      }
+    }
+  });
+
+  it("the age floor holds through the live createCharacter view", () => {
+    const s = new GameSessionAdapter();
+    const v = s.createCharacter({ playerName: "The Player", seed: 31337 });
+    for (const h of v.house) {
+      expect(h.age).toBeGreaterThanOrEqual(21);
+    }
+  });
+
+  it("ages span a real adult range (a mix of younger and older houseguests)", () => {
+    // sweep wide: the cast must not collapse to a single age bracket
+    const ages: number[] = [];
+    for (const seed of [3, 17, 88, 256, 1009, 4242]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      for (const n of npcs) ages.push(n.character.age);
+    }
+    expect(Math.min(...ages)).toBeGreaterThanOrEqual(21);
+    // a believable cast reaches past 40 at least somewhere across these seasons
+    expect(Math.max(...ages)).toBeGreaterThanOrEqual(40);
+  });
+});
+
 describe("L28/D — the backstory PERSISTS airtight (no regenerate, no drift)", () => {
   it("vocation + hometown survive a snapshot→restore unchanged", () => {
     const a = new GameSessionAdapter();

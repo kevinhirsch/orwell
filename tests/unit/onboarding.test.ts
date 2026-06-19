@@ -39,13 +39,18 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
     s.createCharacter({ playerName: PLAYER_NAME, seed: 3 });
     const blob = JSON.stringify(s.getGameState().house);
     // The genuinely hidden layer never crosses: aptitudes, the soul, hidden elements.
-    // (NB: "social" is NOT banned — it is a legitimate public strategy style/archetype word.)
-    for (const leak of ["physical", "mental", '"stats"', '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive", "concealed-aptitude"]) {
+    // NB: bare "physical"/"mental"/"social" are NOT banned — they are legitimate PUBLIC words
+    // (a "physical therapist" vocation, a "social" strategy style, L28). What must never cross is
+    // the serialized STAT BLOCK — the aptitude KEYS (`"physical":<n>`) and any numeric value.
+    for (const leak of ['"physical":', '"mental":', '"social":', '"stats"', '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive", "concealed-aptitude"]) {
       expect(blob.includes(leak), `house projection leaked "${leak}"`).toBe(false);
     }
+    // No numeric aptitude rides along anywhere (engine stats are floats).
+    expect(blob).not.toMatch(/\d\.\d/);
     const card = s.getGameState().house[0]!;
     expect(Object.keys(card).sort()).toEqual(
-      ["age", "appearance", "archetype", "background", "id", "name", "presentation", "status", "strategyStyle"].sort());
+      // L28: vocation + hometown are PUBLIC facets (introduced in the premiere, voiced in social play).
+      ["age", "appearance", "archetype", "background", "hometown", "id", "name", "presentation", "status", "strategyStyle", "vocation"].sort());
   });
 });
 

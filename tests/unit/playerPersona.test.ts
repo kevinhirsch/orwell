@@ -59,8 +59,9 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
     }
     const { castingCard: _card, ...playerSansCard } = view.player!;
     const blob = JSON.stringify({ ...view, player: playerSansCard });
-    // "social"/"emotional" are public strategy-style words (B61); the hidden layer stays banned.
-    for (const banned of ["physical", "mental", '"stats"', '"soul"', "emotionalState", "volatility", "hiddenElement"]) {
+    // "social"/"emotional"/"physical" (a "physical therapist" vocation) are public words (B61/L28);
+    // only the serialized STAT BLOCK — the aptitude KEYS (`"physical":<n>`) and the soul — stays banned.
+    for (const banned of ['"physical":', '"mental":', '"social":', '"stats"', '"soul"', "emotionalState", "volatility", "hiddenElement"]) {
       expect(blob.includes(banned)).toBe(false);
     }
     // And no numeric value ever rides along anywhere — the card included (engine stats are floats).

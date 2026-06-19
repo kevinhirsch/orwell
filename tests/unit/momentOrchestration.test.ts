@@ -36,10 +36,14 @@ describe("0018 — narrative & moment orchestration", () => {
     game.createCharacter({ playerName: "Player One", seed: 4 });
     const ctx = renderGameContext(game.getGameState());
     expect(ctx).toContain("Player One");
-    // "social" is a public strategy-style word (B61 cast voices) — ban the hidden layer precisely.
-    for (const banned of ["physical", "mental", '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive"]) {
+    // The woven context is PROSE, not the stat block: bare "physical"/"mental"/"social" are public
+    // words (a "physical therapist" vocation, a "social" strategy style — L28), so they are NOT
+    // banned. The hidden layer is banned precisely (soul vocabulary), and no numeric aptitude (a
+    // float) may ever ride along — that is what a real stat leak would look like in the context.
+    for (const banned of ['"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive"]) {
       expect(ctx.includes(banned)).toBe(false);
     }
+    expect(ctx).not.toMatch(/\d\.\d/);
   });
 
   it("editing a moment fragment changes only that moment", () => {
