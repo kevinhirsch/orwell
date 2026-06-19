@@ -42,14 +42,19 @@ export const PRESENCE: PresenceConstants = {
  * never the hard floor-plan rules. The sibling-constants pattern (decisionConstants/relationship-
  * Constants): no magic number is hard-coded at a call site.
  *
- * CRITICAL (the L21/L24 root-cause + the reverted-attempt lesson): the personality rolls these
- * constants govern are drawn from a DEDICATED, isolated movement RNG stream — `presenceTick` forks
- * its own per-tick stream off the GAME seed — NEVER the orchestrator's shared per-user stream that
- * drives the off-screen society + relationship folds + votes. That isolation is the whole reason
- * this weighting can ship without perturbing the seeded `juryReach` calibration gate (the prior,
- * reverted attempt drew the extra movement rolls from the shared stream and shifted competition/
- * vote outcomes downstream). The weighting reads the static CHARACTER `stats.social` and the dynamic
- * SOUL volatility; no number ever crosses the Vault Wall (presence reads stay Vault-free).
+ * CRITICAL (the L21/L24 root-cause + the two-reverted-attempts lesson). The personality-WEIGHTED,
+ * player-facing positions are drawn from a DEDICATED movement RNG stream — `presenceTick` forks its own
+ * per-tick stream off the GAME seed — so these constants NEVER touch the orchestrator's shared per-user
+ * stream that drives the off-screen society + relationship folds + votes. But the CALIBRATION-NEUTRAL
+ * BASE assignment the society pairs on still draws from that SHARED stream, un-weighted, with the SAME
+ * draw count as the pre-feature build — so the seeded `juryReach` calibration spine is byte-identical.
+ * Both prior attempts broke that spine by changing the shared-stream consumption: the first ADDED
+ * weighting rolls to it; the second stopped drawing from it ENTIRELY (the un-weighted assignment used
+ * to BE part of the spine). The fix keeps the base on the shared stream and the weighting on its own.
+ * (Guards: `tests/property/movementStreamIsolation` + the shared-draw-count test in
+ * `tests/unit/presence.test.ts` + the permanent `tests/property/juryReach` gate.) The weighting reads
+ * the static CHARACTER `stats.social` and the dynamic SOUL volatility; no number ever crosses the Vault
+ * Wall (presence reads stay Vault-free).
  */
 export interface MovementPersonality {
   /**

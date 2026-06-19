@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, occupancyViolations } from "../../src/domain/house";
 import type { Room } from "../../src/domain/house";
 import { assignRooms, rollOverhears } from "../../src/engine/presence";
-import { PRESENCE } from "../../src/engine/presenceConstants";
+import { PRESENCE, MOVEMENT_PERSONALITY } from "../../src/engine/presenceConstants";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
@@ -571,5 +571,50 @@ describe("the live game's personality-weighted movement (L21/L24)", () => {
       expect(occupancyViolations(active, base)).toEqual([]);
       for (const room of base.values()) expect(room).not.toBe("diary-room");
     }
+  });
+
+  // THE CALIBRATION-SPINE GUARD (the jury-reach regression root cause; companions: juryReach +
+  // movementStreamIsolation). `presenceTick` runs INSIDE the orchestrator's bounded off-screen tick,
+  // BEFORE the off-screen society / gossip / confessional / votes — all of which draw from the SAME
+  // shared per-user `rng`. Before L21/L24, the un-weighted room assignment drew from that shared stream,
+  // so its draws were part of the calibrated spine. The regression: the first ship of L21/L24 stopped
+  // drawing from the shared stream entirely (movement went to a dedicated stream), which RE-PHASED every
+  // later shared-stream consumer and shifted the seeded competition/vote outcomes — `juryReach` failed
+  // (seed 7 crowned a 1-comp goat). The fix: the CALIBRATION-NEUTRAL BASE assignment STILL draws from the
+  // shared `rng`, with the exact same draw count as before, while ONLY the personality-weighted player-
+  // facing view rides the dedicated stream. This guard pins both halves of that invariant directly.
+  it("presenceTick draws from the shared stream, and the draw count is INVARIANT to the weighting constants", () => {
+    // Count the shared-stream `.next()` draws a single tick takes, at a given MOVEMENT_PERSONALITY.
+    function sharedDrawsForTick(over: Partial<typeof MOVEMENT_PERSONALITY>): number {
+      const saved = { ...MOVEMENT_PERSONALITY };
+      Object.assign(MOVEMENT_PERSONALITY, over);
+      try {
+        const { sb } = liveGame(77);
+        sb.session.presenceTick(new SeededRandom(1)); // a first tick to settle a prior occupancy
+        let count = 0;
+        const base = new SeededRandom(2);
+        const counting = {
+          next: () => { count++; return base.next(); },
+          int: (n: number) => base.int(n),
+          pick: <T,>(xs: readonly T[]) => base.pick(xs),
+          fork: (l: string) => base.fork(l),
+        };
+        sb.session.presenceTick(counting); // the measured tick
+        return count;
+      } finally {
+        Object.assign(MOVEMENT_PERSONALITY, saved);
+      }
+    }
+    // The base assignment consumes the shared stream — a non-zero draw count (the #338 regression drew ZERO,
+    // which silently re-phased the calibration spine downstream).
+    const defaultDraws = sharedDrawsForTick({});
+    expect(defaultDraws, "the base room assignment must consume the SHARED stream (else the spine re-phases)").toBeGreaterThan(0);
+    // …and that consumption is INVARIANT to the personality constants — only the dedicated movement stream
+    // (the player-facing weighted view) ever sees the weighting, so however the constants are cranked, the
+    // shared stream advances by the SAME number of draws ⇒ the calibration is byte-identical (juryReach).
+    const extremeDraws = sharedDrawsForTick({
+      moveAptitudeWeight: 5, seekAptitudeWeight: 8, volatilityWeight: 5, moveProbFloor: 0.01, moveProbCeil: 0.999,
+    });
+    expect(extremeDraws, "extreme weighting must NOT change the shared-stream draw count (calibration isolation)").toBe(defaultDraws);
   });
 });

@@ -8,16 +8,22 @@ import { MOVEMENT_PERSONALITY } from "../../src/engine/presenceConstants";
  * L21/L24 — the RNG-ISOLATION regression guard (the golden test the feature lives or dies on).
  *
  * NPC-personality movement weighting (`presence.ts` / `presenceConstants.ts`) bends each NPC's
- * room-to-room movement by WHO they are (social aptitude + soul volatility). A PRIOR attempt at this
- * was REVERTED because it drew the extra movement rolls from the orchestrator's SHARED per-user RNG
- * stream — the same stream that drives the off-screen society + relationship folds + (downstream)
- * the nomination/vote decisions — so it shifted the seeded `juryReach` calibration outcomes past the
- * `F2_WIN_MAX` cap. A real calibration regression caused purely by a side-channel RNG draw.
+ * room-to-room movement by WHO they are (social aptitude + soul volatility). TWO prior attempts at this
+ * broke the seeded `juryReach` calibration gate — both by changing how the orchestrator's SHARED per-user
+ * RNG stream (which drives the off-screen society + relationship folds + downstream nomination/vote
+ * decisions) is consumed during `presenceTick`:
+ *   1. The FIRST reverted attempt ADDED extra weighting rolls to the shared stream — re-phasing it.
+ *   2. The SECOND (the first ship of this feature) over-corrected and stopped drawing from the shared
+ *      stream ENTIRELY (all movement went to a dedicated stream) — which ALSO re-phased every later
+ *      shared-stream consumer, because the un-weighted room assignment used to BE part of the spine.
  *
- * THE FIX, proven here: movement randomness rides a DEDICATED stream that `GameSessionAdapter`
- * `presenceTick` forks off the GAME seed + a persisted per-tick counter — it NEVER consumes the
- * shared per-user stream. So however differently the personality weighting moves the house, the
- * shared stream is byte-for-byte unchanged and the competition/vote outcomes are IDENTICAL.
+ * THE FIX, proven here AND in `tests/unit/presence.test.ts` (the shared-draw-count guard): the
+ * CALIBRATION-NEUTRAL BASE assignment — `presenceBase`, what the off-screen society pairs on — STILL
+ * draws from the SHARED per-user stream, un-weighted, with the EXACT same draw count as the pre-feature
+ * build, so the shared stream is advanced byte-identically and the competition/vote outcomes are
+ * UNCHANGED. ONLY the personality-WEIGHTED, player-facing positions ride a DEDICATED stream that
+ * `presenceTick` forks off the GAME seed + a persisted per-tick counter. So however differently the
+ * weighting moves the player-facing house, the calibration spine is byte-for-byte unchanged.
  *
  * The golden assertion: drive the SAME seeded passive live season twice through the SAME runtime the
  * production composition (and `juryReach`) uses — once with the DEFAULT movement weighting, once with

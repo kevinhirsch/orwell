@@ -980,24 +980,31 @@ export class GameSessionAdapter implements GameSession {
    * to an ADJACENT room, clustered by affinity + personality (L21/L24). The orchestrator calls this
    * once per tick; lingering player turns never move the week — only the rooms.
    *
-   * RNG ISOLATION (L21/L24): the `rng` argument the orchestrator passes is the SHARED per-user stream
-   * (off-screen society + relationship folds + votes). Movement does NOT consume it — it draws from a
-   * DEDICATED stream (`movementRng()`). So the shared stream is byte-for-byte unchanged.
+   * THE CALIBRATION INVARIANT (L21/L24 — the jury-reach root cause). The off-screen society pairs
+   * CO-PRESENT NPCs, so its occupancy is calibration-LOAD-BEARING (it feeds relationship folds →
+   * nominations/votes downstream). Before this feature, `presenceTick` drew its room rolls straight
+   * from the orchestrator's SHARED per-user `rng` — so the move/room draws were part of the calibrated
+   * spine, and every later shared-stream consumer (society/gossip/confessional/votes) saw a specific
+   * sequence. To stay byte-identical to that spine, the BASE (un-weighted) assignment STILL draws from
+   * the SHARED `rng`, with the exact same algorithm and draw count as before — so the shared stream is
+   * advanced identically and the seeded competition/vote outcomes are byte-for-byte unchanged. (The
+   * prior reverted attempt added EXTRA shared-stream draws for weighting; the first ship of this feature
+   * over-corrected and drew NONE from the shared stream — both re-phased the spine and broke juryReach.)
    *
-   * CALIBRATION ISOLATION (L21/L24): the off-screen society pairs CO-PRESENT NPCs, so its occupancy is
-   * calibration-load-bearing. We therefore compute TWO assignments from the SAME dedicated stream:
-   *   • the BASE (un-weighted) occupancy — `presenceBase`, what `societyOccupancy()` feeds the society,
-   *     INVARIANT to the personality constants, so the seeded competition/vote outcomes are byte-identical
-   *     whether or not the weighting is enabled (proven by `movementStreamIsolation`);
+   * TWO assignments:
+   *   • the BASE (un-weighted) occupancy — `presenceBase`, what `societyOccupancy()` feeds the society.
+   *     Drawn from the SHARED `rng`, un-weighted, identical to the pre-L21/L24 build ⇒ INVARIANT to the
+   *     personality constants AND byte-identical to the calibrated spine (proven by `movementStreamIsolation`
+   *     + `juryReach`).
    *   • the personality-WEIGHTED occupancy — `presence`, the player-facing positions (`whereabouts`,
-   *     witnessing). The player never observes the hidden society's pairing, so one-place-at-a-time still
-   *     holds for everything the player sees.
-   * The base draws from the stream FIRST so the weighted pass is a pure re-weight of the same rolls.
+   *     witnessing). Drawn from a DEDICATED `movementRng()` stream (never the shared one), so however the
+   *     weighting moves the house it cannot perturb calibration. The player never observes the hidden
+   *     society's pairing, so one-place-at-a-time still holds for everything the player sees.
    */
-  presenceTick(_rng?: RandomnessSource): void {
+  presenceTick(rng?: RandomnessSource): void {
     if (!this.house) return;
-    // Advance the dedicated movement stream by one tick FIRST, so each tick draws a fresh, reproducible
-    // sub-stream (and a resumed game continues the deterministic sequence from the persisted counter).
+    // Advance the dedicated movement stream by one tick FIRST, so the WEIGHTED pass draws a fresh,
+    // reproducible sub-stream (and a resumed game continues the deterministic sequence from the counter).
     this.presenceTickCount += 1;
     const me = this.house.player.id;
     const prev = this.presence;
@@ -1010,21 +1017,25 @@ export class GameSessionAdapter implements GameSession {
     // or off). Pre-L21/L24 saves have no separate base — seed it from the only positions we have.
     const prevBase = this.presenceBase ?? prev;
 
-    // Compute one assignment for a given weighting from a FRESH dedicated sub-stream (so the base and the
-    // weighted pass each start at the same point — the weighted pass is a pure re-weight of identical rolls).
+    // Compute one assignment for a given weighting. `weighted` ⇒ the DEDICATED movement stream (isolated
+    // from calibration); un-weighted ⇒ the caller's SHARED `rng` (the calibrated spine the society reads),
+    // falling back to the dedicated stream only when no shared rng is supplied (standalone/test callers).
     const assign = (previous: Occupancy | null, weighted: boolean): Map<EntityId, Room> => {
-      const rng = this.movementRng();
+      const stream = weighted ? this.movementRng() : (rng ?? this.movementRng());
       if (!previous) {
         // Premiere seating — the ONE time everyone (the player included) is placed at once.
-        return assignRooms(this.presenceActive(), null, this.presenceDeps(rng, weighted));
+        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted));
       }
       // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them. Pin them (in BOTH views) at
       // their real room; the engine drives only the NPCs around the held player.
       const pinned = playerRoom ? new Map<EntityId, Room>([[me, playerRoom]]) : null;
-      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(rng, weighted), pinned);
+      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted), pinned);
     };
 
-    const nextBase = assign(prevBase, false);   // calibration-neutral — the society's occupancy
+    // The BASE draws from the SHARED `rng` FIRST — the same single un-weighted `assignRooms` call (same
+    // active set, same `prev`, same pinned player) the pre-L21/L24 build made, so the shared stream is
+    // advanced byte-identically to the calibrated spine.
+    const nextBase = assign(prevBase, false);   // calibration spine — the society's occupancy
     const next = assign(prev, true);            // personality-weighted — the player's positions
     // The player's position is authoritative and identical in both views (never personality-weighted) —
     // force the base to agree with the weighted player room so a player overhear of an off-screen scene
