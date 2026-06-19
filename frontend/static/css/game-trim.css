@@ -73,6 +73,18 @@ body[data-game-build].is-admin #model-select { display: initial; }
       build doesn't surface. (chat.js also removes the node outright.) ── */
 body[data-game-build] #export-doc-btn { display: none !important; }
 
+/* ── L1 (casting headshot): the welcome-screen lifts the composer ~30vh up the
+      page so it reads centred. While the casting headshot card is mounted ABOVE
+      the composer (orwellHeadshot.js adds .ow-casting-headshot-open), that lift
+      shoves the card up under the "orwell" header and over the logo. Drop the lift
+      while casting so the card + composer sit near the bottom, clear of the header;
+      the card's own max-height cap (orwellHeadshot.js) keeps it scrollable. ── */
+body[data-game-build].ow-casting-headshot-open .chat-container.welcome-active .chat-input-bar {
+  margin-bottom: 12px;
+}
+/* keep the welcome splash above the casting card so the logo is never occluded */
+body[data-game-build].ow-casting-headshot-open #welcome-screen { z-index: 3; }
+
 /* ── D7: game turns always act — the Agent|Chat mode toggle invites the
       broken tool-less mode while a game is live. ── */
 body[data-game-build][data-game-active="1"] .mode-toggle { display: none !important; }

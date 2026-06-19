@@ -163,11 +163,20 @@
     }, 5000);
   }
 
-  // The remedy the J4 card names: the workspace's own settings trigger (rail first, user
-  // bar as fallback). Called AFTER dismiss so the modal never opens behind the inert wall.
+  // The remedy the J4 card names: the workspace's own settings trigger. Called AFTER
+  // dismiss so the modal never opens behind the inert wall.
+  //
+  // L2 (OOBE play-through): #rail-settings only un-hides the sidebar and scrolls — it does
+  // NOT open the settings modal (see app.js). Clicking it left the player back at the chat
+  // with no settings UI. The button that actually opens Settings is the user-bar gear
+  // (#user-bar-settings → settingsModule.open()), so prefer it; fall back to a direct module
+  // open if exposed, then to the rail button as a last resort.
   function openSettings() {
-    const btn = document.getElementById("rail-settings") || document.getElementById("user-bar-settings");
-    if (btn) btn.click();
+    const gear = document.getElementById("user-bar-settings");
+    if (gear) { gear.click(); return; }
+    try { if (window.settingsModule && window.settingsModule.open) { window.settingsModule.open(); return; } } catch (_) {}
+    const rail = document.getElementById("rail-settings");
+    if (rail) rail.click();
   }
 
   // Seam for the headless browser gate: mount the dark-house holding card on demand.
@@ -176,6 +185,20 @@
       "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
       async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
   };
+
+  // L2: is the caller an admin? The J4 card offers "Open Settings → Add Models" only to
+  // operators who can actually fix it. The old gate read `window._isAdmin`, which nothing in
+  // the app ever sets — so the button never rendered even for admins. Probe the real signal
+  // (/api/auth/status.is_admin). Fail closed (no button) when the probe is unavailable, so a
+  // non-admin is never handed a control they can't act on; the dismiss is always there.
+  async function isAdmin() {
+    try {
+      const r = await fetch("/api/auth/status", { credentials: "same-origin" });
+      if (!r.ok) return false;
+      const d = await r.json();
+      return !!(d && d.is_admin);
+    } catch (_) { return false; }
+  }
 
   // J4: "is any chat model configured?" — the interview cannot speak without one, and the
   // old flow let the player author a houseguest then dead-end at "No model selected".
@@ -221,6 +244,44 @@
       }
     }, 400); // after the fresh-session click settles
   }
+
+  // L5: the casting→game cutover. Picking the casting headshot is the LAST pre-game
+  // step (orwellHeadshot.js calls this on finalize); the PRODUCERS open the show — the
+  // player should never have to type the opening word. We auto-send ONE producer-framed
+  // kickoff so the model (under the pre-game/casting moment prompt) finalizes casting if
+  // needed (createCharacter) and narrates the premiere. This is a deliberate, scoped
+  // departure from the "prefill, never auto-send" rule — only at this single handoff,
+  // game-build only, fired once. Guards: never override the player's own typing or an
+  // in-flight stream, and never fire if the conversation is already underway from a
+  // started game.
+  const OPEN_GAME_LINE =
+    "Casting's done and my headshot's set — I'm ready. Let's open the show.";
+  let _openSent = false;
+  window._orwellOpenGameAfterCasting = function () {
+    const gameBuild = document.body && document.body.hasAttribute("data-game-build");
+    if (!gameBuild || _openSent) return;
+    _openSent = true;
+    // Give the headshot card's teardown a beat, then auto-send through the normal
+    // submit path (the same seam chat.js uses for its own programmatic sends).
+    setTimeout(() => {
+      try {
+        const box = document.getElementById("message");
+        if (!box) { _openSent = false; return; }
+        if (box.value.trim()) return;                 // the player is mid-thought — don't stomp it
+        if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
+          _openSent = false; return;                  // a turn is already running — let it finish
+        }
+        box.value = OPEN_GAME_LINE;
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
+          window.chatModule.handleChatSubmit({ preventDefault() {} });
+        } else {
+          // No send seam available — fall back to a focused prefill so the player's Enter starts it.
+          box.focus();
+        }
+      } catch (_) { _openSent = false; /* fail open — the composer is still the way in */ }
+    }, 250);
+  };
 
   // F4: re-run the PREFILL ONLY — never the fresh-session click (the F7 fence stays
   // one-per-interview, so a reload can never spawn extra sessions). Guards: an
@@ -276,12 +337,13 @@
         // Sequence the prerequisite (J4): production needs a feed source first. Admins get
         // pointed at setup — and a BUTTON that actually goes there (the copy's remedy must
         // be operable from the card; the page behind it is inert). Re-probe and continue.
+        const admin = await isAdmin();
         mountHolding("Production needs a feed source",
           "No chat model is configured yet, so the house can't speak. " +
-          (window._isAdmin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
-                           : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
+          (admin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
+                 : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
           anyModelConfigured,
-          window._isAdmin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
+          admin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
         return;
       }
       takeASeat();
