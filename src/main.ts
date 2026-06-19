@@ -36,58 +36,18 @@ const port = parsePort(
 // the deterministic provider (tests, dev).
 const embedMode = (process.env["ORWELL_EMBEDDINGS"] ?? "").trim().toLowerCase();
 // G1: the embeddings-provider status surfaced on /health (the admin Health & Logs card).
-// `provider` is the EFFECTIVE provider right now; `degraded` is true when fastembed was
-// requested but the process is (or has fallen) on the deterministic fallback — either a
-// warm-up failure at boot or a mid-process worker death (FastembedEmbedding.degraded).
-let embeddingsStatus: () => { provider: string; degraded: boolean } = () => ({
-  provider: "deterministic",
-  degraded: false,
-});
-if (embedMode === "fastembed") {
-  const dataDir =
-    process.env["ORWELL_DATA_DIR"] ?? process.env["BBAI_DATA_DIR"] ?? "./.orwell-data";
-  const cacheDir = process.env["ORWELL_EMBED_CACHE"] || `${dataDir.replace(/\/$/, "")}/models`;
-  // BOOT-SAFETY (prod incident 2026-06-19): the warm-up must NEVER wedge the engine. It runs
-  // BEFORE startHttpMcp, and the catch below only handles a *thrown* error — a model download that
-  // STALLS (cold cache + a blocked/slow model CDN) would hang this await forever, so the process
-  // stays "active" under systemd yet never binds :8765 and /health never answers (exactly the
-  // outage seen). Bound it: if the model isn't ready in time, fall back to the deterministic
-  // embedder and boot anyway. Prefetch (`node dist/embedWorker.js --prefetch`) to keep real recall.
-  const warmupMs = Number(process.env["ORWELL_EMBED_WARMUP_MS"]) || 45000;
-  try {
-    const { createFastembedEmbedding } = await import("./adapters/embedding/FastembedEmbedding");
-    const provider = await Promise.race([
-      createFastembedEmbedding({
-        workerUrl: new URL("./embedWorker.js", import.meta.url),
-        cacheDir,
-      }),
-      new Promise<never>((_, reject) => {
-        const t = setTimeout(
-          () => reject(new Error(`fastembed warm-up exceeded ${warmupMs}ms — booting on deterministic recall`)),
-          warmupMs,
-        );
-        // Don't let the timeout itself keep the process alive once warm-up wins the race.
-        if (typeof t.unref === "function") t.unref();
-      }),
-    ]);
-    const { setRuntimeEmbedding } = await import("./composition/engineRoot");
-    setRuntimeEmbedding(provider);
-    embeddingsStatus = () =>
-      provider.degraded
-        ? { provider: "deterministic", degraded: true } // worker died mid-process — permanent for this run
-        : { provider: "fastembed", degraded: false };
-    console.log(`[orwell] semantic recall: fastembed (local ONNX, dim=${provider.dim}, cache=${cacheDir})`);
-  } catch (e) {
-    embeddingsStatus = () => ({ provider: "deterministic", degraded: true }); // requested but unavailable
-    console.error(
-      `[orwell] fastembed warm-up failed (${e instanceof Error ? e.message : String(e)}); ` +
-        `semantic recall uses deterministic embeddings this run. ` +
-        `Prefetch the model (node dist/embedWorker.js --prefetch --cache-dir ${cacheDir}) and restart to upgrade.`,
-    );
-  }
-}
+// `provider` is the EFFECTIVE provider right now; `degraded` is true when fastembed was requested
+// but the process is (or has fallen) on the deterministic fallback. A STABLE closure over mutable
+// state, so the warm-up — which now runs AFTER the server binds (prod incident 2026-06-19), so a
+// cold/blocked model can NEVER delay /health — updates what /health reports without re-wiring
+// startHttpMcp. The actual warm-up is at the very bottom, after the listen.
+let embeddingsState: { provider: string; degraded: boolean } = { provider: "deterministic", degraded: false };
+const embeddingsStatus = (): { provider: string; degraded: boolean } => embeddingsState;
 
-const runtime = composeRuntime({ durable: true });
+// deferResume: bind the HTTP server + warm the embedder FIRST, then resume saved games (at the
+// bottom) — so a cold/blocked embedding model can never delay /health, and resumed souls still
+// capture the real embedder once it is warm (prod incident 2026-06-19).
+const runtime = composeRuntime({ durable: true, deferResume: true });
 
 // Network-edge guardrails (audit E1 / B34). Default to a trusted-loopback single-tenant deploy;
 // any of these can be turned on for an exposed / multi-user deployment:
@@ -115,3 +75,44 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 // eslint-disable-next-line no-console
 console.log(`Orwell engine MCP server listening on http://${host}:${port}`);
+
+// Warm up the real embedder AFTER /health is already answering (prod incident 2026-06-19): a cold
+// cache or a blocked/slow model CDN can NEVER delay boot now. Bounded by ORWELL_EMBED_WARMUP_MS so
+// even a stalled download falls through to the deterministic fallback. Saved games are resumed only
+// AFTER this, so they still capture fastembed when it is available; on timeout/failure they resume
+// on the deterministic fallback. Skipped entirely unless ORWELL_EMBEDDINGS=fastembed.
+if (embedMode === "fastembed") {
+  const dataDir = process.env["ORWELL_DATA_DIR"] ?? process.env["BBAI_DATA_DIR"] ?? "./.orwell-data";
+  const cacheDir = process.env["ORWELL_EMBED_CACHE"] || `${dataDir.replace(/\/$/, "")}/models`;
+  const warmupMs = Number(process.env["ORWELL_EMBED_WARMUP_MS"]) || 45000;
+  try {
+    const { createFastembedEmbedding } = await import("./adapters/embedding/FastembedEmbedding");
+    const provider = await Promise.race([
+      createFastembedEmbedding({ workerUrl: new URL("./embedWorker.js", import.meta.url), cacheDir }),
+      new Promise<never>((_, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`fastembed warm-up exceeded ${warmupMs}ms — staying on deterministic recall`)),
+          warmupMs,
+        );
+        if (typeof t.unref === "function") t.unref();
+      }),
+    ]);
+    const { setRuntimeEmbedding } = await import("./composition/engineRoot");
+    setRuntimeEmbedding(provider);
+    embeddingsState = provider.degraded
+      ? { provider: "deterministic", degraded: true } // worker died mid-process — permanent for this run
+      : { provider: "fastembed", degraded: false };
+    // eslint-disable-next-line no-console
+    console.log(`[orwell] semantic recall: fastembed (local ONNX, dim=${provider.dim}, cache=${cacheDir})`);
+  } catch (e) {
+    embeddingsState = { provider: "deterministic", degraded: true };
+    console.error(
+      `[orwell] fastembed warm-up failed (${e instanceof Error ? e.message : String(e)}); ` +
+        `semantic recall uses deterministic embeddings this run. ` +
+        `Prefetch the model (node dist/embedWorker.js --prefetch --cache-dir ${cacheDir}) and restart to upgrade.`,
+    );
+  }
+}
+// Resume saved games now — after warm-up — so resumed souls capture the real embedder when warm.
+// (Before this, a request for a saved user still works: the resolver builds their sandbox lazily.)
+runtime.resumeSaved();
