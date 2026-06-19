@@ -63,9 +63,13 @@ function ensureCss() {
       /* NB (A6): do NOT clip the frost by hiding overflow on this root — combined with the
          10px border-radius it clips the rounded-corner pointer region and defeats the L11
          corner-resize grab (which arms 2px from the corner; CI browser-smoke caught it). The
-         frosted-top cohesion rides the L34 frost rules in style.css (the titlebar inherits the
-         translucent+blur root). A6's seam refinement needs the live-browser audit its ledger
-         entry calls for, never a blind clip. */
+         frosted-top cohesion instead rides the L34 frost rules in style.css: this .ow-window
+         ROOT carries the single backdrop-filter, and the .ow-titlebar is transparent with NO
+         filter of its own — so the whole window frosts as one continuous glass surface. (A6
+         FIXED 2026-06-19: the titlebar previously carried its OWN backdrop-filter, which
+         re-blurred the root's already-frosted glass and composited the top strip to a
+         mismatched shade — the "frost breaks at the top" band. Never re-add a child filter or
+         a blind overflow clip here.) */
     }
     /* L11: once a window carries an explicit height (the player resized it, or a
        persisted size was restored), let it become a flex column so the body

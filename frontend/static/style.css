@@ -36156,15 +36156,11 @@ body.theme-frosted .sidebar-user-bar {
 /* Same problem on tool modals: the sticky .modal-header paints a solid
    var(--panel) bar (so scrolled content doesn't bleed through). Over a
    frosted-glass modal body that solid bar reads as a dark band across the
-   title area (Calendar, Tasks, Cookbook, Memory, Email…). Give the header
-   its own matching frosted glass — translucent tint + blur — so it stays
-   readable while scrolling but blends into the panel instead of a black band. */
-body.theme-frosted .modal-header,
-/* L34: the kit titlebar (.ow-titlebar) gets the SAME frosted treatment as the
-   modal header — translucent (no solid fill) + the body's backdrop-blur — so
-   the window's header reads as glass, not a heavy opaque bar, on EVERY Lane-F
-   window. Fixed at the kit level so all current and future windows inherit it. */
-body.theme-frosted .ow-titlebar {
+   title area (Calendar, Tasks, Cookbook, Memory, Email…). The .modal-header
+   is `position: sticky` and the modal body scrolls UNDER it, so it keeps its
+   own blur (translucent, no tint) to keep scrolled content legible while
+   blending into the panel instead of a black band. */
+body.theme-frosted .modal-header {
   /* Transparent — NOT another panel tint. The header sits on top of the
      already-frosted modal body, so any added tint stacks and the band
      reads darker than its surroundings. Keep just the blur (which doesn't
@@ -36173,6 +36169,23 @@ body.theme-frosted .ow-titlebar {
   background-image: none !important;
   backdrop-filter: blur(24px) !important;
   -webkit-backdrop-filter: blur(24px) !important;
+}
+/* A6 [frosted-top fix]: the kit titlebar (.ow-titlebar) is NOT sticky and the
+   kit body does not scroll under it — the bar sits flush at the very top of the
+   panel. Giving it its OWN backdrop-filter (as the modal header above needs) made
+   the titlebar re-sample and re-blur the .ow-window root's ALREADY-frosted glass,
+   so the top strip composited to a sharper, mismatched shade — the visible "frost
+   breaks at the top edge" band. The fix (per the A6 fix spec — the element with
+   backdrop-filter is the panel ROOT, the header is transparent over it): keep the
+   titlebar fully transparent with NO filter of its own, so the single .ow-window
+   root backdrop-filter renders the whole window — header included — as one
+   cohesive glass surface. Fixed at the kit level so every Lane-F window inherits
+   it (cast, finale, retrospective, gadget rail, theme). */
+body.theme-frosted .ow-titlebar {
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 /* Deep Research's header isn't sticky (content doesn't scroll under it) and
    its pane carries extra frosting — saturate + a top gradient highlight +
