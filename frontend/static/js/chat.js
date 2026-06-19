@@ -1291,6 +1291,14 @@ import { isNarrow } from './platform.js';
 
         // If thinking is still streaming (unclosed <think>), show indicator instead of raw text
         if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
+          // GAME BUILD (immersion): NEVER render the model's reasoning — not even the
+          // "Thinking…" indicator (it would carry leaked engine lever names once the
+          // box exists, and the header itself breaks the diegesis). Hold the bubble
+          // empty while reasoning is open; the reply-only render lands when it closes.
+          if (isGameBuild()) {
+            uiModule.scrollHistory();
+            return;
+          }
           const thinkStart = dt.search(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought/i);
           const thinkContent = dt.substring(Math.max(thinkStart, 0))
             .replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought\s*\n?/i, '')
@@ -1564,6 +1572,35 @@ import { isNarrow } from './platform.js';
                       hasUnclosedThink = true; // keep waiting for real </think>
                     }
                   }
+                }
+
+                // GAME BUILD (immersion): the model's reasoning must NEVER reach the DOM —
+                // it leaks engine lever names (whereabouts, npcVoice, getGameState, …) and
+                // breaks the show. We STILL track the thinking open/close state (so we know
+                // when reasoning ends and the reply begins) but build NO reasoning DOM:
+                //   • opening  → mark isThinking, destroy the spinner, hold the bubble empty
+                //   • streaming → keep holding (no live-think box)
+                //   • closing  → clear the flag, let normal streaming render the reply only
+                // The model keeps reasoning; it just never renders here. _renderStream() +
+                // processWithThinking() strip any reasoning that bleeds into the reply text.
+                if (isGameBuild() && (hasUnclosedThink || isThinking)) {
+                  if (hasUnclosedThink) {
+                    if (!isThinking) {
+                      isThinking = true;
+                      thinkingStartTime = Date.now();
+                      if (spinner && spinner.element) spinner.destroy();
+                    }
+                    // Reasoning still streaming — render nothing, just wait.
+                    uiModule.scrollHistory();
+                    continue;
+                  }
+                  // Reasoning just closed — drop back to normal streaming for the reply.
+                  isThinking = false;
+                  if (spinner && spinner.element) spinner.destroy();
+                  _renderStream();
+                  _scheduleThinkingSpinner();
+                  if (streamingTTS) window.aiTTSManager.streamingUpdate(roundText);
+                  continue;
                 }
 
                 if (hasUnclosedThink && !isThinking) {
