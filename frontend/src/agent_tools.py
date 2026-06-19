@@ -179,6 +179,7 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 from src.tool_parsing import (  # noqa: E402, F401
     parse_tool_blocks,
     strip_tool_blocks,
+    tool_call_opener_index,
     _TOOL_NAME_MAP,
     _TOOL_BLOCK_RE,
     _TOOL_CALL_RE,
