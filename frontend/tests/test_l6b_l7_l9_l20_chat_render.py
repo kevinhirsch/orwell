@@ -158,6 +158,45 @@ def test_mode_toggle_present_in_non_game_build():
 
 # ── L20 ──────────────────────────────────────────────────────────────────────── #
 
+# L45 — the same systemic class the owner re-reported can recur in via ANY trailing
+# sentence-terminator, not only `?`. The single line of defense (these guards) must cover
+# `?`, `!`, `.` and `…` (ellipsis) — plus a closing quote/paren riding after them.
+_L45_TERMINATORS = ("?", "!", ".", "…")
+
+
+@pytest.mark.parametrize("term", _L45_TERMINATORS)
+def test_python_live_scrub_preserves_trailing_terminator(term):
+    # The live-game stream scrub + the saved-message strip must not eat a trailing
+    # sentence terminator (?, !, ., …) — L20/L45.
+    os.environ.setdefault(
+        "DATABASE_URL",
+        "sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-l20-db-"), "app.db"),
+    )
+    import src.agent_tools  # noqa: F401  (load-order coupling)
+    import src.agent_loop as al
+    import src.tool_parsing as tp
+
+    # Each case carries (input, suffix-that-must-survive). The terminator may sit at
+    # the very end, be doubled, or ride just inside a closing quote/parenthetical —
+    # in every shape the punctuation (and the quote/paren after it) must round-trip.
+    cases = (
+        (f"Who do you trust most in this house{term}", term),
+        (f"So what is your move{term}{term}", f"{term}{term}"),
+        (f"They huddle by the pool{term}", term),
+        (f"I trust you{term} Do you really trust me{term}", term),
+        (f'"You ready{term}"', f'{term}"'),
+        (f"(We never saw that coming{term})", f"{term})"),
+    )
+    for reply, suffix in cases:
+        comp, rem = al._split_complete_sentences(reply)
+        scrubbed = al._scrub_game_leak(comp) + al._scrub_game_leak(rem)
+        assert scrubbed.endswith(suffix), \
+            f"live scrub ate the trailing {suffix!r} from {reply!r} -> {scrubbed!r}"
+        stripped = tp.strip_tool_blocks(reply)
+        assert stripped.endswith(suffix), \
+            f"strip_tool_blocks ate the trailing {suffix!r} from {reply!r} -> {stripped!r}"
+
+
 def test_python_live_scrub_preserves_trailing_question_mark():
     # The live-game stream scrub + the saved-message strip must not eat a trailing `?`.
     os.environ.setdefault(
@@ -216,12 +255,16 @@ def test_python_streaming_scrub_round_trips_trailing_question():
                 full += clean
         return full
 
-    # The `?` arrives in the final delta and the stream ends.
+    # The terminator arrives in the final delta and the stream ends. L45 widens this
+    # from `?`-only to every sentence terminator (?, !, ., …).
     cases = [
         (["The room ", "goes quiet. ", "Who do ", "you trust ", "most", "?"],
          "The room goes quiet. Who do you trust most?"),
         (["So ", "what is ", "your move", "?"], "So what is your move?"),
         (["Ready", "?"], "Ready?"),
+        (["The lights ", "snap ", "off", "!"], "The lights snap off!"),
+        (["She ", "leaves the ", "room", "."], "She leaves the room."),
+        (["He ", "trails ", "off", "…"], "He trails off…"),
     ]
     for deltas, expected in cases:
         assert simulate(deltas) == expected
@@ -257,6 +300,10 @@ def test_js_scrub_reasoning_preamble_keeps_trailing_question():
       ['Looking at the roster: npc:1 - someone.\nWelcome to the house. Who do you trust?',
        'Welcome to the house. Who do you trust?'],
       ['Let me stay in character.\nThe lights dim. Ready?', 'The lights dim. Ready?'],
+      // L45 — preserve every trailing sentence terminator, not just `?`.
+      ['The lights snap off!', 'The lights snap off!'],
+      ['She leaves the room.', 'She leaves the room.'],
+      ['He trails off…', 'He trails off…'],
     ];
     const run = new Function('cases', reLine + '\n' + reNpc + '\n' + body + '\n' +
       "let ok = true;" +
@@ -285,11 +332,16 @@ def test_js_strip_tool_blocks_keeps_trailing_question():
     }
     const fn = src.slice(src.indexOf('export function stripToolBlocks'));
     const body = fn.slice(0, fn.indexOf('\n}\n') + 2).replace('export function', 'function');
-    const cases = ['Who do you trust most in this house?','So what is your move??','Ready to play?','You ready??'];
+    // L45 — every trailing sentence terminator (?, !, ., …) must survive, not just `?`.
+    const cases = ['Who do you trust most in this house?','So what is your move??','Ready to play?',
+                   'You ready??','The lights snap off!','She leaves the room.','He trails off…',
+                   'No way!!','Wait...'];
     const run = new Function('cases', prelude + body + '\n' +
+      "const TERMS = ['?','!','.','…'];" +
       "let ok = true;" +
       "for (const t of cases) { const got = stripToolBlocks(t);" +
-      "  if (!got.endsWith('?')) { ok = false; console.error('ATE ?', JSON.stringify(t), '=>', JSON.stringify(got)); } }" +
+      "  const term = TERMS.find(x => t.endsWith(x));" +
+      "  if (!got.endsWith(term)) { ok = false; console.error('ATE', JSON.stringify(term), JSON.stringify(t), '=>', JSON.stringify(got)); } }" +
       "return ok;");
     console.log(run(cases) ? 'OK' : 'FAIL');
     """
