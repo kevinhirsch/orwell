@@ -149,6 +149,42 @@ export function startsWithReasoningPrefix(text) {
   return /^\s*(?:thinking(?:\s+process)?\s*:|the user |i need |i should |i will |they are |the question |i can )/i.test(text || '');
 }
 
+// L6b — plain-content reasoning leak (game build only). The model emits its
+// planning as NORMAL assistant text (not a <think> block, so the think-strip
+// passes miss it): operator/planning openers ("Let me…", "Looking at the
+// roster", "The game state shows…", "I need to…", "I should…") and raw engine
+// ids ("npc:1 - Faith Willis"). These leak engine machinery + the cast roster.
+//
+// A line is a reasoning/planning line when it opens with one of those operator
+// phrases OR contains a raw `npc:<digits>` id (the engine's entity handle — it
+// must never reach the player verbatim; the narration uses the houseguest's
+// name). We drop a CONTIGUOUS run of such lines from the START of the content
+// (the planning preamble), then return whatever narration follows. If the whole
+// block is preamble, we return '' so the leak renders as nothing — fail-open to
+// hiding (immersion is the priority). Operates on raw text BEFORE markdown.
+const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b)/i;
+const _RAW_NPC_ID_RE = /\bnpc:\d+\b/i;
+
+export function scrubReasoningPreamble(text) {
+  if (!text) return text;
+  const lines = String(text).split('\n');
+  let start = 0;
+  // Skip a contiguous leading run of reasoning/planning lines (blank lines
+  // inside the run are tolerated so a paragraph break doesn't end the scrub).
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { start = i + 1; continue; }
+    if (_REASONING_LINE_RE.test(line) || _RAW_NPC_ID_RE.test(line)) {
+      start = i + 1;
+      continue;
+    }
+    break;
+  }
+  if (start === 0) return text;            // nothing scrubbed
+  const rest = lines.slice(start).join('\n').replace(/^\s+/, '');
+  return rest;
+}
+
 export function normalizeThinkingMarkup(text) {
   if (!text) return text;
   let normalized = text;
@@ -454,6 +490,11 @@ export function processWithThinking(text) {
       if (/<think/i.test(stripped)) {
         reply = (extractThinkingBlocks(stripped).content || '').trim();
       }
+      // L6b belt-and-suspenders: even a FINAL narration round can carry a
+      // plain-content reasoning preamble (operator openers / raw npc:<id> ids)
+      // that never got tagged as thinking — scrub it before render so engine
+      // machinery + the cast roster never reach the player.
+      reply = (scrubReasoningPreamble(reply) || '').trim();
     }
     const html = reply ? mdToHtml(reply) : '';
     return _useSvgEmoji() ? svgifyEmoji(html) : html;
@@ -833,6 +874,7 @@ const markdownModule = {
   extractThinkingBlocks,
   normalizeThinkingMarkup,
   startsWithReasoningPrefix,
+  scrubReasoningPreamble,
   renderMermaid
 };
 
