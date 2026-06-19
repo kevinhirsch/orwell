@@ -498,11 +498,26 @@ export function renderGameContext(view: GameStateView): string {
  * WITNESSED events only — the store recalled, never the chat remembered (ADR 0003). The caller
  * (the engine adapter) selects the events; this only renders them as facts the model voices.
  */
-export function renderStoryFacts(recentWitnessed: ReadonlyArray<{ content: string }>, finale?: { winner: string; week: number } | null): string {
+export function renderStoryFacts(
+  recentWitnessed: ReadonlyArray<{ content: string }>,
+  finale?: { winner: string; week: number; tally?: { winnerVotes: number; runnerUpVotes: number; runnerUp: string } } | null,
+  playerSeason?: string | null,
+): string {
   const lines: string[] = ["THE RECORD (witnessed events — voice these, never invent others):"];
   for (const e of recentWitnessed) lines.push(`  - ${e.content}`);
   if (recentWitnessed.length === 0) lines.push("  - (the season has just begun — nothing has happened yet)");
-  if (finale) lines.push(`THE RESULT: ${finale.winner} won the season in week ${finale.week}.`);
+  if (finale) {
+    // Anti-confabulation (priority #3): a reunion/recap that INVENTS the jury margin or the player's
+    // placement embellishes the record. Hand the model the EXACT public finale facts to voice.
+    let result = `THE RESULT: ${finale.winner} won the season in week ${finale.week}`;
+    if (finale.tally) {
+      result += `, defeating ${finale.tally.runnerUp} by a jury vote of ${finale.tally.winnerVotes}–${finale.tally.runnerUpVotes}`;
+    }
+    lines.push(result + ". Voice THIS exact winner and tally — never invent a different count, margin, or finalist.");
+  }
+  if (playerSeason) {
+    lines.push(`THE PLAYER'S OWN SEASON: ${playerSeason} State this EXACTLY — never embellish how far they got, their placement, or their competition wins.`);
+  }
   return lines.join("\n");
 }
 
