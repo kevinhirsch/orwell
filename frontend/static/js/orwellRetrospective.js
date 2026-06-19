@@ -6,14 +6,22 @@
 //   • "Open the Producer's Vault" — the unsealed hidden story: the off-screen scheming, the
 //     private confessionals, and the twist that never fired.
 //
-// Fail-open, render-only (route payloads verbatim), game-build gated, dismissible. The panel
-// AUGMENTS the reunion chat (the model hosts it via seasonRecap/seasonRetrospective levers);
-// nothing here progresses the game.
+// Fail-open, render-only (route payloads verbatim), game-build gated. The panel AUGMENTS the
+// reunion chat (the model hosts it via seasonRecap/seasonRetrospective levers); nothing here
+// progresses the game.
+//
+// Lane F migration (2026-06-19): this panel COMPOSES the window kit — chrome, drag, minimize,
+// Escape, focus, and the ONE position system (the clamped slot offset "retro") come from
+// OrwellWindow; the old bespoke fixed-position + ow-dismiss banner are gone. 0054 Phase 2: it is
+// DOCKABLE — the player can tuck it into the control-room rail (post-season only); the dock flag
+// persists. Content-driven visibility: the panel self-display:none while live so the rail's
+// observer hides it, and shows once the season is finished.
 (function () {
   "use strict";
 
   const POLL_MS = 30000;
   const ID = "orwell-retro";
+  const ICON = "📼";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -37,48 +45,63 @@
     return e;
   }
 
+  // The kit owns chrome/drag/dock/Escape/focus + the ONE position system (slotKey
+  // "retro"); this module owns only the recap body (which it re-renders each tick).
+  let _win = null;
+  let _body = null;
   function ensurePanel() {
     let panel = document.getElementById(ID);
     if (panel) return panel;
-    panel = el("div", [
-      "position:fixed", "width:min(380px, calc(100vw - 32px))", /* E91/S11: bottom-right slot */
-      "max-height:min(70vh, 560px)", "overflow:auto", "z-index:45",
-      "background:var(--surface-2, rgba(22,22,26,0.96))", "color:var(--text-1, #ddd)",
-      "border:1px solid var(--border-1, rgba(255,255,255,0.14))", "border-radius:12px",
-      "padding:12px 14px", "font-size:13px", "line-height:1.5",
-      "box-shadow:0 8px 24px rgba(0,0,0,0.45)", "display:none", "backdrop-filter:blur(8px)",
-    ].join(";"));
-    panel.id = ID;
-    panel.setAttribute("role", "complementary");
-    panel.setAttribute("aria-label", "Season retrospective");
-    document.body.appendChild(panel);
-  if (window.OrwellSlots) window.OrwellSlots.register(panel, "bottom-right", { key: "retro" });
+    const content = document.createElement("div");
+    content.innerHTML = `
+      <style>
+        #orwell-retro { width: min(380px, 92vw); font-size: 13px; line-height: 1.5; }
+        #orwell-retro .oretro-body { display: block; }
+        @media (max-width: 768px) {
+          #orwell-retro { width: auto !important; max-width: none !important; }
+        }
+      </style>
+      <div class="oretro-body" data-role="body"></div>`;
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "📼 The season, watched back", icon: ICON,
+      slot: "bottom-right", slotKey: "retro", role: "complementary",
+      minimizable: true, closable: true, draggable: true,
+      // 0054 Phase 2: dockable into the control-room rail (default floating — a one-
+      // line owner flip to defaultDocked:true if the feature doc's lean is preferred).
+      dockable: true, defaultDocked: false,
+      content,
+      onClose: () => {
+        // Dismissing the floating panel for the session (mirrors the old ow-dismiss).
+        try { sessionStorage.setItem("orwell-retro-dismissed", "1"); } catch (_) {}
+        _win = null; _body = null;
+      },
+    });
+    _win.open();
+    panel = document.getElementById(ID);
+    _body = panel.querySelector('[data-role="body"]');
     return panel;
   }
 
+  // Show/hide via the panel root's own display (content-driven for the rail's observer).
+  function showPanel(on) {
+    const panel = document.getElementById(ID);
+    if (!panel) return;
+    if (_win && _win.isMinimized && _win.isMinimized()) return; // parked: leave it
+    panel.style.display = on ? "" : "none";
+  }
+
   function render(recap) {
-    const panel = ensurePanel();
-    if (!recap || !recap.finished) { panel.style.display = "none"; return; }
-    if (sessionStorage.getItem("orwell-retro-dismissed") === "1") { panel.style.display = "none"; return; }
-    panel.replaceChildren();
+    if (!recap || !recap.finished) { showPanel(false); return; }
+    if (sessionStorage.getItem("orwell-retro-dismissed") === "1") { showPanel(false); return; }
+    ensurePanel();
+    if (!_body) return;
+    _body.replaceChildren();
 
-    const head = el("div", "display:flex;justify-content:space-between;align-items:center;margin-bottom:6px");
-    head.appendChild(el("strong", "", "📼 The season, watched back"));
-    const close = el("button", "", "×");
-    close.className = "ow-dismiss";
-    close.setAttribute("aria-label", "Dismiss the retrospective panel");
-    close.addEventListener("click", () => {
-      try { sessionStorage.setItem("orwell-retro-dismissed", "1"); } catch (_) {}
-      panel.style.display = "none";
-    });
-    head.appendChild(close);
-    panel.appendChild(head);
-
-    if (recap.winner) panel.appendChild(el("div", "margin-bottom:6px;opacity:0.9", "👑 " + recap.winner.name + " won the season (week " + recap.weeksPlayed + ")."));
+    if (recap.winner) _body.appendChild(el("div", "margin-bottom:6px;opacity:0.9", "👑 " + recap.winner.name + " won the season (week " + recap.weeksPlayed + ")."));
 
     const list = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85");
     for (const h of (recap.highlights || []).slice(-12)) list.appendChild(el("li", "", h));
-    panel.appendChild(list);
+    _body.appendChild(list);
 
     const vaultWrap = el("div", "margin-top:8px");
     if (unsealed) {
@@ -130,8 +153,8 @@
       vaultWrap.appendChild(el("div", "opacity:0.6;font-size:11.5px;margin-top:3px",
         "The hidden story they never showed you — scheming, confessionals, the twist that never fired."));
     }
-    panel.appendChild(vaultWrap);
-    panel.style.display = "block";
+    _body.appendChild(vaultWrap);
+    showPanel(true);
   }
 
   async function tick() {
@@ -150,6 +173,9 @@
       timer = setTimeout(tick, _pollDelay());
     }
   }
+
+  // Seam for the headless gate (mirrors the other panels): build + show on demand.
+  window._orwellRetroEnsure = () => { ensurePanel(); return true; };
 
   ready(() => {
     if (document.body && document.body.dataset.gameBuild !== "1") return;

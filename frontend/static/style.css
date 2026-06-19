@@ -1853,11 +1853,16 @@ body.bg-pattern-sparkles {
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
       display: flex; flex-direction: column; }
-    /* canonical stacking regardless of which gadget mounted first */
+    /* canonical stacking regardless of which gadget mounted first (drag-reorder —
+       L13 — overrides these inline). 0054 Phase 2 docked windows slot in after the
+       always-on HUD gadgets; the rail body scrolls (overflow-y:auto) for tall ones. */
     .gadget-rail-body > #orwell-status { order: 1; }
     .gadget-rail-body > #orwell-social { order: 2; }
-    .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: docked cast roster */
+    .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
     .gadget-rail-body > #orwell-presence { order: 4; }
+    .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
+    .gadget-rail-body > #orwell-cast { order: 6; }      /* 0054 P2: docked full cast roster */
+    .gadget-rail-body > #orwell-retro { order: 7; }     /* 0054 P2: docked retrospective */
     .gadget-rail-strip { display: none; flex-direction: column; align-items: center; gap: .3rem; padding: .5rem 0; }
     .grail-ico { background: transparent; border: none; cursor: pointer; font-size: 1.1rem;
       padding: .35rem; border-radius: 8px; line-height: 1; }

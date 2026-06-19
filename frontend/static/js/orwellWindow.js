@@ -108,13 +108,47 @@ function ensureCss() {
     .ow-controls button:hover, .ow-controls button:focus-visible,
     .ow-dismiss:hover, .ow-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
     .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); }
+    /* ── A7 [ruling #19] — the Windows-7 fly-out family ───────────────────────
+       The animation CONTRACT exposes DISTINCT minimize vs. close keyframes, both
+       DRIVEN (not pure transitions) so the CSS itself names the two motions; the
+       JS sets the fly vector via --ow-fly-x/-y. open keeps the E97 fade+scale.
+       prefers-reduced-motion strips ALL of it (the @media block below). */
     @keyframes ow-open { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
-    .ow-anim-open { animation: ow-open .18s ease-out; }
-    .ow-anim-fly { transition: transform .26s cubic-bezier(.45,.05,.55,.95), opacity .24s ease-in; }
-    @media (prefers-reduced-motion: reduce) {
-      .ow-anim-open { animation: none; }
-      .ow-anim-fly { transition: none; }
+    @keyframes ow-minimize {
+      from { opacity: 1; transform: translate(0, 0) scale(1); }
+      to   { opacity: 0; transform: translate(var(--ow-fly-x, 0), var(--ow-fly-y, 0)) scale(.12); }
     }
+    @keyframes ow-close {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(.9); }
+    }
+    .ow-anim-open { animation: ow-open .18s ease-out; }
+    /* pronounced Win7 easing on the minimize fly-out; a quicker fade on close */
+    .ow-anim-minimize { animation: ow-minimize .27s cubic-bezier(.5,-0.2,.4,1) forwards; }
+    .ow-anim-close { animation: ow-close .18s cubic-bezier(.45,.05,.55,.95) forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .ow-anim-open, .ow-anim-minimize, .ow-anim-close { animation: none; }
+    }
+    /* ── 0054 Phase 2 — DOCKED kit mode ───────────────────────────────────────
+       A docked window mounts its WHOLE element as a child of #gadget-rail-body
+       (full-content "docked kit mode", not a compact summary). It opts OUT of the
+       slot geometry system entirely: static flow position, no drag, no resize, no
+       fixed z — so F5's ONE-position-system invariant holds (docked = NO geometry,
+       never a second scheme). The rail owns visibility (content-driven), order
+       (drag-reorder), collapse, and the single mobile drawer. The titlebar frost
+       (L34) and the .ow-* chrome family ride along unchanged. */
+    .ow-window.ow-docked {
+      position: static !important; z-index: auto !important;
+      width: auto !important; max-width: none !important; min-width: 0 !important;
+      left: auto !important; top: auto !important; right: auto !important; bottom: auto !important;
+      transform: none !important;
+      margin: var(--space-2, .4rem) 0 0; box-shadow: none;
+      display: flex; flex-direction: column;
+    }
+    .ow-window.ow-docked > .ow-titlebar { cursor: default; }
+    .ow-window.ow-docked > .ow-body { max-height: none; }
+    /* the dock/undock toggle reads as a quieter control than min/close */
+    .ow-controls .ow-dock { font-size: .9rem; }
   `;
   document.head.appendChild(st);
 }
@@ -160,12 +194,41 @@ function saveParked(id, on) {
   } catch (_) {}
 }
 
+// ── docked-state persistence (0054 Phase 2) ───────────────────────────────
+// Per-window, per-user — mirroring orwellCastPin's 'orwell-cast-pinned:<user>'
+// key pattern so docked-vs-floating survives a reload exactly like the rail's
+// other persisted layout. Default is floating unless `defaultDocked` flips it.
+function dockedKey(id) {
+  return 'orwell-' + id + '-docked:' + ((document.body && document.body.dataset.user) || '');
+}
+function loadDocked(id, dflt) {
+  try {
+    const v = localStorage.getItem(dockedKey(id));
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch (_) {}
+  return !!dflt;
+}
+function saveDocked(id, on) {
+  try { localStorage.setItem(dockedKey(id), on ? '1' : '0'); } catch (_) {}
+}
+
 export class OrwellWindow {
   /**
    * opts: { id, title, icon, slot='top-right', slotKey=null, role='complementary',
    *         draggable=true, minimizable=true, closable=true, resizable=true,
    *         minWidth=240, minHeight=160,
-   *         content (Node|string), focus=false, onClose, onMinimize, onRestore }
+   *         content (Node|string), focus=false, onClose, onMinimize, onRestore,
+   *         dockable=false, defaultDocked=false, onDock }
+   *
+   * 0054 Phase 2 — DOCKED kit mode. A `dockable` window renders a dock/undock
+   * toggle in its titlebar and persists the choice per user (`orwell-<id>-docked:
+   * <user>`). Docked, the whole window mounts as a child of `#gadget-rail-body`
+   * (full-content "docked kit mode"): NO position:fixed, NO drag, NO resize, NO
+   * slot-key (it OPTS OUT of the slot-offset geometry system — F5's one-position-
+   * system invariant holds: docked = no geometry, never a second scheme), and NO
+   * minimize-to-dock (the rail owns visibility/order/collapse/mobile-drawer). The
+   * default is FLOATING (set `defaultDocked:true` to flip — a one-line owner choice).
    *
    * L11: every kit window is user-resizeable from any EDGE and any CORNER on
    * desktop (the shared windowResize helper — edge-proximity grips, not injected
@@ -177,32 +240,53 @@ export class OrwellWindow {
   constructor(opts) {
     this.o = Object.assign({ slot: 'top-right', role: 'complementary',
       draggable: true, minimizable: true, closable: true, resizable: true,
-      minWidth: 240, minHeight: 160, focus: false }, opts);
+      minWidth: 240, minHeight: 160, focus: false,
+      dockable: false, defaultDocked: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
     this.opener = null;
     this.el = null;
     this._slot = null;
+    // 0054 Phase 2: docked-vs-floating is resolved per OPEN (the toggle close()s
+    // then open()s, so the kit rebuilds in the chosen mode). Seed from persistence.
+    this._docked = this.o.dockable && loadDocked(this.o.id, this.o.defaultDocked);
   }
 
   _build() {
     ensureCss();
+    const docked = this._docked;
     const el = document.createElement('div');
     el.id = this.o.id;
-    el.className = 'ow-window';
+    el.className = 'ow-window' + (docked ? ' ow-docked' : '');
     el.setAttribute('data-ow-window', '');
+    if (docked) el.setAttribute('data-ow-docked', '');
     el.setAttribute('role', this.o.role);
     el.setAttribute('aria-label', this.o.title);
     const tb = document.createElement('div');
     tb.className = 'ow-titlebar';
     tb.setAttribute('tabindex', '0');
-    tb.title = this.o.draggable ? 'Drag to move · arrows to nudge' : '';
+    tb.title = (this.o.draggable && !docked) ? 'Drag to move · arrows to nudge' : '';
     const title = document.createElement('span');
     title.className = 'ow-title';
     title.textContent = this.o.title;
     const controls = document.createElement('div');
     controls.className = 'ow-controls';
-    if (this.o.minimizable) {
+    // 0054 Phase 2: the dock/undock toggle (only on dockable windows). It flips the
+    // persisted flag and re-opens in the other mode — ONE position system, so a
+    // mode change is a teardown + rebuild, never a live geometry mutation.
+    if (this.o.dockable) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ow-dock';
+      const docked = this._docked;
+      b.setAttribute('aria-label', docked ? 'Float this window' : 'Dock to the control room');
+      b.title = docked ? 'Float (undock from the control room)' : 'Dock to the control room';
+      b.textContent = docked ? '⇱' : '⇲';  // undock (pop out) vs. dock (tuck in)
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.toggleDock(); }, { signal: this.ac.signal });
+      controls.appendChild(b);
+    }
+    // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
+    // and never minimizes to the chip dock (the rail owns its visibility/collapse).
+    if (this.o.minimizable && !this._docked) {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ow-min';
       b.setAttribute('aria-label', 'Minimize'); b.title = 'Minimize';
@@ -225,6 +309,11 @@ export class OrwellWindow {
     else if (typeof this.o.content === 'string') body.innerHTML = this.o.content;
     el.appendChild(tb); el.appendChild(body);
     this.el = el; this.titlebar = tb; this.body = body;
+
+    // 0054 Phase 2: a docked window opts OUT of drag, resize, slot geometry, the
+    // raise/z-band, and the keyboard-move handler — it is static rail flow, and the
+    // rail owns its placement. Everything below the guard is FLOATING-only chrome.
+    if (docked) return el;
 
     // click-to-front (capture so any inner click raises first) — audit F9
     el.addEventListener('pointerdown', () => this.raise(), { capture: true, signal: this.ac.signal });
@@ -293,7 +382,21 @@ export class OrwellWindow {
   open(opener) {
     if (this.el && this.el.isConnected) { this.restore(); return this; }
     this.opener = opener || document.activeElement || null;
+    // A prior _teardown() aborted this.ac; a fresh open (incl. the dock toggle's
+    // re-open) needs a live controller so _build's listeners actually attach.
+    if (this.ac.signal.aborted) this.ac = new AbortController();
     const el = this._build();
+    // 0054 Phase 2: a docked window mounts straight into #gadget-rail-body (the
+    // rail owns visibility/order/collapse/mobile-drawer). NO slot register, NO
+    // dock-chip register, NO z-band raise — docked = no geometry, the F5 invariant
+    // holds. The consuming panel's own content-driven display:none decides when the
+    // rail shows it (its existing MutationObserver). Body fallback if no rail yet.
+    if (this._docked) {
+      const railBody = document.getElementById('gadget-rail-body');
+      (railBody || document.body).appendChild(el);
+      if (this.o.focus) this.titlebar.focus();
+      return this;
+    }
     document.body.appendChild(el);
     if (window.OrwellSlots) {
       this._slot = window.OrwellSlots.register(el, this.o.slot,
@@ -322,7 +425,7 @@ export class OrwellWindow {
   }
 
   raise() {
-    if (!this.el) return;
+    if (!this.el || this._docked) return;  // a docked window has no z-band / focus stack
     if (_zTop >= Z_CEIL) { // renormalize the band
       _zTop = Z_BASE;
       for (const w of _stack) { w.el.style.zIndex = String(++_zTop); }
@@ -335,7 +438,7 @@ export class OrwellWindow {
   }
 
   minimize() {
-    if (!this.el) return;
+    if (!this.el || this._docked) return;  // docked windows live in the rail, no chip dock
     saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
@@ -346,24 +449,24 @@ export class OrwellWindow {
     // one layer up.
     this._displayBeforeMin = this.el.style.display;
     const done = () => {
-      this.el.classList.remove('ow-anim-fly');
-      this.el.style.transform = ''; this.el.style.opacity = '';
+      this.el.classList.remove('ow-anim-minimize');
+      this.el.style.removeProperty('--ow-fly-x'); this.el.style.removeProperty('--ow-fly-y');
       Modals.minimize(this.o.id);            // chip renders; F1 makes the dock visible
       this.el.style.display = 'none';        // kit windows aren't .modal — hide explicitly
       try { this.o.onMinimize && this.o.onMinimize(); } catch (_) {}
     };
     if (REDUCED()) { done(); return; }
-    // ruling #19: fly-out toward the dock
+    // A7 [ruling #19]: the Win7 fly-out — scale-down + translate along the path to
+    // the dock row, driven by the dedicated ow-minimize keyframe (the fly vector is
+    // handed to it via --ow-fly-x/-y so the keyframe owns the motion, one contract).
     const from = this.el.getBoundingClientRect();
     const to = flyTargetRect();
     const dx = (to.left + (to.width || 32) / 2) - (from.left + from.width / 2);
     const dy = (to.top + (to.height || 24) / 2) - (from.top + from.height / 2);
-    this.el.classList.add('ow-anim-fly');
-    requestAnimationFrame(() => {
-      this.el.style.transform = `translate(${dx}px, ${dy}px) scale(.12)`;
-      this.el.style.opacity = '0';
-      setTimeout(done, 270);
-    });
+    this.el.style.setProperty('--ow-fly-x', dx + 'px');
+    this.el.style.setProperty('--ow-fly-y', dy + 'px');
+    this.el.classList.add('ow-anim-minimize');
+    setTimeout(done, 280);
   }
 
   _afterDockRestore() {
@@ -383,21 +486,50 @@ export class OrwellWindow {
     try { this.o.onRestore && this.o.onRestore(); } catch (_) {}
   }
 
-  restore() { Modals.restore(this.o.id); }
+  restore() { if (!this._docked) Modals.restore(this.o.id); }
 
   /** True while this window is parked in the dock (modalManager's registry). */
-  isMinimized() { return Modals.isMinimized(this.o.id); }
+  isMinimized() { return !this._docked && Modals.isMinimized(this.o.id); }
+
+  /** True while this window is rendered docked into the gadget rail (0054 Phase 2). */
+  isDocked() { return !!this._docked; }
+
+  /** Toggle docked↔floating: persist the flag, tear down, and re-open in the new
+   *  mode. ONE position system (F5) — a mode change is a rebuild, never a live
+   *  geometry mutation. A docked window registers no dock chip, so close() here
+   *  just tears it down directly. */
+  toggleDock() {
+    if (!this.o.dockable) return;
+    const next = !this._docked;
+    saveDocked(this.o.id, next);
+    const opener = this.opener;
+    // A dock toggle is a RE-HOME, not a dismissal: suppress the consumer's onClose
+    // (it resets the module's _win reference — which we keep, since it's the same
+    // instance) and Modals.unregister so the re-open is clean. The _rehoming guard
+    // makes _teardown skip onClose; we still abort listeners + drop the old node.
+    this._rehoming = true;
+    try {
+      if (this._docked) this._teardown();
+      else Modals.close(this.o.id);  // closeFn → _teardown() (guarded)
+    } finally { this._rehoming = false; }
+    this._docked = next;
+    // Re-open immediately in the new mode (no fly animation — it's a re-home, not a
+    // dismissal). A docked window self-gates visibility; a floated one raises.
+    this.open(opener);
+    try { this.o.onDock && this.o.onDock(next); } catch (_) {}
+    return this;
+  }
 
   close() {
     if (!this.el) return;
+    // A docked window isn't in modalManager — tear it down directly (no chip, no
+    // fly-to-dock: it lives in the rail flow).
+    if (this._docked) { this._teardown(); return; }
     const finish = () => Modals.close(this.o.id);   // closeFn → _teardown()
     if (REDUCED()) { finish(); return; }
-    this.el.classList.add('ow-anim-fly');           // fly-away on close (ruling #19)
-    requestAnimationFrame(() => {
-      this.el.style.transform = 'scale(.9)';
-      this.el.style.opacity = '0';
-      setTimeout(finish, 180);
-    });
+    // A7 [ruling #19]: scale+fade fly-away on close (the dedicated ow-close keyframe).
+    this.el.classList.add('ow-anim-close');
+    setTimeout(finish, 190);
   }
 
   _teardown() {
@@ -407,6 +539,9 @@ export class OrwellWindow {
     this.ac.abort();
     const opener = this.opener;
     if (this.el) { this.el.remove(); this.el = null; }
+    // A dock-toggle re-home keeps the same instance + the module's _win reference,
+    // so skip the consumer's onClose reset and the focus-return (open() refocuses).
+    if (this._rehoming) return;
     try { this.o.onClose && this.o.onClose(); } catch (_) {}
     // audit F8: focus returns to the opener
     if (opener && opener.isConnected && typeof opener.focus === 'function') {
