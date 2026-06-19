@@ -142,7 +142,13 @@ Then("at move-in some NPC to player edges differ from the player to NPC edges", 
 
 Then("no relationship number ever crosses to the player", function (this: BbWorld) {
   const blob = dpPlayerSurface(this.dpSandbox!);
-  assert.ok(!/"trust":|"affinity":|"threat":|"confidence":/.test(blob), "a relationship number reached the player");
+  // A RELATIONSHIP number is a hidden EDGE signal — trust / affinity / threat (an `EdgeSignals`
+  // serialization always carries all three). Those NEVER cross. Note: a knowledge BELIEF the player
+  // legitimately holds (a gossip/overhear/surfaced rumor) carries its OWN `confidence` by design (the
+  // B27b "belief with source + confidence" model, CLAUDE.md) — that is the player's own belief, not a
+  // hidden relationship number, so it is NOT banned here (0060: a surfaced thread reaches the player as
+  // exactly such a belief). The edge keys remain the precise guard.
+  assert.ok(!/"trust":|"affinity":|"threat":/.test(blob), "a relationship number reached the player");
 });
 
 // --- Scenario: story threads ---------------------------------------------------------------------

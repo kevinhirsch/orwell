@@ -4,6 +4,7 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "./characterFactory";
 import type { Character, Houseguest } from "./characterFactory";
+import { THREAD } from "./threadConstants";
 
 export type { PhysicalCharacteristics };
 
@@ -85,6 +86,30 @@ export type ThreadStatus = "dormant" | "active" | "surfaced" | "resolved" | "exp
 export type ThreadWeightImpact = "conflict" | "betrayal" | "alliance" | "bonding" | "strategy" | "gossip";
 
 /**
+ * Feature 0060 §3 — the STRUCTURED, machine-evaluable trigger condition (a small closed enum, mirroring
+ * `decisionConstants.ts`'s closed `NominationTactic`/disposition sets). It rides ALONGSIDE the prose
+ * `trigger` (never replacing it — the prose stays for full-fidelity recall / narrator flavor, 0058 §6).
+ * Each member is a GATE on when the world is ripe, evaluated against a Vault-free `SeasonPosition`
+ * snapshot — never a content channel: the predicates read only PUBLIC position facts (nominations, week,
+ * living-cast size, power holders, the engine's own relationship reads), never the thread premise.
+ */
+export type TriggerCondition =
+  /** the source houseguest is currently nominated */
+  | "on-block"
+  /** the source has been on the block in ≥ THREAD.nominatedWeeksForRivalry distinct weeks */
+  | "nominated-twice"
+  /** the source's standing has dropped — bottom-quantile bond/threat read among the living house */
+  | "cornered-socially"
+  /** the living-cast count has fallen to ≤ THREAD.tightenCastSize */
+  | "house-tightens"
+  /** the source holds power this week (HOH / veto) — the goal demands a visible play */
+  | "goal-demands-move";
+
+export const TRIGGER_CONDITIONS: readonly TriggerCondition[] = [
+  "on-block", "nominated-twice", "cornered-socially", "house-tightens", "goal-demands-move",
+];
+
+/**
  * A hidden dramatic thread derived from a character's secrets / weakness / goals. Sealed into the
  * Vault at seal time, persisted across restart, and folded into the relationship/soul layer when it
  * activates (reusing the 0023 consequence fold — NOT a parallel subsystem). Surfacing to others/the
@@ -97,14 +122,28 @@ export interface StoryThread {
   sourceId: EntityId;
   /** What the thread is about (the secret/weakness/goal it dramatizes). */
   premise: string;
-  /** The game condition that activates/escalates it (prose; phase-2 wiring reads structured fields). */
+  /** The game condition that activates/escalates it (prose; the scheduler reads `triggerCondition`). */
   trigger: string;
+  /**
+   * Feature 0060 §3 — the STRUCTURED condition the scheduler evaluates each tick against the live,
+   * Vault-free season position. Mapped from the source class (secret/weakness/goal) at derive time so
+   * it agrees in spirit with the prose `trigger`. OPTIONAL on the type so a pre-0060 saved thread (no
+   * structured field) loads cleanly; the engine defaults it by source class on restore (back-compat).
+   */
+  triggerCondition?: TriggerCondition;
   /** How it can become known — in-game pathways only (witnessed / told / overheard / gossip). */
   surfacingPathways: string[];
   /** The interaction nature whose hidden delta this thread folds when it activates (0023 kind). */
   weightImpact: ThreadWeightImpact;
-  /** Lifecycle. Phase 1 seeds them `dormant`; the activation hook flips one to `active` and folds. */
+  /** Lifecycle. Phase 1 seeds them `dormant`; the 0060 scheduler walks dormant→active→surfaced→resolved
+   *  (or →expired). The status is persisted, so a driven thread survives a restart at its status (0030). */
   status: ThreadStatus;
+  /**
+   * Feature 0060 — the WEEK the thread last changed lifecycle (seeded at 0 on derive; set to the live
+   * week on each transition). The scheduler reads it for the resolve/expire windows. Optional on the
+   * type for pre-0060 back-compat; defaulted to the live week on restore when absent.
+   */
+  lifecycleWeek?: number;
 }
 
 // ── Deterministic PUBLIC generation ───────────────────────────────────────────────────────────────
@@ -403,28 +442,62 @@ function pickPerceptionCapped(rng: RandomnessSource, uses: Map<string, number>, 
   return p;
 }
 
-// ── Story-thread derivation (0058 §5) ─────────────────────────────────────────────────────────────
+// ── Story-thread derivation (0058 §5 / 0060 §3) ───────────────────────────────────────────────────
 /** A surfacing pathway is always one of the in-game channels (0002) — never exposition. */
 const PATHWAYS = ["witnessed", "told-by-confidant", "overheard", "gossip-diffused"] as const;
 
+/** The thread's SOURCE class — which half of the deep profile minted it (0060 §3 condition mapping). */
+export type ThreadSourceClass = "secret" | "weakness" | "goal";
+
+// 0060 §3 — each source class maps to a small set of structured conditions; the prose `trigger` lines
+// map cleanly onto these. The scheduler picks one deterministically off the same side rng, so the
+// choice is seed-stable and agrees in spirit with the prose line.
+const CONDITIONS_BY_CLASS: Record<ThreadSourceClass, readonly TriggerCondition[]> = {
+  secret: ["on-block", "cornered-socially", "nominated-twice"],
+  weakness: ["cornered-socially", "goal-demands-move"],
+  goal: ["house-tightens", "goal-demands-move"],
+};
+
+/**
+ * 0060 §3 back-compat: the default structured condition for a thread that has none (a pre-0060 save, or
+ * a thread whose class can't be re-derived). Inferred from the thread's `premise` prefix (`secret —` /
+ * `weakness —` / `true goal —`), so the re-derive on restore is idempotent and seed-free. Deterministic
+ * (no rng): a fixed representative per class — the FIRST of that class's list.
+ */
+export function defaultTriggerConditionFor(thread: Pick<StoryThread, "premise">): TriggerCondition {
+  const cls: ThreadSourceClass = thread.premise.startsWith("weakness")
+    ? "weakness"
+    : thread.premise.startsWith("true goal")
+      ? "goal"
+      : "secret";
+  return CONDITIONS_BY_CLASS[cls][0]!;
+}
+
 /**
  * Derive the hidden story threads from one NPC's deep profile (0058 §5). Each secret, the weakness,
- * and the first true goal becomes a `dormant` thread with a trigger, in-game surfacing pathways, and
- * the hidden-weight interaction it folds when it activates. Deterministic per seed.
+ * and the first true goal becomes a `dormant` thread with a prose trigger, a STRUCTURED `triggerCondition`
+ * (0060 §3), in-game surfacing pathways, and the hidden-weight interaction it folds on activation.
+ * Deterministic per seed.
  */
 export function deriveStoryThreads(rng: RandomnessSource, sourceId: EntityId, profile: DeepProfile): StoryThread[] {
   const threads: StoryThread[] = [];
   let n = 0;
   const path = (): string[] => [PATHWAYS[rng.int(PATHWAYS.length)]!];
+  const condFor = (cls: ThreadSourceClass): TriggerCondition => {
+    const pool = CONDITIONS_BY_CLASS[cls];
+    return pool[rng.int(pool.length)]!;
+  };
   for (const secret of profile.secrets) {
     threads.push({
       id: `thread:${sourceId}:${n++}`,
       sourceId,
       premise: `secret — ${secret}`,
       trigger: "activates when this houseguest is genuinely threatened on the block or cornered socially",
+      triggerCondition: condFor("secret"),
       surfacingPathways: path(),
       weightImpact: rng.next() < 0.5 ? "conflict" : "betrayal",
       status: "dormant",
+      lifecycleWeek: 0,
     });
   }
   threads.push({
@@ -432,9 +505,11 @@ export function deriveStoryThreads(rng: RandomnessSource, sourceId: EntityId, pr
     sourceId,
     premise: `weakness — ${profile.weakness}`,
     trigger: "fires when the game presents the exact situation this blind spot mishandles",
+    triggerCondition: condFor("weakness"),
     surfacingPathways: path(),
     weightImpact: "strategy",
     status: "dormant",
+    lifecycleWeek: 0,
   });
   if (profile.trueGoals[0]) {
     threads.push({
@@ -442,9 +517,11 @@ export function deriveStoryThreads(rng: RandomnessSource, sourceId: EntityId, pr
       sourceId,
       premise: `true goal — ${profile.trueGoals[0]}`,
       trigger: "escalates as the house tightens and this goal demands a visible move",
+      triggerCondition: condFor("goal"),
       surfacingPathways: path(),
       weightImpact: "alliance",
       status: "dormant",
+      lifecycleWeek: 0,
     });
   }
   return threads;
@@ -515,7 +592,92 @@ export function storyThreadToVaultContent(t: StoryThread): string {
   return [
     `story-thread ${t.id} [${t.status}]`,
     `premise: ${t.premise}`,
-    `trigger: ${t.trigger}`,
+    `trigger: ${t.trigger}` + (t.triggerCondition ? ` (${t.triggerCondition})` : ""),
     `surfaces via: ${t.surfacingPathways.join(", ")}`,
   ].join("\n");
+}
+
+// ── 0060 — the scheduler's PURE support (the season-position predicates + the Vault-safe paraphrase) ─
+// All of this is engine-only and Vault-free BY CONSTRUCTION: the predicates read only PUBLIC position
+// facts, and the paraphrase is a vague atmospheric gloss keyed by SOURCE CLASS — it never touches the
+// thread premise/trigger string, so the §7 leak-sweep stays strict about exact secret text. The
+// orchestration (which thread, which roll) lives in `GameSessionAdapter.scheduleStoryThreads`.
+
+/**
+ * A Vault-FREE snapshot of the live season position the scheduler evaluates a thread's `triggerCondition`
+ * against (0060 §3). Every field is a PUBLIC/engine-internal POSITION fact (who's nominated, the week,
+ * the living-cast size, who holds power, the engine's own relationship reads) — never a thread premise.
+ * A predicate is a gate on when the world is RIPE, never a content channel.
+ */
+export interface SeasonPosition {
+  /** The current week (1-based once the game is live). */
+  week: number;
+  /** Living-cast count (player + non-evicted NPCs). */
+  livingCount: number;
+  /** Currently nominated houseguests. */
+  nominees: ReadonlySet<EntityId>;
+  /** The current power holders this week (HOH and/or veto holder). */
+  powerHolders: ReadonlySet<EntityId>;
+  /** Sources whose bond standing is in the bottom quantile of the living house (THREAD.corneredBottomQuantile). */
+  cornered: ReadonlySet<EntityId>;
+  /** Sources who have been on the block in ≥ THREAD.nominatedWeeksForRivalry distinct weeks. */
+  nominatedRepeatedly: ReadonlySet<EntityId>;
+  /** Whether the source has been evicted (its trigger window is closed — drives expiry). */
+  evicted: ReadonlySet<EntityId>;
+}
+
+/**
+ * Is a thread's STRUCTURED trigger condition met by the live season position (0060 §3)? Pure; reads only
+ * the Vault-free `SeasonPosition`. A thread with no structured condition (pre-0060) is treated as its
+ * class default before this is called (the adapter back-fills on restore), so `condition` is required.
+ */
+export function triggerMet(thread: StoryThread, pos: SeasonPosition): boolean {
+  const cond = thread.triggerCondition ?? defaultTriggerConditionFor(thread);
+  const src = thread.sourceId;
+  switch (cond) {
+    case "on-block":
+      return pos.nominees.has(src);
+    case "nominated-twice":
+      return pos.nominatedRepeatedly.has(src);
+    case "cornered-socially":
+      return pos.cornered.has(src);
+    case "house-tightens":
+      return pos.livingCount <= THREAD.tightenCastSize;
+    case "goal-demands-move":
+      return pos.powerHolders.has(src);
+    default:
+      return false;
+  }
+}
+
+/** Has a thread's source left the game (its trigger window is closed — drives the 0060 §4.4 expiry)? */
+export function sourceWindowClosed(thread: StoryThread, pos: SeasonPosition): boolean {
+  return pos.evicted.has(thread.sourceId);
+}
+
+// The vague atmospheric gloss a surfacing thread becomes (0060 §4.2 / §7) — keyed by SOURCE CLASS, NEVER
+// the premise. This is the thread analogue of gossip's `RUMOR_GLOSS`: a belief-level paraphrase that
+// shapes atmosphere, not a fact-on-a-projection and not an exposition line. No secret/trigger text here.
+const THREAD_GLOSS: Record<ThreadSourceClass, string> = {
+  secret: "is carrying something they're not telling anyone",
+  weakness: "has a blind spot the house could play on",
+  goal: "is quietly playing a bigger game than they let on",
+};
+
+function threadSourceClass(thread: Pick<StoryThread, "premise">): ThreadSourceClass {
+  return thread.premise.startsWith("weakness")
+    ? "weakness"
+    : thread.premise.startsWith("true goal")
+      ? "goal"
+      : "secret";
+}
+
+/**
+ * The vague paraphrase a surfacing thread gives rise to (0060 §4.2): a belief about the SOURCE keyed by
+ * the thread's class — NEVER the verbatim premise/trigger, so the 0031/0060 §7 leak sweep can stay
+ * strict about exact secret strings. `name` is the public name of the source (a public fact). The
+ * result reads like a rumor a houseguest could hold with source + confidence.
+ */
+export function threadRumor(thread: StoryThread, name: string): string {
+  return `there's a feeling around the house that ${name} ${THREAD_GLOSS[threadSourceClass(thread)]}`;
 }

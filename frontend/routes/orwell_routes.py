@@ -95,6 +95,137 @@ def _current_user(request: Request) -> Optional[str]:
         return getattr(getattr(request, "state", None), "current_user", None)
 
 
+# ── Calibration instrumentation: capture the per-season PUBLIC outcome when a season finishes ─────
+# The owner chose "instrument & gather data first" over tuning the calibration weights. This is the
+# data-gathering half: when a season ends, we durably log the public, player-known outcome facts a
+# calibration review needs (placement, social-scene count, public comp wins, final jury margin) into
+# the append-only per-user log (`orwell_outcomes.py`), readable on the admin surface. Vault-FREE: every
+# field comes from the engine's public projections AFTER the season is over (the same facts the player
+# themselves see in the recap / finale reveal / their own Journal). Nothing pre-reveal or hidden.
+
+# `finaleView()` returns null once the season FLIPS to finished, so the jury-vote MARGIN must be
+# captured while the finale is still staging (the `reveal` stage). We cache the last COMPLETE finale
+# tally per user (process-local) as the `/finale` panel polls, then read it back at finish-capture.
+_LAST_FINALE_TALLY: dict = {}
+
+
+def _remember_finale_tally(user: Optional[str], finale: Optional[dict]) -> None:
+    """Cache the jury-vote margin from an in-progress finale's revealed ballots (Vault-free: the
+    reveals are the public finale, ordered). Only stores once EVERY juror's vote is revealed, so the
+    cached tally is the full, final margin — exactly what survives the flip to `finished`."""
+    if not isinstance(finale, dict):
+        return
+    reveals = finale.get("reveals")
+    finalists = finale.get("finalists")
+    if not isinstance(reveals, list) or not reveals or not isinstance(finalists, list):
+        return
+    tally: dict = {}
+    for r in reveals:
+        voted = (r or {}).get("votedFor") if isinstance(r, dict) else None
+        name = (voted or {}).get("name") if isinstance(voted, dict) else None
+        if name:
+            tally[name] = tally.get(name, 0) + 1
+    if not tally:
+        return
+    counts = sorted(tally.values(), reverse=True)
+    top = counts[0]
+    second = counts[1] if len(counts) > 1 else 0
+    _LAST_FINALE_TALLY[user or ""] = {"margin": top - second, "total": sum(counts)}
+
+
+def _last_finale_margin(user: Optional[str]) -> Optional[int]:
+    rec = _LAST_FINALE_TALLY.get(user or "")
+    return rec.get("margin") if isinstance(rec, dict) else None
+
+
+# Public comp-win highlight lines from the recap read "<Name> wins Head of Household" / "wins the
+# Power of Veto" / "wins the final Head of Household" — the player's VISIBLE competition resume.
+def _count_player_comp_wins(highlights: list, player_name: Optional[str]) -> int:
+    if not player_name or not isinstance(highlights, list):
+        return 0
+    needle = player_name.strip().lower()
+    wins = 0
+    for line in highlights:
+        if not isinstance(line, str):
+            continue
+        low = line.lower()
+        if low.startswith(needle + " wins ") and (
+            "head of household" in low or "power of veto" in low
+        ):
+            wins += 1
+    return wins
+
+
+async def _count_player_social_scenes(user: Optional[str]) -> int:
+    """How many social scenes the player recorded — counted from their OWN visible projection
+    (player-witnessed `conversation` events; recordInteraction writes that type). Public, Vault-free
+    by construction (the player witnessed every one). Fail-soft: 0 if the read is unavailable."""
+    try:
+        vis = await orwell_engine.get_visible_state(user=user)
+    except Exception:
+        return 0
+    events = vis.get("visibleEvents") if isinstance(vis, dict) else None
+    if not isinstance(events, list):
+        return 0
+    return sum(1 for e in events if isinstance(e, dict) and e.get("type") == "conversation")
+
+
+def _derive_placement(state: dict, recap: dict, player_name: Optional[str]) -> str:
+    """The player's final placement (winner | runner-up | jury | evicted) from PUBLIC facts only —
+    the recap winner + the player's public 0046 seat. Mirrors the engine's own placement logic."""
+    player = state.get("player") if isinstance(state.get("player"), dict) else {}
+    status = (player or {}).get("status") or "active"
+    winner = recap.get("winner") if isinstance(recap, dict) else None
+    winner_name = (winner or {}).get("name") if isinstance(winner, dict) else None
+    if status == "active":
+        # A finished season with the player still 'active' means they sat in the Final 2.
+        if player_name and winner_name and player_name.strip().lower() == winner_name.strip().lower():
+            return "winner"
+        return "runner-up"
+    if status == "jury":
+        return "jury"
+    return "evicted"
+
+
+async def _capture_season_outcome(user: Optional[str]) -> bool:
+    """If THIS user's season is over, append its public outcome row (idempotent). Returns True on a
+    NEW row. Safe to call from any poll — it self-gates on `finished` and never raises (a capture
+    failure must never break a player-facing route)."""
+    try:
+        from src import orwell_outcomes, orwell_seasons
+
+        state = await orwell_engine.get_game_state(user=user)
+        if not isinstance(state, dict) or not state.get("started"):
+            return False
+        is_over = bool(state.get("finished")) or state.get("moment") == "post-season"
+        if not is_over:
+            return False
+        recap = await orwell_engine.season_recap(user=user)
+        recap = recap if isinstance(recap, dict) else {}
+        player = state.get("player") if isinstance(state.get("player"), dict) else {}
+        player_name = (player or {}).get("name")
+        winner = recap.get("winner") if isinstance(recap.get("winner"), dict) else None
+        winner_name = (winner or {}).get("name") if isinstance(winner, dict) else None
+        placement = _derive_placement(state, recap, player_name)
+        social = await _count_player_social_scenes(user)
+        comp_wins = _count_player_comp_wins(recap.get("highlights") or [], player_name)
+        margin = _last_finale_margin(user)
+        weeks = recap.get("weeksPlayed")
+        return orwell_outcomes.record_outcome(
+            user,
+            season=orwell_seasons.get_season(user),
+            placement=placement,
+            social_scenes=social,
+            competition_wins=comp_wins,
+            jury_margin=margin,
+            winner_name=winner_name,
+            weeks_played=weeks if isinstance(weeks, int) else None,
+        )
+    except Exception as e:  # never let instrumentation break a route
+        logger.info(f"[orwell] outcome capture skipped: {e}")
+        return False
+
+
 def _roster_cards(state: dict, user: Optional[str]) -> list:
     """The Vault-free roster cards (0051) from the engine's public projection: id, name,
     status, isPlayer, and the persisted portrait ref (or null). Shared by /roster and the
@@ -283,8 +414,14 @@ def setup_orwell_routes() -> APIRouter:
     async def orwell_recap(request: Request):
         """The season's public arc from the EVENT RECORD (0048/C17) — Vault-free, any time
         (mid-season it is simply the story so far). Fails OPEN: {recap: null} on any error."""
+        user = _current_user(request)
         try:
-            return {"recap": await orwell_engine.season_recap(user=_current_user(request))}
+            recap = await orwell_engine.season_recap(user=user)
+            # Calibration instrumentation: the recap is polled at the finale, so this is a natural
+            # finish-detection point — log the public outcome once the season is over (idempotent).
+            if isinstance(recap, dict) and recap.get("finished"):
+                await _capture_season_outcome(user)
+            return {"recap": recap}
         except Exception as e:
             logger.warning(f"[orwell] recap failed: {e}")
             return {"recap": None}
@@ -327,8 +464,13 @@ def setup_orwell_routes() -> APIRouter:
         """The Vault-free in-progress finale projection for the finale panel (0037 §8.2): finalists,
         stage, and the votes revealed so far — null when no finale is staging. Fails OPEN: {finale: null}
         on any error, so the page never blocks on it."""
+        user = _current_user(request)
         try:
-            return {"finale": await orwell_engine.finale_view(user=_current_user(request))}
+            finale = await orwell_engine.finale_view(user=user)
+            # Calibration instrumentation: cache the full jury margin from the revealed ballots while
+            # the finale is still staging (it vanishes once the season flips to `finished`).
+            _remember_finale_tally(user, finale if isinstance(finale, dict) else None)
+            return {"finale": finale}
         except Exception as e:
             _warn_throttled("finale", f"[orwell] finale failed: {e}")
             return {"finale": None}
@@ -746,6 +888,10 @@ def setup_orwell_routes() -> APIRouter:
             is_over = bool(state.get("finished")) or state.get("moment") == "post-season"
             if not is_over:
                 return JSONResponse(status_code=409, content={"error": "the current season is not over yet"})
+            # Calibration instrumentation (belt): the season is provably OVER here, so capture its
+            # public outcome BEFORE the reset wipes the engine sandbox — idempotent, so it never
+            # double-logs a season the recap poll already captured. Never blocks the season advance.
+            await _capture_season_outcome(user)
             # A new season is a new cast: scrub the prior portrait set before generating (0051).
             try:
                 orwell_portraits.scrub_user(user)

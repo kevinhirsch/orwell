@@ -481,6 +481,21 @@ export class BbWorld extends World {
   svSentinel?: string;
   svPresent?: Eid[];
 
+  // Story-thread scheduler (0060) scratch state.
+  stRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  stSandbox?: import("../../src/composition/registry").UserSandbox;
+  stSandboxB?: import("../../src/composition/registry").UserSandbox;
+  stOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  stOrchB?: import("../../src/composition/orchestrator").Orchestrator;
+  stUser?: string;
+  stUserB?: string;
+  stSentinel?: string;
+  stThreadSourceId?: import("../../src/domain/ids").EntityId;
+  stTransitionsA?: string;
+  stTransitionsB?: string;
+  stStaticA?: string;
+  stStaticB?: string;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

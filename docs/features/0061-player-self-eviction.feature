@@ -6,8 +6,7 @@ Feature: 0061 — Player self-eviction (the voluntary walk-out / quit path)
   and transitions the player out through the SAME sanctioned door as 0046 — never a second eviction
   or restart path. Narrated-but-not-recorded means it didn't happen. Roles only — no names.
   #
-  # SPEC ONLY — this skeleton is NOT YET wired into cucumber.cjs; it is added when the feature is
-  # built to green (priority order), exactly as 0046/0047 were.
+  # BUILT — wired into cucumber.cjs and green (built to spec in priority order, exactly as 0046/0047 were).
 
   # §4.1 / §4.2 — a CONFIRMED self-eviction is a real, recorded engine transition
   Scenario: a confirmed self-eviction records a real event and transitions state via the sanctioned door

@@ -84,7 +84,12 @@ import {
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
-import { generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads } from "../../engine/deepProfile";
+import {
+  generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
+  defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
+  type SeasonPosition,
+} from "../../engine/deepProfile";
+import { THREAD } from "../../engine/threadConstants";
 import {
   loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
   DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
@@ -329,6 +334,34 @@ export class GameSessionAdapter implements GameSession {
   setOnShowmanceSurfaced(fn: (sm: { a: EntityId; b: EntityId; aName: string; bName: string }) => void): void {
     this.onShowmanceSurfaced = fn;
   }
+
+  /**
+   * 0060 §4.2 — the surfacing seams the thread scheduler uses (NPC↔NPC gossip vs. a rare to-the-player
+   * pathway). The adapter holds NO events/knowledge handle, so it hands the registry a Vault-SAFE
+   * paraphrase (never the premise — `threadRumor` keyed by source class) and the registry runs the
+   * 0038 gossip diffusion / 0002 `surfaceInformationTo` (with genuine content lineage, E9). Returns
+   * whether the surfacing actually reached the player (so the scheduler can count it for restraint).
+   */
+  private onThreadGossip?: (origin: EntityId, rumor: string, subject: EntityId) => void;
+  private onThreadSurfaceToPlayer?: (subject: EntityId, rumor: string) => boolean;
+
+  setOnThreadGossip(fn: (origin: EntityId, rumor: string, subject: EntityId) => void): void {
+    this.onThreadGossip = fn;
+  }
+
+  setOnThreadSurfaceToPlayer(fn: (subject: EntityId, rumor: string) => boolean): void {
+    this.onThreadSurfaceToPlayer = fn;
+  }
+
+  /**
+   * 0060 §3 (`nominated-twice`) — engine-only, hidden bookkeeping: the DISTINCT weeks each houseguest
+   * has been on the block, accrued each schedule tick from the live ceremony nominees. Persisted in the
+   * snapshot so the count survives a restart (0030); never projected. Absent on pre-0060 saves (rebuilt
+   * from the current ceremony onward — at worst a thread waits one extra block to ripen, never leaks).
+   */
+  private nominationWeeks: Record<EntityId, number[]> = {};
+  /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
+  private surfacedThreadCount = 0;
 
   /**
    * The season record providers (0048/B56): the full event record + the Vault's hidden records,
@@ -706,6 +739,10 @@ export class GameSessionAdapter implements GameSession {
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
       ...(this.storyThreads.length ? { storyThreads: cloneSession(this.storyThreads) } : {}),
+      // 0060 — the scheduler's hidden bookkeeping (nominated-twice ledger + the season surfacing cap),
+      // persisted so a driven thread stays driven and the cap is never re-opened by a reload.
+      ...(Object.keys(this.nominationWeeks).length ? { nominationWeeks: cloneSession(this.nominationWeeks) } : {}),
+      ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
     };
@@ -749,6 +786,19 @@ export class GameSessionAdapter implements GameSession {
       this.deepProfiles = {};
       this.storyThreads = [];
     }
+    // 0060 §3 back-compat: a thread restored from a pre-0060 save carries no structured `triggerCondition`
+    // / `lifecycleWeek` — default them by source class / the live week (idempotent), so the scheduler has
+    // a gate and the windows have a base. This is a NON-mutating re-derive (the byte-stable PUBLIC facets
+    // are untouched); the hidden thread gains a field that was always implied by its prose trigger.
+    for (const t of this.storyThreads) {
+      if (t.triggerCondition === undefined) t.triggerCondition = defaultTriggerConditionFor(t);
+      if (t.lifecycleWeek === undefined) t.lifecycleWeek = this.week;
+    }
+    // 0060 — restore the scheduler's hidden bookkeeping (nominated-twice ledger + the season cap). Absent
+    // on pre-0060 saves ⇒ start fresh (rebuilt forward; the cap re-baselines to 0 — a benign, never-leaky
+    // relaxation on a legacy resume, since pre-0060 saves carried no surfaced threads to over-count).
+    this.nominationWeeks = core.nominationWeeks ? cloneSession(core.nominationWeeks) : {};
+    this.surfacedThreadCount = core.surfacedThreadCount ?? 0;
     // 0059 — the seeded relationship layer persists explicitly (a showmance STAGE must never silently
     // reset on restore). Absent on pre-0059 saves ⇒ re-seed deterministically off the persisted seed.
     if (core.seededRelationships) {
@@ -1260,6 +1310,9 @@ export class GameSessionAdapter implements GameSession {
     // HIDDEN — engine-only, sealed off the player AND admin.
     this.deepProfiles = layer.hidden;
     this.storyThreads = layer.threads;
+    // 0060 — a fresh season starts with no nomination history and an unspent surfacing cap.
+    this.nominationWeeks = {};
+    this.surfacedThreadCount = 0;
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -1356,12 +1409,191 @@ export class GameSessionAdapter implements GameSession {
   activateThread(sourceId: EntityId, rng: RandomnessSource = new SeededRandom(hashSeed(`${this.gameSeed}:thread:${sourceId}`))): StoryThread | undefined {
     const thread = this.storyThreads.find((t) => t.sourceId === sourceId && t.status === "dormant");
     if (!thread) return undefined;
-    thread.status = "active";
-    // The source acts toward the player by the thread's nature — the hidden delta folds into the
-    // relationship layer (engine-only). `toward: [PLAYER]` makes the player's read of the source move.
-    foldHiddenImpact(this.rel, rng, sourceId, [sourceId, PLAYER], thread.weightImpact, [PLAYER]);
+    this.foldThreadActivation(thread, rng);
     this.persist();
     return thread;
+  }
+
+  /** The shared activation step (0058 §5 / 0060 §4.1): flip dormant→active + fold the 0023 hidden weight.
+   *  `activateThread` (the directly-callable hook) and the 0060 scheduler both go through here — one fold
+   *  implementation, zero drift. NEVER persists itself (the scheduler batches one persist per tick). */
+  private foldThreadActivation(thread: StoryThread, rng: RandomnessSource): void {
+    thread.status = "active";
+    thread.lifecycleWeek = this.week;
+    // The source acts toward the player by the thread's nature — the hidden delta folds into the
+    // relationship layer (engine-only). `toward: [PLAYER]` makes the player's read of the source move.
+    foldHiddenImpact(this.rel, rng, thread.sourceId, [thread.sourceId, PLAYER], thread.weightImpact, [PLAYER]);
+  }
+
+  /**
+   * Feature 0060 — the per-tick story-thread SCHEDULER. Rides the EXISTING bounded off-screen tick
+   * (`orchestrator.defaultApply`), runs AFTER the tick's society/gossip/confessional steps so it reads
+   * the freshly-moved house, and walks each thread's lifecycle once:
+   *
+   *   dormant  & triggerCondition met & roll < activateProb    → activate (reuse the 0023 fold, §4.1)
+   *   active   & roll < surfaceProb & under the season cap      → surface (reuse 0038 gossip / 0002, §4.2)
+   *   surfaced / active beyond resolveAfterWeeks                → resolve (one final 0023 fold, §4.3)
+   *   source evicted / expireAfterWeeks elapsed dormant         → expire  (record, never delete, §4.4)
+   *
+   * It AUTHORS nothing and adds NO parallel subsystem — it only decides WHICH transition fires. Every
+   * roll is a seeded SIDE rng (`seed:thread-scheduler:…`), so it never perturbs the main house stream
+   * (0007 byte-stability) and the same seed + trigger sequence ⇒ the same thread drama (§4.5). Restraint
+   * is structural: a hard season SURFACING cap (§5), at most one activation + one surface per tick, and
+   * NPC↔NPC surfacing far more common than to-the-player. The Vault Wall holds (§7): nothing crosses but
+   * a class-keyed paraphrase belief — never the premise, never a number.
+   */
+  scheduleStoryThreads(rng: RandomnessSource): void {
+    if (!this.house || this.storyThreads.length === 0) return;
+    this.recordNominationWeeks();
+    const pos = this.seasonPosition();
+
+    // Back-compat (§3): a thread restored from a pre-0060 save has no structured condition / lifecycle
+    // week — default them in place (idempotent), so the predicate has a gate and the windows have a base.
+    for (const t of this.storyThreads) {
+      if (t.triggerCondition === undefined) t.triggerCondition = defaultTriggerConditionFor(t);
+      if (t.lifecycleWeek === undefined) t.lifecycleWeek = this.week;
+    }
+
+    let activations = 0;
+    let surfaces = 0;
+    // Seed-stable iteration order is the derive order (the array order); never re-sort. The per-thread
+    // side rng keys off the game seed + thread id + the live (week, phase) — so the roll is deterministic
+    // AND advances as the game's POSITION advances (a thread gets a fresh chance each beat the house
+    // moves to), never perturbing the main house stream (0007 §4.5). Within one (week, phase) repeated
+    // ticks reuse the same roll — natural restraint: a thread fires at most once per beat, not per tick.
+    for (const thread of this.storyThreads) {
+      const side = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:thread-scheduler:${thread.id}:${this.week}:${this.phase}`));
+      if (thread.status === "dormant") {
+        // §4.4 — a dormant thread whose window has closed (source evicted, or expireAfterWeeks elapsed
+        // since seed without ever triggering) EXPIRES: recorded, never deleted (non-degradation, §7).
+        if (sourceWindowClosed(thread, pos)
+          || this.week - (thread.lifecycleWeek ?? 0) >= THREAD.expireAfterWeeks) {
+          thread.status = "expired";
+          thread.lifecycleWeek = this.week;
+          continue;
+        }
+        // §4.1 — ripe + a bounded roll + under the per-tick activation cap ⇒ activate (reuse 0023).
+        if (activations < THREAD.maxActivationsPerTick
+          && triggerMet(thread, pos)
+          && side.next() < THREAD.activateProb) {
+          this.foldThreadActivation(thread, side);
+          activations++;
+        }
+        continue;
+      }
+      if (thread.status === "active") {
+        // §4.3 — an active thread that has burned down (active longer than resolveAfterWeeks without
+        // surfacing) RESOLVES off-screen with one final bounded 0023 fold; OR the source has left.
+        if (sourceWindowClosed(thread, pos)
+          || this.week - (thread.lifecycleWeek ?? 0) >= THREAD.resolveAfterWeeks) {
+          this.foldThreadResolution(thread, side);
+          continue;
+        }
+        // §4.2 / §5 — surface this tick (bounded roll, the season cap not yet spent, under the per-tick
+        // surface cap). Surfacing is belief-level: NPC↔NPC gossip the common path, to-the-player rarer.
+        if (surfaces < THREAD.maxSurfacesPerTick
+          && this.surfacedThreadCount < THREAD.maxSurfacedPerSeason
+          && side.next() < THREAD.surfaceProb) {
+          this.surfaceThread(thread, pos, side);
+          surfaces++;
+        }
+        continue;
+      }
+    }
+    // No `persist()` here: the scheduler runs INSIDE the orchestrator's bounded off-screen tick, whose
+    // own commit exports + persists the candidate snapshot (which includes the mutated `storyThreads`).
+    // Persisting again would force a redundant O(events) re-serialization on the hot tick (R3/spineHardening).
+  }
+
+  /** §4.3 — resolve an active/surfaced thread: one FINAL bounded 0023 fold (the closing beat), then inert. */
+  private foldThreadResolution(thread: StoryThread, rng: RandomnessSource): void {
+    foldHiddenImpact(this.rel, rng, thread.sourceId, [thread.sourceId, PLAYER], thread.weightImpact, [PLAYER]);
+    thread.status = "resolved";
+    thread.lifecycleWeek = this.week;
+  }
+
+  /**
+   * §4.2 — surface an active thread through an in-game pathway ONLY (never exposition). NPC↔NPC is the
+   * common case (a vague class-keyed paraphrase handed to the 0038 gossip engine); surfacing TO the
+   * player is rarer (gated behind `surfaceToPlayerProb` AND a real modeled pathway via the registry's
+   * `surfaceInformationTo`, E9). Either way it counts ONCE against the hard season cap (§5). What
+   * crosses is a belief with source + confidence — never the premise, never a number (§7).
+   */
+  private surfaceThread(thread: StoryThread, pos: SeasonPosition, rng: RandomnessSource): void {
+    const name = this.nameOf(thread.sourceId);
+    const rumor = threadRumor(thread, name);
+    // Choose an NPC ORIGIN for the rumor: a living NPC other than the source (someone who'd whisper it).
+    const livingNpcs = (this.house?.npcs ?? [])
+      .map((n) => n.id)
+      .filter((id) => id !== thread.sourceId && !pos.evicted.has(id));
+    const toPlayer = rng.next() < THREAD.surfaceToPlayerProb && this.onThreadSurfaceToPlayer !== undefined;
+    if (toPlayer && this.onThreadSurfaceToPlayer) {
+      // Rare: a modeled pathway already reaches the player — surface a content-lineage-anchored belief
+      // (E9). An unanchored attempt is correctly downgraded to a suspicion by 0002; either way the
+      // thread is spent (it "surfaced" — the house's drama broke into the open).
+      this.onThreadSurfaceToPlayer(thread.sourceId, rumor);
+    } else if (livingNpcs.length > 0 && this.onThreadGossip) {
+      // The common case: hand the paraphrase to the 0038 gossip engine to diffuse NPC↔NPC.
+      const origin = livingNpcs[rng.int(livingNpcs.length)]!;
+      this.onThreadGossip(origin, rumor, thread.sourceId);
+    }
+    thread.status = "surfaced";
+    thread.lifecycleWeek = this.week;
+    this.surfacedThreadCount++;
+  }
+
+  /** 0060 §3 (`nominated-twice`) — accrue the DISTINCT weeks each current nominee has been on the block. */
+  private recordNominationWeeks(): void {
+    for (const id of this.ceremony.nominees) {
+      const weeks = (this.nominationWeeks[id] ??= []);
+      if (!weeks.includes(this.week)) weeks.push(this.week);
+    }
+  }
+
+  /**
+   * Build the Vault-FREE season position the scheduler's predicates read (0060 §3). Every field is a
+   * PUBLIC/engine-internal POSITION fact — never a thread premise. `cornered` is the bottom-quantile of
+   * the living house by the engine's own bond read toward the player-side house (engine-internal, never
+   * surfaced); `nominatedRepeatedly` reads the hidden nomination-week ledger above.
+   */
+  private seasonPosition(): SeasonPosition {
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const livingNpcs = (this.house?.npcs ?? []).map((n) => n.id).filter((id) => !evicted.has(id));
+    const livingCount = livingNpcs.length + (this.house && !evicted.has(this.house.player.id) ? 1 : 0);
+    const powerHolders = new Set<EntityId>();
+    if (this.ceremony.hoh) powerHolders.add(this.ceremony.hoh);
+    if (this.ceremony.vetoHolder) powerHolders.add(this.ceremony.vetoHolder);
+    // `cornered-socially`: a source's standing among the living house. Score each living NPC by how the
+    // REST of the living house reads them (mean bondStrength of others' edges toward them); the bottom
+    // quantile is "cornered". Pure engine read — never crosses the wall.
+    const others = [...livingNpcs, ...(this.house ? [this.house.player.id] : [])];
+    const standing = new Map<EntityId, number>();
+    for (const id of livingNpcs) {
+      let sum = 0; let n = 0;
+      for (const o of others) {
+        if (o === id) continue;
+        const e = this.rel.edge(o, id);
+        sum += e.trust + e.affinity - e.threat; n++;
+      }
+      standing.set(id, n > 0 ? sum / n : 0);
+    }
+    const ranked = [...standing.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+    const cut = Math.max(1, Math.floor(ranked.length * THREAD.corneredBottomQuantile));
+    const cornered = new Set(ranked.slice(0, cut));
+    const nominatedRepeatedly = new Set<EntityId>(
+      Object.entries(this.nominationWeeks)
+        .filter(([, weeks]) => weeks.length >= THREAD.nominatedWeeksForRivalry)
+        .map(([id]) => id as EntityId),
+    );
+    return {
+      week: this.week,
+      livingCount,
+      nominees: new Set(this.ceremony.nominees),
+      powerHolders,
+      cornered,
+      nominatedRepeatedly,
+      evicted,
+    };
   }
 
   /**
