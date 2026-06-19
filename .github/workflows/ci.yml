@@ -185,7 +185,10 @@ jobs:
   # band, rare-F2-win ceiling, and earned-win teeth the pre-shard single-file gate ran. Green only if
   # the full-20 band holds. Depends on every shard (so all artifacts exist) and downloads them into one dir.
   jury-aggregate:
-    needs: jury-shard
+    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
+    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
+    # band assertion would silently never run). `jury-shard` already needs `changes`, so ordering holds.
+    needs: [changes, jury-shard]
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     name: jury-aggregate (full-20 band)
@@ -243,7 +246,10 @@ jobs:
   # Recombine every gradient shard and assert the full monotonic band (active ≥ passive). Green only
   # if the full band holds. Depends on every shard so all artifacts exist.
   gradient-aggregate:
-    needs: gradient-shard
+    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
+    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
+    # band assertion would silently never run). `gradient-shard` already needs `changes`, so ordering holds.
+    needs: [changes, gradient-shard]
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     name: gradient-aggregate (full band)
