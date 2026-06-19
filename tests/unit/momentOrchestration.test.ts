@@ -57,6 +57,21 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/seize the lull/i);
   });
 
+  it("L36 — the base prompt pins the OOC channel: meta/logistics queries are not voiced into the room", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // the two-channel distinction is named (talking to the game vs talking to the room)
+    expect(p).toMatch(/TALKING TO THE GAME vs TALKING TO THE ROOM/i);
+    // a bare logistics/state/time question is OUT OF CHARACTER — a HUD aside, not spoken aloud
+    expect(p).toMatch(/OUT OF CHARACTER/);
+    expect(p).toMatch(/producer\/HUD aside/i);
+    // the house must NOT hear or react, and the scene continues uninterrupted (the L36 bug shape)
+    expect(p).toMatch(/DO NOT make the house hear or react/i);
+    expect(p).toMatch(/CONTINUES UNINTERRUPTED/i);
+    // the explicit override marker is honored without exception
+    expect(p).toMatch(/\(\(double parentheses\)\)/);
+    expect(p).toMatch(/prefixed "ooc:"/i);
+  });
+
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
     const game = new GameSessionAdapter();
     game.createCharacter({ playerName: "Player One", seed: 4 });
