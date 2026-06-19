@@ -53,10 +53,10 @@ Feature: 0063 — Casting diversity floor (a cast that authentically reflects th
   Scenario: a privately-held orientation never reaches the player or the admin before a pathway surfaces it
     Given a generated cast at seed "0063-6" with a houseguest whose orientation is held privately
     When a sentinel is planted in that houseguest's private-orientation field
-    Then the planted sentinel never appears on any player surface
-    And the planted sentinel never appears on the admin surface
-    And the planted sentinel never appears in that houseguest's voicing projection
-    And the planted sentinel never appears in the moment prompt
+    Then the planted private-orientation sentinel never appears on any player surface
+    And the planted private-orientation sentinel never appears on the admin surface
+    And the planted private-orientation sentinel never appears in that houseguest's voicing projection
+    And the planted private-orientation sentinel never appears in the moment prompt
 
   # §4/§5 — a publicly-out orientation IS observable (public facet), the house knows it
   Scenario: a publicly-out houseguest's orientation is an observable public facet
@@ -68,10 +68,10 @@ Feature: 0063 — Casting diversity floor (a cast that authentically reflects th
   Scenario: a private orientation reaches the player only after an in-game pathway terminates at them
     Given a generated cast at seed "0063-8" with a houseguest whose orientation is held privately
     And the player holds no knowledge of that orientation
-    When no in-game pathway has surfaced it
+    When no in-game pathway has surfaced the private orientation
     Then the player's knowledge still contains nothing about that orientation
     When an in-game pathway surfaces it to the player
-    Then the player holds a belief about it with a source and a confidence
+    Then the player holds a belief about the orientation with a source and a confidence
     And the verbatim private-orientation field never appears on any player surface
 
   # §4.1 — 0059 can seed a queer showmance that surfaces only organically under reserve governance

@@ -214,23 +214,23 @@ When("a sentinel is planted in that houseguest's private-orientation field", fun
   sb.session.restore(core);
 });
 
-Then("the planted sentinel never appears on any player surface", function (this: BbWorld) {
+Then("the planted private-orientation sentinel never appears on any player surface", function (this: BbWorld) {
   assert.ok(!dvPlayerSurface(this.dvSandbox!).includes(this.dvSentinel!), "private orientation leaked to a player surface");
 });
 
-Then("the planted sentinel never appears on the admin surface", function (this: BbWorld) {
+Then("the planted private-orientation sentinel never appears on the admin surface", function (this: BbWorld) {
   this.dvSandbox!.syncAdmin();
   assert.ok(!JSON.stringify(this.dvSandbox!.admin.inspect()).includes(this.dvSentinel!), "private orientation leaked to the admin surface");
 });
 
-Then("the planted sentinel never appears in that houseguest's voicing projection", function (this: BbWorld) {
+Then("the planted private-orientation sentinel never appears in that houseguest's voicing projection", function (this: BbWorld) {
   const voices = this.dvSandbox!.session.getGameState().house
     .filter((h) => h.status === "active")
     .map((h) => JSON.stringify(this.dvSandbox!.session.npcVoice(h.id))).join("\n");
   assert.ok(!voices.includes(this.dvSentinel!), "private orientation leaked to a voicing projection");
 });
 
-Then("the planted sentinel never appears in the moment prompt", function (this: BbWorld) {
+Then("the planted private-orientation sentinel never appears in the moment prompt", function (this: BbWorld) {
   const prompt = this.dvSandbox!.session.getMomentPrompt({}).systemPrompt
     + this.dvSandbox!.session.getMomentPrompt({ moment: "social" }).systemPrompt;
   assert.ok(!prompt.includes(this.dvSentinel!), "private orientation leaked to the moment prompt");
@@ -252,7 +252,7 @@ Then("no competition stat or hidden number is derivable from it", function (this
 
 // ── Pathway-only disclosure ──────────────────────────────────────────────────────────────────────────
 
-When("no in-game pathway has surfaced it", function (this: BbWorld) {
+When("no in-game pathway has surfaced the private orientation", function (this: BbWorld) {
   // No-op: by construction nothing has surfaced the sealed orientation yet.
 });
 
@@ -266,7 +266,7 @@ Then("the player's knowledge still contains nothing about that orientation", fun
   }
   // The player holds no belief about the sealed orientation.
   for (const id of Object.keys(sealed)) {
-    const known = sb.engine.knowledge.known(PLAYER).map((f) => f.content).join("\n");
+    const known = sb.engine.knowledge.knownTo(PLAYER).map((f: { content: string }) => f.content).join("\n");
     assert.ok(!known.includes(privateOrientationVaultId(id as never)), "the player already knows a sealed orientation");
   }
 });
@@ -279,15 +279,15 @@ When("an in-game pathway surfaces it to the player", function (this: BbWorld) {
   const orientation = sb.session.snapshot().privateOrientations![id]!;
   sb.engine.knowledge.seedBelief(
     PLAYER,
-    { content: `learned through the house that a houseguest is ${orientation}`, subject: id },
+    { content: `learned through the house that a houseguest is ${orientation}`, subject: id, factId: `dv-orientation:${id}` },
     "told",
   );
 });
 
-Then("the player holds a belief about it with a source and a confidence", function (this: BbWorld) {
+Then("the player holds a belief about the orientation with a source and a confidence", function (this: BbWorld) {
   const sb = this.dvSandbox!;
-  const beliefs = sb.engine.knowledge.known(PLAYER);
-  const surfaced = beliefs.find((b) => /learned through the house/.test(b.content));
+  const beliefs = sb.engine.knowledge.knownTo(PLAYER);
+  const surfaced = beliefs.find((b: { content: string }) => /learned through the house/.test(b.content));
   assert.ok(surfaced, "the player holds no surfaced belief about the orientation");
 });
 
