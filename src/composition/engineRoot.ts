@@ -4,10 +4,12 @@ import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledge
 import { RelationshipModel } from "../engine/relationships";
 import { SoulStore } from "../adapters/engine/SoulStore";
 import { DeterministicEmbedding } from "../adapters/embedding/DeterministicEmbedding";
+import { sqliteVectorIndexFactory } from "../adapters/sqlite/SqliteVectorIndex";
 import type { EventStore } from "../ports/EventStore";
 import type { VaultStore } from "../ports/VaultStore";
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { SoulProvider } from "../ports/SoulProvider";
+import type { VectorIndex } from "../ports/VectorIndex";
 
 /**
  * Engine composition root. This is the ONLY place the Vault is wired. Outward
@@ -54,6 +56,14 @@ export function buildEngineCore(): EngineCore {
   // otherwise the deterministic offline embedding (0024) — reproducible seeded recall, and
   // the sanctioned whole-process fallback when the real model is unavailable.
   const embedding = runtimeEmbedding ?? new DeterministicEmbedding();
-  const soul = new SoulStore((text) => embedding.embed(text));
+  // E63: `ORWELL_STORE=sqlite` backs each houseguest's recall index with sqlite-vec (SYNCHRONOUS, so
+  // the SoulStore seam stays sync — the fastembed bridge + G8/G12 breathing lane are unaffected). One
+  // shared in-process vector db PER SANDBOX (each `buildEngineCore` call), so cross-user isolation
+  // holds. DEFAULT unset ⇒ the in-memory cosine index (today's behavior — unchanged).
+  const makeIndex: (() => VectorIndex) | undefined =
+    (process.env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite" ? sqliteVectorIndexFactory() : undefined;
+  const soul = makeIndex
+    ? new SoulStore((text) => embedding.embed(text), makeIndex)
+    : new SoulStore((text) => embedding.embed(text));
   return { events, vault, knowledge, relationships, soul };
 }

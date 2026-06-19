@@ -4,8 +4,6 @@ import { buildOutwardChannels } from "./outwardRoot";
 import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameStateRepository";
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
 import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
-import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledgeService";
-import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
 import { SeededRandom } from "../adapters/random/SeededRandom";
@@ -209,7 +207,8 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
     events: sb.engine.events.query(),
     relationships: sb.engine.relationships.serialize().edges,
     // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
-    knowledge: (sb.engine.knowledge as InMemoryKnowledgeService).serialize(),
+    // Through the port seam (E63): `serialize`/`load` are on `KnowledgeService`, no concrete cast.
+    knowledge: sb.engine.knowledge.serialize(),
     // The Vault's hidden records (B53/audit I7) — sealed twists et al. survive a restart too.
     vault: sb.engine.vault.readHidden(),
   };
@@ -223,9 +222,11 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
 function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   if (!snapshotCompatible(snap)) throw new Error(`incompatible snapshot version: ${snap.snapshotVersion}`);
   sb.session.restore(snap);
-  for (const e of snap.events) (sb.engine.events as InMemoryEventStore).restoreRecord(e); // ids/ts/hidden preserved exactly
+  // Through the port seam (E63): `restoreRecord`/`load` are on the EventStore/KnowledgeService ports,
+  // no concrete `as InMemory*` cast — a relational adapter (SQLite) satisfies the same resume path.
+  for (const e of snap.events) sb.engine.events.restoreRecord(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
-  if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
+  if (snap.knowledge) sb.engine.knowledge.load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
 }
 
