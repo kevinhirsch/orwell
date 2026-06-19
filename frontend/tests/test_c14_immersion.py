@@ -164,6 +164,71 @@ def test_chatjs_imports_every_helper_it_calls():
         assert imp, "chat.js calls isGameBuild() but does not import it from orwellToolBeats.js"
 
 
+# --- 4. the model's private reasoning never reaches the player in the game build ---------
+
+def test_markdown_suppresses_thinking_in_the_game_build():
+    # IMMERSION LEAK: a reasoning model's chain-of-thought (wrapped in <think>…</think>) was
+    # rendering as visible chat text in the GAME BUILD — leaking engine lever names. markdown.js
+    # is the chokepoint every reload + final-render path funnels through; in the game build it
+    # must render reply-only (no thinking section), gated by a helper that fails OPEN to hiding.
+    md = _read("static", "js", "markdown.js")
+    assert "export function gameBuildSuppressesThinking()" in md
+    # the helper checks the game-build marker and the admin-only opt-in escape hatch
+    assert "data-game-build" in md
+    assert "data-show-thinking" in md  # admin-only setting to view reasoning (off by default)
+    # fail-open to HIDING: a thrown check still suppresses (return true in the catch)
+    cap = md[md.index("export function gameBuildSuppressesThinking()"):]
+    cap = cap[:cap.index("export function processWithThinking")]
+    assert "catch" in cap and "return true;" in cap
+    # processWithThinking gates on the helper and renders reply-only (no createThinkingSection)
+    pwt = md[md.index("export function processWithThinking"):]
+    assert "if (gameBuildSuppressesThinking())" in pwt
+    gated = pwt[pwt.index("if (gameBuildSuppressesThinking())"):]
+    gated = gated[:gated.index("let html = ''")]
+    assert "createThinkingSection" not in gated  # no thinking dropdown is built in the game build
+
+
+def test_live_streaming_thinking_indicator_is_game_build_gated():
+    # The LIVE stream path (chat.js) renders reasoning two ways: a "Thinking…" indicator while
+    # the <think> is open, and a streaming live-think box. BOTH must be gated off in the game
+    # build (hold/continue without building DOM), then render the reply only on close.
+    chat = _read("static", "js", "chat.js")
+    # the unclosed-think indicator returns early in the game build (no "Thinking…" header DOM)
+    assert "If thinking is still streaming (unclosed <think>)" in chat
+    ind = chat[chat.index("If thinking is still streaming (unclosed <think>)"):]
+    ind = ind[:600]
+    assert "if (isGameBuild()) {" in ind
+    # the live-think BOX builder is bypassed in the game build (the reasoning DOM is never made)
+    assert "if (isGameBuild() && (hasUnclosedThink || isThinking)) {" in chat
+    gb = chat[chat.index("if (isGameBuild() && (hasUnclosedThink || isThinking)) {"):]
+    gb = gb[:gb.index("if (hasUnclosedThink && !isThinking) {")]
+    # while reasoning is open we hold (continue) and never build the live-think box
+    assert "continue;" in gb
+    assert "live-think" not in gb  # the box markup is NOT emitted in the game-build branch
+    # on close, the reply renders via the normal stream path (reply-only)
+    assert "_renderStream();" in gb
+
+
+def test_reload_path_skips_thinking_reconstruction_in_the_game_build():
+    # The history-RELOAD path (chatRenderer.js) reconstructs thinking from metadata.thinking.
+    # In the game build that reconstruction must be SKIPPED entirely — render the reply text only.
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert "metadata?.thinking && !isGameBuild()" in renderer
+
+
+def test_non_game_build_still_renders_the_collapsible_thinking():
+    # NON-game build is UNCHANGED: processWithThinking still builds the collapsible thinking
+    # section, and the reload path still reconstructs from metadata.thinking.
+    md = _read("static", "js", "markdown.js")
+    # the normal (non-game) branch still calls createThinkingSection
+    assert "thinkingBlocks.forEach((block, index) => {" in md
+    assert "html += createThinkingSection(block, index, thinkingTime);" in md
+    # the reload reconstruction is only gated by the game build — its full form is preserved
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert "markdownModule.processWithThinking(" in renderer
+    assert "'<think' + (thinkTime ? ` time=\"${thinkTime}\"` : '') + '>' + metadata.thinking" in renderer
+
+
 def test_streaming_tts_flag_is_function_scoped():
     # REGRESSION GUARD: streamingTTS was a `const` inside the stream-read block but READ in the
     # error/abort cleanup branch — a `ReferenceError` on any early submit error that masked the real

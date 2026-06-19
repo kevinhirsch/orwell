@@ -418,8 +418,46 @@ export function createCollapsible(contentMarkdown, label = 'details') {
     </div>`;
 }
 
+/**
+ * Game build (immersion) — the player must NEVER see the model's private
+ * reasoning/chain-of-thought (it leaks engine lever names like `whereabouts`,
+ * `npcVoice`, `getGameState`). In the game build we suppress ALL thinking
+ * rendering by default; it may be re-enabled ONLY by an admin-only setting that
+ * sets `data-show-thinking` on the body. Fail-open to HIDING: if `document` is
+ * unavailable or the attribute can't be read, we suppress (the safe direction).
+ */
+export function gameBuildSuppressesThinking() {
+  try {
+    if (typeof document === 'undefined' || !document.body) return false;
+    if (!document.body.hasAttribute('data-game-build')) return false;
+    // Admin-only escape hatch: explicitly opt back in to seeing reasoning.
+    if (document.body.hasAttribute('data-show-thinking')) return false;
+    return true;
+  } catch (_) {
+    // Fail closed (to hiding) — never leak reasoning because a check threw.
+    return true;
+  }
+}
+
 export function processWithThinking(text) {
   const { thinkingBlocks, content, thinkingTime } = extractThinkingBlocks(text);
+
+  // Game build: drop the model's reasoning entirely — render reply-only. Also
+  // strip a stray `<think>`/"Thinking:" preamble that may have arrived as plain
+  // CONTENT (extractThinkingBlocks already removes tagged blocks; this guards a
+  // bare reasoning prefix that never got tagged) so no reasoning leaks as
+  // narration. void thinkingBlocks/thinkingTime — intentionally unused here.
+  if (gameBuildSuppressesThinking()) {
+    let reply = content;
+    if (reply) {
+      const stripped = normalizePlainThinking(reply);
+      if (/<think/i.test(stripped)) {
+        reply = (extractThinkingBlocks(stripped).content || '').trim();
+      }
+    }
+    const html = reply ? mdToHtml(reply) : '';
+    return _useSvgEmoji() ? svgifyEmoji(html) : html;
+  }
 
   let html = '';
 
@@ -789,6 +827,7 @@ const markdownModule = {
   squashOutsideCode,
   renderContent,
   processWithThinking,
+  gameBuildSuppressesThinking,
   createCollapsible,
   hasUnclosedThinkTag,
   extractThinkingBlocks,
