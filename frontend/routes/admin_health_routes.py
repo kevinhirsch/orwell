@@ -624,6 +624,39 @@ _OPS_SCRIPTS = {
 }
 _OPS_RUNNING = {}
 
+# L37 — size-cap the on-disk ops logs. Each run opens the file with "w" (so it never APPENDS across
+# runs), but a single run can still capture an unbounded journal/diagnostic tail (the 2026-06-19
+# incident, where an engine-down firehose ballooned the captured journal). After the run we cap the
+# file to its last `_OPS_LOG_CAP_BYTES`, keeping the most-recent (most-useful) tail and prefixing a
+# truncation marker — so the file the /admin/status viewer tails can never grow without bound.
+_OPS_LOG_CAP_BYTES = 256 * 1024  # 256 KB — generous for a health/diagnostic tail, bounded for the disk
+
+
+def _cap_log_file(path: str, cap: int = _OPS_LOG_CAP_BYTES) -> None:
+    """Truncate `path` IN PLACE to AT MOST `cap` bytes total when it exceeds the cap, keeping the
+    freshest tail and a one-line truncation marker (the marker counts toward the cap, so the result
+    is genuinely bounded AND a second pass is a true no-op). Best-effort: any error is swallowed so a
+    capping failure never breaks the reaper. A file already at/under the cap is left byte-identical."""
+    try:
+        if not os.path.isfile(path):
+            return
+        size = os.path.getsize(path)
+        if size <= cap:
+            return
+        marker = (
+            f"[ops] log truncated to the last {cap} bytes "
+            f"(older output dropped to keep the on-disk log bounded)\n"
+        ).encode("utf-8")
+        tail_bytes = max(0, cap - len(marker))
+        with open(path, "rb") as fh:
+            fh.seek(size - tail_bytes)
+            tail = fh.read()
+        with open(path, "wb") as fh:
+            fh.write(marker)
+            fh.write(tail)
+    except Exception:
+        pass
+
 
 def _ops_script_path(script: str) -> str:
     return os.path.join(_REPO_ROOT, "deploy", script)
@@ -659,6 +692,7 @@ async def _run_ops_script(sid: str) -> dict:
         finally:
             f.close()
             _OPS_RUNNING[sid] = False
+            _cap_log_file(log_path)  # L37: keep the on-disk log bounded (tail only)
     threading.Thread(target=_reap, name=f"ops-reap-{sid}", daemon=True).start()
     return {"started": True, "log": log_name}
 
