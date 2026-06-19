@@ -137,11 +137,34 @@ const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON
  *  - relationship edges legitimately MUTATE (trust moves) ⇒ presence-only, as before;
  *  - Vault records ⇒ id presence (this projection carries ids only).
  */
-export function isSuperset(later: GameState, earlier: GameState): boolean {
-  const laterEvents = new Map(later.events.map((e) => [e.id, e]));
-  for (const e of earlier.events) {
-    const l = laterEvents.get(e.id);
-    if (!l || !sameJson(l, e)) return false;
+export function isSuperset(later: GameState, earlier: GameState, opts: { trustEventPrefix?: boolean } = {}): boolean {
+  // R3 — the event log is the dominant accumulator and is APPEND-ONLY by construction (events.record
+  // only appends; a prior event is never mutated or removed). Re-`sameJson`-ing the entire prefix every
+  // commit is the O(events) cost behind the late-season latency. When `trustEventPrefix` is set (the
+  // orchestrator's per-turn fast path), trust the immutable, ALREADY-verified prefix and check only that
+  // it was not truncated and its boundary is intact — O(Δ). What the fast path STILL guarantees on every
+  // commit does NOT depend on any later full re-scan: a net DROP is caught by `countsNonDecreasing`, the
+  // prefix BOUNDARY is spot-checked right here, and every OTHER dimension — knowledge, suspicions, souls,
+  // the byte-stable character, relationships — stays FULLY verified below. The only thing it trusts is a
+  // MIDDLE event's body being rewritten in place at equal length, which cannot happen under the append-
+  // only contract; the orchestrator's periodic FULL re-scan is cheap belt-and-suspenders for that case
+  // (it catches such a rewrite only within the current window — once a corruption is absorbed into a
+  // committed baseline the contract, not this check, is what kept it out).
+  if (opts.trustEventPrefix) {
+    if (later.events.length < earlier.events.length) return false; // truncated prefix
+    const n = earlier.events.length;
+    if (n > 0) {
+      // boundary spot-check: the prefix START and END must still match (catches misalignment / a
+      // shifted or rewritten prefix end), at O(1) instead of O(events).
+      if (!sameJson(later.events[0], earlier.events[0])) return false;
+      if (!sameJson(later.events[n - 1], earlier.events[n - 1])) return false;
+    }
+  } else {
+    const laterEvents = new Map(later.events.map((e) => [e.id, e]));
+    for (const e of earlier.events) {
+      const l = laterEvents.get(e.id);
+      if (!l || !sameJson(l, e)) return false;
+    }
   }
 
   const laterFacts = new Map(later.knowledge.map((k) => [`${k.entity}:${k.fact.id}`, k.fact]));
