@@ -70,6 +70,13 @@ export interface SessionCore {
    */
   deepProfiles?: Record<EntityId, DeepProfile>;
   storyThreads?: StoryThread[];
+  /**
+   * The engine-only HIDDEN seeded relationship layer (feature 0059): the sparse pre-game ties +
+   * showmances seeded at cast time, Vault-sealed from the player AND the admin. Persisted so a
+   * showmance stage never silently resets and the layer survives a restart (0030). ENGINE-ONLY (same
+   * reasoning as deepProfiles above). Absent on pre-0059 saves (re-derived from the seed on restore).
+   */
+  seededRelationships?: import("./seededRelationships").SeededRelationships;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

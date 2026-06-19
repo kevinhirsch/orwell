@@ -11,7 +11,8 @@ export type HiddenKind =
   | "confessional"
   | "hidden-thread"
   | "offscreen-event"
-  | "reserved-twist";
+  | "reserved-twist"
+  | "seeded-relationship";
 
 export interface HiddenRecord {
   id: string;

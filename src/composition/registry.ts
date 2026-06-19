@@ -13,6 +13,7 @@ import { hashSeed } from "../engine/characterFactory";
 import {
   DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
 } from "../engine/deepProfile";
+import { preGameTieToVaultContent, showmanceToVaultContent } from "../engine/seededRelationships";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -123,6 +124,18 @@ function buildUserSandbox(user = "default"): UserSandbox {
       { kind: STORY_THREAD_KIND, subject: id },
       threads.map((t) => ({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) })),
     );
+  });
+  // 0059 — SEAL the hidden seeded relationship layer (pre-game ties + showmances) into the Vault: the
+  // engine-only audit copy no player OR admin surface can reach (0001), like the reserve twists (0025).
+  session.setOnSealSeededRels((rels) => {
+    for (let i = 0; i < rels.ties.length; i++) {
+      const t = rels.ties[i]!;
+      engine.vault.writeHidden({ id: `seeded-tie:${i}`, kind: "seeded-relationship", subject: t.a, content: preGameTieToVaultContent(t) });
+    }
+    for (let i = 0; i < rels.showmances.length; i++) {
+      const s = rels.showmances[i]!;
+      engine.vault.writeHidden({ id: `seeded-showmance:${i}`, kind: "seeded-relationship", subject: s.a, content: showmanceToVaultContent(s) });
+    }
   });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).

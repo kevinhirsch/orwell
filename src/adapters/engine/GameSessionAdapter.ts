@@ -84,6 +84,11 @@ import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
 import { generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads } from "../../engine/deepProfile";
+import {
+  loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
+  DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET,
+} from "../../engine/seededRelationships";
+import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
@@ -297,6 +302,21 @@ export class GameSessionAdapter implements GameSession {
    */
   private deepProfiles: Record<EntityId, DeepProfile> = {};
   private storyThreads: StoryThread[] = [];
+
+  /**
+   * The engine-only HIDDEN seeded relationship layer (0059): sparse pre-game ties + showmances, sealed
+   * off the player AND admin. NEVER projected (no view/npcVoice/portrait/moment path reads it); sealed
+   * into the Vault at seed time and persisted in the snapshot. The admin may set the per-season COUNT
+   * budget (0016-style) — never the content.
+   */
+  private seededRels: SeededRelationships = { ties: [], showmances: [] };
+  private tieBudget = DEFAULT_TIE_BUDGET;
+  private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
+  private onSealSeededRels?: (rels: SeededRelationships) => void;
+
+  setOnSealSeededRels(fn: (rels: SeededRelationships) => void): void {
+    this.onSealSeededRels = fn;
+  }
 
   /**
    * The season record providers (0048/B56): the full event record + the Vault's hidden records,
@@ -672,6 +692,8 @@ export class GameSessionAdapter implements GameSession {
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
       ...(this.storyThreads.length ? { storyThreads: cloneSession(this.storyThreads) } : {}),
+      ...(this.seededRels.ties.length || this.seededRels.showmances.length
+        ? { seededRelationships: cloneSession(this.seededRels) } : {}),
     };
   }
 
@@ -712,6 +734,18 @@ export class GameSessionAdapter implements GameSession {
     } else {
       this.deepProfiles = {};
       this.storyThreads = [];
+    }
+    // 0059 — the seeded relationship layer persists explicitly (a showmance STAGE must never silently
+    // reset on restore). Absent on pre-0059 saves ⇒ re-seed deterministically off the persisted seed.
+    if (core.seededRelationships) {
+      this.seededRels = cloneSession(core.seededRelationships);
+    } else if (core.house && core.seed !== undefined) {
+      this.seededRels = loadSeededRelationships(
+        core.house.npcs, this.tieBudget, this.showmanceBudget,
+        new SeededRandom(hashSeed(`${core.seed}:seeded-relationships`)),
+      );
+    } else {
+      this.seededRels = { ties: [], showmances: [] };
     }
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
@@ -1054,6 +1088,11 @@ export class GameSessionAdapter implements GameSession {
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
     this.seedFirstImpressions(seed);
+    // 0059 — born with a few HIDDEN ties: seed the sparse pre-game ties + showmances (0–2 each, often
+    // none), fold their small standing affinity bias on top of the move-in edges, and SEAL them into the
+    // Vault (engine-only; invisible to player AND admin — they surface only organically). Done AFTER
+    // first impressions so the bias rides the scattered baseline; persisted so a showmance never resets.
+    this.seedSeededRelationships(seed);
     this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
     this.presence = assignRooms(
@@ -1224,6 +1263,29 @@ export class GameSessionAdapter implements GameSession {
       Object.entries(layer.hidden).map(([id, profile]) => ({ id: id as EntityId, profile })),
       layer.threads,
     );
+  }
+
+  /**
+   * 0059 — seed the sparse HIDDEN relationship layer (pre-game ties + showmances) off a SIDE rng, fold
+   * each pair's small standing affinity BIAS onto the (already-scattered) move-in edges, and SEAL the
+   * layer into the Vault. Engine-only by construction (the bias is the ONLY observable — as later
+   * behavior — and no tie/partner/stage is ever projected). Deterministic per seed + player-independent.
+   */
+  private seedSeededRelationships(seed: number): void {
+    if (!this.house) return;
+    const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
+    this.seededRels = loadSeededRelationships(this.house.npcs, this.tieBudget, this.showmanceBudget, rng);
+    // Fold the small standing affinity bias between each seeded pair (both directions). NEVER a
+    // deterministic advantage — just unconscious warmth a careful player reads only as behavior (§3).
+    const bias = (a: EntityId, b: EntityId, amount: number): void => {
+      this.rel.edge(a, b).affinity = clamp01(this.rel.edge(a, b).affinity + amount);
+      this.rel.edge(b, a).affinity = clamp01(this.rel.edge(b, a).affinity + amount);
+    };
+    for (const t of this.seededRels.ties) bias(t.a, t.b, TIE_AFFINITY_BIAS);
+    for (const s of this.seededRels.showmances) bias(s.a, s.b, SHOWMANCE_SPARK_BIAS);
+    if (this.seededRels.ties.length || this.seededRels.showmances.length) {
+      this.onSealSeededRels?.(this.seededRels);
+    }
   }
 
   /**
