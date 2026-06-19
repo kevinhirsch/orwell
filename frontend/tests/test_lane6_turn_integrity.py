@@ -311,6 +311,82 @@ def test_agent_done_path_wires_the_guard():
     assert "_agent_tools_called" in CHAT_ROUTES_SRC
 
 
+# ── L18: the E22 fallback is single-flight per user (no engine-write pileup) ─────────
+
+
+def test_concurrent_same_user_fallbacks_do_not_stack(monkeypatch):
+    """L18 — the fallback is fired fire-and-forget at [DONE]; without single-flight, several
+    under-called turns in a row stack racing recordInteraction commits onto the engine's
+    per-user queue and stall the next live turn (the observed 'hang then 502'). While one
+    fallback is in flight for a user, a second is SKIPPED — only one engine write goes out."""
+    gate = asyncio.Event()
+    calls = []
+
+    async def slow_record(content, with_ids=None, initiator="player", kind=None, user=None):
+        calls.append({"user": user})
+        await gate.wait()  # hold the write 'in flight' like a slow late-season commit
+        return {"recorded": True}
+
+    monkeypatch.setattr(orwell_engine, "record_interaction", slow_record)
+    narration = "The house holds its breath as the player makes a move. " * 4
+
+    async def scenario():
+        first = asyncio.create_task(chat_helpers.ensure_turn_recorded("solo", "a", narration, []))
+        await asyncio.sleep(0)  # let the first reach the in-flight state and block on the gate
+        assert chat_helpers.fallback_in_flight("solo") is True
+        # A second under-called turn for the SAME user while the first is in flight: skipped.
+        second = await chat_helpers.ensure_turn_recorded("solo", "b", narration, [])
+        assert second is False
+        gate.set()
+        assert await first is True
+        # exactly one engine write went out despite two under-called turns
+        assert [c["user"] for c in calls] == ["solo"]
+        # and once the first drains, the user is free to record again
+        assert chat_helpers.fallback_in_flight("solo") is False
+
+    _run(scenario())
+
+
+def test_a_different_user_is_never_blocked_by_anothers_in_flight_fallback(monkeypatch):
+    """L18 — per-user isolation (0021) holds for the guard too: user B's fallback fires even
+    while user A's is in flight (single-flight is keyed per user, never a global lock)."""
+    gate = asyncio.Event()
+    calls = []
+
+    async def record(content, with_ids=None, initiator="player", kind=None, user=None):
+        calls.append(user)
+        if user == "A":
+            await gate.wait()
+        return {"recorded": True}
+
+    monkeypatch.setattr(orwell_engine, "record_interaction", record)
+    narration = "A tense beat unfolds in the living room at length. " * 4
+
+    async def scenario():
+        a = asyncio.create_task(chat_helpers.ensure_turn_recorded("A", "x", narration, []))
+        await asyncio.sleep(0)
+        assert chat_helpers.fallback_in_flight("A") is True
+        # B sails through while A is held.
+        assert await chat_helpers.ensure_turn_recorded("B", "y", narration, []) is True
+        gate.set()
+        assert await a is True
+        assert "B" in calls and "A" in calls
+
+    _run(scenario())
+
+
+def test_a_failed_fallback_releases_the_in_flight_slot(monkeypatch):
+    """L18 — a raised recordInteraction must not wedge the slot shut (else one engine hiccup
+    permanently disables the guard for that user). The finally-release proves it reopens."""
+    async def boom(content, with_ids=None, initiator="player", kind=None, user=None):
+        raise RuntimeError("engine said no")
+
+    monkeypatch.setattr(orwell_engine, "record_interaction", boom)
+    narration = "Something went sideways in the backyard, recounted fully. " * 4
+    assert _run(chat_helpers.ensure_turn_recorded("z", "m", narration, [])) is False
+    assert chat_helpers.fallback_in_flight("z") is False  # slot released despite the failure
+
+
 # ── E24/P7: incognito cannot strip game framing under the game build ────────────────
 
 

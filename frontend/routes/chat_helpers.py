@@ -659,6 +659,18 @@ GAME_TURN_DIGEST_CHARS = 300
 
 _unrecorded_turn_fallbacks = 0
 
+# L18 — per-user single-flight for the E22 fallback write. The guard is fired fire-and-forget at
+# stream `[DONE]` (`asyncio.create_task`), so nothing serialized it: when the model under-calls the
+# engine on several turns in a row, the fallback `recordInteraction` calls STACK and race both each
+# other and the next turn's framing reads through the engine's per-user request queue (the E10
+# serialization). Each fallback commit pays the O(events) snapshot+checkpoint cost, so on a small
+# host the next live turn waits behind the backlog long enough for the front-end to surface a
+# transient 502 ("the game hung"). One in-flight fallback per user fixes the pileup at the source
+# WITHOUT touching game logic or the Vault Wall: a second under-called turn whose fallback would
+# race the first is skipped — the very next real engine write (or the next, now-unblocked fallback)
+# still records the consequence. The under-call is still COUNTED (the diagnostic signal is unchanged).
+_fallback_in_flight: set = set()
+
 
 def unrecorded_turn_fallback_count() -> int:
     """E22's counter: how many game turns this process force-recorded because the model
@@ -666,12 +678,21 @@ def unrecorded_turn_fallback_count() -> int:
     return _unrecorded_turn_fallbacks
 
 
+def fallback_in_flight(user) -> bool:
+    """L18 — is an E22 fallback write already in flight for this user? (test/ops visibility)."""
+    return user in _fallback_in_flight
+
+
 async def ensure_turn_recorded(user, player_message, narration, tools_called) -> bool:
     """E22 — the server-side guard for the cardinal sin. Prompt wording told the model to
     record scenes; nothing ENFORCED it (the GM asking "Record this interaction?" was the
     symptom). On a completed game turn with non-trivial narration and ZERO engine writes,
     fold a bounded digest of the exchange into the record so the beat has consequence and
-    memory. Returns True when a fallback record was made."""
+    memory. Returns True when a fallback record was made.
+
+    L18: single-flight per user — a fallback fired while one is still in flight for the same
+    user is skipped rather than stacked, so the fire-and-forget guard can never pile a backlog
+    of O(events) commits onto the engine's per-user queue and stall the next live turn."""
     text = (narration or "").strip()
     if len(text) < GAME_TURN_RECORD_MIN_CHARS:
         return False
@@ -683,11 +704,20 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
         "[orwell] E22 guard: game turn narrated with no engine write — recording a fallback "
         "digest (process count=%d)", _unrecorded_turn_fallbacks,
     )
+    # L18: don't race a fallback already committing for this user (or pile a backlog behind the
+    # next live turn). The under-call is recorded above; one in-flight digest per user is enough.
+    if user in _fallback_in_flight:
+        logger.warning(
+            "[orwell] E22 guard: a fallback write is already in flight for user=%s — "
+            "skipping this one to avoid stacking engine writes", user,
+        )
+        return False
     digest = (
         "Scene (auto-recorded): the player said: "
         f"{str(player_message or '').strip()[:GAME_TURN_DIGEST_CHARS]!r}. "
         f"What happened: {text[:GAME_TURN_DIGEST_CHARS]}"
     )
+    _fallback_in_flight.add(user)
     try:
         from src import orwell_engine
         await orwell_engine.record_interaction(digest, user=user)
@@ -695,6 +725,8 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
     except Exception as e:
         logger.warning("[orwell] E22 fallback recordInteraction failed for user=%s: %s", user, e)
         return False
+    finally:
+        _fallback_in_flight.discard(user)
 
 
 def discard_last_user_message(sess) -> None:

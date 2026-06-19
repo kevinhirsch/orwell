@@ -16,7 +16,7 @@
 # UX: a community-scripts-style config menu (Use Defaults vs Advanced) with every field
 # pre-populated, shown when run on a TTY; otherwise it runs non-interactively with defaults.
 # Every setting can also be supplied / overridden via env, e.g.:
-#   CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 STORAGE=local-lvm BRANCH=main \
+#   CTID=104 CORES=6 RAM_MB=12288 DISK_GB=16 STORAGE=local-lvm BRANCH=main \
 #     bash -c "$(curl -fsSL .../deploy/orwell.sh)"
 # Pass --default (or set USE_DEFAULTS=1 / ORWELL_NONINTERACTIVE=1) to skip the menu.
 set -euo pipefail
@@ -105,9 +105,12 @@ wt_pick_llm() {  # writes the LLM provider into the container's data/.env (never
 # ── Defaults (env overrides everything; auto-detected where it matters) ────────────────────────
 CTID="${CTID:-$(pvesh get /cluster/nextid 2>/dev/null || echo 900)}"
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
-CORES="${CORES:-2}"
-RAM_MB="${RAM_MB:-2048}"
-DISK_GB="${DISK_GB:-8}"
+# Recommended baseline (approved 2026-06-19): 4 vCPU / 8 GB RAM. The LLM is REMOTE, so CPU is for
+# the front-end + engine + local embeddings (fastembed/ONNX); allow more RAM if also running image
+# generation. Every value is overridable via env (CORES=… RAM_MB=… DISK_GB=…).
+CORES="${CORES:-4}"
+RAM_MB="${RAM_MB:-8192}"
+DISK_GB="${DISK_GB:-12}"
 BRIDGE="${BRIDGE:-vmbr0}"
 NET="${NET:-dhcp}"                 # "dhcp" or a static CIDR, e.g. 192.168.1.50/24
 GATEWAY="${GATEWAY:-}"             # required only for a static NET
