@@ -1,18 +1,26 @@
 /**
- * tests/uat/fullGameUat.test.ts
+ * tests/uat/fullGameUatHarness.ts
  *
- * Full-game UAT over the deployed HTTP transport path.
+ * Shared harness for the full-game UAT, extracted verbatim from the former single
+ * fullGameUat.test.ts so its three heavy `it` blocks can fan out across separate CI
+ * runners (heavy-sims matrix lanes uat-12seed / uat-5seed / uat-decisions) WITHOUT
+ * duplicating the driver or weakening any seed/assertion.
  *
- * Spins up the same runtime as main.ts (composeRuntime → createHttpMcpServer),
- * drives every game entirely via HTTP calls — createCharacter → advanceGame /
- * submitDecision in a loop → winner — and checks invariants on every response.
+ * This module holds NO `it`/`describe` (it is `*.ts`, not `*.test.ts`, so vitest's
+ * `include: tests/**\/*.test.ts` never picks it up directly). The three split test
+ * files import the driver + invariant checkers from here and each own a disjoint slice
+ * of the work:
  *
- * Coverage gaps this fills vs. the existing test suite:
+ *   fullGameUat.12seed.test.ts    — 12 seeds, never-use-veto (direct callTool)
+ *   fullGameUat.5seed.test.ts     — 5 seeds, always-use-veto (direct callTool: veto path)
+ *   fullGameUat.decisions.test.ts — decision-type coverage over seeds 1-5 (real HTTP)
+ *
+ * Coverage gaps this UAT fills vs. the existing test suite:
  *   httpServer.test.ts:          onboarding + tool checks only, no full loop over HTTP.
  *   liveProgression.test.ts:     full game but via GameSessionRegistry directly; 2 seeds.
  *   vault-sentinel.property.ts:  checks tools in isolation, not the live-game HTTP flow.
  *
- * Edge cases specifically targeted:
+ * Edge cases specifically targeted (across the three split files):
  *   - Veto-use + replacement decision path    (always-use-veto strategy)
  *   - Final-4 veto-revert (no legal replacement → engine reverts; replacement pend absent)
  *   - Player in every role across seeds       (HOH, nominee, veto holder, voter, bystander)
@@ -23,7 +31,6 @@
  *   - Final-2 roster: exactly 1 active NPC in the house when the player survives to finale
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createHttpMcpServer } from "../../src/adapters/mcp/HttpMcpServer";
@@ -33,9 +40,9 @@ import type { McpServer } from "../../src/adapters/mcp/McpServer";
 
 // ─── HTTP response shapes ────────────────────────────────────────────────────
 
-interface NamedRef { id: string; name: string; }
+export interface NamedRef { id: string; name: string; }
 
-interface PendingDecision {
+export interface PendingDecision {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
       | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   by: NamedRef;
@@ -45,7 +52,7 @@ interface PendingDecision {
   appeals?: string[];
 }
 
-interface CeremonyStatus {
+export interface CeremonyStatus {
   week: number;
   phase: string;
   hoh: NamedRef | null;
@@ -53,7 +60,7 @@ interface CeremonyStatus {
   veto: { holder: NamedRef | null; used: boolean };
 }
 
-interface AdvanceResult {
+export interface AdvanceResult {
   started: boolean;
   finished: boolean;
   winner: NamedRef | null;
@@ -62,14 +69,14 @@ interface AdvanceResult {
   event: { beat: string; content: string } | null;
 }
 
-interface GameStateResult {
+export interface GameStateResult {
   started: boolean;
   house: { id: string; name: string; status: "active" | "evicted" }[];
 }
 
 // ─── Anomaly model ───────────────────────────────────────────────────────────
 
-type AnomalyKind =
+export type AnomalyKind =
   | "http-error"             // non-200 or JSON parse failure
   | "vault-stat-leak"        // numeric stat / soul / relationship value in player response
   | "missing-winner"         // finished=true but winner=null
@@ -81,7 +88,7 @@ type AnomalyKind =
   | "ceremony-anomaly"       // nominations phase but no HOH in status
   | "final-roster-anomaly";  // getGameState post-finish shows unexpected active count
 
-interface Anomaly {
+export interface Anomaly {
   seed: number;
   strategy: string;
   week: number;
@@ -92,9 +99,9 @@ interface Anomaly {
 
 // ─── Decision strategies ─────────────────────────────────────────────────────
 
-type DecisionStrategy = "never-use-veto" | "always-use-veto";
+export type DecisionStrategy = "never-use-veto" | "always-use-veto";
 
-function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<string, unknown> {
+export function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<string, unknown> {
   switch (p.kind) {
     case "nominations":
       // Always nominate first two legal options.
@@ -134,14 +141,14 @@ function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Record<str
 // ─── Invariant checkers ───────────────────────────────────────────────────────
 
 /** Patterns that must never appear in a player-channel HTTP response body. */
-const VAULT_LEAK_PATTERNS: Array<[RegExp, string]> = [
+export const VAULT_LEAK_PATTERNS: Array<[RegExp, string]> = [
   [/"(physical|mental|social)"\s*:\s*\d+\.\d+/, "numeric competition stat in player response"],
   [/"(trust|affinity|threat)"\s*:\s*\d+\.\d+/,  "raw relationship numeric in player response"],
   [/"soul"\s*:\s*[{[]/,                           '"soul" object/array in player response'],
   [/"hidden"\s*:\s*true/,                         '"hidden":true in player response'],
 ];
 
-function checkResponseBody(
+export function checkResponseBody(
   raw: string,
   ctx: { seed: number; strategy: string; week: number; beat: string },
   anomalies: Anomaly[],
@@ -153,7 +160,7 @@ function checkResponseBody(
   }
 }
 
-function checkAdvanceResult(
+export function checkAdvanceResult(
   adv: AdvanceResult,
   ctx: { seed: number; strategy: string },
   anomalies: Anomaly[],
@@ -192,9 +199,9 @@ function checkAdvanceResult(
 
 // ─── Per-run game driver ──────────────────────────────────────────────────────
 
-const MAX_ITERATIONS = 5_000;
+export const MAX_ITERATIONS = 5_000;
 
-interface RunResult {
+export interface RunResult {
   seed: number;
   strategy: DecisionStrategy;
   weeksPlayed: number;
@@ -205,7 +212,7 @@ interface RunResult {
   anomalies: Anomaly[];
 }
 
-async function runFullGame(
+export async function runFullGame(
   base: string,
   seed: number,
   strategy: DecisionStrategy,
@@ -314,11 +321,11 @@ async function runFullGame(
 
 /**
  * Drives a full game through the McpServer.callTool API directly — no HTTP round-trip.
- * Used for the large completion-oriented test suites (tests 1 and 2) where CI's HTTP
- * overhead caused intermittent stale-loop failures that never reproduced locally.
+ * Used for the large completion-oriented test suites (the 12-seed and 5-seed files) where
+ * CI's HTTP overhead caused intermittent stale-loop failures that never reproduced locally.
  * Vault-leak invariants are still checked by serialising each result to JSON.
  */
-async function runFullGameDirect(
+export async function runFullGameDirect(
   resolver: (channel: "player" | "admin", user: string) => McpServer,
   seed: number,
   strategy: DecisionStrategy,
@@ -406,143 +413,36 @@ async function runFullGameDirect(
   return { seed, strategy, weeksPlayed, finished, winner, decisionCounts, anomalies };
 }
 
-// ─── Test suite ───────────────────────────────────────────────────────────────
+// ─── Shared runtime harness ────────────────────────────────────────────────────
 
-describe("full-game UAT over the deployed HTTP transport path", () => {
-  let server: Server;
-  let base: string;
-  let directResolver: (channel: "player" | "admin", user: string) => McpServer;
+export interface UatHarness {
+  /** Base URL of the live HTTP MCP server (for the real-HTTP decision-coverage file). */
+  base: string;
+  /** Direct channel resolver (for the completion-oriented 12-seed / 5-seed files). */
+  directResolver: (channel: "player" | "admin", user: string) => McpServer;
+  /** Tear down the HTTP server. */
+  close: () => Promise<void>;
+}
 
-  beforeAll(async () => {
-    // The same runtime composition as main.ts: registry + orchestrator + watcher.
-    // FakeClock + tickEveryMs:0 disables the background watcher (no real timers in tests).
-    const clock = new FakeClock();
-    const runtime = composeRuntime({
-      clock,
-      watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
-      seed: 1,
-    });
-    // Do NOT call runtime.start() — watcher is disabled; wiring is identical to production otherwise.
-    directResolver = runtime.registry.resolver();
-    server = createHttpMcpServer({ resolve: directResolver });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+/**
+ * Stands up the SAME runtime composition as main.ts (registry + orchestrator + watcher),
+ * exactly as the former single UAT file's beforeAll did. FakeClock + tickEveryMs:0 disables
+ * the background watcher (no real timers in tests). Each split test file calls this in its
+ * own beforeAll and tears it down in afterAll — the runtimes are independent, so the files
+ * are free to run on separate CI runners.
+ */
+export async function startUatHarness(): Promise<UatHarness> {
+  const clock = new FakeClock();
+  const runtime = composeRuntime({
+    clock,
+    watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
+    seed: 1,
   });
-
-  afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-
-  // ── Primary run: 12 seeds, never-use-veto ──────────────────────────────────
-
-  it(
-    "plays 12 seeds to completion (never-use-veto) — no anomalies detected",
-    async () => {
-      const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-      // Uses direct callTool (no HTTP) for reliability: the transport layer added
-      // non-deterministic overhead that caused stale-loop failures in CI for some seeds.
-      const runs: RunResult[] = [];
-      for (const s of seeds) runs.push(await runFullGameDirect(directResolver, s, "never-use-veto"));
-      const allAnomalies = runs.flatMap((r) => r.anomalies);
-
-      // All games must finish. Include anomalies in the failure message so CI logs show the root cause.
-      const unfinished = runs.filter((r) => !r.finished);
-      if (unfinished.length > 0) {
-        const detail = unfinished
-          .map((r) => {
-            const ants = r.anomalies.map((a) => `    [${a.kind}] w${a.week} ${a.beat}: ${a.detail}`).join("\n");
-            return `  seed ${r.seed}: ${ants || "(no anomalies recorded)"}`;
-          })
-          .join("\n");
-        expect.fail(`\nGames that did not finish (never-use-veto):\n${detail}\n`);
-      }
-
-      const noWinner = runs.filter((r) => r.finished && !r.winner).map((r) => `seed ${r.seed}`);
-      expect(noWinner, "finished games without a winner").toEqual([]);
-
-      // No anomalies.
-      if (allAnomalies.length > 0) {
-        const report = allAnomalies
-          .map((a) => `  [${a.kind}] seed=${a.seed} week=${a.week} beat=${a.beat}: ${a.detail}`)
-          .join("\n");
-        expect.fail(`\nAnomalies detected (never-use-veto):\n${report}\n`);
-      }
-
-      // All games must have played at least 1 week.
-      expect(runs.every((r) => r.weeksPlayed >= 1), "each game played ≥ 1 week").toBe(true);
-
-      // At least some games must have produced player decisions.
-      const decisionsTotal = runs.reduce((n, r) => n + Object.values(r.decisionCounts).reduce((a, b) => a + b, 0), 0);
-      expect(decisionsTotal, "total player decisions across all runs").toBeGreaterThan(0);
-    },
-    { timeout: 120_000 },
-  );
-
-  // ── Veto-use path: 5 seeds, always-use-veto ───────────────────────────────
-
-  it(
-    "plays 5 seeds with always-use-veto — covers veto-save, replacement, and final-4 revert",
-    async () => {
-      const seeds = [1, 2, 3, 4, 5];
-      const runs: RunResult[] = [];
-      for (const s of seeds) runs.push(await runFullGameDirect(directResolver, s, "always-use-veto"));
-      const allAnomalies = runs.flatMap((r) => r.anomalies);
-
-      const unfinished = runs.filter((r) => !r.finished);
-      if (unfinished.length > 0) {
-        const detail = unfinished
-          .map((r) => {
-            const ants = r.anomalies.map((a) => `    [${a.kind}] w${a.week} ${a.beat}: ${a.detail}`).join("\n");
-            return `  seed ${r.seed}: ${ants || "(no anomalies recorded)"}`;
-          })
-          .join("\n");
-        expect.fail(`\nGames that did not finish (always-use-veto):\n${detail}\n`);
-      }
-
-      const noWinner = runs.filter((r) => r.finished && !r.winner).map((r) => `seed ${r.seed}`);
-      expect(noWinner, "finished games without a winner (always-use-veto)").toEqual([]);
-
-      if (allAnomalies.length > 0) {
-        const report = allAnomalies
-          .map((a) => `  [${a.kind}] seed=${a.seed} week=${a.week} beat=${a.beat}: ${a.detail}`)
-          .join("\n");
-        expect.fail(`\nAnomalies detected (always-use-veto):\n${report}\n`);
-      }
-    },
-    { timeout: 60_000 },
-  );
-
-  // ── Decision-type coverage assertion ──────────────────────────────────────
-
-  it(
-    "all 4 player decision types are exercised across the 12-seed run set",
-    async () => {
-      // Re-run a representative subset (seeds 1-5) to verify coverage without
-      // re-running the full 12-seed suite (which already ran above).
-      const runs: RunResult[] = [];
-      for (const s of [1, 2, 3, 4, 5]) runs.push(await runFullGame(base, s, "never-use-veto"));
-      const merged: Partial<Record<PendingDecision["kind"], number>> = {};
-      for (const r of runs) {
-        for (const [k, v] of Object.entries(r.decisionCounts) as [PendingDecision["kind"], number][]) {
-          merged[k] = (merged[k] ?? 0) + v;
-        }
-      }
-      // Nominations and eviction-vote must appear (player is always a voter when not a nominee).
-      expect(merged["nominations"] ?? 0, "nominations decisions hit").toBeGreaterThan(0);
-      expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
-    },
-    // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as test 1
-    // (measured at ~62s on an unmodified main in a shared-CPU environment — the old 60s budget
-    // was a hair-trigger env flake; and the E42–E55 consequence folds added real per-beat work
-    // on top of the transport cost; assertions unchanged, only the wall-clock budget breathes).
-    { timeout: 180_000 },
-  );
-
-  // ── Health endpoint reachable (sanity) ────────────────────────────────────
-
-  it("engine health endpoint is reachable", async () => {
-    const res = await fetch(`${base}/health`);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true });
-  });
-});
+  // Do NOT call runtime.start() — watcher is disabled; wiring is identical to production otherwise.
+  const directResolver = runtime.registry.resolver();
+  const server: Server = createHttpMcpServer({ resolve: directResolver });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  return { base, directResolver, close };
+}

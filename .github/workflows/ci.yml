@@ -27,22 +27,28 @@ jobs:
       - run: npm run test:ci
 
   # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
-  # scope). Plays the full-game UAT (12+5 seeds), the juryReach calibration gate (20 passive
-  # seasons), and the calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion —
-  # the same files `test:ci` excludes — so together with `test` the whole functional suite still
-  # runs exactly once per CI run, just across concurrent runners.
+  # scope). Plays the full-game UAT, the juryReach calibration gate (20 passive seasons), and the
+  # calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion — the same files
+  # `test:ci` excludes — so together with `test` the whole functional suite still runs exactly once
+  # per CI run, just across concurrent runners.
   #
-  # These two files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
-  # CONCURRENTLY on the SAME runner inside `npm test`, so they shared 4 vCPUs and contended. Here
-  # they fan out one-file-per-runner via the matrix, so each gets a dedicated runner with no
-  # cross-file contention — the lane's wall is then the single slowest file, the irreducible floor.
-  # The files import src/ directly (vitest transpiles on the fly), so no `npm run build` is needed.
+  # These files were the wall-clock long pole and previously ran CONCURRENTLY on the SAME runner
+  # inside `npm test`, so they shared 4 vCPUs and contended. Here they fan out one-file-per-runner
+  # via the matrix, so each gets a dedicated runner with no cross-file contention — the lane's wall
+  # is then the single slowest matrix entry, the irreducible floor.
+  #
+  # The full-game UAT itself is FURTHER fanned out across three lanes (its three independent `it`
+  # blocks, previously ~511s serial on one runner): `uat-12seed` (12 seeds never-veto, ~281s — the
+  # new floor), `uat-5seed` (5 seeds always-veto, ~113s), `uat-decisions` (decision-type coverage
+  # over seeds 1-5 + health sanity, ~118s). No seed or assertion changed — pure structural fan-out;
+  # the three split files share `tests/uat/fullGameUatHarness.ts`. The files import src/ directly
+  # (vitest transpiles on the fly), so no `npm run build` is needed.
   heavy-sims:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        sim: [uat, jury, gradient]
+        sim: [uat-12seed, uat-5seed, uat-decisions, jury, gradient]
     name: heavy-sims (${{ matrix.sim }})
     steps:
       - uses: actions/checkout@v4
