@@ -86,6 +86,15 @@ export interface SessionCore {
   deepProfiles?: Record<EntityId, DeepProfile>;
   storyThreads?: StoryThread[];
   /**
+   * Feature 0060 — the story-thread scheduler's engine-only, HIDDEN bookkeeping: the distinct weeks each
+   * houseguest has been nominated (drives the `nominated-twice` trigger) and the count of threads that
+   * have ever SURFACED this season (the hard restraint cap, §5). Persisted so both survive a restart
+   * (0030) — a thread driven to a status stays at it, and the season cap is never re-opened by a reload.
+   * Absent on pre-0060 saves (rebuilt forward from the current ceremony; the cap defaults to 0).
+   */
+  nominationWeeks?: Record<EntityId, number[]>;
+  surfacedThreadCount?: number;
+  /**
    * The engine-only HIDDEN seeded relationship layer (feature 0059): the sparse pre-game ties +
    * showmances seeded at cast time, Vault-sealed from the player AND the admin. Persisted so a
    * showmance stage never silently resets and the layer survives a restart (0030). ENGINE-ONLY (same

@@ -53,6 +53,7 @@ module.exports = {
       "docs/features/0049-house-presence-and-lingering.feature",
       "docs/features/0050-casting-interview.feature",
       "docs/features/0058-deep-character-profiles.feature",
+      "docs/features/0060-story-thread-scheduler.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

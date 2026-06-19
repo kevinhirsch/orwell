@@ -51,8 +51,10 @@ KIT = {"orwellWindow.js"}
 GRANDFATHERED_DRAG = {"planWindow.js", "settings.js", "theme.js", "workspace.js"}
 
 # Non-window slotted chrome (ruling-class strips/panels — placement only,
-# no window behavior).
-GRANDFATHERED_SLOTS = {"orwellPresence.js", "orwellRetrospective.js"}
+# no window behavior). orwellRetrospective.js MIGRATED onto the kit (2026-06-19,
+# 0054 Phase 2) — it composes OrwellWindow now, so the kit registers its placement;
+# shrink-only, removed here.
+GRANDFATHERED_SLOTS = {"orwellPresence.js"}
 
 # Files that legitimately handle their own Escape (the audit-verified set:
 # the arbiter, the LIFO menu stack, self-trapping micro-dialogs, scoped
@@ -76,6 +78,12 @@ GEOMETRY_KEY_MARKERS = (
     "orwell-slot-offset", "winsize-", "orwell-edge-dock-width",
     "orwell-email-doc-split-width", "orwell-modal-remembered-dock",
     "orwell.mobileDockState",
+    # 0054 Phase 2: the kit's per-window DOCKED-vs-FLOATING flag ('orwell-<id>-docked:
+    # <user>', minted via dockedKey()). It is a MODE flag, not geometry — a docked
+    # window OPTS OUT of the slot-offset scheme entirely (F5's one-position-system
+    # invariant holds: docked = no geometry). Kit-mediated (orwellWindow.js owns it),
+    # mirroring orwellCastPin's 'orwell-cast-pinned:<user>' precedent.
+    "dockedKey",
 )
 
 

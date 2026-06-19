@@ -169,7 +169,7 @@
         }
       </style>
       <div class="oc-toolbar">
-        <button type="button" class="oc-pin" id="oc-pin" title="Pin the cast into the control-room rail">📌 Pin to rail</button>
+        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail">📌 Compact pin</button>
       </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
@@ -182,11 +182,23 @@
       icon: "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='9' cy='7' r='4'/><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/></svg>",
       slot: "top-left", slotKey: "cast", role: "complementary",
       minimizable: true, closable: true, draggable: true,
+      // 0054 Phase 2: the FULL roster docks into the control-room rail (the kit's
+      // ⇲ titlebar toggle). This is the full-content docked window; the L12 "compact
+      // pin" (two portraits) below stays a separate, lighter affordance. Default
+      // floating; the poll keeps running across a dock re-home (onClose is suppressed).
+      dockable: true, defaultDocked: false,
       content,
       onClose: () => {
         _win = null; _open = false;
         if (_timer) { clearTimeout(_timer); _timer = null; }
         _cards.clear(); // the kit tore the panel DOM down — drop the detached card nodes
+      },
+      onDock: () => {
+        // A re-home keeps the SAME instance AND the same content node (with its grid,
+        // cards, and the #oc-pin/#oc-backfill listeners intact — they're plain
+        // listeners on nodes the kit re-appends, not kit-AbortController ones). Just
+        // refresh so the (now-docked or now-floating) panel shows live content.
+        if (_open) refreshRoster().then(scheduleNextPoll);
       },
     });
     _win.open(document.getElementById(BTN_ID) || undefined);
@@ -468,8 +480,15 @@
       // minimized window as a restore, which would silently un-park it.)
       const bootParked = !existed && _win && _win.isMinimized && _win.isMinimized();
       if (!bootParked) {
-        el.style.display = "block";
-        if (_win) { _win.restore(); _win.raise(); }
+        // Docked: clear the inline display so the .ow-docked flex-column rule applies
+        // (an inline `block` would break the kit's docked layout); the rail shows it.
+        // Floating: un-hide + restore/raise as before.
+        if (_win && _win.isDocked && _win.isDocked()) {
+          el.style.display = "";
+        } else {
+          el.style.display = "block";
+          if (_win) { _win.restore(); _win.raise(); }
+        }
       }
       // G22: refresh now, then poll on the adaptive cadence that refresh computed.
       refreshRoster().then(scheduleNextPoll);

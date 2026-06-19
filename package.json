@@ -12,11 +12,17 @@
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --external:fastembed --external:better-sqlite3 --external:sqlite-vec --outfile=dist/main.js && esbuild src/adapters/embedding/fastembedWorker.ts --bundle --platform=node --format=esm --target=node22 --external:fastembed --outfile=dist/embedWorker.js",
     "start": "node dist/main.js",
     "test:unit": "vitest run",
+    "test:unit:fast": "vitest run --exclude 'tests/uat/**' --exclude 'tests/property/juryReach.property.test.ts' --exclude 'tests/property/calibrationGradient.property.test.ts'",
+    "test:heavy": "vitest run tests/uat/fullGameUat.test.ts tests/property/juryReach.property.test.ts tests/property/calibrationGradient.property.test.ts",
+    "test:heavy:uat": "vitest run tests/uat/fullGameUat.test.ts",
+    "test:heavy:jury": "vitest run tests/property/juryReach.property.test.ts",
+    "test:heavy:gradient": "vitest run tests/property/calibrationGradient.property.test.ts",
     "test:watch": "vitest",
     "test:bdd": "NODE_OPTIONS='--import tsx' cucumber-js",
     "test:arch": "depcruise src --config .dependency-cruiser.cjs",
-    "test:cov": "vitest run --coverage --coverage.provider=v8 --coverage.include='src/**' --coverage.exclude='src/ports/**' --coverage.exclude='src/main.ts'",
-    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:bdd"
+    "test:cov": "vitest run --coverage --coverage.provider=v8 --coverage.include='src/**' --coverage.exclude='src/ports/**' --coverage.exclude='src/main.ts' --exclude 'tests/uat/**' --exclude 'tests/property/juryReach.property.test.ts' --exclude 'tests/property/calibrationGradient.property.test.ts'",
+    "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:bdd",
+    "test:ci": "npm run typecheck && npm run build && npm run test:unit:fast && npm run test:bdd"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^11.3.0",

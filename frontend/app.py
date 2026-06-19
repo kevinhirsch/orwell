@@ -74,6 +74,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# L37 — quiet the per-request httpx access lines ("INFO HTTP Request: GET …/models 200").
+# The FE warms/keepalives the LLM endpoints' /models every ~60s and model discovery polls them
+# too, so httpx's INFO log of every request firehosed the journal (and the ops-panel.log tail
+# that captures it). Request-level access logs from the HTTP client are noise; raise httpx (and its
+# transport, httpcore) to WARNING so real client errors still surface but the steady drip is gone.
+from src.log_quiet import quiet_http_loggers as _quiet_http_loggers
+_quiet_http_loggers()
+
 # ========= APP =========
 # Lifespan is defined below (after all helpers it references are in scope)
 # and passed to FastAPI so we can use the modern context-manager lifecycle
@@ -556,6 +564,11 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 # access to any user's chat transcripts. Behind require_admin; no game-chrome surface.
 from routes.admin_transcript_routes import setup_admin_transcript_routes
 app.include_router(setup_admin_transcript_routes())
+
+# Calibration instrumentation — admin read over the per-season outcome log (Vault-free public
+# outcomes; "gather playtest data first" lane). Behind require_admin; read-only; no game chrome.
+from routes.admin_calibration_routes import setup_admin_calibration_routes
+app.include_router(setup_admin_calibration_routes())
 
 # Admin Health & Logs (Lane G1) — aggregated engine/FE health + the engine's recent-failure
 # ring + the secrets-redacted debug bundle. Behind require_admin; read-only by construction.

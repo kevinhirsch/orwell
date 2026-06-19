@@ -617,6 +617,109 @@ def main() -> int:
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
+            # 0054 Phase 2 — DOCKED kit mode: a dockable window can render its full
+            # body INTO #gadget-rail-body (opting OUT of position:fixed + the slot
+            # geometry — ONE position system), the docked flag persists per-window,
+            # and undocking floats it back. (Engine is down, so we drive the kit seam
+            # directly; the rail body exists in the game build.)
+            dock = page.evaluate("""() => {
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-dock-smoke', title: 'Dock Test', slot: 'top-left', slotKey: 'owdocksmoke',
+                content: '<p>docked body</p>', icon: '', dockable: true, defaultDocked: false });
+              w.open();
+              window._owDock = w;
+              const el = document.getElementById('ow-dock-smoke');
+              const beforeFixed = getComputedStyle(el).position;  // floating: fixed
+              const hasToggle = !!el.querySelector('.ow-controls .ow-dock');
+              w.toggleDock();  // float -> dock
+              const d = document.getElementById('ow-dock-smoke');
+              const railBody = document.getElementById('gadget-rail-body');
+              const user = (document.body && document.body.dataset.user) || '';
+              return {
+                hasToggle,
+                beforeFixed,
+                inRail: !!railBody && railBody.contains(d),
+                dockedClass: d.classList.contains('ow-docked'),
+                dockedPos: getComputedStyle(d).position,   // docked: static
+                kitWindow: d.hasAttribute('data-ow-window'),
+                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+                noChip: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-dock-smoke"]'),
+              };
+            }""")
+            check(dock.get("hasToggle") is True and dock.get("beforeFixed") == "fixed",
+                  f"0054 P2: a dockable window has the dock toggle and floats first ({dock})")
+            check(dock.get("inRail") is True and dock.get("dockedClass") is True
+                  and dock.get("dockedPos") == "static" and dock.get("kitWindow") is True,
+                  f"0054 P2: docking mounts the FULL window into the rail, static (no slot geometry) ({dock})")
+            check(dock.get("flag") == "1" and dock.get("noChip") is True,
+                  f"0054 P2: the docked flag persists and no chip dock is used ({dock})")
+            undock = page.evaluate("""() => {
+              window._owDock.toggleDock();  // dock -> float
+              const d = document.getElementById('ow-dock-smoke');
+              const user = (document.body && document.body.dataset.user) || '';
+              const railBody = document.getElementById('gadget-rail-body');
+              const out = {
+                floats: getComputedStyle(d).position === 'fixed',
+                notDocked: !d.classList.contains('ow-docked'),
+                notInRail: !(railBody && railBody.contains(d)),
+                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+              };
+              window._owDock.close();
+              return out;
+            }""")
+            check(undock.get("floats") is True and undock.get("notDocked") is True
+                  and undock.get("notInRail") is True and undock.get("flag") == "0",
+                  f"0054 P2: undocking floats it back and persists the float choice ({undock})")
+
+            # A7 [ruling #19]: the Win7 fly-out — minimize applies the DISTINCT
+            # ow-anim-minimize keyframe with a real fly vector toward the dock; close
+            # applies the DISTINCT ow-anim-close keyframe. (Reduced-motion stripping is
+            # source-pinned in pytest; here we prove the two motions are wired + named.)
+            fly = page.evaluate("""() => {
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-fly-smoke', title: 'Fly Test', slot: 'top-left', slotKey: 'owflysmoke',
+                content: '<p>fly</p>', icon: '' });
+              w.open();
+              window._owFly = w;
+              const el = document.getElementById('ow-fly-smoke');
+              w.minimize();
+              return { minClass: el.classList.contains('ow-anim-minimize'),
+                       flyX: el.style.getPropertyValue('--ow-fly-x') };
+            }""")
+            check(fly.get("minClass") is True and fly.get("flyX") not in (None, ""),
+                  f"A7: minimize applies the ow-anim-minimize fly-out with a fly vector ({fly})")
+            page.wait_for_timeout(320)  # let the minimize settle (chip lands), then restore + close
+            page.evaluate("""() => {
+              const dock = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-fly-smoke"]');
+              if (dock) dock.click();
+            }""")
+            page.wait_for_timeout(150)
+            flyc = page.evaluate("""() => {
+              const el = document.getElementById('ow-fly-smoke');
+              if (!el) return { closeClass: false };
+              // drive close via the × button to exercise the distinct close keyframe
+              const btn = el.querySelector('.ow-close');
+              if (btn) btn.click();
+              return { closeClass: el.classList.contains('ow-anim-close') };
+            }""")
+            check(flyc.get("closeClass") is True,
+                  f"A7: close applies the distinct ow-anim-close keyframe ({flyc})")
+            page.wait_for_timeout(260)  # let the close fly-away finish + tear down
+            # Belt-and-suspenders cleanup: ensure no smoke window/chip lingers in the
+            # kit stack or the dock before the G14/F8 .modal-family checks run.
+            page.evaluate("""() => {
+              ['_owDock', '_owFly', '_owSmoke'].forEach(k => {
+                try { if (window[k] && window[k].destroy) window[k].destroy(); } catch (_) {}
+                window[k] = null;
+              });
+              ['ow-dock-smoke', 'ow-fly-smoke', 'ow-smoke-window'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.remove();
+                const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="' + id + '"]');
+                if (chip) chip.remove();
+              });
+            }""")
+            page.wait_for_timeout(120)
+
             # G14 (DWE audit F9b): ONE z-authority for the .modal family —
             # modalManager's _bringToFront defers to ui.js's counter instead of
             # stamping a second 300s ladder with !important. Open theme, park it
