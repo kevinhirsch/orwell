@@ -103,4 +103,173 @@
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", syncVisibility, { once: true });
   } else { syncVisibility(); }
+
+  // ── L13: drag-reorder the rail gadgets (persisted, keyboard-accessible) ─────
+  // The gadgets self-mount into #gadget-rail-body and lay out by CSS `order`. To
+  // let the player reorder them, each gadget gets a small drag handle (a real
+  // button — keyboard-focusable, with arrow-key reorder) and the chosen order
+  // persists per-user under 'orwell-gadget-order:<user>'. We override `order`
+  // inline from the saved sequence; unsaved/new gadgets fall in after, by their
+  // base CSS order. Reordering never touches a gadget's own content or focus.
+  function _orderKey() {
+    return "orwell-gadget-order:" + ((document.body && document.body.dataset.user) || "");
+  }
+  function loadOrder() {
+    try { var v = JSON.parse(lsGet(_orderKey()) || "null"); return Array.isArray(v) ? v : []; }
+    catch (_) { return []; }
+  }
+  function saveOrder(ids) { lsSet(_orderKey(), JSON.stringify(ids)); }
+
+  function gadgets() {
+    if (!body) return [];
+    return Array.prototype.filter.call(body.children, function (c) { return c.id; });
+  }
+
+  // Apply the persisted order as inline `order` (saved ids first, in saved order;
+  // everything else after, preserving its base CSS order via a high offset).
+  function applyOrder() {
+    var saved = loadOrder();
+    var list = gadgets();
+    list.forEach(function (el) {
+      var i = saved.indexOf(el.id);
+      // saved gadgets: 1..N; unsaved: 100+ (keeps them after, in DOM/base order)
+      el.style.order = String(i === -1 ? 100 : i + 1);
+    });
+  }
+
+  // The current visual order of gadget ids (by computed `order`, then DOM order).
+  function currentOrderIds() {
+    var list = gadgets();
+    return list
+      .map(function (el, idx) { return { id: el.id, ord: parseFloat(getComputedStyle(el).order) || 0, idx: idx }; })
+      .sort(function (a, b) { return a.ord - b.ord || a.idx - b.idx; })
+      .map(function (e) { return e.id; });
+  }
+
+  // Persist + apply a new full order (the public seam + the drop/keyboard paths).
+  function reorder(ids) {
+    var present = gadgets().map(function (el) { return el.id; });
+    // keep only real gadget ids, then append any present gadget the caller omitted
+    var clean = ids.filter(function (id) { return present.indexOf(id) !== -1; });
+    present.forEach(function (id) { if (clean.indexOf(id) === -1) clean.push(id); });
+    saveOrder(clean);
+    applyOrder();
+  }
+
+  // Move one gadget id before/after another (keyboard + drop helper).
+  function moveRelative(dragId, targetId, after) {
+    var order = currentOrderIds();
+    var from = order.indexOf(dragId);
+    if (from === -1) return;
+    order.splice(from, 1);
+    var to = order.indexOf(targetId);
+    if (to === -1) to = order.length;
+    order.splice(after ? to + 1 : to, 0, dragId);
+    reorder(order);
+  }
+  function nudge(id, dir) {
+    var order = currentOrderIds();
+    var i = order.indexOf(id);
+    if (i === -1) return;
+    var j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    reorder(order);
+  }
+
+  var DRAG_MIME = "text/orwell-gadget";
+  var _dragId = null;
+
+  function decorate(el) {
+    if (!el || !el.id || el.querySelector(":scope > .grail-drag")) return;
+    var handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "grail-drag";
+    handle.setAttribute("draggable", "true");
+    handle.setAttribute("aria-label", "Reorder this gadget (drag, or arrow keys)");
+    handle.title = "Drag to reorder · ↑/↓ to move";
+    handle.textContent = "⠿";
+    handle.addEventListener("dragstart", function (e) {
+      _dragId = el.id;
+      el.classList.add("grail-dragging");
+      try { e.dataTransfer.setData(DRAG_MIME, el.id); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
+    });
+    handle.addEventListener("dragend", function () {
+      el.classList.remove("grail-dragging");
+      _dragId = null;
+      Array.prototype.forEach.call(body.children, function (c) { c.classList.remove("grail-drop-into"); });
+    });
+    // keyboard reorder (accessible): arrows move the gadget; focus is preserved.
+    handle.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowUp") { e.preventDefault(); nudge(el.id, -1); handle.focus(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); nudge(el.id, 1); handle.focus(); }
+    });
+    el.insertBefore(handle, el.firstChild);
+
+    // the gadget is a drop target for another gadget's handle
+    el.addEventListener("dragover", function (e) {
+      if (_dragId == null || _dragId === el.id) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
+      el.classList.add("grail-drop-into");
+    });
+    el.addEventListener("dragleave", function () { el.classList.remove("grail-drop-into"); });
+    el.addEventListener("drop", function (e) {
+      el.classList.remove("grail-drop-into");
+      var id = _dragId;
+      try { id = e.dataTransfer.getData(DRAG_MIME) || _dragId; } catch (_) {}
+      if (!id || id === el.id) return;
+      e.preventDefault();
+      // drop AFTER the target if the pointer is in its lower half, else before
+      var r = el.getBoundingClientRect();
+      moveRelative(id, el.id, e.clientY > r.top + r.height / 2);
+    });
+  }
+
+  function ensureDragCss() {
+    if (document.getElementById("grail-drag-css")) return;
+    var st = document.createElement("style");
+    st.id = "grail-drag-css";
+    st.textContent =
+      ".gadget-rail-body > * { position: relative; }" +
+      // the grip lives bottom-left so it never overlaps a gadget's own header
+      // controls (the status HUD chevron, the cast-pin buttons — all top-right).
+      // Revealed on gadget hover / keyboard focus so it stays unobtrusive.
+      ".grail-drag { position: absolute; bottom: 2px; left: 2px; z-index: 2;" +
+      "  width: 22px; height: 22px; min-width: 22px; padding: 0; line-height: 1;" +
+      "  display: inline-flex; align-items: center; justify-content: center;" +
+      "  border: none; background: transparent; color: var(--fg, #9cdef2); opacity: 0;" +
+      "  cursor: grab; border-radius: 5px; font-size: .85rem; transition: opacity .12s ease; }" +
+      ".gadget-rail-body > *:hover > .grail-drag, .grail-drag:focus-visible { opacity: .6; }" +
+      ".grail-drag:hover, .grail-drag:focus-visible { opacity: .95 !important; background: color-mix(in srgb, var(--fg) 14%, transparent); }" +
+      ".grail-drag:active { cursor: grabbing; }" +
+      ".grail-dragging { opacity: .5; }" +
+      ".grail-drop-into { outline: 2px dashed color-mix(in srgb, var(--accent, #e06c75) 70%, transparent); outline-offset: -2px; }" +
+      // the collapsed icon-strip has no gadgets to reorder; hide the handle there
+      ".gadget-rail[data-collapsed=\"true\"] .grail-drag { display: none; }";
+    document.head.appendChild(st);
+  }
+
+  function decorateAll() {
+    if (!body) return;
+    ensureDragCss();
+    gadgets().forEach(decorate);
+    applyOrder();
+  }
+
+  // keep handles + order applied as gadgets mount/unmount
+  if (body && window.MutationObserver) {
+    var _reobs = new MutationObserver(function () { decorateAll(); });
+    _reobs.observe(body, { childList: true });
+  }
+  window.addEventListener("orwell:gamechanged", decorateAll);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", decorateAll, { once: true });
+  } else { decorateAll(); }
+
+  // public seam (the headless gate + any future control surface)
+  window.OrwellGadgetRail = {
+    reorder: reorder,
+    currentOrder: currentOrderIds,
+  };
 })();

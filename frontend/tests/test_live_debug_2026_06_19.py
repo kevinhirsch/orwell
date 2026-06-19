@@ -82,6 +82,30 @@ def test_l12_pin_gadget_loaded_and_ordered():
     assert ".gadget-rail-body > #orwell-cast-pin" in css
 
 
+# ── L13 — drag-reorder the gadgets in the rail; order persists ─────────────
+
+def test_l13_rail_supports_drag_reorder():
+    js = _read("static", "js", "orwellGadgetRail.js")
+    # HTML5 drag-and-drop reorder of the rail's gadgets
+    assert "dragstart" in js
+    assert "dragover" in js
+    assert "drop" in js
+    # persisted order, per-user, like the rail's existing persisted layout
+    assert "orwell-gadget-order" in js
+    # the public reorder seam
+    assert "OrwellGadgetRail" in js and "reorder" in js
+
+
+def test_l13_reorder_keeps_accessibility():
+    js = _read("static", "js", "orwellGadgetRail.js")
+    # a real focusable handle (button) with a label, and keyboard reorder
+    assert "grail-drag" in js
+    assert "aria-label" in js
+    assert "ArrowUp" in js and "ArrowDown" in js
+    # Escape is NOT handled per-surface (flows through ui.js's arbiter — F3 ratchet)
+    assert '"Escape"' not in js and "'Escape'" not in js
+
+
 # ── L16 — color while active, grayscale once evicted ───────────────────────
 
 def test_l16_cast_portrait_grayscale_keyed_on_status():

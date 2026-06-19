@@ -164,6 +164,9 @@
   }
 
   // ── the pin toggle (the cast window calls this; the gadget owns it) ─────────
+  // The rail's own MutationObserver watches gadget display, so flipping the
+  // gadget's display re-syncs the rail visibility — no gamechanged dispatch
+  // needed (which would route through the cast window's engine-gate).
   function setPinned(on) {
     if (on) lsSet(pinKey(), "1"); else lsDel(pinKey());
     var el = ensureEl();
@@ -174,17 +177,10 @@
     } else {
       el.style.display = "none";
       if (_timer) { clearTimeout(_timer); _timer = null; }
-      // un-pinning floats it back: re-open the full window — DEFERRED a beat so a
-      // just-fired close animation finishes tearing down first (the kit close is
-      // async; reopening synchronously would race its teardown).
-      setTimeout(function () {
-        if (!isPinned() && typeof window._orwellCastEnsure === "function") {
-          window._orwellCastEnsure();
-        }
-      }, 260);
+      // un-pinning floats it back: re-open the full window (idempotent — the seam
+      // restores it if already open).
+      if (typeof window._orwellCastEnsure === "function") window._orwellCastEnsure();
     }
-    // tell the rail's content-driven visibility to re-sync immediately
-    window.dispatchEvent(new CustomEvent("orwell:gamechanged"));
   }
 
   // public seam the cast window's pin button uses

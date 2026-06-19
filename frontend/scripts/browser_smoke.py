@@ -940,6 +940,48 @@ def main() -> int:
             check(l12b.get("hidden") is True and l12b.get("flag") is None,
                   f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
 
+            # L13: the rail gadgets are drag-reorderable and the order PERSISTS. Each
+            # gadget carries a keyboard-focusable drag handle; the controller's reorder
+            # seam (the live path is HTML5 drag-and-drop) persists the sequence per-user
+            # and lays the gadgets out by inline `order`.
+            l13 = page.evaluate("""() => {
+              const body = document.getElementById('gadget-rail-body');
+              if (!body) return { ok: false, why: 'no-body' };
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              // a synthetic second gadget so there's something to reorder past
+              let probe = document.getElementById('orwell-l13-probe');
+              if (!probe) {
+                probe = document.createElement('section');
+                probe.id = 'orwell-l13-probe';
+                probe.style.display = 'block';
+                probe.textContent = 'probe';
+                body.appendChild(probe);
+              }
+              if (!window.OrwellGadgetRail || !window.OrwellGadgetRail.reorder)
+                return { ok: false, why: 'no-reorder-seam' };
+              const before = window.OrwellGadgetRail.currentOrder();
+              window.OrwellGadgetRail.reorder(before.slice().reverse());
+              const after = window.OrwellGadgetRail.currentOrder();
+              const user = (document.body && document.body.dataset.user) || '';
+              const saved = localStorage.getItem('orwell-gadget-order:' + user);
+              return { ok: true, reversed: after.join() === before.slice().reverse().join(),
+                       saved: !!saved, savedHasProbe: !!saved && saved.indexOf('orwell-l13-probe') !== -1,
+                       handles: body.querySelectorAll('.grail-drag[draggable="true"]').length,
+                       handleHasLabel: !!(body.querySelector('.grail-drag') &&
+                         body.querySelector('.grail-drag').getAttribute('aria-label')) };
+            }""")
+            check(l13.get("ok") is True and l13.get("reversed") is True
+                  and l13.get("saved") is True and l13.get("savedHasProbe") is True,
+                  f"L13: rail gadgets drag-reorder and the order persists ({l13})")
+            check((l13.get("handles") or 0) >= 1 and l13.get("handleHasLabel") is True,
+                  f"L13: every gadget has a labeled, draggable, keyboard-focusable handle ({l13})")
+            # clean up the synthetic probe so it can't bleed into later assertions
+            page.evaluate("""() => {
+              const p = document.getElementById('orwell-l13-probe'); if (p) p.remove();
+              const u = (document.body && document.body.dataset.user) || '';
+              localStorage.removeItem('orwell-gadget-order:' + u);
+            }""")
+
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
             # .list-item standard), and no collapse chevron renders on a section with
