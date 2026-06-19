@@ -234,6 +234,12 @@ persona — all cast **live** through the interview:
 | S5-1 | POLISH | The **S2-1 under-finalize** pattern is consistent across seasons (each `createCharacter` needed an explicit "lock it in"). | S1, S2 casting. | Same as S2-1 (structural "Enter the house" when `casting.ready`). |
 | S5-2 | NOTE | The **S3-CORE engine-bypass bug is season-agnostic** — it will recur on every season's first competition unless the pending-decision interlock lands. | (inferred; S3-CORE reproduced live). | Fixing S3-CORE fixes all seasons. |
 
+**Both restart paths validated:**
+- **Recast from scratch** (keep=false): S1→S2→S3, fresh casting interview each time, distinct casts.
+- **Keep the houseguest (0056)** (keep=true): S3→S4 carried **Nadia Okafor** forward, **skipped
+  casting** (straight to `premiere`), and generated a fresh cast (London Montoya, Zara Morrow…).
+  Season number 1→2→3→4 throughout; the next-season door refuses while a season is live.
+
 ---
 
 ## Summary & triage (launch is next week)
@@ -246,6 +252,9 @@ introductions) is genuinely strong. **The single critical defect is the narratio
 handoff**: when the model should *commit a decision the engine owns*, it instead improvises the
 outcome (and sometimes a houseguest), bypassing the engine and desyncing the game.
 
+*(Note: State 6 — responsive, themes, windowing, Producer's Vault, WCAG — is appended below
+this summary; its findings are folded into the triage here.)*
+
 ### [Launch-Blocking]
 - **S3-CORE** — model bypasses the engine on decision resolution; invents outcomes and
   houseguests; narration/engine desync compounds across turns. *(The core-loop bug; fix via the
@@ -255,17 +264,104 @@ outcome (and sometimes a houseguest), bypassing the engine and desyncing the gam
   and no control. *(The structural escape hatch that de-fangs S3-CORE.)*
 - **S1-1** — the very first screen (zero-data landing) overlaps the casting card on top of the
   welcome message — unreadable text-over-text for every first-time user.
+- **S6-2** — the **Cast window covers the entire left sidebar** and intercepts its clicks
+  (default slot at x=14 over the 240px sidebar); also **breaks the `browser_smoke` CI gate**.
 
 ### [High-Priority Polish]
 - **S2-1 / S5-1** — model under-finalizes casting; add a structural "Enter the house" when ready.
 - **S4-2** — `status`/`finaleView` projections go stale at season end (no `finished`/`winner`).
+- **S6-1** — HUD roster header (`.os-roster-h`) renders below the 11px legibility floor
+  (9.1–10.4px) at ≤1024px viewports.
+- **S6-3** — raw internal pathway id (`overheard:offscreen:strategy:1358:7985649`) leaks into the
+  player-facing retrospective.
+- **S6-4** — primary red button (white-on-`#e06c75`) is 3.20:1 — below WCAG AA for normal text.
 - **S1-2** — game-build console 404 spam (`avatar`, `tts/stats`, `stt/stats`).
 - **S1-3 / S4-3** — raw unstyled `<input type=file>` across casting / account / new-season.
 - **S1-4** — login password field shows a clear glyph while empty.
 - **S3-1** — HUD "16/16" count vs the visible 15-NPC list ambiguity.
 
+### Coverage (this audit)
+Login · zero-data landing · settings (AI/Appearance/Account/System/Shortcuts) · theme picker ·
+live casting (×3 archetypes) · core gameplay + narration grounding · the gadget-rail HUD +
+presence · live decision flow + structured decision card · eviction/secret-ballot · finale ·
+retrospective + Producer's Vault unseal · new-season · **4 seasons** (recast ×3 + keep-character)
+· responsive matrix (6 viewports + 200% font) · 5 house themes · windowing (collapse/swap/mobile
+drawer/diary) · mobile gameplay · copy proofread · WCAG AA contrast · CI gates
+(`responsive_matrix.py`, `browser_smoke.py`).
+
 ### What to protect (do not regress)
 The casting interview, the gadget-rail HUD + presence, the decision-card copy ("your selection
 only — never read from prose"), the secret-ballot reveal, the retrospective Vault-unseal, and
 the multi-season restart/replayability. These are the product's strengths.
+
+---
+
+## State 6 — Responsive, house themes, windowing, mobile, copy (deeper sweep)
+
+### Responsive matrix (the canonical `responsive_matrix.py` gate, run live)
+**38 pass · 5 FAIL** across 320/390/820/1024/1366/1440 + the 200%-root-font pass. The layout
+is genuinely responsive: **no horizontal overflow, no surface overlap, tap-target floors met,
+settings-rail orientation correct, 200%-font integrity holds.** The 5 failures are all the
+**same** legibility defect:
+
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S6-1** | POLISH | **Sub-floor font in the HUD roster header.** `.os-roster-h` ("The house · N/16") is `font-size: .8em` *relative* to a `--fs-xs` (~12px) parent → ~9.1–10.4px at ≤1024px viewports, below the `--fs-2xs` 11px legibility floor (S10 token contract). | matrix FAILs at tiny-320 (9.1px), phone-390 (9.2px), tablet-820 (10.0px), laptop-1024 (10.4px); `orwellStatusPanel.js:138`. | Set `.os-roster-h` to `font-size: var(--fs-2xs)` (or `max(.8em, var(--fs-2xs))`) so it never drops below the floor. |
+
+### House themes (0052) — all 5 apply cleanly
+`the-feed` (green CRT), `telescreen` (cyan), `room-101` (neutral), `memory-wall` (amber/blue),
+`sequester` (warm). Each applies the `house-theme--<key>` frost treatment without breaking
+layout; foreground/background pairs are high-contrast (e.g. the-feed `#9fe8a8` on `#050a05`;
+sequester `#e6d3c4` on `#170d10`) and read well. No theme-specific defects found.
+
+### Windowing / gadget rail (0054) — interactions work
+Rail **collapse → right-edge icon strip**, **side-swap** (rail moves left), and the **mobile
+drawer** (content behind a FAB at ≤768px) all function. Diary Room opens with its correct
+"private & out-of-character — the house never hears this" label; presence mounts. No window
+defects observed beyond S4-1 (the decision card's chat-only trigger).
+
+### Mobile gameplay (375×812) — clean
+Narration is readable, the composer + model indicator + send are reachable, the Season badge
+shows, and the rail collapses to a FAB drawer. Move-in narration grounded correctly to the S3
+roster (Desiree, Eli, Esme). No overflow or clipping.
+
+### Copy & runtime hygiene
+- **Copy is clean**: no space-before-punct, double-space, `FR-/NFR-` jargon, `undefined`/
+  `[object Object]`, or engine-machinery strings in the rendered live-game or settings text.
+  (The s1 automated "double-space" flags were false positives from theme-name concatenation.)
+- **Zero `pageerror`/`console.error` on the live game surface.** (The only console noise is the
+  S1-2 game-build 404 polling, pre-game.)
+
+### Windowing defect — the Cast window covers the sidebar (also breaks a CI gate)
+
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S6-2** | **BLOCK** | **The Cast window's default slot overlaps the entire left sidebar and intercepts its clicks.** Opened via `_orwellCastEnsure()` at desktop 1440, `#orwell-cast` mounts at x=14, width 560 (spanning x=14–574) over the 240px sidebar (x=0–240). `document.elementFromPoint` at the sidebar's `#session-sort-btn` (x=205) returns the cast window's `.oc-ph` — so New Chat / Search / Diary Room / Cast / Chats / sort are all **covered and unclickable** while the Cast window is open. This is **why `frontend/scripts/browser_smoke.py` fails** (test H6 `page.click("#session-sort-btn")` times out — "subtree intercepts pointer events"). | `cast-overlap.png`; measured `castOverlapsSidebar:true`, `elementAtSortBtn:"oc-ph"`; `browser_smoke.py:969` timeout. | The cast window's default slot must clear the sidebar — anchor it to the right/content area (offset x ≥ sidebar width, like the retrospective/HUD), or open it centered in the content column. The slot system should account for the 240px sidebar so no top-left-slotted window lands under it. **Re-run `browser_smoke.py` to confirm green.** |
+
+### Post-season — the Producer's Vault (0048) unseal
+
+The deep retrospective works: "📼 The season, watched back" → "👑 Samir Grant won (week 14)" →
+per-juror finale votes (attributed post-season per E12: "Nadia Okafor votes for Samir Grant",
+"Eli Quintero votes for Axel Solis"…) → "🔒 The Producer's Vault" unsealing the hidden layer
+(showmances, strategy talks, confessionals — "[confessional Axel Solis] I need Bridget Liu gone
+… Luke Rasmussen is the one I actually trust"). All real roster; only post-season; Vault Wall
+honored until the game ends.
+
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S6-3** | POLISH | **Raw internal pathway id leaks into player-facing retrospective copy.** A "surfacing" line reads: *"surfaced to Samir Grant via `overheard:offscreen:strategy:1358:7985649`"* — a raw provenance/pathway identifier (channel:kind:timestamps) shown verbatim to the player. | `producers-vault.png`. | Humanize the pathway in the retrospective renderer (e.g. "overheard off-screen") — map the structured provenance to prose; never print the raw `channel:kind:id` token. |
+
+### WCAG 2.1 AA contrast (computed)
+
+Body/panel text and **all 5 house themes pass AA with wide margins** (12–15:1). Two
+sub-threshold cases on the brand red:
+
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S6-4** | POLISH | **Primary red button fails AA for normal text.** White (`#fff`) on the brand red (`#e06c75`) = **3.20:1** (AA needs 4.5; passes only as ≥18px/bold "large" text). Affects "Sign In", and likely "Confirm — this is binding" and "Make AI studio portraits". Accent-red-as-text (`#e06c75` on `#282c34`) = **4.38:1**, also just under 4.5 for normal text. Dark text on that red is 5.91:1. | computed contrast ratios. | Either darken the brand red a touch (toward ~4.5:1 on white) or use dark button text on red CTAs; reserve `#e06c75`-as-text for ≥large sizes. House themes need no change. |
+
+### Settings (system / shortcuts) + theme picker
+System and Shortcuts tabs render clean (no copy smells). The Theme picker is well-structured
+(Themes / Customize tabs, a labeled swatch grid incl. the 5 house themes + workspace presets).
+No defects.
 
