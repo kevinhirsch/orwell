@@ -402,8 +402,22 @@ async def advance_game(user: str | None = None) -> dict:
 
 async def submit_decision(decision: dict, user: str | None = None) -> dict:
     """Resolve the player's pending decision (nominations / use veto / replacement /
-    eviction vote) and continue the loop. `decision` is the validated payload."""
+    eviction vote) and continue the loop. `decision` is the validated payload.
+    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}."""
     return await _call("submitDecision", decision or {}, user=user)
+
+
+async def request_self_eviction(user: str | None = None) -> dict:
+    """Self-eviction step 1 (0061): the player expressed an OOC intent to LEAVE/quit — raise the
+    confirmation (names the irreversible stakes) and change NO state. The house never hears it; nothing
+    evicts until the player explicitly confirms via submit_decision({"kind":"self-evict","confirmed":True})."""
+    return await _call("requestSelfEviction", {}, user=user)
+
+
+async def cancel_self_eviction(user: str | None = None) -> dict:
+    """Self-eviction cancel (0061): the player decided to stay — clear the confirmation; they remain
+    ACTIVE and in the house, unchanged."""
+    return await _call("cancelSelfEviction", {}, user=user)
 
 
 async def player_tagline(user: str | None = None) -> dict:

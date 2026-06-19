@@ -90,15 +90,22 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/no access to the Vault/i);
   });
 
-  it("L39(a) — the base prompt forbids fabricating a player exit (walk-out / quit is a real, recorded event)", () => {
+  it("L39(a) + 0061 — the base prompt forbids fabricating a player exit, AND requires the confirmed self-evict handshake", () => {
     const p = BASE_GAME_MASTER_PROMPT;
     expect(p).toMatch(/WALKING OUT \/ QUITTING IS A REAL, BINDING EVENT/i);
     // the narrated-but-not-recorded gap: never narrate an exit the engine did not process
     expect(p).toMatch(/NEVER narrate one the game did not process/i);
-    expect(p).toMatch(/there is no lever that makes the player leave/i);
-    // the player remains a houseguest until the engine reports them evicted / the season over
-    expect(p).toMatch(/the player is still ACTIVE in the house/i);
-    expect(p).toMatch(/never by you fabricating an exit/i);
+    // 0061: a self-eviction IS a real lever now — but it takes an explicit two-step CONFIRMATION
+    // (the L36/L39a refusal stays for the bare/unconfirmed/ambiguous line, which the house never hears).
+    expect(p).toMatch(/deliberate, IRREVERSIBLE choice/i);
+    expect(p).toMatch(/two-step CONFIRMATION/i);
+    expect(p).toMatch(/HOUSE NEVER HEARS OR REACTS to it/i);
+    expect(p).toMatch(/Only once they[\s\S]*explicitly confirm/i);
+    expect(p).toMatch(/ambiguous or unconfirmed/i);
+    // the player remains a houseguest until the engine reports them evicted (or self-evicted) / season over
+    expect(p).toMatch(/player is still ACTIVE in the house/i);
+    expect(p).toMatch(/evicted \(or self-evicted\)/i);
+    expect(p).toMatch(/NEVER fabricate the exit\s+yourself/i);
   });
 
   it("L40 — the base prompt restrains showmance over-labeling (no soap-opera saturation)", () => {
