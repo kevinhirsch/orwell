@@ -469,6 +469,13 @@ export class BbWorld extends World {
   dpSentinel?: string;
   dpWriteResult?: import("../../src/ports/GameSession").RecordCastProfileResult;
 
+  // Casting diversity floor (0063) scratch state.
+  dvRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  dvSandbox?: import("../../src/composition/registry").UserSandbox;
+  dvSeed?: number;
+  dvSentinel?: string;
+  dvSurfacedBefore?: boolean;
+
   // Player self-eviction (0061) scratch state.
   svRegistry?: import("../../src/composition/registry").GameSessionRegistry;
   svUser?: string;

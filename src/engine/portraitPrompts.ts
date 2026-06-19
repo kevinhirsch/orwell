@@ -28,6 +28,19 @@ export interface PublicAppearanceFacets {
    * to the prose line. All facets are PUBLIC (already on the card) — no hidden content ever rides here.
    */
   physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * Feature 0063 — the PUBLIC diversity + personality facets that make each shot uniquely THIS person.
+   * ALL are PUBLIC (already on the HouseguestCard): the heritage / cultural identity (`ethnicity` —
+   * grounds an authentic, accurate likeness so the face matches who the character is), how they present
+   * (`genderPresentation`), and their observable DEMEANOR (`demeanor` — expression / vibe / energy, the
+   * L28 register). A PRIVATELY-held orientation is NOT in this type and MUST NEVER enter a prompt — only
+   * public facets feed the shot (the §5 Vault rule). Identity informs a dignified, authentic likeness —
+   * never a caricature: the appearance is built from the grounded physical facet + heritage + demeanor,
+   * not from clichés.
+   */
+  ethnicity?: string;
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  demeanor?: string;
 }
 
 import { EXPRESSION_VARIANTS, FRAMING_VARIANTS, BACKDROP_VARIANTS } from "./imageConstants";
@@ -42,6 +55,14 @@ export function physicalFacetToAppearance(p: PhysicalCharacteristics): string {
   if (p.distinguishingMark && !/^none\b/i.test(p.distinguishingMark.trim())) parts.push(p.distinguishingMark);
   parts.push(p.ageLook);
   return parts.join(", ");
+}
+
+/**
+ * A dignified, plain phrase for how a subject presents (feature 0063) — feeds the portrait SUBJECT line
+ * so the face matches who the character is. Authentic, never a caricature.
+ */
+export function genderPresentationPhrase(g: "man" | "woman" | "nonbinary"): string {
+  return g === "man" ? "a man" : g === "woman" ? "a woman" : "androgynous, nonbinary presentation";
 }
 
 /** A generated portrait prompt ready to hand to an image provider. */
@@ -85,7 +106,7 @@ export function buildPortraitPrompt(
   facets: PublicAppearanceFacets,
   styleAnchor: string,
 ): PortraitPromptResult {
-  const { appearance, age, presentation, physicalCharacteristics } = facets;
+  const { appearance, age, presentation, physicalCharacteristics, ethnicity, genderPresentation, demeanor } = facets;
   const shot = fnv1a(`${houseguestId}|${styleAnchor}`);
   const expression = EXPRESSION_VARIANTS[shot % EXPRESSION_VARIANTS.length]!;
   const framing = FRAMING_VARIANTS[(shot >>> 8) % FRAMING_VARIANTS.length]!;
@@ -96,12 +117,21 @@ export function buildPortraitPrompt(
   const styleLine = physicalCharacteristics?.style
     ? `${presentation}, ${physicalCharacteristics.style}`
     : presentation;
+  // 0063: build a SUBJECT line that reflects the unique person — the heritage (an authentic, accurate
+  // likeness — never a caricature) + how they present + their age. The skin tone in `physical` is already
+  // grounded in this same heritage, so the description is internally consistent and dignified.
+  const subjectParts = [`${name}`, `${age} years old`];
+  if (genderPresentation) subjectParts.push(genderPresentationPhrase(genderPresentation));
+  if (ethnicity) subjectParts.push(`of ${ethnicity} heritage`);
+  // 0063: the observable DEMEANOR colors the EXPRESSION line — the face matches the personality (a blunt
+  // person reads guarded, a warm one reads open) instead of every portrait sharing one default affect.
+  const expressionLine = demeanor ? `${expression}, ${demeanor}` : expression;
   const prompt = [
     styleAnchor,
-    `Subject: ${name}, ${age} years old`,
+    `Subject: ${subjectParts.join(", ")}`,
     `Physical appearance: ${physical}`,
     `Presentation style: ${styleLine}`,
-    `Expression: ${expression}`,
+    `Expression: ${expressionLine}`,
     `Framing: ${framing}`,
     `Setting: ${backdrop}`,
   ].join(". ");
@@ -124,6 +154,9 @@ export function buildCastPortraitPrompts(
     age?: number;
     presentation?: string;
     physicalCharacteristics?: PhysicalCharacteristics;
+    ethnicity?: string;
+    genderPresentation?: "man" | "woman" | "nonbinary";
+    demeanor?: string;
   }>,
   styleAnchor: string,
 ): PortraitPromptResult[] {
@@ -138,6 +171,9 @@ export function buildCastPortraitPrompts(
           age: hg.age!,
           presentation: hg.presentation!,
           ...(hg.physicalCharacteristics !== undefined ? { physicalCharacteristics: hg.physicalCharacteristics } : {}),
+          ...(hg.ethnicity !== undefined ? { ethnicity: hg.ethnicity } : {}),
+          ...(hg.genderPresentation !== undefined ? { genderPresentation: hg.genderPresentation } : {}),
+          ...(hg.demeanor !== undefined ? { demeanor: hg.demeanor } : {}),
         },
         styleAnchor,
       ),

@@ -122,6 +122,20 @@ export interface Character {
   biography?: string;
   physicalCharacteristics?: PhysicalCharacteristics;
   /**
+   * PUBLIC diversity-identity facets (feature 0063) — the cast's engine-guaranteed authentic diversity.
+   * `ethnicity` is a FIRST-CLASS heritage/cultural-identity facet (an authentic facet of a full
+   * character, never a stereotype kit) that GROUNDS `physicalCharacteristics.skinTone` so text and
+   * portrait agree; `genderPresentation` is how the houseguest presents (descriptive, never a
+   * competition input); `outOrientation` is present ONLY when the houseguest is PUBLICLY out (the house
+   * knows it — a public facet like hometown). A PRIVATELY-held orientation is NEVER here — it is
+   * Vault-sealed (engine-only) and surfaces only via a 0002 pathway. Public, Vault-free, byte-stable
+   * (0007/0031). DESCRIPTIVE ONLY — these never bend any competition/vote/outcome. Optional for
+   * back-compat with pre-0063 saves (which load without them and re-derive nothing).
+   */
+  ethnicity?: string;
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  outOrientation?: string;
+  /**
    * Seeded, typed HIDDEN elements (B50) — engine-side secrets the public persona may match or wildly
    * diverge from. NEVER projected to the player (the NPC card carries name + status only); they surface
    * rarely into hidden off-screen content and reach the player only via a pathway. Empty for the player

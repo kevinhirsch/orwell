@@ -55,6 +55,7 @@ module.exports = {
       "docs/features/0058-deep-character-profiles.feature",
       "docs/features/0060-story-thread-scheduler.feature",
       "docs/features/0061-player-self-eviction.feature",
+      "docs/features/0063-casting-diversity-floor.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
