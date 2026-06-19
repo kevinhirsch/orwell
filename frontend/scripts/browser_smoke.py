@@ -242,6 +242,76 @@ def main() -> int:
             check(think_probe.get("liveThinkBoxes") == 0,
                   f"game build: no live-think reasoning box exists in the DOM ({think_probe})")
 
+            # L36 — the player's OUT-OF-CHARACTER aside channel. Drive the real bubble
+            # renderer (chatRenderer.addMessage, the same path the live send + reload
+            # both funnel through) with an OOC line, a normal line, and an `ooc:`-prefixed
+            # line, then assert the produced DOM: the OOC bubbles carry the distinct
+            # .msg-ooc class with the markers STRIPPED from the display text; the normal
+            # bubble does NOT. No engine/LLM needed — pure render.
+            ooc_probe = page.evaluate(
+                """async () => {
+                  const cr = await import('/static/js/chatRenderer.js');
+                  const host = document.getElementById('chat-history');
+                  const before = host.querySelectorAll('.msg-user').length;
+                  cr.addMessage('user', '((what time is it in-game?))');
+                  cr.addMessage('user', 'Hey, want to work together this week?');
+                  cr.addMessage('user', 'ooc: what are my options?');
+                  const bubbles = Array.prototype.slice.call(
+                    host.querySelectorAll('.msg-user')).slice(before);
+                  const rows = bubbles.map(b => ({
+                    ooc: b.classList.contains('msg-ooc'),
+                    text: (b.querySelector('.body') || {}).textContent || '',
+                  }));
+                  // the distinct production badge shows on an OOC bubble's role line
+                  const badged = bubbles[0] &&
+                    getComputedStyle(bubbles[0].querySelector('.role'), '::after')
+                      .content.indexOf('production') !== -1;
+                  return { rows: rows, badged: badged };
+                }"""
+            )
+            _rows = ooc_probe.get("rows") or []
+            check(len(_rows) == 3, f"L36: three user bubbles rendered ({ooc_probe})")
+            check(_rows and _rows[0]["ooc"] is True and "(((" not in _rows[0]["text"]
+                  and "what time is it in-game?" in _rows[0]["text"],
+                  f"L36: ((...)) aside is .msg-ooc with markers stripped ({_rows[:1]})")
+            check(len(_rows) > 1 and _rows[1]["ooc"] is False,
+                  f"L36: a normal in-character line is NOT styled as an aside ({_rows[1:2]})")
+            check(len(_rows) > 2 and _rows[2]["ooc"] is True
+                  and _rows[2]["text"].strip().startswith("what are my options"),
+                  f"L36: an `ooc:` aside is .msg-ooc with the prefix stripped ({_rows[2:3]})")
+            check(ooc_probe.get("badged") is True,
+                  f"L36: the OOC bubble carries the 'to production' badge ({ooc_probe})")
+            # the one-time composer hint mounts in the game build and is dismissible + per-user keyed
+            ooc_hint = page.evaluate(
+                """() => {
+                  const h = document.getElementById('orwell-ooc-hint');
+                  return {
+                    present: !!h,
+                    hasDismiss: !!(h && h.querySelector('.orwell-ooc-hint-dismiss')),
+                    namesBoth: !!(h && /double parens/i.test(h.textContent)
+                                  && /ooc:/i.test(h.textContent)),
+                  };
+                }"""
+            )
+            check(ooc_hint.get("present") is True,
+                  f"L36: the OOC composer hint mounts in the game build ({ooc_hint})")
+            check(ooc_hint.get("hasDismiss") is True and ooc_hint.get("namesBoth") is True,
+                  f"L36: the hint is dismissible and names both conventions ({ooc_hint})")
+            # dismiss it -> persists under the per-user key -> stays gone on a remount attempt
+            ooc_dismissed = page.evaluate(
+                """() => {
+                  const h = document.getElementById('orwell-ooc-hint');
+                  if (h) h.querySelector('.orwell-ooc-hint-dismiss').click();
+                  const user = (document.body.dataset.user || '');
+                  const stored = localStorage.getItem('orwell-ooc-hint-dismissed:' + user);
+                  // a remount attempt must be a no-op now that it's dismissed
+                  window.dispatchEvent(new Event('orwell:gamechanged'));
+                  return { stored: stored, stillGone: !document.getElementById('orwell-ooc-hint') };
+                }"""
+            )
+            check(ooc_dismissed.get("stored") == "1",
+                  f"L36: dismissal persists under the per-user key ({ooc_dismissed})")
+
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
               const vis = (k) => {
