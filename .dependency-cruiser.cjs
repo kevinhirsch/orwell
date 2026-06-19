@@ -20,6 +20,9 @@ const VAULT =
   "^src/ports/(VaultStore|VectorIndex|SoulProvider|EmbeddingProvider|UserSaveStore)\\.ts$" +
   "|^src/adapters/inmemory/(InMemoryVaultStore|InMemoryVectorIndex)\\.ts$" +
   "|^src/adapters/engine/(SoulStore|FileSaveStore)\\.ts$" +
+  // E63: the relational adapters persist souls + the hidden relationship layer (the snapshot) and the
+  // Vault-side soul vectors — engine-only, exactly like FileSaveStore / InMemoryVectorIndex above.
+  "|^src/adapters/sqlite/(SqliteSaveStore|SqliteVectorIndex)\\.ts$" +
   "|^src/adapters/embedding/DeterministicEmbedding\\.ts$" +
   "|^src/engine/(sessionSnapshot|relationships|confessionals|offscreen|gossip|liveSeason)\\.ts$" +
   "|^src/composition/engineRoot\\.ts$";
@@ -34,7 +37,7 @@ const VAULT =
 // weaken).
 const ENGINE_LAYER =
   "^src/engine/" +
-  "|^src/adapters/(inmemory|engine|embedding)/" +
+  "|^src/adapters/(inmemory|engine|embedding|sqlite)/" +
   "|^src/composition/";
 
 module.exports = {

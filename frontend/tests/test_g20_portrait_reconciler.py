@@ -442,7 +442,11 @@ def test_roster_route_reports_present_and_total(tmp_portraits, monkeypatch, clie
 
     # The fail-open shapes are PINNED pre-G20 ({roster, imagesAvailable} only — see
     # test_orwell_portraits.py): no counter keys ride along, and the panel's typeof
-    # guard falls back to its own roster-derived count.
+    # guard falls back to its own roster-derived count. (L15 adds a last-good roster cache;
+    # clearing it here pins the genuine "engine down, no prior cast" fail-open — the
+    # stale-serving path has its own test in test_l15_l17_cast_generation.py.)
+    orwell_routes._LAST_ROSTER.clear()
+
     async def down(user=None, **k):
         raise RuntimeError("engine unreachable")
     monkeypatch.setattr(orwell_engine, "get_game_state", down)

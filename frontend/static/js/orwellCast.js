@@ -78,8 +78,14 @@
     if (!btn) return;
     try {
       const r = await fetch("/api/orwell/state", { credentials: "same-origin" });
-      const st = r.ok ? await r.json() : null;
-      const live = !!(st && st.started);
+      // L15: a 5xx/non-ok is a TRANSIENT engine hiccup (e.g. the per-user queue is busy
+      // committing portraits) — leave the button as it is. Only a definitive, parseable
+      // state answers the live/not-live question; an unreadable one never hides the cast or
+      // closes an open panel (which is what made generation look like a dropped connection).
+      if (!r.ok) return;
+      const st = await r.json();
+      if (!st || typeof st.started !== "boolean") return; // ambiguous → leave as-is
+      const live = !!st.started;
       btn.style.display = live ? "" : "none";
       if (!live && _open) togglePanel(false);
     } catch (_) { /* engine hiccup: leave the button as it was (fail-open) */ }
@@ -332,18 +338,26 @@
     const roster = (data && Array.isArray(data.roster)) ? data.roster : [];
     _imagesAvailable = !!(data && data.imagesAvailable);
 
-    // G22: the adaptive cadence reads the G20 counters — while a generation run is
-    // still landing portraits (provider configured + total > present), the next poll
-    // comes fast so each face shows up within a few seconds of being written.
+    // G22 + L15: the adaptive cadence. The server reports a LIVE generation record
+    // (`generation: {total, done, active}`) while a run is in flight — when present it is
+    // authoritative (poll fast while `active`). Otherwise fall back to the G20 portrait
+    // counters (provider configured + total > present). Either way each face shows up within a
+    // few seconds. A `stale` payload (the route served the last-good roster because a state read
+    // timed out during heavy generation) NEVER blanks the cast — the keyed upsert keeps the
+    // existing faces and we keep polling fast so the real set lands.
     const total = (data && typeof data.portraitsTotal === "number") ? data.portraitsTotal : null;
     const present = (data && typeof data.portraitsPresent === "number") ? data.portraitsPresent : null;
-    const generating = _imagesAvailable && total != null && present != null && total > present;
-    _pollDelay = generating ? FAST_POLL_MS : POLL_MS;
+    const gen = data && data.generation && typeof data.generation === "object" ? data.generation : null;
+    const runActive = !!(gen && gen.active);
+    const generating = runActive ||
+      (_imagesAvailable && total != null && present != null && total > present);
+    _pollDelay = (generating || data.stale) ? FAST_POLL_MS : POLL_MS;
 
     const actions = el.querySelector("#oc-actions");
     if (!roster.length) {
       // The empty state (pre-season / a reset) — the ONLY path that empties the
-      // grid; a populated roster only ever upserts cards in place.
+      // grid; a populated roster only ever upserts cards in place. A `stale` payload
+      // always carries the last good cards, so it never reaches here.
       for (const entry of _cards.values()) entry.el.remove();
       _cards.clear();
       empty.style.display = "";
@@ -360,13 +374,20 @@
     );
     if (actions) {
       actions.style.display = (_imagesAvailable && missing.length) ? "" : "none";
-      // G20: standing completeness copy — the background reconciler verifies and
-      // retries the set; this row reports the live remainder (server counters when
-      // present, the rendered roster otherwise).
+      // G20 + L15: standing completeness copy — the background reconciler verifies and
+      // retries the set; this row reports the live remainder. Prefer the live run record
+      // ("Generating N of M…") when a run is active, else the rendered-roster remainder.
       if (_imagesAvailable && missing.length) {
         const note = el.querySelector("#oc-backfill-note");
-        if (note) note.textContent = "Generating " + missing.length + " remaining…" +
-          (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
+        if (note) {
+          if (gen && gen.active && gen.total) {
+            note.textContent = "Generating " + Math.min(gen.done, gen.total) + " of " +
+              gen.total + " portrait" + (gen.total === 1 ? "" : "s") + "…";
+          } else {
+            note.textContent = "Generating " + missing.length + " remaining…" +
+              (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
+          }
+        }
       }
     }
 

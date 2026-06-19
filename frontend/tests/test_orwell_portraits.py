@@ -217,6 +217,11 @@ def test_roster_empty_pre_game(tmp_portraits, client, monkeypatch):
 
 
 def test_roster_fails_open_on_engine_error(tmp_portraits, client, monkeypatch):
+    # No prior good roster cached for this (anonymous) user → the route must fail open to empty.
+    # (L15 adds a last-good cache; clearing it here pins the genuine "engine down, never had a
+    #  cast" path — the stale-serving behavior is covered by its own test below.)
+    orwell_routes._LAST_ROSTER.clear()
+
     async def boom(user=None, **k):
         raise RuntimeError("engine unreachable")
     monkeypatch.setattr(orwell_engine, "get_game_state", boom)

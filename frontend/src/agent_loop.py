@@ -1499,6 +1499,95 @@ _MAX_RECORD_NUDGES_PER_TURN = 1  # at most one auto-record per finishing turn
 _RECORD_KINDS = {"bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"}
 
 
+# ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
+# Owner ledger (L21/L24 — "the single biggest immersion-killer"): turn to turn the world resets
+# because the model invents positions instead of grounding to the engine. The engine grounding
+# shipped (whereabouts() in the per-turn context; the player is PINNED and only an explicit
+# `moveTo` relocates them). But just like recordInteraction/advanceGame, the model reliably
+# UNDER-calls `moveTo`: the player says "I head to the kitchen", the narrator voices the kitchen,
+# but never moves the engine — so next turn whereabouts still reports the OLD room and the picture
+# snaps back ("you're still in the kitchen" after you moved to the living room). So when the
+# player's turn clearly walked them somewhere and the model did NOT call moveTo, the FE GUARANTEES
+# the move: a constrained extraction proposes the destination room and we call move_to ourselves,
+# PERSISTING the player's room so the whereabouts picture stays consistent turn-to-turn.
+# Model-driven moveTo always takes precedence. Vault-free (whereabouts is a Vault-free projection),
+# fail-closed (any hiccup just skips), and it never invents a move the player did not make.
+_MOVE_TOOLS = {"moveTo"}
+_MAX_MOVE_NUDGES_PER_TURN = 1  # at most one auto-move per finishing turn
+# The canonical house floor plan (mirrors src/domain/house.ts HOUSE_ROOMS). The engine no-ops an
+# unknown room; matching here keeps the extraction honest and the pre-filter cheap.
+_HOUSE_ROOMS = (
+    "kitchen", "living-room", "backyard", "bedroom-a", "bedroom-b",
+    "hoh-room", "bathroom", "storage-room", "diary-room",
+)
+# A deliberately BROAD pre-filter — movement language is varied ("I head to the kitchen", "let's go
+# out back", "I wander into the living room", "walk over to the bedroom", "step into the bathroom").
+# A missed signal means a lost move (the immersion bug); a false hit only costs a rare extraction
+# call that returns room:null. So we err wide and let the extraction be the gatekeeper. The room
+# words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
+# go/head/walk/move/wander/step/slip/stroll verbs.
+_MOVE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"go|going|head(?:ing)?|walk(?:ing)?|moves?|moving|wander(?:ing)?|stroll(?:ing)?|"
+    r"drift(?:ing)?|slip(?:ping)?|steps?|stepping|"
+    r"kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
+    r"hoh[\s-]?room|head of household|storage[\s-]?room|diary[\s-]?room"
+    r")\b", re.I)
+
+
+async def _auto_move_player(narration, last_user, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE whereabouts cohesion (L21/L24). When the player's turn walked them to a room but the
+    model never called moveTo, a constrained extraction proposes the destination room and we call
+    move_to ourselves — so the engine persists the player's new room and next turn's whereabouts
+    stays consistent (no snap-back). The engine OWNS the move (it no-ops an unknown room and pins the
+    player otherwise); we only relay a room the player clearly named. Fail-closed: any hiccup just
+    skips (the prompt nudge + the engine grounding still apply). Whereabouts is a Vault-free
+    projection, so nothing secret is touched."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        rooms = ", ".join(_HOUSE_ROOMS)
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the PLAYER walked to a new room in this Big Brother scene, and if so "
+                "which one. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no thinking, no "
+                "prose, no code fence:\n"
+                '{"room":"<one of the room ids below, or null>"}\n'
+                f"Room ids: {rooms}.\n"
+                "Pick the room the player ENDED UP IN if they clearly moved there themselves "
+                "(\"I head to the kitchen\", \"let's go out back\", \"I wander into the living room\"). "
+                'If the player did NOT move (they stayed put, only spoke, or only an NPC moved), reply '
+                '{"room":null}. Map loose names to the closest id (\"out back\"/\"yard\" → backyard, '
+                "\"lounge\"/\"couch\" → living-room, \"bedroom\" → bedroom-a, \"HOH\" → hoh-room)."},
+            {"role": "user", "content":
+                f"THE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
+                f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=400, timeout=45)
+        raw = raw or ""
+        # The JSON may sit after a reasoning block — scan the WHOLE response, take the LAST object
+        # carrying a "room" key (reasoning models emit the answer last).
+        obj = None
+        for cand in reversed(re.findall(r"\{[^{}]*\"room\"[^{}]*\}", raw, re.DOTALL)):
+            try:
+                obj = json.loads(cand); break
+            except Exception:
+                continue
+        if obj is None:
+            logger.info(f"[orwell] auto-move: no parseable JSON (len={len(raw)})")
+            return False
+        room = obj.get("room")
+        if not isinstance(room, str) or room not in _HOUSE_ROOMS:
+            return False  # null / no move / unknown room → nothing to do
+        await _oe.move_to(room, user=owner)
+        logger.info(f"[orwell] auto-moved player → {room} user={owner}")
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-move failed: {_e}")
+        return False
+
+
 async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
     """GUARANTEE the consequence loop fires (0055). When the model narrated a player↔houseguest
     scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
@@ -2359,6 +2448,7 @@ async def stream_agent_loop(
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
+    _turn_move_nudges = 0  # L21/L24 auto-move belt: at most one auto-move per finishing turn
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
@@ -2861,6 +2951,7 @@ async def stream_agent_loop(
                 _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
+                _moved = bool(_tool_names & _MOVE_TOOLS)  # L21/L24: did the model call moveTo itself?
                 # Track staleness: this finishing block runs once per player turn. A turn that
                 # advanced resets the clock; otherwise the beat has sat one more turn. The lull-nudge
                 # waits until the night has genuinely stopped moving (>= grace), so engaging play and
@@ -2900,6 +2991,19 @@ async def stream_agent_loop(
                 _turn_narration = "\n".join(t for t in round_texts if t)
                 _want_deal = (_turn_deal_nudges < 1
                               and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
+                # L21/L24 auto-move belt: the player walked somewhere this turn but the model never
+                # called moveTo, so the engine still has them in the OLD room and next turn's
+                # whereabouts will snap back. Gated on a cheap movement-language pre-filter over the
+                # player's OWN last message (the player is the only one whose move we relay — the
+                # engine pins them and drives the NPCs) and the per-turn cap. Deliberately NOT gated on
+                # `_progressed`/`_is_lull`: a player can walk to a room AND advance a beat in the same
+                # turn, and a short "I head out back" lull is exactly when a move happens. The
+                # constrained extraction (room:null when the player didn't actually move) is the real
+                # gatekeeper. Model-driven moveTo always wins (`_moved` short-circuits).
+                _last_user_for_move = _extract_last_user_message(messages) or ""
+                _want_move = ((not _moved)
+                              and _turn_move_nudges < _MAX_MOVE_NUDGES_PER_TURN
+                              and bool(_MOVE_SIGNAL_RE.search(_last_user_for_move)))
                 # NPC-approach nudge (0036/0049): the house lives between the player's beats — NPCs play
                 # THEIR game and come to the player, not only the other way around. With the "Wants a
                 # word" notification panel removed (owner ruling 2026-06-18 — that intent must never reach
@@ -2915,7 +3019,7 @@ async def stream_agent_loop(
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_deal or _want_approach or _want_reapproach:
+                if _want_advance or _want_record or _want_deal or _want_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     try:
                         from src import orwell_engine as _oe
@@ -2928,6 +3032,20 @@ async def stream_agent_loop(
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
                         logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                    # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
+                    # The player walked to a room this turn but the model never called moveTo, so the
+                    # engine still has them in the OLD room and next turn's whereabouts would snap back.
+                    # A constrained extraction proposes the destination and we call move_to ourselves,
+                    # PERSISTING the player's new room. Runs BEFORE the post-season/advance/approach
+                    # branches (each of which can break/continue) so the move always lands even on a
+                    # turn that also advances a beat — the player can both walk somewhere and trigger a
+                    # ceremony. It never re-prompts the model or ends the turn; the narration the player
+                    # already saw stands and we just make the engine agree with it. Model-driven moveTo
+                    # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
+                    if _want_move:
+                        _turn_move_nudges += 1  # once per turn
+                        await _auto_move_player(_turn_narration, _last_user_for_move,
+                                                endpoint_url, model, headers, owner)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
                     # off into free chat. Count their off-finale turns; once they've taken a couple,
                     # have the producer re-invite OUT OF FICTION to the next season (escalating,
