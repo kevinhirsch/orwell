@@ -21,6 +21,16 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/not a generic ai assistant/i);
   });
 
+  it("L25 — the base prompt pins the casting interview OOC: no NPC knows a casting answer until revealed in-scene", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // The casting interview is producer-only, with no pathway into the house (mirrors the Diary Room).
+    expect(p).toMatch(/casting interview is sealed from the house/i);
+    expect(p).toMatch(/no houseguest ever learns/i);
+    // The exact L25 leak shape — an NPC quoting the player's profession back as a "read" — is named.
+    expect(p).toMatch(/never quote, paraphrase, or even allude to a casting answer/i);
+    expect(p).toMatch(/witnessed/i); // NPCs form their read from witnessed behavior only
+  });
+
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
     const game = new GameSessionAdapter();
     game.createCharacter({ playerName: "Player One", seed: 4 });
