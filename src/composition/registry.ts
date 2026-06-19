@@ -10,6 +10,9 @@ import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
+import {
+  DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
+} from "../engine/deepProfile";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -92,6 +95,22 @@ function buildUserSandbox(user = "default"): UserSandbox {
         kind: "reserved-twist",
         content: `sealed reserve twist: ${t.kind}, fires week ${t.fireAtBeat}`,
       });
+    }
+  });
+  // Deep character profiles (feature 0058): SEAL each NPC's HIDDEN profile + story threads into the
+  // Vault — the audit copy no player OR admin surface can reach (0001), and the 0048 unsealing payoff.
+  // This is the SAME hidden-seal seam the reserve twists use — engine-only by construction. The
+  // SOUL indexing (full-fidelity recall, L27b) is done by the adapter's seedDeepProfiles into each
+  // NPC's authoritative soul.memory (so it persists + re-indexes on restore); the PUBLIC facets fold
+  // onto the byte-stable Character separately (they cross to the player).
+  session.setOnSealProfiles((profiles, threads) => {
+    for (const { id, profile } of profiles) {
+      engine.vault.writeHidden({
+        id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id, content: deepProfileToVaultContent(id, profile),
+      });
+    }
+    for (const t of threads) {
+      engine.vault.writeHidden({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) });
     }
   });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the

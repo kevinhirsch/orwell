@@ -59,8 +59,9 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
     }
     const { castingCard: _card, ...playerSansCard } = view.player!;
     const blob = JSON.stringify({ ...view, player: playerSansCard });
-    // "social"/"emotional"/"physical" (a "physical therapist" vocation) are public words (B61/L28);
-    // only the serialized STAT BLOCK — the aptitude KEYS (`"physical":<n>`) and the soul — stays banned.
+    // "social"/"emotional"/"physical" (a "physical therapist" vocation; the 0058 physicalCharacteristics
+    // facet KEY) are public words (B61/L28). Only the serialized STAT BLOCK — the aptitude KEYS
+    // (`"physical":<n>`) and the soul — stays banned: the L28 precise-scan form, never the bare word.
     for (const banned of ['"physical":', '"mental":', '"social":', '"stats"', '"soul"', "emotionalState", "volatility", "hiddenElement"]) {
       expect(blob.includes(banned)).toBe(false);
     }

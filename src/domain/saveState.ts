@@ -1,6 +1,7 @@
 import type { EntityId } from "./ids";
 import type { GameEvent } from "./event";
 import type { KnowledgeFact } from "./knowledge";
+import type { PhysicalCharacteristics } from "./physicalCharacteristics";
 
 /**
  * The persisted game state. Detail must NEVER regress across saves and should
@@ -48,6 +49,16 @@ export interface PersistedCharacter {
    * only for back-compat with pre-demeanor saves.
    */
   demeanor?: string;
+  /**
+   * The PUBLIC deep-profile facets (feature 0058) — a multi-sentence `biography` + the STRUCTURED
+   * `physicalCharacteristics` facet. Part of the byte-stable static baseline, so the superset/byte-
+   * compare check (`isSuperset`) covers them too: an existing game's NPC biography or physical facet
+   * can never regenerate or drift. Optional only for back-compat with pre-0058 saves (which load
+   * without them — the conditional spread in `toGameState` keeps an absent field absent, so an old
+   * save never trips a spurious superset failure).
+   */
+  biography?: string;
+  physicalCharacteristics?: PhysicalCharacteristics;
 }
 
 /** A hunch in the persisted projection (audit C4) — counted + superset-checked like knowledge. */

@@ -462,6 +462,13 @@ export class BbWorld extends World {
   castResumed?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
   castError?: Error;
 
+  // Deep character profiles (0058) scratch state.
+  dpRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  dpSandbox?: import("../../src/composition/registry").UserSandbox;
+  dpSandboxB?: import("../../src/composition/registry").UserSandbox;
+  dpSentinel?: string;
+  dpWriteResult?: import("../../src/ports/GameSession").RecordCastProfileResult;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

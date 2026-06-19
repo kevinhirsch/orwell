@@ -514,6 +514,9 @@ export function renderGameContext(view: GameStateView): string {
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
+      // 0058: the STORED public biography — voice THIS established backstory, never invent (and drift)
+      // one. It is the presentable §3 backstory; the hidden secrets/goals never appear here (the wall).
+      h.biography,
       [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;

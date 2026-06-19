@@ -1,4 +1,5 @@
 import type { GameHouse } from "./characterFactory";
+import type { DeepProfile, StoryThread } from "./deepProfile";
 import type { CastingIntake } from "./castingIntake";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
@@ -59,6 +60,16 @@ export interface SessionCore {
   casting?: CastingIntake;
   /** Per-season photorealistic style anchor (0051): seeded at cast time, stable through the season. Absent on older saves (falls back to a default). */
   portraitStyleAnchor?: string;
+  /**
+   * The engine-only HIDDEN deep layer (feature 0058): the §3 secrets/goals/weakness/Day-1 perception
+   * per NPC and the derived story THREADS (with their live `status`). Persisted here so a thread that
+   * has ACTIVATED stays activated across a restart (0030) and the Day-1 perception re-seeds identically.
+   * ENGINE-ONLY: the snapshot itself never crosses the wall (it carries the souls + relationships too),
+   * so holding hidden profiles here leaks nothing. Absent on pre-0058 saves (re-derived deterministically
+   * on restore from the persisted seed + cast — seed-stable & player-independent).
+   */
+  deepProfiles?: Record<EntityId, DeepProfile>;
+  storyThreads?: StoryThread[];
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
@@ -105,6 +116,12 @@ export function toGameState(snap: SessionSnapshot): GameState {
       // L28 (voice register): part of the byte-stable baseline the checkpoint guards (conditional
       // spread keeps an absent field absent on a pre-demeanor save — no spurious superset failure).
       ...(hg.character.demeanor !== undefined ? { demeanor: hg.character.demeanor } : {}),
+      // 0058: the PUBLIC deep-profile facets are part of the byte-stable static baseline — included so
+      // the 0031 checkpoint's superset/byte-compare guards them against regeneration/drift. Spread
+      // (not nested) so an absent field on a pre-0058 save stays absent (no spurious superset failure).
+      ...(hg.character.biography !== undefined ? { biography: hg.character.biography } : {}),
+      ...(hg.character.physicalCharacteristics !== undefined
+        ? { physicalCharacteristics: hg.character.physicalCharacteristics } : {}),
     };
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,

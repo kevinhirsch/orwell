@@ -1,4 +1,5 @@
 import type { EntityId } from "../domain/ids";
+import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -79,6 +80,14 @@ export interface HouseguestCard {
    * register so each person sounds distinct, instead of defaulting everyone to warm-and-witty.
    */
   demeanor?: string;
+  /**
+   * The PUBLIC deep-profile facets (feature 0058): a multi-sentence `biography` (the presentable
+   * backstory) and the STRUCTURED `physicalCharacteristics` facet (the single source of truth the
+   * narration AND the portrait prompt both read, L29/L23). Public, Vault-free, byte-stable. The
+   * HIDDEN half (secrets, true goals, weakness, Day-1 perception) NEVER appears on this card.
+   */
+  biography?: string;
+  physicalCharacteristics?: PhysicalCharacteristics;
 }
 
 /**
@@ -486,6 +495,12 @@ export interface NpcVoiceView {
     age?: number; appearance?: string; presentation?: string;
     /** The observable voice register (L28) — voice this houseguest in THEIR demeanor, not a default. */
     demeanor?: string;
+    /**
+     * The PUBLIC deep-profile facets (0058) — voice the houseguest's STORED biography + physical
+     * characteristics, never invent (and drift) them. Both are Vault-free public facets; the HIDDEN
+     * profile (secrets/goals/weakness/perception) is NEVER on this projection.
+     */
+    biography?: string; physicalCharacteristics?: PhysicalCharacteristics;
   };
   /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
   whereabouts: { room: string; present: NamedRef[] } | null;
@@ -561,6 +576,50 @@ export interface SubmitDecisionReq {
   appeal?: string;
   /** comp-intent: the player's declared approach — "compete" | "throw" | "play-safe" (B46). */
   intent?: string;
+}
+
+/**
+ * The write-back seam (feature 0058 / ledger L28b) — the FE producer-LLM authors a houseguest's rich
+ * §3 profile (endless variety) and writes it BACK here so the ENGINE becomes the source of truth
+ * (mirrors the 0051 portrait-prompt handshake). The engine validates / repairs (diversity + non-
+ * player-mirroring), SPLITS it across the Vault Wall (public facets onto the byte-stable Character;
+ * secrets/goals/weakness/perception sealed into the Vault), INDEXES it for full-fidelity recall
+ * (L27b), and SEEDS the story threads + the NPC→player edge from it.
+ *
+ * PHASE 1: this is the clearly-TYPED seam, STUBBED (it records nothing structurally yet) and unit-
+ * tested. The deterministic seeded floor is the live profile source for now; wiring the live LLM
+ * write-back (validate/repair/split/seal/index) is Phase 2. Everything PUBLIC here may cross to the
+ * player; everything HIDDEN is sealed and never projected.
+ */
+export interface RecordCastProfileReq {
+  /** Which houseguest this authored profile is for. */
+  houseguestId: EntityId;
+  // --- PUBLIC (crosses to the player; folded onto the byte-stable Character) ---
+  /** A real multi-sentence backstory (the presentable parts). */
+  biography?: string;
+  /** The structured physical-characteristics facet (text↔image single source of truth). */
+  physicalCharacteristics?: PhysicalCharacteristics;
+  // --- HIDDEN (Vault-sealed; NEVER projected to player or admin) ---
+  /** 2–3 secrets. */
+  secrets?: string[];
+  /** The true strategic goals. */
+  trueGoals?: string[];
+  /** The named weakness / blind spot. */
+  weakness?: string;
+  /** The Day-1 perception-of-the-player read (seeds the NPC→player edge). */
+  dayOnePerception?: string;
+}
+
+/** Whether the write-back was accepted (and which fields, Vault-free — never echoes a secret). */
+export interface RecordCastProfileResult {
+  /** True iff the houseguest exists and a profile could be recorded. */
+  accepted: boolean;
+  /** The PUBLIC field NAMES that were accepted (never their hidden values). */
+  publicFields: string[];
+  /** The HIDDEN field NAMES that were accepted (names only — the values are sealed, never echoed). */
+  hiddenFields: string[];
+  /** Set when not accepted (unknown houseguest / no game / phase-2-deferred path). */
+  reason?: string;
 }
 
 export interface GameSession {
@@ -655,4 +714,14 @@ export interface GameSession {
 
   /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
+
+  /**
+   * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded
+   * here so the ENGINE is the source of truth: PUBLIC facets fold onto the byte-stable Character;
+   * HIDDEN facets are sealed into the Vault and NEVER projected. PHASE 1: clearly typed + STUBBED
+   * (it validates the target and reports which fields it would accept, without yet overwriting the
+   * seeded floor); the live validate/repair/split/seal/index wiring is Phase 2. The result never
+   * echoes a hidden value (it reports field NAMES only).
+   */
+  recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
 }
