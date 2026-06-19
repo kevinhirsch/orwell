@@ -148,7 +148,8 @@ Then("it lists who is in adjacent rooms", function (this: BbWorld) {
 Then("it reveals nothing about non-adjacent rooms", function (this: BbWorld) {
   const w = this.hpWhereabouts!;
   for (const n of w.nearby) assert.ok(areAdjacent(w.room as Room, n.room as Room), `${n.room} is adjacent`);
-  assert.deepEqual(Object.keys(w).sort(), ["nearby", "present", "room"]);
+  // L21/L24: duration rides the view (turnsHere + per-companion tenure) — still no non-adjacent room.
+  assert.deepEqual(Object.keys(w).sort(), ["companions", "nearby", "present", "room", "turnsHere"]);
 });
 
 Then("it contains no motive, number, hidden state, or Vault sentinel", function (this: BbWorld) {

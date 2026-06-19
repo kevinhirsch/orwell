@@ -33,6 +33,7 @@ export const ORWELL_TOOL_BEATS = {
   // raw camelCase names in the transcript are the C14/C19 immersion bleed.
   'updateCasting': '\u{1F3AC} Casting notes',
   'whereabouts': '\u{1F9ED} Around the house',
+  'moveTo': '\u{1F6B6} Moving through the house',
   'seasonRecap': '\u{1F4DC} The season so far',
   'seasonRetrospective': '\u{1F513} The producers’ vault',
   'npcVoice': '\u{1F3AD} In their head',

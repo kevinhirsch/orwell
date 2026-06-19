@@ -60,7 +60,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # Big Brother game engine (Vault-free): the model drives the game by
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
-             "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts",
+             "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts", "moveTo",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
@@ -95,6 +95,8 @@ GAME_TOOL_KEEP = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
+    # L21/L24: the player walks where they choose; the engine never auto-relocates a person.
+    "moveTo",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.

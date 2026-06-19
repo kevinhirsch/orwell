@@ -9014,6 +9014,15 @@ body.hide-thinking .thinking-section { display: none !important; }
 .agent-thread-header:hover {
   color: var(--fg);
 }
+/* L7: a node with nothing to expand (production beat / empty tool result) is a
+   flat label — no expand affordance. Drop the pointer cursor + hover highlight
+   so it never reads as a clickable accordion that opens nothing. */
+.agent-thread-node--flat > .agent-thread-header {
+  cursor: default;
+}
+.agent-thread-node--flat > .agent-thread-header:hover {
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
 .agent-thread-icon {
   font-size: 0.9em;
   color: var(--red);
@@ -36011,7 +36020,16 @@ body.theme-frosted .doc-tab-dropdown,
 body.theme-frosted .email-reader,
 body.theme-frosted .admin-card,
 body.theme-frosted .gallery-detail-menu,
-body.theme-frosted #theme-popup .modal-content {
+body.theme-frosted #theme-popup .modal-content,
+/* L34: the control-room gadget rail frosts with the rest of the chrome. Its
+   .gadget-rail-head is transparent (border-only), so frosting the rail body
+   carries the header into the same glass — no opaque band at the top. */
+body.theme-frosted .gadget-rail,
+/* L34: the OrwellWindow kit (.ow-window — cast, finale, retrospective, the
+   gadget rail, every Lane-F window) frosts identically to the modal family.
+   Without this the kit window kept its solid --win-bg, so its transparent
+   titlebar + body read as one opaque block (the "big opaque rectangle"). */
+body.theme-frosted .ow-window {
   /* Tinted base color (set separately so the shorthand can't swallow it);
      much more transparent than before so what's behind actually shows
      through. The blur catches whatever pixels are below. */
@@ -36038,7 +36056,12 @@ body.theme-frosted .sidebar-user-bar {
    title area (Calendar, Tasks, Cookbook, Memory, Email…). Give the header
    its own matching frosted glass — translucent tint + blur — so it stays
    readable while scrolling but blends into the panel instead of a black band. */
-body.theme-frosted .modal-header {
+body.theme-frosted .modal-header,
+/* L34: the kit titlebar (.ow-titlebar) gets the SAME frosted treatment as the
+   modal header — translucent (no solid fill) + the body's backdrop-blur — so
+   the window's header reads as glass, not a heavy opaque bar, on EVERY Lane-F
+   window. Fixed at the kit level so all current and future windows inherit it. */
+body.theme-frosted .ow-titlebar {
   /* Transparent — NOT another panel tint. The header sits on top of the
      already-frosted modal body, so any added tint stacks and the band
      reads darker than its surroundings. Keep just the blur (which doesn't

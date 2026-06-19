@@ -21,15 +21,55 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/not a generic ai assistant/i);
   });
 
+  it("L25 — the base prompt pins the casting interview OOC: no NPC knows a casting answer until revealed in-scene", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // The casting interview is producer-only, with no pathway into the house (mirrors the Diary Room).
+    expect(p).toMatch(/casting interview is sealed from the house/i);
+    expect(p).toMatch(/no houseguest ever learns/i);
+    // The exact L25 leak shape — an NPC quoting the player's profession back as a "read" — is named.
+    expect(p).toMatch(/never quote, paraphrase, or even allude to a casting answer/i);
+    expect(p).toMatch(/witnessed/i); // NPCs form their read from witnessed behavior only
+  });
+
+  it("L28 — the base prompt pins DISTINCT registers: the house is NOT a room of identical warm pros", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // each houseguest is voiced in their OWN register, grounded in demeanor/archetype/background…
+    expect(p).toMatch(/DISTINCT REGISTERS/);
+    expect(p).toMatch(/own register/i);
+    expect(p).toMatch(/demeanor/i);
+    // …and the homogeneity it must break is named explicitly (a blunt one is blunt, a quiet one quiet)
+    expect(p).toMatch(/not a room of identical/i);
+    expect(p).toMatch(/a blunt houseguest is blunt/i);
+    expect(p).toMatch(/a quiet one stays quiet/i);
+  });
+
+  it("L30 — the base prompt pins wander pacing: survey, then ONE cluster, then WAIT", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // one grouping at a time for real connection — the survey orients, the scene happens
+    expect(p).toMatch(/ONE GROUPING AT A TIME/i);
+    expect(p).toMatch(/brief orienting SURVEY/i);
+    expect(p).toMatch(/WAIT for their reply/i);
+    // it must NEVER narrate all rooms or fire multiple unanswerable questions in one turn
+    expect(p).toMatch(/NEVER narrate all/i);
+    expect(p).toMatch(/across\s+different rooms/i);
+    // tied to the existing lingering / seize-the-lull framing
+    expect(p).toMatch(/lingering IS play/i);
+    expect(p).toMatch(/seize the lull/i);
+  });
+
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
     const game = new GameSessionAdapter();
     game.createCharacter({ playerName: "Player One", seed: 4 });
     const ctx = renderGameContext(game.getGameState());
     expect(ctx).toContain("Player One");
-    // "social" is a public strategy-style word (B61 cast voices) — ban the hidden layer precisely.
-    for (const banned of ["physical", "mental", '"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive"]) {
+    // The woven context is PROSE, not the stat block: bare "physical"/"mental"/"social" are public
+    // words (a "physical therapist" vocation, a "social" strategy style — L28), so they are NOT
+    // banned. The hidden layer is banned precisely (soul vocabulary), and no numeric aptitude (a
+    // float) may ever ride along — that is what a real stat leak would look like in the context.
+    for (const banned of ['"soul"', "volatility", "emotionalState", "hiddenElement", "secret-motive"]) {
       expect(ctx.includes(banned)).toBe(false);
     }
+    expect(ctx).not.toMatch(/\d\.\d/);
   });
 
   it("editing a moment fragment changes only that moment", () => {

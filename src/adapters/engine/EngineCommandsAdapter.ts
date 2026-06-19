@@ -46,6 +46,12 @@ export class EngineCommandsAdapter implements EngineCommands {
   private livingProvider?: () => Iterable<EntityId>;
   /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
   private presenceProvider?: () => Occupancy | null;
+  /**
+   * L27: index a recorded social scene into a houseguest's SEMANTIC recall memory (0024). Every
+   * houseguest who was in a scene remembers its SUMMARY, so later narrative is built from the STORE
+   * recalled (ADR 0003), never the chat window. Unset = standalone (no recall index — prior behavior).
+   */
+  private soulMemo?: (hg: EntityId, content: string) => void;
   /** E21: the beat window the fold budget counts within, plus the per-edge tallies inside it. */
   private foldBeatKey = "";
   private readonly foldCounts = new Map<string, number>();
@@ -70,6 +76,11 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** Wire the house occupancy (0049) so recorded scenes gain co-present witnesses + adjacent overhears. */
   setPresenceProvider(fn: () => Occupancy | null): void {
     this.presenceProvider = fn;
+  }
+
+  /** Wire the semantic-recall index (L27/0024) so a recorded social scene becomes recallable later. */
+  setSoulMemo(fn: (hg: EntityId, content: string) => void): void {
+    this.soulMemo = fn;
   }
 
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
@@ -138,6 +149,12 @@ export class EngineCommandsAdapter implements EngineCommands {
       );
       foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
         partners, MAX_FOLDS_PER_INTERACTION, bystanders);
+    }
+    // L27: index the scene's SUMMARY into each houseguest's semantic recall memory (0024) — every
+    // houseguest who was in it remembers it, so later story/narrative is built from the STORE recalled
+    // (ADR 0003), never the chat window. The player's own knowledge already lives in the event record.
+    if (this.soulMemo) {
+      for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, req.content);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };

@@ -51,6 +51,8 @@ export interface SessionCore {
   deals?: Deal[];
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
+  /** Room tenure — ticks each houseguest has held their current room (L21/L24). Absent on older saves (reseeded on the next tick). */
+  presenceTenure?: Record<EntityId, number>;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
@@ -95,6 +97,14 @@ export function toGameState(snap: SessionSnapshot): GameState {
       strategyStyle: hg.character.strategyStyle,
       stats: hg.character.stats,
       background: hg.character.background,
+      // L28: the diverse backstory facets are part of the byte-stable static baseline — included so
+      // the 0031 checkpoint's superset/byte-compare guards them against regeneration/drift. Spread
+      // (not nested) so an absent field on a pre-L28 save stays absent (no spurious superset failure).
+      ...(hg.character.vocation !== undefined ? { vocation: hg.character.vocation } : {}),
+      ...(hg.character.hometown !== undefined ? { hometown: hg.character.hometown } : {}),
+      // L28 (voice register): part of the byte-stable baseline the checkpoint guards (conditional
+      // spread keeps an absent field absent on a pre-demeanor save — no spurious superset failure).
+      ...(hg.character.demeanor !== undefined ? { demeanor: hg.character.demeanor } : {}),
     };
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,

@@ -13,6 +13,15 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
    data: /opt/orwell/data       .env (secrets) + the save (SQLite + souls); preserved across updates
 ```
 
+## Recommended specs
+
+**Baseline: 4 vCPU / 8 GB RAM** (12 GB disk) — the installer defaults (overridable via `CORES`,
+`RAM_MB`, `DISK_GB`). The LLM is **remote**, so CPU is spent on the front-end + engine + **local
+embeddings** (fastembed / ONNX, warmed at boot). Give it **more RAM** if you also run in-character
+**image generation**, or run several concurrent games. A 2 vCPU / 2 GB box (the old default) is
+enough to boot but tends to stall under the embedding warm-up + a live turn — symptoms are a
+hung-feeling turn and a brief front-end 502 while the engine catches up.
+
 ## Usage
 
 The repo is **private** (ruling #17, 2026-06-10). You authenticate **once, ever**: the
@@ -210,7 +219,7 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 |---|---|---|
 | `CTID` | next free id | container id |
 | `CT_HOSTNAME` | `orwell` | hostname |
-| `CORES` / `RAM_MB` / `DISK_GB` | `2` / `2048` / `8` | resources |
+| `CORES` / `RAM_MB` / `DISK_GB` | `4` / `8192` / `12` | resources (recommended baseline 4 vCPU / 8 GB — see **Recommended specs**) |
 | `STORAGE` | first `rootdir` storage → `local-lvm` | CT rootfs |
 | `TEMPLATE_STORAGE` | first `vztmpl` storage → `local` | where the template is stored |
 | `TEMPLATE_NAME` / `TEMPLATE` | newest `debian-12-standard` | pin a specific template |
@@ -222,8 +231,8 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
 
 ```bash
-# fully non-interactive example
-GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
+# fully non-interactive example (the 4 vCPU / 8 GB baseline is the default — shown here explicitly)
+GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
   bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
 ```
 

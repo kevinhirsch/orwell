@@ -462,7 +462,7 @@ async function loadEndpoints() {
       const statusBadge = ep.status === 'empty'
         ? '<span class="admin-badge">no models</span>'
         : ep.online
-          ? `<span class="admin-badge">${visibleCount}/${totalCount} models enabled</span>`
+          ? `<span class="admin-badge adm-ep-model-count">${visibleCount}/${totalCount} models enabled</span>`
           : '<span class="admin-badge admin-badge-off">offline</span>';
       const justAddedClass = (_recentlyAddedEpId && String(ep.id) === _recentlyAddedEpId) ? ' adm-ep-just-added' : '';
       const category = ep.category || (_isLocalEndpoint(ep.base_url) ? 'local' : 'api');
@@ -732,12 +732,17 @@ async function _saveEpModelState(epId, panel) {
       credentials: 'same-origin',
       body: JSON.stringify({ hidden }),
     });
+    const enabled = total - hidden.length;
     const countLabel = panel.querySelector('.mcp-tools-count');
-    if (countLabel) countLabel.textContent = `${total - hidden.length}/${total} enabled`;
+    if (countLabel) countLabel.textContent = `${enabled}/${total} enabled`;
     const row = panel.closest('[data-adm-ep-id]');
     if (row) {
-      const badge = row.querySelector('.admin-badge');
-      if (badge && !badge.classList.contains('admin-badge-off')) badge.textContent = `${total - hidden.length}/${total} models enabled`;
+      // Target the COUNT badge specifically. A row can carry several
+      // `.admin-badge` spans (Image / endpoint-kind / status); the first one
+      // is not necessarily the count, so querying `.admin-badge` left the
+      // header count stale while the panel updated — two disagreeing counters.
+      const badge = row.querySelector('.adm-ep-model-count');
+      if (badge) badge.textContent = `${enabled}/${total} models enabled`;
     }
     if (settingsModule && typeof settingsModule.refreshAiModelEndpoints === 'function') {
       settingsModule.refreshAiModelEndpoints();

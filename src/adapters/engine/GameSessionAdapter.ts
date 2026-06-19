@@ -12,7 +12,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY } from "../../domain/house";
+import { HOUSE_ADJACENCY, HOUSE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -153,6 +153,12 @@ export class GameSessionAdapter implements GameSession {
    * witnessing, overhearing, and the player's `whereabouts()` read.
    */
   private presence: Map<EntityId, Room> | null = null;
+  /**
+   * Room TENURE (L21/L24) — consecutive presence ticks each houseguest has held their CURRENT room
+   * (0 = moved this tick). Bumped/reset in `presenceTick` alongside `presence`; grounds scene
+   * continuity in `whereabouts()` so the narrator voices who has lingered vs. who just arrived.
+   */
+  private presenceTenure: Map<EntityId, number> | null = null;
   /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
   private gameSeed: number | null = null;
   /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
@@ -338,6 +344,8 @@ export class GameSessionAdapter implements GameSession {
         age: npc.character.age,
         appearance: npc.character.appearance,
         presentation: npc.character.presentation,
+        // L28: voice them in their STORED observable register (blunt / deadpan / anxious…), not a default.
+        ...(npc.character.demeanor !== undefined ? { demeanor: npc.character.demeanor } : {}),
       },
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
@@ -438,6 +446,7 @@ export class GameSessionAdapter implements GameSession {
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
+      ...(this.presenceTenure ? { presenceTenure: Object.fromEntries(this.presenceTenure) as Record<EntityId, number> } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // A half-done casting interview is durable state too (0050/0030).
@@ -455,6 +464,7 @@ export class GameSessionAdapter implements GameSession {
     this.deals.load(core.deals ?? []);
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
+    this.presenceTenure = core.presenceTenure ? new Map(Object.entries(core.presenceTenure) as [EntityId, number][]) : null;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // 0051: restore the per-season portrait style anchor. On a legacy save that predates it, re-seed
     // from the game seed (so the look stays stable for a resumed game), or fall back to the first
@@ -574,7 +584,46 @@ export class GameSessionAdapter implements GameSession {
    */
   presenceTick(rng: RandomnessSource): void {
     if (!this.house) return;
-    this.presence = assignRooms(this.presenceActive(), this.presence, this.presenceDeps(rng));
+    const prev = this.presence;
+    const me = this.house.player.id;
+    let next: Map<EntityId, Room>;
+    if (!prev) {
+      // Premiere seating — the ONE time everyone (the player included) is placed at once.
+      next = assignRooms(this.presenceActive(), null, this.presenceDeps(rng));
+    } else {
+      // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them; their room changes
+      // only by an explicit move (`movePlayer`). The engine drives the NPCs, pinned around the held
+      // player so allies can still gravitate to wherever the player chose to be.
+      const playerRoom = prev.get(me);
+      const pinned = playerRoom ? new Map<EntityId, Room>([[me, playerRoom]]) : null;
+      next = assignRooms(this.presenceActive().filter((id) => id !== me), prev, this.presenceDeps(rng), pinned);
+    }
+    // L21/L24: room tenure — a houseguest who held their room this tick keeps accumulating; a mover
+    // resets to 0. Grounds scene continuity so the narrator knows who has lingered vs. just arrived.
+    const tenure = new Map<EntityId, number>();
+    for (const [id, room] of next) {
+      const stayed = prev?.get(id) === room;
+      tenure.set(id, stayed ? (this.presenceTenure?.get(id) ?? 0) + 1 : 0);
+    }
+    this.presence = next;
+    this.presenceTenure = tenure;
+  }
+
+  /**
+   * The player DIRECTS their own movement (L21/L24 — the player is a person, not engine-relocated):
+   * walk to any real room. Sets the player's room and resets their tenure; the engine holds them
+   * there (NPCs drive around them) until the next directed move. No-op for an unknown room or before
+   * presence is seeded. Returns the player's resulting whereabouts so the caller can voice the move.
+   */
+  movePlayer(room: string): WhereaboutsView | null {
+    if (!this.house || !this.presence) return null;
+    if (!(HOUSE_ROOMS as readonly string[]).includes(room)) return this.whereabouts();
+    const me = this.house.player.id;
+    if (this.presence.get(me) === room) return this.whereabouts(); // already there — nothing to move
+    this.presence.set(me, room as Room);
+    (this.presenceTenure ??= new Map()).set(me, 0); // a fresh arrival
+    this.persist();
+    return this.whereabouts();
   }
 
   /** The live occupancy ground truth (engine/registry wiring — never projected raw to the player). */
@@ -587,6 +636,7 @@ export class GameSessionAdapter implements GameSession {
     if (!this.presence) return;
     const active = new Set(this.presenceActive());
     for (const id of [...this.presence.keys()]) if (!active.has(id)) this.presence.delete(id);
+    if (this.presenceTenure) for (const id of [...this.presenceTenure.keys()]) if (!active.has(id)) this.presenceTenure.delete(id);
   }
 
   whereabouts(): WhereaboutsView | null {
@@ -602,10 +652,15 @@ export class GameSessionAdapter implements GameSession {
       return out;
     };
     // The player's room + each ADJACENT room only — what they could see or hear themselves.
+    const present = inRoom(room);
     return {
       room,
-      present: inRoom(room),
+      present,
       nearby: (HOUSE_ADJACENCY.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
+      // L21/L24: duration — the player's tenure in this room + each companion's, so the narrator
+      // voices continuity (who has lingered with you vs. who just walked in) instead of resetting.
+      turnsHere: this.presenceTenure?.get(me) ?? 0,
+      companions: present.map((p) => ({ ...p, turnsHere: this.presenceTenure?.get(p.id) ?? 0 })),
     };
   }
 
@@ -1727,6 +1782,7 @@ export class GameSessionAdapter implements GameSession {
       return {
         started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
         ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
+        whereabouts: null,
         player: null, house: [], casting: castingStatusOf(this.intake),
       };
     }
@@ -1752,6 +1808,9 @@ export class GameSessionAdapter implements GameSession {
           players: (this.live?.vetoField ?? []).map((id) => ({ id, name: this.nameOf(id) })), // R9-AGENCY-1: the drawn six
         },
       },
+      // L21/L24: the player's live whereabouts (room, who's with them + tenure, adjacent rooms) so the
+      // narrator voices the REAL, persistent occupancy the engine drives — never invented positions.
+      whereabouts: this.whereabouts(),
       week: this.week,
       phase: this.phase,
       moment,
@@ -1791,6 +1850,13 @@ export class GameSessionAdapter implements GameSession {
         age: n.character.age,
         appearance: n.character.appearance,
         presentation: n.character.presentation,
+        // L28: the concrete, diverse, PERSISTED backstory facets — the narrator voices the STORED
+        // vocation/hometown instead of inventing (and mirroring the player's). Public, Vault-free.
+        ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
+        ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
+        // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
+        // is not a room of identical warm professionals. Public, Vault-free.
+        ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

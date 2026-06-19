@@ -85,9 +85,14 @@ body[data-game-build].ow-casting-headshot-open .chat-container.welcome-active .c
 /* keep the welcome splash above the casting card so the logo is never occluded */
 body[data-game-build].ow-casting-headshot-open #welcome-screen { z-index: 3; }
 
-/* ── D7: game turns always act — the Agent|Chat mode toggle invites the
-      broken tool-less mode while a game is live. ── */
-body[data-game-build][data-game-active="1"] .mode-toggle { display: none !important; }
+/* ── D7 / L9: game turns always act — the Agent|Chat mode toggle invites the
+      broken tool-less mode. Play here is ALWAYS hybrid (the player can chat OOC,
+      role-play in character, and the agent runs the engine tools every turn), so
+      the switch is meaningless. D7 hid it only while a game was live; L9 widens
+      that to the whole game build (casting + reunion + free chat included) so the
+      dead control never appears. The full inherited workspace (no data-game-build)
+      keeps the toggle. ── */
+body[data-game-build] .mode-toggle { display: none !important; }
 
 /* C31/S5: the game build has no memory/skills/notes/tasks/documents/gallery/calendar —
    their Danger-Zone wipe rows are dead surface. Scoped on the server-injected body flag,
