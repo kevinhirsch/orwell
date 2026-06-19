@@ -26,18 +26,65 @@ jobs:
       - run: npm ci
       - run: npm run test:ci
 
+  # Path filter for the heavy-sims lane. The heavy simulations are calibration end-to-end runs:
+  # their outcomes can only change when ENGINE-relevant inputs change. So we run them only when a
+  # PR touches sources/tests/lockfile/test-config or this workflow itself — a docs-only or
+  # frontend-only PR cannot move a calibration result and skips the lane (fast green).
+  #
+  # `should-run` is computed once here and consumed by `heavy-sims` (its `if:`) and by
+  # `heavy-sims-gate` (which ALWAYS runs and reports the required-check status — green on skip).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      heavy: ${{ steps.filter.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the base ref to diff against on a PR; on push, HEAD~1 is enough.
+          fetch-depth: 0
+      - name: detect calibration-relevant changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # On a PR, diff the merge base..head; on push, diff against the previous commit.
+          if [ -n "${BASE_SHA:-}" ]; then
+            base="$BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
+          else
+            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "Diffing against base: $base"
+          # Files that can affect simulation outcomes. Anything outside these (frontend/**,
+          # docs/**, deploy/**, unrelated) cannot move a calibration result.
+          if git diff --name-only "$base" HEAD \
+              | grep -E '^(src/|tests/|package\.json$|package-lock\.json$|vitest\.config\.ts$|cucumber\.cjs$|\.github/workflows/ci\.yml$)' ; then
+            echo "heavy=true" >> "$GITHUB_OUTPUT"
+            echo "==> calibration-relevant changes detected: heavy-sims WILL run"
+          else
+            echo "heavy=false" >> "$GITHUB_OUTPUT"
+            echo "==> no calibration-relevant changes: heavy-sims SKIPPED (gate reports green)"
+          fi
+
   # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
   # scope). Plays the full-game UAT (12+5 seeds), the juryReach calibration gate (20 passive
   # seasons), and the calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion —
   # the same files `test:ci` excludes — so together with `test` the whole functional suite still
   # runs exactly once per CI run, just across concurrent runners.
   #
-  # These two files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
+  # These files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
   # CONCURRENTLY on the SAME runner inside `npm test`, so they shared 4 vCPUs and contended. Here
   # they fan out one-file-per-runner via the matrix, so each gets a dedicated runner with no
   # cross-file contention — the lane's wall is then the single slowest file, the irreducible floor.
   # The files import src/ directly (vitest transpiles on the fly), so no `npm run build` is needed.
+  #
+  # PATH-GATED (see `changes`): runs only when calibration-relevant files change. On a skip the
+  # matrix jobs don't run at all — `heavy-sims-gate` below is what reports the green status so a
+  # required check never deadlocks a docs-only/frontend-only PR.
   heavy-sims:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,6 +99,34 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:heavy:${{ matrix.sim }}
+
+  # Stable required-check anchor for the heavy-sims lane. ALWAYS runs (no path gate), so its name
+  # always resolves to a conclusion. It passes when heavy-sims succeeded OR when heavy-sims was
+  # skipped (no calibration-relevant change), and fails only if any heavy-sims matrix leg failed
+  # or was cancelled. Point branch protection at THIS job ("heavy-sims-gate"), not the matrix legs,
+  # so a docs-only PR goes green without the lane ever running.
+  heavy-sims-gate:
+    needs: [changes, heavy-sims]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: resolve heavy-sims outcome
+        env:
+          HEAVY_NEEDED: ${{ needs.changes.outputs.heavy }}
+          HEAVY_RESULT: ${{ needs.heavy-sims.result }}
+        run: |
+          set -euo pipefail
+          echo "heavy needed: $HEAVY_NEEDED ; heavy-sims result: $HEAVY_RESULT"
+          # `result` is one of success | failure | cancelled | skipped.
+          case "$HEAVY_RESULT" in
+            success|skipped)
+              echo "heavy-sims gate: PASS"
+              ;;
+            *)
+              echo "heavy-sims gate: FAIL (one or more heavy-sims legs did not succeed)"
+              exit 1
+              ;;
+          esac
 
   # Coverage gate (B70/audit C8): per-directory branch thresholds in vitest.config.ts —
   # coverage can no longer silently regress while the functional gate stays green.
