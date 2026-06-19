@@ -148,6 +148,31 @@ def test_game_tool_nodes_suppress_raw_payloads():
     assert "_beatOut || json.tool" in js
 
 
+def test_chatjs_imports_every_helper_it_calls():
+    # REGRESSION GUARD (critical): #314 added isGameBuild() CALLS to chat.js but never imported
+    # it, so handleChatSubmit threw `ReferenceError: isGameBuild is not defined` in the send path
+    # — the player could not send ANY message in the game build (the chat POST never fired). The
+    # source-string immersion tests asserted the CALLS but not the IMPORT, and the browser smoke
+    # only checks page errors at LOAD time, never after a send. Every isGameBuild() user must
+    # import it. (See test_send_path_has_no_undefined_refs in the browser smoke for the runtime guard.)
+    chat = _read("static", "js", "chat.js")
+    if "isGameBuild(" in chat:
+        assert "isGameBuild" in chat[:chat.index("isGameBuild(")] and "from './orwellToolBeats.js'" in chat
+        # specifically: isGameBuild rides the existing orwellToolBeats import
+        import re
+        imp = re.search(r"import\s*\{[^}]*\bisGameBuild\b[^}]*\}\s*from\s*'\./orwellToolBeats\.js'", chat)
+        assert imp, "chat.js calls isGameBuild() but does not import it from orwellToolBeats.js"
+
+
+def test_streaming_tts_flag_is_function_scoped():
+    # REGRESSION GUARD: streamingTTS was a `const` inside the stream-read block but READ in the
+    # error/abort cleanup branch — a `ReferenceError` on any early submit error that masked the real
+    # failure. It must be declared at the handleChatSubmit function scope (a hoisted `let`).
+    chat = _read("static", "js", "chat.js")
+    assert "let streamingTTS = false;" in chat
+    assert "const streamingTTS =" not in chat  # never re-shadow it in an inner block
+
+
 def test_game_build_never_labels_messages_with_the_model_name():
     # Immersion (visual audit): every AI message was labelled with the raw LLM model name
     # ("deepseek-v4-pro → …") — the narrator is the show, not a model. The game build uses a

@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, isGameBuild } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -313,7 +313,12 @@ import { isNarrow } from './platform.js';
     const session = sessionModule.getSessions().find(s => s.id === sessionId);
     
     const submitBtn = document.querySelector('.send-btn');
-    
+    // Streaming-TTS flag, hoisted to the function scope: it is SET when the stream starts (below)
+    // but also READ in the error/abort cleanup branch — a block-scoped `const` there threw
+    // "streamingTTS is not defined" on ANY early submit error, masking the real failure and
+    // blowing up the whole submit (no chat POST ever fired). Declare once here so both see it.
+    let streamingTTS = false;
+
     // If compare is active, stop all compare streams
     if (window.compareModule && window.compareModule.isActive()) {
       window.compareModule.handleCompareSubmit();
@@ -1090,8 +1095,8 @@ import { isNarrow } from './platform.js';
       let metrics = null;
       let isThinking = false;
       let thinkingStartTime = null;
-      // Streaming TTS: synthesize sentence-by-sentence during streaming
-      const streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
+      // Streaming TTS: synthesize sentence-by-sentence during streaming (assigns the hoisted flag).
+      streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)

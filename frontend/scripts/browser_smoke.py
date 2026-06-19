@@ -162,6 +162,25 @@ def main() -> int:
             check(btn_out.get("gone") is True, "dismiss button removes the holding card")
             check(btn_out.get("inertLeft") == 0, "no inert residue after button dismissal")
 
+            # SEND-PATH RUNTIME GUARD (regression: #314 broke sending — chat.js called isGameBuild()
+            # without importing it, so handleChatSubmit threw `ReferenceError: isGameBuild is not
+            # defined` BEFORE the chat POST fired; the player could not send ANY message in the game
+            # build. Load-time error capture missed it because the throw is in the submit path.) We
+            # actually SUBMIT and assert the handler ran clean: a chat POST fired AND no new
+            # ReferenceError appeared. (The backend LLM may not answer in the smoke — we only assert
+            # the client send path is wired, not a reply.)
+            posted: list[str] = []
+            page.on("request", lambda r: posted.append(r.url)
+                    if r.method == "POST" and "chat" in r.url else None)
+            errs_before = len(page_errors)
+            page.fill("#message", "Smoke send-path check — does this submit?")
+            page.wait_for_timeout(250)
+            page.click(".send-btn")
+            page.wait_for_timeout(1800)
+            new_ref_errs = [e for e in page_errors[errs_before:] if "is not defined" in e or "ReferenceError" in e]
+            check(not new_ref_errs, f"send path: no ReferenceError on submit ({new_ref_errs[:3]})")
+            check(any("chat" in u for u in posted), "send path: clicking send fires a chat POST (handler reached the fetch)")
+
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
               const vis = (k) => {
