@@ -396,7 +396,22 @@ export class Orchestrator {
     // player legitimately holds it through a real pathway (B27b: gossip/overhears/tellings surface
     // sanctioned, traceable beliefs; flagging those would refuse every legal propagation). The 0001
     // sentinel canary remains the precise guard for content with NO pathway to the player.
-    const hidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
+    // Hidden contents are APPEND-ONLY (a hidden event is never mutated/removed — the same contract
+    // `trustEventPrefix` rests on) and a vault-leak fault is TERMINAL (it rolls back, never commits) —
+    // so a committed baseline holds ZERO unsanctioned hidden content in its view. On the fast path the
+    // baseline's hidden PREFIX was therefore already verified leak-free; we re-scan only the hidden
+    // contents NEW since the baseline against the full current view (O(Δ) rather than O(hidden×view),
+    // the per-season quadratic this guard's `includes` scan was — CPU-profiled as ~88% of checkpoint
+    // time). The full set is re-scanned on the first commit and at least every R3_FULL_CHECK_EVERY
+    // commits (the SAME periodic belt-and-suspenders window `isSuperset`'s prefix trust uses), so the
+    // rare case of an OLD hidden content newly surfacing verbatim in a re-rendered view is bounded
+    // identically to the superset guard the owner sanctioned. The 0001 sentinel canary + the structural
+    // Vault Wall remain the precise guards; this is the orchestrator's defense-in-depth.
+    const allHidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
+    const baselineHiddenCount = opts.trustEventPrefix === true
+      ? baseline.events.reduce((n, e) => n + (e.hidden ? 1 : 0), 0)
+      : 0;
+    const hidden = baselineHiddenCount > 0 ? allHidden.slice(baselineHiddenCount) : allHidden;
     if (hidden.length > 0) {
       const view = playerSweep(sandbox);
       const playerFacts = (candidate.knowledge?.knowledge?.[PLAYER] ?? [])
@@ -424,7 +439,7 @@ export class Orchestrator {
       phase: core.phase,
       lastAdvanceAt: when,
       lastTrigger: trigger,
-      eventCount: sandbox.engine.events.query().length,
+      eventCount: sandbox.engine.events.count(),
       lastIntegrity: integrity,
       faults,
       circuitOpen: this.circuitOpen(user),
@@ -448,7 +463,7 @@ export class Orchestrator {
       phase: core.phase,
       lastAdvanceAt: null,
       lastTrigger: null,
-      eventCount: this.registry.sandboxFor(user).engine.events.query().length,
+      eventCount: this.registry.sandboxFor(user).engine.events.count(),
       lastIntegrity: "ok",
       faults: [],
       circuitOpen: false,
@@ -467,7 +482,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // there is NO ONE to scheme (the tick is gated upstream; this is the belt to that suspender).
   const evicted = new Set(core.live?.evictionOrder ?? []);
   const ids = (core.house?.npcs ?? []).filter((n) => !evicted.has(n.id)).map((n) => n.id);
-  const before = sandbox.engine.events.query().length;
+  const before = sandbox.engine.events.count();
 
   // House presence (0049): the tick re-seats the house FIRST (seeded, affinity-clustered, adjacent
   // moves only), so this stretch's scenes happen somewhere and overhears have ground truth.
@@ -576,7 +591,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // crosses but a class-keyed paraphrase belief (never the premise, never a number — §7).
   sandbox.session.scheduleStoryThreads(rng);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
-  return sandbox.engine.events.query().length - before;
+  return sandbox.engine.events.count() - before;
 }
 
 function playerSweep(sandbox: UserSandbox): string {

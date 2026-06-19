@@ -28,14 +28,34 @@
  * `npc:15`) — redundant with the token boundary, kept as defence in depth.
  */
 export function humanizeIds(content: string, entities: ReadonlyArray<{ id: string; name: string }>): string {
-  let out = content;
-  for (const e of [...entities].sort((a, b) => b.id.length - a.id.length)) {
-    const escaped = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // (?<![\w:]) / (?![\w:]) : the id must stand alone, not be a fragment of a longer token
-    // (so the word "players" survives, and "npc:1" never matches inside "npc:15").
-    out = out.replace(new RegExp(`(?<![\\w:])${escaped}(?![\\w:])`, "g"), e.name);
-  }
-  return out;
+  return makeIdHumanizer(entities)(content);
+}
+
+/**
+ * Build a REUSABLE id→name substituter for a fixed roster. The matcher compiles ONCE (a single
+ * alternation regex over all ids) and then applies to many strings — the hot player-projection path
+ * cleans the whole growing event log per commit, so re-compiling 16 per-id regexes per event was a
+ * dominant per-season cost (CPU-profiled). The output is byte-identical to the prior per-id loop:
+ *
+ *   - longest id first in the alternation ⇒ a short id can never match inside a longer one
+ *     (`npc:1` never clobbers `npc:15`) — the same guarantee the prior longest-first sort gave;
+ *   - the same `(?<![\w:]) … (?![\w:])` whole-token boundary, so the word "players" is never touched;
+ *   - one left-to-right scan with non-overlapping matches reproduces the sequential `replace` result —
+ *     names carry no id tokens, so an earlier substitution can never create a new match (same as before).
+ */
+export function makeIdHumanizer(
+  entities: ReadonlyArray<{ id: string; name: string }>,
+): (content: string) => string {
+  if (entities.length === 0) return (content) => content;
+  const byId = new Map<string, string>();
+  for (const e of entities) byId.set(e.id, e.name);
+  // Longest id first so the alternation prefers the longer token at any position (matches the prior sort).
+  const alternation = [...entities]
+    .sort((a, b) => b.id.length - a.id.length)
+    .map((e) => e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const re = new RegExp(`(?<![\\w:])(?:${alternation})(?![\\w:])`, "g");
+  return (content) => content.replace(re, (m) => byId.get(m) ?? m);
 }
 
 /**
@@ -68,7 +88,19 @@ export function humanizeForPlayer(
   content: string,
   entities: ReadonlyArray<{ id: string; name: string }>,
 ): string {
-  return tidyPathwaySlugs(humanizeIds(content, entities));
+  return makeForPlayerScrub(entities)(content);
+}
+
+/**
+ * A REUSABLE player-facing content scrub for a fixed roster (`humanizeIds` then `tidyPathwaySlugs`).
+ * Compile once, apply to many strings — the visible-state projection scrubs the whole event log per
+ * read, so the id matcher must not recompile per event. Byte-identical to `humanizeForPlayer` per call.
+ */
+export function makeForPlayerScrub(
+  entities: ReadonlyArray<{ id: string; name: string }>,
+): (content: string) => string {
+  const humanize = makeIdHumanizer(entities);
+  return (content) => tidyPathwaySlugs(humanize(content));
 }
 
 /**

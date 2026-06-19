@@ -137,6 +137,15 @@ export function toGameState(snap: SessionSnapshot): GameState {
   const characters: Record<EntityId, PersistedCharacter> = {};
   const souls: Record<EntityId, PersistedSoul> = {};
   const all = snap.house ? [snap.house.player, ...snap.house.npcs] : [];
+  // Group the edges by holder in ONE pass (preserving order) instead of re-`filter`ing the whole edge
+  // list per houseguest — the old `snap.relationships.filter(e => e.from === hg.id)` inside the loop was
+  // O(houseguests × edges). The grouped arrays are byte-identical to the per-holder filters (same order).
+  const beliefsByHolder = new Map<EntityId, EdgeRecord[]>();
+  for (const e of snap.relationships) {
+    let list = beliefsByHolder.get(e.from);
+    if (!list) { list = []; beliefsByHolder.set(e.from, list); }
+    list.push(e);
+  }
   for (const hg of all) {
     characters[hg.id] = {
       archetype: hg.character.archetype,
@@ -164,7 +173,7 @@ export function toGameState(snap: SessionSnapshot): GameState {
       // The live emotional trajectory (0041) — persisted + counted for non-degradation (0007/0030).
       emotionalHistory: [...(hg.soul.emotionalHistory ?? [])],
       memory: [...hg.soul.memory],
-      relationshipBeliefs: snap.relationships.filter((e) => e.from === hg.id),
+      relationshipBeliefs: beliefsByHolder.get(hg.id) ?? [],
     };
   }
   // The knowledge layer is now part of the snapshot (B40), so the non-degradation checkpoint (0031)

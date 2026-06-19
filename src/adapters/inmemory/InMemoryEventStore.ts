@@ -33,11 +33,22 @@ export class InMemoryEventStore implements EventStore {
   }
 
   query(filter: EventQuery = {}): GameEvent[] {
+    // Fast path for the dominant call: no filter ⇒ a single fresh shallow copy (callers may sort/
+    // splice the result, so we never hand back the live backing array). Byte-identical to the
+    // `.filter(() => true)` it replaces, but without the per-element predicate dispatch.
+    if (filter.witnessedBy === undefined && filter.hidden === undefined && filter.type === undefined) {
+      return this.events.slice();
+    }
     return this.events.filter((e) => {
       if (filter.witnessedBy !== undefined && classify(e, filter.witnessedBy) !== "VISIBLE") return false;
       if (filter.hidden !== undefined && e.hidden !== filter.hidden) return false;
       if (filter.type !== undefined && e.type !== filter.type) return false;
       return true;
     });
+  }
+
+  /** O(1) count of the unfiltered log — no array allocation (the hot-path id/ts/count seam). */
+  count(): number {
+    return this.events.length;
   }
 }
