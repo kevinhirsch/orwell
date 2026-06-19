@@ -17,6 +17,7 @@ import { defineConfig } from "vitest/config";
 export const HEAVY_SIM_FILES = [
   "tests/uat/**",
   "tests/property/juryReach.property.test.ts",
+  "tests/property/calibrationGradient.property.test.ts",
 ];
 
 export default defineConfig({
