@@ -167,6 +167,41 @@ def test_sourcepin_g10_cast_composes_the_kit():
     assert '"Escape"' not in js                      # the kit arbiter owns Escape now
 
 
+# ── viewport re-clamp on browser resize (the DWE windowing tail) ───────────
+# The kit clamps on open/drag/resize and the slot engine re-clamps on its own
+# 'resize' listener (post-#345); the remaining gap was a FLOATING window that had
+# no path to re-clamp when the browser viewport shrinks. ONE global, rAF-debounced
+# window 'resize' listener over the open-window stack closes it. (Live behavior —
+# a near-edge window re-clamping into a shrunken viewport — is exercised for real
+# in browser_smoke.py; these source-pin the wiring.)
+
+
+def test_sourcepin_kit_reclamps_open_windows_on_viewport_resize():
+    js = _read("static", "js", "orwellWindow.js")
+    # a single global window resize listener (not per-instance) is wired
+    assert "window.addEventListener('resize'" in js
+    # it is debounced (rAF, falling back to a ~120ms timer) — never a layout thrash
+    assert "requestAnimationFrame" in js
+    # the per-window re-clamp method exists and is driven over the open-window stack
+    assert "_reclamp()" in js
+    assert "reclampOpenWindows" in js
+    # it skips docked + minimized windows (the rail owns docked; minimized are hidden)
+    reclamp = js[js.index("_reclamp() {"):js.index("_reclamp() {") + 1600]
+    assert "this._docked" in reclamp and "isMinimized()" in reclamp
+    # all three jobs: slot re-clamp (restack), position clamp into the viewport (full
+    # containment when it fits), and shrink-to-fit respecting the window's own minimums.
+    assert "this._slot.restack()" in reclamp
+    assert "window.innerWidth - r.width" in reclamp and "window.innerHeight - r.height" in reclamp
+    assert "this.o.minWidth" in reclamp and "this.o.minHeight" in reclamp
+
+
+def test_smoke_exercises_resize_reclamp_for_real():
+    smoke = _read("scripts", "browser_smoke.py")
+    assert "resize re-clamp: a floating window re-anchors INTO the shrunken viewport" in smoke
+    assert "ow-reclamp-smoke" in smoke
+    assert "new Event('resize')" in smoke
+
+
 # ── A7 [ruling #19 / E97 follow-up] — the Windows-7 fly-out ────────────────
 # The shared animation CONTRACT exposes DISTINCT minimize vs. close keyframes;
 # prefers-reduced-motion removes them. (The live motion is exercised in

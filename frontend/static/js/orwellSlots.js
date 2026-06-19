@@ -112,11 +112,18 @@
   // Clamp a left/top pair into the viewport (S11/E91): a stacked window can NEVER
   // be positioned off-screen — top above the viewport, or left/right/bottom out of
   // view — no matter how many panels share a slot or how big the saved offset is.
-  // At least a sliver (4px margin, ≥200px of a tall panel's top) stays on-screen.
+  // When the panel FITS, the WHOLE of it is kept on-screen (pull left/top back so the
+  // right/bottom edges land inside too) — so a viewport shrink re-anchors a dragged
+  // panel fully into view. Only when the panel is itself bigger than the viewport do
+  // we fall back to the sliver guarantee (≥200px of a tall panel's top, 4px margin).
   function clampPos(left, top, w, h) {
+    const maxLeft = window.innerWidth - w - 4;
+    const maxTop = window.innerHeight - h - 4;
     return {
-      left: Math.max(4, Math.min(window.innerWidth - w - 4, left)),
-      top: Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, top)),
+      left: maxLeft >= 4 ? Math.max(4, Math.min(maxLeft, left))
+        : Math.max(4, Math.min(window.innerWidth - 60 - 4, left)),       // wider than viewport
+      top: maxTop >= 4 ? Math.max(4, Math.min(maxTop, top))
+        : Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, top)),  // taller than viewport
     };
   }
 

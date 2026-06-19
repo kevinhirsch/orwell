@@ -354,6 +354,48 @@ export class OrwellWindow {
     if (this._slot) this._slot.saveDragOffset(rect);
   }
 
+  // Re-anchor + clamp this window into the CURRENT viewport (the global resize
+  // listener calls this for every open, un-minimized, non-docked window). Cheap:
+  // one rect read, at most a few style writes. Docked windows are skipped by the
+  // caller (the rail owns them); minimized ones are skipped too (hidden, no point).
+  //   1. slotted windows re-run the slot re-clamp (restackSlot already clamps,
+  //      post-#345) so they re-anchor + clamp into the new viewport;
+  //   2. a floating/dragged window clamps its raw left/top via clampPos;
+  //   3. a window now LARGER than the viewport shrinks to fit (viewport − 8),
+  //      respecting its own minWidth/minHeight, then re-clamps its position.
+  _reclamp() {
+    if (!this.el || this._docked || this.isMinimized()) return;
+    if (this.el.style.display === 'none') return;
+    // 3. Shrink-to-fit FIRST so the post-shrink size drives the position clamp.
+    const r0 = this.el.getBoundingClientRect();
+    const maxW = window.innerWidth - 8;
+    const maxH = window.innerHeight - 8;
+    if (r0.width > maxW) {
+      this.el.style.width = Math.max(this.o.minWidth, maxW) + 'px';
+      this.el.style.maxWidth = 'none';
+    }
+    if (r0.height > maxH) {
+      this.el.style.height = Math.max(this.o.minHeight, maxH) + 'px';
+      this.el.style.maxHeight = 'none';
+    }
+    // 1. Slotted: let the slot engine re-anchor + clamp (it runs clampPos itself).
+    if (this._slot) { this._slot.restack(); }
+    // 2. Clamp this window's own position into the viewport. clampPos only guarantees
+    //    a SLIVER stays on-screen (≥200px of a tall window's top); on a viewport SHRINK
+    //    we want the WHOLE window in view whenever it now fits, so pull left/top back so
+    //    the right/bottom edges land inside too (never past the 4px margin on either side).
+    const m = 4;
+    const r = this.el.getBoundingClientRect();
+    let left = Math.max(m, Math.min(window.innerWidth - r.width - m, r.left));
+    let top = Math.max(m, Math.min(window.innerHeight - r.height - m, r.top));
+    if (left < m) left = m;   // wider than the viewport (already min-clamped above) — pin left
+    if (top < m) top = m;     // taller than the viewport — pin top
+    if (Math.abs(left - r.left) > 0.5 || Math.abs(top - r.top) > 0.5) {
+      this.el.style.left = left + 'px'; this.el.style.top = top + 'px';
+      this.el.style.right = 'auto'; this.el.style.bottom = 'auto'; this.el.style.transform = 'none';
+    }
+  }
+
   _onTitlebarKey(e) {
     const STEP = 16;
     const dirs = { ArrowLeft: [-STEP, 0], ArrowRight: [STEP, 0], ArrowUp: [0, -STEP], ArrowDown: [0, STEP] };
@@ -566,6 +608,31 @@ export function dismissTop() {
 }
 
 export function stackIds() { return _stack.map((w) => w.o.id); }
+
+// ── viewport re-clamp on browser resize (DWE windowing tail) ───────────────
+// The kit clamps on open/drag/resize, and the slot engine re-clamps every entry
+// on its own 'resize' listener (post-#345). The remaining gap: a FLOATING/dragged
+// kit window had no path to re-clamp when the BROWSER viewport shrinks, so it could
+// strand partially off-screen until touched. ONE global, rAF-debounced listener
+// over the open-window stack closes it — for every OPEN, un-minimized, non-docked
+// window: re-anchor + clamp (slotted via restackSlot, floating via clampPos) and
+// shrink any window now larger than the viewport to fit. Cheap (one frame coalesces
+// a resize-drag burst, no per-window listeners to tear down) and it leaves docked
+// windows (the rail owns them) and minimized ones (hidden) alone.
+let _reclampRaf = 0;
+function reclampOpenWindows() {
+  _reclampRaf = 0;
+  // Snapshot: _reclamp() may write styles that re-enter the slot observer; iterate
+  // a copy so a concurrent splice (a window closing mid-pass) can't skip entries.
+  for (const w of _stack.slice()) {
+    try { w._reclamp(); } catch (_) {}
+  }
+}
+function onViewportResize() {
+  if (_reclampRaf) return;
+  _reclampRaf = (window.requestAnimationFrame || ((fn) => setTimeout(fn, 120)))(reclampOpenWindows);
+}
+window.addEventListener('resize', onViewportResize);
 
 // The .ow-* family is page-global chrome (the .ow-dismiss affordance is used by
 // non-window surfaces that may render before any window exists) — inject at load.

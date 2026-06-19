@@ -643,6 +643,59 @@ def main() -> int:
                           "window._owStackB && window._owStackB.destroy();")
             page.wait_for_timeout(120)
 
+            # VIEWPORT RE-CLAMP ON BROWSER RESIZE (the DWE windowing tail): a FLOATING
+            # window dragged near an edge must re-clamp into a SHRUNKEN viewport when the
+            # browser window resizes — the kit clamps on open/drag/resize but had no path
+            # to react to a viewport shrink, so a window could strand partially off-screen
+            # until touched. Open a window, shove it to the bottom-right corner, then shrink
+            # window.innerWidth/innerHeight (real shim) + dispatch 'resize', and assert its
+            # bounding rect stays inside the new viewport. The original innerWidth/Height are
+            # restored after so later checks see the true viewport.
+            reclamp = page.evaluate("""async () => {
+              const realW = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+              const realH = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+              const trueW = window.innerWidth, trueH = window.innerHeight;
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-reclamp-smoke', title: 'Reclamp Test', slot: 'bottom-right',
+                slotKey: 'owreclamp', content: '<div style="width:300px;height:240px">x</div>',
+                icon: '' });
+              w.open();
+              window._owReclamp = w;
+              const el = document.getElementById('ow-reclamp-smoke');
+              // Drag it (via the real slot drag-drop API) to the far bottom-right corner
+              // of the CURRENT (large) viewport — the genuine "dragged near an edge" case.
+              const r0 = el.getBoundingClientRect();
+              if (w._slot) w._slot.saveDragOffset({
+                left: trueW - r0.width - 6, top: trueH - r0.height - 6,
+                width: r0.width, height: r0.height });
+              const before = el.getBoundingClientRect().toJSON();
+              // Shrink the viewport hard, then fire the real resize event.
+              const newW = 520, newH = 420;
+              Object.defineProperty(window, 'innerWidth', { value: newW, configurable: true });
+              Object.defineProperty(window, 'innerHeight', { value: newH, configurable: true });
+              window.dispatchEvent(new Event('resize'));
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+              await new Promise(r => setTimeout(r, 200));  // let the slot observer settle
+              const after = el.getBoundingClientRect().toJSON();
+              // restore the true viewport so downstream checks are unaffected — and
+              // re-fire resize so any width-driven listeners recompute at the real size.
+              if (realW) Object.defineProperty(window, 'innerWidth', realW);
+              if (realH) Object.defineProperty(window, 'innerHeight', realH);
+              window._owReclamp.close();
+              window.dispatchEvent(new Event('resize'));
+              await new Promise(r => requestAnimationFrame(r));
+              return { before, after, newW, newH };
+            }""")
+            a = reclamp["after"]
+            check(a["right"] <= reclamp["newW"] + 1 and a["bottom"] <= reclamp["newH"] + 1
+                  and a["left"] >= -1 and a["top"] >= -1,
+                  f"resize re-clamp: a floating window re-anchors INTO the shrunken viewport "
+                  f"(right={a['right']:.0f}<= {reclamp['newW']}, bottom={a['bottom']:.0f}<= {reclamp['newH']})")
+            check(a["width"] <= reclamp["newW"] - 7 and a["height"] <= reclamp["newH"] - 7,
+                  f"resize re-clamp: an over-sized window shrinks to fit the viewport "
+                  f"(w={a['width']:.0f}, h={a['height']:.0f} <= viewport-8)")
+            page.wait_for_timeout(120)
+
             # 0054 Phase 2 — DOCKED kit mode: a dockable window can render its full
             # body INTO #gadget-rail-body (opting OUT of position:fixed + the slot
             # geometry — ONE position system), the docked flag persists per-window,

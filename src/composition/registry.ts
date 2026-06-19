@@ -145,8 +145,8 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // 0059/L40 — a showmance that becomes VISIBLE is a PUBLIC house fact: record it as a player-witnessed
   // (non-hidden) event so it enters the player's knowledge and the narrator may voice the romance.
   session.setOnShowmanceSurfaced((sm) => engine.events.record({
-    id: `showmance:${sm.a}:${sm.b}:${engine.events.query().length}`,
-    ts: engine.events.query().length,
+    id: `showmance:${sm.a}:${sm.b}:${engine.events.count()}`,
+    ts: engine.events.count(),
     type: "house-event",
     initiator: sm.a,
     witnessSet: [PLAYER, sm.a, sm.b],
@@ -202,7 +202,7 @@ function buildUserSandbox(user = "default"): UserSandbox {
     // A living NPC confidant who is NOT the subject relays it (someone with a real pathway to the player).
     const confidant = core.house.npcs.map((n) => n.id).find((id) => id !== subject && !evicted.has(id));
     if (!confidant) return false;
-    const factId = `thread-belief:${subject}:${engine.events.query().length}`;
+    const factId = `thread-belief:${subject}:${engine.events.count()}`;
     // The confidant first HOLDS the rumor (an origin belief), so the told-by pathway is content-anchored.
     engine.knowledge.seedBelief(confidant, { content: rumor, originalContent: rumor, factId, confidence: 0.6, hops: 1, distortion: 1, source: confidant }, "origin");
     const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: rumor, subject, confidence: 0.5 }, `told-by:${confidant}`);
@@ -211,8 +211,8 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
-    id: `season:${engine.events.query().length}`,
-    ts: engine.events.query().length,
+    id: `season:${engine.events.count()}`,
+    ts: engine.events.count(),
     type: "house-event",
     initiator: ev.participants[0] ?? PLAYER,
     witnessSet: [PLAYER, ...ev.participants.filter((p) => p !== PLAYER)],
@@ -222,9 +222,9 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // One-off witnessed events (a deal made / a promise broken, 0039). Hidden iff the player is NOT
   // a witness — so a player-party deal is their knowledge, never the Vault.
   session.setOnPlayerEvent((content, witnessSet, type = "deal") => {
-    const id = `deal:${engine.events.query().length}`;
+    const id = `deal:${engine.events.count()}`;
     engine.events.record({
-      id, ts: engine.events.query().length, type,
+      id, ts: engine.events.count(), type,
       initiator: witnessSet[0] ?? PLAYER, witnessSet: [...witnessSet],
       hidden: !witnessSet.includes(PLAYER), content,
     });
