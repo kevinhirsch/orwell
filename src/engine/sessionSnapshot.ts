@@ -105,7 +105,26 @@ export function cloneSession<T>(value: T): T {
  * across a restart. Characters map to the static baseline; souls to the dynamic
  * (deepening) layer; relationships are the hidden beliefs.
  */
+/**
+ * R3 — memoize the projection by snapshot IDENTITY. The integrity checkpoint (orchestrator) projects
+ * the BASELINE and the CANDIDATE every commit, and the candidate of one commit is reused as the exact
+ * baseline object of the next (orchestrator keeps it), and again as the supplementary off-screen tick's
+ * baseline — so the same snapshot object is projected up to three times. `toGameState` is a PURE
+ * function of its input, and snapshots are immutable once exported, so caching by object identity is
+ * provably correct and cuts the redundant O(events) re-projection from the per-commit cost. A WeakMap
+ * keeps it leak-free: an entry vanishes when the snapshot is collected.
+ *
+ * CONTRACT: callers MUST treat the result as READ-ONLY (the checkpoint's isSuperset/counts/playerSweep
+ * all are). A mutating caller would corrupt a later memo hit — none exists, and none should.
+ *
+ * (This is the SAFE slice of R3. The remaining win — an incremental, O(Δ) export + isSuperset that
+ * never walks the full event set — is a deeper redesign of the integrity spine and stays its own item.)
+ */
+const _gameStateCache = new WeakMap<SessionSnapshot, GameState>();
+
 export function toGameState(snap: SessionSnapshot): GameState {
+  const memo = _gameStateCache.get(snap);
+  if (memo) return memo;
   const characters: Record<EntityId, PersistedCharacter> = {};
   const souls: Record<EntityId, PersistedSoul> = {};
   const all = snap.house ? [snap.house.player, ...snap.house.npcs] : [];
@@ -157,7 +176,7 @@ export function toGameState(snap: SessionSnapshot): GameState {
       for (const s of list) suspicions.push({ entity, suspicion: { id: s.id, content: s.content, ts: s.ts } });
     }
   }
-  return {
+  const gs: GameState = {
     coreVersion: 1,
     vaultVersion: 1,
     journalVersion: 1,
@@ -169,4 +188,6 @@ export function toGameState(snap: SessionSnapshot): GameState {
     suspicions,
     vaultIds: (snap.vault ?? []).map((r) => r.id),
   };
+  _gameStateCache.set(snap, gs);
+  return gs;
 }

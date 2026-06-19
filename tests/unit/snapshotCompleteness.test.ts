@@ -107,3 +107,24 @@ describe("B40 — an unknown snapshot version is rejected, not crashed on", () =
     expect(resumed.started).toBe(true); // legacy migrates, the game resumes
   });
 });
+
+describe("R3 — toGameState is memoized by snapshot identity (safe, pure)", () => {
+  it("returns the SAME object for one snapshot, a fresh one for a new snapshot, and stays correct", () => {
+    const dir = freshDir();
+    const reg = startedGame(dir);
+    const sb = reg.sandboxFor("u");
+    sb.engine.knowledge.seedBelief(npc(1), { content: "a fact", factId: "f" }, "witnessed");
+
+    const snap = reg.snapshot("u");
+    const a = toGameState(snap);
+    expect(toGameState(snap)).toBe(a); // identity memo hit — the redundant re-projection is skipped
+
+    // A DIFFERENT snapshot object (re-exported) is projected fresh — never the cached one…
+    const snap2 = reg.snapshot("u");
+    expect(snap2).not.toBe(snap);
+    const c = toGameState(snap2);
+    expect(c).not.toBe(a);
+    // …and the content is byte-identical: the memo never changes WHAT toGameState returns.
+    expect(JSON.stringify(c)).toBe(JSON.stringify(a));
+  });
+});
