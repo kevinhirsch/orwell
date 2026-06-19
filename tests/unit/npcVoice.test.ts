@@ -50,6 +50,41 @@ describe("B65 — the per-NPC knowledge bound (the canary on the per-NPC axis)",
     expect(blob).not.toMatch(/trust|threat|affinity|confidence|emotional/i); // labels, never numbers
   });
 
+  it("L25 — the player's PRIVATE casting answers never reach an NPC's mouth (the casting channel is OOC)", () => {
+    // The casting interview is a player-level / OOC channel like the Diary Room (CLAUDE.md): the player
+    // tells PRODUCERS their motivation, private strategy, profession, and a producer-only self-read.
+    // None of it has an in-game pathway to any NPC — an NPC forms their OWN read from WITNESSED behavior
+    // only and must NEVER echo a casting answer (the L25 leak: an NPC quoted the player's casting phrase).
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("voice-casting-ooc");
+    const MOTIVE = "SENTINEL-L25-why-i-came-to-win-for-my-summer-camp";
+    const PRIVATE = "SENTINEL-L25-private-plan-flip-the-house-week-three";
+    const PROFESSION = "SENTINEL-L25-summer-camp-director-by-trade";
+    const NOTE = "SENTINEL-L25-producer-only-self-description-camp-counselor-energy";
+    sb.session.createCharacter({
+      playerName: "The Player",
+      seed: 11,
+      // The OOC/private casting fields — the producer-only material that must stay walled from NPCs.
+      motivation: MOTIVE,
+      privateStrategy: `${PRIVATE} — ${PROFESSION}`,
+      interviewNotes: [NOTE],
+    });
+    const secrets = [MOTIVE, PRIVATE, PROFESSION, NOTE];
+
+    // (1) No NPC's voicing projection may carry any private casting answer — for EVERY active NPC.
+    for (const hg of sb.session.getGameState().house) {
+      if (hg.status !== "active") continue;
+      const voice = sb.session.npcVoice(hg.id);
+      const blob = JSON.stringify(voice);
+      for (const s of secrets) expect(blob, `npcVoice(${hg.id}) leaks ${s}`).not.toContain(s);
+    }
+
+    // (2) No NPC-facing context block (the per-NPC voice cue / roster the per-turn prompt exposes) may
+    // carry a private casting answer either — the casting sheet must not ride into the model's context.
+    const prompt = sb.session.getMomentPrompt({ moment: "social" }).systemPrompt;
+    for (const s of secrets) expect(prompt, `the moment prompt leaks ${s}`).not.toContain(s);
+  });
+
   it("hunches stay hunches: a suspicion appears under suspects, never under knows", () => {
     const { sb } = liveGame("voice-suspect", 5);
     sb.engine.knowledge.addSuspicion(npc(1), { content: "something is off about the vote" });
