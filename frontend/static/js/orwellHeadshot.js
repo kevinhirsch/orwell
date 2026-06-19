@@ -30,14 +30,20 @@
     s.id = "orwell-headshot-css";
     s.textContent = `
       #${ID} { margin: 0 auto 8px; max-width: 760px; width: 100%;
+        /* L1: never ride up under the "orwell" header in the welcome-lifted state —
+           cap the whole card to the space below the top bar and let it scroll. */
+        max-height: min(60vh, calc(100vh - var(--ow-headshot-top-clear, 96px)));
+        display: flex; flex-direction: column;
         border: 1px solid var(--border, #355a66); border-radius: 10px;
         background: color-mix(in srgb, var(--panel, #1b1f27) 92%, transparent);
         font-size: 13px; overflow: hidden; }
       #${ID} .hs-head { display: flex; align-items: center; gap: 8px; cursor: pointer;
-        padding: 8px 12px; user-select: none; color: var(--fg, #cfd8e3); }
+        padding: 8px 12px; user-select: none; color: var(--fg, #cfd8e3); flex: none; }
       #${ID} .hs-head .hs-chev { margin-left: auto; opacity: .6; transition: transform .15s; }
       #${ID}.hs-open .hs-head .hs-chev { transform: rotate(90deg); }
-      #${ID} .hs-body { display: none; padding: 4px 12px 12px; }
+      /* L3: generated photos must show expanded — the body scrolls internally rather
+         than growing the card upward into the header. */
+      #${ID} .hs-body { display: none; padding: 4px 12px 12px; overflow-y: auto; min-height: 0; }
       #${ID}.hs-open .hs-body { display: block; }
       /* the studio body — shared by the casting card AND Settings (scoped to the class) */
       .ow-headshot-studio { font-size: 13px; }
@@ -86,6 +92,14 @@
     const msg = (m) => { _msg = m || ""; };
     const setBusy = (b) => { st.busy = b; render(); };
     const summary = (t) => { try { opts.onSummary && opts.onSummary(t); } catch (_) {} };
+    // L3: the host card must stay open while options/results are showing — generated
+    // photos should never collapse out of view. The host passes this; Settings doesn't.
+    const ensureOpen = () => { try { opts.ensureOpen && opts.ensureOpen(); } catch (_) {} };
+    // L4: on the pre-game casting card, picking a headshot DISMISSES the picker and hands
+    // off into the game (the host unmounts the card + opens the producers' first turn).
+    // Returns true when the host took over, so we skip painting the "finalized" state that
+    // would keep covering the logo. Settings → Account passes nothing and stays in place.
+    const handoff = () => { try { return !!(opts.onFinalized && opts.onFinalized()); } catch (_) { return false; } };
     function avatarChanged() { try { window.dispatchEvent(new CustomEvent("orwell:avatarchanged")); } catch (_) {} }
 
     async function upload(mode) {
@@ -116,7 +130,7 @@
         const r = await fetch("/api/orwell/portrait/studio/generate", { method: "POST", credentials: "same-origin" });
         const d = r.ok ? await r.json() : null;
         st.busy = false;
-        if (d && d.generated > 0) { st.candidates = d.candidates; st.selected = null; msg("Pick your favorite — or generate 3 more."); }
+        if (d && d.generated > 0) { st.candidates = d.candidates; st.selected = null; msg("Pick your favorite — or generate 3 more."); ensureOpen(); }
         else { msg((d && d.reason) || "Couldn't generate options — check the image model in Settings."); }
       } catch (e) {
         if (window.OrwellReport) window.OrwellReport.fail("headshot", "studio", e);
@@ -134,8 +148,11 @@
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: st.selected }) });
         const d = r.ok ? await r.json() : null;
         st.busy = false;
-        if (d && d.ok) { avatarChanged(); st.candidates = []; st.selected = null; await refreshStatus(); }
-        else { msg("Couldn't set that option — try again."); render(); }
+        if (d && d.ok) {
+          avatarChanged(); st.candidates = []; st.selected = null;
+          if (handoff()) return; // L4: picker dismissed, game taking over — don't repaint
+          await refreshStatus();
+        } else { msg("Couldn't set that option — try again."); render(); }
       } catch (e) { st.busy = false; msg("The photo service is offline right now."); render(); }
     }
 
@@ -155,6 +172,7 @@
       if (!status.finalized && (status.candidates || 0) > 0 && !st.candidates.length) {
         st.candidates = Array.from({ length: status.candidates },
           (_, i) => ({ index: i, ref: "/api/orwell/portrait/studio/candidate/" + i }));
+        ensureOpen(); // L3: restored options reappear expanded, never tucked away
       }
       render();
     }
@@ -167,8 +185,11 @@
           method: "POST", credentials: "same-origin",
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
         st.busy = false;
-        if (r.ok) { avatarChanged(); status.finalized = true; await refreshStatus(); }
-        else { msg("Couldn't use that one — try again."); render(); }
+        if (r.ok) {
+          avatarChanged(); status.finalized = true;
+          if (handoff()) return; // L4: picking a cached headshot hands off into the game too
+          await refreshStatus();
+        } else { msg("Couldn't use that one — try again."); render(); }
       } catch (e) { st.busy = false; msg("The photo service is offline right now."); render(); }
     }
     async function deleteFromLibrary(id) {
@@ -281,11 +302,28 @@
   function wire(el, openByDefault) {
     const head = el.querySelector(".hs-head");
     const summary = el.querySelector("#hs-summary");
+    const open = () => { el.classList.add("hs-open"); head.setAttribute("aria-expanded", "true"); };
     const toggle = () => { const o = el.classList.toggle("hs-open"); head.setAttribute("aria-expanded", o ? "true" : "false"); };
     head.addEventListener("click", toggle);
     head.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
-    if (openByDefault) { el.classList.add("hs-open"); head.setAttribute("aria-expanded", "true"); }
-    buildStudio(el.querySelector("#hs-body"), { onSummary: (t) => { summary.textContent = t; } });
+    if (openByDefault) open();
+    buildStudio(el.querySelector("#hs-body"), {
+      onSummary: (t) => { summary.textContent = t; },
+      ensureOpen: open,                 // L3: keep the card open while options/results show
+      onFinalized: () => onCastingHeadshotChosen(el), // L4/L5: dismiss + hand off into the game
+    });
+  }
+
+  // L4/L5: the player has picked their casting headshot — the last pre-game step. Dismiss
+  // the picker (unmount the card) and let the PRODUCERS open the game with the first message,
+  // so the player never has to type the opening word. Returns true so the studio stops
+  // repainting its own "finalized" state behind the teardown.
+  function onCastingHeadshotChosen(el) {
+    unmount();
+    try {
+      if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting();
+    } catch (_) { /* fail open — the chat composer is still the way in */ }
+    return true;
   }
 
   function mount() {
@@ -295,9 +333,17 @@
     ensureCss();
     const el = build();
     bar.parentNode.insertBefore(el, bar);
+    // L1: while the casting card is mounted, drop the welcome-screen's 30vh composer
+    // lift so the card + composer sit near the bottom and never climb under the
+    // "orwell" header. The flag is scoped to the game build in game-trim.css.
+    try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
     wire(el, true); // G29: producers push it — the casting card opens expanded, not tucked away
   }
-  function unmount() { const el = document.getElementById(ID); if (el) el.remove(); }
+  function unmount() {
+    const el = document.getElementById(ID);
+    if (el) el.remove();
+    try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
+  }
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
