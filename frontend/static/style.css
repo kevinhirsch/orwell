@@ -9014,6 +9014,15 @@ body.hide-thinking .thinking-section { display: none !important; }
 .agent-thread-header:hover {
   color: var(--fg);
 }
+/* L7: a node with nothing to expand (production beat / empty tool result) is a
+   flat label — no expand affordance. Drop the pointer cursor + hover highlight
+   so it never reads as a clickable accordion that opens nothing. */
+.agent-thread-node--flat > .agent-thread-header {
+  cursor: default;
+}
+.agent-thread-node--flat > .agent-thread-header:hover {
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
 .agent-thread-icon {
   font-size: 0.9em;
   color: var(--red);

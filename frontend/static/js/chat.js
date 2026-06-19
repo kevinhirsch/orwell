@@ -224,6 +224,18 @@ import { isNarrow } from './platform.js';
     API_BASE = apiBase;
     initSlashCommands({ apiBase, isStreaming: () => isStreaming });
     if (emailInbox) emailInbox.init(documentModule);
+    // L9 (composer): the Agent|Chat mode toggle is meaningless in the game build —
+    // play is always hybrid (OOC chat + in-character role-play + the engine tools
+    // run every turn). game-trim.css hides it; this is the belt-and-suspenders JS
+    // gate so the dead control stays gone even if the visibility system (app.js
+    // applyUIVis) clears the inline display. The full inherited workspace is
+    // unchanged. Fail-safe: wrapped so a missing node never throws in init.
+    try {
+      if (isGameBuild()) {
+        const _modeToggle = document.querySelector('.mode-toggle');
+        if (_modeToggle) _modeToggle.style.display = 'none';
+      }
+    } catch (_) {}
     // Wire the slash-command autocomplete popup on the chat composer. The
     // dispatcher already handles the typed command — this just surfaces the
     // registry as a discoverable menu when the user starts a message with /.
@@ -2110,7 +2122,15 @@ import { isNarrow } from './platform.js';
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
                   const dt = stripToolBlocks(roundText);
-                  if (dt.trim()) {
+                  // L6b (game build): a tool now follows this round's text, so it
+                  // is an INTERMEDIATE agent round — its free text is the model's
+                  // planning ("Looking at the roster… npc:1 … Let me stay in
+                  // character"), NOT narration. Suppress the whole bubble; only the
+                  // FINAL round (the final-render block) shows the player narration.
+                  // Fail-open to hiding. Non-game build is UNCHANGED.
+                  if (isGameBuild()) {
+                    roundHolder.style.display = 'none';
+                  } else if (dt.trim()) {
                     var _body3 = roundHolder.querySelector('.body');
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
@@ -2293,14 +2313,24 @@ import { isNarrow } from './platform.js';
                     if (json.tool === 'createCharacter' && window._orwellFreshSession) window._orwellFreshSession();
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
+                  // L7: a node is only EXPANDABLE when it has real content (command,
+                  // output, or diff). A production beat (and any tool that returned
+                  // nothing) has an empty content area, so rendering a chevron +
+                  // collapsible affordance is a worthless click target. Render the
+                  // chevron + content div ONLY when there is something to expand;
+                  // otherwise mark the node --flat (a plain label, no expander).
+                  const _expandHtml = `${cmdHtml2}${outHtml}${diffHtml}`;
+                  const _hasExpand = !!_expandHtml.trim();
+                  const _chevron2 = _hasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
+                  const _contentDiv2 = _hasExpand ? `<div class="agent-thread-content">${_expandHtml}</div>` : '';
                   // Preserve the user's .open choice across the innerHTML
                   // rewrite \u2014 otherwise expanding a running tool collapses
                   // it as soon as the result lands, forcing the user to
                   // click again. Click handling is delegated (see init at
                   // bottom of file) so no per-node listener needed.
-                  const _wasOpen = currentToolBubble.classList.contains('open');
-                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_wasOpen ? ' open' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beatOut || json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${cmdHtml2}${outHtml}${diffHtml}</div>`;
+                  const _wasOpen = _hasExpand && currentToolBubble.classList.contains('open');
+                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '');
+                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beatOut || json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>${_chevron2}</div>${_contentDiv2}`;
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();
@@ -2562,6 +2592,15 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
+                // L6b (game build): a NEW agent round is starting, so whatever the
+                // PREVIOUS round rendered is an INTERMEDIATE round — followed by
+                // another assistant round — i.e. the model's planning, not the
+                // final narration. Suppress that bubble (the live render may have
+                // already painted its text). The FINAL round's narration is shown
+                // by the final-render block. Non-game build is UNCHANGED.
+                if (isGameBuild() && roundHolder) {
+                  roundHolder.style.display = 'none';
+                }
                 // Mark thread as connected to bubble below
                 const _activeThread = document.querySelector('.agent-thread.streaming');
                 if (_activeThread) {
@@ -5199,6 +5238,8 @@ import { isNarrow } from './platform.js';
       if (!header) return;
       const node = header.closest('.agent-thread-node');
       if (!node) return;
+      // L7: flat nodes (no expandable content) are plain labels — never toggle.
+      if (node.classList.contains('agent-thread-node--flat')) return;
       node.classList.toggle('open');
     });
     window.__orwell_thread_click_bound = true;
