@@ -1848,6 +1848,10 @@ export class GameSessionAdapter implements GameSession {
         age: n.character.age,
         appearance: n.character.appearance,
         presentation: n.character.presentation,
+        // L28: the concrete, diverse, PERSISTED backstory facets — the narrator voices the STORED
+        // vocation/hometown instead of inventing (and mirroring the player's). Public, Vault-free.
+        ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
+        ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

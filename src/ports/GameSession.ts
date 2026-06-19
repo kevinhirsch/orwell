@@ -67,6 +67,12 @@ export interface HouseguestCard {
   age?: number;
   appearance?: string;
   presentation?: string;
+  /**
+   * The concrete, diverse backstory facets (L28): the houseguest's vocation and hometown — public,
+   * Vault-free origin facts the narrator voices instead of inventing (and mirroring the player).
+   */
+  vocation?: string;
+  hometown?: string;
 }
 
 /**

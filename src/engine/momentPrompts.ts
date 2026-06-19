@@ -473,6 +473,9 @@ export function renderGameContext(view: GameStateView): string {
     const vibe = [
       `${h.archetype}, plays ${h.strategyStyle}`,
       h.background,
+      // L28: the STORED concrete backstory facets — voice THESE (a real, diverse cast), never invent
+      // or mirror the player's job/hometown. Origin colors who they ARE; the game still happens in LA.
+      [h.vocation, h.hometown && `from ${h.hometown}`].filter(Boolean).join(", "),
       [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;
