@@ -565,6 +565,11 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.admin_transcript_routes import setup_admin_transcript_routes
 app.include_router(setup_admin_transcript_routes())
 
+# Calibration instrumentation — admin read over the per-season outcome log (Vault-free public
+# outcomes; "gather playtest data first" lane). Behind require_admin; read-only; no game chrome.
+from routes.admin_calibration_routes import setup_admin_calibration_routes
+app.include_router(setup_admin_calibration_routes())
+
 # Admin Health & Logs (Lane G1) — aggregated engine/FE health + the engine's recent-failure
 # ring + the secrets-redacted debug bundle. Behind require_admin; read-only by construction.
 from routes.admin_health_routes import setup_admin_health_routes, setup_admin_status_page

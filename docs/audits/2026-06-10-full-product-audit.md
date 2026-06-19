@@ -1574,6 +1574,20 @@ cheap to do so. This section is the authoritative open-items list going forward.
   `FastembedEmbedding` + `fastembedWorker` behind the synchronous `EmbeddingProvider` seam, loud
   permanent degrade to the deterministic fake on failure. (Was: open — ADR 0004 had been amended
   to "Accepted — adapter not yet built." See the "E86a — BUILT" section below.)
+- ✅ **Calibration instrumentation (the playtest-revisit enabler)** — the owner chose "instrument
+  & gather data first" over tuning the calibration weights for the open E33-ceiling question
+  ("passive players coast to Final 2 and lose there — emergent realism, or a degenerate plateau?",
+  section C below). Two measurement pieces, **NO weight change**: (1) an append-only per-user
+  **season-outcome log** (`frontend/src/orwell_outcomes.py`) that durably records the PUBLIC,
+  post-finale facts the question needs — final placement, the player's recorded social-scene
+  count, their public competition wins, and the final jury-vote margin — captured idempotently
+  when a season finishes and surfaced on the admin surface (`/api/admin/calibration/outcomes`,
+  the 0053 `require_admin` read pattern), so real playtest data accrues to review; and (2) an
+  engine **gradient gate** (`tests/property/calibrationGradient.property.test.ts`, heavy-sims lane)
+  that proves a minimal-active seeded policy reaches the jury and wins **at least as often** as the
+  fully-passive policy `juryReach` already gates — measuring that *playing the game is never a
+  disadvantage*, the monotonic property any future calibration must preserve. (Was: only the
+  passive extreme was gated, and no public playtest data was captured.)
 
 ## B — Cross-lane tails that fell through (each verified absent on main)
 **✅ All five DONE — one "cross-lane tails" PR (PR #224, Lane A), each with its proving test.**

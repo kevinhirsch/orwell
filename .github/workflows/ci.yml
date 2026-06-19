@@ -27,9 +27,10 @@ jobs:
       - run: npm run test:ci
 
   # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
-  # scope). Plays the full-game UAT (12+5 seeds) and the juryReach calibration gate (20 passive
-  # seasons) to completion — the same two files `test:ci` excludes — so together with `test` the
-  # whole functional suite still runs exactly once per CI run, just across concurrent runners.
+  # scope). Plays the full-game UAT (12+5 seeds), the juryReach calibration gate (20 passive
+  # seasons), and the calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion —
+  # the same files `test:ci` excludes — so together with `test` the whole functional suite still
+  # runs exactly once per CI run, just across concurrent runners.
   #
   # These two files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
   # CONCURRENTLY on the SAME runner inside `npm test`, so they shared 4 vCPUs and contended. Here
@@ -41,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sim: [uat, jury]
+        sim: [uat, jury, gradient]
     name: heavy-sims (${{ matrix.sim }})
     steps:
       - uses: actions/checkout@v4
