@@ -779,6 +779,32 @@ def main() -> int:
                          "G16: the cast seam + the kit mount")
             g16.evaluate("window._orwellCastEnsure()")
             g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+
+            # L16: a cast portrait is full COLOR while active/jury and grayscale ONLY
+            # once EVICTED. Inject the three roster states into the real grid and read
+            # the computed filter off each card's portrait img — the eviction state is
+            # the one and only monochrome treatment.
+            l16 = g16.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              if (!grid) return { ok: false, why: 'no-grid' };
+              const mk = (cls) => {
+                const card = document.createElement('div');
+                card.className = 'oc-hg ' + cls;
+                const holder = document.createElement('div'); holder.className = 'oc-portrait';
+                const img = document.createElement('img');
+                img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+                holder.appendChild(img); card.appendChild(holder); grid.appendChild(card);
+                return getComputedStyle(img).filter;
+              };
+              return { ok: true,
+                       active: mk(''), jury: mk('oc-out'),
+                       evicted: mk('oc-out oc-evicted') };
+            }""")
+            gray = lambda f: bool(f) and "grayscale" in f and "grayscale(0" not in f.replace(" ", "")
+            check(l16.get("ok") is True and not gray(l16.get("active", ""))
+                  and not gray(l16.get("jury", "")) and gray(l16.get("evicted", "")),
+                  f"L16: cast portraits are color until EVICTED, then grayscale ({l16})")
+
             g16.click("#orwell-cast .ow-min")
             g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
                 "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",

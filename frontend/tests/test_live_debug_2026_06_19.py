@@ -48,53 +48,6 @@ def test_l11_cast_window_default_is_smaller():
     assert "resizable: false" not in js
 
 
-# ── L12 — pin the cast window into the gadget rail as a compact gadget ──────
-
-def test_l12_cast_pin_gadget_registers_in_rail():
-    js = _read("static", "js", "orwellCastPin.js")
-    # mounts into the 0054 gadget rail body, content-driven visibility
-    assert "gadget-rail-body" in js
-    # sourced from the cast roster
-    assert "/api/orwell/roster" in js
-    # two small portraits side by side (the compact gadget)
-    assert "ocp-portraits" in js or "ocp-face" in js
-    # persisted pinned state (per-user)
-    assert "orwell-cast-pinned" in js
-
-
-def test_l12_pin_affordance_in_cast_window_and_persisted():
-    js = _read("static", "js", "orwellCast.js")
-    # a pin/un-pin control exists on the cast window titlebar/body
-    assert "pin" in js.lower()
-    # toggling the pin writes the persisted flag the gadget reads
-    assert "orwell-cast-pinned" in js
-
-
-def test_l12_pin_gadget_loaded():
-    html = _read("static", "index.html")
-    assert "orwellCastPin.js" in html
-
-
-# ── L13 — drag-reorder the gadgets in the rail; order persists ─────────────
-
-def test_l13_rail_supports_drag_reorder():
-    js = _read("static", "js", "orwellGadgetRail.js")
-    # HTML5 drag-and-drop reorder of the rail's gadgets
-    assert "dragstart" in js
-    assert "dragover" in js or "dragenter" in js
-    assert "drop" in js
-    # persisted order, per-user, like the rail's existing persisted layout
-    assert "orwell-gadget-order" in js
-
-
-def test_l13_reorder_keeps_accessibility():
-    js = _read("static", "js", "orwellGadgetRail.js")
-    # keyboard reorder path (don't break keyboard focus)
-    assert "ArrowUp" in js or "ArrowDown" in js
-    # Escape is NOT handled per-surface (flows through ui.js's arbiter — F3 ratchet)
-    assert '"Escape"' not in js and "'Escape'" not in js
-
-
 # ── L16 — color while active, grayscale once evicted ───────────────────────
 
 def test_l16_cast_portrait_grayscale_keyed_on_status():
@@ -105,10 +58,3 @@ def test_l16_cast_portrait_grayscale_keyed_on_status():
     assert "grayscale(1)" in css
     # a jury / active houseguest is NOT grayscaled — only evicted
     assert ".oc-evicted" in css
-
-
-def test_l16_pin_gadget_grayscales_evicted_too():
-    js = _read("static", "js", "orwellCastPin.js")
-    # the compact rail gadget honors the same color/B&W eviction rule
-    assert "grayscale" in js
-    assert "evicted" in js

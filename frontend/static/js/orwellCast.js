@@ -133,7 +133,10 @@
           margin-top: .15rem; font-size: .66rem; letter-spacing: .04em; opacity: .65; text-transform: uppercase;
         }
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
-        #orwell-cast .oc-hg.oc-out .oc-portrait img { filter: grayscale(1); }
+        /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest
+           keeps full-color portrait; an evicted one renders grayscale/monotone.
+           (Jury is still dimmed via oc-out, just not desaturated.) */
+        #orwell-cast .oc-hg.oc-evicted .oc-portrait img { filter: grayscale(1); }
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
@@ -259,8 +262,9 @@
 
   function makeCard(hg) {
     const out = hg.status && hg.status !== "active";
+    const evicted = hg.status === "evicted"; // L16: grayscale only on eviction
     const card = document.createElement("div");
-    card.className = "oc-hg" + (out ? " oc-out" : "");
+    card.className = "oc-hg" + (out ? " oc-out" : "") + (evicted ? " oc-evicted" : "");
     const holder = document.createElement("div");
     holder.className = "oc-portrait";
     const nameEl = document.createElement("div");
@@ -292,6 +296,7 @@
     if (status !== entry.status) {
       entry.status = status;
       entry.el.classList.toggle("oc-out", !!(hg.status && hg.status !== "active"));
+      entry.el.classList.toggle("oc-evicted", hg.status === "evicted"); // L16
       entry.statusEl.textContent = statusLabel(hg.status);
     }
     const name = hg.name == null ? "" : String(hg.name);
