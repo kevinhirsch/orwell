@@ -528,6 +528,31 @@ content-driven visibility, persisted layout — `frontend/static/js/orwellGadget
 consequence-loop section above; *Big Brother is politics*, so ongoing role-play must move other
 houseguests' hidden perceptions, and it now structurally does).
 
+**Session 2026-06-19 — the returning-player / deep-profile arc (specs 0056–0059):** the
+"seasons as levels" lane shipped and the cast got materially deeper. **0056** (season-to-season
+character continuity) — engine carry-over **built**, unit-gated (`tests/unit/seasonContinuity.test.ts`):
+starting a new season offers a **soft re-run of casting** — *keep* the same houseguest into a
+brand-new cast or *recreate* via the interview — reusing the **one sanctioned restart door**
+(D1/R1); the FE relay threads `keepCharacter` through `/new-game` + `create_character`. **0057**
+(seasons as levels) — SPEC + **chunks 1–4 built FE-side**: the per-user season store
+(`frontend/src/orwell_seasons.py`), `GET /api/orwell/season` + `POST /api/orwell/next-season`
+(finished-season-gated, increments) + `POST /api/orwell/reset-progress` (both through the one
+sanctioned reset); the ≤5px season **progress bar** + "Season N" chip HUD
+(`orwellSeasonProgress.js`); the persistent post-season **"New season" surface**
+(`orwellNewSeason.js`, which **subsumes the 0056 FE keep/recreate UX** + the per-season portrait
+studio); and the engagement-driven post-season **producers re-approach** agent-loop nudge.
+**0058** (deep character profiles — *born deep, persist, play out*) — ✅ **Phase 1 built**,
+**BDD-gated** (`0058-deep-character-profiles.feature`, now in `cucumber.cjs`): the seeded floor
+spawns §3-depth profiles split across the Vault Wall (byte-stable baseline), seeds & seals story
+threads, seeds the Day-1 NPC→player edge, and recalls authored detail in full; **Phase 2 deferred**
+(seamed, not wired): the LLM-authored write-back (`recordCastProfile` is a typed stub), portrait
+consumption of the physical facet, premiere voicing, and the thread trigger/resolution scheduler.
+**0059** (hidden seeded relationships) — 📝 **SPEC only**: consolidates ledger **L35** (pre-game
+ties) + **L40** (showmance overload — the narrator currently reads every high-affinity edge as
+romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances that surface only
+organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
+pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
+
 ## Open decisions (remaining)
 
 **Resolved:** tech stack, datastore, and vector adoption (above); soul storage = markdown +

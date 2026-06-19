@@ -154,6 +154,13 @@ export interface GameStateView {
   house: HouseguestCard[];
   /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
   deals?: DealView[];
+  /**
+   * The PUBLIC showmances (0059/L40) — the houseguest pairs whose romance has become VISIBLE to the
+   * whole house (stage `visible`). A public fact at that point (not a Vault leak), surfaced so the
+   * narrator may voice romance for THESE pairs only — never for ordinary high-affinity friendships.
+   * Pre-visible (sealed) showmances and the pre-game ties NEVER appear here. Absent when there are none.
+   */
+  showmances?: Array<{ a: string; b: string }>;
   /** Pre-game only (0050): where the casting interview stands — what's captured, what's next. */
   casting?: CastingStatusView;
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */

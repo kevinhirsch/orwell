@@ -281,6 +281,16 @@ async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> di
     return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
 
 
+async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
+    """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
+    becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the
+    PUBLIC fields (``biography``, ``physicalCharacteristics``) and HIDDEN fields (``secrets``,
+    ``trueGoals``, ``weakness``, ``dayOnePerception``). The engine validates (non-player-mirroring),
+    splits across the Vault Wall, re-derives threads, and re-seals — returning field NAMES only
+    (never a hidden value). Vault-free response by construction."""
+    return await _call("recordCastProfile", profile, user=user)
+
+
 async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
     """Feature 0051: record that a generated portrait was SHOWN to the player — a
     player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored

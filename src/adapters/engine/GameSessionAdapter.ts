@@ -83,7 +83,12 @@ import {
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
-import { generateCastDeepLayer, deepProfileToVaultContent } from "../../engine/deepProfile";
+import { generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads } from "../../engine/deepProfile";
+import {
+  loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
+  DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
+} from "../../engine/seededRelationships";
+import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
@@ -279,6 +284,17 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * RE-seal ONE houseguest's authored profile + threads (L28b write-back) — REPLACING that subject's
+   * prior Vault records (idempotent, no duplication), unlike `onSealProfiles` which appends the cast at
+   * birth. Engine-only by construction (the registry wires it to the Vault via `replaceHidden`).
+   */
+  private onResealProfile?: (id: EntityId, profile: DeepProfile, threads: readonly StoryThread[]) => void;
+
+  setOnResealProfile(fn: (id: EntityId, profile: DeepProfile, threads: readonly StoryThread[]) => void): void {
+    this.onResealProfile = fn;
+  }
+
+  /**
    * The engine-only HIDDEN deep layer (0058) — the §3 secrets/goals/weakness/Day-1 perception per NPC
    * and the derived story threads. NEVER projected (the view/npcVoice/portrait paths never read this);
    * sealed into the Vault at seal time and persisted through the Vault snapshot. Kept here so the
@@ -286,6 +302,32 @@ export class GameSessionAdapter implements GameSession {
    */
   private deepProfiles: Record<EntityId, DeepProfile> = {};
   private storyThreads: StoryThread[] = [];
+
+  /**
+   * The engine-only HIDDEN seeded relationship layer (0059): sparse pre-game ties + showmances, sealed
+   * off the player AND admin. NEVER projected (no view/npcVoice/portrait/moment path reads it); sealed
+   * into the Vault at seed time and persisted in the snapshot. The admin may set the per-season COUNT
+   * budget (0016-style) — never the content.
+   */
+  private seededRels: SeededRelationships = { ties: [], showmances: [] };
+  private tieBudget = DEFAULT_TIE_BUDGET;
+  private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
+  private onSealSeededRels?: (rels: SeededRelationships) => void;
+
+  setOnSealSeededRels(fn: (rels: SeededRelationships) => void): void {
+    this.onSealSeededRels = fn;
+  }
+
+  /**
+   * 0059/L40 — fired when a seeded showmance crosses into `visible`: the registry wires this to record
+   * a PLAYER-witnessed (public, non-hidden) house event, so the player learns of the romance through a
+   * real pathway (0002) and the narrator may voice it. Engine-only seam (the adapter holds no events).
+   */
+  private onShowmanceSurfaced?: (sm: { a: EntityId; b: EntityId; aName: string; bName: string }) => void;
+
+  setOnShowmanceSurfaced(fn: (sm: { a: EntityId; b: EntityId; aName: string; bName: string }) => void): void {
+    this.onShowmanceSurfaced = fn;
+  }
 
   /**
    * The season record providers (0048/B56): the full event record + the Vault's hidden records,
@@ -413,6 +455,8 @@ export class GameSessionAdapter implements GameSession {
         appearance: subject.character.appearance,
         age: subject.character.age,
         presentation: subject.character.presentation,
+        ...(subject.character.physicalCharacteristics !== undefined
+          ? { physicalCharacteristics: subject.character.physicalCharacteristics } : {}),
       },
       this.portraitStyleAnchor,
     );
@@ -420,29 +464,75 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The deep-profile write-back seam (feature 0058 / ledger L28b) — the FE producer-LLM authors a
-   * houseguest's rich §3 profile and writes it BACK here so the ENGINE is the source of truth (mirrors
-   * the 0051 portrait handshake). PHASE 1: clearly typed + STUBBED — it VALIDATES the target and
-   * reports which PUBLIC / HIDDEN fields it WOULD accept (names only — a hidden value is never echoed),
-   * without yet overwriting the deterministic seeded floor. The live validate / repair (diversity +
-   * non-player-mirroring) / split-across-the-wall / seal / index wiring is Phase 2.
+   * houseguest's rich §3 profile and writes it BACK here so the ENGINE becomes the airtight source of
+   * truth (mirrors the 0051 portrait handshake). NOW LIVE: it validates (non-player-mirroring),
+   * SPLITS across the Vault Wall (PUBLIC biography/physical facet → the byte-stable Character; HIDDEN
+   * secrets/goals/weakness/Day-1 perception → the engine-only deep layer + the Vault), re-derives the
+   * story threads, re-seeds the NPC→player edge from the new Day-1 read, and re-indexes for full
+   * recall — REPLACING the seeded floor for that houseguest (idempotent; no stale/duplicated records).
    *
-   * The split is ENFORCED here by construction even in the stub: PUBLIC field names and HIDDEN field
-   * names are reported on SEPARATE lists, and the hidden values are never read into the result — so
-   * the seam can never become a wall leak as it is fleshed out.
+   * The split is ENFORCED by construction: the result reports PUBLIC and HIDDEN field NAMES on separate
+   * lists and NEVER echoes a hidden value — so the seam can never become a wall leak (§8). Any field the
+   * author omits keeps its prior (seeded) value, so the profile always stays complete.
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult {
     if (!this.house) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
     const target = this.house.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
+
+    // Validate — non-player-mirroring (L28): the cast is independent of the player, so the authored
+    // PUBLIC material must not echo the player's name. Refuse a mirror (Vault-safe: no value echoed).
+    const playerName = (this.house.player.name ?? "").trim();
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`.toLowerCase();
+    if (playerName.length >= 3 && publicText.includes(playerName.toLowerCase())) {
+      return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
+    }
+
     // Field NAMES only — never the values (a hidden value must never ride out on the result, §8).
     const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined);
     const hiddenFields = (["secrets", "trueGoals", "weakness", "dayOnePerception"] as const)
       .filter((f) => req[f] !== undefined);
-    // PHASE 2 (deferred): validate/repair the authored profile (diversity + non-player-mirroring),
-    // SPLIT it (public → target.character; hidden → this.deepProfiles + the Vault seal hook), re-derive
-    // the threads + the NPC→player edge, and index for full recall. Phase 1 records nothing structurally
-    // — the seeded floor stays authoritative — but the seam is wired, typed, and split-safe.
-    return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "phase-1 stub: validated; live write-back deferred to phase 2" };
+
+    // (1) PUBLIC fold onto the byte-stable Character — these cross to the player.
+    if (req.biography !== undefined) target.character.biography = req.biography;
+    if (req.physicalCharacteristics !== undefined) target.character.physicalCharacteristics = req.physicalCharacteristics;
+
+    // (2) HIDDEN: merge the authored fields over the prior profile so it stays complete. The prior is
+    // the seeded floor (always present after seedDeepProfiles; regenerate deterministically if missing).
+    // The author supplies the Day-1 read as PROSE only — the engine KEEPS the calibrated seeded leans
+    // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
+    // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
+    const prev: DeepProfile = this.deepProfiles[target.id]
+      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)));
+    const next: DeepProfile = {
+      secrets: req.secrets ?? prev.secrets,
+      trueGoals: req.trueGoals ?? prev.trueGoals,
+      weakness: req.weakness ?? prev.weakness,
+      dayOnePerception: req.dayOnePerception !== undefined
+        ? { ...prev.dayOnePerception, read: req.dayOnePerception }
+        : prev.dayOnePerception,
+    };
+    this.deepProfiles[target.id] = next;
+
+    // (3) Re-derive THIS source's story threads (replace), deterministic off the name. The NPC→player
+    // edge keeps its seeded lean (the engine owns the numbers — see above), so no edge re-seed here.
+    const thrRng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-thread-authored:${target.name}`));
+    this.storyThreads = this.storyThreads.filter((t) => t.sourceId !== target.id)
+      .concat(deriveStoryThreads(thrRng, target.id, next));
+
+    // (4) Full-fidelity recall (L27b): replace the prior deep-profile note in the authoritative soul
+    // memory (engine-only; never crosses) so the authored detail is recall-able in full and persists +
+    // re-indexes on restore. Also index it NOW for same-session recall.
+    const oldNote = deepProfileToVaultContent(target.id, prev);
+    const newNote = deepProfileToVaultContent(target.id, next);
+    const idx = target.soul.memory.lastIndexOf(oldNote);
+    if (idx >= 0) target.soul.memory[idx] = newNote; else target.soul.memory.push(newNote);
+    this.soul?.recordToSoul(target.id, newNote);
+
+    // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
+    this.onResealProfile?.(target.id, next, this.storyThreads.filter((t) => t.sourceId === target.id));
+
+    return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
@@ -613,6 +703,8 @@ export class GameSessionAdapter implements GameSession {
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
       ...(this.storyThreads.length ? { storyThreads: cloneSession(this.storyThreads) } : {}),
+      ...(this.seededRels.ties.length || this.seededRels.showmances.length
+        ? { seededRelationships: cloneSession(this.seededRels) } : {}),
     };
   }
 
@@ -653,6 +745,18 @@ export class GameSessionAdapter implements GameSession {
     } else {
       this.deepProfiles = {};
       this.storyThreads = [];
+    }
+    // 0059 — the seeded relationship layer persists explicitly (a showmance STAGE must never silently
+    // reset on restore). Absent on pre-0059 saves ⇒ re-seed deterministically off the persisted seed.
+    if (core.seededRelationships) {
+      this.seededRels = cloneSession(core.seededRelationships);
+    } else if (core.house && core.seed !== undefined) {
+      this.seededRels = loadSeededRelationships(
+        core.house.npcs, this.tieBudget, this.showmanceBudget,
+        new SeededRandom(hashSeed(`${core.seed}:seeded-relationships`)),
+      );
+    } else {
+      this.seededRels = { ties: [], showmances: [] };
     }
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
@@ -995,6 +1099,11 @@ export class GameSessionAdapter implements GameSession {
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
     this.seedFirstImpressions(seed);
+    // 0059 — born with a few HIDDEN ties: seed the sparse pre-game ties + showmances (0–2 each, often
+    // none), fold their small standing affinity bias on top of the move-in edges, and SEAL them into the
+    // Vault (engine-only; invisible to player AND admin — they surface only organically). Done AFTER
+    // first impressions so the bias rides the scattered baseline; persisted so a showmance never resets.
+    this.seedSeededRelationships(seed);
     this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
     this.presence = assignRooms(
@@ -1053,6 +1162,10 @@ export class GameSessionAdapter implements GameSession {
       appearance: h.character.appearance,
       age: h.character.age,
       presentation: h.character.presentation,
+      // L29: the structured physical facet (0058) AUTHORS the face so it matches the person and never
+      // drifts from the narration. PUBLIC by construction; falls back to the prose appearance if unseeded.
+      ...(h.character.physicalCharacteristics !== undefined
+        ? { physicalCharacteristics: h.character.physicalCharacteristics } : {}),
     }));
     return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
   }
@@ -1161,6 +1274,72 @@ export class GameSessionAdapter implements GameSession {
       Object.entries(layer.hidden).map(([id, profile]) => ({ id: id as EntityId, profile })),
       layer.threads,
     );
+  }
+
+  /**
+   * 0059 — seed the sparse HIDDEN relationship layer (pre-game ties + showmances) off a SIDE rng, fold
+   * each pair's small standing affinity BIAS onto the (already-scattered) move-in edges, and SEAL the
+   * layer into the Vault. Engine-only by construction (the bias is the ONLY observable — as later
+   * behavior — and no tie/partner/stage is ever projected). Deterministic per seed + player-independent.
+   */
+  private seedSeededRelationships(seed: number): void {
+    if (!this.house) return;
+    const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
+    this.seededRels = loadSeededRelationships(this.house.npcs, this.tieBudget, this.showmanceBudget, rng);
+    // Fold the small standing affinity bias between each seeded pair (both directions). NEVER a
+    // deterministic advantage — just unconscious warmth a careful player reads only as behavior (§3).
+    const bias = (a: EntityId, b: EntityId, amount: number): void => {
+      this.rel.edge(a, b).affinity = clamp01(this.rel.edge(a, b).affinity + amount);
+      this.rel.edge(b, a).affinity = clamp01(this.rel.edge(b, a).affinity + amount);
+    };
+    for (const t of this.seededRels.ties) bias(t.a, t.b, TIE_AFFINITY_BIAS);
+    for (const s of this.seededRels.showmances) bias(s.a, s.b, SHOWMANCE_SPARK_BIAS);
+    if (this.seededRels.ties.length || this.seededRels.showmances.length) {
+      this.onSealSeededRels?.(this.seededRels);
+    }
+  }
+
+  /**
+   * 0059 / L40 — advance the seeded showmances by the pair's CURRENT mutual affinity (the off-screen
+   * tick calls this after its scenes move the edges). A showmance climbs spark → bond → visible only as
+   * the two genuinely grow close over weeks (never instant); it RESOLVES when one of the pair leaves.
+   * Returns the pairs that JUST became `visible` — the PUBLIC moment the house notices — so the caller
+   * can record a witnessed beat the player can see. Pre-`visible` stages stay Vault-sealed (no surface).
+   */
+  advanceShowmances(): Array<{ a: EntityId; b: EntityId; aName: string; bName: string }> {
+    if (!this.house) return [];
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const nameOf = (id: EntityId): string => this.house!.npcs.find((n) => n.id === id)?.name ?? id;
+    const surfaced: Array<{ a: EntityId; b: EntityId; aName: string; bName: string }> = [];
+    for (const s of this.seededRels.showmances) {
+      if (s.stage === "resolved") continue;
+      if (evicted.has(s.a) || evicted.has(s.b)) { s.stage = "resolved"; continue; }
+      const mutual = Math.min(this.rel.edge(s.a, s.b).affinity, this.rel.edge(s.b, s.a).affinity);
+      const next = nextShowmanceStage(s.stage, mutual);
+      if (next !== s.stage) {
+        s.stage = next;
+        if (next === "visible") {
+          const sm = { a: s.a, b: s.b, aName: nameOf(s.a), bName: nameOf(s.b) };
+          surfaced.push(sm);
+          this.onShowmanceSurfaced?.(sm); // record the PUBLIC house beat (engine-only seam)
+        }
+      }
+    }
+    return surfaced;
+  }
+
+  /**
+   * 0059 / L40 — the Vault-free projection of the PUBLIC showmances (stage `visible`): once a showmance
+   * is visible the whole house knows it, so naming the pair is a public fact, not a Vault leak. This is
+   * what lets the narrator voice romance for THESE pairs ONLY (the L40 restraint). Pre-visible (sealed)
+   * showmances and the pre-game ties never appear here.
+   */
+  visibleShowmances(): Array<{ a: string; b: string }> {
+    if (!this.house) return [];
+    const nameOf = (id: EntityId): string => this.house!.npcs.find((n) => n.id === id)?.name ?? id;
+    return this.seededRels.showmances
+      .filter((s) => s.stage === "visible")
+      .map((s) => ({ a: nameOf(s.a), b: nameOf(s.b) }));
   }
 
   /**
@@ -2123,6 +2302,8 @@ export class GameSessionAdapter implements GameSession {
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+      // 0059/L40 — only PUBLIC (visible) showmances; sealed ties/showmances never surface here.
+      ...(this.visibleShowmances().length ? { showmances: this.visibleShowmances() } : {}),
     };
   }
 }

@@ -59,6 +59,44 @@ export function orwellBeat(tool) {
   return (tool && ORWELL_TOOL_BEATS[tool]) || null;
 }
 
+// L42 — the PUBLIC outcome of a solidified beat (so the chat shows WHAT happened, not a stack of
+// identical "PRODUCTION done" rows). Derived ONLY from the tool RESULT's player-witnessed, Vault-free
+// fields: the resolved beat's `event.content` (a short diegetic sentence the engine already exposes —
+// "Maya nominates Cole and Jess", "Troy is evicted"), the crowned `winner`, and, for an eviction, the
+// anonymized ballot count from the staged `eviction.votesRevealed` (E12: ballots, never voters). No
+// hidden state is ever read here — these are the same facts the player sees on the ceremonies.
+const _BEAT_ICON = {
+  'hoh-competition': '🏆', 'veto-competition': '💎', 'veto-draw': '🎟️', 'nominations': '🔨',
+  'veto-ceremony': '💎', 'eviction': '🗳️', 'eviction-result': '🗳️', 'eviction-reveal': '🗳️',
+  'eviction-goodbye': '💌', 'final-eviction': '🗳️', 'finale': '👑', 'finale-reveal': '👑',
+  'finale-result': '👑', 'twist-reveal': '🌀',
+};
+
+export function orwellBeatOutcome(tool, output) {
+  if (!output) return null;
+  let r;
+  try { r = typeof output === 'string' ? JSON.parse(output) : output; }
+  catch (_) { return null; }
+  if (!r || typeof r !== 'object') return null;
+  // A crowned winner trumps everything.
+  if (r.finished && r.winner && r.winner.name) return `👑 ${r.winner.name} wins the season`;
+  const ev = r.event;
+  if (!ev || !ev.content) return null;
+  const icon = _BEAT_ICON[ev.beat] || '•';
+  let content = String(ev.content);
+  // Append the anonymized ballot tally for a resolved eviction, when the staged ballots are present.
+  if (/eviction|final-eviction/.test(ev.beat || '') && r.eviction && Array.isArray(r.eviction.votesRevealed) && r.eviction.votesRevealed.length) {
+    const counts = {};
+    for (const v of r.eviction.votesRevealed) {
+      const n = v && v.votedFor && v.votedFor.name;
+      if (n) counts[n] = (counts[n] || 0) + 1;
+    }
+    const nums = Object.values(counts).sort((a, b) => b - a);
+    if (nums.length) content += ` (${nums.join('-')})`;
+  }
+  return `${icon} ${content}`;
+}
+
 export function isGameBuild() {
   return !!(typeof document !== 'undefined' && document.body && document.body.hasAttribute('data-game-build'));
 }

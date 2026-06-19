@@ -4676,16 +4676,28 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 orwell_seasons.increment_season(owner)
             except Exception:
                 pass  # the counter is best-effort meta-progression; never fail the restart over it
-        # 0051: move-in cast portraits. The engine returns Vault-free portrait prompts on
-        # season start; kick off generation in the background so game start NEVER blocks on
-        # images, and so a missing image model is a silent no-op (graceful absence).
+        # L28b → 0051 pipeline: author the cast's rich backstories FIRST (the LLM writes each
+        # houseguest's §3 profile back to the engine, the airtight source of truth), THEN the
+        # move-in portraits (the authored physical facet feeds the prompt; engine returns Vault-free
+        # prompts on season start). Both run in the BACKGROUND so game start NEVER blocks, and a
+        # missing model (chat OR image) is a silent no-op — the seeded floor stays authoritative.
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
-            if prompts:
-                from src import orwell_portraits
-                orwell_portraits.kickoff_generation(prompts, owner)
+            cast = res.get("house") if isinstance(res, dict) else None
+            player_name = (res.get("player") or {}).get("name") if isinstance(res, dict) else None
+
+            def _portraits():
+                if prompts:
+                    from src import orwell_portraits
+                    orwell_portraits.kickoff_generation(prompts, owner)
+
+            if cast and player_name:
+                from src import orwell_cast_authoring
+                orwell_cast_authoring.kickoff_authoring(cast, player_name, owner, then=_portraits)
+            else:
+                _portraits()
         except Exception:
-            pass  # portraits are augmentation — never let them affect game start
+            pass  # authoring + portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
