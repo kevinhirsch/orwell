@@ -178,6 +178,44 @@ def main() -> int:
             new_ref_errs = [e for e in page_errors[errs_before:] if "is not defined" in e or "ReferenceError" in e]
             check(not new_ref_errs, f"send path: submit runs with no ReferenceError ({new_ref_errs[:3]})")
 
+            # IMMERSION LEAK GUARD: the model's private reasoning (chain-of-thought) must NEVER
+            # render in the game build — it leaks engine lever names (whereabouts, npcVoice,
+            # getGameState, social read). Drive the real render chokepoint (markdown.js
+            # processWithThinking — every reload + final-render path funnels through it) with a
+            # reply that carries a <think> block whose body names those levers, then assert the
+            # produced DOM shows the reply only: no .thinking-section / .thinking-content, no
+            # leaked lever text, no visible "Thinking…" header. No LLM needed — pure render.
+            think_probe = page.evaluate(
+                """async () => {
+                  const m = await import('/static/js/markdown.js');
+                  const raw = '<think>I should call whereabouts and npcVoice, then a social read '
+                    + 'via getGameState before narrating.</think>\\n\\nThe living room hums with tension.';
+                  const host = document.createElement('div');
+                  host.innerHTML = m.processWithThinking(raw);
+                  document.body.appendChild(host);
+                  const txt = (host.textContent || '');
+                  const out = {
+                    suppresses: !!(m.gameBuildSuppressesThinking && m.gameBuildSuppressesThinking()),
+                    thinkSections: host.querySelectorAll('.thinking-section, .thinking-content').length,
+                    leversInText: /whereabouts|npcVoice|getGameState|social read/i.test(txt),
+                    replyKept: /living room/i.test(txt),
+                    liveThinkBoxes: document.querySelectorAll('.live-think-inner').length,
+                  };
+                  host.remove();
+                  return out;
+                }"""
+            )
+            check(think_probe.get("suppresses") is True,
+                  f"game build suppresses thinking by default ({think_probe})")
+            check(think_probe.get("thinkSections") == 0,
+                  f"game build: no thinking section/box renders ({think_probe})")
+            check(think_probe.get("leversInText") is False,
+                  f"game build: no engine lever names leak from reasoning ({think_probe})")
+            check(think_probe.get("replyKept") is True,
+                  f"game build: the in-character reply still renders ({think_probe})")
+            check(think_probe.get("liveThinkBoxes") == 0,
+                  f"game build: no live-think reasoning box exists in the DOM ({think_probe})")
+
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
               const vis = (k) => {
