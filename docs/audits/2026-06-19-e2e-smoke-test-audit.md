@@ -275,6 +275,7 @@ this summary; its findings are folded into the triage here.)*
 - **S6-3** — raw internal pathway id (`overheard:offscreen:strategy:1358:7985649`) leaks into the
   player-facing retrospective.
 - **S6-4** — primary red button (white-on-`#e06c75`) is 3.20:1 — below WCAG AA for normal text.
+- **S7-1** — the Settings modal is not a focus trap and doesn't take focus on open (a11y / WCAG 2.4.3).
 - **S1-2** — game-build console 404 spam (`avatar`, `tts/stats`, `stt/stats`).
 - **S1-3 / S4-3** — raw unstyled `<input type=file>` across casting / account / new-season.
 - **S1-4** — login password field shows a clear glyph while empty.
@@ -288,6 +289,14 @@ retrospective + Producer's Vault unseal · new-season · **4 seasons** (recast �
 · responsive matrix (6 viewports + 200% font) · 5 house themes · windowing (collapse/swap/mobile
 drawer/diary) · mobile gameplay · copy proofread · WCAG AA contrast · CI gates
 (`responsive_matrix.py`, `browser_smoke.py`).
+
+### Priority invariants — verified PASS at runtime (State 7, do not regress)
+- **Vault Wall (#1 mandate):** player channel exposes no secret state; `seasonRetrospective`
+  refuses while live; **admin/God Mode is walled** (refuses Vault tools); the **GM prompt fed to
+  the LLM carries no Vault data** (vocabulary only, zero numeric soul/relationship values).
+- **Cross-user isolation (0021):** each user gets an isolated sandbox; no leakage across users.
+- **Diary Room OOC isolation (0002/0014):** diary `witnessSet:['player']`; NPCs never surface it;
+  the player channel can't inspect NPC views (self-pinned `getVisibleStateFor`).
 
 ### What to protect (do not regress)
 The casting interview, the gadget-rail HUD + presence, the decision-card copy ("your selection
@@ -364,4 +373,58 @@ sub-threshold cases on the brand red:
 System and Shortcuts tabs render clean (no copy smells). The Theme picker is well-structured
 (Themes / Customize tabs, a labeled swatch grid incl. the 5 house themes + workspace presets).
 No defects.
+
+---
+
+## State 7 — Priority invariants: Vault Wall & cross-user isolation (runtime probes)
+
+The two non-negotiable structural guarantees, verified at runtime on the live game. **Both hold
+— no findings.** This is the most important result in the audit.
+
+### Vault Wall (priority #1) — PASS
+- **Player channel:** `getGameState`/`gameStatus`/`whereabouts`/`socialRead` expose only public
+  persona (name, status, archetype, public background, appearance) and the player's **own**
+  qualitative casting card (`strengths: {physical:"scrappy", mental:"standout"}` — tier words,
+  no numbers). **No** trust/threat/affinity/soul/confessional/privateStrategy/numeric stats.
+- **`seasonRetrospective` refuses while the season is live** → `{"result": null}`. The Vault
+  unseal is post-season only; mid-game it returns nothing.
+- **Admin / God Mode is walled from the Vault** (the mandate): `inspectNonVaultState` returns
+  only `{week, phase, houseguests, config}` (no sentinels), and the admin channel **refuses**
+  Vault-reading tools — `seasonRetrospective` on `/admin/call` → *"tool not available on channel
+  admin/God Mode"*.
+- **The GM moment prompt fed to the LLM is Vault-free DATA.** It contains the *vocabulary* of
+  the rules ("never reveal hidden content", "the soul of the show", "reading a threat",
+  "keeping it builds trust") but **zero numeric relationship/soul values and no confessional
+  content** — confirmed by scanning for `trust|threat|affinity|suspicion: <number>` (NONE). The
+  model genuinely "cannot leak what it never receives."
+
+### Cross-user isolation (0021) — PASS
+A fresh user (`auditor2`) gets a **separate, empty sandbox** ("no active game for this user");
+its response contains **neither** the admin player ("Nadia") **nor** the admin roster ("London
+Montoya"). No call for one user returns another user's game — secret or not.
+
+### Diary Room OOC isolation (0002/0014) — PASS
+A marked diary entry (`diaryRoom {entry}`) is recorded with `witnessSet: ['player']` and
+`hidden:false`. It appears only in the **player's** own visible state/knowledge; `npcVoice` for
+an NPC does **not** surface it. On the player channel, `getVisibleStateFor` is intentionally
+**self-pinned** (`PlayerSurface.ts:43` → `getVisibleStateFor(this.player)`; `forEntity` is always
+`"player"` regardless of any `id` passed) — the player channel cannot inspect an NPC's view, which
+closes a leak vector by design. *(Minor NOTE: the tool silently ignores an `id` arg rather than
+rejecting it — a harmless API-clarity nit, not a leak.)*
+
+### Accessibility (keyboard / focus / ARIA)
+
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S7-1** | POLISH | **The Settings modal is not a focus trap and doesn't take focus on open** (WCAG 2.4.3 / dialog pattern). After opening Settings, Tab walks the **background page** — `#export-dl-btn`, the chat composer `#message`, `#model-picker-btn`, the gadget-rail buttons, the roster — for ~12 tabs before reaching the modal's own controls. A keyboard/SR user can interact with content behind the open dialog. | focus trail (16 tabs) — first 12 land outside `#settings-modal`. | On open, move focus to the modal's first control and trap Tab/Shift+Tab within it (`role="dialog" aria-modal="true"` + a focus-trap), restoring focus to the opener on close. Apply to the legacy modal family (the OrwellWindow kit already returns focus on close). |
+
+**A11y positives:** all 21 visible buttons have an accessible name (text/aria-label/title); no
+`<img>` missing `alt`; Settings closes on Escape. House-theme + body text all pass AA contrast
+(State 6). The Customize theme tab (color pickers, harmony generator, font) renders cleanly.
+
+### Error handling — engine offline (F5) — PASS
+With the engine unreachable (`/api/orwell/health` → `engine:false`), the onboarding overlay
+shows a polished, on-brand holding screen — **"The house is dark — Big Brother will return. The
+game engine isn't reachable right now — this screen will clear the moment the feeds come back."**
+with a "Continue anyway" dismiss (`onboarding-f5.png`). Graceful degradation; no defect.
 
