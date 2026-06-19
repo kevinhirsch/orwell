@@ -77,8 +77,12 @@ When("the eviction resolves", function (this: BbWorld) {
   this.peView = this.peSandbox!.session.getGameState();
 });
 
+// Shared by 0046 (vote-out) and 0061 (self-eviction): read whichever feature's sandbox/view is live.
 Then("the player's status is marked evicted", function (this: BbWorld) {
-  assert.equal(this.peView!.player!.status, "evicted");
+  const status = this.svSandbox
+    ? this.svSandbox.session.getGameState().player!.status
+    : this.peView!.player!.status;
+  assert.equal(status, "evicted");
 });
 
 Then("the season reaches a defined end state for that player", function (this: BbWorld) {

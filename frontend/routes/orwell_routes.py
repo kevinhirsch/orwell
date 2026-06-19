@@ -731,12 +731,16 @@ def setup_orwell_routes() -> APIRouter:
         statement: Optional[str] = None
         appeal: Optional[str] = None
         intent: Optional[str] = None
+        # 0061 — self-eviction: ONLY confirmed:true executes the irreversible walk-out.
+        confirmed: Optional[bool] = None
 
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
+        # 0061 — the sanctioned confirmed self-eviction rides the same validated decision seam.
+        "self-evict",
     }
 
     @router.post("/decision")
@@ -761,6 +765,42 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] decision failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    @router.post("/self-eviction/request")
+    async def orwell_self_eviction_request(request: Request):
+        """0061 step 1 — the player expressed an OOC intent to LEAVE/quit. Raise the self-evict
+        CONFIRMATION on the engine (it names the irreversible stakes) and change NO state: the house
+        never hears it, and nothing evicts until the player explicitly confirms. The confirmed exit
+        then rides the validated /decision seam ({kind:'self-evict', confirmed:true})."""
+        try:
+            res = await orwell_engine.request_self_eviction(user=_current_user(request))
+            orwell_engine.remember_pending(res, user=_current_user(request))
+            return res
+        except orwell_engine.EngineToolError as e:
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] self-eviction request failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] self-eviction request failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    @router.post("/self-eviction/cancel")
+    async def orwell_self_eviction_cancel(request: Request):
+        """0061 — the player declined the self-evict confirmation. Clear it; they remain ACTIVE and in
+        the house, unchanged."""
+        try:
+            res = await orwell_engine.cancel_self_eviction(user=_current_user(request))
+            orwell_engine.remember_pending(res, user=_current_user(request))
+            return res
+        except orwell_engine.EngineToolError as e:
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] self-eviction cancel failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] self-eviction cancel failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/new-game")

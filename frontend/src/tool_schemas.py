@@ -1322,10 +1322,11 @@ FUNCTION_TOOL_SCHEMAS = [
                             "nominations", "veto-decision", "comp-intent", "houseguests-choice",
                             "replacement", "eviction-vote", "tie-break", "final-eviction",
                             "goodbye-message", "finale-statement", "finale-answer",
-                            "juror-question", "juror-vote",
+                            "juror-question", "juror-vote", "self-evict",
                         ],
                         "description": "The pending decision's kind (mirror the engine's pending.kind exactly).",
                     },
+                    "confirmed": {"type": "boolean", "description": "self-evict (0061): ONLY confirmed=true executes the irreversible walk-out — and ONLY after the player's own explicit confirmation. Never set this off an in-character line."},
                     "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids. houseguests-choice / tie-break / final-eviction: one houseguest id."},
                     "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
                     "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
@@ -1337,6 +1338,14 @@ FUNCTION_TOOL_SCHEMAS = [
                 },
                 "required": ["kind"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "requestSelfEviction",
+            "description": "Raise a SELF-EVICTION confirmation (0061). Call this ONLY when the player clearly, out of character, says they want to LEAVE / quit / walk out of the GAME (not in-fiction venting). It changes NOTHING and the house never hears it — it surfaces a confirm/cancel card naming the irreversible stakes (this ends and forfeits their season). NEVER call submitDecision with a confirmed self-evict off the player's line; only their own explicit confirmation binds it.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -1683,6 +1692,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
     "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
     "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
+    # 0061: raise the self-eviction confirmation on a clear OOC intent to leave.
+    "requestSelfEviction",
     # C13: the prompt-advertised levers that were missing from the FE surface.
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).

@@ -99,6 +99,8 @@
     }
     if (kind === "finale-answer") return sel.length === 1 ? { kind, appeal: sel[0] } : null;
     if (kind === "comp-intent") return sel.length === 1 ? { kind, intent: sel[0] } : null;
+    // 0061 — a confirmed self-eviction needs no pick; ONLY the explicit confirm flag binds it.
+    if (kind === "self-evict") return { kind, confirmed: true };
     if (kind === "veto-decision") {
       if (useVeto === false) return { kind, use: false };
       return sel.length === 1 ? { kind, use: true, save: sel[0] } : null;
@@ -123,6 +125,7 @@
       "finale-answer": "Jury question — choose your appeal",
       "juror-question": "Your jury question — ask the finalist",
       "juror-vote": "Your jury vote — crown a winner",
+      "self-evict": "Self-eviction — leave the game?",
     }[kind] || "Your decision";
   }
 
@@ -238,6 +241,11 @@
       (Array.isArray(pending.appeals) && pending.appeals.length ? pending.appeals : []).forEach((a) => addChip(String(a), String(a)));
     } else if (kind === "comp-intent") {
       COMP_INTENTS.forEach((i) => addChip(i, i));
+    } else if (kind === "self-evict") {
+      // 0061: no options to pick — an explicit Confirm IS the irreversible decision (a Cancel
+      // button is added to the row below, posting the engine cancel so the player plays on).
+      confirm.disabled = false;
+      confirm.textContent = "Confirm — leave the game (final)";
     } else if (kind === "veto-decision") {
       const dont = addChip("Don't use the veto", "__dont__");
       dont.addEventListener("click", () => {
@@ -263,8 +271,28 @@
     row.className = "odec-row";
     const note = document.createElement("span");
     note.className = "odec-note";
-    note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
+    if (kind === "self-evict") {
+      note.textContent = "This ends and forfeits your game — it cannot be undone.";
+    } else {
+      note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
+    }
     row.appendChild(note);
+    // 0061: a self-eviction confirmation gets an explicit CANCEL — declining must clear the engine
+    // confirmation so the player simply plays on (never a fabricated, half-committed exit).
+    if (kind === "self-evict") {
+      const cancel = document.createElement("button");
+      cancel.className = "odec-opt"; cancel.type = "button";
+      cancel.textContent = "Cancel — stay in the house";
+      cancel.addEventListener("click", async () => {
+        _userDismissed = true;
+        try {
+          await fetch("/api/orwell/self-eviction/cancel", { method: "POST", credentials: "same-origin" });
+        } catch (_) { if (window.OrwellReport) window.OrwellReport.fail("self-evict", "cancel-post", _); }
+        if (window.orwellGameChanged) window.orwellGameChanged("self-evict:cancel");
+        removeCard();
+      });
+      row.appendChild(cancel);
+    }
     row.appendChild(confirm);
     card.appendChild(row);
 

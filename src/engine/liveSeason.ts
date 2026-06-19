@@ -50,7 +50,10 @@ export type Beat =
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
   | "finale-reveal" | "finale-result"
   // eviction sub-loop events (0047) — emitted on BeatEvent only; the staged reveal/goodbye/result.
-  | "eviction-reveal" | "eviction-goodbye" | "eviction-result";
+  | "eviction-reveal" | "eviction-goodbye" | "eviction-result"
+  // the player's voluntary walk-out (0061) — a recorded, witnessed, non-hidden exit event; emitted
+  // on BeatEvent only (the structural transition is the player's removal + the terminal `selfEvicted`).
+  | "self-eviction";
 
 /** A player decision the live loop is blocked on until `applyDecision` resolves it. */
 export type PendingDecision =
@@ -73,7 +76,11 @@ export type PendingDecision =
   | { kind: "finale-answer"; by: EntityId; juror: EntityId; appeals: FinaleAppeal[] }
   // --- finale (0037/E37): the player-JUROR's own question to a finalist (scoreless free text) ---
   | { kind: "juror-question"; by: EntityId; finalist: EntityId }
-  | { kind: "juror-vote"; by: EntityId; finalists: [EntityId, EntityId] };
+  | { kind: "juror-vote"; by: EntityId; finalists: [EntityId, EntityId] }
+  // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit. It is
+  // raised by an intent-to-leave and lives ALONGSIDE (never overriding) a ceremony pending, so it is
+  // legal at any beat and corrupts no in-flight ceremony. Only an explicit confirm resolves it. ---
+  | { kind: "self-evict"; by: EntityId };
 
 /** Which stage of the live finale sub-loop (0037) we are advancing. */
 export type FinaleStage = "statements" | "questions" | "vote" | "reveal";
@@ -150,6 +157,16 @@ export interface LiveSeasonState {
   finalTwo?: [EntityId, EntityId];
   jury?: EntityId[];
   pending?: PendingDecision;
+  /**
+   * Self-eviction (0061). `selfEvictPending` = the OOC confirmation is raised and awaiting the
+   * player's explicit confirm/cancel — it changes NO game state and lives ALONGSIDE any ceremony
+   * `pending` (it never overrides one, so it is legal at any beat and corrupts no ceremony, §4.6).
+   * `selfEvicted` = a confirmed walk-out resolved: the player forfeits and EXITS ENTIRELY (owner
+   * decision #1 — terminal, never a juror's seat), so the seat read is forced to "evicted" by phase.
+   * Both persist with the season (0030). ENGINE-ONLY booleans — no number/hidden state, Vault-free.
+   */
+  selfEvictPending?: boolean;
+  selfEvicted?: boolean;
   /**
    * How each evictee read the manner of their eviction toward each responsible houseguest
    * (0037): mannerByEvictee[evictee][responsible]. Recorded live at each eviction so jury
@@ -248,7 +265,9 @@ export type DecisionInput =
   | { kind: "finale-answer"; appeal: FinaleAppeal }
   // --- finale (E37): scoreless free text — the juror's moment, never a tally input ---
   | { kind: "juror-question"; question?: string }
-  | { kind: "juror-vote"; vote: EntityId };
+  | { kind: "juror-vote"; vote: EntityId }
+  // --- self-eviction (0061): ONLY `confirmed:true` executes the irreversible walk-out (§4.2) ---
+  | { kind: "self-evict"; confirmed: boolean };
 
 /** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
 const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource): CompetitionDef =>
@@ -575,6 +594,54 @@ function applyEviction(s: LiveSeasonState, evictee: EntityId, ctx: SeasonCtx, re
   recordEvictionManner(s, evictee, responsible, ctx);
   removeEvictee(s, evictee);
   rollWeek(s);
+}
+
+// --- Self-eviction (0061): the player's voluntary walk-out ----------------------
+
+/** True once the player has genuinely left the game — voted/comp'd out, or a confirmed walk-out. */
+export function playerHasLeft(s: LiveSeasonState, player: EntityId): boolean {
+  return s.evictionOrder.includes(player);
+}
+
+/**
+ * Step 1 (§4.2): raise the OOC `self-evict` confirmation. Changes NO game state — it does NOT evict,
+ * the house never hears it, and it sits ALONGSIDE any ceremony `pending` so it is legal at any beat
+ * (§4.6). A no-op once the player has already left. Idempotent.
+ */
+export function requestSelfEviction(s: LiveSeasonState, ctx: SeasonCtx): void {
+  if (s.finished || playerHasLeft(s, ctx.player)) return;
+  s.selfEvictPending = true;
+}
+
+/** Cancel the confirmation (§4.2): clear it; the player plays on, ACTIVE and unchanged. */
+export function cancelSelfEviction(s: LiveSeasonState): void {
+  s.selfEvictPending = false;
+}
+
+/**
+ * Step 2 (§4.1) — execute a CONFIRMED self-eviction. The player walks out: this is a REAL, recorded
+ * transition. The present house WITNESSES the departure (the returned BeatEvent's participants); the
+ * player is removed through the SAME exit bookkeeping every player exit uses (`removeEvictee` → the
+ * 0046 `evictionOrder` door), the resentment manner is recorded so souls fold it (§4.4), and the
+ * forfeit flag (`selfEvicted`) marks the EXIT-ENTIRELY terminal seat (owner decision #1 — never a
+ * juror's seat). The season ends for the player here: a quit is terminal. Resolved at this SAFE
+ * point (the loop's `pending`/`eviction` sub-state is untouched — never mid-ceremony, §4.6).
+ *
+ * Returns the witnessed `self-eviction` BeatEvent — the adapter records it (non-hidden, player in the
+ * witness set) and folds its hidden impact, exactly like any other witnessed beat (§4.1 / 0023).
+ */
+export function applySelfEviction(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent {
+  const player = ctx.player;
+  // The active house in the moment the player walks witnesses the departure. (The fold is the
+  // PRESENT HOUSE's read of the leaver — relief/shock/shifted threat — done adapter-side, §4.4; it
+  // is NOT the evictee-grievance direction of a vote-out, so we don't record an eviction manner here.)
+  const present = s.active.filter((h) => h !== player);
+  removeEvictee(s, player);            // the 0046 exit door: evictionOrder + remove from the live house
+  s.selfEvictPending = false;
+  s.selfEvicted = true;                // owner decision #1: forfeit — the seat reads "evicted" by phase
+  s.finished = true;                   // a quit ends the player's game — terminal recap (0048) unseals
+  s.beat = "complete";
+  return { beat: "self-eviction", content: `${player} self-evicts and walks out of the house`, participants: [player, ...present] };
 }
 
 // --- Live eviction sub-loop (0047) --------------------------------------------
@@ -1059,6 +1126,11 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(p.by, fin, ctx), mannerFor(s, p.by, fin));
       return { kind: "juror-vote", vote: lean(p.finalists[0]) >= lean(p.finalists[1]) ? p.finalists[0] : p.finalists[1] };
     }
+    case "self-evict":
+      // 0061: an NPC sitting in the player's seat NEVER voluntarily quits — and the self-evict
+      // confirmation never rides `s.pending` (it lives on `selfEvictPending`), so the auto-driver
+      // (calibration / admin fast-forward) is never asked to resolve one. Refuse defensively.
+      throw new Error("self-eviction is a deliberate player choice — never auto-resolved");
   }
 }
 
@@ -1221,6 +1293,13 @@ export function applyDecision(
       (f.votes ??= {})[ctx.player] = input.vote;
       s.pending = undefined;
       return { beat: "finale", content: `you cast your jury vote`, participants: [ctx.player] };
+    }
+    case "self-evict": {
+      // 0061: a confirmed self-eviction does NOT flow through the ceremony-pending machinery (it
+      // lives on `selfEvictPending`, alongside any ceremony pending). The adapter executes it via
+      // `applySelfEviction` so it never overrides an in-flight ceremony — this seam refuses it, so
+      // there is no second exit path through the standard decision rulebook.
+      throw new Error("self-eviction is executed through the dedicated confirmed-quit seam, not applyDecision");
     }
   }
 }

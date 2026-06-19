@@ -165,7 +165,7 @@ export function scaleImpact(impact: Partial<EdgeSignals>, factor: number): Parti
  * E47: a comp win is a THREAT read, not a grievance — the house does not stop *liking* its own
  * winner; allies stay warm while everyone recalibrates the danger.
  */
-export type CeremonyAct = "nominated" | "veto-saved" | "replaced" | "evicted" | "comp-won";
+export type CeremonyAct = "nominated" | "veto-saved" | "replaced" | "evicted" | "comp-won" | "self-evicted";
 
 /** A comp win moves only the danger read (E47) — no affinity/trust souring from a clean victory. */
 const COMP_WON_IMPACT: Partial<EdgeSignals> = { threat: +0.14 };
@@ -173,12 +173,21 @@ const COMP_WON_IMPACT: Partial<EdgeSignals> = { threat: +0.14 };
 /** A veto save is alliance-grade warmth PLUS demonstrated protection — the E54 evidence signal. */
 const VETO_SAVED_IMPACT: Partial<EdgeSignals> = { trust: +0.16, affinity: +0.14, alignment: +0.15, reliability: +0.15 };
 
+/**
+ * How the PRESENT HOUSE reads a houseguest who VOLUNTARILY walks out (0061): a rival removed
+ * themselves, so the danger read drops (threat▼) and warmth/reliability dip a little — they quit on
+ * the house, which a competitor weighs (a quitter is not someone you'd have leaned on). A modest,
+ * signed move, never a betrayal-grade shock. The leaver's own edges don't matter — they're gone.
+ */
+const SELF_EVICTED_IMPACT: Partial<EdgeSignals> = { threat: -0.12, affinity: -0.06, reliability: -0.1 };
+
 export const CEREMONY_IMPACTS: Record<CeremonyAct, Partial<EdgeSignals>> = {
   nominated: { affinity: -0.16, trust: -0.13, threat: +0.16 }, // = IMPACT.conflict
   "veto-saved": VETO_SAVED_IMPACT,
   replaced: BETRAYAL_SHOCK,
   evicted: BETRAYAL_SHOCK, // base magnitude; the live fold scales it by the recorded MANNER (E48)
   "comp-won": COMP_WON_IMPACT,
+  "self-evicted": SELF_EVICTED_IMPACT, // 0061: the present house's read of a voluntary walk-out
 };
 
 /**
