@@ -137,6 +137,17 @@ function buildUserSandbox(user = "default"): UserSandbox {
       engine.vault.writeHidden({ id: `seeded-showmance:${i}`, kind: "seeded-relationship", subject: s.a, content: showmanceToVaultContent(s) });
     }
   });
+  // 0059/L40 — a showmance that becomes VISIBLE is a PUBLIC house fact: record it as a player-witnessed
+  // (non-hidden) event so it enters the player's knowledge and the narrator may voice the romance.
+  session.setOnShowmanceSurfaced((sm) => engine.events.record({
+    id: `showmance:${sm.a}:${sm.b}:${engine.events.query().length}`,
+    ts: engine.events.query().length,
+    type: "house-event",
+    initiator: sm.a,
+    witnessSet: [PLAYER, sm.a, sm.b],
+    hidden: false,
+    content: `${sm.aName} and ${sm.bName} have grown close — the house is starting to notice a showmance`,
+  }));
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({

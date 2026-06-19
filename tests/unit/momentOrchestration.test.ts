@@ -79,9 +79,11 @@ describe("0018 — narrative & moment orchestration", () => {
   it("L40 — the base prompt restrains showmance over-labeling (no soap-opera saturation)", () => {
     const p = BASE_GAME_MASTER_PROMPT;
     expect(p).toMatch(/SHOWMANCES ARE RARE/i);
-    // ordinary closeness is friendship/strategy, not romance, unless explicitly marked a romantic pair
+    // ordinary closeness is friendship/strategy, not romance
     expect(p).toMatch(/do NOT read romance into ordinary closeness/i);
-    expect(p).toMatch(/explicitly marks two people as a romantic pair/i);
+    // romance is voiced ONLY for a pair the engine has SURFACED into the GAME CONTEXT (0059/L40)
+    expect(p).toMatch(/engine SEEDS the season's showmances/i);
+    expect(p).toMatch(/Public showmance/i);
   });
 
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {

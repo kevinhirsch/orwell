@@ -86,7 +86,7 @@ import { loadReserveTwists } from "../../engine/reserveTwists";
 import { generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads } from "../../engine/deepProfile";
 import {
   loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
-  DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET,
+  DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
@@ -316,6 +316,17 @@ export class GameSessionAdapter implements GameSession {
 
   setOnSealSeededRels(fn: (rels: SeededRelationships) => void): void {
     this.onSealSeededRels = fn;
+  }
+
+  /**
+   * 0059/L40 — fired when a seeded showmance crosses into `visible`: the registry wires this to record
+   * a PLAYER-witnessed (public, non-hidden) house event, so the player learns of the romance through a
+   * real pathway (0002) and the narrator may voice it. Engine-only seam (the adapter holds no events).
+   */
+  private onShowmanceSurfaced?: (sm: { a: EntityId; b: EntityId; aName: string; bName: string }) => void;
+
+  setOnShowmanceSurfaced(fn: (sm: { a: EntityId; b: EntityId; aName: string; bName: string }) => void): void {
+    this.onShowmanceSurfaced = fn;
   }
 
   /**
@@ -1289,6 +1300,49 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0059 / L40 — advance the seeded showmances by the pair's CURRENT mutual affinity (the off-screen
+   * tick calls this after its scenes move the edges). A showmance climbs spark → bond → visible only as
+   * the two genuinely grow close over weeks (never instant); it RESOLVES when one of the pair leaves.
+   * Returns the pairs that JUST became `visible` — the PUBLIC moment the house notices — so the caller
+   * can record a witnessed beat the player can see. Pre-`visible` stages stay Vault-sealed (no surface).
+   */
+  advanceShowmances(): Array<{ a: EntityId; b: EntityId; aName: string; bName: string }> {
+    if (!this.house) return [];
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const nameOf = (id: EntityId): string => this.house!.npcs.find((n) => n.id === id)?.name ?? id;
+    const surfaced: Array<{ a: EntityId; b: EntityId; aName: string; bName: string }> = [];
+    for (const s of this.seededRels.showmances) {
+      if (s.stage === "resolved") continue;
+      if (evicted.has(s.a) || evicted.has(s.b)) { s.stage = "resolved"; continue; }
+      const mutual = Math.min(this.rel.edge(s.a, s.b).affinity, this.rel.edge(s.b, s.a).affinity);
+      const next = nextShowmanceStage(s.stage, mutual);
+      if (next !== s.stage) {
+        s.stage = next;
+        if (next === "visible") {
+          const sm = { a: s.a, b: s.b, aName: nameOf(s.a), bName: nameOf(s.b) };
+          surfaced.push(sm);
+          this.onShowmanceSurfaced?.(sm); // record the PUBLIC house beat (engine-only seam)
+        }
+      }
+    }
+    return surfaced;
+  }
+
+  /**
+   * 0059 / L40 — the Vault-free projection of the PUBLIC showmances (stage `visible`): once a showmance
+   * is visible the whole house knows it, so naming the pair is a public fact, not a Vault leak. This is
+   * what lets the narrator voice romance for THESE pairs ONLY (the L40 restraint). Pre-visible (sealed)
+   * showmances and the pre-game ties never appear here.
+   */
+  visibleShowmances(): Array<{ a: string; b: string }> {
+    if (!this.house) return [];
+    const nameOf = (id: EntityId): string => this.house!.npcs.find((n) => n.id === id)?.name ?? id;
+    return this.seededRels.showmances
+      .filter((s) => s.stage === "visible")
+      .map((s) => ({ a: nameOf(s.a), b: nameOf(s.b) }));
+  }
+
+  /**
    * Activate ONE dormant story thread and FOLD its hidden weight (0058 §5) — reusing the 0023
    * consequence fold (`foldHiddenImpact`), NOT a parallel subsystem. The thread's source houseguest
    * acts toward the player (the witness/partner), moving the hidden relationship layer by the thread's
@@ -2248,6 +2302,8 @@ export class GameSessionAdapter implements GameSession {
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+      // 0059/L40 — only PUBLIC (visible) showmances; sealed ties/showmances never surface here.
+      ...(this.visibleShowmances().length ? { showmances: this.visibleShowmances() } : {}),
     };
   }
 }
