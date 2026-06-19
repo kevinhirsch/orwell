@@ -135,14 +135,13 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       // worth of hidden history exists to leak. Exclusions are principled, not convenient:
       //  - seasonRetrospective is the SANCTIONED post-season unsealing (0048) — it returns hidden
       //    content by design once the game is finished;
-      //  - advanceGame was swept at every single beat above (line 104 runs unconditionally);
+      //  - advanceGame was swept at every single beat above;
       //  - createCharacter/updateCasting are the start-of-game doors (swept pre-game) — calling
       //    them again would restart the sandbox and void the terminal state under sweep.
-      // NOT excluded: submitDecision. It is swept DURING the loop only when a pending decision
-      // appeared — but for a season where the player never faced one (e.g. evicted before ever being
-      // HOH/holding the veto/voting, which is legal play), it would otherwise never be swept and the
-      // coverage assertion below would flake. Sweeping it here against the terminal house (a clean
-      // refusal — no pending decision) GUARANTEES coverage AND still checks the refusal text for leaks.
+      // submitDecision is swept IN-LOOP when a decision arises; it is ALSO swept here (post-finish it
+      // simply refuses — and the refusal text is sentinel-checked), so a player evicted early enough
+      // to never reach an in-loop decision (a legitimate, fair loss — calibration-dependent) still
+      // covers it. (It previously assumed the player always reaches a decision point.)
       const POST_FINISH_EXCLUDED = new Set(["seasonRetrospective", "advanceGame", "createCharacter", "updateCasting"]);
       // Action tools may deliberately REFUSE on a terminal house (e.g. recordInteraction naming an
       // evicted houseguest) — a refusal is a legitimate outcome, but its error text is still an
