@@ -101,6 +101,15 @@ export interface SessionCore {
    * reasoning as deepProfiles above). Absent on pre-0059 saves (re-derived from the seed on restore).
    */
   seededRelationships?: import("./seededRelationships").SeededRelationships;
+  /**
+   * The engine-only HIDDEN private-orientation map (feature 0063): the orientation of each houseguest who
+   * holds it PRIVATELY (closeted / not-yet-out), Vault-sealed from the player AND the admin. Persisted so
+   * a closeted orientation never silently resets and survives a restart (0030). ENGINE-ONLY (same
+   * reasoning as deepProfiles above). The PUBLIC diversity facets (ethnicity, gender presentation, an out
+   * orientation) ride on the byte-stable Character. Absent on pre-0063 saves (re-derived from the seed on
+   * restore ONLY for a truly pre-0063 cast; a 0063 cast with an empty map simply had everyone out).
+   */
+  privateOrientations?: Record<EntityId, import("./diversityConstants").Orientation>;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

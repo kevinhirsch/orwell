@@ -88,6 +88,17 @@ export interface HouseguestCard {
    */
   biography?: string;
   physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * The PUBLIC diversity-identity facets (feature 0063): `ethnicity` is a first-class heritage / cultural
+   * identity (an authentic facet of a full character that grounds the skin tone so text and portrait
+   * agree); `genderPresentation` is how the houseguest presents; `outOrientation` is present ONLY when the
+   * houseguest is PUBLICLY OUT (a public facet the house knows). A PRIVATELY-held orientation is NEVER on
+   * this card — it is Vault-sealed and surfaces only via a 0002 pathway. Public, Vault-free, byte-stable.
+   * Descriptive only — never a competition input, never a defining single word.
+   */
+  ethnicity?: string;
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  outOrientation?: string;
 }
 
 /**
@@ -510,6 +521,12 @@ export interface NpcVoiceView {
      * profile (secrets/goals/weakness/perception) is NEVER on this projection.
      */
     biography?: string; physicalCharacteristics?: PhysicalCharacteristics;
+    /**
+     * The PUBLIC identity facets (0063) — heritage, gender presentation, and a PUBLICLY-OUT orientation
+     * only. A PRIVATELY-held orientation is NEVER here (Vault-sealed; surfaces only via a 0002 pathway).
+     * One true facet of a full character, never a reductive label.
+     */
+    ethnicity?: string; genderPresentation?: "man" | "woman" | "nonbinary"; outOrientation?: string;
   };
   /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
   whereabouts: { room: string; present: NamedRef[] } | null;

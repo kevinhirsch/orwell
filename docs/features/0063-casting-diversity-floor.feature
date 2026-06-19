@@ -11,8 +11,10 @@ Feature: 0063 — Casting diversity floor (a cast that authentically reflects th
   Diversity is the depth of a full character, never a reductive single-word label. Floors hold across seeds;
   same seed ⇒ same cast. Roles only — no names.
   #
-  # SPEC ONLY — this skeleton is NOT YET wired into cucumber.cjs; it is added when the feature is built
-  # to green (priority order), exactly as 0058 Phase 1's feature was.
+  # BUILT & GREEN — wired into cucumber.cjs. The engine guarantees the floors off a DEDICATED isolated
+  # seeded sub-stream (the #338 RNG-isolation lesson), so the public competition/vote outcome stream is
+  # byte-identical with the diversity layer on vs. off (proved by the golden test). The diversity +
+  # personality public facets ALSO enrich the cast portrait prompt (each shot is uniquely that person).
 
   # §3 — the BIPOC representation floor holds across seeds (a minimum, not just an L28 cap)
   Scenario: across seeds the cast meets the minimum BIPOC representation floor
