@@ -13,6 +13,12 @@ import { defineConfig } from "vitest/config";
  *
  * Single source of truth: `test:heavy` runs exactly this set; `test:unit:fast` and the coverage
  * run exclude exactly this set. Keep the three in lockstep (the npm scripts reference these globs).
+ *
+ * The full-game UAT is split across three files (fullGameUat.{12seed,5seed,decisions}.test.ts —
+ * fanned out across separate CI heavy-sims runners; their shared driver lives in the non-test
+ * fullGameUatHarness.ts, which `include: tests/**\/*.test.ts` never picks up). The `tests/uat/**`
+ * glob below covers all of them, so this exclusion set stays a single source of truth without
+ * needing to enumerate each split file.
  */
 export const HEAVY_SIM_FILES = [
   "tests/uat/**",
@@ -21,6 +27,9 @@ export const HEAVY_SIM_FILES = [
   // heavy lane next to the shards it recombines — excluded from the fast/coverage runs alongside them.
   "tests/property/juryReachAggregate.property.test.ts",
   "tests/property/calibrationGradient.property.test.ts",
+  // The gradient AGGREGATE consumes shard artifacts (no live play of its own) but rides the heavy
+  // lane next to the shards it recombines — excluded from the fast/coverage runs alongside them.
+  "tests/property/calibrationGradientAggregate.property.test.ts",
 ];
 
 export default defineConfig({

@@ -64,7 +64,11 @@
       <div class="oretro-body" data-role="body"></div>`;
     _win = window.OrwellWindowKit.create({
       id: ID, title: "📼 The season, watched back", icon: ICON,
-      slot: "bottom-right", slotKey: "retro", role: "complementary",
+      // top-right slot: the retrospective must NOT share a slot with the post-season
+      // "New season" window (bottom-right) — post-season both are open, and stacking
+      // two windows in one corner shoved the second off-screen. Distinct slots ⇒ no
+      // shared stack (the slot stacking offset is also viewport-clamped in orwellSlots).
+      slot: "top-right", slotKey: "retro", role: "complementary",
       minimizable: true, closable: true, draggable: true,
       // 0054 Phase 2: dockable into the control-room rail (default floating — a one-
       // line owner flip to defaultDocked:true if the feature doc's lean is preferred).

@@ -46,7 +46,7 @@ type Pending = NonNullable<AdvanceView["pending"]>;
 
 /**
  * Answer EVERY pending kind automatically (mirrors tests/unit/statusPending.test.ts `resolve`
- * and tests/uat/fullGameUat.test.ts `autoResolve`) so a season runs unattended to completion.
+ * and tests/uat/fullGameUatHarness.ts `autoResolve`) so a season runs unattended to completion.
  */
 function resolve(s: GameSessionAdapter, p: Pending): void {
   const o = (i = 0): string => p.options[i]?.id;
