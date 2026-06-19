@@ -552,6 +552,26 @@ export interface RetrospectiveView {
   }>;
 }
 
+/**
+ * The Vault-free result of an ADMIN fast-forward to the finale (L38). The dev-only "finish my
+ * season so the post-season retrospective unseals" lever DRIVES the deterministic engine — it
+ * reads NO Vault and reveals nothing hidden: it carries only PUBLIC ceremony facts (the crowned
+ * winner's NAME, weeks played, the player's final placement). The retrospective (0048) still
+ * unseals through its OWN code-gated post-finale path — this only makes the season FINISH.
+ */
+export interface FinaleFastForwardView {
+  /** True once the season is over — a winner is crowned (or it was already finished). */
+  finished: boolean;
+  /** The crowned winner's NAME (Vault-free public fact), or null if the season did not finish. */
+  winnerName: string | null;
+  /** Weeks played to the crown (the public week count). */
+  weeks: number;
+  /** Where the PLAYER finished — `winner`, `runner-up`, `jury`, or `evicted` (public seat facts). */
+  playerPlacement: "winner" | "runner-up" | "jury" | "evicted" | "unknown";
+  /** No game was started, so there was nothing to fast-forward (Vault-free; never raises). */
+  started: boolean;
+}
+
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"

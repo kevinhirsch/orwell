@@ -234,6 +234,12 @@ export class GameSessionRegistry {
       return fresh.session.createCharacter(req);
     });
     sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
+    // L38: the God-Mode "fast-forward to finale (debug)" lever DRIVES the live session to a crowned
+    // winner (auto-resolving the player's pendings with legal defaults) so the post-season Vault
+    // retrospective (0048) opens through its own gate. Vault-free by construction — the session
+    // returns only the public summary (winner NAME, weeks, placement); it reads no Vault, and each
+    // driven beat commits through the SAME checkpointed `onPersist` a live decision does.
+    sb.admin.setFastForwardProvider(() => sb.session.advanceToFinale());
     sb.syncAdmin();
   }
 

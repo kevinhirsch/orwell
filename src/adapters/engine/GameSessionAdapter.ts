@@ -5,7 +5,7 @@ import type {
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
-  RecordCastProfileReq, RecordCastProfileResult,
+  RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds } from "./humanize";
@@ -75,7 +75,7 @@ import { EngineRefusal } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
@@ -495,6 +495,102 @@ export class GameSessionAdapter implements GameSession {
       })),
     }));
     return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
+  }
+
+  /**
+   * ADMIN fast-forward to the finale (L38) — the dev-only "finish my season so the post-season
+   * retrospective unseals" lever. It DRIVES the existing deterministic loop: it loops `advanceGame`,
+   * and whenever the loop stops on a PLAYER pending decision it auto-resolves it with the loop's OWN
+   * legal NPC policy (`autoDecision` — the same rulebook the live game already uses, no second one),
+   * until a winner is crowned (or the game is already finished). The player can legitimately lose on
+   * the way — that is fine, the season still finishes for the rest, and the retrospective opens.
+   *
+   * VAULT-FREE BY CONSTRUCTION: it reads NO Vault state and returns NO Vault content — only PUBLIC
+   * ceremony facts (the crowned winner's NAME, weeks, the player's seat). It does NOT touch
+   * `seasonRetrospective`'s gate: that still fires ONLY post-finale through its own code path — this
+   * just makes the live season reach the terminal state legitimately. BOUNDED: a hard max-iterations
+   * guard means it can never spin forever (a stuck loop returns the unfinished summary, never hangs).
+   *
+   * Engine-side, ADMIN-channel only (wired through `AdminPort.advanceToFinale`, never the player
+   * channel). Each beat still flows through the normal `commit` (consequence fold + persistence),
+   * so the finished season is GENUINE — the integrity is preserved absolutely.
+   */
+  advanceToFinale(): FinaleFastForwardView {
+    if (!this.house || !this.live) {
+      return { finished: false, winnerName: null, weeks: this.week, playerPlacement: "unknown", started: false };
+    }
+    // The loop is bounded: a full 16-cast season is well under a few thousand beats+decisions; the
+    // cap is generously above that so a legitimately long game still finishes, but a wedged loop
+    // (the engine somehow never advancing) can NEVER spin forever — it falls out with the current
+    // (unfinished) summary instead of hanging the request.
+    const MAX_ITERS = 20_000;
+    for (let i = 0; i < MAX_ITERS && !this.live.finished; i++) {
+      if (this.live.pending) {
+        // Auto-resolve the player's pending with the loop's own legal NPC policy (no second rulebook,
+        // B55/D12). `submitDecision` runs the SAME commit path a live decision does (folds + persist).
+        const input = autoDecision(this.live, this.ctx(), this.beatRng());
+        this.submitDecision(this.fromDecisionInput(input));
+      } else {
+        this.advanceGame();
+      }
+    }
+    return this.fastForwardSummary();
+  }
+
+  /** Map the engine's internal `DecisionInput` (autoDecision's output) back onto the outward
+   *  `SubmitDecisionReq` the adapter accepts — so the fast-forward drives the SAME `submitDecision`
+   *  path a live player decision does (one decision rulebook; no bypass of validation or the fold). */
+  private fromDecisionInput(input: DecisionInput): SubmitDecisionReq {
+    switch (input.kind) {
+      case "nominations":
+        return { kind: "nominations", choice: [...input.choice] };
+      case "veto-decision":
+        return { kind: "veto-decision", use: input.use, ...(input.save ? { save: input.save } : {}) };
+      case "comp-intent":
+        return { kind: "comp-intent", intent: input.intent };
+      case "houseguests-choice":
+        return { kind: "houseguests-choice", vote: input.pick };
+      case "replacement":
+        return { kind: "replacement", replacement: input.replacement };
+      case "eviction-vote":
+        return { kind: "eviction-vote", vote: input.vote };
+      case "tie-break":
+        return { kind: "tie-break", vote: input.evict };
+      case "final-eviction":
+        return { kind: "final-eviction", vote: input.evict };
+      case "goodbye-message":
+        return { kind: "goodbye-message", vote: input.tone, ...(input.message ? { statement: input.message } : {}) };
+      case "finale-statement":
+        return { kind: "finale-statement", statement: input.statement };
+      case "finale-answer":
+        return { kind: "finale-answer", appeal: input.appeal };
+      case "juror-question":
+        return { kind: "juror-question", statement: input.question ?? "" };
+      case "juror-vote":
+        return { kind: "juror-vote", vote: input.vote };
+    }
+  }
+
+  /** The Vault-free fast-forward summary (L38): public ceremony facts ONLY — winner NAME, weeks,
+   *  and the player's seat. No hidden state, no soul, no relationship number ever rides out. */
+  private fastForwardSummary(): FinaleFastForwardView {
+    const finished = !!this.live?.finished;
+    const winner = this.live?.winner;
+    const finalTwo = this.live?.finalTwo ?? null;
+    const me = this.house?.player.id ?? PLAYER;
+    let placement: FinaleFastForwardView["playerPlacement"] = "unknown";
+    if (finished) {
+      if (winner === me) placement = "winner";
+      else if (finalTwo && finalTwo.includes(me)) placement = "runner-up";
+      else placement = this.playerStatus() === "jury" ? "jury" : "evicted";
+    }
+    return {
+      finished,
+      winnerName: winner ? this.nameOf(winner) : null,
+      weeks: this.week,
+      playerPlacement: placement,
+      started: this.house !== null,
+    };
   }
 
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
