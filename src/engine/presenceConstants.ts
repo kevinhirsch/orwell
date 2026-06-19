@@ -31,3 +31,66 @@ export const PRESENCE: PresenceConstants = {
   overhearConfidence: 0.4,
   overhearFraction: 0.6,
 };
+
+/**
+ * NPC-personality movement weighting (residual of ledger L21/L24) — house movement bent by WHO a
+ * houseguest is, so the floor plan feels personality-driven: a social butterfly roams and seeks
+ * company; a low-social introvert clusters or holds a room; a volatile, rattled soul can't sit still.
+ *
+ * Every term is a BOUNDED nudge layered on the base 0049 assignment (stay-or-adjacent, affinity-
+ * clustered, the one-room invariant) — it bends the per-NPC move rate and the affinity-seek pull,
+ * never the hard floor-plan rules. The sibling-constants pattern (decisionConstants/relationship-
+ * Constants): no magic number is hard-coded at a call site.
+ *
+ * CRITICAL (the L21/L24 root-cause + the two-reverted-attempts lesson). The personality-WEIGHTED,
+ * player-facing positions are drawn from a DEDICATED movement RNG stream — `presenceTick` forks its own
+ * per-tick stream off the GAME seed — so these constants NEVER touch the orchestrator's shared per-user
+ * stream that drives the off-screen society + relationship folds + votes. But the CALIBRATION-NEUTRAL
+ * BASE assignment the society pairs on still draws from that SHARED stream, un-weighted, with the SAME
+ * draw count as the pre-feature build — so the seeded `juryReach` calibration spine is byte-identical.
+ * Both prior attempts broke that spine by changing the shared-stream consumption: the first ADDED
+ * weighting rolls to it; the second stopped drawing from it ENTIRELY (the un-weighted assignment used
+ * to BE part of the spine). The fix keeps the base on the shared stream and the weighting on its own.
+ * (Guards: `tests/property/movementStreamIsolation` + the shared-draw-count test in
+ * `tests/unit/presence.test.ts` + the permanent `tests/property/juryReach` gate.) The weighting reads
+ * the static CHARACTER `stats.social` and the dynamic SOUL volatility; no number ever crosses the Vault
+ * Wall (presence reads stay Vault-free).
+ */
+export interface MovementPersonality {
+  /**
+   * The center of the social-aptitude scale (`stats.social` is ~0.4–0.85, centered near here).
+   * Aptitude is read as a SIGNED deviation from this center: above ⇒ more roaming/seeking, below ⇒ less.
+   */
+  socialCenter: number;
+  /**
+   * How hard social aptitude bends the per-tick MOVE probability. A high-social houseguest's base
+   * `moveProb` rises (they roam); a low-social one's falls (they hold a room). The result is clamped
+   * into [moveProbFloor, moveProbCeil] so it stays a probability and nobody ever fully freezes/teleports.
+   */
+  moveAptitudeWeight: number;
+  /**
+   * How hard social aptitude bends the AFFINITY PULL toward occupied rooms — high-social houseguests
+   * seek company more strongly (cluster toward where their bonds are), low-social ones less so.
+   */
+  seekAptitudeWeight: number;
+  /**
+   * How much a houseguest's SOUL volatility (current emotional turbulence) adds to their move rate —
+   * a rattled, churning soul can't sit still. `0.5` (a settled soul) is the no-op center.
+   */
+  volatilityWeight: number;
+  /** The hard floor/ceiling the personality-adjusted move probability is clamped into. */
+  moveProbFloor: number;
+  moveProbCeil: number;
+  /** The hard floor the personality-adjusted affinity pull is clamped to (never negative — no repulsion). */
+  seekPullFloor: number;
+}
+
+export const MOVEMENT_PERSONALITY: MovementPersonality = {
+  socialCenter: 0.55,
+  moveAptitudeWeight: 0.6,
+  seekAptitudeWeight: 1.2,
+  volatilityWeight: 0.3,
+  moveProbFloor: 0.05,
+  moveProbCeil: 0.95,
+  seekPullFloor: 0,
+};

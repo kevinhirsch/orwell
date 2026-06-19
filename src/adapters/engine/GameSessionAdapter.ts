@@ -174,6 +174,25 @@ export class GameSessionAdapter implements GameSession {
    * continuity in `whereabouts()` so the narrator voices who has lingered vs. who just arrived.
    */
   private presenceTenure: Map<EntityId, number> | null = null;
+  /**
+   * The CALIBRATION-NEUTRAL base occupancy (L21/L24). The off-screen society pairs co-present NPCs to
+   * generate hidden scenes whose relationship folds feed (downstream) nominations/votes — so the
+   * society's occupancy is calibration-LOAD-BEARING. To keep the seeded competition/vote outcomes
+   * BYTE-IDENTICAL to the pre-personality build, the society reads THIS base assignment (the un-weighted
+   * 0049 movement, exactly as before L21/L24) via `societyOccupancy()`, while the player-facing positions
+   * (`this.presence`, used by `whereabouts`/witnessing) carry the personality-weighted result. The two
+   * differ only in WHICH room NPCs roam to — the player never observes the hidden society's pairing, so
+   * there is no observable contradiction (one place at a time still holds for everything the player sees).
+   */
+  private presenceBase: Map<EntityId, Room> | null = null;
+  /**
+   * The presence-tick COUNTER (L21/L24 isolation). Movement randomness rides a DEDICATED stream forked
+   * off the game seed + this counter (`presenceTick`) — never the orchestrator's shared per-user stream
+   * that drives the off-screen society + relationship folds + votes — so personality-weighted movement
+   * can never perturb the seeded competition/vote calibration (`tests/property/juryReach`). Persisted, so
+   * the movement trajectory stays reproducible across a restart. Advances ONCE per `presenceTick`.
+   */
+  private presenceTickCount = 0;
   /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
   private gameSeed: number | null = null;
   /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
@@ -730,7 +749,13 @@ export class GameSessionAdapter implements GameSession {
       live: this.live ? cloneSession(this.live) : null,
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
+      // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
+      // society's positions stay reproducible across a restart and never reseed from the weighted view.
+      ...(this.presenceBase ? { presenceBase: Object.fromEntries(this.presenceBase) as Record<EntityId, Room> } : {}),
       ...(this.presenceTenure ? { presenceTenure: Object.fromEntries(this.presenceTenure) as Record<EntityId, number> } : {}),
+      // L21/L24: the dedicated movement stream's tick counter — persisted so the personality-weighted
+      // movement trajectory stays reproducible across a restart (absent ⇒ 0).
+      ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // A half-done casting interview is durable state too (0050/0030).
@@ -758,7 +783,12 @@ export class GameSessionAdapter implements GameSession {
     this.deals.load(core.deals ?? []);
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
+    // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick
+    // re-seeds it from the weighted positions, which `societyOccupancy` falls back to in the meantime).
+    this.presenceBase = core.presenceBase ? new Map(Object.entries(core.presenceBase) as [EntityId, Room][]) : null;
     this.presenceTenure = core.presenceTenure ? new Map(Object.entries(core.presenceTenure) as [EntityId, number][]) : null;
+    // L21/L24: restore the dedicated movement stream's tick counter (absent on older saves ⇒ 0).
+    this.presenceTickCount = core.presenceTickCount ?? 0;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // 0051: restore the per-season portrait style anchor. On a legacy save that predates it, re-seed
     // from the game seed (so the look stays stable for a resumed game), or fall back to the first
@@ -903,44 +933,128 @@ export class GameSessionAdapter implements GameSession {
     return this.livingIds().filter((id) => !evicted.has(id));
   }
 
-  /** The shared room-assignment deps: live affinity (allies drift together) + the HOH-room pull. */
-  private presenceDeps(rng: RandomnessSource): Parameters<typeof assignRooms>[2] {
+  /**
+   * The room-assignment deps. `affinity` (allies drift together) + the HOH-room pull are always present;
+   * the per-NPC MOVEMENT PERSONALITY (L21/L24) is included ONLY when `weighted` — it reads the static
+   * CHARACTER `stats.social` and the dynamic SOUL `volatility` (facts the engine already holds) so a
+   * social butterfly roams and seeks company while a low-social/settled one holds a room. The profile
+   * NEVER draws rng; it only re-weights the move-gate threshold and the affinity pull (the L21/L24
+   * isolation guarantee). No number crosses the Vault Wall — presence reads stay Vault-free.
+   *
+   * ONLY NPCs are personality-weighted — the PLAYER returns `null` (no profile). The player is a person
+   * the engine never relocates (moved only by `movePlayer`), so weighting their movement is meaningless;
+   * keeping them un-weighted ALSO makes the player's room identical in the weighted and base views, which
+   * keeps the calibration-neutral base fully invariant to the personality constants (the NPCs cluster
+   * around the same player room in both).
+   */
+  private presenceDeps(rng: RandomnessSource, weighted: boolean): Parameters<typeof assignRooms>[2] {
+    const playerId = this.house?.player.id;
     return {
       rng,
       affinity: (a, b) => this.rel.edge(a, b).affinity,
       hoh: this.ceremony.hoh ?? null,
+      ...(weighted
+        ? {
+            movement: (id: EntityId) => (id === playerId ? null : {
+              social: this.statsOf(id).social,
+              // A live soul carries the current turbulence; fall back to the settled center (0.5) when
+              // there is none (e.g. a standalone adapter without souls) so the term is a no-op there.
+              volatility: this.soulObj(id)?.volatility ?? 0.5,
+            }),
+          }
+        : {}),
     };
   }
 
   /**
-   * Re-seat the house for a new off-screen tick (0049): every active houseguest stays put or moves
-   * to an ADJACENT room, clustered by affinity, through the caller's seeded rng. The orchestrator
-   * calls this once per tick; lingering player turns never move the week — only the rooms.
+   * The DEDICATED, isolated movement RNG stream (L21/L24). Forked off the GAME seed + the persisted
+   * presence-tick counter, so it is fully reproducible AND completely separate from the orchestrator's
+   * shared per-user stream that drives the off-screen society + relationship folds + competitions/votes.
+   * Both the base and the personality-weighted assignment draw from THIS stream — never the shared one —
+   * so the movement weighting cannot perturb the seeded competition/vote calibration.
    */
-  presenceTick(rng: RandomnessSource): void {
+  private movementRng(): SeededRandom {
+    const root = this.gameSeed ?? this.house?.player.name ?? "season";
+    return new SeededRandom(hashSeed(`${root}:presence-move:${this.presenceTickCount}`));
+  }
+
+  /**
+   * Re-seat the house for a new off-screen tick (0049): every active houseguest stays put or moves
+   * to an ADJACENT room, clustered by affinity + personality (L21/L24). The orchestrator calls this
+   * once per tick; lingering player turns never move the week — only the rooms.
+   *
+   * THE CALIBRATION INVARIANT (L21/L24 — the jury-reach root cause). The off-screen society pairs
+   * CO-PRESENT NPCs, so its occupancy is calibration-LOAD-BEARING (it feeds relationship folds →
+   * nominations/votes downstream). Before this feature, `presenceTick` drew its room rolls straight
+   * from the orchestrator's SHARED per-user `rng` — so the move/room draws were part of the calibrated
+   * spine, and every later shared-stream consumer (society/gossip/confessional/votes) saw a specific
+   * sequence. To stay byte-identical to that spine, the BASE (un-weighted) assignment STILL draws from
+   * the SHARED `rng`, with the exact same algorithm and draw count as before — so the shared stream is
+   * advanced identically and the seeded competition/vote outcomes are byte-for-byte unchanged. (The
+   * prior reverted attempt added EXTRA shared-stream draws for weighting; the first ship of this feature
+   * over-corrected and drew NONE from the shared stream — both re-phased the spine and broke juryReach.)
+   *
+   * TWO assignments:
+   *   • the BASE (un-weighted) occupancy — `presenceBase`, what `societyOccupancy()` feeds the society.
+   *     Drawn from the SHARED `rng`, un-weighted, identical to the pre-L21/L24 build ⇒ INVARIANT to the
+   *     personality constants AND byte-identical to the calibrated spine (proven by `movementStreamIsolation`
+   *     + `juryReach`).
+   *   • the personality-WEIGHTED occupancy — `presence`, the player-facing positions (`whereabouts`,
+   *     witnessing). Drawn from a DEDICATED `movementRng()` stream (never the shared one), so however the
+   *     weighting moves the house it cannot perturb calibration. The player never observes the hidden
+   *     society's pairing, so one-place-at-a-time still holds for everything the player sees.
+   */
+  presenceTick(rng?: RandomnessSource): void {
     if (!this.house) return;
-    const prev = this.presence;
+    // Advance the dedicated movement stream by one tick FIRST, so the WEIGHTED pass draws a fresh,
+    // reproducible sub-stream (and a resumed game continues the deterministic sequence from the counter).
+    this.presenceTickCount += 1;
     const me = this.house.player.id;
-    let next: Map<EntityId, Room>;
-    if (!prev) {
-      // Premiere seating — the ONE time everyone (the player included) is placed at once.
-      next = assignRooms(this.presenceActive(), null, this.presenceDeps(rng));
-    } else {
-      // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them; their room changes
-      // only by an explicit move (`movePlayer`). The engine drives the NPCs, pinned around the held
-      // player so allies can still gravitate to wherever the player chose to be.
-      const playerRoom = prev.get(me);
+    const prev = this.presence;
+    // The PLAYER's room is authoritative and IDENTICAL in both views — the player is never personality-
+    // weighted (only NPCs are); they move only by their own `movePlayer`. So both passes pin the player at
+    // the SAME real room; only NPC positions differ between the calibration-neutral base and the weighted view.
+    const playerRoom = prev?.get(me) ?? null;
+    // The base evolves from its OWN history (so it is INVARIANT to the personality constants — the society's
+    // occupancy, and thus the seeded competition/vote outcomes, are byte-identical whether weighting is on
+    // or off). Pre-L21/L24 saves have no separate base — seed it from the only positions we have.
+    const prevBase = this.presenceBase ?? prev;
+
+    // Compute one assignment for a given weighting. `weighted` ⇒ the DEDICATED movement stream (isolated
+    // from calibration); un-weighted ⇒ the caller's SHARED `rng` (the calibrated spine the society reads),
+    // falling back to the dedicated stream only when no shared rng is supplied (standalone/test callers).
+    const assign = (previous: Occupancy | null, weighted: boolean): Map<EntityId, Room> => {
+      const stream = weighted ? this.movementRng() : (rng ?? this.movementRng());
+      if (!previous) {
+        // Premiere seating — the ONE time everyone (the player included) is placed at once.
+        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted));
+      }
+      // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them. Pin them (in BOTH views) at
+      // their real room; the engine drives only the NPCs around the held player.
       const pinned = playerRoom ? new Map<EntityId, Room>([[me, playerRoom]]) : null;
-      next = assignRooms(this.presenceActive().filter((id) => id !== me), prev, this.presenceDeps(rng), pinned);
-    }
-    // L21/L24: room tenure — a houseguest who held their room this tick keeps accumulating; a mover
-    // resets to 0. Grounds scene continuity so the narrator knows who has lingered vs. just arrived.
+      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted), pinned);
+    };
+
+    // The BASE draws from the SHARED `rng` FIRST — the same single un-weighted `assignRooms` call (same
+    // active set, same `prev`, same pinned player) the pre-L21/L24 build made, so the shared stream is
+    // advanced byte-identically to the calibrated spine.
+    const nextBase = assign(prevBase, false);   // calibration spine — the society's occupancy
+    const next = assign(prev, true);            // personality-weighted — the player's positions
+    // The player's position is authoritative and identical in both views (never personality-weighted) —
+    // force the base to agree with the weighted player room so a player overhear of an off-screen scene
+    // reads the player's REAL room, and the two views never disagree about where the player is.
+    const realPlayerRoom = next.get(me);
+    if (realPlayerRoom) nextBase.set(me, realPlayerRoom);
+
+    // L21/L24: room tenure (player-facing) — a houseguest who held their room this tick keeps
+    // accumulating; a mover resets to 0. Grounds scene continuity in `whereabouts`.
     const tenure = new Map<EntityId, number>();
     for (const [id, room] of next) {
       const stayed = prev?.get(id) === room;
       tenure.set(id, stayed ? (this.presenceTenure?.get(id) ?? 0) + 1 : 0);
     }
     this.presence = next;
+    this.presenceBase = nextBase;
     this.presenceTenure = tenure;
   }
 
@@ -956,14 +1070,32 @@ export class GameSessionAdapter implements GameSession {
     const me = this.house.player.id;
     if (this.presence.get(me) === room) return this.whereabouts(); // already there — nothing to move
     this.presence.set(me, room as Room);
+    // L21/L24: the player's position is identical in both views — keep the calibration-neutral base in sync
+    // so the society's player-overhears and `whereabouts` always agree about where the player is.
+    this.presenceBase?.set(me, room as Room);
     (this.presenceTenure ??= new Map()).set(me, 0); // a fresh arrival
     this.persist();
     return this.whereabouts();
   }
 
-  /** The live occupancy ground truth (engine/registry wiring — never projected raw to the player). */
+  /**
+   * The player-facing occupancy ground truth (engine/registry wiring — never projected raw to the player).
+   * Carries the personality-WEIGHTED NPC positions (L21/L24) — what the player observes via `whereabouts`
+   * and what witnessing a player scene reads.
+   */
   occupancy(): Occupancy | null {
     return this.presence;
+  }
+
+  /**
+   * The CALIBRATION-NEUTRAL occupancy the OFF-SCREEN SOCIETY pairs on (L21/L24). The society's co-present
+   * pairing feeds relationship folds → (downstream) nominations/votes, so it must be INVARIANT to the
+   * personality-movement constants — the base assignment is, which keeps the seeded competition/vote
+   * outcomes byte-identical whether or not the weighting is enabled. Falls back to the weighted positions
+   * for pre-L21/L24 saves (no base yet) or before the first tick.
+   */
+  societyOccupancy(): Occupancy | null {
+    return this.presenceBase ?? this.presence;
   }
 
   /** Drop anyone presence still seats who is no longer active (the just-evicted are nowhere). */
@@ -971,6 +1103,8 @@ export class GameSessionAdapter implements GameSession {
     if (!this.presence) return;
     const active = new Set(this.presenceActive());
     for (const id of [...this.presence.keys()]) if (!active.has(id)) this.presence.delete(id);
+    // L21/L24: prune the calibration-neutral base in lockstep so the society never pairs an evictee.
+    if (this.presenceBase) for (const id of [...this.presenceBase.keys()]) if (!active.has(id)) this.presenceBase.delete(id);
     if (this.presenceTenure) for (const id of [...this.presenceTenure.keys()]) if (!active.has(id)) this.presenceTenure.delete(id);
   }
 
@@ -1158,11 +1292,21 @@ export class GameSessionAdapter implements GameSession {
     // first impressions so the bias rides the scattered baseline; persisted so a showmance never resets.
     this.seedSeededRelationships(seed);
     this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
-    // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere).
+    // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere). L21/L24:
+    // seed BOTH views from the SAME premiere stream — the player-facing WEIGHTED positions (`presence`)
+    // and the calibration-neutral BASE the off-screen society pairs on (`presenceBase`). The player's
+    // room is forced identical in both (they are never personality-weighted).
     this.presence = assignRooms(
       this.presenceActive(), null,
-      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`))),
+      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), true),
     );
+    this.presenceBase = assignRooms(
+      this.presenceActive(), null,
+      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), false),
+    );
+    const meId = this.house!.player.id;
+    const pr = this.presence.get(meId);
+    if (pr) this.presenceBase.set(meId, pr);
     this.persist(); // durable save (0030): a started game must survive a restart
     // 0051: attach the season-start portrait prompts — present ONLY on this response (the FE calls
     // the image API once at move-in and stores the results). Built from PUBLIC appearance facets

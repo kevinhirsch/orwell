@@ -52,8 +52,23 @@ export interface SessionCore {
   deals?: Deal[];
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
+  /**
+   * The CALIBRATION-NEUTRAL base occupancy the off-screen society pairs on (L21/L24). Kept separate from
+   * the personality-weighted `presence` (the player's view) so the society's co-presence — and thus the
+   * seeded competition/vote outcomes — stays invariant to the movement-personality constants. Absent on
+   * pre-L21/L24 saves (the next tick re-seeds it; `societyOccupancy` falls back to `presence` meanwhile).
+   */
+  presenceBase?: Record<EntityId, Room>;
   /** Room tenure — ticks each houseguest has held their current room (L21/L24). Absent on older saves (reseeded on the next tick). */
   presenceTenure?: Record<EntityId, number>;
+  /**
+   * The presence-tick COUNTER (L21/L24). Movement randomness rides a DEDICATED stream forked off the
+   * game seed + this counter — never the orchestrator's shared per-user stream — so personality-weighted
+   * movement can never perturb the competition/vote calibration (the seeded `juryReach` gate). Persisted
+   * so the movement trajectory stays reproducible across a restart; absent ⇒ 0 (a resumed game continues
+   * the deterministic sequence). The counter advances ONCE per `presenceTick`.
+   */
+  presenceTickCount?: number;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
