@@ -14,6 +14,8 @@ import {
   DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
 } from "../engine/deepProfile";
 import { preGameTieToVaultContent, showmanceToVaultContent } from "../engine/seededRelationships";
+import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
+import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -148,6 +150,61 @@ function buildUserSandbox(user = "default"): UserSandbox {
     hidden: false,
     content: `${sm.aName} and ${sm.bName} have grown close — the house is starting to notice a showmance`,
   }));
+  // 0060 — the story-thread scheduler's SURFACING seams. The session holds no events/knowledge handle;
+  // it hands a Vault-SAFE class-keyed paraphrase (never the premise — `threadRumor`) and the registry
+  // runs the in-game pathway. This is the SAME hidden→pathway machinery gossip/overhears already use,
+  // so nothing crosses but a belief with source + confidence (§7).
+  //  (a) NPC↔NPC (the common case): diffuse the paraphrase along the affinity graph (0038) — most of
+  //      the time it stays among the NPCs; the player catches it only if a chain terminates at them.
+  session.setOnThreadGossip((origin, rumor, subject) => {
+    const core = session.snapshot();
+    if (!core.house) return;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    // Diffuse NPC↔NPC along the affinity graph — NPC nodes ONLY (the player is never a node here; the
+    // rare to-player pathway is the separate anchored seam below). `diffuseGossip` seeds the ORIGIN's
+    // belief first, so even on a cold graph this NPC-directed surfacing leaves a real NPC-side belief
+    // (the rumor exists in the house), then it spreads with the normal low transmit/decay/drift. This
+    // is the engine-only hidden layer; nothing crosses to the player here.
+    const npcIds: EntityId[] = core.house.npcs.map((n) => n.id).filter((id) => !evicted.has(id));
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < npcIds.length; i++) {
+      for (let j = i + 1; j < npcIds.length; j++) {
+        if (engine.relationships.edge(npcIds[i]!, npcIds[j]!).affinity > GOSSIP.affinityEdge) {
+          edges.push([npcIds[i]!, npcIds[j]!] as const);
+        }
+      }
+    }
+    // Always diffuse: `diffuseGossip` seeds the ORIGIN's belief unconditionally (independent of the
+    // graph), so even a cold graph leaves the origin holding the rumor — the NPC-side surfacing never
+    // silently vanishes; it just doesn't spread far this tick.
+    diffuseGossip({
+      knowledge: engine.knowledge,
+      graph: makeSocialGraph(edges),
+      rng: new SeededRandom(hashSeed(`${core.seed ?? user}:thread-gossip:${subject}:${core.week}`)),
+      origin,
+      fact: { content: rumor },
+      rounds: GOSSIP.rounds,
+      transmitProb: GOSSIP.transmitProb,
+      decay: GOSSIP.decay,
+    });
+  });
+  //  (b) TO the player (rare): seed the paraphrase onto an NPC confidant, then surface it `told-by:<npc>`
+  //      so the E9 content-lineage check accepts it as a BELIEF (source + confidence) — never an invented
+  //      fact. An unanchored attempt is correctly downgraded to a suspicion by 0002. Returns whether the
+  //      player actually came to hold the belief (the scheduler counts it once against the season cap).
+  session.setOnThreadSurfaceToPlayer((subject, rumor) => {
+    const core = session.snapshot();
+    if (!core.house) return false;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    // A living NPC confidant who is NOT the subject relays it (someone with a real pathway to the player).
+    const confidant = core.house.npcs.map((n) => n.id).find((id) => id !== subject && !evicted.has(id));
+    if (!confidant) return false;
+    const factId = `thread-belief:${subject}:${engine.events.query().length}`;
+    // The confidant first HOLDS the rumor (an origin belief), so the told-by pathway is content-anchored.
+    engine.knowledge.seedBelief(confidant, { content: rumor, originalContent: rumor, factId, confidence: 0.6, hops: 1, distortion: 1, source: confidant }, "origin");
+    const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: rumor, subject, confidence: 0.5 }, `told-by:${confidant}`);
+    return fact !== null;
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
