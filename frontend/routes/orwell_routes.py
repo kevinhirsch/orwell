@@ -53,6 +53,34 @@ def _clear_warn(key: str) -> None:
     _LAST_WARN.pop(key, None)
 
 
+# ── L15: a LAST-GOOD roster cache (per user, process-local) ─────────────────────────────────────
+# The cast panel polls /roster FAST (3.5s) while portraits land. During cast generation the engine's
+# per-user serial queue is busy committing the run's writes, so a getGameState poll can time out
+# (the 3s framing timeout) — and the route used to fail open to an EMPTY roster, which made EVERY
+# portrait vanish from the open panel (the reported L15 symptom). Instead, remember the last roster
+# we successfully built for a user and serve it (flagged `stale`) when a transient read fails, so a
+# busy engine never blanks the cast. Cleared when the engine reports the game is over/absent (a real
+# "no cast" state must still empty the panel). Vault-free: it caches only the public roster cards.
+_LAST_ROSTER: dict = {}
+_LAST_ROSTER_TTL_S = 90.0
+
+
+def _remember_roster(user: Optional[str], cards: list) -> None:
+    if cards:
+        _LAST_ROSTER[user or ""] = {"cards": cards, "ts": _time.time()}
+
+
+def _last_good_roster(user: Optional[str]) -> Optional[list]:
+    rec = _LAST_ROSTER.get(user or "")
+    if rec and (_time.time() - rec["ts"]) <= _LAST_ROSTER_TTL_S:
+        return rec["cards"]
+    return None
+
+
+def _forget_roster(user: Optional[str]) -> None:
+    _LAST_ROSTER.pop(user or "", None)
+
+
 def _current_user(request: Request) -> Optional[str]:
     """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021).
 
@@ -96,6 +124,42 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
             "portrait": orwell_portraits.portrait_ref(user, hid),
         })
     return cards
+
+
+def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
+    """The /roster response body from a set of roster cards: the cards plus the portrait-set
+    counters, whether an image provider is configured, the live generation progress (L15), and a
+    `stale` flag when these cards came from the last-good cache (a transient read failure). Every
+    field is Vault-free (counts + a stale flag only). Fully fail-soft — a sub-helper raising never
+    changes the cards we already have."""
+    counts = {"total": 0, "present": 0, "missing": 0}
+    try:
+        counts = orwell_portraits.completeness(user, cards)
+    except Exception:
+        pass
+    images_available = False
+    try:
+        images_available = orwell_portraits.image_generation_available(user)
+    except Exception:
+        images_available = False
+    # L15: the live run progress (counts only, never a name) so the panel reports honest
+    # "Generating N of M…" and stays on the fast cadence ONLY while a run is genuinely active.
+    progress = None
+    try:
+        progress = orwell_portraits.generation_progress(user)
+    except Exception:
+        progress = None
+    payload = {
+        "roster": cards,
+        "imagesAvailable": images_available,
+        "portraitsPresent": counts["present"],
+        "portraitsTotal": counts["total"],
+    }
+    if progress is not None:
+        payload["generation"] = progress
+    if stale:
+        payload["stale"] = True
+    return payload
 
 
 class NewGameRequest(BaseModel):
@@ -278,49 +342,48 @@ def setup_orwell_routes() -> APIRouter:
         empty roster so the sidebar never blocks the page.
 
         Also reports `imagesAvailable` so the UI can pick its empty-state copy (a configured-
-        but-not-yet-generated set vs. graceful absence — no image model)."""
+        but-not-yet-generated set vs. graceful absence — no image model).
+
+        L15: while a generation run is in flight the engine is busy committing the run's writes,
+        so a state read can transiently time out — we serve the LAST-GOOD roster (flagged `stale`)
+        instead of blanking the panel, and surface the live `generation` progress so the cast shows
+        "Generating N of M…" instead of going dark or dropping the connection."""
         user = _current_user(request)
+        # L15: a roster read tolerates a busier engine than a chat-framing read — use a wider
+        # timeout (still bounded) so a generation-busy queue doesn't blank the cast on every poll.
         try:
-            state = await orwell_engine.get_game_state(user=user)
+            state = await orwell_engine.get_game_state(user=user, timeout=8.0)
         except Exception as e:
-            logger.warning(f"[orwell] roster failed: {e}")
+            # Transient read failure (e.g. the per-user queue is busy committing portraits): keep
+            # the cast on screen by serving the last roster we built, never an empty one.
+            cached = _last_good_roster(user)
+            if cached is not None:
+                _warn_throttled("roster", f"[orwell] roster read failed — serving last-good roster: {e}")
+                return _roster_payload(user, cached, stale=True)
+            _warn_throttled("roster", f"[orwell] roster failed: {e}")
             return {"roster": [], "imagesAvailable": False}
 
+        _clear_warn("roster")
         if not isinstance(state, dict) or state.get("started") is False:
+            _forget_roster(user)  # a real "no cast" state must empty the panel
             return {"roster": [], "imagesAvailable": False}
 
         cards = _roster_cards(state, user)
-
-        # G20: the completeness counter (active cast only, shared derivation) so the cast
-        # panel can show "Generating N remaining…" while the reconciler works the set.
-        # Happy path only — the fail-open shapes above are pinned, and the panel falls
-        # back to its own roster-derived count when the keys are absent.
-        counts = {"total": 0, "present": 0, "missing": 0}
-        try:
-            counts = orwell_portraits.completeness(user, cards)
-        except Exception:
-            pass
-
-        images_available = False
-        try:
-            images_available = orwell_portraits.image_generation_available(user)
-        except Exception:
-            images_available = False
+        _remember_roster(user, cards)  # the fresh good roster — the fallback above serves it
 
         # G9 backfill: seasons that predate 0051 (or whose generation failed) have no stored
         # portraits — once a provider IS configured, generate the missing set in the background
         # via the engine's live `getPortraitPrompt` tool. Debounced per user in orwell_portraits
         # (one attempt per process per window); fire-and-forget, NEVER blocks this response.
-        if images_available:
-            try:
+        try:
+            if orwell_portraits.image_generation_available(user):
                 missing = orwell_portraits.missing_portrait_ids(user, cards)
                 if missing:
                     orwell_portraits.kickoff_backfill(missing, user)
-            except Exception as e:
-                logger.info(f"[orwell] portrait backfill kick failed: {e}")
+        except Exception as e:
+            logger.info(f"[orwell] portrait backfill kick failed: {e}")
 
-        return {"roster": cards, "imagesAvailable": images_available,
-                "portraitsPresent": counts["present"], "portraitsTotal": counts["total"]}
+        return _roster_payload(user, cards, stale=False)
 
     @router.post("/portraits/backfill")
     async def orwell_portraits_backfill(request: Request):
