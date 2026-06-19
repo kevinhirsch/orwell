@@ -5,11 +5,11 @@ resolve. Status: ☐ open · ◐ in progress · ☑ done. Lane: FE (front-end), 
 COPY (text). This ledger is the authoritative open-items list for this batch.
 
 ## Casting / OOBE flow
-- **L1 ☐ FE** — The headshot prompt/studio panel renders **under the "orwell" header and gets jumbled** (z-index / layout); it keeps interfering with the logo throughout the headshot step.
-- **L2 ☐ FE** — In OOBE, the **"Open settings" button doesn't open settings** — it only closes the modal back to the main chat screen (broken action; looks wrong).
-- **L3 ☐ FE** — During the headshot step, the generation **accordion is collapsed by default** after generating your photos. It should not collapse at all, let alone by default.
-- **L4 ☐ FE** — After tapping a desired generated headshot it says **"casting headshot set" but the dialog doesn't dismiss or guide you into the game** — only "make another" / "remove" are offered, and it keeps covering the logo; the only escape is collapsing it manually. Selecting a headshot must dismiss the picker and hand off into the game.
-- **L5 ☐ FE/ENG** — Once the headshot is selected, **the producers must send the first message to open the game** — the player should NOT be responsible for the first word. The game opens with the producer's opener.
+- **L1 ☑ FE** — The headshot prompt/studio panel renders **under the "orwell" header and gets jumbled** (z-index / layout); it keeps interfering with the logo throughout the headshot step.
+- **L2 ☑ FE** — In OOBE, the **"Open settings" button doesn't open settings** — it only closes the modal back to the main chat screen (broken action; looks wrong).
+- **L3 ☑ FE** — During the headshot step, the generation **accordion is collapsed by default** after generating your photos. It should not collapse at all, let alone by default.
+- **L4 ☑ FE** — After tapping a desired generated headshot it says **"casting headshot set" but the dialog doesn't dismiss or guide you into the game** — only "make another" / "remove" are offered, and it keeps covering the logo; the only escape is collapsing it manually. Selecting a headshot must dismiss the picker and hand off into the game.
+- **L5 ☑ FE** — Once the headshot is selected, **the producers must send the first message to open the game** — the player should NOT be responsible for the first word. The game opens with the producer's opener.
 
 ## Thinking / immersion / accordions
 - **L6 ◐ FE** — Model **thinking/reasoning was visible** in the game build. Thinking must **never** be shown/expanded by default (not even while generating); viewable ONLY via an admin-only opt-in.
