@@ -48,6 +48,40 @@ def test_l11_cast_window_default_is_smaller():
     assert "resizable: false" not in js
 
 
+# ── L12 — pin the cast window into the gadget rail as a compact gadget ──────
+
+def test_l12_cast_pin_gadget_registers_in_rail():
+    js = _read("static", "js", "orwellCastPin.js")
+    # mounts into the 0054 gadget rail body
+    assert 'getElementById("gadget-rail-body")' in js
+    # sourced from the cast roster
+    assert "/api/orwell/roster" in js
+    # two small portraits side by side (the compact gadget)
+    assert "ocp-portraits" in js and "ocp-face" in js
+    # persisted pinned state (per-user)
+    assert "orwell-cast-pinned" in js
+    # game-build gated like the rail
+    assert "data-game-build" in js
+    # exposes the pin/un-pin seam the cast window calls
+    assert "OrwellCastPin" in js and "setPinned" in js
+
+
+def test_l12_pin_affordance_in_cast_window_and_persisted():
+    js = _read("static", "js", "orwellCast.js")
+    # a pin control + a close seam the gadget uses
+    assert "oc-pin" in js
+    assert "OrwellCastPin" in js
+    assert "_orwellCastClose" in js
+
+
+def test_l12_pin_gadget_loaded_and_ordered():
+    html = _read("static", "index.html")
+    assert "orwellCastPin.js" in html
+    css = _read("static", "style.css")
+    # the docked cast gadget has a canonical stacking order in the rail body
+    assert ".gadget-rail-body > #orwell-cast-pin" in css
+
+
 # ── L16 — color while active, grayscale once evicted ───────────────────────
 
 def test_l16_cast_portrait_grayscale_keyed_on_status():
@@ -58,3 +92,11 @@ def test_l16_cast_portrait_grayscale_keyed_on_status():
     assert "grayscale(1)" in css
     # a jury / active houseguest is NOT grayscaled — only evicted
     assert ".oc-evicted" in css
+
+
+def test_l16_pin_gadget_grayscales_evicted_too():
+    js = _read("static", "js", "orwellCastPin.js")
+    # the compact rail gadget honors the same color/B&W eviction rule
+    assert "grayscale(1)" in js
+    assert "ocp-evicted" in js
+    assert 'status === "evicted"' in js

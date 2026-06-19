@@ -904,6 +904,42 @@ def main() -> int:
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
 
+            # L12: the cast roster can be PINNED into the control-room gadget rail as a
+            # compact gadget — it mounts INTO #gadget-rail-body, the pinned state
+            # persists, and un-pinning hides it. (Engine is down here, so we inject a
+            # synthetic roster face to prove the gadget renders + reveals the rail.)
+            l12 = page.evaluate("""() => {
+              if (!window.OrwellCastPin) return { ok: false, why: 'no-seam' };
+              window.OrwellCastPin.setPinned(true);
+              const el = document.getElementById('orwell-cast-pin');
+              if (!el) return { ok: false, why: 'no-gadget' };
+              const railBody = document.getElementById('gadget-rail-body');
+              const inRail = !!railBody && railBody.contains(el);
+              // simulate a render landing (the live path fetches /api/orwell/roster)
+              el.style.display = 'block';
+              el.querySelector('[data-role="portraits"]').innerHTML =
+                '<div class="ocp-face"><span class="ocp-ph">x</span></div>' +
+                '<div class="ocp-face ocp-evicted"><span class="ocp-ph">x</span></div>';
+              const user = (document.body && document.body.dataset.user) || '';
+              const flag = localStorage.getItem('orwell-cast-pinned:' + user);
+              const faces = el.querySelectorAll('.ocp-face').length;
+              return { ok: true, inRail, flag, faces,
+                       hasUnpin: !!el.querySelector('[data-act="unpin"]') };
+            }""")
+            check(l12.get("ok") is True and l12.get("inRail") is True
+                  and l12.get("flag") == "1" and l12.get("faces") == 2
+                  and l12.get("hasUnpin") is True,
+                  f"L12: the cast pins into the gadget rail as a compact 2-portrait gadget ({l12})")
+            l12b = page.evaluate("""() => {
+              window.OrwellCastPin.setPinned(false);
+              const el = document.getElementById('orwell-cast-pin');
+              const user = (document.body && document.body.dataset.user) || '';
+              return { hidden: getComputedStyle(el).display === 'none',
+                       flag: localStorage.getItem('orwell-cast-pinned:' + user) };
+            }""")
+            check(l12b.get("hidden") is True and l12b.get("flag") is None,
+                  f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
+
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
             # .list-item standard), and no collapse chevron renders on a section with

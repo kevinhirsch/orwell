@@ -1856,7 +1856,8 @@ body.bg-pattern-sparkles {
     /* canonical stacking regardless of which gadget mounted first */
     .gadget-rail-body > #orwell-status { order: 1; }
     .gadget-rail-body > #orwell-social { order: 2; }
-    .gadget-rail-body > #orwell-presence { order: 3; }
+    .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: docked cast roster */
+    .gadget-rail-body > #orwell-presence { order: 4; }
     .gadget-rail-strip { display: none; flex-direction: column; align-items: center; gap: .3rem; padding: .5rem 0; }
     .grail-ico { background: transparent; border: none; cursor: pointer; font-size: 1.1rem;
       padding: .35rem; border-radius: 8px; line-height: 1; }
