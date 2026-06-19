@@ -35,6 +35,13 @@ export interface PersistedCharacter {
   strategyStyle: string;
   stats: { physical: number; mental: number; social: number };
   background: string;
+  /**
+   * The concrete, diverse backstory facets (L28) — part of the static baseline, so the
+   * byte-stable superset check (`isSuperset`) covers them too: an existing game's NPC vocation/
+   * hometown can never regenerate or drift. Optional only for back-compat with pre-L28 saves.
+   */
+  vocation?: string;
+  hometown?: string;
 }
 
 /** A hunch in the persisted projection (audit C4) — counted + superset-checked like knowledge. */

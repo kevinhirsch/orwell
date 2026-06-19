@@ -95,6 +95,11 @@ export function toGameState(snap: SessionSnapshot): GameState {
       strategyStyle: hg.character.strategyStyle,
       stats: hg.character.stats,
       background: hg.character.background,
+      // L28: the diverse backstory facets are part of the byte-stable static baseline — included so
+      // the 0031 checkpoint's superset/byte-compare guards them against regeneration/drift. Spread
+      // (not nested) so an absent field on a pre-L28 save stays absent (no spurious superset failure).
+      ...(hg.character.vocation !== undefined ? { vocation: hg.character.vocation } : {}),
+      ...(hg.character.hometown !== undefined ? { hometown: hg.character.hometown } : {}),
     };
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,
