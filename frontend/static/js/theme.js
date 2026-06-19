@@ -63,6 +63,14 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
+  // A5 (ruling #18) — every HOUSE theme ships a creative particles background that fits its
+  // identity, reusing the existing canvas-particle machinery (behind the chat, perf-budgeted,
+  // prefers-reduced-motion / document.hidden aware). Tinted to the theme's --fg by default.
+  'the-feed':   'rain',          // surveillance signal-static raining down the live feed
+  'telescreen': 'perlin-flow',   // the slow phosphor flow of a 1984 CRT
+  'room-101':   'synapse',       // a cold institutional monitoring lattice
+  'memory-wall':'constellations',// memories as connected points of light
+  'sequester':  'embers',        // a warm, slow drift in the jury house
   dark:       'none',
   light:      'dots',
   midnight:   'rain',
@@ -90,6 +98,12 @@ const THEME_DEFAULT_INTENSITY = {
   midnight:   0.5,
   terminal:   0.8,
   organs:     0.65,
+  // A5 — the house particles sit BEHIND the frosted chrome, so keep them subtle (texture, not noise).
+  'the-feed':    0.5,
+  'telescreen':  0.5,
+  'room-101':    0.4,
+  'memory-wall': 0.55,
+  'sequester':   0.5,
 };
 
 // L33: the frosted-glass treatment is ON by default on EVERY theme. An unset

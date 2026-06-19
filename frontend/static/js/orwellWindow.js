@@ -60,6 +60,12 @@ function ensureCss() {
       border-radius: var(--win-radius, 10px);
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
       font-size: var(--fs-sm, .8rem); line-height: 1.45;
+      /* A6/L34 — the frosted window is ONE clipped surface: the root carries the
+         backdrop-filter + radius (orwellHouseThemes.css) and overflow:hidden makes the
+         radius clip the TITLE BAR and body together, so the frost is continuous to the
+         rounded edge with no opaque top seam. Safe for resize (pointer-position based,
+         not child handles) and the box-shadow (drawn outside the clip). */
+      overflow: hidden;
     }
     /* L11: once a window carries an explicit height (the player resized it, or a
        persisted size was restored), let it become a flex column so the body
