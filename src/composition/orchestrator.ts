@@ -87,6 +87,10 @@ export class Orchestrator {
   private static readonly MAX_STORED_FAULTS = 20;
   /** Default aux-commit tick debounce (E57/R5): tool calls inside one turn land within seconds. */
   private static readonly AUX_TICK_DEBOUNCE_MS = 10_000;
+  /** R3 — re-run a FULL (untrusted-prefix) event-content re-scan at least this often, per user, as cheap
+   *  belt-and-suspenders; between full checks the immutable append-only event prefix is trusted (O(Δ)).
+   *  Not a standalone integrity guarantee — see `trustEventPrefixFor` for what every commit still proves. */
+  private static readonly R3_FULL_CHECK_EVERY = 32;
 
   private readonly seed: number;
   private readonly offscreenInteractions: number;
@@ -102,6 +106,8 @@ export class Orchestrator {
   private readonly baselines = new Map<string, SessionSnapshot>();
   /** Wall time of the user's last turn-driven off-screen tick (the E57 debounce anchor). */
   private readonly lastTurnTickAt = new Map<string, number>();
+  /** R3 — commits since this user's last FULL (untrusted-prefix) non-degradation verification. */
+  private readonly commitsSinceFullCheck = new Map<string, number>();
   private seq = 0;
 
   constructor(
@@ -225,8 +231,10 @@ export class Orchestrator {
     }
 
     const candidate = this.registry.snapshot(user);
+    // R3: audits always full-verify (rare, and never count toward the fast-path window).
+    const trustEventPrefix = trigger !== "audit" && this.trustEventPrefixFor(user);
     const faults = this.checkpoint(baseline, candidate, sandbox, trigger,
-      opts.supplementary ? { requireDailyEvent: false } : {});
+      { ...(opts.supplementary ? { requireDailyEvent: false } : {}), trustEventPrefix });
     const when = this.clock.now();
 
     if (faults.length === 0) {
@@ -270,7 +278,10 @@ export class Orchestrator {
     // baseline; there is nothing to degrade away from. (A season RESTART through the one sanctioned
     // door lands here too: `forgetUser` cleared the dead season's baseline, so week 1 of season 2
     // is a first commit again, not a count regression against a finished season — E1/R1.)
-    const faults = baseline ? this.checkpoint(baseline, candidate, sandbox, "player-turn", { requireDailyEvent: false }) : [];
+    const faults = baseline
+      ? this.checkpoint(baseline, candidate, sandbox, "player-turn",
+          { requireDailyEvent: false, trustEventPrefix: this.trustEventPrefixFor(user) })
+      : [];
 
     if (faults.length === 0) {
       try {
@@ -336,21 +347,43 @@ export class Orchestrator {
     this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
   }
 
+  /**
+   * R3 — whether THIS commit may trust the append-only event prefix (the O(Δ) fast path). The real
+   * per-commit guarantees do NOT depend on this: a net drop of any persisted item is always caught by
+   * countsNonDecreasing, the prefix boundary is always spot-checked, and every non-event dimension is
+   * always fully verified. The fast path only relaxes the full EVENT-content re-scan, which the
+   * append-only contract (events.record only ever APPENDS — never mutates/removes a past event) makes
+   * redundant. We still force a FULL event re-scan on a user's FIRST commit and at least every
+   * `R3_FULL_CHECK_EVERY` commits as cheap belt-and-suspenders. Advances the per-user counter.
+   */
+  private trustEventPrefixFor(user: string): boolean {
+    const n = this.commitsSinceFullCheck.get(user) ?? 0;
+    if (n === 0 || n >= Orchestrator.R3_FULL_CHECK_EVERY) {
+      this.commitsSinceFullCheck.set(user, 1); // full check now; this commit opens the next window
+      return false;
+    }
+    this.commitsSinceFullCheck.set(user, n + 1);
+    return true;
+  }
+
   /** Verify a candidate advance against the baseline — fail-closed (0031 §4.3). */
   checkpoint(
     baseline: SessionSnapshot,
     candidate: SessionSnapshot,
     sandbox: UserSandbox,
     trigger: Trigger = "player-turn",
-    opts: { requireDailyEvent?: boolean } = {},
+    opts: { requireDailyEvent?: boolean; trustEventPrefix?: boolean } = {},
   ): Fault[] {
     const faults: Fault[] = [];
     const when = this.clock.now();
     const gsBase = toGameState(baseline);
     const gsCand = toGameState(candidate);
 
-    // Non-degradation (0007): nothing previously persisted may be dropped.
-    if (!isSuperset(gsCand, gsBase) || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
+    // Non-degradation (0007): nothing previously persisted may be dropped. R3 — the append-only event
+    // PREFIX may be trusted on the fast path (the orchestrator runs a FULL re-verification periodically);
+    // every other dimension is fully verified, and a net DROP is always caught by countsNonDecreasing.
+    if (!isSuperset(gsCand, gsBase, { trustEventPrefix: opts.trustEventPrefix === true })
+        || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
       faults.push({ when, kind: "degradation" });
     }
     // Daily-event (0008): a progression advance must produce ≥1 new event. A player-turn COMMIT
