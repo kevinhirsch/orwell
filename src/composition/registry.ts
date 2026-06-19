@@ -113,6 +113,17 @@ function buildUserSandbox(user = "default"): UserSandbox {
       engine.vault.writeHidden({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) });
     }
   });
+  // L28b — the AUTHORED write-back re-seals ONE houseguest: REPLACE that subject's prior profile +
+  // thread records (idempotent, no stale/duplicated records) via the engine-only Vault upsert.
+  session.setOnResealProfile((id, profile, threads) => {
+    engine.vault.replaceHidden({ kind: DEEP_PROFILE_KIND, subject: id }, [
+      { id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id, content: deepProfileToVaultContent(id, profile) },
+    ]);
+    engine.vault.replaceHidden(
+      { kind: STORY_THREAD_KIND, subject: id },
+      threads.map((t) => ({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) })),
+    );
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({

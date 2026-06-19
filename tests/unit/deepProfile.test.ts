@@ -229,7 +229,7 @@ describe("0058 non-degradation + full recall (L27b)", () => {
   });
 });
 
-describe("0058 write-back seam (Phase 1 stub) — typed + split-safe", () => {
+describe("0058 / L28b write-back seam — LIVE, airtight, split-safe", () => {
   it("recordCastProfile reports public/hidden field NAMES and never echoes a hidden value", () => {
     const { sb } = liveGame("dp-writeback", 3);
     const id = sb.session.getGameState().house[0]!.id;
@@ -251,5 +251,57 @@ describe("0058 write-back seam (Phase 1 stub) — typed + split-safe", () => {
     const { sb } = liveGame("dp-writeback-unknown", 3);
     const res = sb.session.recordCastProfile({ houseguestId: "npc:999", biography: "x. y." });
     expect(res.accepted).toBe(false);
+  });
+
+  it("L28b — the authored PUBLIC biography crosses to the player and stays put", () => {
+    const { sb } = liveGame("dp-wb-public", 11);
+    const id = sb.session.getGameState().house[0]!.id;
+    const bio = "Authored backstory. A welder from Detroit who came up the hard way.";
+    expect(sb.session.recordCastProfile({ houseguestId: id, biography: bio }).accepted).toBe(true);
+    const card = sb.session.getGameState().house.find((h) => h.id === id)!;
+    expect(card.biography).toBe(bio); // the public facet is now the authored one
+  });
+
+  it("L28b — the authored HIDDEN detail NEVER reaches the player/admin/npcVoice/moment, but recalls in full", () => {
+    const { sb } = liveGame("dp-wb-hidden", 12);
+    const id = sb.session.getGameState().house[0]!.id;
+    expect(sb.session.recordCastProfile({
+      houseguestId: id,
+      secrets: [`${SENT}-authored-secret`],
+      weakness: `${SENT}-authored-weakness`,
+      dayOnePerception: `${SENT}-authored-read`,
+    }).accepted).toBe(true);
+
+    const playerSurface = JSON.stringify(sb.session.getGameState())
+      + JSON.stringify(sb.player.getVisibleState())
+      + sb.session.getMomentPrompt({ moment: "social" }).systemPrompt
+      + JSON.stringify(sb.session.npcVoice(id));
+    expect(playerSurface).not.toContain(SENT);
+    sb.syncAdmin();
+    expect(JSON.stringify(sb.admin.inspect())).not.toContain(SENT);
+
+    // …but the authored hidden detail IS recall-able in full from the (engine-only) soul (L27b).
+    const recalled = sb.engine.soul.recall(id, "secret weakness read", 5);
+    expect(recalled.some((m) => m.content.includes(`${SENT}-authored-secret`))).toBe(true);
+  });
+
+  it("L28b — re-sealing is IDEMPOTENT: writing twice leaves exactly one profile + one thread set", () => {
+    const { sb } = liveGame("dp-wb-idem", 13);
+    const id = sb.session.getGameState().house[0]!.id;
+    const write = () => sb.session.recordCastProfile({ houseguestId: id, secrets: ["a single authored secret"], weakness: "one authored weakness" });
+    write(); write();
+    const profiles = sb.engine.vault.readHidden({ kind: "hidden-attribute", subject: id });
+    expect(profiles.length).toBe(1); // not duplicated
+    // the sealed profile is the AUTHORED one
+    expect(profiles[0]!.content).toContain("a single authored secret");
+  });
+
+  it("L28b — refuses an authored profile that MIRRORS the player (cast stays player-independent)", () => {
+    const { sb } = liveGame("dp-wb-mirror", 14);
+    const id = sb.session.getGameState().house[0]!.id;
+    const playerName = "The Player";
+    const res = sb.session.recordCastProfile({ houseguestId: id, biography: `A friend of ${playerName} from back home.` });
+    expect(res.accepted).toBe(false);
+    expect(res.reason).toMatch(/mirror/i);
   });
 });

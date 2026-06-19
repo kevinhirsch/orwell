@@ -83,7 +83,7 @@ import {
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
-import { generateCastDeepLayer, deepProfileToVaultContent } from "../../engine/deepProfile";
+import { generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads } from "../../engine/deepProfile";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
@@ -279,6 +279,17 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * RE-seal ONE houseguest's authored profile + threads (L28b write-back) — REPLACING that subject's
+   * prior Vault records (idempotent, no duplication), unlike `onSealProfiles` which appends the cast at
+   * birth. Engine-only by construction (the registry wires it to the Vault via `replaceHidden`).
+   */
+  private onResealProfile?: (id: EntityId, profile: DeepProfile, threads: readonly StoryThread[]) => void;
+
+  setOnResealProfile(fn: (id: EntityId, profile: DeepProfile, threads: readonly StoryThread[]) => void): void {
+    this.onResealProfile = fn;
+  }
+
+  /**
    * The engine-only HIDDEN deep layer (0058) — the §3 secrets/goals/weakness/Day-1 perception per NPC
    * and the derived story threads. NEVER projected (the view/npcVoice/portrait paths never read this);
    * sealed into the Vault at seal time and persisted through the Vault snapshot. Kept here so the
@@ -422,29 +433,75 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The deep-profile write-back seam (feature 0058 / ledger L28b) — the FE producer-LLM authors a
-   * houseguest's rich §3 profile and writes it BACK here so the ENGINE is the source of truth (mirrors
-   * the 0051 portrait handshake). PHASE 1: clearly typed + STUBBED — it VALIDATES the target and
-   * reports which PUBLIC / HIDDEN fields it WOULD accept (names only — a hidden value is never echoed),
-   * without yet overwriting the deterministic seeded floor. The live validate / repair (diversity +
-   * non-player-mirroring) / split-across-the-wall / seal / index wiring is Phase 2.
+   * houseguest's rich §3 profile and writes it BACK here so the ENGINE becomes the airtight source of
+   * truth (mirrors the 0051 portrait handshake). NOW LIVE: it validates (non-player-mirroring),
+   * SPLITS across the Vault Wall (PUBLIC biography/physical facet → the byte-stable Character; HIDDEN
+   * secrets/goals/weakness/Day-1 perception → the engine-only deep layer + the Vault), re-derives the
+   * story threads, re-seeds the NPC→player edge from the new Day-1 read, and re-indexes for full
+   * recall — REPLACING the seeded floor for that houseguest (idempotent; no stale/duplicated records).
    *
-   * The split is ENFORCED here by construction even in the stub: PUBLIC field names and HIDDEN field
-   * names are reported on SEPARATE lists, and the hidden values are never read into the result — so
-   * the seam can never become a wall leak as it is fleshed out.
+   * The split is ENFORCED by construction: the result reports PUBLIC and HIDDEN field NAMES on separate
+   * lists and NEVER echoes a hidden value — so the seam can never become a wall leak (§8). Any field the
+   * author omits keeps its prior (seeded) value, so the profile always stays complete.
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult {
     if (!this.house) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
     const target = this.house.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
+
+    // Validate — non-player-mirroring (L28): the cast is independent of the player, so the authored
+    // PUBLIC material must not echo the player's name. Refuse a mirror (Vault-safe: no value echoed).
+    const playerName = (this.house.player.name ?? "").trim();
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`.toLowerCase();
+    if (playerName.length >= 3 && publicText.includes(playerName.toLowerCase())) {
+      return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
+    }
+
     // Field NAMES only — never the values (a hidden value must never ride out on the result, §8).
     const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined);
     const hiddenFields = (["secrets", "trueGoals", "weakness", "dayOnePerception"] as const)
       .filter((f) => req[f] !== undefined);
-    // PHASE 2 (deferred): validate/repair the authored profile (diversity + non-player-mirroring),
-    // SPLIT it (public → target.character; hidden → this.deepProfiles + the Vault seal hook), re-derive
-    // the threads + the NPC→player edge, and index for full recall. Phase 1 records nothing structurally
-    // — the seeded floor stays authoritative — but the seam is wired, typed, and split-safe.
-    return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "phase-1 stub: validated; live write-back deferred to phase 2" };
+
+    // (1) PUBLIC fold onto the byte-stable Character — these cross to the player.
+    if (req.biography !== undefined) target.character.biography = req.biography;
+    if (req.physicalCharacteristics !== undefined) target.character.physicalCharacteristics = req.physicalCharacteristics;
+
+    // (2) HIDDEN: merge the authored fields over the prior profile so it stays complete. The prior is
+    // the seeded floor (always present after seedDeepProfiles; regenerate deterministically if missing).
+    // The author supplies the Day-1 read as PROSE only — the engine KEEPS the calibrated seeded leans
+    // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
+    // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
+    const prev: DeepProfile = this.deepProfiles[target.id]
+      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)));
+    const next: DeepProfile = {
+      secrets: req.secrets ?? prev.secrets,
+      trueGoals: req.trueGoals ?? prev.trueGoals,
+      weakness: req.weakness ?? prev.weakness,
+      dayOnePerception: req.dayOnePerception !== undefined
+        ? { ...prev.dayOnePerception, read: req.dayOnePerception }
+        : prev.dayOnePerception,
+    };
+    this.deepProfiles[target.id] = next;
+
+    // (3) Re-derive THIS source's story threads (replace), deterministic off the name. The NPC→player
+    // edge keeps its seeded lean (the engine owns the numbers — see above), so no edge re-seed here.
+    const thrRng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-thread-authored:${target.name}`));
+    this.storyThreads = this.storyThreads.filter((t) => t.sourceId !== target.id)
+      .concat(deriveStoryThreads(thrRng, target.id, next));
+
+    // (4) Full-fidelity recall (L27b): replace the prior deep-profile note in the authoritative soul
+    // memory (engine-only; never crosses) so the authored detail is recall-able in full and persists +
+    // re-indexes on restore. Also index it NOW for same-session recall.
+    const oldNote = deepProfileToVaultContent(target.id, prev);
+    const newNote = deepProfileToVaultContent(target.id, next);
+    const idx = target.soul.memory.lastIndexOf(oldNote);
+    if (idx >= 0) target.soul.memory[idx] = newNote; else target.soul.memory.push(newNote);
+    this.soul?.recordToSoul(target.id, newNote);
+
+    // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
+    this.onResealProfile?.(target.id, next, this.storyThreads.filter((t) => t.sourceId === target.id));
+
+    return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */

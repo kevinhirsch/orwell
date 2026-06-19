@@ -23,4 +23,10 @@ export interface HiddenRecord {
 export interface VaultStore {
   readHidden(query?: { kind?: HiddenKind; subject?: string }): HiddenRecord[];
   writeHidden(record: HiddenRecord): void;
+  /**
+   * Atomically REPLACE every hidden record matching `query` with `records` (an idempotent upsert by
+   * subject+kind). Used by the 0058 / L28b authored write-back to re-seal ONE houseguest's profile +
+   * threads without leaving stale or duplicated records. Engine-only, like the rest of this port.
+   */
+  replaceHidden(query: { kind?: HiddenKind; subject?: string }, records: readonly HiddenRecord[]): void;
 }
