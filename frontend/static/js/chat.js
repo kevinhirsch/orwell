@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, isGameBuild } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -2330,7 +2330,12 @@ import { isNarrow } from './platform.js';
                   // bottom of file) so no per-node listener needed.
                   const _wasOpen = _hasExpand && currentToolBubble.classList.contains('open');
                   currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beatOut || json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>${_chevron2}</div>${_contentDiv2}`;
+                  // L42: in the game build, show the beat's PUBLIC OUTCOME (Vault-free, from the tool
+                  // result) instead of a generic "done" \u2014 "\ud83d\uddf3\ufe0f Troy is evicted (7-1)", "\ud83c\udfc6 Maya wins HOH".
+                  const _outcome = (_beatOut && ok) ? orwellBeatOutcome(json.tool, json.output) : null;
+                  const _toolText = _outcome || _beatOut || json.tool;
+                  const _statusHtml = _outcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();

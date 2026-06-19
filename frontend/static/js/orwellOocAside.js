@@ -17,9 +17,12 @@
 //      convention. Per-user dismiss state (localStorage, the E71 per-user-key
 //      pattern). Game-build only (the data-game-build body attr).
 //
-// SCOPE (audit L36): styling the MODEL's OOC *responses* needs an engine-emitted
-// marker that does not exist yet — out of scope here, NOT heuristically guessed.
-// This is the player-INPUT side + the hint only.
+// SCOPE (audit L36 + follow-on): this module is the player-INPUT detector + hint.
+// The MODEL's OOC *answers* are now also rendered as a producer/HUD aside — keyed
+// to a REAL engine marker (the GM wraps its whole OOC reply in `((...))` per the
+// momentPrompts prompt contract), recognised by the SAME `detectOocAside` here and
+// styled by chatRenderer (the assistant branch). Never a heuristic guess on free
+// narration — only a fully-`((...))`-wrapped reply is treated as an aside.
 //
 // Provenance: docs/audits/2026-06-19-live-debug-issues.md item L36 (DECIDED).
 

@@ -1,12 +1,17 @@
 # 0059 — Hidden seeded relationships (pre-game ties & showmances)
 
-> **Status:** 📝 SPEC (design note — not yet built). Consolidates ledger items **L35** (pre-game
-> relationships, approved 2026-06-19, twist-gated) and **L40** (showmance OVERLOAD — there is no
-> showmance model, so the narrator reads *every* high-affinity bond as romance). Both are the same
-> shape: a SMALL number of **hidden, seeded, Vault-sealed** relationship arcs that surface only
-> through organic gameplay. **Depth reference (FORMAT/DEPTH only):** `docs/legacy/BB_ProducersVault.md`
-> §4 (pre-game relationships) + §6 (the showmance profile). **Executable spec:**
-> `0059-hidden-seeded-relationships.feature` *(authored at implementation, BDD-first)*.
+> **Status:** ✅ **CORE BUILT** (unit-gated, following the 0054/0055/0056 convention — no standalone
+> `.feature`). `src/engine/seededRelationships.ts` seeds **0–2 sparse pre-game ties + 0–2 showmances**
+> off the 0025 reserve governance; the adapter folds each pair's small standing affinity bias onto the
+> move-in edges, **seals** the layer into the Vault (new `seeded-relationship` HiddenKind — invisible to
+> player AND admin), and **persists** it (a showmance stage never resets). Gate:
+> `tests/unit/seededRelationships.test.ts` — sparseness over 80 seeds (no NPC in two pairs), the wall
+> (sentinel + structural markers never cross), the affinity fold, the Vault seal, round-trip persistence.
+> Pairs with the shipped **L40 moment-prompt restraint**. **DEFERRED (the §5 follow-on):** the organic
+> **stage-advancement surfacing scheduler** (spark→bond→visible via pathways 0002 + the consequence
+> fold 0023) — analogous to 0058 Phase 1's dormant threads. Consolidates ledger items **L35** (pre-game
+> relationships, approved 2026-06-19, twist-gated) and **L40** (showmance OVERLOAD). **Depth reference
+> (FORMAT/DEPTH only):** `docs/legacy/BB_ProducersVault.md` §4 (pre-game relationships) + §6 (showmance).
 
 ## 1. Summary
 

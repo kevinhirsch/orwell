@@ -2212,6 +2212,34 @@ body.bg-pattern-sparkles {
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
 
+    /* L36 follow-on — the MODEL's OOC answer (a producer/HUD aside): the GM wrapped its whole
+       reply in ((...)), so render it as a quiet aside outside the fiction, not a spoken-in-room
+       line. Mirrors the player-side aside treatment; theme-token driven. */
+    .msg-ooc.msg-ooc-producer {
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      border-style: dashed;
+      border-color: color-mix(in srgb, var(--fg) 28%, transparent);
+      opacity: 0.92;
+    }
+    .msg-ooc.msg-ooc-producer .body {
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+    }
+    .msg-ooc.msg-ooc-producer .role::after {
+      content: 'production';
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+
     /* L36 — the one-time, dismissible composer hint surfacing the OOC convention. */
     .orwell-ooc-hint {
       display: flex;

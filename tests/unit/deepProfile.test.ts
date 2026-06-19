@@ -5,6 +5,7 @@ import { PLAYER } from "../../src/domain/ids";
 import {
   generateCastDeepLayer, generateDeepProfile, generatePhysicalCharacteristics, generateBiography,
   deriveStoryThreads, ageLookFor, SECRET_RANGE, STORY_THREAD_KIND,
+  MAX_PER_SECRET, MAX_PER_GOAL, MAX_PER_WEAKNESS, MAX_PER_PERCEPTION,
 } from "../../src/engine/deepProfile";
 import { generateHouse } from "../../src/engine/characterFactory";
 
@@ -84,6 +85,32 @@ describe("0058 deepProfile — deterministic generators", () => {
       expect(a.hidden[n.id]).toBeTruthy();
     }
     expect(a.threads.length).toBeGreaterThan(npcs.length); // ≥1 thread per NPC
+  });
+
+  it("L41 — no hidden trope clusters across the cast (spread caps hold over many seeds)", () => {
+    // The 2026-06-19 finale reveal showed 4 NPCs sharing one "secretly clocking every move" trope.
+    // The cast-wide spread caps must keep any secret/goal/weakness/Day-1-read under its MAX_PER_*.
+    for (let seed = 1; seed <= 60; seed++) {
+      const npcs = generateHouse(new SeededRandom(seed)).npcs;
+      const layer = generateCastDeepLayer(seed, npcs);
+      const secret = new Map<string, number>();
+      const goal = new Map<string, number>();
+      const weak = new Map<string, number>();
+      const read = new Map<string, number>();
+      for (const id of Object.keys(layer.hidden)) {
+        const p = layer.hidden[id]!;
+        for (const s of p.secrets) secret.set(s, (secret.get(s) ?? 0) + 1);
+        for (const g of p.trueGoals) goal.set(g, (goal.get(g) ?? 0) + 1);
+        weak.set(p.weakness, (weak.get(p.weakness) ?? 0) + 1);
+        read.set(p.dayOnePerception.read, (read.get(p.dayOnePerception.read) ?? 0) + 1);
+      }
+      expect(Math.max(...secret.values())).toBeLessThanOrEqual(MAX_PER_SECRET);
+      expect(Math.max(...goal.values())).toBeLessThanOrEqual(MAX_PER_GOAL);
+      expect(Math.max(...weak.values())).toBeLessThanOrEqual(MAX_PER_WEAKNESS);
+      expect(Math.max(...read.values())).toBeLessThanOrEqual(MAX_PER_PERCEPTION);
+      // and the hidden layer reads as genuinely varied — many distinct secrets across a 15-cast
+      expect(secret.size).toBeGreaterThanOrEqual(8);
+    }
   });
 });
 
@@ -202,7 +229,7 @@ describe("0058 non-degradation + full recall (L27b)", () => {
   });
 });
 
-describe("0058 write-back seam (Phase 1 stub) — typed + split-safe", () => {
+describe("0058 / L28b write-back seam — LIVE, airtight, split-safe", () => {
   it("recordCastProfile reports public/hidden field NAMES and never echoes a hidden value", () => {
     const { sb } = liveGame("dp-writeback", 3);
     const id = sb.session.getGameState().house[0]!.id;
@@ -224,5 +251,57 @@ describe("0058 write-back seam (Phase 1 stub) — typed + split-safe", () => {
     const { sb } = liveGame("dp-writeback-unknown", 3);
     const res = sb.session.recordCastProfile({ houseguestId: "npc:999", biography: "x. y." });
     expect(res.accepted).toBe(false);
+  });
+
+  it("L28b — the authored PUBLIC biography crosses to the player and stays put", () => {
+    const { sb } = liveGame("dp-wb-public", 11);
+    const id = sb.session.getGameState().house[0]!.id;
+    const bio = "Authored backstory. A welder from Detroit who came up the hard way.";
+    expect(sb.session.recordCastProfile({ houseguestId: id, biography: bio }).accepted).toBe(true);
+    const card = sb.session.getGameState().house.find((h) => h.id === id)!;
+    expect(card.biography).toBe(bio); // the public facet is now the authored one
+  });
+
+  it("L28b — the authored HIDDEN detail NEVER reaches the player/admin/npcVoice/moment, but recalls in full", () => {
+    const { sb } = liveGame("dp-wb-hidden", 12);
+    const id = sb.session.getGameState().house[0]!.id;
+    expect(sb.session.recordCastProfile({
+      houseguestId: id,
+      secrets: [`${SENT}-authored-secret`],
+      weakness: `${SENT}-authored-weakness`,
+      dayOnePerception: `${SENT}-authored-read`,
+    }).accepted).toBe(true);
+
+    const playerSurface = JSON.stringify(sb.session.getGameState())
+      + JSON.stringify(sb.player.getVisibleState())
+      + sb.session.getMomentPrompt({ moment: "social" }).systemPrompt
+      + JSON.stringify(sb.session.npcVoice(id));
+    expect(playerSurface).not.toContain(SENT);
+    sb.syncAdmin();
+    expect(JSON.stringify(sb.admin.inspect())).not.toContain(SENT);
+
+    // …but the authored hidden detail IS recall-able in full from the (engine-only) soul (L27b).
+    const recalled = sb.engine.soul.recall(id, "secret weakness read", 5);
+    expect(recalled.some((m) => m.content.includes(`${SENT}-authored-secret`))).toBe(true);
+  });
+
+  it("L28b — re-sealing is IDEMPOTENT: writing twice leaves exactly one profile + one thread set", () => {
+    const { sb } = liveGame("dp-wb-idem", 13);
+    const id = sb.session.getGameState().house[0]!.id;
+    const write = () => sb.session.recordCastProfile({ houseguestId: id, secrets: ["a single authored secret"], weakness: "one authored weakness" });
+    write(); write();
+    const profiles = sb.engine.vault.readHidden({ kind: "hidden-attribute", subject: id });
+    expect(profiles.length).toBe(1); // not duplicated
+    // the sealed profile is the AUTHORED one
+    expect(profiles[0]!.content).toContain("a single authored secret");
+  });
+
+  it("L28b — refuses an authored profile that MIRRORS the player (cast stays player-independent)", () => {
+    const { sb } = liveGame("dp-wb-mirror", 14);
+    const id = sb.session.getGameState().house[0]!.id;
+    const playerName = "The Player";
+    const res = sb.session.recordCastProfile({ houseguestId: id, biography: `A friend of ${playerName} from back home.` });
+    expect(res.accepted).toBe(false);
+    expect(res.reason).toMatch(/mirror/i);
   });
 });

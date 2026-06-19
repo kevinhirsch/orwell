@@ -10,7 +10,7 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
-import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
 import { detectOocAside } from './orwellOocAside.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -2053,7 +2053,12 @@ export function addMessage(role, content, modelName, metadata) {
             node.className = 'agent-thread-node' + (ok ? '' : ' error') + (_evHasExpand ? '' : ' agent-thread-node--flat');
             const _evChevron = _evHasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
             const _evContentDiv = _evHasExpand ? `<div class="agent-thread-content">${_evExpandHtml}</div>` : '';
-            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beat || ev.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>${_evChevron}</div>${_evContentDiv}`;
+            // L42: render the PUBLIC outcome (Vault-free, from the persisted tool result) on reload too,
+            // so the re-opened transcript reads as what happened, not a stack of identical beat rows.
+            const _evOutcome = (_beat && ok) ? orwellBeatOutcome(ev.tool, ev.output) : null;
+            const _evToolText = _evOutcome || _beat || ev.tool;
+            const _evStatusHtml = _evOutcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }
@@ -2156,17 +2161,18 @@ export function addMessage(role, content, modelName, metadata) {
         .trim();
     }
 
-    // L36 (game build): an OUT-OF-CHARACTER aside the player wrapped in `((...))`
-    // or prefixed with `ooc:` is a quiet word to production, NOT a line the room
-    // hears. Style the bubble distinctly and strip the markers from the display
-    // text so it reads cleanly. Detection is on the player's actual words (after
-    // attachment/vision stripping). Only the player-INPUT side — the model's OOC
-    // *responses* need an engine-emitted marker that does not exist yet (out of
-    // scope; never heuristically guessed). Full build is UNCHANGED.
-    if (role === 'user' && isGameBuild()) {
+    // L36 (game build): an OUT-OF-CHARACTER aside is a quiet word to/from production,
+    // NOT a line the room hears. Style the bubble distinctly and strip the markers so it
+    // reads cleanly. PLAYER side: a message the player wrapped in `((...))` or prefixed
+    // `ooc:`. MODEL side (L36 follow-on): the GM marks its OWN OOC answers by wrapping the
+    // ENTIRE reply in `((...))` (the engine prompt contract — not a heuristic guess), so a
+    // fully-wrapped assistant message renders as a producer/HUD aside, never a spoken line.
+    // Full build is UNCHANGED.
+    if ((role === 'user' || role === 'assistant') && isGameBuild()) {
       const _ooc = detectOocAside(text);
       if (_ooc.ooc) {
         wrap.classList.add('msg-ooc');
+        if (role === 'assistant') wrap.classList.add('msg-ooc-producer');
         text = _ooc.text;
       }
     }

@@ -294,7 +294,8 @@ def test_reload_path_applies_production_beats():
     # the live stream did — so re-opening a session leaked raw camelCase tool names and raw
     # engine JSON output on every reload (a Vault-Wall / refresh-persistence break).
     js = _read("static", "js", "chatRenderer.js")
-    assert "import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';" in js
+    # L42: the import now also pulls orwellBeatOutcome (the Vault-free public-outcome deriver).
+    assert "import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';" in js
     assert "const _gbBeat = isGameBuild();" in js
     assert "const _beat = _gbBeat ? ORWELL_TOOL_BEATS[ev.tool] : null;" in js
     # a production beat suppresses output, screenshot, diff, and raw args, and relabels the pill
@@ -302,4 +303,7 @@ def test_reload_path_applies_production_beats():
     assert "_beat ? null : safeToolScreenshotSrc(ev.screenshot)" in js
     assert "if (!_beat && ev.diff && ev.diff.text)" in js
     assert "!_beat && ev.command" in js
-    assert "esc(_beat || ev.tool)" in js
+    # L42: the beat row renders the PUBLIC OUTCOME when present (else the plain beat label).
+    assert "orwellBeatOutcome(ev.tool, ev.output)" in js
+    assert "_evOutcome || _beat || ev.tool" in js
+    assert "esc(_evToolText)" in js

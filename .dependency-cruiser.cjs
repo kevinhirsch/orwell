@@ -44,9 +44,22 @@ module.exports = {
       severity: "error",
       comment:
         "Outward-facing code must be structurally incapable of reading the Vault. " +
-        "The narrator cannot leak what it never receives.",
-      from: { path: OUTWARD },
+        "The narrator cannot leak what it never receives. (The process entrypoint is the " +
+        "ONE sanctioned exception — see no-vault-on-entrypoint below — so it is excluded here.)",
+      from: { path: OUTWARD, pathNot: "^src/main\\.ts$" },
       to: { path: VAULT },
+    },
+    {
+      name: "no-vault-on-entrypoint",
+      severity: "error",
+      comment:
+        "The process entrypoint (src/main.ts) may compose the engine root (engineRoot.ts wires the " +
+        "Vault internally — the E86a fastembed warm-up calls setRuntimeEmbedding through it) but it " +
+        "may NEVER reach the actual Vault ports/adapters or the hidden engine modules directly. So " +
+        "engineRoot is the ONLY VAULT-listed module the entrypoint may touch; everything deeper stays " +
+        "forbidden — the wall holds even for the trusted entrypoint.",
+      from: { path: "^src/main\\.ts$" },
+      to: { path: VAULT, pathNot: "^src/composition/engineRoot\\.ts$" },
     },
     {
       name: "no-engine-layer-on-outward",
@@ -63,10 +76,16 @@ module.exports = {
       name: "entrypoint-composes-runtime-only",
       severity: "error",
       comment:
-        "The process entrypoint may compose the runtime (which wires the Vault internally) " +
-        "but nothing else in the engine layer (audit E18).",
+        "The process entrypoint may compose the runtime (which wires the Vault internally), the " +
+        "outward root, the engine root (E86a: setRuntimeEmbedding), and the fastembed embedding " +
+        "adapter it warms up at boot — but nothing else in the engine layer (audit E18).",
       from: { path: "^src/main\\.ts$" },
-      to: { path: ENGINE_LAYER, pathNot: "^src/composition/(runtime|outwardRoot)\\.ts$" },
+      to: {
+        path: ENGINE_LAYER,
+        pathNot:
+          "^src/composition/(runtime|outwardRoot|engineRoot)\\.ts$" +
+          "|^src/adapters/embedding/FastembedEmbedding\\.ts$",
+      },
     },
     {
       name: "no-circular",

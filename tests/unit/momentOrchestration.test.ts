@@ -70,6 +70,18 @@ describe("0018 — narrative & moment orchestration", () => {
     // the explicit override marker is honored without exception
     expect(p).toMatch(/\(\(double parentheses\)\)/);
     expect(p).toMatch(/prefixed "ooc:"/i);
+    // L36 follow-on: the model MARKS its own OOC answers (wrap in double-parens) so the surface can
+    // render them as a producer/HUD aside, not a spoken-in-room line — the engine marker the FE needs.
+    expect(p).toMatch(/MARK YOUR OWN OOC ANSWERS/i);
+    expect(p).toMatch(/wrap your ENTIRE reply in \(\(double/i);
+  });
+
+  it("L40 — the base prompt restrains showmance over-labeling (no soap-opera saturation)", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    expect(p).toMatch(/SHOWMANCES ARE RARE/i);
+    // ordinary closeness is friendship/strategy, not romance, unless explicitly marked a romantic pair
+    expect(p).toMatch(/do NOT read romance into ordinary closeness/i);
+    expect(p).toMatch(/explicitly marks two people as a romantic pair/i);
   });
 
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
