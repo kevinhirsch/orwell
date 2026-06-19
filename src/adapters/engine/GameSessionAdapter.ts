@@ -1603,7 +1603,54 @@ export class GameSessionAdapter implements GameSession {
       .slice(-GameSessionAdapter.STORY_FACT_EVENTS)
       .map((e) => ({ content: this.humanize(e.content) }));
     const winner = this.live?.finished ? this.named(this.live.winner) : null;
-    return renderStoryFacts(recent, winner ? { winner: winner.name, week: this.week } : null);
+    // Anti-confabulation (priority #3): the reunion/recap was inventing the jury margin and the
+    // player's own placement (a real playtest defect — "9-2" for an 8-1 vote, "Final 5" for a Final
+    // 6 exit). Hand the model the EXACT public finale facts so it voices them instead of embellishing.
+    const tally = this.live?.finished ? this.finaleTally() : null;
+    const playerSeason = this.live?.finished ? this.playerSeason() : null;
+    return renderStoryFacts(
+      recent,
+      winner ? { winner: winner.name, week: this.week, ...(tally ? { tally } : {}) } : null,
+      playerSeason,
+    );
+  }
+
+  /** The exact, public jury vote margin (anti-confabulation grounding for the recap). Counts the
+   *  persisted finale ballots per finalist; null until a winner + Final 2 + ballots exist. */
+  private finaleTally(): { winnerVotes: number; runnerUpVotes: number; runnerUp: string } | null {
+    const votes = this.live?.finale?.votes;
+    const winner = this.live?.winner;
+    const finalTwo = this.live?.finalTwo;
+    if (!votes || !winner || !finalTwo) return null;
+    const runnerUp = finalTwo.find((id) => id !== winner);
+    if (!runnerUp) return null;
+    let winnerVotes = 0, runnerUpVotes = 0;
+    for (const choice of Object.values(votes)) {
+      if (choice === winner) winnerVotes += 1;
+      else if (choice === runnerUp) runnerUpVotes += 1;
+    }
+    return { winnerVotes, runnerUpVotes, runnerUp: this.nameOf(runnerUp) };
+  }
+
+  /** The player's OWN public placement, stated exactly so the recap can't inflate it (Final N they
+   *  went out at, the eviction week, jury seat + their finale vote). Public ceremony facts only. */
+  private playerSeason(): string | null {
+    if (!this.house || !this.live) return null;
+    const me = this.house.player.id;
+    if (this.live.winner === me) return "You WON the season.";
+    if (this.live.finalTwo?.includes(me)) return "You finished as the RUNNER-UP (the Final 2).";
+    const idx = this.live.evictionOrder.indexOf(me);
+    if (idx < 0) return null;
+    const cast = this.house.npcs.length + 1;
+    const finalN = cast - idx; // houseguests remaining (incl. the player) when they were evicted
+    const week = this.live.voteRecord?.find((r) => r.evictee === me)?.week;
+    let s = `You were evicted${week ? ` in week ${week}` : ""}, going out at the Final ${finalN}`;
+    if (this.seatOf(me) === "jury") {
+      s += ", then sat on the jury";
+      const vote = this.live.finale?.votes?.[me];
+      if (vote) s += ` and voted for ${this.nameOf(vote)} to win`;
+    }
+    return s + ".";
   }
 
   /**
