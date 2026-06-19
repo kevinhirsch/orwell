@@ -1439,6 +1439,23 @@ _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptiv
 # (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
 _ADVANCE_GRACE_TURNS = 2
 
+# L39(b) — the SAFETY NET for a model that ignores every escalating nudge. The graduated text nudges
+# above rely entirely on the model eventually calling advanceGame; the 2026-06-19 God-Mode transcript
+# showed a model that NEVER did ("not a single beat advanced", then hit step limits speed-running). So
+# once the persisted stall level has climbed past every text rung AND this many turns (the model has
+# now been nudged through all three rungs and STILL won't move), the FE calls advanceGame ITSELF — the
+# SAME engine lever the model was asked to pull, one beat, deterministically resolved by the engine.
+# This is NOT engine-authored content (the model still voices the real returned beat); it is the same
+# "error-correct the omission" guardrail as _auto_record_scene, applied to progression. Bounded: at
+# most one forced advance per finishing turn, only past the threshold, and a pending PLAYER decision is
+# never auto-resolved (the engine returns the pending unchanged — the model surfaces it as a choice).
+_ADVANCE_FORCE_LEVEL = len(_ADVANCE_NUDGES)  # past the last text rung (levels are 0-indexed)
+_FORCED_ADVANCE_NUDGE = (
+    "(Production note, not for the player.) The beat was stuck for several turns, so the game has been "
+    "advanced for you. Call gameStatus / getGameState NOW to read the REAL new beat the engine just "
+    "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
+    "now pending, present its options and wait for their choice.")
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -2945,6 +2962,28 @@ async def stream_agent_loop(
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
+                        # L39(b) SAFETY NET: the model has been nudged through every text rung across
+                        # several turns and STILL won't advance (the "not a single beat advanced" stall).
+                        # Pull the engine lever ourselves — one beat, deterministically resolved — then
+                        # tell the model to re-read and voice the REAL result. Only for a plain stall (a
+                        # previewed/undelivered outcome still gets its targeted text nudge, since the model
+                        # is one call away). A pending player decision is returned unchanged by the engine.
+                        if (_level >= _ADVANCE_FORCE_LEVEL
+                                and not _previewed_uncommitted and not _decision_undelivered):
+                            try:
+                                from src import orwell_engine as _oe3
+                                await _oe3.advance_game(owner)
+                                if owner:
+                                    _TURNS_SINCE_PROGRESS[owner] = 0  # the beat moved — reset the clock
+                                logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
+                                            f"round {round_num} user={owner}")
+                                messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
+                                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                continue
+                            except Exception as _e:
+                                # Fail-open: a forced advance that errors just falls through to the text
+                                # nudge below — never crash the turn over the safety net.
+                                logger.warning(f"[orwell] forced advanceGame failed: {_e}")
                         # A previewed-but-uncommitted outcome (or an undelivered decision result) gets
                         # the FORCEFUL nudge straight away (it is not a gentle "lingering beat").
                         if _previewed_uncommitted:

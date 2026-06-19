@@ -1438,6 +1438,25 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * L27b — DURABLY record a recorded player-witnessed scene's summary into a houseguest's recall
+   * memory. The fix this closes: `recordInteraction` (the player channel's social-scene seam) used to
+   * index the summary into the SoulStore's vector index ALONE — which is DERIVED state. After a restart
+   * `rebuildSoulIndex` replays only each houseguest's PERSISTED `soul.memory` mirror, so a scene's
+   * semantic recall silently vanished on restart (the event record survived, but the NPC could no
+   * longer RECALL the scene — a non-degradation #4 / L27b leak). Writing the SAME persisted mirror the
+   * arc/confessional/deep-profile paths already use makes the scene recall-able IN FULL forever, across
+   * restarts. Idempotent against the mirror: a content already present (e.g. a double restore replay) is
+   * not duplicated, so the monotonic-count non-degradation guard stays exact.
+   */
+  recordSceneMemory(id: EntityId, content: string): void {
+    const soul = this.soulObj(id);
+    if (soul && !soul.memory.includes(content)) {
+      soul.memory.push(content);            // persisted mirror — survives + re-indexes on restore (0030)
+    }
+    this.soul?.recordToSoul(id, content);    // vector recall index NOW (0024), same-session recall
+  }
+
+  /**
    * Evolve the involved souls from a just-resolved beat (the live consequence fold, 0041): a comp
    * winner is emboldened and the CONTESTED LOSERS are stung (audit E51 — `comp-loss` finally
    * fires); on an eviction the SURVIVING nominee is emboldened (`survived-vote`, the 0041 beat

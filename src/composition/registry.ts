@@ -72,9 +72,14 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
-  // L27/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall memory,
-  // so later story/narrative is built from the store recalled (ADR 0003), never the chat window.
-  commands.setSoulMemo((hg, content) => engine.soul.recordToSoul(hg, content));
+  // L27/L27b/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall
+  // memory, so later story/narrative is built from the store recalled (ADR 0003), never the chat
+  // window. Routed through the session's `recordSceneMemory` — NOT engine.soul.recordToSoul directly —
+  // so the summary lands in the houseguest's PERSISTED `soul.memory` mirror too (L27b): the vector
+  // index is derived state that `rebuildSoulIndex` re-derives ONLY from the persisted mirror, so a
+  // scene recorded N turns ago stays recall-able IN FULL across a restart (it used to vanish on
+  // restore — the event record survived but the NPC could no longer recall the scene).
+  commands.setSoulMemo((hg, content) => session.recordSceneMemory(hg, content));
   // Per-NPC voicing (B65 / ADR 0003 §8): the session projects ONE houseguest's legitimate
   // knowledge + hunches so the narrator can voice them without inventing or omnisciently leaking.
   session.setNpcKnowledgeProviders({
