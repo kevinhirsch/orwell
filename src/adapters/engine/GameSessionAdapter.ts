@@ -96,6 +96,10 @@ import {
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
+import {
+  generateDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
+} from "../../engine/diversity";
+import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
@@ -337,6 +341,34 @@ export class GameSessionAdapter implements GameSession {
   private seededRels: SeededRelationships = { ties: [], showmances: [] };
   private tieBudget = DEFAULT_TIE_BUDGET;
   private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
+
+  /**
+   * The engine-only HIDDEN private-orientation map (feature 0063): the orientation of each houseguest
+   * who holds it PRIVATELY (closeted / not-yet-out). NEVER projected — no view/npcVoice/portrait/moment
+   * path reads it; sealed into the Vault at cast time (via `onSealPrivateOrientations`) and persisted in
+   * the snapshot. It surfaces to the player ONLY through a modeled 0002 pathway, exactly as a 0058 secret
+   * does. PUBLIC (out) orientations are NOT here — they ride on the Character as `outOrientation`.
+   */
+  private privateOrientations: Record<EntityId, Orientation> = {};
+
+  /**
+   * The ethnicity-grounded skin-tone cue per NPC id (feature 0063) — set by `seedDiversity`, read by
+   * `seedDeepProfiles` to ground `physicalCharacteristics.skinTone` so the text and the portrait agree
+   * with the guaranteed heritage. PUBLIC, Vault-free (it's a complexion phrase, already on the card);
+   * transient (re-derivable from the ethnicity facet), so it is NOT separately persisted.
+   */
+  private groundedSkinTones: Record<EntityId, string> = {};
+
+  /**
+   * Seal hook for the HIDDEN private orientations (feature 0063) — the registry writes the Vault audit
+   * copy + recall index, exactly like `onSealProfiles`. Engine-only: a private orientation is a secret
+   * (off the player AND admin), so it rides this hook, never an outward projection.
+   */
+  private onSealPrivateOrientations?: (entries: ReadonlyArray<{ id: EntityId; orientation: Orientation }>) => void;
+
+  setOnSealPrivateOrientations(fn: (entries: ReadonlyArray<{ id: EntityId; orientation: Orientation }>) => void): void {
+    this.onSealPrivateOrientations = fn;
+  }
   private onSealSeededRels?: (rels: SeededRelationships) => void;
 
   setOnSealSeededRels(fn: (rels: SeededRelationships) => void): void {
@@ -476,6 +508,12 @@ export class GameSessionAdapter implements GameSession {
         ...(npc.character.biography !== undefined ? { biography: npc.character.biography } : {}),
         ...(npc.character.physicalCharacteristics !== undefined
           ? { physicalCharacteristics: npc.character.physicalCharacteristics } : {}),
+        // 0063: voice the PUBLIC identity facets — heritage, gender presentation, and a PUBLICLY-OUT
+        // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed; the houseguest
+        // would never lead with it until a pathway surfaces it, §5). One true facet, never the character.
+        ...(npc.character.ethnicity !== undefined ? { ethnicity: npc.character.ethnicity } : {}),
+        ...(npc.character.genderPresentation !== undefined ? { genderPresentation: npc.character.genderPresentation } : {}),
+        ...(npc.character.outOrientation !== undefined ? { outOrientation: npc.character.outOrientation } : {}),
       },
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
@@ -510,6 +548,13 @@ export class GameSessionAdapter implements GameSession {
         presentation: subject.character.presentation,
         ...(subject.character.physicalCharacteristics !== undefined
           ? { physicalCharacteristics: subject.character.physicalCharacteristics } : {}),
+        // 0063: feed the PUBLIC diversity + personality facets so the shot is uniquely this person — the
+        // heritage (an authentic likeness), how they present, and their observable demeanor (vibe/energy).
+        // A PRIVATE orientation is NEVER read here (it lives in the engine-only map, not on the Character),
+        // so it can never enter a prompt — the §5 Vault rule holds by construction.
+        ...(subject.character.ethnicity !== undefined ? { ethnicity: subject.character.ethnicity } : {}),
+        ...(subject.character.genderPresentation !== undefined ? { genderPresentation: subject.character.genderPresentation } : {}),
+        ...(subject.character.demeanor !== undefined ? { demeanor: subject.character.demeanor } : {}),
       },
       this.portraitStyleAnchor,
     );
@@ -770,6 +815,11 @@ export class GameSessionAdapter implements GameSession {
       ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
+      // 0063: the engine-only HIDDEN private-orientation map — persisted so a closeted houseguest's
+      // sealed orientation survives a restart losslessly and never silently resets. ENGINE-ONLY (the
+      // snapshot never crosses the wall). The PUBLIC facets ride on the persisted Character (byte-stable).
+      ...(Object.keys(this.privateOrientations).length
+        ? { privateOrientations: cloneSession(this.privateOrientations) } : {}),
     };
   }
 
@@ -829,14 +879,31 @@ export class GameSessionAdapter implements GameSession {
     // relaxation on a legacy resume, since pre-0060 saves carried no surfaced threads to over-count).
     this.nominationWeeks = core.nominationWeeks ? cloneSession(core.nominationWeeks) : {};
     this.surfacedThreadCount = core.surfacedThreadCount ?? 0;
+    // 0063 — restore the engine-only HIDDEN private orientations (a closeted orientation must never
+    // silently reset) FIRST, so the 0059 showmance re-derive below can read them for its eligibility gate.
+    // Persisted on 0063+ saves; on a pre-0063 (or legacy) save with a seed, re-derive deterministically —
+    // the diversity layer keys off the cast names + seed, so it returns identically (and the PUBLIC facets
+    // already ride on the persisted Character, byte-stable). No re-seal on restore: the Vault already
+    // holds the audit copy from cast time (idempotent).
+    if (core.privateOrientations) {
+      this.privateOrientations = cloneSession(core.privateOrientations);
+    } else if (core.house && core.seed !== undefined && !core.house.npcs.some((n) => n.character.ethnicity)) {
+      // Only re-derive for a TRULY pre-0063 cast (no ethnicity folded). A 0063 cast with an empty
+      // private map simply had everyone publicly out — keep it empty, never invent a secret.
+      this.privateOrientations = { ...generateDiversityLayer(core.seed, core.house.npcs).privateOrientations };
+    } else {
+      this.privateOrientations = {};
+    }
     // 0059 — the seeded relationship layer persists explicitly (a showmance STAGE must never silently
-    // reset on restore). Absent on pre-0059 saves ⇒ re-seed deterministically off the persisted seed.
+    // reset on restore). Absent on pre-0059 saves ⇒ re-seed deterministically off the persisted seed,
+    // gated by the 0063 showmance-eligibility predicate (which reads the just-restored identities).
     if (core.seededRelationships) {
       this.seededRels = cloneSession(core.seededRelationships);
     } else if (core.house && core.seed !== undefined) {
       this.seededRels = loadSeededRelationships(
         core.house.npcs, this.tieBudget, this.showmanceBudget,
         new SeededRandom(hashSeed(`${core.seed}:seeded-relationships`)),
+        this.showmanceEligiblePredicate(),
       );
     } else {
       this.seededRels = { ties: [], showmances: [] };
@@ -1276,6 +1343,13 @@ export class GameSessionAdapter implements GameSession {
       this.live.reserve = reserve;
       this.onSeal?.(reserve);
     }
+    // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
+    // isolated sub-stream (never the shared house/competition stream — the #338 RNG-isolation lesson),
+    // validate/repair to the four floors (BIPOC / gender balance / age spread / LGBTQ+), fold the PUBLIC
+    // facets (ethnicity, gender presentation, an out orientation) onto each byte-stable Character, GROUND
+    // physicalCharacteristics.skinTone from the ethnicity, and SEAL each private orientation into the
+    // Vault. Done BEFORE seedDeepProfiles so the deep layer's skin-tone reads the grounded ethnicity.
+    this.seedDiversity(seed);
     // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
     // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
     // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
@@ -1363,6 +1437,12 @@ export class GameSessionAdapter implements GameSession {
       // drifts from the narration. PUBLIC by construction; falls back to the prose appearance if unseeded.
       ...(h.character.physicalCharacteristics !== undefined
         ? { physicalCharacteristics: h.character.physicalCharacteristics } : {}),
+      // 0063: feed the PUBLIC diversity + personality facets — heritage, presentation, demeanor — so each
+      // shot is visibly that unique person. A PRIVATE orientation is NOT a Character field, so it never
+      // reaches here (the §5 Vault rule, enforced by construction + the portrait sentinel sweep).
+      ...(h.character.ethnicity !== undefined ? { ethnicity: h.character.ethnicity } : {}),
+      ...(h.character.genderPresentation !== undefined ? { genderPresentation: h.character.genderPresentation } : {}),
+      ...(h.character.demeanor !== undefined ? { demeanor: h.character.demeanor } : {}),
     }));
     return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
   }
@@ -1441,6 +1521,60 @@ export class GameSessionAdapter implements GameSession {
    * Deterministic per seed and player-INDEPENDENT (the layer keys off the cast's seeded names, never
    * the player's profile — same seed ⇒ same deep cast regardless of who the player is, L28).
    */
+  /**
+   * 0063 — the casting diversity floor. Deal the engine-GUARANTEED diversity layer off a DEDICATED
+   * isolated sub-stream (forked off the seed via `hashSeed` inside `generateDiversityLayer` — NEVER the
+   * shared house/competition/vote stream, the #338 RNG-isolation lesson), validate/repair to the four
+   * floors, SPLIT across the Vault:
+   *   • PUBLIC facets (ethnicity, gender presentation, an OUT orientation) fold onto each byte-stable
+   *     Character — they cross to the player and are superset-guarded (0007/0031); the ethnicity ALSO
+   *     grounds `physicalCharacteristics.skinTone` (applied in seedDeepProfiles, which runs next), so the
+   *     text and the portrait agree;
+   *   • each PRIVATE orientation (closeted / not-yet-out) is kept engine-only here and sealed into the
+   *     Vault — it surfaces to the player ONLY via a 0002 pathway, never on any projection.
+   * Deterministic per seed and player-INDEPENDENT (the sub-stream keys off the seeded cast names). The
+   * diversity attributes are DESCRIPTIVE ONLY — never a competition/vote/outcome input.
+   */
+  private seedDiversity(seed: number): void {
+    if (!this.house) return;
+    // TEST SEAM (the #338 RNG-isolation golden test): `ORWELL_DISABLE_DIVERSITY=1` skips the entire
+    // diversity layer. Because the layer runs on a DEDICATED sub-stream and folds ONLY descriptive
+    // fields (never a competition/vote input), the public OUTCOME stream must be byte-identical with it
+    // on vs. off — the golden test proves exactly that. Never set in production (the deploy default is on).
+    if (process.env.ORWELL_DISABLE_DIVERSITY === "1") return;
+    const layer = generateDiversityLayer(seed, this.house.npcs);
+    // PUBLIC fold — onto the static Character (byte-stable from here on; superset-guarded).
+    for (const n of this.house.npcs) {
+      const pub = layer.public[n.id];
+      if (!pub) continue;
+      n.character.ethnicity = pub.ethnicity;
+      n.character.genderPresentation = pub.genderPresentation;
+      if (pub.outOrientation !== undefined) n.character.outOrientation = pub.outOrientation;
+      // The age-spread floor may have repaired the age into a short band (descriptive only — age is NOT a
+      // competition/vote input, so this never perturbs the seeded outcome stream). Write it back so the
+      // card, the ageLook (0058), and the portrait all agree with the guaranteed spread.
+      n.character.age = pub.age;
+      this.groundedSkinTones[n.id] = pub.skinTone;
+      // If the structured physical facet already exists (e.g. on a re-run path), ground its skin tone
+      // now; otherwise seedDeepProfiles applies the grounding when it builds the facet.
+      if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+    }
+    // HIDDEN — engine-only, sealed off the player AND admin (a private orientation is a secret).
+    this.privateOrientations = { ...layer.privateOrientations };
+    // Full-fidelity recall + persistence (L27b): record each private orientation into the NPC's
+    // AUTHORITATIVE soul memory (engine-only — never crosses) so it persists losslessly with the house,
+    // counts toward non-degradation (0007), and re-indexes on restore. Also index NOW for same-session.
+    for (const [id, orientation] of Object.entries(layer.privateOrientations)) {
+      const note = privateOrientationToVaultContent(id as EntityId, orientation);
+      const n = this.house.npcs.find((x) => x.id === id);
+      n?.soul.memory.push(note);
+      this.soul?.recordToSoul(id as EntityId, note);
+    }
+    // Seal the private orientations into the Vault (engine-only audit copy, the §5 wall).
+    const entries = Object.entries(layer.privateOrientations).map(([id, orientation]) => ({ id: id as EntityId, orientation }));
+    if (entries.length) this.onSealPrivateOrientations?.(entries);
+  }
+
   private seedDeepProfiles(seed: number): void {
     if (!this.house) return;
     const layer = generateCastDeepLayer(seed, this.house.npcs);
@@ -1450,6 +1584,11 @@ export class GameSessionAdapter implements GameSession {
       if (!pub) continue;
       n.character.biography = pub.biography;
       n.character.physicalCharacteristics = pub.physicalCharacteristics;
+      // 0063: GROUND the skin tone from the houseguest's ethnicity identity facet, so the structured
+      // physical characteristics (which drive BOTH the narration and the portrait, L29/L23) agree with
+      // the heritage the cast was guaranteed — the text and the picture never contradict the identity.
+      const grounded = this.groundedSkinTones[n.id];
+      if (grounded) n.character.physicalCharacteristics.skinTone = grounded;
     }
     // HIDDEN — engine-only, sealed off the player AND admin.
     this.deepProfiles = layer.hidden;
@@ -1482,10 +1621,32 @@ export class GameSessionAdapter implements GameSession {
    * layer into the Vault. Engine-only by construction (the bias is the ONLY observable — as later
    * behavior — and no tie/partner/stage is ever projected). Deterministic per seed + player-independent.
    */
+  /**
+   * 0063 (owner decision #3) — the orientation-aware showmance ELIGIBILITY predicate the 0059 seeder uses,
+   * assembled from each NPC's PUBLIC gender presentation + their FULL orientation (the out facet on the
+   * Character OR the engine-only private orientation). Engine-only by construction (it reads the private
+   * map but never surfaces it). A QUEER showmance is a first-class plausible pairing; it never forces one.
+   */
+  private showmanceEligiblePredicate(): (a: EntityId, b: EntityId) => boolean {
+    const identityOf = (id: EntityId): { orientation: Orientation; genderPresentation: GenderPresentation } | null => {
+      const n = this.house?.npcs.find((x) => x.id === id);
+      if (!n || !n.character.genderPresentation) return null;
+      const orientation = (n.character.outOrientation as Orientation | undefined)
+        ?? this.privateOrientations[id] ?? "straight";
+      return { orientation, genderPresentation: n.character.genderPresentation };
+    };
+    return (a, b) => {
+      const ia = identityOf(a); const ib = identityOf(b);
+      if (!ia || !ib) return true; // unknown identity (pre-0063 cast) ⇒ no gating (back-compat)
+      return showmancePlausible(ia, ib);
+    };
+  }
+
   private seedSeededRelationships(seed: number): void {
     if (!this.house) return;
     const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
-    this.seededRels = loadSeededRelationships(this.house.npcs, this.tieBudget, this.showmanceBudget, rng);
+    this.seededRels = loadSeededRelationships(
+      this.house.npcs, this.tieBudget, this.showmanceBudget, rng, this.showmanceEligiblePredicate());
     // Fold the small standing affinity bias between each seeded pair (both directions). NEVER a
     // deterministic advantage — just unconscious warmth a careful player reads only as behavior (§3).
     const bias = (a: EntityId, b: EntityId, amount: number): void => {
@@ -2787,6 +2948,13 @@ export class GameSessionAdapter implements GameSession {
         ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
         ...(n.character.physicalCharacteristics !== undefined
           ? { physicalCharacteristics: n.character.physicalCharacteristics } : {}),
+        // 0063: the PUBLIC diversity-identity facets — the heritage/cultural identity (an authentic facet
+        // of a full character, grounding the skin tone), the gender presentation, and a PUBLICLY-OUT
+        // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed, §5). Descriptive
+        // only — the narrator voices them as it would any public facet, never a defining single word.
+        ...(n.character.ethnicity !== undefined ? { ethnicity: n.character.ethnicity } : {}),
+        ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
+        ...(n.character.outOrientation !== undefined ? { outOrientation: n.character.outOrientation } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

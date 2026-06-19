@@ -52,6 +52,20 @@ def test_a5_every_house_theme_has_a_particle_pattern():
             f"house theme {name!r} pattern {patterns[name]!r} is not an animated particle pattern"
 
 
+def test_a5_animated_particles_honor_prefers_reduced_motion():
+    # A5 (ruling #18): the animated canvas generators must NOT spawn under
+    # prefers-reduced-motion (static or off). applyBgPattern gates the canvas
+    # init on the live media query; the static CSS base layer still paints.
+    js = _read("static", "js", "theme.js")
+    body = re.search(r"export function applyBgPattern\(pattern\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "_prefersReducedMotion()" in body, \
+        "applyBgPattern must consult prefers-reduced-motion before starting the canvas generator"
+    assert re.search(r"_CANVAS_PATTERNS\[p\]\s*&&\s*!_prefersReducedMotion\(\)", body), \
+        "the animated canvas init must be skipped when reduced motion is requested"
+    helper = re.search(r"function _prefersReducedMotion\(\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "prefers-reduced-motion" in helper and "matchMedia" in helper
+
+
 def test_a5_house_particles_are_kept_subtle():
     # The house particles sit behind the frosted chrome — each has a sub-1.0 default intensity.
     js = _read("static", "js", "theme.js")

@@ -197,6 +197,50 @@ export function checkAdvanceResult(
   }
 }
 
+// ─── Seed sharding ─────────────────────────────────────────────────────────────
+
+/**
+ * Split a contiguous seed list across CI runners. The 12-seed UAT asserts only PER-SEED
+ * properties (each game finishes, no anomalies, ≥1 week, and — over a non-empty slice — at least
+ * one decision was produced); it runs NO cross-seed aggregate. So the seeds can be played on
+ * separate runners with each shard asserting INDEPENDENTLY over its own slice — no recombination
+ * is needed and no assertion is weakened.
+ *
+ * Returns shard `index`'s contiguous slice of `seeds` for a `count`-way split, distributing any
+ * remainder over the first shards so EVERY seed is covered by EXACTLY ONE shard (a clean partition:
+ * the disjoint union of all shards is the original list, in order, no gaps, no dupes). `count===1`
+ * (or unset, the local path) returns the whole list unchanged.
+ */
+export function shardSeeds(seeds: readonly number[], index: number, count: number): number[] {
+  if (!Number.isInteger(index) || !Number.isInteger(count) || count < 1 || index < 0 || index >= count) {
+    throw new Error(`invalid UAT shard ${index}/${count}`);
+  }
+  const n = seeds.length;
+  const base = Math.floor(n / count);
+  const extra = n % count;
+  const start = index * base + Math.min(index, extra);
+  const len = base + (index < extra ? 1 : 0);
+  return seeds.slice(start, start + len);
+}
+
+/**
+ * Resolve this process's shard slice of `seeds` from the env (`UAT12_SHARDS` / `UAT12_SHARD`).
+ * Unset/`<2` ⇒ the whole list (the local `npm run test:heavy:uat-12seed` path is unchanged).
+ * Returns the slice plus a human label for the test name.
+ */
+export function resolveUatSeedShard(
+  seeds: readonly number[],
+  env: NodeJS.ProcessEnv = process.env,
+): { seeds: number[]; label: string } {
+  const count = Number(env.UAT12_SHARDS ?? "0");
+  const index = Number(env.UAT12_SHARD ?? "0");
+  if (!Number.isInteger(count) || count < 2) {
+    return { seeds: [...seeds], label: `${seeds.length} seeds` };
+  }
+  const slice = shardSeeds(seeds, index, count);
+  return { seeds: slice, label: `shard ${index}/${count}: seeds [${slice.join(", ")}]` };
+}
+
 // ─── Per-run game driver ──────────────────────────────────────────────────────
 
 export const MAX_ITERATIONS = 5_000;

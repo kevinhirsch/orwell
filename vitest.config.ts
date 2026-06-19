@@ -23,7 +23,13 @@ import { defineConfig } from "vitest/config";
 export const HEAVY_SIM_FILES = [
   "tests/uat/**",
   "tests/property/juryReach.property.test.ts",
+  // The jury-reach AGGREGATE consumes shard artifacts (no live play of its own) but rides the
+  // heavy lane next to the shards it recombines — excluded from the fast/coverage runs alongside them.
+  "tests/property/juryReachAggregate.property.test.ts",
   "tests/property/calibrationGradient.property.test.ts",
+  // The gradient AGGREGATE consumes shard artifacts (no live play of its own) but rides the heavy
+  // lane next to the shards it recombines — excluded from the fast/coverage runs alongside them.
+  "tests/property/calibrationGradientAggregate.property.test.ts",
   // The calibration data INSTRUMENT (not a gate — it plays 2×N full live seasons and only EMITS
   // a data artifact, asserts no band). Excluded from the fast gate + coverage like the heavy sims;
   // run it on demand: `npx vitest run tests/calibration/calibrationInstrument.test.ts`.

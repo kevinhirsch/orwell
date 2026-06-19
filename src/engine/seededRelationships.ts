@@ -64,6 +64,14 @@ export function loadSeededRelationships(
   tieBudget: number,
   showmanceBudget: number,
   rng: RandomnessSource,
+  /**
+   * 0063 (owner decision #3) — orientation-aware showmance ELIGIBILITY. When supplied, a showmance pair
+   * is only drawn if `showmanceEligible(a, b)` holds (plausible pairings only — a QUEER showmance is a
+   * first-class possible seed, never special-cased). Omitted ⇒ any pair is eligible (pre-0063 behavior).
+   * It NEVER forces a showmance — the sparseness/earned discipline above still dominates; this only gates
+   * WHO is eligible. Pre-game TIES are not romantic, so they are NOT gated by it.
+   */
+  showmanceEligible?: (a: EntityId, b: EntityId) => boolean,
 ): SeededRelationships {
   const ids = npcs.map((n) => n.id);
   const used = new Set<EntityId>();
@@ -80,6 +88,20 @@ export function loadSeededRelationships(
     return [a, b];
   };
 
+  // Draw a pair where the romance is PLAUSIBLE (eligibility gate). Consumes the same draws whether or not
+  // a candidate is eligible (the eligibility test never re-rolls), so the stream stays seed-deterministic;
+  // an ineligible draw is simply released back to the free pool and the slot is skipped.
+  const drawEligiblePair = (): [EntityId, EntityId] | null => {
+    const free = ids.filter((id) => !used.has(id));
+    if (free.length < 2) return null;
+    const a = free[rng.int(free.length)]!;
+    const rest = free.filter((id) => id !== a);
+    const b = rest[rng.int(rest.length)]!;
+    if (showmanceEligible && !showmanceEligible(a, b)) return null; // skip this slot, release the pair
+    used.add(a); used.add(b);
+    return [a, b];
+  };
+
   const tieSlots = Math.max(0, Math.min(tieBudget, Math.floor(ids.length / 2)));
   for (let i = 0; i < tieSlots; i++) {
     if (rng.next() < 1 - SEED_LOAD_PROB) continue; // often none
@@ -91,8 +113,8 @@ export function loadSeededRelationships(
   const showSlots = Math.max(0, Math.min(showmanceBudget, Math.floor(ids.length / 2)));
   for (let i = 0; i < showSlots; i++) {
     if (rng.next() < 1 - SEED_LOAD_PROB) continue;
-    const pair = drawPair();
-    if (!pair) break;
+    const pair = drawEligiblePair();
+    if (!pair) continue; // ineligible / exhausted — skip this slot (never force an implausible romance)
     showmances.push({ a: pair[0], b: pair[1], stage: "spark" }); // never week-one visible
   }
 

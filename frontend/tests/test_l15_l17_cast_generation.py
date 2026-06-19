@@ -254,7 +254,7 @@ def test_dedupe_regenerates_offenders_with_variety_and_caps(tmp_portraits, monke
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
     seen_prompts = []
 
-    async def fake_gen(prompt, user, reference_png=None):
+    async def fake_gen(prompt, user, reference_png=None, keep_identity=True):
         seen_prompts.append(prompt)
         return b"REGEN-PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
@@ -275,7 +275,7 @@ def test_dedupe_respects_the_retry_cap(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
     n = []
 
-    async def fake_gen(prompt, user, reference_png=None):
+    async def fake_gen(prompt, user, reference_png=None, keep_identity=True):
         n.append(1)
         return b"PNG"
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
@@ -305,7 +305,7 @@ def test_dedupe_noop_without_a_provider(tmp_portraits, monkeypatch):
 def test_generate_and_store_runs_the_distinctness_pass(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 
-    async def fake_gen(prompt, user, reference_png=None):
+    async def fake_gen(prompt, user, reference_png=None, keep_identity=True):
         return b"PNG-" + prompt.encode()[:6]
     monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
 

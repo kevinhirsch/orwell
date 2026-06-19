@@ -7,15 +7,97 @@ on:
     branches: [main]
 
 jobs:
-  # Full engine gate: typecheck -> build -> unit/property/arch -> BDD.
+  # ── Path filters ────────────────────────────────────────────────────────────
   #
-  # The two HEAVY end-to-end simulation files (the full-game UAT + the juryReach calibration
-  # property) are split out into the parallel `heavy-sims` job below (`test:ci` runs `test:unit:fast`,
-  # which excludes exactly those two). Nothing is dropped from the gate — the heavy sims run, in a
-  # sibling job, concurrently — so this job now returns in roughly the time of the rest of the suite
-  # while the wall-clock long pole shrinks toward the single slowest file. The dependency-cruiser
+  # One cheap job computes a set of boolean outputs from the PR/push diff; every other job gates its
+  # `if:` on the relevant boolean. The point: a job runs ONLY when files it actually exercises change.
+  #   - a docs-only PR (`docs/**` only) flips ALL of these false ⇒ every gated job skips ⇒ the PR
+  #     goes green in seconds (the unified `ci-gate` reports the required status; see below).
+  #   - a frontend-only PR runs only `frontend` (engine + heavy + smoke skip).
+  #   - an engine PR runs `test`/`coverage`/`heavy-sims` (frontend skips); etc.
+  #
+  # The booleans:
+  #   engine   — src/tests/features + the build/test config + this workflow → gates `test`, `coverage`.
+  #   frontend — frontend/** + this workflow                                → gates `frontend`.
+  #   deploy   — src/** + frontend/** + deploy/** + this workflow           → gates `smoke` (boots both).
+  #   heavy    — the calibration-relevant inputs (a subset of engine)       → gates `heavy-sims*`.
+  #
+  # CRITICAL: gated jobs that SKIP must not deadlock a required check. The single `ci-gate` job at the
+  # bottom (`if: always()`) is the ONE required check — it passes when no needed job FAILED/was
+  # CANCELLED (a SKIP counts as a pass). Point branch protection at `ci-gate`, not the individual jobs.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      engine: ${{ steps.filter.outputs.engine }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      heavy: ${{ steps.filter.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the base ref to diff against on a PR; on push, HEAD~1 is enough.
+          fetch-depth: 0
+      - name: detect changed paths
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # On a PR, diff the base..head; on push, diff against the previous commit.
+          if [ -n "${BASE_SHA:-}" ]; then
+            base="$BASE_SHA"
+            git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
+          else
+            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "Diffing against base: $base"
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "Changed files:"; echo "$changed" | sed 's/^/  /'
+
+          # Helper: does any changed file match the given ERE?
+          matches() { echo "$changed" | grep -qE "$1"; }
+
+          # ENGINE: TS sources, all tests, BDD features, the build/test config, this workflow.
+          ENGINE_RE='^(src/|tests/|features/|package\.json$|package-lock\.json$|tsconfig.*\.json$|vitest\.config\.ts$|cucumber\.cjs$|\.github/workflows/ci\.yml$)'
+          # FRONTEND: the vendored Python app + this workflow.
+          FRONTEND_RE='^(frontend/|\.github/workflows/ci\.yml$)'
+          # DEPLOY: anything the end-to-end deploy smoke boots — engine, FE, deploy scripts, this workflow.
+          DEPLOY_RE='^(src/|frontend/|deploy/|\.github/workflows/ci\.yml$)'
+          # HEAVY (calibration-relevant): the simulation inputs. A subset of engine — a docs/frontend
+          # change can never move a calibration result, so the heavy lane skips for those.
+          HEAVY_RE='^(src/|tests/|package\.json$|package-lock\.json$|vitest\.config\.ts$|cucumber\.cjs$|\.github/workflows/ci\.yml$)'
+
+          for name in engine frontend deploy heavy; do
+            case "$name" in
+              engine)   re="$ENGINE_RE" ;;
+              frontend) re="$FRONTEND_RE" ;;
+              deploy)   re="$DEPLOY_RE" ;;
+              heavy)    re="$HEAVY_RE" ;;
+            esac
+            if matches "$re"; then
+              echo "${name}=true" >> "$GITHUB_OUTPUT"
+              echo "==> ${name}: WILL run"
+            else
+              echo "${name}=false" >> "$GITHUB_OUTPUT"
+              echo "==> ${name}: skipped"
+            fi
+          done
+
+  # ── Engine gate ───────────────────────────────────────────────────────────────
+  # typecheck -> build -> unit/property/arch (minus the heavy sims) -> BDD.
+  #
+  # The HEAVY end-to-end simulation files (the full-game UAT, the juryReach calibration gate, and the
+  # calibration-gradient gate) are split into the parallel `heavy-sims` matrix below (`test:ci` runs
+  # `test:unit:fast`, which excludes exactly those). Nothing is dropped — the heavy sims run, in
+  # sibling jobs, concurrently — so this job returns in roughly the time of the rest of the suite
+  # while the long pole shrinks toward the single slowest sharded leg. The dependency-cruiser
   # Vault-Wall arch test, the live sentinel sweeps, and the BDD gate all still run HERE.
+  #
+  # PATH-GATED (`changes.engine`): a docs-only / frontend-only PR skips it (the unified `ci-gate`
+  # reports green for the skip).
   test:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,68 +108,26 @@ jobs:
       - run: npm ci
       - run: npm run test:ci
 
-  # Path filter for the heavy-sims lane. The heavy simulations are calibration end-to-end runs:
-  # their outcomes can only change when ENGINE-relevant inputs change. So we run them only when a
-  # PR touches sources/tests/lockfile/test-config or this workflow itself — a docs-only or
-  # frontend-only PR cannot move a calibration result and skips the lane (fast green).
+  # ── Heavy simulation lane (split + sharded for wall-clock — NOT a reduction in scope) ──────────
   #
-  # `should-run` is computed once here and consumed by `heavy-sims` (its `if:`) and by
-  # `heavy-sims-gate` (which ALWAYS runs and reports the required-check status — green on skip).
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      heavy: ${{ steps.filter.outputs.heavy }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Need the base ref to diff against on a PR; on push, HEAD~1 is enough.
-          fetch-depth: 0
-      - name: detect calibration-relevant changes
-        id: filter
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          # On a PR, diff the merge base..head; on push, diff against the previous commit.
-          if [ -n "${BASE_SHA:-}" ]; then
-            base="$BASE_SHA"
-            git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
-          else
-            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
-          fi
-          echo "Diffing against base: $base"
-          # Files that can affect simulation outcomes. Anything outside these (frontend/**,
-          # docs/**, deploy/**, unrelated) cannot move a calibration result.
-          if git diff --name-only "$base" HEAD \
-              | grep -E '^(src/|tests/|package\.json$|package-lock\.json$|vitest\.config\.ts$|cucumber\.cjs$|\.github/workflows/ci\.yml$)' ; then
-            echo "heavy=true" >> "$GITHUB_OUTPUT"
-            echo "==> calibration-relevant changes detected: heavy-sims WILL run"
-          else
-            echo "heavy=false" >> "$GITHUB_OUTPUT"
-            echo "==> no calibration-relevant changes: heavy-sims SKIPPED (gate reports green)"
-          fi
-
-  # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
-  # scope). Plays the full-game UAT, the juryReach calibration gate (20 passive seasons), and the
-  # calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion — the same files
-  # `test:ci` excludes — so together with `test` the whole functional suite still runs exactly once
-  # per CI run, just across concurrent runners.
+  # Plays the full-game UAT, the juryReach calibration gate, and the calibration-gradient gate to
+  # completion — the same files `test:ci` excludes. Every matrix leg is a one-file-per-runner SHARD so
+  # the lane's wall-clock is the single slowest leg (target ≤ ~180s), with no cross-file contention.
+  # Nothing is dropped — the whole functional suite still runs exactly once per CI run, across runners.
   #
-  # These files were the wall-clock long pole and previously ran CONCURRENTLY on the SAME runner
-  # inside `npm test`, so they shared 4 vCPUs and contended. Here they fan out one-file-per-runner
-  # via the matrix, so each gets a dedicated runner with no cross-file contention — the lane's wall
-  # is then the single slowest matrix entry, the irreducible floor.
+  # Lanes / sharding (each ≤ ~180s; see the PR body's per-lane wall-time table):
+  #   uat-12seed-{a,b,c} — the 12-seed never-veto UAT, sharded 3×4 seeds. PER-SEED assertions only
+  #                        (no cross-seed aggregate), so each shard asserts INDEPENDENTLY — no recombine.
+  #   uat-5seed          — 5-seed always-veto UAT (already ≤180s).
+  #   uat-decisions      — decision-type coverage over seeds 1-5 (already ≤180s).
+  #   gradient-{0,1}     — the gradient passive+active sweeps, sharded 2×3 seeds, then aggregated.
   #
-  # The full-game UAT itself is FURTHER fanned out across three lanes (its three independent `it`
-  # blocks, previously ~511s serial on one runner): `uat-12seed` (12 seeds never-veto, ~281s — the
-  # new floor), `uat-5seed` (5 seeds always-veto, ~113s), `uat-decisions` (decision-type coverage
-  # over seeds 1-5 + health sanity, ~118s). No seed or assertion changed — pure structural fan-out;
-  # the three split files share `tests/uat/fullGameUatHarness.ts`. The files import src/ directly
-  # (vitest transpiles on the fly), so no `npm run build` is needed.
+  # The juryReach calibration gate is sharded SEPARATELY in `jury-shard` + `jury-aggregate` below (it
+  # uploads/recombines per-season artifacts). The gradient mirrors that shard+aggregate pattern in its
+  # own `gradient-aggregate` job. All band assertions live in the aggregate jobs; the shards only play.
   #
-  # PATH-GATED (see `changes`): runs only when calibration-relevant files change. On a skip the
-  # matrix jobs don't run at all — `heavy-sims-gate` below is what reports the green status so a
-  # required check never deadlocks a docs-only/frontend-only PR.
+  # PATH-GATED (`changes.heavy`): runs only when calibration-relevant files change. On a skip the legs
+  # don't run — `ci-gate` reports the required green status so a docs/frontend-only PR never deadlocks.
   heavy-sims:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
@@ -95,7 +135,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sim: [uat-12seed, uat-5seed, uat-decisions, jury, gradient]
+        sim: [uat-12seed-a, uat-12seed-b, uat-12seed-c, uat-5seed, uat-decisions]
     name: heavy-sims (${{ matrix.sim }})
     steps:
       - uses: actions/checkout@v4
@@ -106,43 +146,138 @@ jobs:
       - run: npm ci
       - run: npm run test:heavy:${{ matrix.sim }}
 
-  # Stable required-check anchor for the heavy-sims lane. ALWAYS runs (no path gate), so its name
-  # always resolves to a conclusion. It passes when heavy-sims succeeded OR when heavy-sims was
-  # skipped (no calibration-relevant change), and fails only if any heavy-sims matrix leg failed
-  # or was cancelled. Point branch protection at THIS job ("heavy-sims-gate"), not the matrix legs,
-  # so a docs-only PR goes green without the lane ever running.
-  heavy-sims-gate:
-    needs: [changes, heavy-sims]
-    if: always()
+  # The juryReach calibration gate, SHARDED across runners (~464s as one file historically). The 20
+  # passive seeded seasons are independent and per-season seeded, so each shard plays a contiguous
+  # 4-seed slice (5 shards × 4 = 20, no overlap) and UPLOADS its per-season measurements as an
+  # artifact. NO band assertion happens here — a slice can't see the distribution. `jury-aggregate`
+  # downloads all five artifacts, recombines the full 20, and runs the SINGLE distribution assertion.
+  # Bands and seed count are UNCHANGED — only WHERE the seeds are played moved.
+  jury-shard:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    name: jury-shard (${{ matrix.shard }})
+    env:
+      JURY_SHARDS: "5"
+      JURY_SHARD: ${{ matrix.shard }}
+      JURY_RESULTS_DIR: jury-results
     steps:
-      - name: resolve heavy-sims outcome
-        env:
-          HEAVY_NEEDED: ${{ needs.changes.outputs.heavy }}
-          HEAVY_RESULT: ${{ needs.heavy-sims.result }}
-        run: |
-          set -euo pipefail
-          echo "heavy needed: $HEAVY_NEEDED ; heavy-sims result: $HEAVY_RESULT"
-          # `result` is one of success | failure | cancelled | skipped.
-          case "$HEAVY_RESULT" in
-            success|skipped)
-              echo "heavy-sims gate: PASS"
-              ;;
-            *)
-              echo "heavy-sims gate: FAIL (one or more heavy-sims legs did not succeed)"
-              exit 1
-              ;;
-          esac
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:heavy:jury
+      - name: upload shard results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jury-shard-${{ matrix.shard }}
+          path: jury-results/jury-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
 
-  # Coverage gate (B70/audit C8): per-directory branch thresholds in vitest.config.ts —
-  # coverage can no longer silently regress while the functional gate stays green.
-  #
-  # `test:cov` now EXCLUDES the two heavy simulation files (see vitest.config.ts HEAVY_SIM_FILES):
-  # under v8 instrumentation they re-ran the whole live loop a second, slower time yet add no
-  # BRANCH coverage in the gated dirs (engine/composition/adapters-engine) that the rest of the
-  # live-loop suite doesn't already cover. The per-directory branch thresholds still hold (and only
-  # ever ratchet UP) — re-measured with the exclusion in place.
+  # Recombine every jury shard and assert the full-20 calibration band — the SAME floor/ceiling reach
+  # band, rare-F2-win ceiling, and earned-win teeth the pre-shard single-file gate ran. Green only if
+  # the full-20 band holds. Depends on every shard (so all artifacts exist) and downloads them into one dir.
+  jury-aggregate:
+    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
+    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
+    # band assertion would silently never run). `jury-shard` already needs `changes`, so ordering holds.
+    needs: [changes, jury-shard]
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    name: jury-aggregate (full-20 band)
+    env:
+      JURY_RESULTS_DIR: jury-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: download all jury shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jury-shard-*
+          path: jury-results
+          merge-multiple: true
+      - run: npm run test:heavy:jury:aggregate
+
+  # The calibration-gradient gate, SHARDED across runners (~321s as one file historically — 6 seeds,
+  # each a passive+active full-season pair). The seeds are independent and per-seed seeded, so each
+  # shard plays a contiguous 2-seed slice (3 shards × 2 = 6, no overlap) and UPLOADS its per-seed
+  # measurements. NO band assertion in a shard — the active-vs-passive monotonic band needs the whole
+  # distribution; `gradient-aggregate` recombines and asserts it. Policy/seeds/band UNCHANGED.
+  gradient-shard:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    name: gradient-shard (${{ matrix.shard }})
+    env:
+      GRADIENT_SHARDS: "3"
+      GRADIENT_SHARD: ${{ matrix.shard }}
+      GRADIENT_RESULTS_DIR: gradient-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:heavy:gradient
+      - name: upload shard results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradient-shard-${{ matrix.shard }}
+          path: gradient-results/gradient-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Recombine every gradient shard and assert the full monotonic band (active ≥ passive). Green only
+  # if the full band holds. Depends on every shard so all artifacts exist.
+  gradient-aggregate:
+    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
+    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
+    # band assertion would silently never run). `gradient-shard` already needs `changes`, so ordering holds.
+    needs: [changes, gradient-shard]
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    name: gradient-aggregate (full band)
+    env:
+      GRADIENT_RESULTS_DIR: gradient-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: download all gradient shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gradient-shard-*
+          path: gradient-results
+          merge-multiple: true
+      - run: npm run test:heavy:gradient:aggregate
+
+  # ── Coverage gate ──────────────────────────────────────────────────────────────
+  # Per-directory branch thresholds in vitest.config.ts — coverage can no longer silently regress
+  # while the functional gate stays green. `test:cov` EXCLUDES the heavy simulation files (under v8
+  # instrumentation they re-run the whole live loop a second, slower time yet add no BRANCH coverage in
+  # the gated dirs the rest of the live-loop suite doesn't already cover). PATH-GATED (`changes.engine`).
   coverage:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -153,9 +288,12 @@ jobs:
       - run: npm ci
       - run: npm run test:cov
 
-  # Deploy smoke (feature 0010): build + start the engine, probe the HTTP MCP
-  # surface, exercise the game tools, prove channel isolation, simulate an update.
+  # ── Deploy smoke ────────────────────────────────────────────────────────────────
+  # Build + start the engine, probe the HTTP MCP surface, boot the real front-end against a
+  # token-enforcing engine, drive a full turn. PATH-GATED (`changes.deploy` — engine/FE/deploy scripts).
   smoke:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -176,10 +314,13 @@ jobs:
       - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
 
-  # Front-end (vendored Python app) is outside the TS tooling. Compile-check it, run its
-  # pytest suite (app-admin 0029, game build 0032), and boot-smoke the real app to prove
-  # the game-build surface reduction holds server-side (feature 0032 running-instance DoD).
+  # ── Front-end gate ──────────────────────────────────────────────────────────────
+  # The vendored Python app is outside the TS tooling. Compile-check it, run its pytest suite
+  # (app-admin 0029, game build 0032), and boot/browser/responsive-smoke the real app. PATH-GATED
+  # (`changes.frontend`): an engine-only PR skips it.
   frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -227,3 +368,65 @@ jobs:
         run: |
           node --check frontend/static/js/orwellOnboarding.js
           node --check frontend/static/js/orwellStatusPanel.js
+
+  # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
+  #
+  # THE single required check — point branch protection HERE, not at the individual gated jobs. It
+  # ALWAYS runs (`if: always()`), so its conclusion always resolves even when every upstream job was
+  # path-skipped. It passes when no needed job FAILED or was CANCELLED — a `skipped` (path-filtered) or
+  # `success` result both count as a pass — and fails otherwise.
+  #
+  # Why this is genuinely deadlock-free on an all-skip (e.g. a docs-only PR): the gated jobs report
+  # `skipped`; `ci-gate` still runs (always()); each `needs.*.result` is `skipped`; the loop below
+  # treats `skipped`/`success` as OK and exits 0. No required check is ever left "expected / pending".
+  ci-gate:
+    needs:
+      - changes
+      - test
+      - coverage
+      - smoke
+      - frontend
+      - heavy-sims
+      - jury-shard
+      - jury-aggregate
+      - gradient-shard
+      - gradient-aggregate
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: resolve overall CI status
+        env:
+          RESULTS: >-
+            changes=${{ needs.changes.result }}
+            test=${{ needs.test.result }}
+            coverage=${{ needs.coverage.result }}
+            smoke=${{ needs.smoke.result }}
+            frontend=${{ needs.frontend.result }}
+            heavy-sims=${{ needs.heavy-sims.result }}
+            jury-shard=${{ needs.jury-shard.result }}
+            jury-aggregate=${{ needs.jury-aggregate.result }}
+            gradient-shard=${{ needs.gradient-shard.result }}
+            gradient-aggregate=${{ needs.gradient-aggregate.result }}
+        run: |
+          set -euo pipefail
+          echo "Needed job results: $RESULTS"
+          fail=0
+          for kv in $RESULTS; do
+            name="${kv%%=*}"
+            result="${kv#*=}"
+            # A required job is OK iff it succeeded or was skipped (path-filtered). Anything else
+            # (failure / cancelled / — an unexpected empty result) fails the gate.
+            case "$result" in
+              success|skipped)
+                ;;
+              *)
+                echo "::error::needed job '$name' did not pass (result: '$result')"
+                fail=1
+                ;;
+            esac
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "ci-gate: FAIL"
+            exit 1
+          fi
+          echo "ci-gate: PASS (all needed jobs succeeded or were skipped)"

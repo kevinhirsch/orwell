@@ -12,6 +12,9 @@ import {
   DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
 } from "../engine/deepProfile";
 import { preGameTieToVaultContent, showmanceToVaultContent } from "../engine/seededRelationships";
+import {
+  PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
+} from "../engine/diversity";
 import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
 import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
@@ -140,6 +143,17 @@ function buildUserSandbox(user = "default"): UserSandbox {
     for (let i = 0; i < rels.showmances.length; i++) {
       const s = rels.showmances[i]!;
       engine.vault.writeHidden({ id: `seeded-showmance:${i}`, kind: "seeded-relationship", subject: s.a, content: showmanceToVaultContent(s) });
+    }
+  });
+  // 0063 — SEAL each HIDDEN private orientation (closeted / not-yet-out) into the Vault: the engine-only
+  // audit copy no player OR admin surface can reach (0001), exactly like the seeded relationships above.
+  // A publicly-out orientation is NEVER sealed here — it rides on the byte-stable Character (public facet).
+  session.setOnSealPrivateOrientations((entries) => {
+    for (const { id, orientation } of entries) {
+      engine.vault.writeHidden({
+        id: privateOrientationVaultId(id), kind: PRIVATE_ORIENTATION_KIND, subject: id,
+        content: privateOrientationToVaultContent(id, orientation),
+      });
     }
   });
   // 0059/L40 — a showmance that becomes VISIBLE is a PUBLIC house fact: record it as a player-witnessed

@@ -1742,3 +1742,66 @@ tiers (and whether the tiers agree), recall provider + model-cache state, save c
 load/mem, the play URL, and the doctor/update one-liners. Design rule: NEVER blocks a
 login — every probe `curl -m 1`, everything `|| true`, measured 96ms worst-case render with
 all probes failing, exit 0 always. Legacy bbai-aware.
+
+---
+
+## 2026-06-19 (PM) — session reconciliation (authoritative current state)
+
+This entry is the single authoritative snapshot for the 2026-06-19 PM work session. It is
+grounded in the **merged git history** (`origin/main` @ `38a3381`), not the drift-prone
+feature-README / CLAUDE.md status prose — where those disagree with the merged code, the code
+wins and the drift is called out under *Ledger corrections* below.
+
+### Merged to main this session
+- **#348** — engine-sim perf: killed the per-season O(events²) integrity-checkpoint hotspot
+  (passive season ~26.6s→4.8s, byte-identical outcomes by golden hash; every heavy CI lane now <3 min).
+- **#347** — windowing kit airtight: re-clamp open kit windows into the viewport on browser resize.
+- **#345** — vault/new-season window collision fix (distinct slots + clamped base-anchor stacking) — **closes L43**.
+- **#344** — live-debug verification pass: L1–L20 confirmed fixed in code (running instance was a stale deploy); logged L43/L44/L45.
+- **#342 / #341** — CI: jury path-filter + UAT fan-out (split matrix, one file per runner).
+- **#340** — **0061 player self-eviction — BUILT, BDD-gated** (forfeit-on-quit, skippable parting message, any-beat-resolved; NPC self-eviction out of scope).
+- **#339** — **0062 move-in zeitgeist snapshot — SPEC**.
+- **#338** — NPC movement weighting, RNG- & calibration-isolated (juryReach green).
+- **#337** — calibration instrumentation + gradient gate (no weight changes).
+- **#336** — **0060 story-thread trigger/resolution scheduler — BUILT** (`src/engine/threadConstants.ts`; `0060-*.feature` in `cucumber.cjs`).
+- **#335** — **0054 Phase 2 dock windows + A7 fly-out — DONE** (finale/cast/retro dock into the gadget rail; Win7 fly-out).
+- **#334** — CI speedup (parallelize heavy sims; drop coverage double-run).
+- **#332** — L27b recall fidelity + L39 God-Mode/finale + L37 ops-log hygiene.
+- **#331** — L32/L34 frosted themes + whereabouts cohesion (L21/L24).
+- **#330** — **E63 + SQLite relational adapters — DONE** (opt-in `ORWELL_STORE=sqlite`, sqlite-vec engine-only, Vault-walled).
+- **#329** — L15/L17 cast-gen responsiveness + look-alike dedup pass.
+- **#328** — 0058 Phase 2 thread-scheduler SPEC (built as 0060 in #336).
+- **#327** — R3 incremental O(Δ) checkpoint (the `eloquent-hamilton` lane).
+
+### In-flight (branches pushed; finisher agents recovering after a mid-session container restart)
+The restart killed the agent *processes*; all work survived as on-disk worktrees and was
+committed + pushed as WIP checkpoints. Finisher agents continue each branch (fast-gate only —
+**no heavy sims locally**, which was the real OOM cause):
+- **`claude/0063-build`** — 0063 casting diversity floor (BIPOC/LGBTQ+/gender/age floors; ethnicity facet; **Vault-sealed private orientation**) + **orientation-aware 0059 showmance eligibility** + portrait enrichment. *(Finisher running.)*
+- **`claude/ci-targeted-and-sharded`** — per-job path-filtering + shard heavy lanes (UAT 12→3, jury 20→5, gradient 6→2) under a unified deadlock-free `ci-gate`. **Supersedes #343.** *(Finisher running.)*
+- **`claude/portrait-image-config`** — square (1:1) aspect + pinned 1024² size + reference-image-on-regen (identity preservation for B&W eviction shots + L17 re-shoots). *(Finisher running.)*
+- **`claude/fe-polish-0054p2-a5a6-l45`** — **A5 (theme particles) + L45 (punctuation guard ?→!/./…) committed**; **A6 (frosted-top) is the only remaining sub-task** — *0054 P2 is DROPPED here, already merged in #335.* *(Queued.)*
+- **`claude/calibration-data-instrument`** — season-outcome instrumentation (instrument-&-gather-data-first). *(Queued.)*
+
+### Queued (not started)
+- **0058 Phase 2 remainder** — `recordCastProfile` LLM write-back + premiere voicing (the portrait physical-facet consumption is now largely covered by the 0063 portrait enrichment; the thread scheduler shipped as 0060/#336). Holds until `claude/0063-build` merges — it shares `GameSessionAdapter.ts`.
+
+### Open PRs to close as superseded (once the finishers land)
+- **#346** (0063 SPEC) → superseded by `claude/0063-build`.
+- **#343** (jury shard only) → superseded by `claude/ci-targeted-and-sharded`.
+
+### Ledger corrections (drift fixed this pass)
+- **0054 Phase 2 + A7 = DONE** (#335). Any earlier "0054 P2 pending" note is stale.
+- **0060 = BUILT + BDD-gated** (#336) — `features/README.md` still rows it "📝 SPEC ONLY"; that row is stale.
+- **Relational adapters = DONE** (#330) — not an open item.
+- **A7 fly-out = DONE** (#335). Remaining UI polish is **A6 frosted-top** (A5 particles committed on the fe-polish branch).
+- **live-debug ledger:** L43 fixed (#345); L15/L17 shipped (#329 — statuses flipped to ☑); L45 guard committed on the fe-polish branch.
+
+### Still genuinely open (forward backlog)
+1. **Calibration TUNING** — after the instrument lane lands its data (passive players coast to F2 ~half of seasons, then lose). Largest open game-feel question.
+2. **0058 Phase 2 remainder** — `recordCastProfile` write-back + premiere voicing.
+3. **A6** — frosted-top render fix.
+4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
+5. **Postgres / pgvector tier** — the relational follow-on beyond SQLite (#330 shipped SQLite + sqlite-vec only).
+6. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
+7. **A11** — onnxruntime cpuset log noise inside the LXC (documentation-only).

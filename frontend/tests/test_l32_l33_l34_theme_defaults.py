@@ -12,9 +12,12 @@ L32 — `telescreen` is the DEFAULT theme out of the box. A brand-new player, an
 L33 — `frosted` is ON by default on EVERY theme. An unset frosted preference
       resolves to ENABLED for all themes; an explicit toggle-off persists + wins.
 
-L34 — the frosted TITLE BAR uses the SAME translucent + backdrop-blur treatment
-      as the frosted body (not a solid fill), cohesively across EVERY window —
-      fixed at the kit / shared-CSS level so all Lane-F (.ow-*) windows inherit it.
+L34 — the frosted TITLE BAR is translucent (not a solid fill), cohesively glass
+      across EVERY window — fixed at the kit / shared-CSS level so all Lane-F
+      (.ow-*) windows inherit it. A6 [frosted-top fix]: the non-sticky kit
+      titlebar rides the .ow-window ROOT's single backdrop-filter (it carries
+      none of its own) so the whole window frosts as one continuous surface and
+      the frost no longer "breaks" into a mismatched band at the top edge.
 """
 import os
 import re
@@ -143,21 +146,28 @@ def test_l34_kit_window_frosts_under_theme_frosted():
     assert "backdrop-filter: blur(24px)" in block
 
 
-def test_l34_kit_titlebar_uses_the_frosted_treatment_not_a_solid_fill():
+def test_l34_a6_kit_titlebar_rides_the_root_frost_no_own_filter():
     css = _read("static", "style.css")
-    # The header-neutralization rule (shared by .modal-header) must also cover
-    # the kit titlebar so the header is glass (translucent + blur), not opaque.
+    # A6 [frosted-top fix]: the non-sticky kit titlebar must NOT carry its own
+    # backdrop-filter. A child filter re-blurs the .ow-window root's already-
+    # frosted glass and composites the top strip to a mismatched shade — the
+    # visible "frost breaks at the top" band. The titlebar is transparent with
+    # NO filter, so the single root backdrop-filter renders the whole window —
+    # header included — as one cohesive glass surface.
     m = re.search(
-        r"(body\.theme-frosted \.modal-header,[^{]*body\.theme-frosted \.ow-titlebar\s*\{[^}]*\})",
-        css, re.S)
-    assert m, ".ow-titlebar must share the .modal-header frosted-header rule"
+        r"body\.theme-frosted \.ow-titlebar\s*\{([^}]*)\}", css, re.S)
+    assert m, "the .ow-titlebar frosted rule must exist"
     rule = m.group(1)
-    # Translucent — NOT a solid panel/win-bg fill — plus the body's blur.
+    # Translucent — NOT a solid panel/win-bg fill.
     assert "background-color: transparent !important;" in rule
     assert "background-image: none !important;" in rule
-    assert "backdrop-filter: blur(24px) !important;" in rule
-    # Guard: the titlebar must NOT carry a solid var(--panel)/--win-bg fill.
+    # A6: no OWN backdrop-filter — it rides the .ow-window root's single filter.
+    assert "backdrop-filter: none !important;" in rule
+    assert "-webkit-backdrop-filter: none !important;" in rule
+    # Guard: the titlebar must NOT carry a solid var(--panel)/--win-bg fill, and
+    # must NOT re-introduce its own blur (the A6 regression).
     assert "var(--panel)" not in rule and "var(--win-bg)" not in rule
+    assert "blur(" not in rule
 
 
 def test_l34_gadget_rail_frosts_too():
