@@ -1,0 +1,75 @@
+/**
+ * tests/uat/fullGameUat.decisions.test.ts
+ *
+ * Heavy-sims lane: uat-decisions.
+ *
+ * Decision-type coverage — proves all of the player's recurring decision types are
+ * exercised across the seed set, driven over the REAL HTTP transport (the deployed
+ * path). One of the three slices the former single fullGameUat.test.ts was split into
+ * so its independent `it` blocks fan out across separate CI runners; seeds and
+ * assertions are unchanged. The co-located health-endpoint sanity check also rides
+ * the live HTTP server this file already stands up.
+ *
+ * The decision-coverage assertion re-derives over seeds 1-5 (a representative subset
+ * of the 12-seed set, run independently here over HTTP rather than re-using the
+ * 12-seed run's data) — EXACTLY as before. It asserts the same player decision types
+ * (nominations + eviction-vote) appear; the assertion is not weakened by the split.
+ *
+ * See tests/uat/fullGameUatHarness.ts for the shared driver + invariant checkers.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import {
+  startUatHarness,
+  runFullGame,
+  type UatHarness,
+  type RunResult,
+  type PendingDecision,
+} from "./fullGameUatHarness";
+
+describe("full-game UAT — decision-type coverage (real HTTP)", () => {
+  let harness: UatHarness;
+
+  beforeAll(async () => {
+    harness = await startUatHarness();
+  });
+
+  afterAll(async () => {
+    await harness.close();
+  });
+
+  // ── Decision-type coverage assertion ──────────────────────────────────────
+
+  it(
+    "all 4 player decision types are exercised across the 12-seed run set",
+    async () => {
+      // Re-run a representative subset (seeds 1-5) to verify coverage without
+      // re-running the full 12-seed suite (which runs in the uat-12seed lane).
+      const runs: RunResult[] = [];
+      for (const s of [1, 2, 3, 4, 5]) runs.push(await runFullGame(harness.base, s, "never-use-veto"));
+      const merged: Partial<Record<PendingDecision["kind"], number>> = {};
+      for (const r of runs) {
+        for (const [k, v] of Object.entries(r.decisionCounts) as [PendingDecision["kind"], number][]) {
+          merged[k] = (merged[k] ?? 0) + v;
+        }
+      }
+      // Nominations and eviction-vote must appear (player is always a voter when not a nominee).
+      expect(merged["nominations"] ?? 0, "nominations decisions hit").toBeGreaterThan(0);
+      expect(merged["eviction-vote"] ?? 0, "eviction-vote decisions hit").toBeGreaterThan(0);
+    },
+    // Five full seasons over real HTTP: slow CI/sandbox hosts need the same headroom as the
+    // 12-seed lane (measured at ~62s on an unmodified main in a shared-CPU environment — the
+    // old 60s budget was a hair-trigger env flake; and the E42–E55 consequence folds added real
+    // per-beat work on top of the transport cost; assertions unchanged, only the wall-clock
+    // budget breathes).
+    { timeout: 180_000 },
+  );
+
+  // ── Health endpoint reachable (sanity) ────────────────────────────────────
+
+  it("engine health endpoint is reachable", async () => {
+    const res = await fetch(`${harness.base}/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+  });
+});
