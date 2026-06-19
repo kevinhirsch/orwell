@@ -90,6 +90,123 @@ describe("seeded room assignment (0049)", () => {
   });
 });
 
+// --- NPC-personality movement weighting (L21/L24 residual) -------------------------
+
+describe("personality-weighted movement (L21/L24)", () => {
+  // Two single-NPC fixtures, identical except the houseguest's social aptitude, run through the SAME
+  // seeded movement stream from the SAME starting room. The high-social one must MOVE measurably more
+  // (roams) than the low-social one (holds their room) — the spread is the feature. Roles only.
+  const lone = [npc(1)] as const;
+  const moveProfile = (social: number) => ({ social, volatility: 0.5 });
+
+  function moveCount(social: number, seed: number, ticks: number): number {
+    let occ: Map<EntityId, Room> = new Map([[npc(1), HOUSE_ROOMS[0]!]]);
+    const rng = new SeededRandom(seed);
+    let moves = 0;
+    for (let t = 0; t < ticks; t++) {
+      const prev = occ;
+      occ = assignRooms(lone, prev, {
+        rng,
+        affinity: flatAffinity,
+        movement: () => moveProfile(social),
+      });
+      if (occ.get(npc(1)) !== prev.get(npc(1))) moves++;
+    }
+    return moves;
+  }
+
+  it("a high-social houseguest ROAMS measurably more than a low-social one (the spread is the point)", () => {
+    // Aggregate over many seeds so the spread is a distribution fact, not a single seeded fluke.
+    let extroRoam = 0;
+    let introRoam = 0;
+    const seeds = 60;
+    const ticks = 50;
+    for (let s = 0; s < seeds; s++) {
+      extroRoam += moveCount(0.9, 1000 + s, ticks); // high social aptitude — a roamer
+      introRoam += moveCount(0.2, 1000 + s, ticks); // low social aptitude — a homebody
+    }
+    // The extrovert moves strictly more in aggregate; the gap is large (not noise).
+    expect(extroRoam).toBeGreaterThan(introRoam);
+    expect(extroRoam - introRoam).toBeGreaterThan(seeds * ticks * 0.1);
+    // Both still MOVE sometimes and STAY sometimes — bounded, never frozen or always-teleporting.
+    expect(introRoam).toBeGreaterThan(0);
+    expect(extroRoam).toBeLessThan(seeds * ticks);
+  });
+
+  it("a high-social houseguest SEEKS company more strongly than a low-social one", () => {
+    // Three NPCs cluster in one room; a fourth (the subject) starts adjacent. Over many seeded ticks,
+    // the high-social subject should land in the crowded room (seek company) more than a low-social one.
+    const crowd = "kitchen" as Room;            // where the bonds are
+    const start = HOUSE_ADJACENCY.get(crowd)![0]!; // adjacent, so the crowd is a legal move target
+    const subject = npc(9);
+    const cluster: [EntityId, Room][] = [[npc(1), crowd], [npc(2), crowd], [npc(3), crowd]];
+    function seekRate(social: number): number {
+      let inCrowd = 0;
+      const trials = 80;
+      for (let s = 0; s < trials; s++) {
+        const prev = new Map<EntityId, Room>([...cluster, [subject, start]]);
+        const next = assignRooms([subject], prev, {
+          rng: new SeededRandom(7000 + s),
+          // Strong, uniform affinity to the cluster occupants so the seek-pull has something to pull on.
+          affinity: () => 1,
+          movement: (id) => (id === subject ? moveProfile(social) : null),
+        });
+        if (next.get(subject) === crowd) inCrowd++;
+      }
+      return inCrowd;
+    }
+    expect(seekRate(0.9)).toBeGreaterThan(seekRate(0.2));
+  });
+
+  it("same seed ⇒ identical personality-weighted trajectories (movement stays reproducible)", () => {
+    const run = (): string => {
+      let occ: Map<EntityId, Room> = new Map([[npc(1), HOUSE_ROOMS[0]!], [npc(2), HOUSE_ROOMS[1]!]]);
+      const rng = new SeededRandom(424242);
+      const trail: string[] = [];
+      for (let t = 0; t < 25; t++) {
+        occ = assignRooms([npc(1), npc(2)], occ, {
+          rng,
+          affinity: flatAffinity,
+          movement: (id) => moveProfile(id === npc(1) ? 0.85 : 0.25),
+        });
+        trail.push([...occ.entries()].map(([id, r]) => `${id}@${r}`).join(","));
+      }
+      return trail.join("|");
+    };
+    expect(run()).toBe(run());
+  });
+
+  it("a movement profile draws NO extra rng beyond the move-gate it gates (no side-channel draw)", () => {
+    // The profile re-weights the move-gate THRESHOLD and the affinity pull, but never DRAWS rng itself
+    // (no per-tick personality roll). It can change WHICH branch the gate takes (stay vs. move) — that is
+    // the feature — but it never injects an additional draw of its own. Proven by feeding a recording rng
+    // and confirming the profiled run draws exactly as many values as the branch decisions require: one
+    // per stay, two per move — never a third "personality" draw.
+    function drawsTaken(withProfile: boolean): number {
+      let count = 0;
+      const base = new SeededRandom(31);
+      const rng = {
+        next: () => { count++; return base.next(); },
+        int: (n: number) => base.int(n),
+        pick: <T,>(xs: readonly T[]) => base.pick(xs),
+        fork: (l: string) => base.fork(l),
+      };
+      const prev = new Map<EntityId, Room>([[npc(1), HOUSE_ROOMS[0]!]]);
+      assignRooms([npc(1)], prev, {
+        rng, affinity: flatAffinity,
+        ...(withProfile ? { movement: () => moveProfile(0.9) } : {}),
+      });
+      // One draw for the stay/move gate; at most one more for the room roll. NEVER a third —
+      // the profile adds no personality side-channel draw of its own.
+      expect(count).toBeGreaterThanOrEqual(1);
+      expect(count).toBeLessThanOrEqual(2);
+      return count;
+    }
+    drawsTaken(false);
+    drawsTaken(true);
+  });
+});
+
 // --- overhearing (gated, partial, traceable) ---------------------------------------
 
 function overhearFixture() {
@@ -383,6 +500,76 @@ describe("lingering never advances the week (0049 / ADR 0003 §7)", () => {
       expect(status.phase).toBe(before.phase);
       expect(s.advanceGame().pending?.kind).toBe(before.kind); // idempotent while pending — still the same beat
       expect(orch.idleSince(user)).toBe(t); // milling resets the idle clock: activity, not idleness
+    }
+  });
+});
+
+// --- live personality-weighted movement + calibration-neutral base (L21/L24) --------
+
+describe("the live game's personality-weighted movement (L21/L24)", () => {
+  it("same seed ⇒ identical live movement trajectory (reproducible across two fresh games)", () => {
+    const trajectory = (): string => {
+      const { sb } = liveGame(33);
+      const trail: string[] = [];
+      for (let i = 0; i < 15; i++) {
+        sb.session.presenceTick();
+        const occ = sb.session.occupancy()!;
+        trail.push([...occ.entries()].map(([id, r]) => `${id}@${r}`).sort().join(","));
+      }
+      return trail.join("|");
+    };
+    expect(trajectory()).toBe(trajectory()); // movement rides the seeded dedicated stream — fully reproducible
+  });
+
+  it("the player-facing positions and the calibration-neutral base both survive a save round-trip", () => {
+    const { sb } = liveGame(34);
+    for (let i = 0; i < 6; i++) sb.session.presenceTick();
+    const beforeWeighted = JSON.stringify([...sb.session.occupancy()!.entries()].sort());
+    const beforeBase = JSON.stringify([...sb.session.societyOccupancy()!.entries()].sort());
+    const core = sb.session.snapshot();
+    sb.session.restore(core);
+    expect(JSON.stringify([...sb.session.occupancy()!.entries()].sort())).toBe(beforeWeighted);
+    expect(JSON.stringify([...sb.session.societyOccupancy()!.entries()].sort())).toBe(beforeBase);
+    // Continuing to tick after a restart stays deterministic (the persisted tick counter resumes the stream).
+    const afterRestart = (() => { sb.session.presenceTick(); return JSON.stringify([...sb.session.occupancy()!.entries()].sort()); })();
+    const { sb: sb2 } = liveGame(34);
+    for (let i = 0; i < 7; i++) sb2.session.presenceTick();
+    expect(JSON.stringify([...sb2.session.occupancy()!.entries()].sort())).toBe(afterRestart);
+  });
+
+  it("higher-social NPCs roam more than lower-social ones over a live run (the spread shows in the real game)", () => {
+    // Drive many off-screen ticks on a real cast; bucket each NPC by their (static) social aptitude and
+    // count room CHANGES. The high-social half must roam more in aggregate than the low-social half.
+    const { sb } = liveGame(40);
+    const core0 = sb.session.snapshot();
+    const npcs = core0.house!.npcs;
+    const socialOf = new Map(npcs.map((n) => [n.id, n.character.stats.social]));
+    const median = [...socialOf.values()].sort((a, b) => a - b)[Math.floor(socialOf.size / 2)]!;
+    let prev = new Map(sb.session.occupancy()!);
+    let highMoves = 0;
+    let lowMoves = 0;
+    for (let t = 0; t < 80; t++) {
+      sb.session.presenceTick();
+      const now = sb.session.occupancy()!;
+      for (const [id, social] of socialOf) {
+        if (now.get(id) !== prev.get(id)) { if (social >= median) highMoves++; else lowMoves++; }
+      }
+      prev = new Map(now);
+    }
+    // The high-social cohort roams strictly more than the low-social cohort — the personality spread is real.
+    expect(highMoves).toBeGreaterThan(lowMoves);
+  });
+
+  it("the society occupancy is a real occupancy (one room each, never the diary room)", () => {
+    const { sb } = liveGame(41);
+    for (let t = 0; t < 30; t++) {
+      sb.session.presenceTick();
+      const base = sb.session.societyOccupancy()!;
+      const core = sb.session.snapshot();
+      const evicted = new Set(core.live?.evictionOrder ?? []);
+      const active = [core.house!.player.id, ...core.house!.npcs.map((n) => n.id)].filter((id) => !evicted.has(id));
+      expect(occupancyViolations(active, base)).toEqual([]);
+      for (const room of base.values()) expect(room).not.toBe("diary-room");
     }
   });
 });

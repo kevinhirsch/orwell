@@ -472,7 +472,12 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // House presence (0049): the tick re-seats the house FIRST (seeded, affinity-clustered, adjacent
   // moves only), so this stretch's scenes happen somewhere and overhears have ground truth.
   sandbox.session.presenceTick(rng);
-  const occupancy = sandbox.session.occupancy();
+  // L21/L24: the off-screen society pairs CO-PRESENT NPCs, so its occupancy is calibration-load-bearing.
+  // It reads the CALIBRATION-NEUTRAL base occupancy (invariant to the movement-personality constants) so
+  // the seeded competition/vote outcomes stay byte-identical whether or not the weighting is enabled
+  // (proven by tests/property/movementStreamIsolation). The player-facing WEIGHTED positions drive only
+  // `whereabouts`/witnessing — which the player observes — never the hidden society's pairing.
+  const occupancy = sandbox.session.societyOccupancy();
 
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
