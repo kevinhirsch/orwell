@@ -12,7 +12,9 @@ COPY (text). This ledger is the authoritative open-items list for this batch.
 - **L5 ☐ FE/ENG** — Once the headshot is selected, **the producers must send the first message to open the game** — the player should NOT be responsible for the first word. The game opens with the producer's opener.
 
 ## Thinking / immersion / accordions
-- **L6 ◐ FE** *(agent in flight)* — Model **thinking/reasoning was visible as it streamed** in the game build. Thinking must **never** be shown or expanded by default — not even while generating. It is viewable **only** if explicitly enabled in the backend UI, and that is an **admin-only privileged** choice.
+- **L6 ◐ FE** — Model **thinking/reasoning was visible** in the game build. Thinking must **never** be shown/expanded by default (not even while generating); viewable ONLY via an admin-only opt-in.
+  - **L6a ☑** — the `<think>`-block / reasoning-stream variant: suppressed in the game build across the live + reload paths (PR #321).
+  - **L6b ☐ FE (still leaking — CRITICAL)** — the **plain-content** variant: at 07:48 the planning ("`The game state shows…` `npc:1 - Faith Willis` … `Let me stay in character`") did **NOT** render in a thinking block — the model emitted its reasoning as a regular assistant turn (an intermediate AGENT ROUND), so think-block suppression does not catch it. Fix: in the game build, suppress the free text of INTERMEDIATE agent rounds (any round that then calls a tool / is followed by another assistant round) — show only the FINAL narration round — and/or broaden plain-reasoning detection ("Let me…", "Looking at the roster", "The game state shows", raw `npc:<n>` ids). The narrator only ever speaks the final in-character text.
 - **L7 ☐ FE** — Every inter-message "action" carries an **accordion** that expands to hidden/empty content. Remove all worthless accordions: if there is nothing to expand, render **no** expand affordance.
 
 ## Settings / models
