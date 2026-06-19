@@ -10,6 +10,8 @@
  * no hidden-layer content. This module is the gate; the tests are the proof.
  */
 
+import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
+
 /** The public appearance facets available on the Vault-free HouseguestCard (B61). */
 export interface PublicAppearanceFacets {
   /** e.g. "athletic, close-cropped hair, a warm smile" */
@@ -18,9 +20,29 @@ export interface PublicAppearanceFacets {
   age: number;
   /** e.g. "casual and laid-back" */
   presentation: string;
+  /**
+   * L29/L23/0058: the STRUCTURED physical facet — the SINGLE source of truth shared by the portrait
+   * prompt AND the text narration, so the face always matches the person (height/build, skin tone,
+   * hair, facial features, distinguishing mark, age-look, style). When present it AUTHORS the physical
+   * description (richer + more differentiating than the prose `appearance`); when absent we fall back
+   * to the prose line. All facets are PUBLIC (already on the card) — no hidden content ever rides here.
+   */
+  physicalCharacteristics?: PhysicalCharacteristics;
 }
 
 import { EXPRESSION_VARIANTS, FRAMING_VARIANTS, BACKDROP_VARIANTS } from "./imageConstants";
+
+/**
+ * Compose the structured physical facet into a single rich appearance clause (L29). Skips a
+ * "none notable" distinguishing mark so it never reads as a literal instruction to the image model.
+ * Pure string assembly over PUBLIC fields — no hidden content.
+ */
+export function physicalFacetToAppearance(p: PhysicalCharacteristics): string {
+  const parts = [p.heightBuild, p.skinTone, p.hair, p.facialFeatures];
+  if (p.distinguishingMark && !/^none\b/i.test(p.distinguishingMark.trim())) parts.push(p.distinguishingMark);
+  parts.push(p.ageLook);
+  return parts.join(", ");
+}
 
 /** A generated portrait prompt ready to hand to an image provider. */
 export interface PortraitPromptResult {
@@ -63,16 +85,22 @@ export function buildPortraitPrompt(
   facets: PublicAppearanceFacets,
   styleAnchor: string,
 ): PortraitPromptResult {
-  const { appearance, age, presentation } = facets;
+  const { appearance, age, presentation, physicalCharacteristics } = facets;
   const shot = fnv1a(`${houseguestId}|${styleAnchor}`);
   const expression = EXPRESSION_VARIANTS[shot % EXPRESSION_VARIANTS.length]!;
   const framing = FRAMING_VARIANTS[(shot >>> 8) % FRAMING_VARIANTS.length]!;
   const backdrop = BACKDROP_VARIANTS[(shot >>> 16) % BACKDROP_VARIANTS.length]!;
+  // L29: prefer the STRUCTURED facet (distinct faces, one source of truth with the narration); fall
+  // back to the prose `appearance` for pre-0058 saves that never seeded a facet.
+  const physical = physicalCharacteristics ? physicalFacetToAppearance(physicalCharacteristics) : appearance;
+  const styleLine = physicalCharacteristics?.style
+    ? `${presentation}, ${physicalCharacteristics.style}`
+    : presentation;
   const prompt = [
     styleAnchor,
     `Subject: ${name}, ${age} years old`,
-    `Physical appearance: ${appearance}`,
-    `Presentation style: ${presentation}`,
+    `Physical appearance: ${physical}`,
+    `Presentation style: ${styleLine}`,
     `Expression: ${expression}`,
     `Framing: ${framing}`,
     `Setting: ${backdrop}`,
@@ -95,6 +123,7 @@ export function buildCastPortraitPrompts(
     appearance?: string;
     age?: number;
     presentation?: string;
+    physicalCharacteristics?: PhysicalCharacteristics;
   }>,
   styleAnchor: string,
 ): PortraitPromptResult[] {
@@ -108,6 +137,7 @@ export function buildCastPortraitPrompts(
           appearance: hg.appearance!,
           age: hg.age!,
           presentation: hg.presentation!,
+          ...(hg.physicalCharacteristics !== undefined ? { physicalCharacteristics: hg.physicalCharacteristics } : {}),
         },
         styleAnchor,
       ),

@@ -413,6 +413,8 @@ export class GameSessionAdapter implements GameSession {
         appearance: subject.character.appearance,
         age: subject.character.age,
         presentation: subject.character.presentation,
+        ...(subject.character.physicalCharacteristics !== undefined
+          ? { physicalCharacteristics: subject.character.physicalCharacteristics } : {}),
       },
       this.portraitStyleAnchor,
     );
@@ -1053,6 +1055,10 @@ export class GameSessionAdapter implements GameSession {
       appearance: h.character.appearance,
       age: h.character.age,
       presentation: h.character.presentation,
+      // L29: the structured physical facet (0058) AUTHORS the face so it matches the person and never
+      // drifts from the narration. PUBLIC by construction; falls back to the prose appearance if unseeded.
+      ...(h.character.physicalCharacteristics !== undefined
+        ? { physicalCharacteristics: h.character.physicalCharacteristics } : {}),
     }));
     return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
   }

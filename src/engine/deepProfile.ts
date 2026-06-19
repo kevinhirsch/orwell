@@ -212,6 +212,11 @@ export function generateBiography(rng: RandomnessSource, c: Pick<Character, "bac
 }
 
 // ── Deterministic HIDDEN generation (the §3 hidden half) ──────────────────────────────────────────
+// L41: the pools are deliberately LARGE and the cast deal is SPREAD-CAPPED (see MAX_PER_* below), so
+// the hidden layer is as diverse as the public one — no single "secret mastermind"/"secretly clocking
+// every move" trope can cluster across the cast (the 2026-06-19 finale-reveal defect). Mirrors the L28
+// `spreadFacet`/`MAX_PER_*` discipline in characterFactory. Every entry is plain English: no banned
+// stat-key substring (`"physical":`-style) and no bare float, so the §8 Vault scans stay clean.
 const SECRET_POOL = [
   "is in real financial trouble — the prize money is urgent, not aspirational",
   "is hiding a serious-superfan knowledge of the game behind a casual front",
@@ -223,6 +228,20 @@ const SECRET_POOL = [
   "carries a family secret that shapes every move they make",
   "is playing for someone else entirely, not themselves",
   "has a temper they have learned to mostly contain",
+  "told a flattering lie about their job that they now have to maintain",
+  "is recently heartbroken and overcompensating with bravado",
+  "has done this kind of high-pressure social game before, under another banner",
+  "is quietly the most competitive person here and hides it behind charm",
+  "owes someone on the outside and needs the win to make it right",
+  "came in with a rival they recognized but is pretending they didn't",
+  "is far more religious or principled than the party persona suggests",
+  "has a soft spot that one specific archetype can exploit every time",
+  "is documenting everyone for a tell-all they plan to write after",
+  "secretly cannot stand the houseguest they are publicly closest to",
+  "is younger or older than they let the house assume",
+  "has a phobia or limit that a comp could expose at the worst moment",
+  "is here mostly to prove something to a parent who doubted them",
+  "made an off-camera alliance pact in the sequester hotel already",
 ];
 
 // True strategic goals — distinct from a stated public game. No stat vocabulary.
@@ -235,6 +254,16 @@ const TRUE_GOAL_POOL = [
   "control the house through suggestion, never visible power",
   "get to the end against someone they can clearly beat",
   "stay off the radar until the numbers force a move",
+  "be the obvious leader and dare the house to take the shot",
+  "collect every secret in the house and trade them like currency",
+  "run a loud decoy game while a quiet one does the real work",
+  "win enough comps that they never have to rely on anyone",
+  "play an emotional, loyalty-first game and make the jury love them",
+  "engineer a big blindside early to set the house's fear of them",
+  "ride a strong shield as far as it lasts, then cut it clean",
+  "flip whichever way the numbers point and never hold a grudge",
+  "protect one specific person to the end, even past their own game",
+  "avoid blood on their hands and let others do every eviction",
 ];
 
 // Named weaknesses / blind spots — behavioral seeds the game exploits on a delay.
@@ -247,6 +276,14 @@ const WEAKNESS_POOL = [
   "trusts a warm conversation far more than it has earned",
   "freezes under direct pressure and over-explains",
   "needs to be liked and folds when an alliance turns cold",
+  "talks too much when nervous and leaks their own plans",
+  "holds grudges and lets revenge override the smart move",
+  "is so conflict-averse they let others make their decisions",
+  "overestimates their own social read and gets blindsided",
+  "gets attached fast and cannot play against people they like",
+  "chases comp wins for the spotlight even when laying low is smarter",
+  "believes their own cover story and forgets who they're lying to",
+  "panics at the first sign of being on the wrong side of the house",
 ];
 
 // Day-1 reads of the player + their signed leans for the NPC→player edge (never shown).
@@ -269,13 +306,46 @@ const PERCEPTION_POOL: ReadonlyArray<DayOnePerception> = [
 /** How many secrets each NPC carries (the §3 "2–3 secrets"). */
 export const SECRET_RANGE = { min: 2, max: 3 } as const;
 
+// L41 — cast-wide SPREAD CAPS: across the 15-cast, no secret/goal/weakness/Day-1-read may be shared by
+// more than this many houseguests. Sized so the pools comfortably satisfy a 15-cast (the relaxation
+// path is unreachable in practice but never spins). The same discipline as L28's MAX_PER_BUILD.
+export const MAX_PER_SECRET = 2;
+export const MAX_PER_GOAL = 3;
+export const MAX_PER_WEAKNESS = 2;
+export const MAX_PER_PERCEPTION = 3;
+
+/**
+ * The mutable usage tallies that enforce the L41 cast-wide spread caps as `generateCastDeepLayer` deals
+ * one NPC at a time. Keyed by the drawn string (the perception by its `read`). Pass the SAME object to
+ * every NPC's `generateDeepProfile` so a trope used to its cap is no longer offered to later NPCs.
+ */
+export interface CastSpreadCaps {
+  secretUses: Map<string, number>;
+  goalUses: Map<string, number>;
+  weaknessUses: Map<string, number>;
+  perceptionUses: Map<string, number>;
+}
+
+export function newCastSpreadCaps(): CastSpreadCaps {
+  return { secretUses: new Map(), goalUses: new Map(), weaknessUses: new Map(), perceptionUses: new Map() };
+}
+
 /**
  * Mint the full HIDDEN deep profile for one houseguest off a SIDE rng, so the main house stream stays
  * byte-stable. ENGINE-ONLY by construction — the caller seals it into the Vault and never projects it.
- * Deterministic per seed + player-independent (the name is player-independent).
+ * Deterministic per seed + player-independent (the name is player-independent). When `caps` is supplied
+ * (the cast-wide path) the draws honor the L41 spread caps; without it (a single standalone profile)
+ * the draws are uncapped.
  */
-export function generateDeepProfile(rng: RandomnessSource): DeepProfile {
+export function generateDeepProfile(rng: RandomnessSource, caps?: CastSpreadCaps): DeepProfile {
   const count = SECRET_RANGE.min + rng.int(SECRET_RANGE.max - SECRET_RANGE.min + 1); // 2..3
+  if (caps) {
+    const secrets = pickDistinctCapped(rng, SECRET_POOL, count, caps.secretUses, MAX_PER_SECRET);
+    const trueGoals = pickDistinctCapped(rng, TRUE_GOAL_POOL, 2, caps.goalUses, MAX_PER_GOAL);
+    const weakness = pickCapped(rng, WEAKNESS_POOL, caps.weaknessUses, MAX_PER_WEAKNESS);
+    const p = pickPerceptionCapped(rng, caps.perceptionUses, MAX_PER_PERCEPTION);
+    return { secrets, trueGoals, weakness, dayOnePerception: { ...p } };
+  }
   const secrets = pickDistinct(rng, SECRET_POOL, count);
   const trueGoals = pickDistinct(rng, TRUE_GOAL_POOL, 2);
   const weakness = rng.pick(WEAKNESS_POOL);
@@ -291,6 +361,46 @@ function pickDistinct(rng: RandomnessSource, pool: readonly string[], n: number)
     if (!seen.has(v)) { seen.add(v); out.push(v); }
   }
   return out;
+}
+
+/** Draw one value honoring the cast-wide cap; relaxes the cap rather than spinning if it can't be met. */
+function pickCapped(rng: RandomnessSource, pool: readonly string[], uses: Map<string, number>, maxEach: number): string {
+  for (let g = 0; g < 400; g++) {
+    const v = rng.pick(pool);
+    if ((uses.get(v) ?? 0) < maxEach) { uses.set(v, (uses.get(v) ?? 0) + 1); return v; }
+  }
+  const v = rng.pick(pool);
+  uses.set(v, (uses.get(v) ?? 0) + 1);
+  return v;
+}
+
+/** Pick `n` values distinct WITHIN this profile AND honoring the cast-wide cap; relaxes if it must. */
+function pickDistinctCapped(rng: RandomnessSource, pool: readonly string[], n: number, uses: Map<string, number>, maxEach: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let guard = 0; out.length < n && guard < 400; guard++) {
+    const v = rng.pick(pool);
+    if (seen.has(v) || (uses.get(v) ?? 0) >= maxEach) continue;
+    seen.add(v); uses.set(v, (uses.get(v) ?? 0) + 1); out.push(v);
+  }
+  // Relaxation: if the cap-and-distinct constraint could not fill, take distinct-only (never spin).
+  for (let guard = 0; out.length < n && guard < 400; guard++) {
+    const v = rng.pick(pool);
+    if (seen.has(v)) continue;
+    seen.add(v); uses.set(v, (uses.get(v) ?? 0) + 1); out.push(v);
+  }
+  return out;
+}
+
+/** Perception is an object pool; cap by its `read`. Keeps the pool's net-zero balance (contents fixed). */
+function pickPerceptionCapped(rng: RandomnessSource, uses: Map<string, number>, maxEach: number): DayOnePerception {
+  for (let g = 0; g < 400; g++) {
+    const p = PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]!;
+    if ((uses.get(p.read) ?? 0) < maxEach) { uses.set(p.read, (uses.get(p.read) ?? 0) + 1); return p; }
+  }
+  const p = PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]!;
+  uses.set(p.read, (uses.get(p.read) ?? 0) + 1);
+  return p;
 }
 
 // ── Story-thread derivation (0058 §5) ─────────────────────────────────────────────────────────────
@@ -356,6 +466,9 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
   const pub: Record<EntityId, PublicDepth> = {};
   const hidden: Record<EntityId, DeepProfile> = {};
   const threads: StoryThread[] = [];
+  // L41: one shared cap tally for the whole cast — so a secret/goal/weakness/read used to its cap is
+  // not offered to the remaining houseguests. Deterministic: the cast iteration order is seed-stable.
+  const caps = newCastSpreadCaps();
   for (const hg of npcs) {
     const pubRng = new SeededRandom(hashSeed(`${seed}:deep-public:${hg.name}`));
     const hidRng = new SeededRandom(hashSeed(`${seed}:deep-hidden:${hg.name}`));
@@ -364,7 +477,7 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
       biography: generateBiography(pubRng, hg.character),
       physicalCharacteristics: generatePhysicalCharacteristics(pubRng, hg.character.age),
     };
-    const profile = generateDeepProfile(hidRng);
+    const profile = generateDeepProfile(hidRng, caps);
     hidden[hg.id] = profile;
     threads.push(...deriveStoryThreads(thrRng, hg.id, profile));
   }

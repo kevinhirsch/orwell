@@ -5,6 +5,7 @@ import { PLAYER } from "../../src/domain/ids";
 import {
   generateCastDeepLayer, generateDeepProfile, generatePhysicalCharacteristics, generateBiography,
   deriveStoryThreads, ageLookFor, SECRET_RANGE, STORY_THREAD_KIND,
+  MAX_PER_SECRET, MAX_PER_GOAL, MAX_PER_WEAKNESS, MAX_PER_PERCEPTION,
 } from "../../src/engine/deepProfile";
 import { generateHouse } from "../../src/engine/characterFactory";
 
@@ -84,6 +85,32 @@ describe("0058 deepProfile — deterministic generators", () => {
       expect(a.hidden[n.id]).toBeTruthy();
     }
     expect(a.threads.length).toBeGreaterThan(npcs.length); // ≥1 thread per NPC
+  });
+
+  it("L41 — no hidden trope clusters across the cast (spread caps hold over many seeds)", () => {
+    // The 2026-06-19 finale reveal showed 4 NPCs sharing one "secretly clocking every move" trope.
+    // The cast-wide spread caps must keep any secret/goal/weakness/Day-1-read under its MAX_PER_*.
+    for (let seed = 1; seed <= 60; seed++) {
+      const npcs = generateHouse(new SeededRandom(seed)).npcs;
+      const layer = generateCastDeepLayer(seed, npcs);
+      const secret = new Map<string, number>();
+      const goal = new Map<string, number>();
+      const weak = new Map<string, number>();
+      const read = new Map<string, number>();
+      for (const id of Object.keys(layer.hidden)) {
+        const p = layer.hidden[id]!;
+        for (const s of p.secrets) secret.set(s, (secret.get(s) ?? 0) + 1);
+        for (const g of p.trueGoals) goal.set(g, (goal.get(g) ?? 0) + 1);
+        weak.set(p.weakness, (weak.get(p.weakness) ?? 0) + 1);
+        read.set(p.dayOnePerception.read, (read.get(p.dayOnePerception.read) ?? 0) + 1);
+      }
+      expect(Math.max(...secret.values())).toBeLessThanOrEqual(MAX_PER_SECRET);
+      expect(Math.max(...goal.values())).toBeLessThanOrEqual(MAX_PER_GOAL);
+      expect(Math.max(...weak.values())).toBeLessThanOrEqual(MAX_PER_WEAKNESS);
+      expect(Math.max(...read.values())).toBeLessThanOrEqual(MAX_PER_PERCEPTION);
+      // and the hidden layer reads as genuinely varied — many distinct secrets across a 15-cast
+      expect(secret.size).toBeGreaterThanOrEqual(8);
+    }
   });
 });
 
