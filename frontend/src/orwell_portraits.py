@@ -14,6 +14,16 @@ Discipline (from the spec, non-negotiable):
   • Generate once per season — on restart the stored portrait is served from disk; a portrait
     that already exists is never regenerated (ADR 0003: augment, never replace; bounded cost).
 
+Image config (the request SHAPE, all Vault-free — see the "Portrait image config" block):
+  • Square (1:1) framing is asked of BOTH transports (OpenAI `size`, OpenRouter
+    `image_config.aspect_ratio`), with per-model graceful degradation and a prompt-text cue
+    as a belt-and-suspenders backstop.
+  • One pinned square resolution (default 1024x1024) is sent on every provider path so the
+    roster grid stays uniform and per-image cost is bounded.
+  • Reference-image-on-regen — re-shooting an EXISTING portrait (the L17 look-alike re-roll)
+    feeds the current portrait back through the img2img edit path so the houseguest stays the
+    SAME person; first-generation stays text-to-image.
+
 Storage: ``{frontend}/data/portraits/{user}/{houseguestId}.png`` plus a small
 ``manifest.json`` (houseguestId → filename + name). The whole tree lives under the
 front-end data dir, so ``orwell-factory-reset.sh`` (which scrubs the FE store) already
