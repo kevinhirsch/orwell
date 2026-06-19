@@ -47,12 +47,29 @@ if (embedMode === "fastembed") {
   const dataDir =
     process.env["ORWELL_DATA_DIR"] ?? process.env["BBAI_DATA_DIR"] ?? "./.orwell-data";
   const cacheDir = process.env["ORWELL_EMBED_CACHE"] || `${dataDir.replace(/\/$/, "")}/models`;
+  // BOOT-SAFETY (prod incident 2026-06-19): the warm-up must NEVER wedge the engine. It runs
+  // BEFORE startHttpMcp, and the catch below only handles a *thrown* error — a model download that
+  // STALLS (cold cache + a blocked/slow model CDN) would hang this await forever, so the process
+  // stays "active" under systemd yet never binds :8765 and /health never answers (exactly the
+  // outage seen). Bound it: if the model isn't ready in time, fall back to the deterministic
+  // embedder and boot anyway. Prefetch (`node dist/embedWorker.js --prefetch`) to keep real recall.
+  const warmupMs = Number(process.env["ORWELL_EMBED_WARMUP_MS"]) || 45000;
   try {
     const { createFastembedEmbedding } = await import("./adapters/embedding/FastembedEmbedding");
-    const provider = await createFastembedEmbedding({
-      workerUrl: new URL("./embedWorker.js", import.meta.url),
-      cacheDir,
-    });
+    const provider = await Promise.race([
+      createFastembedEmbedding({
+        workerUrl: new URL("./embedWorker.js", import.meta.url),
+        cacheDir,
+      }),
+      new Promise<never>((_, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`fastembed warm-up exceeded ${warmupMs}ms — booting on deterministic recall`)),
+          warmupMs,
+        );
+        // Don't let the timeout itself keep the process alive once warm-up wins the race.
+        if (typeof t.unref === "function") t.unref();
+      }),
+    ]);
     const { setRuntimeEmbedding } = await import("./composition/engineRoot");
     setRuntimeEmbedding(provider);
     embeddingsStatus = () =>
