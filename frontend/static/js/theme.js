@@ -481,13 +481,25 @@ function _getEffectSize() {
 // Patterns where the intensity/size sliders have no visible effect.
 const _STATIC_PATTERNS = new Set(['none', 'dots']);
 
+// A5 (ruling #18): the animated canvas particle layers honour prefers-reduced-motion
+// — when the user asks for reduced motion we DON'T spawn the rAF generator at all
+// (static or off, per spec). The CSS base layer (synapse's grid, dots) still paints,
+// so the theme keeps its texture; the canvas-only patterns simply render nothing
+// moving. Re-evaluated live (the media query is read each apply), so flipping the OS
+// setting + re-applying the theme picks it up without a reload.
+function _prefersReducedMotion() {
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  catch (_) { return false; }
+}
+
 export function applyBgPattern(pattern) {
   const p = pattern || 'none';
   document.body.classList.remove(..._BG_CLASSES);
   // Clean up any canvas backgrounds
   document.querySelectorAll('#synapse-canvas, #rain-canvas, #constellations-canvas, #perlin-flow-canvas, #petals-canvas, #sparkles-canvas, #embers-canvas').forEach(c => c.remove());
   if (p !== 'none') document.body.classList.add('bg-pattern-' + p);
-  if (_CANVAS_PATTERNS[p]) _CANVAS_PATTERNS[p]();
+  // Reduced-motion: keep the static CSS base, skip the animated canvas generator.
+  if (_CANVAS_PATTERNS[p] && !_prefersReducedMotion()) _CANVAS_PATTERNS[p]();
   // Hide sliders that do nothing on static patterns.
   const hide = _STATIC_PATTERNS.has(p);
   const ig = document.getElementById('theme-bg-intensity-group');
