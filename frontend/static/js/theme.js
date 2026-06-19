@@ -44,7 +44,11 @@ export const THEMES = {
 // 0052: each preset knows its own key (drives the per-theme house treatment class).
 for (const [k, v] of Object.entries(THEMES)) v._key = k;
 
-const DEFAULT_THEME = 'dark';
+// L32: telescreen — the on-brand 1984 surveillance look — is the DEFAULT theme
+// out of the box. A brand-new player, an unset preference, or a factory-reset /
+// no-stored-theme session all resolve here; an explicit SAVED choice still wins
+// (getSaved() short-circuits every fallback below).
+const DEFAULT_THEME = 'telescreen';
 const LS_KEY = 'orwell-theme';
 const CUSTOM_THEMES_KEY = 'orwell-custom-themes';
 
@@ -88,10 +92,14 @@ const THEME_DEFAULT_INTENSITY = {
   organs:     0.65,
 };
 
-// Default frosted-glass state per theme. Themes not listed default to false.
-const THEME_DEFAULT_FROSTED = {
-  lavender:   true,
-};
+// L33: the frosted-glass treatment is ON by default on EVERY theme. An unset
+// frosted preference resolves to ENABLED; an explicit toggle-off still persists
+// and wins (the saved `frosted` flag short-circuits this fallback). Any theme
+// that should ship frosted-OFF can opt out here; none currently do.
+const THEME_DEFAULT_FROSTED_OFF = {};
+function defaultFrostedFor(_name) {
+  return THEME_DEFAULT_FROSTED_OFF[_name] !== true;
+}
 
 // ── Custom theme persistence ──
 function _loadCustomThemes() {
@@ -492,7 +500,10 @@ export function save(name, colors, opts) {
     if (opts.bgEffectColor) obj.bgEffectColor = opts.bgEffectColor;
     if (opts.bgEffectIntensity !== undefined && opts.bgEffectIntensity !== 1) obj.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined && opts.bgEffectSize !== 1) obj.bgEffectSize = opts.bgEffectSize;
-    if (opts.frosted) obj.frosted = true;
+    // L33: frosted defaults ON, so an explicit toggle-OFF must be PERSISTED as
+    // `frosted: false` — otherwise the default-on fallback would re-enable it on
+    // the next boot. Record the explicit boolean whenever the caller passed one.
+    if (opts.frosted !== undefined) obj.frosted = !!opts.frosted;
   }
   Storage.setJSON(LS_KEY, obj);
   _syncToServer(obj);
@@ -734,7 +745,7 @@ export function initThemeUI() {
         const sz = (ct && ct.bgEffectSize !== undefined) ? ct.bgEffectSize : 1;
         const fr = (ct && ct.frosted !== undefined)
           ? !!ct.frosted
-          : (THEME_DEFAULT_FROSTED[name] === true);
+          : defaultFrostedFor(name);
         applyFontDensity(f, d);
         applyBgEffectColor(ec);
         applyBgEffectIntensity(ei);
@@ -1119,7 +1130,7 @@ export function initThemeUI() {
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
-    : (saved && THEME_DEFAULT_FROSTED[saved.name] === true);
+    : defaultFrostedFor(saved ? saved.name : DEFAULT_THEME);
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);

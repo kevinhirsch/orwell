@@ -18,6 +18,17 @@
   (function(){
     try {
       var t = JSON.parse(localStorage.getItem('orwell-theme'));
+      // L32/L33: with no stored theme (brand-new player / factory reset), the
+      // default is `telescreen` — the on-brand 1984 surveillance look — frosted
+      // ON. Synthesize the saved-theme shape so the existing apply path below
+      // paints it from the very first frame (no flash to the CSS :root before
+      // theme.js boots). An explicit saved choice always wins (t stays as-is).
+      // Keep in sync with theme.js DEFAULT_THEME + the telescreen palette.
+      if (!t || !t.colors) {
+        t = { name: 'telescreen', frosted: true,
+              colors: { bg:'#101418', fg:'#d7e9ee', panel:'#151c22', border:'#2a3e4a', red:'#56c8e8' },
+              house: true };
+      }
       if (t && t.colors) {
         var s = document.documentElement.style;
         var c = t.colors;
@@ -88,6 +99,30 @@
       if (t && t.bgPattern && t.bgPattern !== 'none') {
         document.addEventListener('DOMContentLoaded', function() {
           document.body.classList.add('bg-pattern-' + t.bgPattern);
+        }, {once:true});
+      }
+      // L33/L34 + 0052: paint the frosted-glass + house treatment from the
+      // first frame so a fresh session opens already frosted (no flash to a
+      // solid chrome before theme.js boots). Frosted defaults ON; an explicit
+      // saved `frosted:false` opts out. House presets also tint --panel-frost.
+      if (t) {
+        var _frosted = (t.frosted !== undefined) ? !!t.frosted : true;
+        // House presets (0052) — recognized by name since the saved object
+        // doesn't persist the `house` flag (applyColors re-derives it shortly).
+        var _HOUSE = { 'the-feed':1, 'telescreen':1, 'room-101':1, 'memory-wall':1, 'sequester':1 };
+        var _house = !!t.house || !!(t.name && _HOUSE[t.name]);
+        var _panel = (t.colors && t.colors.panel) || '';
+        document.addEventListener('DOMContentLoaded', function() {
+          if (_frosted) document.body.classList.add('theme-frosted');
+          if (_house) {
+            document.body.classList.add('house-theme');
+            if (t.name) document.body.classList.add('house-theme--' + t.name);
+            var m = /^#?([0-9a-f]{6})$/i.exec(_panel);
+            if (m) {
+              var r = parseInt(m[1].slice(0,2),16), g = parseInt(m[1].slice(2,4),16), b = parseInt(m[1].slice(4,6),16);
+              document.documentElement.style.setProperty('--panel-frost', 'rgba('+r+', '+g+', '+b+', 0.62)');
+            }
+          }
         }, {once:true});
       }
     } catch(e){}

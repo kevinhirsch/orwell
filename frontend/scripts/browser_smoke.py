@@ -40,6 +40,32 @@ def check(cond: bool, label: str) -> None:
         _fails.append(label)
 
 
+# L33/L34: `frosted` is now ON by default for every theme, which paints
+# backdrop-filter glass on every panel/modal/window. That heavy GPU effect makes
+# headless-chromium report stacked window chrome (e.g. a modal's minimize button)
+# as not-visible/not-stable, destabilizing the z-order / focus / restore suites
+# (G14/F8/G2) that are about WINDOW MECHANICS, not the cosmetic frost. So the
+# smoke seeds an EXPLICIT frosted-off theme preference before the first paint —
+# the L33 contract is "an explicit saved choice wins" — to keep those mechanics
+# deterministic. The frosted DEFAULT itself is covered by the pytest source gate
+# (tests/test_l32_l33_l34_theme_defaults.py).
+_SEED_NO_FROST_THEME = (
+    "try { localStorage.setItem('orwell-theme', JSON.stringify("
+    "{ name: 'dark', frosted: false, colors: "
+    "{ bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' } }"
+    ")); } catch (e) {}"
+)
+
+
+def new_page(browser, **kw):
+    """A page with a deterministic, frosted-OFF theme seeded before first paint
+    (see _SEED_NO_FROST_THEME) so the window-mechanics suites are stable under
+    headless backdrop-filter rendering."""
+    page = browser.new_page(**kw)
+    page.add_init_script(_SEED_NO_FROST_THEME)
+    return page
+
+
 def boot():
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
     env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
@@ -65,7 +91,7 @@ def main() -> int:
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            page = browser.new_page()
+            page = new_page(browser)
             page_errors: list[str] = []
             bad_js: list[tuple] = []
             ok_js: list[str] = []
@@ -658,7 +684,7 @@ def main() -> int:
             #   F1: collapse the status HUD (trusted click) → RELOAD → still
             #       collapsed, restored from the SAME per-user+game key the
             #       header click writes (E71).
-            g16 = browser.new_page()
+            g16 = new_page(browser)
             g16_state = (
                 '{"started": true, "week": 1, "phase": "nominations",'
                 ' "player": {"id": "player", "name": "The Player", "status": "active"},'
@@ -953,7 +979,7 @@ def main() -> int:
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
-            mob = browser.new_page(viewport={"width": 390, "height": 844})
+            mob = new_page(browser, viewport={"width": 390, "height": 844})
             mob.goto(base + "/", wait_until="load", timeout=30000)
             mob.wait_for_timeout(2500)
 
@@ -1284,7 +1310,7 @@ def main() -> int:
             # lands (F5 — a restored confessional must never be sendable to the house);
             # an approach prefill keeps its pending chip; and the casting seat re-arms.
             # Driven for REAL on fresh pages: real typing, real reloads, real clicks.
-            g17 = browser.new_page()
+            g17 = new_page(browser)
             # A STARTED game is staged with the sanctioned route-mock pattern (the G15
             # decision fake above; the G5 audit drove its DR cell against a real game):
             # the Diary-Room gate legitimately EXITS DR mode when no game is running, so
@@ -1357,7 +1383,7 @@ def main() -> int:
             # one-shot at prefill time, stranding an empty composer forever). Pre-game is
             # staged with routed fakes — the sanctioned G5-audit pattern, same as the G15
             # decision route above: state says started:false, models says one is live.
-            f4 = browser.new_page()
+            f4 = new_page(browser)
             f4.route("**/api/orwell/state",
                      lambda r: r.fulfill(status=200, content_type="application/json",
                                          body='{"started": false}'))
@@ -1391,7 +1417,7 @@ def main() -> int:
             # every custom shortcut silently reverted on reload while the tab
             # still rendered it as saved. Pin: rebind → reload → the new combo
             # is loaded AND fires; the old default no longer does.
-            s1 = browser.new_page()
+            s1 = new_page(browser)
             s1.goto(base + "/", wait_until="load", timeout=30000)
             g17_settle(s1)
             s1.click("#user-bar-settings")
