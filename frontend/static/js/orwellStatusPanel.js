@@ -150,7 +150,7 @@ import { onNarrowChange } from './platform.js';
         <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
         <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
         <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
-        <div class="os-roster-h" id="os-roster-h">The house</div>
+        <div class="os-roster-h" id="os-roster-h">The House</div>
         <div class="os-roster" id="os-roster"></div>
       </div>
       <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
@@ -290,7 +290,7 @@ import { onNarrowChange } from './platform.js';
     const playerActive = state.player && state.player.status === "active";
     const total = house.length + 1; // player + NPCs
     const activeCount = house.filter((h) => h.status === "active").length + (playerActive ? 1 : 0);
-    headEl.textContent = "The house · " + activeCount + "/" + total;
+    headEl.textContent = "The House · " + activeCount + "/" + total;
 
     const out = house.filter((h) => h.status !== "active");
     const rows = [];
