@@ -8,6 +8,13 @@ on:
 
 jobs:
   # Full engine gate: typecheck -> build -> unit/property/arch -> BDD.
+  #
+  # The two HEAVY end-to-end simulation files (the full-game UAT + the juryReach calibration
+  # property) are split out into the parallel `heavy-sims` job below (`test:ci` runs `test:unit:fast`,
+  # which excludes exactly those two). Nothing is dropped from the gate — the heavy sims run, in a
+  # sibling job, concurrently — so this job now returns in roughly the time of the rest of the suite
+  # while the wall-clock long pole shrinks toward the single slowest file. The dependency-cruiser
+  # Vault-Wall arch test, the live sentinel sweeps, and the BDD gate all still run HERE.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -17,10 +24,42 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm run test:ci
+
+  # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
+  # scope). Plays the full-game UAT (12+5 seeds) and the juryReach calibration gate (20 passive
+  # seasons) to completion — the same two files `test:ci` excludes — so together with `test` the
+  # whole functional suite still runs exactly once per CI run, just across concurrent runners.
+  #
+  # These two files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
+  # CONCURRENTLY on the SAME runner inside `npm test`, so they shared 4 vCPUs and contended. Here
+  # they fan out one-file-per-runner via the matrix, so each gets a dedicated runner with no
+  # cross-file contention — the lane's wall is then the single slowest file, the irreducible floor.
+  # The files import src/ directly (vitest transpiles on the fly), so no `npm run build` is needed.
+  heavy-sims:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sim: [uat, jury]
+    name: heavy-sims (${{ matrix.sim }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:heavy:${{ matrix.sim }}
 
   # Coverage gate (B70/audit C8): per-directory branch thresholds in vitest.config.ts —
   # coverage can no longer silently regress while the functional gate stays green.
+  #
+  # `test:cov` now EXCLUDES the two heavy simulation files (see vitest.config.ts HEAVY_SIM_FILES):
+  # under v8 instrumentation they re-ran the whole live loop a second, slower time yet add no
+  # BRANCH coverage in the gated dirs (engine/composition/adapters-engine) that the rest of the
+  # live-loop suite doesn't already cover. The per-directory branch thresholds still hold (and only
+  # ever ratchet UP) — re-measured with the exclusion in place.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -78,8 +117,23 @@ jobs:
         run: cd frontend && python3 -m pytest tests/ -q
       - name: boot smoke — real app, game-build gating (feature 0032)
         run: cd frontend && python3 scripts/boot_smoke.py
+      # Cache the Playwright chromium download so the install is a near-no-op on a cache hit
+      # (it otherwise re-downloads the browser bundle every run). Keyed to the installed
+      # playwright version, so a dependency bump busts the cache automatically. `install
+      # --with-deps` still runs (apt deps are quick / already present); only the ~100MB+
+      # browser download is what the cache elides.
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: |
+          pip install playwright
+          echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: pip install playwright && python3 -m playwright install --with-deps chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
         run: cd frontend && python3 scripts/browser_smoke.py
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
