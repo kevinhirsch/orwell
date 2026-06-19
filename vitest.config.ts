@@ -24,6 +24,10 @@ export const HEAVY_SIM_FILES = [
   "tests/uat/**",
   "tests/property/juryReach.property.test.ts",
   "tests/property/calibrationGradient.property.test.ts",
+  // The calibration data INSTRUMENT (not a gate — it plays 2×N full live seasons and only EMITS
+  // a data artifact, asserts no band). Excluded from the fast gate + coverage like the heavy sims;
+  // run it on demand: `npx vitest run tests/calibration/calibrationInstrument.test.ts`.
+  "tests/calibration/**",
 ];
 
 export default defineConfig({
