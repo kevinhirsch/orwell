@@ -101,13 +101,16 @@
     const content = document.createElement("div");
     content.innerHTML = `
       <style>
+        /* L11: a smaller, sensible default so the cast window doesn't dominate
+           the screen — it is resizeable from any edge/corner (kit), and the
+           chosen size persists under winsize-orwell-cast. */
         #orwell-cast {
-          width: min(560px, 92vw);
+          width: min(360px, 92vw);
           font-family: 'Fira Code', ui-monospace, monospace;
         }
         #orwell-cast .oc-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: .7rem;
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+          gap: .6rem;
         }
         #orwell-cast .oc-hg { text-align: center; }
         #orwell-cast .oc-portrait {

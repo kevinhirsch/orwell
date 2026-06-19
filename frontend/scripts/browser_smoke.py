@@ -487,6 +487,43 @@ def main() -> int:
             page.wait_for_timeout(150)
             kmoved = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
             check(abs(kmoved["x"] - kb["x"]) > 60, f"kit: trusted drag moves the window (x {kb['x']:.0f}->{kmoved['x']:.0f})")
+
+            # L11: every kit window resizes from the SIDE and the CORNER on
+            # desktop (edge-proximity grips), and the size persists under the
+            # kit's one winsize-<id> key. Grab the bottom-right corner and drag
+            # it out — width AND height must grow, and the chosen size sticks.
+            rbefore = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            cx = rbefore["x"] + rbefore["width"] - 2
+            cy = rbefore["y"] + rbefore["height"] - 2
+            page.mouse.move(cx, cy)
+            page.mouse.down()
+            for i in range(1, 7):
+                page.mouse.move(cx + 120 * i / 6, cy + 90 * i / 6)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            rcorner = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            check(rcorner["width"] - rbefore["width"] > 60 and rcorner["height"] - rbefore["height"] > 40,
+                  f"L11: corner-drag resizes the window (w {rbefore['width']:.0f}->{rcorner['width']:.0f}, "
+                  f"h {rbefore['height']:.0f}->{rcorner['height']:.0f})")
+            # the right EDGE alone resizes width only (a true side grip)
+            rmid = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            ex = rmid["x"] + rmid["width"] - 2
+            ey = rmid["y"] + rmid["height"] / 2
+            page.mouse.move(ex, ey)
+            page.mouse.down()
+            for i in range(1, 5):
+                page.mouse.move(ex + 80 * i / 4, ey)
+            page.mouse.up()
+            page.wait_for_timeout(120)
+            redge = page.evaluate("""() => ({
+              w: Math.round(document.getElementById('ow-smoke-window').getBoundingClientRect().width),
+              saved: localStorage.getItem('winsize-ow-smoke-window'),
+            })""")
+            check(redge["w"] - round(rmid["width"]) > 40,
+                  f"L11: right-edge drag widens the window (w {rmid['width']:.0f}->{redge['w']})")
+            check(bool(redge["saved"]) and '"w"' in (redge["saved"] or ""),
+                  f"L11: the resized geometry persists under winsize-ow-smoke-window ({redge['saved']!r})")
+
             page.mouse.move(640, 500)  # neutral ground: the arbiter's hovered-window pass must not fire
             page.evaluate("document.body.focus()")
             page.keyboard.press("Escape")
