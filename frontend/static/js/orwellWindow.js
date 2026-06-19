@@ -27,6 +27,7 @@
 // (the F-3 ratchet pins it).
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import { makeWindowResizable } from './windowResize.js';
 
 const Z_BASE = 500;          // the window band: above the legacy panel stamps
 const Z_CEIL = 980;          //   (modalManager's 300s), below modals (1000+)
@@ -59,6 +60,16 @@ function ensureCss() {
       border-radius: var(--win-radius, 10px);
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
       font-size: var(--fs-sm, .8rem); line-height: 1.45;
+    }
+    /* L11: once a window carries an explicit height (the player resized it, or a
+       persisted size was restored), let it become a flex column so the body
+       grows to fill it instead of staying pinned to its content height. The
+       windowResize helper sets inline width/height + maxWidth/maxHeight:none. */
+    .ow-window.window-resizing, .ow-window[style*="height"] {
+      display: flex; flex-direction: column;
+    }
+    .ow-window.window-resizing > .ow-body, .ow-window[style*="height"] > .ow-body {
+      flex: 1 1 auto; max-height: none;
     }
     .ow-window.ow-focused {
       border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--win-border, var(--border, #355a66)));
@@ -146,12 +157,21 @@ function saveParked(id, on) {
 export class OrwellWindow {
   /**
    * opts: { id, title, icon, slot='top-right', slotKey=null, role='complementary',
-   *         draggable=true, minimizable=true, closable=true, resizable=false,
+   *         draggable=true, minimizable=true, closable=true, resizable=true,
+   *         minWidth=240, minHeight=160,
    *         content (Node|string), focus=false, onClose, onMinimize, onRestore }
+   *
+   * L11: every kit window is user-resizeable from any EDGE and any CORNER on
+   * desktop (the shared windowResize helper — edge-proximity grips, not injected
+   * handles), with the chosen size persisted per window under the kit's one
+   * `winsize-<id>` key (the same clamped scheme the settings/tool modals use).
+   * Mobile (≤768px, the sheet/drawer tier) skips edge-resize by design — the
+   * sheet host owns the geometry there. Opt a window out with resizable:false.
    */
   constructor(opts) {
     this.o = Object.assign({ slot: 'top-right', role: 'complementary',
-      draggable: true, minimizable: true, closable: true, resizable: false, focus: false }, opts);
+      draggable: true, minimizable: true, closable: true, resizable: true,
+      minWidth: 240, minHeight: 160, focus: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
     this.opener = null;
@@ -212,6 +232,18 @@ export class OrwellWindow {
         enableDock: false, enableFullscreen: false, enableResize: false,
         skipSelector: 'button, input, select, textarea',
         onDragEnd: ({ rect }) => this._persist(rect),
+      });
+    }
+    // L11: pointer edge/corner resize from the kit — every .ow-* window inherits
+    // it (sane min/max, clamped to the viewport, persisted under winsize-<id>).
+    // mobileSkip 768 keeps the sheet/drawer tier untouched. Its capture-phase
+    // mousedown pre-empts the titlebar drag only when the grab lands on a border.
+    if (this.o.resizable) {
+      makeWindowResizable(el, {
+        mobileSkip: 768,
+        minWidth: this.o.minWidth, minHeight: this.o.minHeight,
+        storageKey: 'winsize-' + this.o.id,
+        isLocked: () => this.isMinimized(),
       });
     }
     return el;

@@ -512,6 +512,16 @@ async def sandbox_health(user: str | None = None) -> dict:
     return await _admin_call("sandboxHealth", {}, user=user)
 
 
+async def advance_to_finale(user: str | None = None) -> dict:
+    """God Mode debug (L38): fast-forward THIS user's live season to a crowned winner — the engine
+    drives the deterministic loop, auto-resolving the player's pending decisions with legal defaults,
+    so the post-season retrospective (0048) unseals legitimately. Reads NO Vault and reveals nothing
+    hidden — returns only the Vault-free summary ``{finished, winnerName, weeks, playerPlacement,
+    started}``. The retrospective still opens ONLY post-finale through its own code-gated path; this
+    just makes the season FINISH."""
+    return await _admin_call("advanceToFinale", {}, user=user)
+
+
 async def engine_health_detail() -> dict:
     """Engine reachability plus a human-readable reason when something is wrong — for VISIBLE
     front-end error reporting. ``{"ok": bool, "engineUrl": str, "error"?: str, "lastError"?: dict}``.

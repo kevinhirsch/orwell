@@ -48,10 +48,12 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
     // No numeric aptitude rides along anywhere (engine stats are floats).
     expect(blob).not.toMatch(/\d\.\d/);
     const card = s.getGameState().house[0]!;
+    // 0058 adds the PUBLIC deep facets to the card: a multi-sentence `biography` + the structured
+    // `physicalCharacteristics` facet (both Vault-free, byte-stable). The hidden half never appears.
     expect(Object.keys(card).sort()).toEqual(
-      // L28: vocation + hometown + demeanor are PUBLIC facets (introduced in the premiere, voiced in
-      // social play) — the observable voice register that keeps the cast from sounding identical.
-      ["age", "appearance", "archetype", "background", "demeanor", "hometown", "id", "name", "presentation", "status", "strategyStyle", "vocation"].sort());
+      // L28 + 0058: vocation/hometown/demeanor + biography/physicalCharacteristics are ALL public
+      // card facets (Vault-free, byte-stable); the hidden half (secrets/goals/perception) never appears.
+      ["age", "appearance", "archetype", "background", "biography", "demeanor", "hometown", "id", "name", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
   });
 });
 

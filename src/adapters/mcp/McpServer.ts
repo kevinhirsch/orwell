@@ -173,6 +173,10 @@ export class McpServer {
         return this.deps.admin.manageSandbox(args["op"] as "create" | "reset" | "save" | "load" | undefined);
       case "sandboxHealth":
         return this.deps.admin.health();
+      case "advanceToFinale":
+        // L38 (admin/God-Mode only — gated by `allows()` above): drive the season to a crowned
+        // winner so the post-season retrospective can unseal. Vault-free summary out; reads no Vault.
+        return this.deps.admin.advanceToFinale();
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

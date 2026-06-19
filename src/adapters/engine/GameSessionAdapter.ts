@@ -5,6 +5,7 @@ import type {
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
+  RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds } from "./humanize";
@@ -74,7 +75,7 @@ import { EngineRefusal } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
@@ -82,6 +83,9 @@ import {
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
+import { generateCastDeepLayer, deepProfileToVaultContent } from "../../engine/deepProfile";
+import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
+import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
@@ -258,6 +262,32 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * Deep-profile seal hook (feature 0058): the registry seals each NPC's HIDDEN profile + story
+   * threads into the engine's Vault AND indexes them into the soul for full-fidelity recall (L27b) —
+   * exactly the seam `setOnSeal` uses for reserve twists. Engine-only: the sealed content is a secret
+   * (off the player AND admin), so it rides this hook, never an outward projection.
+   */
+  private onSealProfiles?: (
+    profiles: ReadonlyArray<{ id: EntityId; profile: DeepProfile }>,
+    threads: readonly StoryThread[],
+  ) => void;
+
+  setOnSealProfiles(
+    fn: (profiles: ReadonlyArray<{ id: EntityId; profile: DeepProfile }>, threads: readonly StoryThread[]) => void,
+  ): void {
+    this.onSealProfiles = fn;
+  }
+
+  /**
+   * The engine-only HIDDEN deep layer (0058) — the §3 secrets/goals/weakness/Day-1 perception per NPC
+   * and the derived story threads. NEVER projected (the view/npcVoice/portrait paths never read this);
+   * sealed into the Vault at seal time and persisted through the Vault snapshot. Kept here so the
+   * thread-activation fold (`activateThread`) and the Day-1 edge seeding can read them in-process.
+   */
+  private deepProfiles: Record<EntityId, DeepProfile> = {};
+  private storyThreads: StoryThread[] = [];
+
+  /**
    * The season record providers (0048/B56): the full event record + the Vault's hidden records,
    * wired by the registry. The recap reads only the PUBLIC record; the retrospective reads the
    * hidden side and is gated on the finished terminal state in `seasonRetrospective`.
@@ -346,6 +376,11 @@ export class GameSessionAdapter implements GameSession {
         presentation: npc.character.presentation,
         // L28: voice them in their STORED observable register (blunt / deadpan / anxious…), not a default.
         ...(npc.character.demeanor !== undefined ? { demeanor: npc.character.demeanor } : {}),
+        // 0058: voice the STORED biography + physical characteristics, never invent (and drift) them.
+        // Public facets only — the hidden deep profile is never on this projection (the §8 wall).
+        ...(npc.character.biography !== undefined ? { biography: npc.character.biography } : {}),
+        ...(npc.character.physicalCharacteristics !== undefined
+          ? { physicalCharacteristics: npc.character.physicalCharacteristics } : {}),
       },
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
@@ -381,6 +416,33 @@ export class GameSessionAdapter implements GameSession {
       },
       this.portraitStyleAnchor,
     );
+  }
+
+  /**
+   * The deep-profile write-back seam (feature 0058 / ledger L28b) — the FE producer-LLM authors a
+   * houseguest's rich §3 profile and writes it BACK here so the ENGINE is the source of truth (mirrors
+   * the 0051 portrait handshake). PHASE 1: clearly typed + STUBBED — it VALIDATES the target and
+   * reports which PUBLIC / HIDDEN fields it WOULD accept (names only — a hidden value is never echoed),
+   * without yet overwriting the deterministic seeded floor. The live validate / repair (diversity +
+   * non-player-mirroring) / split-across-the-wall / seal / index wiring is Phase 2.
+   *
+   * The split is ENFORCED here by construction even in the stub: PUBLIC field names and HIDDEN field
+   * names are reported on SEPARATE lists, and the hidden values are never read into the result — so
+   * the seam can never become a wall leak as it is fleshed out.
+   */
+  recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult {
+    if (!this.house) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
+    const target = this.house.npcs.find((n) => n.id === req.houseguestId);
+    if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
+    // Field NAMES only — never the values (a hidden value must never ride out on the result, §8).
+    const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined);
+    const hiddenFields = (["secrets", "trueGoals", "weakness", "dayOnePerception"] as const)
+      .filter((f) => req[f] !== undefined);
+    // PHASE 2 (deferred): validate/repair the authored profile (diversity + non-player-mirroring),
+    // SPLIT it (public → target.character; hidden → this.deepProfiles + the Vault seal hook), re-derive
+    // the threads + the NPC→player edge, and index for full recall. Phase 1 records nothing structurally
+    // — the seeded floor stays authoritative — but the seam is wired, typed, and split-safe.
+    return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "phase-1 stub: validated; live write-back deferred to phase 2" };
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
@@ -435,6 +497,102 @@ export class GameSessionAdapter implements GameSession {
     return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
   }
 
+  /**
+   * ADMIN fast-forward to the finale (L38) — the dev-only "finish my season so the post-season
+   * retrospective unseals" lever. It DRIVES the existing deterministic loop: it loops `advanceGame`,
+   * and whenever the loop stops on a PLAYER pending decision it auto-resolves it with the loop's OWN
+   * legal NPC policy (`autoDecision` — the same rulebook the live game already uses, no second one),
+   * until a winner is crowned (or the game is already finished). The player can legitimately lose on
+   * the way — that is fine, the season still finishes for the rest, and the retrospective opens.
+   *
+   * VAULT-FREE BY CONSTRUCTION: it reads NO Vault state and returns NO Vault content — only PUBLIC
+   * ceremony facts (the crowned winner's NAME, weeks, the player's seat). It does NOT touch
+   * `seasonRetrospective`'s gate: that still fires ONLY post-finale through its own code path — this
+   * just makes the live season reach the terminal state legitimately. BOUNDED: a hard max-iterations
+   * guard means it can never spin forever (a stuck loop returns the unfinished summary, never hangs).
+   *
+   * Engine-side, ADMIN-channel only (wired through `AdminPort.advanceToFinale`, never the player
+   * channel). Each beat still flows through the normal `commit` (consequence fold + persistence),
+   * so the finished season is GENUINE — the integrity is preserved absolutely.
+   */
+  advanceToFinale(): FinaleFastForwardView {
+    if (!this.house || !this.live) {
+      return { finished: false, winnerName: null, weeks: this.week, playerPlacement: "unknown", started: false };
+    }
+    // The loop is bounded: a full 16-cast season is well under a few thousand beats+decisions; the
+    // cap is generously above that so a legitimately long game still finishes, but a wedged loop
+    // (the engine somehow never advancing) can NEVER spin forever — it falls out with the current
+    // (unfinished) summary instead of hanging the request.
+    const MAX_ITERS = 20_000;
+    for (let i = 0; i < MAX_ITERS && !this.live.finished; i++) {
+      if (this.live.pending) {
+        // Auto-resolve the player's pending with the loop's own legal NPC policy (no second rulebook,
+        // B55/D12). `submitDecision` runs the SAME commit path a live decision does (folds + persist).
+        const input = autoDecision(this.live, this.ctx(), this.beatRng());
+        this.submitDecision(this.fromDecisionInput(input));
+      } else {
+        this.advanceGame();
+      }
+    }
+    return this.fastForwardSummary();
+  }
+
+  /** Map the engine's internal `DecisionInput` (autoDecision's output) back onto the outward
+   *  `SubmitDecisionReq` the adapter accepts — so the fast-forward drives the SAME `submitDecision`
+   *  path a live player decision does (one decision rulebook; no bypass of validation or the fold). */
+  private fromDecisionInput(input: DecisionInput): SubmitDecisionReq {
+    switch (input.kind) {
+      case "nominations":
+        return { kind: "nominations", choice: [...input.choice] };
+      case "veto-decision":
+        return { kind: "veto-decision", use: input.use, ...(input.save ? { save: input.save } : {}) };
+      case "comp-intent":
+        return { kind: "comp-intent", intent: input.intent };
+      case "houseguests-choice":
+        return { kind: "houseguests-choice", vote: input.pick };
+      case "replacement":
+        return { kind: "replacement", replacement: input.replacement };
+      case "eviction-vote":
+        return { kind: "eviction-vote", vote: input.vote };
+      case "tie-break":
+        return { kind: "tie-break", vote: input.evict };
+      case "final-eviction":
+        return { kind: "final-eviction", vote: input.evict };
+      case "goodbye-message":
+        return { kind: "goodbye-message", vote: input.tone, ...(input.message ? { statement: input.message } : {}) };
+      case "finale-statement":
+        return { kind: "finale-statement", statement: input.statement };
+      case "finale-answer":
+        return { kind: "finale-answer", appeal: input.appeal };
+      case "juror-question":
+        return { kind: "juror-question", statement: input.question ?? "" };
+      case "juror-vote":
+        return { kind: "juror-vote", vote: input.vote };
+    }
+  }
+
+  /** The Vault-free fast-forward summary (L38): public ceremony facts ONLY — winner NAME, weeks,
+   *  and the player's seat. No hidden state, no soul, no relationship number ever rides out. */
+  private fastForwardSummary(): FinaleFastForwardView {
+    const finished = !!this.live?.finished;
+    const winner = this.live?.winner;
+    const finalTwo = this.live?.finalTwo ?? null;
+    const me = this.house?.player.id ?? PLAYER;
+    let placement: FinaleFastForwardView["playerPlacement"] = "unknown";
+    if (finished) {
+      if (winner === me) placement = "winner";
+      else if (finalTwo && finalTwo.includes(me)) placement = "runner-up";
+      else placement = this.playerStatus() === "jury" ? "jury" : "evicted";
+    }
+    return {
+      finished,
+      winnerName: winner ? this.nameOf(winner) : null,
+      weeks: this.week,
+      playerPlacement: placement,
+      started: this.house !== null,
+    };
+  }
+
   /** The durable session core (0030): the live house + week/phase/ceremony + loop, losslessly. */
   snapshot(): SessionCore {
     return {
@@ -451,6 +609,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
+      // 0058: the engine-only HIDDEN deep layer — persisted so an ACTIVATED thread stays activated and
+      // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
+      ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
+      ...(this.storyThreads.length ? { storyThreads: cloneSession(this.storyThreads) } : {}),
     };
   }
 
@@ -476,6 +638,22 @@ export class GameSessionAdapter implements GameSession {
           : STYLE_ANCHOR_VARIANTS[0])
         : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
+    // 0058: restore the engine-only HIDDEN deep layer (secrets/goals/weakness/perception + thread
+    // status). Persisted on 0058+ saves; on a pre-0058 (or twist-less legacy) save it is re-derived
+    // deterministically from the seed + cast below — seed-stable & player-independent, so the floor
+    // returns identically. The PUBLIC facets ride on the persisted Character (byte-stable), so they
+    // are NOT re-derived here; only the hidden half + thread status are rehydrated.
+    if (core.deepProfiles || core.storyThreads) {
+      this.deepProfiles = core.deepProfiles ? cloneSession(core.deepProfiles) : {};
+      this.storyThreads = core.storyThreads ? cloneSession(core.storyThreads) : [];
+    } else if (core.house && core.seed !== undefined) {
+      const layer = generateCastDeepLayer(core.seed, core.house.npcs);
+      this.deepProfiles = layer.hidden;
+      this.storyThreads = layer.threads;
+    } else {
+      this.deepProfiles = {};
+      this.storyThreads = [];
+    }
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
   }
@@ -807,6 +985,12 @@ export class GameSessionAdapter implements GameSession {
       this.live.reserve = reserve;
       this.onSeal?.(reserve);
     }
+    // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
+    // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
+    // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
+    // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
+    // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
+    this.seedDeepProfiles(seed);
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -923,6 +1107,79 @@ export class GameSessionAdapter implements GameSession {
       e.threat = clamp01(baseline.threat + MOVE_IN.threatWeight * archetypeMenace(b.character.archetype) + scatter());
       e.confidence = MOVE_IN.confidence;
     }
+    // 0058 §3: the AUTHORED Day-1 perception seeds the NPC→player edge — each NPC walks in already
+    // reading the player as something (warm ally / undecided / threat), not from a blank slate. The
+    // signed leans nudge the (already-scattered) move-in edge; the player NEVER sees a number — only
+    // the later behavior. Hidden by construction (the leans live in the Vault-only deep profile).
+    for (const n of this.house?.npcs ?? []) {
+      const p = this.deepProfiles[n.id]?.dayOnePerception;
+      if (!p) continue;
+      const e = this.rel.edge(n.id, PLAYER);
+      e.trust = clamp01(e.trust + MOVE_IN.spread * p.trustLean);
+      e.affinity = clamp01(e.affinity + MOVE_IN.spread * p.affinityLean);
+      e.threat = clamp01(e.threat + MOVE_IN.spread * p.threatLean);
+    }
+  }
+
+  /**
+   * 0058 — born deep. Generate the cast's DETERMINISTIC deep layer (the seeded floor + offline
+   * fallback the live LLM author is validated against, ledger L28b) and SPLIT it across the Vault:
+   *   • PUBLIC facets (biography + the structured physical characteristics) fold onto each byte-stable
+   *     Character — they cross to the player and are guarded byte-stable (0007/0031);
+   *   • the HIDDEN profile (2–3 secrets, true goals, weakness, Day-1 perception) + the derived story
+   *     threads are kept ENGINE-ONLY here and sealed into the Vault + the recall index via the hook.
+   * Deterministic per seed and player-INDEPENDENT (the layer keys off the cast's seeded names, never
+   * the player's profile — same seed ⇒ same deep cast regardless of who the player is, L28).
+   */
+  private seedDeepProfiles(seed: number): void {
+    if (!this.house) return;
+    const layer = generateCastDeepLayer(seed, this.house.npcs);
+    // PUBLIC fold — onto the static Character (byte-stable from here on; superset-guarded).
+    for (const n of this.house.npcs) {
+      const pub = layer.public[n.id];
+      if (!pub) continue;
+      n.character.biography = pub.biography;
+      n.character.physicalCharacteristics = pub.physicalCharacteristics;
+    }
+    // HIDDEN — engine-only, sealed off the player AND admin.
+    this.deepProfiles = layer.hidden;
+    this.storyThreads = layer.threads;
+    // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
+    // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
+    // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
+    // `rebuildSoulIndex` (which replays `soul.memory`) — so a detail established at cast time is
+    // recall-able in full FOREVER, across restarts. Also indexed NOW for same-session recall.
+    for (const n of this.house.npcs) {
+      const profile = layer.hidden[n.id];
+      if (!profile) continue;
+      const note = deepProfileToVaultContent(n.id, profile);
+      n.soul.memory.push(note);
+      this.soul?.recordToSoul(n.id, note);
+    }
+    // Seal the HIDDEN profile + threads into the Vault (engine-only audit copy, the §8 wall).
+    this.onSealProfiles?.(
+      Object.entries(layer.hidden).map(([id, profile]) => ({ id: id as EntityId, profile })),
+      layer.threads,
+    );
+  }
+
+  /**
+   * Activate ONE dormant story thread and FOLD its hidden weight (0058 §5) — reusing the 0023
+   * consequence fold (`foldHiddenImpact`), NOT a parallel subsystem. The thread's source houseguest
+   * acts toward the player (the witness/partner), moving the hidden relationship layer by the thread's
+   * `weightImpact` interaction. Returns the activated thread (or undefined when none is dormant for
+   * that source). The player sees only the later BEHAVIOR; no number, no premise ever crosses (§8).
+   * Phase 1 ships the activation+fold hook proven; the full trigger/resolution scheduler is Phase 2.
+   */
+  activateThread(sourceId: EntityId, rng: RandomnessSource = new SeededRandom(hashSeed(`${this.gameSeed}:thread:${sourceId}`))): StoryThread | undefined {
+    const thread = this.storyThreads.find((t) => t.sourceId === sourceId && t.status === "dormant");
+    if (!thread) return undefined;
+    thread.status = "active";
+    // The source acts toward the player by the thread's nature — the hidden delta folds into the
+    // relationship layer (engine-only). `toward: [PLAYER]` makes the player's read of the source move.
+    foldHiddenImpact(this.rel, rng, sourceId, [sourceId, PLAYER], thread.weightImpact, [PLAYER]);
+    this.persist();
+    return thread;
   }
 
   /**
@@ -1857,6 +2114,12 @@ export class GameSessionAdapter implements GameSession {
         // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
         // is not a room of identical warm professionals. Public, Vault-free.
         ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+        // 0058: the PUBLIC deep-profile facets — the multi-sentence biography + the structured physical
+        // characteristics (the single source of truth narration AND portraits read). Public, Vault-free.
+        // The HIDDEN profile (secrets/goals/weakness/perception) is NEVER selected here.
+        ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
+        ...(n.character.physicalCharacteristics !== undefined
+          ? { physicalCharacteristics: n.character.physicalCharacteristics } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

@@ -310,6 +310,44 @@ def setup_admin_health_routes() -> APIRouter:
         return {"regenerated": True, "discarded": discarded, "queued": len(missing),
                 "kicked": bool(kicked), "log": "portrait-log.jsonl"}
 
+    @router.post("/ops/advance-to-finale")
+    async def admin_advance_to_finale(request: Request):
+        """L38 debug lever (the status-page button, NEXT TO regenerate-portraits): fast-forward THIS
+        admin's live season to a crowned winner so the post-season Vault retrospective (0048) unseals
+        legitimately.
+
+        The non-negotiable boundary (mandate #2 / 0016): God Mode reads NO Vault and reveals nothing
+        hidden. This crosses the engine's ADMIN channel, which is Vault-free BY CONSTRUCTION — it only
+        DRIVES the deterministic loop to the finished terminal state (auto-resolving the player's
+        pendings with legal defaults). The engine returns ONLY a Vault-free summary (winner NAME, weeks
+        played, the player's final placement); the retrospective still opens through its own gate. The
+        season genuinely finishes — integrity is preserved (it is not a Vault bypass)."""
+        require_admin(request)
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        from src import orwell_engine
+        try:
+            summary = await orwell_engine.advance_to_finale(user=user)
+        except Exception as e:
+            return {"finished": False, "reason": f"engine error: {e}"}
+        if not isinstance(summary, dict):
+            return {"finished": False, "reason": "engine returned no summary"}
+        if summary.get("started") is False:
+            return {"finished": False, "reason": "no active game"}
+        logger.info("[ops] admin fast-forward to finale: finished=%s winner=%s weeks=%s placement=%s",
+                    summary.get("finished"), summary.get("winnerName"),
+                    summary.get("weeks"), summary.get("playerPlacement"))
+        # Pass through only the Vault-free public summary fields (never anything else the engine adds).
+        return {
+            "finished": bool(summary.get("finished")),
+            "winnerName": summary.get("winnerName"),
+            "weeks": summary.get("weeks"),
+            "playerPlacement": summary.get("playerPlacement"),
+        }
+
     @router.get("/debug-bundle")
     async def debug_bundle(request: Request):
         require_admin(request)
@@ -382,6 +420,7 @@ _STATUS_PAGE = """<!doctype html>
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
   <button type="button" class="btn" id="refresh-now">Refresh now</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
+  <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
 </div>
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
@@ -536,6 +575,19 @@ async function regenPortraits() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("regen-portraits").addEventListener("click", regenPortraits);
+// ── L38: the fast-forward lever — finish the season so the retrospective unseals (reads no Vault) ──
+async function fastForwardFinale() {
+  if (!confirm("Fast-forward your live season to a crowned winner now? This finishes the season (the player may lose) so the post-season Vault retrospective unseals. It reads no Vault — God Mode never sees the secrets in advance.")) return;
+  opsMsg.textContent = "Driving the season to its finale…";
+  try {
+    const r = await fetch("/api/admin/ops/advance-to-finale", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    opsMsg.textContent = d.finished
+      ? "Season finished — " + esc(d.winnerName || "the winner") + " crowned after " + esc(d.weeks) + " week(s); you placed " + esc(d.playerPlacement) + ". The retrospective is now reachable."
+      : "Could not finish: " + esc(d.reason || "unknown") + ".";
+  } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
+}
+document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
 async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });

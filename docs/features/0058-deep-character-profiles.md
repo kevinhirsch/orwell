@@ -1,12 +1,15 @@
 # 0058 — Deep character profiles (born deep, persist, play out)
 
-> **Status:** 📝 SPEC (design note — not yet built). The deterministic **seeded floor** already
-> ships (procedural archetype/stats/vocation/hometown with diversity caps + non-player-mirroring,
-> `characterFactory.ts`; the distinct **demeanor/voice register** facet, `ae0f247`). 0058 is the
-> **LLM-authored, Vault-walled, story-bearing** layer on top of that floor, and the umbrella for the
-> live-debug items **L28b / L27b / L29 / L31** (and it seeds **L35** pre-game relationships).
+> **Status:** ✅ **PHASE 1 BUILT** (the engine foundation; deterministic generation) — BDD-gated by
+> `0058-deep-character-profiles.feature`. The seeded floor now spawns the §3-depth profile split
+> across the Vault Wall, persists it byte-stable, seeds & seals story threads, seeds the NPC→player
+> edge from the Day-1 read, and recalls authored detail in full. **DEFERRED to Phase 2** (seamed but
+> not wired): the **LLM-authored** write-back (`recordCastProfile` is the typed, unit-tested STUB),
+> the **portrait consumption** of the physical facet (L29), the **premiere voicing** (L31), and the
+> full thread **trigger/resolution scheduler** (the activation+fold HOOK is built and proven; the
+> automatic when-to-fire scheduler is Phase 2).
 > **Depth reference (FORMAT/DEPTH ONLY, never ingest as data):** `docs/legacy/BB_ProducersVault.md` §3.
-> **Executable spec:** `0058-deep-character-profiles.feature` *(to be authored at implementation, BDD-first)*.
+> **Executable spec:** `0058-deep-character-profiles.feature`.
 
 ## 1. Summary — the true-sim thesis
 

@@ -101,13 +101,16 @@
     const content = document.createElement("div");
     content.innerHTML = `
       <style>
+        /* L11: a smaller, sensible default so the cast window doesn't dominate
+           the screen — it is resizeable from any edge/corner (kit), and the
+           chosen size persists under winsize-orwell-cast. */
         #orwell-cast {
-          width: min(560px, 92vw);
+          width: min(360px, 92vw);
           font-family: 'Fira Code', ui-monospace, monospace;
         }
         #orwell-cast .oc-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: .7rem;
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+          gap: .6rem;
         }
         #orwell-cast .oc-hg { text-align: center; }
         #orwell-cast .oc-portrait {
@@ -130,8 +133,20 @@
           margin-top: .15rem; font-size: .66rem; letter-spacing: .04em; opacity: .65; text-transform: uppercase;
         }
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
-        #orwell-cast .oc-hg.oc-out .oc-portrait img { filter: grayscale(1); }
+        /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest
+           keeps full-color portrait; an evicted one renders grayscale/monotone.
+           (Jury is still dimmed via oc-out, just not desaturated.) */
+        #orwell-cast .oc-hg.oc-evicted .oc-portrait img { filter: grayscale(1); }
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
+        /* L12: pin/un-pin the cast window into the right-side gadget rail. */
+        #orwell-cast .oc-toolbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
+        #orwell-cast .oc-pin {
+          cursor: pointer; font: inherit; font-size: .72rem; letter-spacing: .02em;
+          color: inherit; background: rgba(255,255,255,.06);
+          border: 1px solid var(--border, #355a66); border-radius: 8px;
+          padding: .3rem .55rem; min-height: 28px; display: inline-flex; align-items: center; gap: .35rem;
+        }
+        #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.12); }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
           cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
@@ -147,6 +162,9 @@
           #orwell-cast { width: auto !important; max-width: none !important; }
         }
       </style>
+      <div class="oc-toolbar">
+        <button type="button" class="oc-pin" id="oc-pin" title="Pin the cast into the control-room rail">📌 Pin to rail</button>
+      </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
       <div class="oc-actions" id="oc-actions" style="display:none">
@@ -168,6 +186,14 @@
     _win.open(document.getElementById(BTN_ID) || undefined);
     const el2 = document.getElementById(PANEL_ID);
     el2.querySelector("#oc-backfill").addEventListener("click", requestBackfill);
+    // L12: pin the cast window into the gadget rail (the rail gadget owns the
+    // pinned state + render; this just toggles it and the window dismisses itself).
+    const pinBtn = el2.querySelector("#oc-pin");
+    if (pinBtn) {
+      pinBtn.addEventListener("click", () => {
+        if (window.OrwellCastPin) window.OrwellCastPin.setPinned(true);
+      });
+    }
     return el2;
   }
 
@@ -256,8 +282,9 @@
 
   function makeCard(hg) {
     const out = hg.status && hg.status !== "active";
+    const evicted = hg.status === "evicted"; // L16: grayscale only on eviction
     const card = document.createElement("div");
-    card.className = "oc-hg" + (out ? " oc-out" : "");
+    card.className = "oc-hg" + (out ? " oc-out" : "") + (evicted ? " oc-evicted" : "");
     const holder = document.createElement("div");
     holder.className = "oc-portrait";
     const nameEl = document.createElement("div");
@@ -289,6 +316,7 @@
     if (status !== entry.status) {
       entry.status = status;
       entry.el.classList.toggle("oc-out", !!(hg.status && hg.status !== "active"));
+      entry.el.classList.toggle("oc-evicted", hg.status === "evicted"); // L16
       entry.statusEl.textContent = statusLabel(hg.status);
     }
     const name = hg.name == null ? "" : String(hg.name);
@@ -431,6 +459,8 @@
 
   // Seam for the headless gate (mirrors the other panels).
   window._orwellCastEnsure = () => { togglePanel(true); return true; };
+  // L12: the pin gadget closes the floating window when the player docks the cast.
+  window._orwellCastClose = () => { if (_win) togglePanel(false); };
 
   // Public hooks (mirrors the other orwell panels): refresh on a game change — and
   // re-arm the poll so a cadence change (say, a fresh season that is generating its

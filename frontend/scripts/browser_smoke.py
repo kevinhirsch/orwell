@@ -242,6 +242,76 @@ def main() -> int:
             check(think_probe.get("liveThinkBoxes") == 0,
                   f"game build: no live-think reasoning box exists in the DOM ({think_probe})")
 
+            # L36 — the player's OUT-OF-CHARACTER aside channel. Drive the real bubble
+            # renderer (chatRenderer.addMessage, the same path the live send + reload
+            # both funnel through) with an OOC line, a normal line, and an `ooc:`-prefixed
+            # line, then assert the produced DOM: the OOC bubbles carry the distinct
+            # .msg-ooc class with the markers STRIPPED from the display text; the normal
+            # bubble does NOT. No engine/LLM needed — pure render.
+            ooc_probe = page.evaluate(
+                """async () => {
+                  const cr = await import('/static/js/chatRenderer.js');
+                  const host = document.getElementById('chat-history');
+                  const before = host.querySelectorAll('.msg-user').length;
+                  cr.addMessage('user', '((what time is it in-game?))');
+                  cr.addMessage('user', 'Hey, want to work together this week?');
+                  cr.addMessage('user', 'ooc: what are my options?');
+                  const bubbles = Array.prototype.slice.call(
+                    host.querySelectorAll('.msg-user')).slice(before);
+                  const rows = bubbles.map(b => ({
+                    ooc: b.classList.contains('msg-ooc'),
+                    text: (b.querySelector('.body') || {}).textContent || '',
+                  }));
+                  // the distinct production badge shows on an OOC bubble's role line
+                  const badged = bubbles[0] &&
+                    getComputedStyle(bubbles[0].querySelector('.role'), '::after')
+                      .content.indexOf('production') !== -1;
+                  return { rows: rows, badged: badged };
+                }"""
+            )
+            _rows = ooc_probe.get("rows") or []
+            check(len(_rows) == 3, f"L36: three user bubbles rendered ({ooc_probe})")
+            check(_rows and _rows[0]["ooc"] is True and "(((" not in _rows[0]["text"]
+                  and "what time is it in-game?" in _rows[0]["text"],
+                  f"L36: ((...)) aside is .msg-ooc with markers stripped ({_rows[:1]})")
+            check(len(_rows) > 1 and _rows[1]["ooc"] is False,
+                  f"L36: a normal in-character line is NOT styled as an aside ({_rows[1:2]})")
+            check(len(_rows) > 2 and _rows[2]["ooc"] is True
+                  and _rows[2]["text"].strip().startswith("what are my options"),
+                  f"L36: an `ooc:` aside is .msg-ooc with the prefix stripped ({_rows[2:3]})")
+            check(ooc_probe.get("badged") is True,
+                  f"L36: the OOC bubble carries the 'to production' badge ({ooc_probe})")
+            # the one-time composer hint mounts in the game build and is dismissible + per-user keyed
+            ooc_hint = page.evaluate(
+                """() => {
+                  const h = document.getElementById('orwell-ooc-hint');
+                  return {
+                    present: !!h,
+                    hasDismiss: !!(h && h.querySelector('.orwell-ooc-hint-dismiss')),
+                    namesBoth: !!(h && /double parens/i.test(h.textContent)
+                                  && /ooc:/i.test(h.textContent)),
+                  };
+                }"""
+            )
+            check(ooc_hint.get("present") is True,
+                  f"L36: the OOC composer hint mounts in the game build ({ooc_hint})")
+            check(ooc_hint.get("hasDismiss") is True and ooc_hint.get("namesBoth") is True,
+                  f"L36: the hint is dismissible and names both conventions ({ooc_hint})")
+            # dismiss it -> persists under the per-user key -> stays gone on a remount attempt
+            ooc_dismissed = page.evaluate(
+                """() => {
+                  const h = document.getElementById('orwell-ooc-hint');
+                  if (h) h.querySelector('.orwell-ooc-hint-dismiss').click();
+                  const user = (document.body.dataset.user || '');
+                  const stored = localStorage.getItem('orwell-ooc-hint-dismissed:' + user);
+                  // a remount attempt must be a no-op now that it's dismissed
+                  window.dispatchEvent(new Event('orwell:gamechanged'));
+                  return { stored: stored, stillGone: !document.getElementById('orwell-ooc-hint') };
+                }"""
+            )
+            check(ooc_dismissed.get("stored") == "1",
+                  f"L36: dismissal persists under the per-user key ({ooc_dismissed})")
+
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
               const vis = (k) => {
@@ -487,6 +557,43 @@ def main() -> int:
             page.wait_for_timeout(150)
             kmoved = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
             check(abs(kmoved["x"] - kb["x"]) > 60, f"kit: trusted drag moves the window (x {kb['x']:.0f}->{kmoved['x']:.0f})")
+
+            # L11: every kit window resizes from the SIDE and the CORNER on
+            # desktop (edge-proximity grips), and the size persists under the
+            # kit's one winsize-<id> key. Grab the bottom-right corner and drag
+            # it out — width AND height must grow, and the chosen size sticks.
+            rbefore = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            cx = rbefore["x"] + rbefore["width"] - 2
+            cy = rbefore["y"] + rbefore["height"] - 2
+            page.mouse.move(cx, cy)
+            page.mouse.down()
+            for i in range(1, 7):
+                page.mouse.move(cx + 120 * i / 6, cy + 90 * i / 6)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            rcorner = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            check(rcorner["width"] - rbefore["width"] > 60 and rcorner["height"] - rbefore["height"] > 40,
+                  f"L11: corner-drag resizes the window (w {rbefore['width']:.0f}->{rcorner['width']:.0f}, "
+                  f"h {rbefore['height']:.0f}->{rcorner['height']:.0f})")
+            # the right EDGE alone resizes width only (a true side grip)
+            rmid = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            ex = rmid["x"] + rmid["width"] - 2
+            ey = rmid["y"] + rmid["height"] / 2
+            page.mouse.move(ex, ey)
+            page.mouse.down()
+            for i in range(1, 5):
+                page.mouse.move(ex + 80 * i / 4, ey)
+            page.mouse.up()
+            page.wait_for_timeout(120)
+            redge = page.evaluate("""() => ({
+              w: Math.round(document.getElementById('ow-smoke-window').getBoundingClientRect().width),
+              saved: localStorage.getItem('winsize-ow-smoke-window'),
+            })""")
+            check(redge["w"] - round(rmid["width"]) > 40,
+                  f"L11: right-edge drag widens the window (w {rmid['width']:.0f}->{redge['w']})")
+            check(bool(redge["saved"]) and '"w"' in (redge["saved"] or ""),
+                  f"L11: the resized geometry persists under winsize-ow-smoke-window ({redge['saved']!r})")
+
             page.mouse.move(640, 500)  # neutral ground: the arbiter's hovered-window pass must not fire
             page.evaluate("document.body.focus()")
             page.keyboard.press("Escape")
@@ -742,6 +849,32 @@ def main() -> int:
                          "G16: the cast seam + the kit mount")
             g16.evaluate("window._orwellCastEnsure()")
             g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+
+            # L16: a cast portrait is full COLOR while active/jury and grayscale ONLY
+            # once EVICTED. Inject the three roster states into the real grid and read
+            # the computed filter off each card's portrait img — the eviction state is
+            # the one and only monochrome treatment.
+            l16 = g16.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              if (!grid) return { ok: false, why: 'no-grid' };
+              const mk = (cls) => {
+                const card = document.createElement('div');
+                card.className = 'oc-hg ' + cls;
+                const holder = document.createElement('div'); holder.className = 'oc-portrait';
+                const img = document.createElement('img');
+                img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+                holder.appendChild(img); card.appendChild(holder); grid.appendChild(card);
+                return getComputedStyle(img).filter;
+              };
+              return { ok: true,
+                       active: mk(''), jury: mk('oc-out'),
+                       evicted: mk('oc-out oc-evicted') };
+            }""")
+            gray = lambda f: bool(f) and "grayscale" in f and "grayscale(0" not in f.replace(" ", "")
+            check(l16.get("ok") is True and not gray(l16.get("active", ""))
+                  and not gray(l16.get("jury", "")) and gray(l16.get("evicted", "")),
+                  f"L16: cast portraits are color until EVICTED, then grayscale ({l16})")
+
             g16.click("#orwell-cast .ow-min")
             g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
                 "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
@@ -840,6 +973,84 @@ def main() -> int:
             check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
+
+            # L12: the cast roster can be PINNED into the control-room gadget rail as a
+            # compact gadget — it mounts INTO #gadget-rail-body, the pinned state
+            # persists, and un-pinning hides it. (Engine is down here, so we inject a
+            # synthetic roster face to prove the gadget renders + reveals the rail.)
+            l12 = page.evaluate("""() => {
+              if (!window.OrwellCastPin) return { ok: false, why: 'no-seam' };
+              window.OrwellCastPin.setPinned(true);
+              const el = document.getElementById('orwell-cast-pin');
+              if (!el) return { ok: false, why: 'no-gadget' };
+              const railBody = document.getElementById('gadget-rail-body');
+              const inRail = !!railBody && railBody.contains(el);
+              // simulate a render landing (the live path fetches /api/orwell/roster)
+              el.style.display = 'block';
+              el.querySelector('[data-role="portraits"]').innerHTML =
+                '<div class="ocp-face"><span class="ocp-ph">x</span></div>' +
+                '<div class="ocp-face ocp-evicted"><span class="ocp-ph">x</span></div>';
+              const user = (document.body && document.body.dataset.user) || '';
+              const flag = localStorage.getItem('orwell-cast-pinned:' + user);
+              const faces = el.querySelectorAll('.ocp-face').length;
+              return { ok: true, inRail, flag, faces,
+                       hasUnpin: !!el.querySelector('[data-act="unpin"]') };
+            }""")
+            check(l12.get("ok") is True and l12.get("inRail") is True
+                  and l12.get("flag") == "1" and l12.get("faces") == 2
+                  and l12.get("hasUnpin") is True,
+                  f"L12: the cast pins into the gadget rail as a compact 2-portrait gadget ({l12})")
+            l12b = page.evaluate("""() => {
+              window.OrwellCastPin.setPinned(false);
+              const el = document.getElementById('orwell-cast-pin');
+              const user = (document.body && document.body.dataset.user) || '';
+              return { hidden: getComputedStyle(el).display === 'none',
+                       flag: localStorage.getItem('orwell-cast-pinned:' + user) };
+            }""")
+            check(l12b.get("hidden") is True and l12b.get("flag") is None,
+                  f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
+
+            # L13: the rail gadgets are drag-reorderable and the order PERSISTS. Each
+            # gadget carries a keyboard-focusable drag handle; the controller's reorder
+            # seam (the live path is HTML5 drag-and-drop) persists the sequence per-user
+            # and lays the gadgets out by inline `order`.
+            l13 = page.evaluate("""() => {
+              const body = document.getElementById('gadget-rail-body');
+              if (!body) return { ok: false, why: 'no-body' };
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              // a synthetic second gadget so there's something to reorder past
+              let probe = document.getElementById('orwell-l13-probe');
+              if (!probe) {
+                probe = document.createElement('section');
+                probe.id = 'orwell-l13-probe';
+                probe.style.display = 'block';
+                probe.textContent = 'probe';
+                body.appendChild(probe);
+              }
+              if (!window.OrwellGadgetRail || !window.OrwellGadgetRail.reorder)
+                return { ok: false, why: 'no-reorder-seam' };
+              const before = window.OrwellGadgetRail.currentOrder();
+              window.OrwellGadgetRail.reorder(before.slice().reverse());
+              const after = window.OrwellGadgetRail.currentOrder();
+              const user = (document.body && document.body.dataset.user) || '';
+              const saved = localStorage.getItem('orwell-gadget-order:' + user);
+              return { ok: true, reversed: after.join() === before.slice().reverse().join(),
+                       saved: !!saved, savedHasProbe: !!saved && saved.indexOf('orwell-l13-probe') !== -1,
+                       handles: body.querySelectorAll('.grail-drag[draggable="true"]').length,
+                       handleHasLabel: !!(body.querySelector('.grail-drag') &&
+                         body.querySelector('.grail-drag').getAttribute('aria-label')) };
+            }""")
+            check(l13.get("ok") is True and l13.get("reversed") is True
+                  and l13.get("saved") is True and l13.get("savedHasProbe") is True,
+                  f"L13: rail gadgets drag-reorder and the order persists ({l13})")
+            check((l13.get("handles") or 0) >= 1 and l13.get("handleHasLabel") is True,
+                  f"L13: every gadget has a labeled, draggable, keyboard-focusable handle ({l13})")
+            # clean up the synthetic probe so it can't bleed into later assertions
+            page.evaluate("""() => {
+              const p = document.getElementById('orwell-l13-probe'); if (p) p.remove();
+              const u = (document.body && document.body.dataset.user) || '';
+              localStorage.removeItem('orwell-gadget-order:' + u);
+            }""")
 
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the

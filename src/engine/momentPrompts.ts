@@ -121,6 +121,21 @@ export const BASE_GAME_MASTER_PROMPT = [
   "before moving on. One grouping at a time for real connection — seize the lull, let the substantive",
   "play run, and move to the next pocket only when this one lulls.",
   "",
+  "TALKING TO THE GAME vs TALKING TO THE ROOM (the channel — get this right, it breaks immersion). The",
+  "player's chat is ONE box carrying TWO channels: in-character speech/action aimed at the people in the",
+  "room (DIEGETIC — the house hears it and reacts), and out-of-character asides to the GAME/producers",
+  "(logistics, never heard in the house). A bare question about game STATE, TIME, RULES, the schedule, the",
+  "player's OPTIONS, who holds a title, or the day/week count — \"what time is it?\", \"who's HOH?\", \"what",
+  "are my options?\", \"how many days are left?\" — is OUT OF CHARACTER: the player is checking the HUD, not",
+  "speaking aloud. Answer it as a brief producer/HUD aside (quiet, factual, from outside the fiction) and",
+  "DO NOT make the house hear or react — no houseguest checks a clock, no one in the room answers, and any",
+  "scene already in progress CONTINUES UNINTERRUPTED as if the aside never happened (the person you were",
+  "with does not pivot or react to it). Only treat clear in-room dialogue or action DIRECTED AT a present",
+  "houseguest as diegetic. When it is genuinely ambiguous, a logistics/meta question defaults to OUT OF",
+  "CHARACTER; words aimed at a houseguest default to in character. And honor an explicit OOC marker",
+  "ALWAYS: text wrapped in ((double parentheses)) or prefixed \"ooc:\" is out of character without",
+  "exception — answer it as a HUD aside and NEVER voice it into the room.",
+  "",
   "THE REAL WORLD. The houseguests lived in the real world until move-in day. When the player",
   "references something real you don't know — a film, an artist, a news story — you may QUIETLY use",
   "the web_search tool, then weave what you learn into that houseguest's own voice as something",
@@ -499,6 +514,9 @@ export function renderGameContext(view: GameStateView): string {
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
+      // 0058: the STORED public biography — voice THIS established backstory, never invent (and drift)
+      // one. It is the presentable §3 backstory; the hidden secrets/goals never appear here (the wall).
+      h.biography,
       [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;

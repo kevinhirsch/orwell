@@ -1,5 +1,6 @@
 import { PLAYER, npc } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
+import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { GIVEN_NAMES } from "./data/givenNames";
@@ -109,6 +110,17 @@ export interface Character {
    * Optional only for back-compat with pre-demeanor saves (which load without it and re-derive nothing).
    */
   demeanor?: string;
+  /**
+   * Deep character profile — PUBLIC facets (feature 0058). A real multi-sentence `biography` (not a
+   * one-liner) and a STRUCTURED `physicalCharacteristics` facet (the single source of truth shared by
+   * the portrait prompt AND the text narration, L29/L23). Part of the byte-stable static baseline, so
+   * the 0007/0031 superset check guards them against regeneration/drift — exactly like the rest of the
+   * Character. Public & Vault-free (the §3 presentable parts). The HIDDEN half (secrets, true goals,
+   * weakness, Day-1 perception) lives in the Vault, NEVER here (it would project out). Optional only
+   * for back-compat with pre-0058 saves (which load without them and re-derive nothing).
+   */
+  biography?: string;
+  physicalCharacteristics?: PhysicalCharacteristics;
   /**
    * Seeded, typed HIDDEN elements (B50) — engine-side secrets the public persona may match or wildly
    * diverge from. NEVER projected to the player (the NPC card carries name + status only); they surface
