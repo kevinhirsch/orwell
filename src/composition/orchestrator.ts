@@ -531,6 +531,10 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
     });
   }
+  // 0059/L40 — advance the seeded showmances on the affinity the scenes just moved. A showmance that
+  // crosses into `visible` becomes a PUBLIC house fact; the adapter's onShowmanceSurfaced hook (wired
+  // in the registry) records the player-witnessed beat. Pre-visible showmances stay Vault-sealed.
+  sandbox.session.advanceShowmances();
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.query().length - before;
 }

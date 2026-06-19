@@ -1,0 +1,135 @@
+// orwellPremiereTutorial.js — L31 (FE half): the premiere is a light, hand-held tutorial.
+//
+// The engine already drives the structured premiere (a built-in introductions round + a gentler
+// first-week cadence — L31 engine half, momentPrompts). This is the FE framing: a QUIET, ONE-TIME,
+// DISMISSIBLE card that orients a brand-new player to the weekly rhythm the first time they play —
+// the player never has to PROMPT for it (ledger L31). It never replaces the chat (the interview /
+// premiere happens IN the chat); it just sets expectations beside it.
+//
+// Shows ONLY when: the game build is on, a season has started, it is WEEK 1 (the premiere week), and
+// the player has not dismissed it before. Per-user dismiss persists (the E71 per-user-key pattern),
+// so it appears once per account, not once per session. Reads the same Vault-free /api/orwell/state +
+// /status projections the season-progress HUD does; refreshes on `orwell:gamechanged`.
+//
+// Provenance: docs/audits/2026-06-19-live-debug-issues.md item L31 (structured premiere + tutorial).
+
+(function () {
+  "use strict";
+
+  function isGameBuild() {
+    return !!(typeof document !== "undefined" && document.body &&
+      document.body.hasAttribute("data-game-build"));
+  }
+
+  // E71 per-user dismiss key — one account's dismissal never bleeds into another's.
+  function dismissKey() {
+    return "orwell-premiere-tutorial-dismissed:" +
+      ((document.body && document.body.dataset.user) || "");
+  }
+  function hasDismissed() {
+    try { return localStorage.getItem(dismissKey()) === "1"; } catch (_) { return false; }
+  }
+  function markDismissed() {
+    try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
+  }
+
+  function jgetSafe(url) {
+    return fetch(url, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+
+  // The first week is the premiere window: week 1 and not yet post-season / finished.
+  function isPremiereWeek(status, state) {
+    const started = (status && status.started !== false && typeof status.week === "number" && status.week >= 1) ||
+                    (state && state.started === true);
+    if (!started) return false;
+    const week = (status && status.week) || (state && state.week) || 0;
+    const moment = (state && state.moment) || "";
+    if (moment === "post-season") return false;
+    return week === 1;
+  }
+
+  function ensureCss() {
+    if (document.getElementById("orwell-premiere-tutorial-css")) return;
+    const st = document.createElement("style");
+    st.id = "orwell-premiere-tutorial-css";
+    // Theme-token driven (works across every house theme + frost) — no hard-coded colors.
+    st.textContent =
+      ".orwell-premiere-tutorial { margin: var(--space-2, .5rem) auto; max-width: 640px;" +
+      "  padding: var(--space-3, .7rem) var(--space-4, .9rem);" +
+      "  background: color-mix(in srgb, var(--fg) 5%, transparent);" +
+      "  border: 1px dashed color-mix(in srgb, var(--fg) 30%, transparent); border-radius: 12px;" +
+      "  color: color-mix(in srgb, var(--fg) 86%, transparent); font-size: var(--fs-sm, .82rem);" +
+      "  line-height: 1.5; }" +
+      ".orwell-premiere-tutorial .opt-hd { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .3rem; }" +
+      ".orwell-premiere-tutorial .opt-ttl { font-weight: 700; letter-spacing: .02em; }" +
+      ".orwell-premiere-tutorial .opt-rhythm { font-weight: 600;" +
+      "  color: color-mix(in srgb, var(--fg) 72%, transparent); }" +
+      ".orwell-premiere-tutorial .opt-dismiss { margin-left: auto; flex-shrink: 0; cursor: pointer;" +
+      "  background: color-mix(in srgb, var(--fg) 9%, transparent);" +
+      "  border: 1px solid color-mix(in srgb, var(--fg) 24%, transparent); color: inherit;" +
+      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 24px;" +
+      "  padding: 0 .55rem; }" +
+      ".orwell-premiere-tutorial .opt-dismiss:hover, .orwell-premiere-tutorial .opt-dismiss:focus-visible {" +
+      "  background: color-mix(in srgb, var(--fg) 16%, transparent); }" +
+      ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }";
+    document.head.appendChild(st);
+  }
+
+  let _mounted = false;
+
+  function dismiss(card) {
+    markDismissed();
+    card.classList.add("orwell-premiere-tutorial-out");
+    setTimeout(function () { if (card.isConnected) card.remove(); }, 220);
+  }
+
+  function mount() {
+    if (_mounted) return;
+    if (!isGameBuild() || hasDismissed()) return;
+    if (document.getElementById("orwell-premiere-tutorial")) { _mounted = true; return; }
+    // Sit it just above the chat input, the same anchor the OOC hint uses (composer guidance).
+    const bar = document.querySelector(".chat-input-bar");
+    if (!bar || !bar.parentNode) return;
+    ensureCss();
+
+    const card = document.createElement("section");
+    card.id = "orwell-premiere-tutorial";
+    card.className = "orwell-premiere-tutorial";
+    card.setAttribute("role", "note");
+    card.innerHTML =
+      '<div class="opt-hd">' +
+        '<span class="opt-ttl">Welcome to the house — premiere week</span>' +
+        '<button type="button" class="opt-dismiss" aria-label="Dismiss the premiere guide">Got it</button>' +
+      '</div>' +
+      '<div>Take your time meeting the cast — talk to anyone, wander any room; the house keeps ' +
+      'playing around you. Production walks you through this first week:</div>' +
+      '<div class="opt-rhythm">\u{1F44B} Meet the house → \u{1F3C6} HOH → \u{1F528} Nominations ' +
+      '→ \u{1F48E} Veto → \u{1F5F3}️ Eviction.</div>';
+    bar.parentNode.insertBefore(card, bar);
+    _mounted = true;
+    card.querySelector(".opt-dismiss").addEventListener("click", function () { dismiss(card); });
+  }
+
+  async function refresh() {
+    if (!isGameBuild() || hasDismissed()) return;
+    const status = await jgetSafe("/api/orwell/status");
+    const state = await jgetSafe("/api/orwell/state");
+    if (isPremiereWeek(status, state)) mount();
+  }
+
+  const ready = (fn) =>
+    document.readyState === "loading"
+      ? document.addEventListener("DOMContentLoaded", fn, { once: true })
+      : fn();
+
+  if (typeof window !== "undefined") {
+    ready(refresh);
+    window.addEventListener("orwell:gamechanged", refresh);
+    // A new season resets the per-user gate only if the player un-dismissed; otherwise stays retired.
+    window.addEventListener("orwell:gamechanged", function () { _mounted = false; });
+    // Test/debug seam for the headless gate.
+    window._orwellPremiereTutorial = { refresh: refresh, isPremiereWeek: isPremiereWeek };
+  }
+})();

@@ -4,8 +4,10 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { generateHouse } from "../../src/engine/characterFactory";
 import {
   loadSeededRelationships, DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, TIE_AFFINITY_BIAS,
+  nextShowmanceStage, SHOWMANCE_BOND_AFFINITY, SHOWMANCE_VISIBLE_AFFINITY,
 } from "../../src/engine/seededRelationships";
 import { RELATIONSHIP_CONSTANTS } from "../../src/engine/relationshipConstants";
+import { PLAYER } from "../../src/domain/ids";
 
 /**
  * Feature 0059 — hidden seeded relationships (pre-game ties L35 + showmances L40). The layer is sparse,
@@ -31,6 +33,18 @@ function seedWithATie(): { seed: number } {
     if ((sb.session.snapshot().seededRelationships?.ties.length ?? 0) > 0) return { seed };
   }
   throw new Error("no seed produced a pre-game tie within the probe range");
+}
+
+/** A live game whose seeded layer has at least one showmance (returns the sandbox + the pair). */
+function gameWithAShowmance() {
+  for (let seed = 1; seed <= 300; seed++) {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor(`sm-${seed}`);
+    sb.session.createCharacter({ playerName: "The Player", seed });
+    const sms = sb.session.snapshot().seededRelationships?.showmances ?? [];
+    if (sms.length > 0) return { reg, sb, pair: sms[0]! };
+  }
+  throw new Error("no seed produced a showmance within the probe range");
 }
 
 describe("0059 loadSeededRelationships — sparse, distinct, deterministic", () => {
@@ -107,6 +121,44 @@ describe("0059 live wiring — Vault-sealed, never projected, folds a behavioral
     expect(ba.affinity).toBeGreaterThan(baseline.affinity);
     // it is SMALL — never a deterministic advantage (well under a full point)
     expect(ab.affinity - baseline.affinity).toBeLessThanOrEqual(TIE_AFFINITY_BIAS + 0.2);
+  });
+
+  it("nextShowmanceStage advances one step at a time, never skipping visible, only on sustained affinity", () => {
+    expect(nextShowmanceStage("spark", SHOWMANCE_BOND_AFFINITY - 0.01)).toBe("spark"); // not yet
+    expect(nextShowmanceStage("spark", SHOWMANCE_BOND_AFFINITY)).toBe("bond");
+    expect(nextShowmanceStage("bond", SHOWMANCE_VISIBLE_AFFINITY - 0.01)).toBe("bond"); // not yet
+    expect(nextShowmanceStage("bond", SHOWMANCE_VISIBLE_AFFINITY)).toBe("visible");
+    // a spark with already-very-high affinity still only steps to bond (one step per tick — gradual)
+    expect(nextShowmanceStage("spark", 0.99)).toBe("bond");
+    expect(nextShowmanceStage("visible", 0.99)).toBe("visible"); // terminal until resolved
+  });
+
+  it("L40 — a showmance SURFACES only when sustained affinity carries it to visible; then it is public", () => {
+    const { sb, pair } = gameWithAShowmance();
+    const rel = sb.engine.relationships;
+    // The GAME-CONTEXT showmance LISTING carries this phrase; the L40 restraint (always present) does
+    // NOT — so it tells "a pair is publicly surfaced NOW" apart from the standing narrator guidance.
+    const CTX = /voice romance for THESE pairs only/;
+    // pre-visible: it is sealed — not in the Vault-free projection, not listed in the GM context
+    expect(sb.session.visibleShowmances()).toEqual([]);
+    expect(sb.session.getMomentPrompt({}).systemPrompt).not.toMatch(CTX);
+    // drive the pair's mutual affinity up and advance the arc (spark → bond → visible)
+    rel.edge(pair.a, pair.b).affinity = 0.95;
+    rel.edge(pair.b, pair.a).affinity = 0.95;
+    sb.session.advanceShowmances(); // spark → bond
+    expect(sb.session.visibleShowmances()).toEqual([]); // still sealed at bond
+    const surfaced = sb.session.advanceShowmances(); // bond → visible
+    expect(surfaced.length).toBe(1);
+    // now PUBLIC: it appears in the Vault-free projection and is LISTED in the narrator's context
+    const visible = sb.session.visibleShowmances();
+    expect(visible.length).toBe(1);
+    const prompt = sb.session.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toMatch(CTX);
+    expect(prompt).toContain(`${visible[0]!.a} & ${visible[0]!.b}`);
+    // and the surfacing fact reached the PLAYER's knowledge as a witnessed (non-hidden) event
+    const surfacedName = surfaced[0]!.aName;
+    const witnessed = sb.engine.events.query().filter((e) => !e.hidden && e.witnessSet.includes(PLAYER));
+    expect(witnessed.some((e) => e.content.includes(surfacedName) && /showmance|grown close/.test(e.content))).toBe(true);
   });
 
   it("the seeded layer is sealed in the Vault and persists across a restart (stage never resets)", () => {

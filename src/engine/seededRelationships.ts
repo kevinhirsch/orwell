@@ -107,3 +107,21 @@ export function preGameTieToVaultContent(t: PreGameTie): string {
 export function showmanceToVaultContent(s: Showmance): string {
   return `showmance ${s.a} <-> ${s.b} [${s.stage}] (hidden — develops over weeks, never telegraphed)`;
 }
+
+// ── Organic surfacing (L40) — a showmance advances ONLY as the live relationship genuinely develops ──
+// Sustained mutual affinity carries the arc spark → bond → visible → resolved. The bias gives the
+// seeded pair a head start, but they must still grow into it over weeks (never instant). Tuned so a
+// seeded pair does not trip straight past `bond` from the spark bias alone.
+export const SHOWMANCE_BOND_AFFINITY = 0.70;
+export const SHOWMANCE_VISIBLE_AFFINITY = 0.82;
+
+/**
+ * The next stage for a showmance given the pair's CURRENT mutual affinity (pure; advances one step at a
+ * time, never skips `visible`, never regresses). `visible` is the PUBLIC moment — only then may the
+ * narrator voice it. `resolved` is set by the caller when one of the pair leaves.
+ */
+export function nextShowmanceStage(stage: ShowmanceStage, mutualAffinity: number): ShowmanceStage {
+  if (stage === "spark" && mutualAffinity >= SHOWMANCE_BOND_AFFINITY) return "bond";
+  if (stage === "bond" && mutualAffinity >= SHOWMANCE_VISIBLE_AFFINITY) return "visible";
+  return stage;
+}

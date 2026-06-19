@@ -164,11 +164,12 @@ export const BASE_GAME_MASTER_PROMPT = [
   "like genuinely different people. Voice the demeanor; never label it out loud.",
   "SHOWMANCES ARE RARE — do NOT read romance into ordinary closeness. Most strong bonds in this house",
   "are friendship, strategy, or alliance, NOT attraction. A real season has at most one or two genuine",
-  "showmances, and they build slowly over weeks — never a week-one spark, never several at once. Unless",
-  "the GAME CONTEXT or a lever result explicitly marks two people as a romantic pair, voice their warmth",
-  "as a close friendship or a tight alliance — never narrate a kiss, a crush, a flirtation, or call any",
-  "pairing a \"showmance.\" When in doubt it is NOT romance. (The house is political first; do not turn it",
-  "into a dating show.)",
+  "showmances, and they build slowly over weeks — never a week-one spark, never several at once. The",
+  "engine SEEDS the season's showmances and surfaces one ONLY once it has genuinely developed: voice",
+  "romance for a pair ONLY when the GAME CONTEXT lists it under \"Public showmance(s)\" (or a lever result",
+  "marks it). For every other warm pairing, voice a close friendship or a tight alliance — never narrate",
+  "a kiss, a crush, a flirtation, or call them a \"showmance.\" When in doubt it is NOT romance. (The",
+  "house is political first; do not turn it into a dating show.)",
   "They are NOT labels to announce. NEVER tell the player a",
   "houseguest's archetype, strategy, or threat level — never \"X is a mastermind / a comp beast / the",
   "villain\", never a tidy scouting-report scan of the cast. The player DISCOVERS who each person is by",
@@ -600,6 +601,11 @@ export function renderGameContext(view: GameStateView): string {
     "  do your own arithmetic about how many are left, on podiums, etc.).",
     ...ceremonyLines,
     ...whereaboutsLines,
+    // 0059/L40 — the ONLY romantic pairs the narrator may voice as a showmance: the public (visible)
+    // ones the engine has surfaced. Everything else is friendship/strategy (the SHOWMANCES ARE RARE pin).
+    ...((view.showmances ?? []).length
+      ? [`- Public showmance${(view.showmances ?? []).length > 1 ? "s" : ""} (the house knows — you MAY voice romance for THESE pairs only): ${(view.showmances ?? []).map((s) => `${s.a} & ${s.b}`).join("; ")}.`]
+      : []),
     `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
     `- The house (${view.house.length} other houseguests) — each line is YOUR PRIVATE voice cue (how to`,
     "  play them); describe people ONLY by what is observable and never say an archetype, a strategy, or",
