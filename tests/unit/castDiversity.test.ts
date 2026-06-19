@@ -3,8 +3,13 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import {
   generateHouse,
   generateBackstoryFacets,
+  generateDemeanors,
+  DEMEANOR_POOL,
   MAX_PER_VOCATION,
   MAX_PER_REGION,
+  MAX_PER_DEMEANOR,
+  MAX_PER_BUILD,
+  APPEARANCE_POOLS,
 } from "../../src/engine/characterFactory";
 import { VOCATIONS } from "../../src/engine/data/vocations";
 import { HOMETOWNS, HOMETOWN_REGIONS } from "../../src/engine/data/hometowns";
@@ -224,5 +229,132 @@ describe("L28/D — the backstory PERSISTS airtight (no regenerate, no drift)", 
     const first = view.house[0]!;
     expect(ctx).toContain(first.vocation!);
     expect(ctx).toContain(`from ${first.hometown!}`);
+  });
+});
+
+describe("L28/E — the cast is voiced in DIVERSE registers (demeanor spread)", () => {
+  it("every NPC carries an observable demeanor drawn from the pool", () => {
+    const { npcs } = generateHouse(new SeededRandom(202));
+    expect(npcs.length).toBe(15);
+    for (const n of npcs) {
+      expect(n.character.demeanor).toBeTruthy();
+      expect(DEMEANOR_POOL as readonly string[]).toContain(n.character.demeanor!);
+    }
+  });
+
+  it("registers SPREAD across the cast — no single register dominates, several distinct voices", () => {
+    // sweep several seeds: the house must never collapse back into a room of identical warm bonders
+    for (const seed of [3, 17, 88, 256, 1009, 4242]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      const demeanors = npcs.map((n) => n.character.demeanor!);
+      // the cap holds: no register piles up implausibly
+      for (const [, count] of tally(demeanors)) {
+        expect(count).toBeLessThanOrEqual(MAX_PER_DEMEANOR);
+      }
+      // genuine variety: a real spread of distinct registers every season (≤2 each over 15 ⇒ ≥8)
+      expect(new Set(demeanors).size).toBeGreaterThanOrEqual(8);
+    }
+  });
+
+  it("the demeanor pool is large & varied, and carries no stat-key or hidden-layer vocabulary", () => {
+    expect(DEMEANOR_POOL.length).toBeGreaterThanOrEqual(16);
+    expect(new Set(DEMEANOR_POOL).size).toBe(DEMEANOR_POOL.length);
+    for (const d of DEMEANOR_POOL) {
+      // CRITICAL: a register word must never contain a stat-key substring — it could otherwise
+      // serialize into a `"physical":`-style form the Vault-leak scans hunt for (and some scans
+      // still bare-word match "physical"/"mental"/"social").
+      expect(d).not.toMatch(/physical|mental|social/i);
+      // and never smuggle hidden-layer vocabulary (it is a PUBLIC observable facet)
+      expect(d).not.toMatch(/\b(trust|affinity|threat|soul|confessional|secret-motive|stat|volatility)\b/i);
+    }
+  });
+
+  it("generateDemeanors reads only its rng (deterministic, capped) — same seed ⇒ same deal", () => {
+    const deal = (seed: number) => generateDemeanors(new SeededRandom(seed), 15).join("~");
+    expect(deal(13)).toBe(deal(13));
+    expect(deal(13)).not.toBe(deal(14));
+    // the cap holds for the dealer in isolation, across seeds
+    for (const seed of [1, 5, 99, 777]) {
+      for (const [, count] of tally(generateDemeanors(new SeededRandom(seed), 15))) {
+        expect(count).toBeLessThanOrEqual(MAX_PER_DEMEANOR);
+      }
+    }
+  });
+
+  it("body type (build) spreads too — no generation of near-twins", () => {
+    for (const seed of [3, 17, 88, 256, 1009, 4242]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      // the build is the FIRST comma-separated segment of `appearance`
+      const builds = npcs.map((n) => n.character.appearance.split(", ")[0]!);
+      for (const b of builds) expect(APPEARANCE_POOLS.BUILDS as readonly string[]).toContain(b);
+      // the per-build cap holds: no body type clusters across the cast
+      for (const [, count] of tally(builds)) {
+        expect(count).toBeLessThanOrEqual(MAX_PER_BUILD);
+      }
+      // a real spread of body types every season
+      expect(new Set(builds).size).toBeGreaterThanOrEqual(7);
+    }
+  });
+});
+
+describe("L28/F — the demeanor is player-INDEPENDENT and PERSISTS airtight", () => {
+  it("the same seed deals byte-identical demeanors regardless of the player's profile", () => {
+    const demeanorsFor = (name: string, job: string, town: string) => {
+      const s = new GameSessionAdapter();
+      const v = s.createCharacter({
+        playerName: name,
+        seed: 808,
+        backstory: `a ${job} from ${town}`,
+        personaArchetype: job,
+        motivation: `to represent ${town}`,
+      });
+      return v.house.map((h) => h.demeanor!).join("~");
+    };
+    // a loud, theatrical player vs. a quiet, reserved one on the SAME seed — the cast must not shift
+    const loud = demeanorsFor("Big Personality", "stage performer", "Las Vegas, NV");
+    const quiet = demeanorsFor("Quiet One", "librarian", "Portland, ME");
+    expect(loud).toBe(quiet);
+  });
+
+  it("demeanor survives a snapshot→restore unchanged and never regenerates", () => {
+    const a = new GameSessionAdapter();
+    a.createCharacter({ playerName: "The Player", seed: 556 });
+    const before = a.getGameState().house.map((h) => `${h.name}|${h.demeanor}`);
+
+    // round-trip through a fresh adapter twice (the restart path, 0030)
+    const round = (src: GameSessionAdapter) => {
+      const next = new GameSessionAdapter();
+      next.restore(src.snapshot());
+      return next;
+    };
+    const b = round(a);
+    const c = round(b);
+    const after1 = b.getGameState().house.map((h) => `${h.name}|${h.demeanor}`);
+    const after2 = c.getGameState().house.map((h) => `${h.name}|${h.demeanor}`);
+    expect(after1).toEqual(before);
+    expect(after2).toEqual(before);
+    for (const line of after1) expect(line).not.toMatch(/\|undefined$/);
+  });
+
+  it("the stored demeanor reaches the narrator's roster voice cue", async () => {
+    const { renderGameContext } = await import("../../src/engine/momentPrompts");
+    const s = new GameSessionAdapter();
+    const view = s.createCharacter({ playerName: "The Player", seed: 31 });
+    const ctx = renderGameContext(view);
+    const first = view.house[0]!;
+    expect(ctx).toContain(`comes across as ${first.demeanor!}`);
+  });
+
+  it("the house card carries demeanor but NOTHING hidden (no stat keys leak)", () => {
+    const s = new GameSessionAdapter();
+    const v = s.createCharacter({ playerName: "The Player", seed: 31 });
+    const json = JSON.stringify(v.house);
+    // demeanor is present and public…
+    expect(v.house.every((h) => typeof h.demeanor === "string")).toBe(true);
+    // …and no stat-KEY form or float rides along on the projection
+    for (const banned of ['"physical":', '"mental":', '"social":', '"stats"', '"soul"', "volatility", "emotionalState"]) {
+      expect(json.includes(banned)).toBe(false);
+    }
+    expect(json).not.toMatch(/\d\.\d/);
   });
 });

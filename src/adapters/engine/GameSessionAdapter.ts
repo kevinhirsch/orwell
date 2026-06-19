@@ -344,6 +344,8 @@ export class GameSessionAdapter implements GameSession {
         age: npc.character.age,
         appearance: npc.character.appearance,
         presentation: npc.character.presentation,
+        // L28: voice them in their STORED observable register (blunt / deadpan / anxious…), not a default.
+        ...(npc.character.demeanor !== undefined ? { demeanor: npc.character.demeanor } : {}),
       },
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
@@ -1852,6 +1854,9 @@ export class GameSessionAdapter implements GameSession {
         // vocation/hometown instead of inventing (and mirroring the player's). Public, Vault-free.
         ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
         ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
+        // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
+        // is not a room of identical warm professionals. Public, Vault-free.
+        ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

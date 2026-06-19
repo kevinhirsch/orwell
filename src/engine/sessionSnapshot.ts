@@ -102,6 +102,9 @@ export function toGameState(snap: SessionSnapshot): GameState {
       // (not nested) so an absent field on a pre-L28 save stays absent (no spurious superset failure).
       ...(hg.character.vocation !== undefined ? { vocation: hg.character.vocation } : {}),
       ...(hg.character.hometown !== undefined ? { hometown: hg.character.hometown } : {}),
+      // L28 (voice register): part of the byte-stable baseline the checkpoint guards (conditional
+      // spread keeps an absent field absent on a pre-demeanor save — no spurious superset failure).
+      ...(hg.character.demeanor !== undefined ? { demeanor: hg.character.demeanor } : {}),
     };
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,

@@ -73,6 +73,12 @@ export interface HouseguestCard {
    */
   vocation?: string;
   hometown?: string;
+  /**
+   * The observable public DEMEANOR / voice register (L28) — how this houseguest comes across in the
+   * room (blunt, deadpan, anxious, grandiose…). Public, Vault-free: the narrator voices THIS stored
+   * register so each person sounds distinct, instead of defaulting everyone to warm-and-witty.
+   */
+  demeanor?: string;
 }
 
 /**
@@ -478,6 +484,8 @@ export interface NpcVoiceView {
   persona: {
     archetype?: string; strategyStyle?: string; background?: string;
     age?: number; appearance?: string; presentation?: string;
+    /** The observable voice register (L28) — voice this houseguest in THEIR demeanor, not a default. */
+    demeanor?: string;
   };
   /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
   whereabouts: { room: string; present: NamedRef[] } | null;

@@ -109,6 +109,18 @@ export const BASE_GAME_MASTER_PROMPT = [
   "beat the player is still living in, and never strand them in a dead scene waiting for the show to",
   "move. When in doubt during a lull, tee up the next beat and call advanceGame.",
   "",
+  "WANDERING THE HOUSE — ONE GROUPING AT A TIME. When the player explores, mills around, or asks who's",
+  "around, lingering IS play: give a brief orienting SURVEY of the clusters and their vibes (who is",
+  "where, the energy of each pocket — call whereabouts first so it is the real occupancy), and then DROP",
+  "the player into ONE cluster as a real, interactive scene and WAIT for their reply. NEVER narrate all",
+  "the rooms in a single turn, and NEVER fire a string of direct NPC questions at the player across",
+  "different rooms at once (a cool-down offer here, a 'scouting the territory?' there, a 'best TV pilot,",
+  "go' somewhere else) — those are unanswerable in one breath and the player can't actually connect in",
+  "any of them. The survey ORIENTS; the SCENE happens. Pick the grouping that fits (where they drifted,",
+  "who pulled them in), let any NPC opener be a LIVE invitation, and hold there for the player's answer",
+  "before moving on. One grouping at a time for real connection — seize the lull, let the substantive",
+  "play run, and move to the next pocket only when this one lulls.",
+  "",
   "THE REAL WORLD. The houseguests lived in the real world until move-in day. When the player",
   "references something real you don't know — a film, an artist, a news story — you may QUIETLY use",
   "the web_search tool, then weave what you learn into that houseguest's own voice as something",
@@ -121,7 +133,15 @@ export const BASE_GAME_MASTER_PROMPT = [
   "THE HOUSE. Each houseguest in the GAME CONTEXT is a distinct PERSON. Their archetype and strategy",
   "style are YOUR PRIVATE voice-anchor — they tell YOU how to play that person (a villain needles, a",
   "peacemaker smooths, a comp-beast struts), so their voice stays CONSISTENT all season (they sound",
-  "the same in week 8 as week 1). They are NOT labels to announce. NEVER tell the player a",
+  "the same in week 8 as week 1).",
+  "DISTINCT REGISTERS — voice EACH houseguest in their OWN register, grounded in their demeanor,",
+  "archetype, and background. The house is NOT a room of identical witty, warm, emotionally-available",
+  "professionals: a blunt houseguest is blunt, a quiet one stays quiet, an abrasive one grates, a",
+  "deadpan one underplays, an anxious one over-explains, a grandiose one performs, a terse one barely",
+  "answers. Each roster line carries that person's demeanor (\"comes across as …\") — use it. If every",
+  "houseguest sounds the same warm, quick-bantering note, you have flattened the cast; make them sound",
+  "like genuinely different people. Voice the demeanor; never label it out loud.",
+  "They are NOT labels to announce. NEVER tell the player a",
   "houseguest's archetype, strategy, or threat level — never \"X is a mastermind / a comp beast / the",
   "villain\", never a tidy scouting-report scan of the cast. The player DISCOVERS who each person is by",
   "watching them play — that discovery is the game. Introduce and describe people by what is OBSERVABLE",
@@ -476,6 +496,9 @@ export function renderGameContext(view: GameStateView): string {
       // L28: the STORED concrete backstory facets — voice THESE (a real, diverse cast), never invent
       // or mirror the player's job/hometown. Origin colors who they ARE; the game still happens in LA.
       [h.vocation, h.hometown && `from ${h.hometown}`].filter(Boolean).join(", "),
+      // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
+      // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
+      h.demeanor && `comes across as ${h.demeanor}`,
       [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;

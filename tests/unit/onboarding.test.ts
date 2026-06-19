@@ -49,8 +49,9 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
     expect(blob).not.toMatch(/\d\.\d/);
     const card = s.getGameState().house[0]!;
     expect(Object.keys(card).sort()).toEqual(
-      // L28: vocation + hometown are PUBLIC facets (introduced in the premiere, voiced in social play).
-      ["age", "appearance", "archetype", "background", "hometown", "id", "name", "presentation", "status", "strategyStyle", "vocation"].sort());
+      // L28: vocation + hometown + demeanor are PUBLIC facets (introduced in the premiere, voiced in
+      // social play) — the observable voice register that keeps the cast from sounding identical.
+      ["age", "appearance", "archetype", "background", "demeanor", "hometown", "id", "name", "presentation", "status", "strategyStyle", "vocation"].sort());
   });
 });
 

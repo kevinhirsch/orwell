@@ -98,6 +98,18 @@ export interface Character {
   vocation?: string;
   hometown?: string;
   /**
+   * The houseguest's OBSERVABLE public DEMEANOR / speaking register (L28, 2026-06-19) — how they come
+   * across to anyone in the room. PUBLIC and Vault-free, exactly like `archetype`/`strategyStyle`: it is
+   * the surface vibe a stranger reads across the kitchen counter, NOT hidden strategic intent, stats, or
+   * soul state (those stay in `hiddenElements`/the Soul). Its job is to break the "every houseguest is a
+   * warm, witty, emotionally-available professional" homogeneity — the cast is FORCED to spread across a
+   * diverse register pool (blunt, deadpan, anxious, grandiose, terse, quiet…), capped so no single vibe
+   * dominates. The narrator voices the STORED register so each person sounds distinct and consistent all
+   * season. Seed-stable & byte-persisted like the rest of the static Character; player-INDEPENDENT.
+   * Optional only for back-compat with pre-demeanor saves (which load without it and re-derive nothing).
+   */
+  demeanor?: string;
+  /**
    * Seeded, typed HIDDEN elements (B50) — engine-side secrets the public persona may match or wildly
    * diverge from. NEVER projected to the player (the NPC card carries name + status only); they surface
    * rarely into hidden off-screen content and reach the player only via a pathway. Empty for the player
@@ -274,6 +286,82 @@ export function generateBackstoryFacets(rng: RandomnessSource, count: number): B
   return out;
 }
 
+// --- Observable DEMEANOR / voice register (L28): a FORCED SPREAD so the house is not all warm bonders ---
+// The deeper half of L28: even with varied jobs, every houseguest was voiced in the SAME warm, witty,
+// emotionally-available register. A real producer-cast crew is a SPREAD of vibes — a villain grates, a
+// hothead flares, a quiet one stays quiet, a deadpan one underplays. This is a PUBLIC observable facet
+// (how someone comes across in the room), like archetype/strategyStyle — NOT hidden intent, stats, or
+// soul (those live in `hiddenElements`/Soul). Drawn cast-wide off a SEED-derived side rng (never the
+// player's profile), capped so no single register piles up. CRITICAL: every word is a plain adjective
+// that does NOT contain the stat-key substrings "physical"/"mental"/"social" (so it can never serialize
+// into a `"physical":`-style leak the Vault scans hunt for) and carries no hidden-layer vocabulary.
+export const DEMEANORS = [
+  "warm and bubbly",
+  "abrasive and blunt",
+  "deadpan and dry",
+  "anxious and eager",
+  "grandiose and theatrical",
+  "terse and guarded",
+  "cynical and sarcastic",
+  "sweet and earnest",
+  "intense and competitive",
+  "goofy and chaotic",
+  "quiet and watchful",
+  "steady and maternal",
+  "cocky and brash",
+  "bubbly but cutting",
+  "stoic and unbothered",
+  "loud and confrontational",
+  "shy and awkward",
+  "smooth and charming",
+  "scrappy and defiant",
+  "no-nonsense and matter-of-fact",
+] as const;
+
+/** The demeanor pool, exported for the L28 voice-spread tests (same precedent as APPEARANCE_POOLS). */
+export const DEMEANOR_POOL = DEMEANORS;
+
+/**
+ * No single demeanor/register may appear more than this many times across the 15-cast (L28 voice-spread
+ * cap) — the linchpin that stops the house from collapsing back into a room of identical warm bonders.
+ * The pool is large enough (20) that ≤2 per register easily covers 15 with plenty of distinct voices.
+ */
+export const MAX_PER_DEMEANOR = 2;
+
+/**
+ * Deal `count` picks from `pool` off a seeded rng, each used at most `maxEach` times — a generic capped
+ * spread (L28). Player-INDEPENDENT (reads only its rng) and deterministic per seed. Relaxes a pick
+ * rather than looping forever if a cap can't be met within the guard budget (the pools comfortably
+ * satisfy a 15-cast, so the relaxation path is unreachable in practice — but never spins).
+ */
+export function spreadFacet(rng: RandomnessSource, pool: readonly string[], count: number, maxEach: number): string[] {
+  const out: string[] = [];
+  const uses = new Map<string, number>();
+  const pick = (): string => {
+    for (let g = 0; g < 400; g++) {
+      const v = rng.pick(pool);
+      if ((uses.get(v) ?? 0) < maxEach) {
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+        return v;
+      }
+    }
+    const v = rng.pick(pool); // budget exhausted — take the draw rather than loop forever
+    uses.set(v, (uses.get(v) ?? 0) + 1);
+    return v;
+  };
+  for (let i = 0; i < count; i++) out.push(pick());
+  return out;
+}
+
+/**
+ * Deal `count` DIVERSE demeanors/registers off a seeded rng (L28), each used at most `MAX_PER_DEMEANOR`
+ * times so the house reads as a genuinely mixed crew (not all warm). Player-INDEPENDENT & deterministic
+ * per seed — a thin wrapper over `spreadFacet` over the `DEMEANORS` pool.
+ */
+export function generateDemeanors(rng: RandomnessSource, count: number): string[] {
+  return spreadFacet(rng, DEMEANORS, count, MAX_PER_DEMEANOR);
+}
+
 // --- Public appearance generation (0004 amendment): seed-stable, Vault-free facets ---
 // G24: the pools were 7×7×6 short phrases that said nothing about complexion, hair color,
 // or distinguishing features — every unspecified slot fell to the image model's default
@@ -316,6 +404,24 @@ const PRESENTATION = [
 
 /** The facet pools, exported for the G24 variety tests (same precedent as NAME_CORPORA). */
 export const APPEARANCE_POOLS = { BUILDS, COMPLEXIONS, HAIR, FEATURES, LOOKS, PRESENTATION } as const;
+
+/**
+ * No single body type/build may exceed this many across the 15-cast (L28 — "no real spread of body
+ * type"). The per-NPC appearance side rng draws builds INDEPENDENTLY and can cluster; a cast-wide
+ * capped deal forces the spread. 12 builds / ≤2 each comfortably covers 15.
+ */
+export const MAX_PER_BUILD = 2;
+
+/**
+ * Replace the BUILD slot (the first comma-separated segment) of a generated appearance string with
+ * `build`, leaving complexion/hair/features/look intact. The appearance is built as
+ * "<build>, <complexion>, <hair>, <features>, <look>" (see generateAppearance), so swapping the head
+ * segment re-targets only body type. Falls back to a prefix if the shape is unexpected (never throws).
+ */
+function withBuild(appearance: string, build: string): string {
+  const rest = appearance.split(", ").slice(1);
+  return rest.length ? [build, ...rest].join(", ") : `${build}, ${appearance}`;
+}
 
 function generateAppearance(rng: RandomnessSource): { appearance: string; age: number; presentation: string } {
   // 21–52, skewed young (min of two draws): real casts cluster in the 20s–30s with a
@@ -468,9 +574,20 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
   // apply across everyone. It touches no main-stream draw, so stats/names/volatility stay byte-stable.
   const facetRng = new SeededRandom(hashSeed(`backstory:${npcs.map((n) => n.name).join("|")}`));
   const facets = generateBackstoryFacets(facetRng, npcs.length);
+  // L28 (the deeper half): deal a SPREAD of observable DEMEANORS/registers the same way — cast-wide off
+  // a seed-derived side rng, capped (≤MAX_PER_DEMEANOR each) so the house is NOT all warm bonders. And
+  // deal BUILDS cast-wide too (the per-NPC appearance side rng draws builds INDEPENDENTLY, so it can
+  // cluster into a generation of near-twins — L28's "no real spread of body type"): a forced ≤2-per-build
+  // deal overwrites just the build slot of `appearance`, leaving every other appearance facet untouched.
+  const demeanorRng = new SeededRandom(hashSeed(`demeanor:${npcs.map((n) => n.name).join("|")}`));
+  const demeanors = generateDemeanors(demeanorRng, npcs.length);
+  const buildRng = new SeededRandom(hashSeed(`build:${npcs.map((n) => n.name).join("|")}`));
+  const builds = spreadFacet(buildRng, BUILDS, npcs.length, MAX_PER_BUILD);
   npcs.forEach((n, i) => {
     n.character.vocation = facets[i]!.vocation;
     n.character.hometown = facets[i]!.hometown;
+    n.character.demeanor = demeanors[i]!;
+    n.character.appearance = withBuild(n.character.appearance, builds[i]!);
   });
   return { npcs };
 }

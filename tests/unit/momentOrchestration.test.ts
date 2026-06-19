@@ -31,6 +31,32 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/witnessed/i); // NPCs form their read from witnessed behavior only
   });
 
+  it("L28 — the base prompt pins DISTINCT registers: the house is NOT a room of identical warm pros", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // each houseguest is voiced in their OWN register, grounded in demeanor/archetype/background…
+    expect(p).toMatch(/DISTINCT REGISTERS/);
+    expect(p).toMatch(/own register/i);
+    expect(p).toMatch(/demeanor/i);
+    // …and the homogeneity it must break is named explicitly (a blunt one is blunt, a quiet one quiet)
+    expect(p).toMatch(/not a room of identical/i);
+    expect(p).toMatch(/a blunt houseguest is blunt/i);
+    expect(p).toMatch(/a quiet one stays quiet/i);
+  });
+
+  it("L30 — the base prompt pins wander pacing: survey, then ONE cluster, then WAIT", () => {
+    const p = BASE_GAME_MASTER_PROMPT;
+    // one grouping at a time for real connection — the survey orients, the scene happens
+    expect(p).toMatch(/ONE GROUPING AT A TIME/i);
+    expect(p).toMatch(/brief orienting SURVEY/i);
+    expect(p).toMatch(/WAIT for their reply/i);
+    // it must NEVER narrate all rooms or fire multiple unanswerable questions in one turn
+    expect(p).toMatch(/NEVER narrate all/i);
+    expect(p).toMatch(/across\s+different rooms/i);
+    // tied to the existing lingering / seize-the-lull framing
+    expect(p).toMatch(/lingering IS play/i);
+    expect(p).toMatch(/seize the lull/i);
+  });
+
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
     const game = new GameSessionAdapter();
     game.createCharacter({ playerName: "Player One", seed: 4 });
