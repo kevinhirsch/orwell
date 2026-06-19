@@ -568,6 +568,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // crosses into `visible` becomes a PUBLIC house fact; the adapter's onShowmanceSurfaced hook (wired
   // in the registry) records the player-witnessed beat. Pre-visible showmances stay Vault-sealed.
   sandbox.session.advanceShowmances();
+  // 0060 — the story-thread scheduler rides THIS bounded tick (after society/gossip/confessional, so it
+  // reads the freshly-moved house). It walks each seeded thread's lifecycle — dormant→active (reusing
+  // the 0023 fold), active→surfaced (reusing 0038 gossip / 0002 pathways, capped per §5), and →resolved
+  // / →expired (recorded, never deleted). It AUTHORS nothing; it only decides WHEN each transition
+  // fires, on a seeded SIDE rng so the main beat stream stays byte-stable (0007). Engine-only: nothing
+  // crosses but a class-keyed paraphrase belief (never the premise, never a number — §7).
+  sandbox.session.scheduleStoryThreads(rng);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.query().length - before;
 }
