@@ -50,10 +50,14 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
     const card = s.getGameState().house[0]!;
     // 0058 adds the PUBLIC deep facets to the card: a multi-sentence `biography` + the structured
     // `physicalCharacteristics` facet (both Vault-free, byte-stable). The hidden half never appears.
+    // 0063 adds the PUBLIC identity facets: `ethnicity` + `genderPresentation` (always present) and
+    // `outOrientation` (present ONLY when the houseguest is publicly out — this seeded NPC is). The
+    // CLOSETED orientation is engine-only (`privateOrientations`, Vault-sealed) and is NEVER on the card.
     expect(Object.keys(card).sort()).toEqual(
-      // L28 + 0058: vocation/hometown/demeanor + biography/physicalCharacteristics are ALL public
-      // card facets (Vault-free, byte-stable); the hidden half (secrets/goals/perception) never appears.
-      ["age", "appearance", "archetype", "background", "biography", "demeanor", "hometown", "id", "name", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
+      // L28 + 0058 + 0063: vocation/hometown/demeanor + biography/physicalCharacteristics + the public
+      // identity facets are ALL Vault-free, byte-stable; the hidden half (secrets/goals/perception/
+      // closeted orientation) never appears.
+      ["age", "appearance", "archetype", "background", "biography", "demeanor", "ethnicity", "genderPresentation", "hometown", "id", "name", "outOrientation", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
   });
 });
 
