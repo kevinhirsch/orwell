@@ -3,6 +3,7 @@ import { Orchestrator } from "./orchestrator";
 import { GameWatcher, type WatcherConfig } from "./gameWatcher";
 import { SystemClock } from "../adapters/time/SystemClock";
 import { FileSaveStore } from "../adapters/engine/FileSaveStore";
+import { SqliteSaveStore } from "../adapters/sqlite/SqliteSaveStore";
 import type { Clock, Scheduler } from "../ports/Clock";
 import type { UserSaveStore } from "../ports/UserSaveStore";
 
@@ -88,9 +89,21 @@ export function watcherConfigFromEnv(env: Record<string, string | undefined> = p
   };
 }
 
+/**
+ * The durable save store the entrypoint composes when `durable` is set (B59/audit E7: the composition
+ * layer constructs the engine-only adapter, so `main.ts` never imports one). E63: `ORWELL_STORE=sqlite`
+ * selects the relational `SqliteSaveStore` (same versioned-blob, never-overwrite, lossless semantics);
+ * DEFAULT unset ⇒ the file-backed `FileSaveStore` (today's behavior — unchanged).
+ */
+function buildDurableStore(env: Record<string, string | undefined> = process.env): UserSaveStore {
+  return (env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite"
+    ? new SqliteSaveStore()
+    : new FileSaveStore();
+}
+
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
-  const saveStore = opts.saveStore ?? (opts.durable ? new FileSaveStore() : undefined);
+  const saveStore = opts.saveStore ?? (opts.durable ? buildDurableStore() : undefined);
   const envResident = parseInt((process.env.ORWELL_MAX_RESIDENT_SANDBOXES ?? "").trim(), 10);
   const maxResident = opts.maxResidentSandboxes
     ?? (Number.isFinite(envResident) && envResident > 0 ? envResident : undefined);
