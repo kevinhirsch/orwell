@@ -115,7 +115,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // Derive the id + ts from the store's current size (B40/audit C2): monotonic and restart-safe —
     // after a restore the count resumes high, so a post-restart interaction never collides with a
     // pre-restart one (the old `++this.seq` restarted at 0, minting duplicate ids).
-    const n = this.events.query().length;
+    const n = this.events.count();
     const eventId = `evt:mcp:${n}`;
     this.events.record({
       id: eventId, ts: n, type: "conversation",
@@ -216,7 +216,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image
     // is built only from the player's visible state, so showing it is the player's own knowledge.
     // Monotonic, restart-safe id off the store size (same discipline as recordInteraction, B40).
-    const n = this.events.query().length;
+    const n = this.events.count();
     const eventId = `evt:image:${n}`;
     this.events.record({
       id: eventId, ts: n, type: "image-shown",
