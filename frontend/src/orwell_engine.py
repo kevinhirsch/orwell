@@ -437,6 +437,12 @@ async def whereabouts(user: str | None = None):
     return await _call("whereabouts", {}, user=user)
 
 
+async def move_to(room: str, user: str | None = None):
+    """L21/L24: the player walks to a room they named — the engine moves them (it never auto-relocates
+    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game."""
+    return await _call("moveTo", {"room": room}, user=user)
+
+
 async def finale_view(user: str | None = None):
     """The Vault-free in-progress finale projection (0037 §8.1): finalists, the current stage, and the
     votes revealed SO FAR — or ``None`` when no finale is staging. Never a lean/tally/manner or the

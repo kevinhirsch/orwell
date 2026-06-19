@@ -1388,6 +1388,20 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "moveTo",
+            "description": "Move the PLAYER to a room they named (L21/L24): the player is a person and chooses where to go; the engine never relocates them on its own. Call whenever the player heads somewhere (\"I go to the kitchen\"), then voice the new room from what it returns. Until you call this, they are still in their current whereabouts room.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "room": {"type": "string", "description": "The room the player walks to (e.g. kitchen, living-room, backyard, bedroom, storage-room, hoh-room)."},
+                },
+                "required": ["room"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "diaryRoom",
             "description": "Record the player's private, out-of-character Diary Room confessional. Nothing here ever reaches any houseguest — it is the player's own space, never an in-game pathway. Use whenever the player speaks in the Diary Room.",
             "parameters": {
@@ -1673,6 +1687,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
+    # L21/L24: the player directs their own movement (the engine never auto-relocates a person).
+    "moveTo",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.

@@ -4854,6 +4854,23 @@ async def do_whereabouts(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_move_to(content: str, owner: Optional[str] = None) -> Dict:
+    """L21/L24: the player walks to a room they named. `content` is the tool args JSON ({room})."""
+    from src import orwell_engine
+    try:
+        room = ""
+        try:
+            room = (json.loads(content) or {}).get("room", "") if content else ""
+        except Exception:
+            room = (content or "").strip()
+        res = await orwell_engine.move_to(str(room), user=owner)
+        if res is None:
+            return {"output": "No game is running yet.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_diary_room(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
