@@ -70,6 +70,24 @@ describe("B62 — the re-entry beat (resume opens with the store, never the chat
   });
 });
 
+describe("L31 — the premiere is a structured introductions round + a light tutorial", () => {
+  it("the premiere moment drives a built-in round of introductions (not player-prompted) and a tutorial cadence", () => {
+    const { sb } = liveGame("premiere-l31", 8);
+    const { systemPrompt } = sb.session.getMomentPrompt({ moment: "premiere" });
+    // a BUILT-IN introductions round — production gathers the house, person by person
+    expect(systemPrompt).toMatch(/ROUND OF INTRODUCTIONS/i);
+    expect(systemPrompt).toMatch(/do NOT wait for the player to ask/i);
+    // each houseguest introduces their PUBLIC persona (name / from / vocation / one real thing)
+    expect(systemPrompt).toMatch(/name, where they're from/i);
+    // once introduced, the public intro is fixed (ties to 0058 byte-stable public depth)
+    expect(systemPrompt).toMatch(/that intro is FIXED|never drifts/i);
+    // the hand-held tutorial cadence for the first week
+    expect(systemPrompt).toMatch(/TUTORIAL CADENCE/i);
+    // still drives to the first HOH (the premiere does not stall)
+    expect(systemPrompt).toMatch(/FIRST HEAD OF HOUSEHOLD COMPETITION/i);
+  });
+});
+
 describe("B62 — the terminal beat (the season closes with the result, from the record)", () => {
   it("a finished season's post-season prompt carries the winner and the week", () => {
     const { sb } = liveGame("terminal", 3);

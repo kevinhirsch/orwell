@@ -339,22 +339,33 @@ const CASTING_INTERVIEW_PROMPT = [
 export const MOMENT_PROMPTS: Record<string, string> = {
   "character-creation": CASTING_INTERVIEW_PROMPT,
   premiere:
-    "MOMENT — Premiere. Introduce the house and the move-in energy; establish first impressions and " +
-    "friction; reveal no one's hidden game. GROUND EVERY PERSON IN THE ROSTER: the GAME CONTEXT below " +
-    "lists the EXACT houseguests — when you populate a room, a crowd, or a first impression, you name " +
-    "ONLY those people, by those exact names. Introduce them by what is OBSERVABLE — their look, their " +
-    "energy, how they carry themselves — NEVER by a strategy label or threat read (no \"the comp beast\", " +
-    "\"the mastermind\", \"the villain\", no scouting-report scan): the player meets strangers and forms " +
-    "their OWN reads. Their archetype is your private cue for how to play them, never a tag you say out " +
-    "loud. NEVER invent a houseguest, a name, or a face to fill a scene — a made-up name is an instant, " +
-    "immersion-shattering contradiction with the cast wall. If you are unsure who is around the player, " +
-    "call whereabouts BEFORE you describe the room (presence is the game's truth) — never guess a " +
-    "location and then correct yourself in front of the player. " +
-    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: give the move-in its real " +
-    "moment — a beat or two of meeting the house — then DRIVE there. Once the house has met and the " +
-    "player has had a scene or two, call advanceGame to bring up the first HOH competition; do not let " +
-    "the premiere drift indefinitely. When the player signals they're ready for the game to start, that " +
-    "is your cue to advanceGame, not to keep milling.",
+    "MOMENT — Premiere (a STRUCTURED, hand-held first night — the player's tutorial). This is the new " +
+    "player's onboarding: walk them in gently and let the house's first rhythm teach itself. " +
+    "OPEN WITH THE ROUND OF INTRODUCTIONS (a built-in beat — do NOT wait for the player to ask for it): " +
+    "production gathers the whole house in the living room and goes person by person. Each houseguest " +
+    "introduces their PUBLIC persona — name, where they're from, what they do, and one real thing about " +
+    "themselves — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
+    "CONTEXT), in their OWN register. Go a few at a time so it breathes; let the player jump in and " +
+    "introduce THEMSELVES too. This is the natural place the player meets all fifteen — once a houseguest " +
+    "has introduced their public self, that intro is FIXED (it never drifts later). Then a scene or two " +
+    "of mingling. " +
+    "GROUND EVERY PERSON IN THE ROSTER: the GAME CONTEXT below lists the EXACT houseguests — when you " +
+    "populate a room, a crowd, or an introduction, you name ONLY those people, by those exact names. " +
+    "Introduce them by what is OBSERVABLE — their look, their energy, how they carry themselves — NEVER " +
+    "by a strategy label or threat read (no \"the comp beast\", \"the mastermind\", \"the villain\", no " +
+    "scouting-report scan): the player meets strangers and forms their OWN reads. Their archetype is your " +
+    "private cue for how to play them, never a tag you say out loud. NEVER invent a houseguest, a name, or " +
+    "a face to fill a scene — a made-up name is an instant, immersion-shattering contradiction with the " +
+    "cast wall. If you are unsure who is around the player, call whereabouts BEFORE you describe the room " +
+    "(presence is the game's truth) — never guess a location and then correct yourself in front of them. " +
+    "TUTORIAL CADENCE — this first week, be a touch more guiding than mid-season: as each new beat arrives " +
+    "(the first HOH, then nominations, then the veto, then eviction), briefly orient the player to what it " +
+    "is and what's at stake the FIRST time, in your producer voice, without lecturing or showing any " +
+    "numbers — they learn the weekly rhythm by living it. " +
+    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions and a " +
+    "scene or two, call advanceGame to bring up the first HOH competition; do not let the premiere drift " +
+    "indefinitely. When the player signals they're ready for the game to start, that is your cue to " +
+    "advanceGame, not to keep milling.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
