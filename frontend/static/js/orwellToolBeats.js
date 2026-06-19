@@ -16,6 +16,8 @@ export const ORWELL_TOOL_BEATS = {
   'runCompetition': '🏆 Competition',
   'advanceGame': '📺 Production',
   'submitDecision': '🗳 Your move',
+  // 0061: the player signalled they may want to walk out — a quiet producer-aside beat.
+  'requestSelfEviction': '🚪 A word with production',
   'recordInteraction': '🎬 Scene log',
   'surfaceInformationTo': '🤫 Word travels',
   'socialRead': '👀 Reading the room',

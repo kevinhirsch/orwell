@@ -68,6 +68,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
              # Weekly loop (0011): advance beats and resolve player decisions.
              "createCharacter", "updateCasting", "advanceGame", "submitDecision",
+             # 0061: raise the self-eviction confirmation on a clear OOC intent to leave (no state change).
+             "requestSelfEviction",
              # Generic loopback to any UI-button endpoint (cookbook,
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.
@@ -104,6 +106,8 @@ GAME_TOOL_KEEP = frozenset({
     "renderScene", "endOfSessionSummary",
     # Weekly loop (0011).
     "createCharacter", "updateCasting", "advanceGame", "submitDecision",
+    # 0061: raise the self-eviction confirmation on a clear OOC intent to leave (no state change).
+    "requestSelfEviction",
     # God Mode (0016): admin-gated non-Vault levers.
     "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
     # In-fiction real-world lookups (C32, amends 0032): the model quietly searches when the

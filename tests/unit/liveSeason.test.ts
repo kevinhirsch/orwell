@@ -45,7 +45,7 @@ function playToEnd(s: LiveSeasonState, ctx: SeasonCtx, seed: number): BeatEvent[
       else if (p.kind === "comp-intent") events.push(applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng));
       else if (p.kind === "goodbye-message") events.push(applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx));
       else if (p.kind === "juror-question") events.push(applyDecision(s, { kind: "juror-question", question: "q" }, ctx));
-      else events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
+      else if (p.kind === "juror-vote") events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
     } else {
       const ev = advance(s, ctx, rng);
       if (ev) events.push(ev);
@@ -113,7 +113,7 @@ describe("live weekly loop (incremental 0011)", () => {
           else if (p.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
           else if (p.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx);
           else if (p.kind === "juror-question") applyDecision(s, { kind: "juror-question", question: "q" }, ctx);
-          else applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);
+          else if (p.kind === "juror-vote") applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);
         } else {
           if (s.replacement) {
             // A replacement is never the HOH or the veto winner.
