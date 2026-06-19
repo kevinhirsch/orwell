@@ -78,6 +78,17 @@ describe("C8-04 — the ceremony state is in the model's persistent context", ()
     for (const p of field) expect(prompt).toContain(p.name); // every drawn player, by name
   });
 
+  it("renders WHERE YOU ARE from the engine whereabouts so the model never invents positions (L21/L24)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 81000 });
+    const wa = s.getGameState().whereabouts;
+    expect(wa).not.toBeNull(); // presence is seeded at premiere — everyone is placed, no "arrivals"
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("WHERE YOU ARE");
+    expect(prompt).toContain(`the ${wa!.room.replace(/-/g, " ")}`); // the player's REAL room
+    for (const c of wa!.present) expect(prompt).toContain(c.name); // everyone actually with them, by name
+  });
+
   it("pre-game and pre-ceremony carry an empty ceremony (no invented marks)", () => {
     const s = new GameSessionAdapter();
     expect(s.getGameState().ceremony).toEqual({ hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } });

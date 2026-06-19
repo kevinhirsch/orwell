@@ -51,6 +51,8 @@ export interface SessionCore {
   deals?: Deal[];
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
+  /** Room tenure — ticks each houseguest has held their current room (L21/L24). Absent on older saves (reseeded on the next tick). */
+  presenceTenure?: Record<EntityId, number>;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */

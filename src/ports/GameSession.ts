@@ -120,6 +120,15 @@ export interface GameStateView {
      */
     veto: { holder: { id: EntityId; name: string } | null; used: boolean; players: Array<{ id: EntityId; name: string }> };
   };
+  /**
+   * WHERE THE PLAYER IS — their room, who is with them, and each ADJACENT room with its occupants
+   * (the player's own scoped view, Vault-free: only what they could see or hear themselves; non-
+   * adjacent rooms never appear). Surfaced into the model's persistent GAME CONTEXT (L21/L24) so the
+   * narrator voices the REAL occupancy instead of inventing positions or "still to arrive" houseguests
+   * (the engine seats everyone at premiere — there are no arrivals). Null pre-game / when the player
+   * is out of the house. Also feeds the "Where you are" gadget (L26).
+   */
+  whereabouts?: WhereaboutsView | null;
   player: PlayerCard | null;
   house: HouseguestCard[];
   /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
@@ -434,6 +443,15 @@ export interface WhereaboutsView {
   present: NamedRef[];
   /** Each ADJACENT room and who is in it (names only). Non-adjacent rooms never appear. */
   nearby: Array<{ room: string; present: NamedRef[] }>;
+  /**
+   * DURATION — how many consecutive player-turns the player has been in this room (0 = just
+   * arrived this turn). Grounds scene continuity so the narrator voices persistence ("you've held
+   * the kitchen a while") instead of resetting the scene each turn (L21/L24). `companions` carries
+   * the same tenure for each houseguest currently with the player, so the model knows who has been
+   * lingering with them vs. who just walked in.
+   */
+  turnsHere: number;
+  companions: Array<{ id: EntityId; name: string; turnsHere: number }>;
 }
 
 /**
@@ -595,6 +613,14 @@ export interface GameSession {
    * narrator queries instead of inventing. `null` before a game starts (or once the player is out).
    */
   whereabouts(): WhereaboutsView | null;
+
+  /**
+   * The player walks to a room (L21/L24) — the player is a person, so THEY direct their movement;
+   * the engine never auto-relocates them, only holds them where they chose (NPCs drive around them).
+   * Sets the player's room + resets their tenure and returns the resulting whereabouts. No-op for an
+   * unknown room / before a game starts (returns the current whereabouts unchanged). Vault-free.
+   */
+  movePlayer(room: string): WhereaboutsView | null;
 
   /** The season's public arc from the event record (0048) — Vault-free, reproducible, any time. */
   seasonRecap(): SeasonRecapView;

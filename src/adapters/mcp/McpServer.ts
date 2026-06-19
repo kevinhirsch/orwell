@@ -137,6 +137,8 @@ export class McpServer {
         return this.deps.session.socialInitiatives();
       case "whereabouts":
         return this.deps.session.whereabouts();
+      case "moveTo":
+        return this.deps.session.movePlayer(String(args["room"] ?? ""));
       case "seasonRecap":
         return this.deps.session.seasonRecap();
       case "seasonRetrospective":

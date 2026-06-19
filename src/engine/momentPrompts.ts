@@ -202,6 +202,11 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    never place a houseguest from memory or a guess, never call a room empty without checking, and",
   "    never put one person in two places. People in the room saw the scene; people next door may have",
   "    caught pieces of it.",
+  "  • moveTo — the player walks somewhere they named (e.g. \"I head to the kitchen\"): call moveTo {room}",
+  "    so the game MOVES them for real, then voice the new room from what it returns. The player is a",
+  "    person — they choose where to go; they are never relocated on their own. Until you call this, they",
+  "    are still in their current `whereabouts` room — never narrate them somewhere the game has not moved",
+  "    them. (The houseguests drift on their own; you only moveTo the PLAYER.)",
   "  • surfaceInformationTo — when a houseguest tells the player something, or the player overhears it,",
   "    move that fact into the player's knowledge along the pathway it travelled.",
   "  • diaryRoom — record the player's private, out-of-character confessional. Nothing here reaches any",
@@ -486,6 +491,29 @@ export function renderGameContext(view: GameStateView): string {
   const playerIn = !view.player.status || view.player.status === "active";
   const remaining = activeNpcs + (playerIn ? 1 : 0);
   const total = view.house.length + 1; // the whole cast (player + every houseguest), never changes
+  // L21/L24: the player's live whereabouts — engine ground truth the model voices instead of inventing
+  // positions or "still to arrive" houseguests (the whole cast is seated at premiere). Scoped to the
+  // player's room + adjacent rooms only; tenure grounds continuity (who has lingered vs. just arrived).
+  const wa = view.whereabouts ?? null;
+  const roomLabel = (r: string): string => r.replace(/-/g, " ");
+  const tenureWord = (t: number): string => (t <= 0 ? "just arrived" : t === 1 ? "a moment" : `${t} turns`);
+  const whereaboutsLines: string[] = !wa ? [] : (() => {
+    const here = wa.present.length
+      ? wa.present.map((p) => {
+          const t = wa.companions.find((c) => c.id === p.id)?.turnsHere ?? 0;
+          return t >= 2 ? `${p.name} (lingering, ${tenureWord(t)})` : `${p.name} (${tenureWord(t)})`;
+        }).join(", ")
+      : "no one — you have this room to yourself";
+    const nearby = wa.nearby.filter((n) => n.present.length).map((n) => `${roomLabel(n.room)}: ${n.present.map((p) => p.name).join(", ")}`);
+    return [
+      "- WHERE YOU ARE (engine truth — voice THIS room and THESE people; NEVER invent positions, room",
+      "  changes, or \"still to arrive\" houseguests — the whole cast is already in the house):",
+      `    Your room: the ${roomLabel(wa.room)} (you've been here ${tenureWord(wa.turnsHere)}).`,
+      `    With you: ${here}.`,
+      nearby.length ? `    One room over: ${nearby.join("  ·  ")}.` : "    Adjacent rooms are empty (or you can't see in).",
+      "    You only see/hear your room and the rooms next to it — do NOT place anyone elsewhere in the scene.",
+    ];
+  })();
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -493,6 +521,7 @@ export function renderGameContext(view: GameStateView): string {
     `- Houseguests remaining: ${remaining} of ${total} (use THIS exact number for any count — never`,
     "  do your own arithmetic about how many are left, on podiums, etc.).",
     ...ceremonyLines,
+    ...whereaboutsLines,
     `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
     `- The house (${view.house.length} other houseguests) — each line is YOUR PRIVATE voice cue (how to`,
     "  play them); describe people ONLY by what is observable and never say an archetype, a strategy, or",

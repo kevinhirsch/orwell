@@ -28,8 +28,12 @@ export function assignRooms(
   active: readonly EntityId[],
   previous: Occupancy | null,
   deps: PresenceDeps,
+  // PINNED houseguests are seated FIRST and never moved — the engine drives only `active`, but the
+  // pinned still pull the movers (affinity clustering reads them). Used to hold the PLAYER in place
+  // (a person, not engine-relocated — L21/L24) while NPCs may still gravitate to the player's room.
+  pinned?: Occupancy | null,
 ): Map<EntityId, Room> {
-  const next = new Map<EntityId, Room>();
+  const next = new Map<EntityId, Room>(pinned ?? undefined);
   for (const id of active) {
     const here = previous?.get(id);
     // Candidate rooms: anywhere on first assignment; stay-or-adjacent afterwards. The diary

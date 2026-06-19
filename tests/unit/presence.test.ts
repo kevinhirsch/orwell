@@ -193,15 +193,53 @@ describe("whereabouts (0049) — the Vault-free presence read", () => {
     const adjacent = HOUSE_ADJACENCY.get(w.room as Room) ?? [];
     expect(w.nearby.map((n) => n.room)).toEqual([...adjacent]);
     for (const n of w.nearby) expect(areAdjacent(w.room as Room, n.room as Room)).toBe(true);
-    // Strict shape: NamedRefs only, anywhere in the view.
+    // Strict shape: NamedRefs only in present/nearby (no numbers, motives, or hidden keys).
     for (const ref of [...w.present, ...w.nearby.flatMap((n) => n.present)]) {
       expect(Object.keys(ref).sort()).toEqual(["id", "name"]);
     }
-    expect(Object.keys(w).sort()).toEqual(["nearby", "present", "room"]);
+    // L21/L24: duration rides the view — the player's tenure + each companion's (a NamedRef + turnsHere).
+    expect(Object.keys(w).sort()).toEqual(["companions", "nearby", "present", "room", "turnsHere"]);
+    expect(typeof w.turnsHere).toBe("number");
+    expect(w.turnsHere).toBeGreaterThanOrEqual(0);
+    expect(w.companions.map((c) => c.id).sort()).toEqual(w.present.map((p) => p.id).sort()); // same people as present
+    for (const c of w.companions) {
+      expect(Object.keys(c).sort()).toEqual(["id", "name", "turnsHere"]);
+      expect(c.turnsHere).toBeGreaterThanOrEqual(0);
+    }
     // Non-adjacent rooms never appear (fog of war): rooms shown = own + adjacent.
     const shown = new Set([w.room, ...w.nearby.map((n) => n.room)]);
     for (const room of shown) expect(HOUSE_ROOMS).toContain(room as Room);
     expect(shown.size).toBe(adjacent.length + 1);
+  });
+
+  it("L21/L24 — the player is a person: held across engine ticks, relocated only by movePlayer; tenure accrues", () => {
+    const { sb } = liveGame(8);
+    const room0 = sb.session.whereabouts()!.room;
+    // The engine drives many off-screen ticks (NPCs move) — the player is NEVER auto-relocated.
+    for (let i = 0; i < 12; i++) sb.session.presenceTick(new SeededRandom(500 + i));
+    expect(sb.session.whereabouts()!.room).toBe(room0);
+    expect(sb.session.whereabouts()!.turnsHere).toBeGreaterThan(0); // tenure accrued while held
+    // A DIRECTED move relocates the player and resets their tenure (a fresh arrival).
+    const dest = HOUSE_ROOMS.find((r) => r !== room0 && r !== "diary-room")!;
+    const after = sb.session.movePlayer(dest)!;
+    expect(after.room).toBe(dest);
+    expect(after.turnsHere).toBe(0);
+    // The engine still doesn't yank them off their chosen room on subsequent ticks.
+    for (let i = 0; i < 6; i++) sb.session.presenceTick(new SeededRandom(900 + i));
+    expect(sb.session.whereabouts()!.room).toBe(dest);
+    // An unknown room is a no-op (stays put); a same-room move is idempotent.
+    expect(sb.session.movePlayer("nowhere-room")!.room).toBe(dest);
+  });
+
+  it("L21/L24 — presence tenure round-trips through a save (continuity survives a restart)", () => {
+    const { sb } = liveGame(5);
+    for (let i = 0; i < 4; i++) sb.session.presenceTick(new SeededRandom(70 + i));
+    const before = sb.session.whereabouts()!;
+    const core = sb.session.snapshot();
+    sb.session.restore(core);
+    const restored = sb.session.whereabouts()!;
+    expect(restored.room).toBe(before.room);
+    expect(restored.turnsHere).toBe(before.turnsHere); // duration is durable, not reseeded to 0
   });
 
   it("never leaks a planted hidden sentinel", () => {
