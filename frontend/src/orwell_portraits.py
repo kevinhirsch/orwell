@@ -98,6 +98,34 @@ _VARIETY_DIRECTIVE = (
     "face shape, hairstyle, and overall look, unmistakably their own individual. "
 )
 
+# ── Portrait image config — square 1:1 framing at a pinned resolution ──────────────────────
+# Every cast portrait is requested as a SQUARE headshot at ONE consistent resolution, so the
+# roster grid is uniform and per-image cost is bounded (no surprise wide/tall renders). Both
+# provider transports (OpenAI /images/{generations,edits} via `size`, OpenRouter
+# /chat/completions via `image_config.aspect_ratio`) are asked for square; the prompt also
+# carries a "square headshot framing" belt-and-suspenders cue. All of this is per-model with
+# graceful degradation — a provider that ignores or rejects the hint never blocks generation.
+PORTRAIT_ASPECT_RATIO = "1:1"
+PORTRAIT_SIZE_DEFAULT = "1024x1024"
+# The `image_quality` setting maps to a square OpenAI `size` string. We keep ONE square family
+# (the grid stays uniform); quality only nudges the pixel budget / cost. Unknown values fall
+# back to the default. dall-e-3 accepts only 1024x1024, so that is the safe shared square size
+# across every provider — a single pinned resolution keeps the grid uniform and cost bounded.
+_QUALITY_SIZE = {
+    "low": "1024x1024",
+    "medium": "1024x1024",
+    "high": "1024x1024",
+    "auto": "1024x1024",
+}
+# A short, Vault-free framing cue appended to a portrait prompt so a provider that ignores the
+# structured size/aspect param still tends toward a square crop. Pure styling — no hidden state.
+_SQUARE_FRAMING_CUE = " Square headshot framing, 1:1 aspect ratio, centered subject."
+
+
+def _portrait_size(quality: Optional[str]) -> str:
+    """The pinned SQUARE OpenAI `size` string for a quality setting (default 1024x1024)."""
+    return _QUALITY_SIZE.get(str(quality or "").lower(), PORTRAIT_SIZE_DEFAULT)
+
 
 def _progress_start(user: Optional[str], total: int) -> None:
     """Mark a generation run as STARTED for this user (idempotent per run)."""
@@ -543,7 +571,9 @@ async def _generate_via_images_edit(client, base_url: str, model_id: str, prompt
     # httpx sets the multipart Content-Type (with boundary) itself — drop any JSON one.
     h = {k: v for k, v in (headers or {}).items() if k.lower() != "content-type"}
     files = {"image": ("headshot.png", reference_png, "image/png")}
-    data = {"model": model_id, "prompt": prompt, "size": "1024x1024"}
+    # Pinned square size (per-quality, default 1024x1024) so the edited result matches the rest
+    # of the cast grid; the prompt also carries the square-framing cue (belt-and-suspenders).
+    data = {"model": model_id, "prompt": prompt, "size": _portrait_size(quality)}
     if quality in ("low", "medium", "high", "auto"):
         data["quality"] = quality
     try:
@@ -590,9 +620,13 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
     else:
         content = prompt
     base_msg = {"model": model_id, "messages": [{"role": "user", "content": content}]}
+    # Request a SQUARE 1:1 portrait via OpenRouter's `image_config` hint. Per-model with graceful
+    # degradation: a model/provider that rejects the param (a 400) is retried once WITHOUT it, so
+    # the square ask never blocks generation. The prompt already carries the framing cue too.
+    square_cfg = {"image_config": {"aspect_ratio": PORTRAIT_ASPECT_RATIO}}
     attempts = (
-        {**base_msg, "modalities": ["image", "text"]},
-        {**base_msg, "tools": [{"type": "openrouter:image_generation"}]},
+        {**base_msg, "modalities": ["image", "text"], **square_cfg},
+        {**base_msg, "tools": [{"type": "openrouter:image_generation"}], **square_cfg},
     )
     last_reason, last_detail = "no-image", None
     for payload in attempts:
@@ -601,6 +635,18 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
         except Exception as e:  # transport error — try the next mechanism
             last_reason, last_detail = type(e).__name__, None
             continue
+        if resp.status_code != 200:
+            # Graceful degradation: a 4xx may be the unrecognized `image_config` — retry the SAME
+            # mechanism once with it stripped before giving up on this attempt.
+            if 400 <= resp.status_code < 500 and "image_config" in payload:
+                logger.info("[portraits] openrouter chat %s with image_config — retrying square-free",
+                            resp.status_code)
+                stripped = {k: v for k, v in payload.items() if k != "image_config"}
+                try:
+                    resp = await client.post(chat_url, json=stripped, headers=headers)
+                except Exception as e:
+                    last_reason, last_detail = type(e).__name__, None
+                    continue
         if resp.status_code != 200:
             logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
             last_reason, last_detail = f"http-{resp.status_code}", _provider_error_reason(resp)
@@ -623,7 +669,8 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
 
 
 async def _generate_one(prompt: str, user: Optional[str],
-                        reference_png: Optional[bytes] = None) -> Optional[bytes]:
+                        reference_png: Optional[bytes] = None,
+                        keep_identity: bool = True) -> Optional[bytes]:
     """Generate a single image from `prompt`; return PNG bytes, or None on any failure.
 
     Best-effort: every failure path returns None (never raises) so a flaky image API can
@@ -636,6 +683,13 @@ async def _generate_one(prompt: str, user: Optional[str],
     provider's image-to-image path — OpenRouter chat with the image part, OpenAI /images/edits.
     A provider with no img2img path falls back to plain text-to-image (logged) so a portrait
     still lands; the likeness is best-effort, never a hard failure.
+
+    L17 re-shoot: when REGENERATING an existing houseguest's portrait, the caller passes the
+    current portrait as `reference_png` so the houseguest stays the SAME person across the
+    re-roll. There the caller supplies its own framing (the variety directive) and sets
+    `keep_identity=False` so the standard "minimal alteration" identity-keep prefix is NOT
+    prepended (it would fight the variety directive) — the reference image alone carries the
+    person, the variety directive carries the differentiation from the rest of the cast.
     """
     import httpx
     from src.ai_interaction import _resolve_model
@@ -643,8 +697,12 @@ async def _generate_one(prompt: str, user: Optional[str],
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
         return None
-    if reference_png:
+    if reference_png and keep_identity:
         prompt = REFERENCE_PROMPT_PREFIX + prompt
+    # Belt-and-suspenders square framing: every portrait carries the 1:1 cue in the prompt text
+    # so a provider that ignores the structured size/aspect param still tends toward a square
+    # crop. The structured params (size / image_config) below remain the primary control.
+    prompt = prompt + _SQUARE_FRAMING_CUE
 
     # Ignore a configured CHAT model (it can't generate — it would 400) and fall back to
     # image auto-detect, mirroring image_generation_available so a stale/mis-set model never
@@ -681,7 +739,9 @@ async def _generate_one(prompt: str, user: Optional[str],
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
     images_url = base_url + "/images/generations"
 
-    size = "1024x1024"
+    # Pinned SQUARE size (per-quality, default 1024x1024) — one consistent resolution so the
+    # roster grid is uniform and per-image cost is bounded.
+    size = _portrait_size(quality)
     payload = {"model": model_id, "prompt": prompt, "n": 1, "size": size}
     if is_gpt_image:
         payload["quality"] = quality if quality in ("low", "medium", "high", "auto") else "medium"
@@ -1317,11 +1377,25 @@ async def dedupe_lookalikes(prompts: list, user: Optional[str],
         name = str(entry.get("name") or "")
         if not base_prompt:
             continue
-        # Re-prompt with the variety directive injected up front so the model produces a clearly
-        # different face. NPCs are always text-to-image (no reference) — the player is excluded above.
+        # Re-prompt with the variety directive injected up front so the model produces a face
+        # that is clearly distinct from the REST of the cast. Feed the houseguest's CURRENT
+        # portrait back as a reference image (img2img) so they stay the SAME person across the
+        # re-roll — only when a prior portrait exists; first-generation is always text-to-image.
+        # keep_identity=False so the standard "minimal alteration" prefix is NOT prepended (it
+        # would fight the variety directive); the reference image carries the person, the
+        # directive carries the differentiation. A provider with no img2img path degrades to
+        # plain text-to-image inside _generate_one (best-effort, never a hard failure).
+        ref_png = None
+        try:
+            existing = portrait_file(user, str(hid))
+            if existing:
+                ref_png = existing.read_bytes()
+        except Exception:
+            ref_png = None
         _consume_gen_error(); _consume_gen_detail()
         t0 = time.monotonic()
-        png = await _generate_one(_VARIETY_DIRECTIVE + base_prompt, user)
+        png = await _generate_one(_VARIETY_DIRECTIVE + base_prompt, user,
+                                  reference_png=ref_png, keep_identity=False)
         duration_ms = int((time.monotonic() - t0) * 1000)
         if not png:
             log_attempt(str(hid), False, (_consume_gen_error() or "lookalike-regen-failed"),
