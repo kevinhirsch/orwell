@@ -368,7 +368,9 @@ export interface BeatEventView {
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
+    | "self-evict";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -582,7 +584,15 @@ export interface FinaleFastForwardView {
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
+    | "self-evict";
+  /**
+   * self-evict (0061): the EXPLICIT confirmation. ONLY `confirmed:true` executes the irreversible
+   * walk-out (record the event + fold its impact + flip status through the 0046 door). Anything else
+   * (false/absent/cancel) leaves the player ACTIVE and in the house — the anti-accident gate.
+   */
+  confirmed?: boolean;
   /** nominations: exactly two houseguest ids. For houseguests-choice / tie-break / final-eviction
    *  a single pick may ride here as a 1-element array (the FE tool schema's convention) — the
    *  engine accepts it interchangeably with `vote` (audit A10). */
@@ -679,6 +689,19 @@ export interface GameSession {
   advanceGame(): AdvanceView;
   /** Resolve the current pending decision and continue the loop (validated; 0011). */
   submitDecision(req: SubmitDecisionReq): AdvanceView;
+  /**
+   * Self-eviction step 1 (0061 §4.2) — the player expresses an OOC intent to leave: surface the
+   * `self-evict` CONFIRMATION pending and change NO state (the house never hears it; the L36/L39a
+   * gate holds). It does NOT evict — only an explicit `submitDecision({ kind: "self-evict",
+   * confirmed: true })` does (step 2). Idempotent; a no-op before a game starts or once the player
+   * is already out. Returns the Vault-free view carrying the confirmation pending.
+   */
+  requestSelfEviction(): AdvanceView;
+  /**
+   * Self-eviction cancel (0061 §4.2) — the player declines the confirmation: clear the `self-evict`
+   * pending and leave them ACTIVE and in the house, state unchanged. A no-op when nothing is pending.
+   */
+  cancelSelfEviction(): AdvanceView;
   /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding

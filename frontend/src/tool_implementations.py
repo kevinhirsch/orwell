@@ -4741,16 +4741,30 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
+        # 0061: the confirmed self-eviction rides the same validated decision seam.
+        "self-evict",
     }
     if kind not in _DECISION_KINDS:
         return {"error": f"kind must be one of: {', '.join(sorted(_DECISION_KINDS))}", "exit_code": 1}
     decision: dict = {"kind": kind}
-    for k in ("choice", "use", "save", "replacement", "vote", "statement", "appeal", "intent"):
+    for k in ("choice", "use", "save", "replacement", "vote", "statement", "appeal", "intent", "confirmed"):
         if args.get(k) is not None:
             decision[k] = args[k]
     try:
         res = await orwell_engine.submit_decision(decision, user=owner)
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_request_self_eviction(content: str, owner: Optional[str] = None) -> Dict:
+    # 0061 step 1: a clear OOC intent to leave raises the confirmation (no state change; the house
+    # never hears it). The player's own explicit confirm (the card → submitDecision) is what binds.
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.request_self_eviction(user=owner)
+        orwell_engine.remember_pending(res, user=owner)  # surface the confirm card on reload too
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

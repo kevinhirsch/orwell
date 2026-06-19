@@ -77,6 +77,7 @@ import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
+  requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
@@ -658,6 +659,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "juror-question", statement: input.question ?? "" };
       case "juror-vote":
         return { kind: "juror-vote", vote: input.vote };
+      case "self-evict": // 0061: the auto-driver never produces a self-evict (it's a deliberate quit) — mapped for exhaustiveness.
+        return { kind: "self-evict", confirmed: input.confirmed };
     }
   }
 
@@ -1606,6 +1609,15 @@ export class GameSessionAdapter implements GameSession {
         if (s.hoh) for (const h of s.active) fold(h, s.hoh, "comp-won");
         break;
       }
+      case "self-eviction": {
+        // 0061 §4.4: the present house's souls fold the player's VOLUNTARY walk-out — the house's
+        // read of the LEAVER moves (threat▼ as a rival removes itself, a slight warmth/reliability
+        // dip for quitting on them). The leaver is gone, so only the house→leaver direction folds.
+        // `applySelfEviction` already removed the player, so `s.active` is exactly the present house.
+        const leaver = ev.participants[0];
+        if (leaver) for (const h of s.active) fold(h, leaver, "self-evicted");
+        break;
+      }
     }
   }
 
@@ -1639,15 +1651,70 @@ export class GameSessionAdapter implements GameSession {
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
+    if (!this.house || !this.live) return this.advanceView(null);
+    // 0061 — self-eviction is the sanctioned CONFIRMED quit. It rides the SAME `submitDecision`
+    // seam but resolves through its own dedicated path (NOT the ceremony-pending machinery): the
+    // confirmation must already be raised (the OOC step-1 gate), AND `confirmed` must be true.
+    // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
+    // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
+    if (req.kind === "self-evict") return this.resolveSelfEviction(req.confirmed === true);
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error).
-    if (!this.house || !this.live || !this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    if (!this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
     return this.inOneCommit(() => {
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
+      return this.advanceView(ev);
+    });
+  }
+
+  /**
+   * Self-eviction step 1 (0061 §4.2) — an OOC intent-to-leave raises the confirmation pending and
+   * changes NO game state (the house never hears it; the L36/L39a gate holds for the bare line). It
+   * does NOT evict — only a confirmed `submitDecision({ kind: "self-evict", confirmed: true })` does.
+   */
+  requestSelfEviction(): AdvanceView {
+    if (!this.house || !this.live) return this.advanceView(null);
+    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
+    return this.inOneCommit(() => {
+      requestSelfEvict(this.live!, this.ctx());
+      this.persist(); // durable: a raised confirmation survives a reload (0030)
+      return this.advanceView(null);
+    });
+  }
+
+  /** Self-eviction cancel (0061 §4.2) — clear the confirmation; the player plays on, ACTIVE, unchanged. */
+  cancelSelfEviction(): AdvanceView {
+    if (!this.house || !this.live) return this.advanceView(null);
+    return this.inOneCommit(() => {
+      cancelSelfEvict(this.live!);
+      this.persist();
+      return this.advanceView(null);
+    });
+  }
+
+  /**
+   * Self-eviction step 2 (0061 §4.1) — the confirmed walk-out. A no-op unless the confirmation was
+   * raised AND `confirmed` is true (the anti-accident gate; a stray/unconfirmed call never evicts).
+   * Routes the exit through the SAME commit path every beat uses: `applySelfEviction` records a real
+   * `self-eviction` BeatEvent (the registry records it player-witnessed + non-hidden), `commit` folds
+   * its 0023 hidden impact, the player's status flips via the 0046 `evictionOrder` door, and the
+   * snapshot persists. Never narrated-but-not-recorded: either this transition ran, or the player
+   * is still in the house.
+   */
+  private resolveSelfEviction(confirmed: boolean): AdvanceView {
+    const s = this.live!;
+    // The gate: the OOC confirmation must be standing, the player must still be in, and the confirm
+    // must be explicit. Any miss is a safe no-op (the player stays active) — never a fabricated exit.
+    if (!confirmed || !s.selfEvictPending || s.finished || playerHasLeft(s, PLAYER)) {
+      return this.advanceView(null);
+    }
+    return this.inOneCommit(() => {
+      const ev = applySelfEviction(s, this.ctx());
+      this.commit(ev); // record (witness = present house, non-hidden) + fold 0023 + sync + persist
       return this.advanceView(ev);
     });
   }
@@ -1958,6 +2025,8 @@ export class GameSessionAdapter implements GameSession {
         if (!vote) throw new Error("a juror vote is required");
         return { kind: "juror-vote", vote };
       }
+      case "self-evict": // 0061: intercepted in `submitDecision` BEFORE this map — never reached here.
+        return { kind: "self-evict", confirmed: req.confirmed === true };
     }
   }
 
@@ -1967,6 +2036,17 @@ export class GameSessionAdapter implements GameSession {
 
   private pendingView(): PendingDecisionView | null {
     const p = this.live?.pending;
+    // 0061: surface the OOC self-evict CONFIRMATION. A ceremony pending is a hard stop and takes
+    // priority (the in-flight ceremony resolves first, §4.6 — the confirmation waits); when the loop
+    // is not blocked on a ceremony decision, the raised confirmation shows on the player-level channel.
+    if (!p && this.live?.selfEvictPending && this.house) {
+      const by = this.named(PLAYER)!;
+      return {
+        kind: "self-evict", by,
+        prompt: "Leaving the game is final — a real walk-out you cannot undo. Confirm to self-evict and end your season, or cancel to stay in the house.",
+        options: [], pick: 0,
+      };
+    }
     if (!p) return null;
     const by = this.named(p.by)!;
     const refs = (ids: EntityId[]): NamedRef[] => ids.map((id) => ({ id, name: this.nameOf(id) }));
@@ -2020,6 +2100,11 @@ export class GameSessionAdapter implements GameSession {
         };
       case "juror-vote":
         return { kind: p.kind, by, prompt: "You sit on the jury — cast your vote for the winner.", options: refs(p.finalists), pick: 1 };
+      case "self-evict":
+        // 0061: the self-evict confirmation never lives on `this.live.pending` (it rides
+        // `selfEvictPending`, surfaced above), so this branch is unreachable — handled for
+        // type-exhaustiveness only.
+        return { kind: p.kind, by, prompt: "Confirm to self-evict, or cancel to stay.", options: [], pick: 0 };
     }
   }
 
@@ -2216,6 +2301,10 @@ export class GameSessionAdapter implements GameSession {
    * Vault-free: nothing here reads a hidden number.
    */
   private playerStatus(): "active" | "jury" | "evicted" {
+    // 0061 (owner decision #1): a CONFIRMED self-eviction is a FORFEIT — the player exits the game
+    // entirely and never takes a juror's seat, even in the jury phase. So a self-evicted player
+    // always reads "evicted" (terminal), overriding the phase-derived seat the eviction index would give.
+    if (this.live?.selfEvicted) return "evicted";
     return this.seatOf(PLAYER);
   }
 
@@ -2245,8 +2334,12 @@ export class GameSessionAdapter implements GameSession {
     const status = this.playerStatus();
     // Once the player is out, the moment frames their new seat (closure / the jury spectator box, 0046)
     // rather than the ceremony phase they can no longer act in. An active player keeps the phase moment.
-    // The finished terminal state (0048) trumps every seat: the season is over, the reunion begins.
-    const moment = this.live?.finished
+    // 0061: a VOLUNTARY walk-out gets its own terminal framing (the season is over for them by their OWN
+    // choice — no crowned winner to host a reunion around, unlike `post-season`). It trumps every seat.
+    // Otherwise the finished terminal state (0048) trumps every seat: the season is over, the reunion begins.
+    const moment = this.live?.selfEvicted
+      ? "self-evicted"
+      : this.live?.finished
       ? "post-season"
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {

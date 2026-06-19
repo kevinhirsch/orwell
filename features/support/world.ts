@@ -469,6 +469,18 @@ export class BbWorld extends World {
   dpSentinel?: string;
   dpWriteResult?: import("../../src/ports/GameSession").RecordCastProfileResult;
 
+  // Player self-eviction (0061) scratch state.
+  svRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  svUser?: string;
+  svSandbox?: import("../../src/composition/registry").UserSandbox;
+  svView?: import("../../src/ports/GameSession").AdvanceView;
+  svGameState?: import("../../src/ports/GameSession").GameStateView;
+  svEventsBefore?: number;
+  svWitnessedBefore?: number;
+  svStateBefore?: string;
+  svSentinel?: string;
+  svPresent?: Eid[];
+
   constructor(options: IWorldOptions) {
     super(options);
   }

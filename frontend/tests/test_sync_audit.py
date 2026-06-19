@@ -40,6 +40,8 @@ _DECISION_KINDS = [
     "finale-answer",
     "juror-question",
     "juror-vote",
+    # 0061: the confirmed self-eviction rides the same validated decision seam (and gets the barrier).
+    "self-evict",
 ]
 
 

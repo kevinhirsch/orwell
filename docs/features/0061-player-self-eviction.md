@@ -1,14 +1,22 @@
 # 0061 — Player self-eviction (the voluntary walk-out / quit path)
 
-> **Status:** 📝 **SPEC ONLY — not built.** Adds a **real, recorded, confirmed** voluntary
-> self-eviction (the player walks out / quits the game) on top of **0046** (player eviction & the
-> juror's seat) — reusing that feature's terminal/jury machinery, **0047**'s eviction-night beat +
-> player-authored goodbye, and **0023**'s consequence fold. This is the *confirmed* path that the
-> **L39(a)** interim refusal stands in for: the GM currently REFUSES to fabricate a narrated-but-
-> unrecorded exit and keeps the player ACTIVE until the *game* evicts them; 0061 makes the genuine
-> walk-out a sanctioned engine action so the refusal applies only to *unconfirmed/ambiguous* exits.
+> **Status:** ✅ **BUILT — BDD-gated** (`0061-player-self-eviction.feature` in `cucumber.cjs`).
+> A **real, recorded, confirmed** voluntary self-eviction (the player walks out / quits the game) on
+> top of **0046** (player eviction & the juror's seat) — reusing that feature's terminal/exit
+> `evictionOrder` door (no second hinge), **0047**'s player-authored parting message (offered but
+> skippable), and **0023**'s consequence fold. This is the *confirmed* path that the **L39(a)** interim
+> refusal stood in for: the GM still REFUSES a narrated-but-unrecorded exit for *unconfirmed/ambiguous*
+> lines, while 0061 makes the genuine, explicitly-confirmed walk-out a sanctioned engine action.
+> **Owner decisions baked in (see §9):** (1) a confirmed quit **FORFEITS** — the player exits the game
+> ENTIRELY (terminal recap) and never takes a juror's seat, in any phase; (2) the parting message is
+> **offered but skippable**; (3) legal at **any beat**, resolved at the next safe transition; (4) NPC
+> self-eviction is **out of scope**.
+> **Engine:** the `self-evict` pending + `submitDecision({kind:"self-evict",confirmed:true})` plus the
+> `requestSelfEviction`/`cancelSelfEviction` handshake (`GameSession`); `applySelfEviction` in
+> `liveSeason.ts`; the `self-evicted` ceremony fold + forfeit seat in `GameSessionAdapter`. **Tests:**
+> `tests/unit/selfEviction.test.ts`, `features/step_definitions/self_eviction.steps.ts`, FE
+> `frontend/tests/test_0061_self_eviction.py`.
 > **Executable spec:** [`0061-player-self-eviction.feature`](./0061-player-self-eviction.feature)
-> **Not yet in `cucumber.cjs`** (added when built to green, in priority order — exactly as 0046/0047 were).
 
 ## 1. Summary
 

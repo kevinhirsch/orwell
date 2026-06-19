@@ -41,7 +41,9 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "surfaceInformationTo", channel: "player", readsVault: false, description: "Move a hidden fact into knowledge via a recorded in-game pathway." },
   { name: "diaryRoom", channel: "player", readsVault: false, description: "Record a player Diary-Room entry: the player's own OOC knowledge, with no in-game pathway to any houseguest." },
   { name: "advanceGame", channel: "player", readsVault: false, description: "Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale); stops and returns a pending decision when it's the player's turn to choose." },
-  { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending binding decision — whatever kind the engine is blocked on; the pending decision itself names its kind and legal options — and continue the loop." },
+  { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending binding decision — whatever kind the engine is blocked on; the pending decision itself names its kind and legal options — and continue the loop. (For a confirmed self-eviction (0061), submit { kind: 'self-evict', confirmed: true } — ONLY after the player has explicitly confirmed the raised confirmation.)" },
+  { name: "requestSelfEviction", channel: "player", readsVault: false, description: "Step 1 of a player self-eviction (0061): the player expressed an OOC intent to LEAVE/quit. Raise the confirmation (names the irreversible stakes) and change NO state — the house never hears it, and nothing evicts until the player explicitly confirms via submitDecision({ kind:'self-evict', confirmed:true }). FE-driven; never call this off an in-character throwaway line." },
+  { name: "cancelSelfEviction", channel: "player", readsVault: false, description: "Cancel a raised self-eviction confirmation (0061): the player decided to stay. Clears the confirmation; they remain ACTIVE and in the house, unchanged." },
   { name: "makeDeal", channel: "player", readsVault: false, description: "Make a deal with a houseguest (safety / vote / final-two / target-other). Tracked as a first-class promise; the engine reconciles it against later binding actions and a broken promise hurts." },
   { name: "recordImageBeat", channel: "player", readsVault: false, description: "Record that an in-character image was shown to the player (0051) — a player-witnessed image-shown event so it has memory ('recorded or it didn't happen'). Returns its id." },
 ];
@@ -66,7 +68,11 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
  */
 // (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
 // competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
-const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView", "getPortraitPrompt", "recordImageBeat"]);
+const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView", "getPortraitPrompt", "recordImageBeat",
+  // 0061: `cancelSelfEviction` is the confirmation card's own Cancel action (FE-driven), NOT a model
+  // lever. `requestSelfEviction` IS advertised (below): on a clear OOC intent the model raises the
+  // confirmation — which changes NO state — and the player's explicit confirm (the card) is what binds.
+  "cancelSelfEviction"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

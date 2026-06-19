@@ -1167,6 +1167,7 @@ async def execute_tool_block(
         do_inspect_non_vault_state, do_override_mechanic, do_configure_game,
         do_manage_sandbox, do_sandbox_health,
         do_create_character, do_update_casting, do_advance_game, do_submit_decision,
+        do_request_self_eviction,
         do_social_initiatives, do_diary_room, do_make_deal, do_whereabouts, do_move_to,
         do_season_recap, do_season_retrospective, do_npc_voice,
         do_app_api,
@@ -1558,6 +1559,9 @@ async def execute_tool_block(
     elif tool == "submitDecision":
         desc = "submitDecision"
         result = await do_submit_decision(content, owner=owner)
+    elif tool == "requestSelfEviction":
+        desc = "requestSelfEviction"
+        result = await do_request_self_eviction(content, owner=owner)
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

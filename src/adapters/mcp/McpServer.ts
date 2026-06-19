@@ -125,6 +125,12 @@ export class McpServer {
         return this.deps.session.advanceGame();
       case "submitDecision":
         return this.deps.session.submitDecision(args as unknown as SubmitDecisionReq);
+      case "requestSelfEviction":
+        // 0061 step 1: raise the OOC self-evict confirmation (no state change; the house never hears it).
+        return this.deps.session.requestSelfEviction();
+      case "cancelSelfEviction":
+        // 0061: decline the confirmation — the player plays on, ACTIVE and unchanged.
+        return this.deps.session.cancelSelfEviction();
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
       case "getVisibleStateFor":
