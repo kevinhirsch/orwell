@@ -617,6 +617,32 @@ def main() -> int:
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
 
+            # Slot stacking is viewport-clamped (the vault/new-season collision fix):
+            # two TALL windows in ONE slot must BOTH stay on-screen — never shoved
+            # above the top (the original bug pushed the second window off-screen).
+            stack = page.evaluate("""() => {
+              const tall = '<div style="height:420px;width:340px">tall</div>';
+              const a = window.OrwellWindowKit.create({ id: 'ow-stack-a', title: 'Stack A',
+                slot: 'bottom-right', slotKey: 'owstacka', content: tall, icon: '' });
+              const b = window.OrwellWindowKit.create({ id: 'ow-stack-b', title: 'Stack B',
+                slot: 'bottom-right', slotKey: 'owstackb', content: tall, icon: '' });
+              a.open(); b.open();
+              window._owStackA = a; window._owStackB = b;
+              if (window.OrwellSlots && window.OrwellSlots.restackAll) window.OrwellSlots.restackAll();
+              const rect = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
+              return { a: rect('ow-stack-a'), b: rect('ow-stack-b'),
+                       vw: window.innerWidth, vh: window.innerHeight };
+            }""")
+            for nm in ("a", "b"):
+                r = stack[nm]
+                check(r["top"] >= -1 and r["left"] >= -1
+                      and r["left"] <= stack["vw"] and r["top"] <= stack["vh"],
+                      f"slot: stacked window '{nm}' stays in viewport "
+                      f"(top={r['top']:.0f} left={r['left']:.0f} vw={stack['vw']} vh={stack['vh']})")
+            page.evaluate("window._owStackA && window._owStackA.destroy(); "
+                          "window._owStackB && window._owStackB.destroy();")
+            page.wait_for_timeout(120)
+
             # 0054 Phase 2 — DOCKED kit mode: a dockable window can render its full
             # body INTO #gadget-rail-body (opting OUT of position:fixed + the slot
             # geometry — ONE position system), the docked flag persists per-window,
