@@ -29,6 +29,29 @@ from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
+# Throttle recurring poll-failure warnings. The status/state/finale routes are polled every ~2s;
+# when the engine is unreachable EVERY poll failed and logged a WARNING, which firehosed the logs
+# (and ballooned ops-panel.log / the /admin/status viewer — a sustained outage could crash the tab).
+# Log the FIRST failure immediately, then at most once per `_WARN_EVERY` seconds per key, so an
+# outage leaves a readable heartbeat instead of a flood. Recovery clears the key (next failure logs).
+import time as _time
+
+_WARN_EVERY = 30.0
+_LAST_WARN: dict[str, float] = {}
+
+
+def _warn_throttled(key: str, msg: str) -> None:
+    now = _time.monotonic()
+    last = _LAST_WARN.get(key)
+    if last is None or now - last >= _WARN_EVERY:
+        _LAST_WARN[key] = now
+        logger.warning(msg)
+
+
+def _clear_warn(key: str) -> None:
+    """Call on a successful poll so the next failure logs immediately (outage start is never silent)."""
+    _LAST_WARN.pop(key, None)
+
 
 def _current_user(request: Request) -> Optional[str]:
     """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021).
@@ -124,9 +147,11 @@ def setup_orwell_routes() -> APIRouter:
     @router.get("/state")
     async def orwell_state(request: Request):
         try:
-            return await orwell_engine.get_game_state(user=_current_user(request))
+            st = await orwell_engine.get_game_state(user=_current_user(request))
+            _clear_warn("state")
+            return st
         except Exception as e:
-            logger.warning(f"[orwell] state failed: {e}")
+            _warn_throttled("state", f"[orwell] state failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.get("/moment")
@@ -140,7 +165,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
-            logger.warning(f"[orwell] moment failed: {e}")
+            _warn_throttled("moment", f"[orwell] moment failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.get("/status")
@@ -159,14 +184,15 @@ def setup_orwell_routes() -> APIRouter:
             # never refreshes that cache). A status poll NEVER advances the game (ADR 0003).
             if isinstance(st, dict) and "pending" not in st:
                 st["pending"] = orwell_engine.last_pending(_current_user(request))
+            _clear_warn("status")
             return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
                 return {"started": False}
-            logger.warning(f"[orwell] status failed: {e}")
+            _warn_throttled("status", f"[orwell] status failed: {e}")
             return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
-            logger.warning(f"[orwell] status failed: {e}")
+            _warn_throttled("status", f"[orwell] status failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.get("/tagline")
@@ -240,7 +266,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             return {"finale": await orwell_engine.finale_view(user=_current_user(request))}
         except Exception as e:
-            logger.warning(f"[orwell] finale failed: {e}")
+            _warn_throttled("finale", f"[orwell] finale failed: {e}")
             return {"finale": None}
 
     @router.get("/roster")
