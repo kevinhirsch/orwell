@@ -13,3 +13,7 @@ coverage/
 
 # audit visual-telemetry sandbox (never commit)
 .audit-telemetry/
+
+# jury-reach shard artifacts (local default JURY_RESULTS_DIR / CI's collected dir)
+tmp/
+jury-results/

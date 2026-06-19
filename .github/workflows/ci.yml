@@ -27,22 +27,25 @@ jobs:
       - run: npm run test:ci
 
   # The heavy simulation lane (split from `test` for wall-clock parallelism — NOT a reduction in
-  # scope). Plays the full-game UAT (12+5 seeds), the juryReach calibration gate (20 passive
-  # seasons), and the calibration GRADIENT gate (6 seeds × passive+active sweeps) to completion —
-  # the same files `test:ci` excludes — so together with `test` the whole functional suite still
-  # runs exactly once per CI run, just across concurrent runners.
+  # scope). Plays the full-game UAT (12+5 seeds) and the calibration GRADIENT gate (6 seeds ×
+  # passive+active sweeps) to completion — the same files `test:ci` excludes — so together with
+  # `test` and the jury shards below, the whole functional suite still runs exactly once per CI
+  # run, just across concurrent runners.
   #
-  # These two files were the wall-clock long pole (on real CI, ~511s and ~464s) and previously ran
+  # These files were the wall-clock long pole (on real CI, ~511s for the UAT) and previously ran
   # CONCURRENTLY on the SAME runner inside `npm test`, so they shared 4 vCPUs and contended. Here
   # they fan out one-file-per-runner via the matrix, so each gets a dedicated runner with no
   # cross-file contention — the lane's wall is then the single slowest file, the irreducible floor.
   # The files import src/ directly (vitest transpiles on the fly), so no `npm run build` is needed.
+  #
+  # The juryReach calibration gate (~464s as a single file) is sharded further below — see
+  # `jury-shard` + `jury-aggregate`.
   heavy-sims:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        sim: [uat, jury, gradient]
+        sim: [uat, gradient]
     name: heavy-sims (${{ matrix.sim }})
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +55,65 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:heavy:${{ matrix.sim }}
+
+  # The juryReach calibration gate, SHARDED across runners (was the heavy-sims (jury) entry, ~464s
+  # as one file). The 20 passive seeded seasons are independent and per-season seeded, so each shard
+  # plays a contiguous 5-seed slice (4 shards × 5 = 20, no overlap) and UPLOADS its per-season
+  # measurements as an artifact. NO band assertion happens here — a slice can't see the
+  # distribution. The dependent `jury-aggregate` job downloads all four artifacts, recombines the
+  # full 20, and runs the SINGLE distribution assertion (the reported required check for the gate).
+  # Bands and seed count are UNCHANGED — only WHERE the seeds are played moved.
+  jury-shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    name: jury-shard (${{ matrix.shard }})
+    env:
+      JURY_SHARDS: "4"
+      JURY_SHARD: ${{ matrix.shard }}
+      JURY_RESULTS_DIR: jury-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:heavy:jury
+      - name: upload shard results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jury-shard-${{ matrix.shard }}
+          path: jury-results/jury-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Recombine every jury shard and assert the full-20 calibration band — the SAME floor/ceiling
+  # reach band, rare-F2-win ceiling, and earned-win teeth the pre-shard single-file gate ran.
+  # This is the reported required check for jury calibration: green only if the full-20 band holds.
+  # It depends on every shard (so all four artifacts exist) and downloads them into one dir.
+  jury-aggregate:
+    runs-on: ubuntu-latest
+    needs: jury-shard
+    name: jury-aggregate (full-20 band)
+    env:
+      JURY_RESULTS_DIR: jury-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: download all jury shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jury-shard-*
+          path: jury-results
+          merge-multiple: true
+      - run: npm run test:heavy:jury:aggregate
 
   # Coverage gate (B70/audit C8): per-directory branch thresholds in vitest.config.ts —
   # coverage can no longer silently regress while the functional gate stays green.
