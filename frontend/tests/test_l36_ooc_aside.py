@@ -11,9 +11,10 @@ half of the DECIDED design (docs/audits/2026-06-19-live-debug-issues.md, L36):
   2. The player's own SENT OOC aside renders in a visually-distinct "aside to
      production" bubble style (theme-token driven), with the markers stripped from
      the display text — clearly NOT a spoken-in-room line.
-
-OUT OF SCOPE here (and asserted as such): styling the MODEL's OOC *responses*
-needs an engine-emitted marker that does not exist yet — never heuristically faked.
+  3. (L36 follow-on) The MODEL's OOC *answers* render as a distinct producer/HUD
+     aside too — keyed to the ENGINE MARKER (the GM wraps its whole OOC reply in
+     `((...))` per the momentPrompts prompt contract), so it is a real marker, NOT
+     a heuristic guess.
 
 Two halves to this test:
   * BEHAVIORAL — the actual JS `detectOocAside` is executed in Node over a table
@@ -138,32 +139,39 @@ def test_l36_renderer_applies_aside_class_and_strips_markers():
     js = _read("static", "js", "chatRenderer.js")
     # imports the single-source detector
     assert "import { detectOocAside } from './orwellOocAside.js'" in js
-    # applied to the player's own user bubble, game-build gated
-    assert "role === 'user' && isGameBuild()" in js
+    # applied to BOTH the player's input AND the model's answer, game-build gated
+    assert "(role === 'user' || role === 'assistant') && isGameBuild()" in js
     assert "detectOocAside(text)" in js
     # the distinct class + the marker-stripped display text
     assert "'msg-ooc'" in js
 
 
-def test_l36_renderer_does_not_fake_model_output_marker():
-    """SCOPE GUARD: the OOC style is keyed to the PLAYER's own input only —
-    never applied to assistant/model bubbles (that needs an engine marker that
-    does not exist yet). The detection branch must be inside the user-role guard."""
+def test_l36_model_output_uses_engine_marker():
+    """L36 follow-on: the MODEL's OOC answer renders as a distinct producer aside,
+    keyed to the ENGINE MARKER — the GM wraps its whole OOC reply in `((...))` (the
+    momentPrompts prompt contract), which the same `detectOocAside` recognises. This
+    is a real marker, NOT a heuristic guess on free narration."""
     js = _read("static", "js", "chatRenderer.js")
-    # the only detectOocAside call is gated by role === 'user'
+    # the detection branch covers the assistant role and adds the producer class
     idx = js.index("detectOocAside(text)")
-    window = js[max(0, idx - 200):idx]
-    assert "role === 'user'" in window
+    window = js[max(0, idx - 260):idx + 260]
+    assert "role === 'assistant'" in window
+    assert "msg-ooc-producer" in window
+    # the engine side ships the marker contract (the GM wraps its OOC reply in (( )))
+    prompts = _read("..", "src", "engine", "momentPrompts.ts")
+    assert "MARK YOUR OWN OOC ANSWERS" in prompts
 
 
 # ── STRUCTURAL — the CSS is theme-token driven (works across themes/frost) ────
 
 def test_l36_aside_and_hint_css_is_theme_token_driven():
     css = _read("static", "style.css")
-    # the distinct aside bubble + body + production badge
+    # the distinct aside bubble + body + production badge (player input side)
     assert ".msg-user.msg-ooc" in css
     assert ".msg-user.msg-ooc .body" in css
     assert ".msg-user.msg-ooc .role::after" in css
+    # L36 follow-on — the MODEL's OOC answer aside (producer/HUD), same token-driven treatment
+    assert ".msg-ooc.msg-ooc-producer" in css
     # the one-time composer hint
     assert ".orwell-ooc-hint" in css
     assert ".orwell-ooc-hint-dismiss" in css
