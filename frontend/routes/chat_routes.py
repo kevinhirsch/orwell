@@ -1108,6 +1108,9 @@ def setup_chat_routes(
                                     used_memories=ctx.used_memories,
                                     do_research=effective_do_research,
                                     incognito=incognito,
+                                    # Vault Wall (casting-leak fix): an OOC pre-game casting
+                                    # reply is stamped so the in-game narrator never receives it.
+                                    phase=("casting" if (ctx.framed and not ctx.game_active) else None),
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
@@ -1256,6 +1259,9 @@ def setup_chat_routes(
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
                                     incognito=incognito,
+                                    # Vault Wall (casting-leak fix): an OOC pre-game casting
+                                    # reply is stamped so the in-game narrator never receives it.
+                                    phase=("casting" if (ctx.framed and not ctx.game_active) else None),
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
