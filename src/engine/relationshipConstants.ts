@@ -204,6 +204,49 @@ export const EVICTION_MANNER_SCALE = {
 } as const;
 
 /**
+ * The generative-consequence path (ADR 0005 — "split authority by openness"). The LLM may PROPOSE a
+ * per-edge consequence SHAPE — which directed signal moves, in which direction — but NEVER the amount.
+ * These are the engine's OWN base magnitudes (one knob per signal-direction); the caller's `emphasis`
+ * only picks a BOUNDED, CLAMPED multiplier (`CONSEQUENCE_EMPHASIS` below) of one of them. So widening
+ * what the LLM may propose (open-set interpretation) never widens what it may magnitude (closed-set,
+ * engine-owned — anti-sycophancy #3): a proposal can never pump an edge to flatter the player.
+ *
+ * Each direction names a member of the closed `EdgeSignals` space and its sign. `warmer`/`cooler`
+ * move the affinity bond (with a small trust co-move, the shape `IMPACT.bonding`/`conflict` use);
+ * the rest move one signal. Magnitudes sit in the same band as `IMPACT` (≈ a `notable` social beat),
+ * so the generative path and the 7-way floor land in the same range — no back-door amplification.
+ * `reliability` is intentionally NOT addressable here: it is evidence (E54), not a proposable vibe.
+ */
+export type ConsequenceDirection =
+  | "warmer" | "cooler"
+  | "more-trust" | "less-trust"
+  | "more-threatened" | "less-threatened"
+  | "more-aligned" | "less-aligned";
+
+export const CONSEQUENCE_DIRECTION_IMPACTS: Record<ConsequenceDirection, Partial<EdgeSignals>> = {
+  warmer: { affinity: +0.15, trust: +0.06 },
+  cooler: { affinity: -0.15, trust: -0.06 },
+  "more-trust": { trust: +0.12 },
+  "less-trust": { trust: -0.12 },
+  "more-threatened": { threat: +0.16 },
+  "less-threatened": { threat: -0.12 },
+  "more-aligned": { alignment: +0.14 },
+  "less-aligned": { alignment: -0.14 },
+};
+
+/**
+ * Emphasis → a BOUNDED, CLAMPED multiplier on the engine's OWN base (above). RELATIVE weight only:
+ * the caller says "this mattered more/less," the engine decides how much that is. The band is tight
+ * (≤ `strong`) so emphasis can never inflate a fold past the betrayal-shock range — the closed set
+ * keeps authority over the amount (ADR 0005 / mandate #3).
+ */
+export const CONSEQUENCE_EMPHASIS: Record<"slight" | "notable" | "strong", number> = {
+  slight: 0.6,
+  notable: 1.0,
+  strong: 1.4,
+};
+
+/**
  * Deal consequences (0039 + audit E43/E54): HONORING a promise is a real, bounded positive fold —
  * the protected party registers the kept word (trust/alignment up, plus the evidence signal).
  * Applied once per honoring binding action by `DealLedger.reconcile`; breaking already lands
