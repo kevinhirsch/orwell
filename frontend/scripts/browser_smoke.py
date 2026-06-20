@@ -1229,6 +1229,30 @@ def main() -> int:
               localStorage.removeItem('orwell-gadget-order:' + u);
             }""")
 
+            # 0054 strip refactor: the COLLAPSED icon strip is derived from the gadget
+            # registry, filtered to the gadgets actually mounted-and-visible, in the rail's
+            # current order. Collapse the rail and assert the strip maps 1:1 (same ids, same
+            # order) to the active gadget set, and that each icon carries its gadget id so a
+            # click acts on THAT gadget (not a blanket expand).
+            strip11 = page.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const api = window.OrwellGadgetRail;
+              if (!api || !api.activeGadgets) return { ok: false, why: 'no-api' };
+              const rail = document.getElementById('gadget-rail');
+              const wasCollapsed = rail.getAttribute('data-collapsed') === 'true';
+              const toggle = document.getElementById('gadget-rail-toggle');
+              if (!wasCollapsed && toggle) toggle.click();   // enter the icon-strip mode
+              const active = api.activeGadgets();
+              const strip = api.stripGadgets();
+              const allReg = strip.every(id => api.registry.some(g => g.id === id));
+              if (!wasCollapsed && toggle) toggle.click();   // restore expanded
+              return { ok: true, active: active, strip: strip,
+                       match: active.join() === strip.join(), allReg: allReg };
+            }""")
+            check(strip11.get("ok") is True and strip11.get("match") is True
+                  and strip11.get("allReg") is True and len(strip11.get("strip") or []) >= 1,
+                  f"0054: collapsed strip maps 1:1 to active gadgets, in order ({strip11})")
+
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
             # .list-item standard), and no collapse chevron renders on a section with

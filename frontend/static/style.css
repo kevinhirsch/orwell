@@ -1861,11 +1861,13 @@ body.bg-pattern-sparkles {
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
       display: flex; flex-direction: column; }
-    /* canonical stacking regardless of which gadget mounted first (drag-reorder —
-       L13 — overrides these inline). 0054 Phase 2 docked windows slot in after the
-       always-on HUD gadgets; the rail body scrolls (overflow-y:auto) for tall ones. */
+    /* Canonical stacking fallback — these MIRROR the gadget registry in
+       orwellGadgetRail.js (the single source of truth, which also applies these as
+       inline `order`; drag-reorder — L13 — overrides per-user). 0054 Phase 2 docked
+       windows slot in after the always-on HUD gadgets; the rail body scrolls
+       (overflow-y:auto) for tall ones. Keep these in sync with REGISTRY. */
     .gadget-rail-body > #orwell-status { order: 1; }
-    .gadget-rail-body > #orwell-social { order: 2; }
+    .gadget-rail-body > #orwell-deals { order: 2; }     /* 0039: your deals */
     .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
     .gadget-rail-body > #orwell-presence { order: 4; }
     .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
