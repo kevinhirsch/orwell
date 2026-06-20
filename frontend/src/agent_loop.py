@@ -3257,10 +3257,29 @@ async def stream_agent_loop(
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
                             turn that already narrated a scene does not get a second one. Resets the
                             staleness clock on success. Fail-open: any hiccup just returns False so the
-                            caller can fall back to the (re-prompting) text nudge."""
+                            caller can fall back to the (re-prompting) text nudge.
+
+                            0065 Part A/B: this is an FE-ISSUED progression call, so it carries the
+                            current last-seen `beatSeq` as the compare-and-swap token and a freshly-
+                            minted idempotency key (reused only on a retry of THIS action). A 409
+                            `stale-beat` (the board moved under us) reconciles via the existing desync
+                            spine — the re-ground fires next turn — and we report False so the caller
+                            does NOT then blindly retry into a stomp."""
                             try:
                                 from src import orwell_engine as _oe3
-                                await _oe3.advance_game(owner)
+                                from routes import chat_helpers as _ch3
+                                try:
+                                    _adv = await _oe3.advance_game(
+                                        expected_beat_seq=_ch3.last_beat_seq(owner),
+                                        idempotency_key=_ch3._mint_idempotency_key(),
+                                        user=owner,
+                                    )
+                                except Exception as _stale_e:
+                                    if _ch3._is_stale_beat_error(_stale_e):
+                                        await _ch3._handle_stale_beat(owner, _stale_e)
+                                        return False  # board moved — reconciled, do not blind-retry
+                                    raise
+                                _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
                                 if owner:
                                     # The beat moved — reset the staleness clock AND clear the
                                     # persisted escalation so the next stall (if any) starts gentle,

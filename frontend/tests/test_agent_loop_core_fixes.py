@@ -125,8 +125,10 @@ def test_one_narration_invariant_blocks_a_second_scene_after_a_visible_one():
     # the gate: a visible scene already shown ⇒ commit silently then break (no re-prompt)
     assert "if _emitted_visible:" in js
     assert "await _commit_advance_silently(" in js
-    # the silent commit progresses the engine WITHOUT a model re-prompt and resets the clock
-    assert "_oe3.advance_game(owner)" in js
+    # the silent commit progresses the engine WITHOUT a model re-prompt and resets the clock.
+    # 0065 Part A/B: the FE-issued advance now threads the optional CAS token + idempotency key.
+    assert "_oe3.advance_game(" in js
+    assert "expected_beat_seq=_ch3.last_beat_seq(owner)" in js
     assert "_TURNS_SINCE_PROGRESS[owner] = 0" in js
     # it ends the turn instead of continuing the loop (which is what re-narrated)
     assert "break  # one scene shown, state committed — done this turn" in js

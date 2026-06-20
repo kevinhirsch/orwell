@@ -55,7 +55,8 @@ class _Engine:
     async def get_game_state(self, user=None, **kw):
         return self.state()
 
-    async def advance_game(self, user=None):
+    async def advance_game(self, expected_beat_seq=None, idempotency_key=None, user=None):
+        # 0065 Part A/B: the FE-issued pre-resolve now threads the optional sync-spine fields.
         self.advances += 1
         i = self._CHAIN.index(self.phase) if self.phase in self._CHAIN else -1
         nxt = self._CHAIN[i + 1] if 0 <= i < len(self._CHAIN) - 1 else self.phase
@@ -162,7 +163,7 @@ def test_staged_eviction_reveal_is_not_held_between_ballots(monkeypatch):
     # During the eviction reveal the phase STAYS `eviction` across advances (same signature), so the
     # runway never re-arms mid-reveal — the ballots tick one per turn as before (E12 staged reveal).
     class _Eviction(_Engine):
-        async def advance_game(self, user=None):
+        async def advance_game(self, expected_beat_seq=None, idempotency_key=None, user=None):
             self.advances += 1
             return {"event": {"content": "a vote to evict <name>"}}  # phase stays `eviction`
 

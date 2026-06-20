@@ -352,6 +352,132 @@ _LAST_BEAT_SIG: dict = {}
 _DESYNC_REGROUND: dict = {}
 
 
+# ── 0065 Part A/B — the per-turn LAST-SEEN beatSeq + compare-and-swap wiring ──────────────── #
+#
+# Part A (engine, commit e9c03b4) gives every read/advance/submit result a monotonic `beatSeq`, and
+# lets the two PROGRESSION tools carry an optional `expectedBeatSeq` compare-and-swap token — a write
+# computed against a board that has since moved (the 0064 queued-turn case) is REFUSED with HTTP 409
+# `stale-beat` rather than applied to the moved board. Part B adds an `idempotencyKey` so a retried
+# advance/submit returns the original result instead of double-advancing.
+#
+# The MODEL never sees these tokens — the FE holds them. This slice wires the FE-ISSUED progression
+# calls (the C-02 pre-resolve here + the agent-loop forced/silent advance) to:
+#   1. track the last-seen `beatSeq` per user (mirroring `_LAST_BEAT_SIG`), refreshed from EVERY
+#      engine response that carries one (status/state reads AND every mutation's response — critical:
+#      within one turn the FE makes multiple engine calls, each bumps `beatSeq`, so the last-seen
+#      value MUST update from each response or the FE would inflict a SELF-409 on its own next call);
+#   2. attach that last-seen token as `expected_beat_seq` + a freshly-minted `idempotency_key` to its
+#      progression calls (the highest-value CAS point — the queued-turn case);
+#   3. handle a 409 `stale-beat` gracefully — refresh last-seen, stash a re-ground via the EXISTING
+#      desync mechanism (`_DESYNC_REGROUND`), and surface nothing scary to the player.
+# Process-local (like `_LAST_BEAT_SIG`); a front-end restart simply re-seeds from the first read.
+#
+# Future refinement (documented, not built here): the lower-value mutating tools
+# (`recordInteraction`/`makeDeal`/`moveTo`/`surfaceInformationTo`) are left CAS-FREE in this slice —
+# attaching a token mid-turn to a sequence of those risks a self-409 for little gain (they are not the
+# queued-turn double-apply case). They keep the client param available; the wiring is deferred.
+_LAST_BEAT_SEQ: dict = {}
+
+# Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
+# (the ledger hook, feature 0065 Part D, is a separate slice; this counter is its data source).
+_STALE_BEAT_REJECTIONS = 0
+
+# The fresh `beatSeq` is embedded in the StaleBeatError message the engine raised — "…(now N)…". We
+# can't read the structured 409 body here (the thin client surfaces only the message + status), so we
+# parse it from the message and re-read the board to reconcile. A 409 whose message lacks the marker
+# is a DIFFERENT 409 (a TurnRefusedError integrity refusal) and is NOT a stale-beat.
+_STALE_BEAT_MARKER = "stale write refused"
+_STALE_BEAT_NOW_RE = re.compile(r"\(now\s+(\d+)\)")
+
+
+def last_beat_seq(user):
+    """The last-seen engine `beatSeq` for `user` (or None) — the compare-and-swap token the FE
+    attaches to its next progression call. Test/ops visibility."""
+    return _LAST_BEAT_SEQ.get(user)
+
+
+def stale_beat_rejections() -> int:
+    """How many 409 `stale-beat` writes the FE has reconciled this process-run (0065 diagnostic)."""
+    return _STALE_BEAT_REJECTIONS
+
+
+def reset_stale_beat_rejections() -> None:
+    """Reset the stale-beat counter (tests/ops)."""
+    global _STALE_BEAT_REJECTIONS
+    _STALE_BEAT_REJECTIONS = 0
+
+
+def _refresh_beat_seq(user, *responses) -> None:
+    """Refresh `user`'s last-seen `beatSeq` from one or more engine responses. EVERY engine response
+    that carries `beatSeq` (status/state reads and every mutation's response) flows through here so the
+    next progression call attaches the freshest token (avoiding a self-inflicted 409). Fail-safe: a
+    non-dict / a response without `beatSeq` is skipped; the LAST carrying response wins (a 0 token is
+    legitimate — a brand-new sandbox — so the guard is `isinstance(int)`, never truthiness)."""
+    if user is None:
+        return
+    for resp in responses:
+        if not isinstance(resp, dict):
+            continue
+        seq = resp.get("beatSeq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            _LAST_BEAT_SEQ[user] = seq
+
+
+def _mint_idempotency_key() -> str:
+    """A fresh idempotency key for ONE intended progression action (0065 Part B). Reused only if THAT
+    action is retried (so a flaky-socket retry returns the original result instead of double-advancing);
+    never reused across distinct advances."""
+    import uuid
+    return uuid.uuid4().hex
+
+
+def _is_stale_beat_error(exc) -> bool:
+    """Is `exc` the engine's 409 `stale-beat` compare-and-swap refusal (0065 Part A)? Detected at the
+    seam where the thin client surfaces engine errors: an `EngineToolError` with status 409 whose
+    message carries the stale-beat marker. A 409 WITHOUT the marker is a different refusal (an integrity
+    `TurnRefusedError`) and must not be treated as stale-beat."""
+    from src.orwell_engine import EngineToolError
+    if not isinstance(exc, EngineToolError):
+        return False
+    if getattr(exc, "status", None) != 409:
+        return False
+    return _STALE_BEAT_MARKER in (str(exc) or "").lower()
+
+
+async def _handle_stale_beat(user, exc) -> None:
+    """Reconcile a 409 `stale-beat` refusal (0065 Part A) — the whole point of the spine: the board
+    moved under a write computed against a stale token, so we DON'T crash or blindly retry into a
+    stomp. We (1) refresh last-seen from the fresh `beatSeq` the engine put in the message, then
+    re-read the live board to be sure; (2) stash a re-ground directive via the EXISTING desync
+    mechanism so the next turn reconciles to the moved board; (3) count it for the ledger hook. The
+    player sees nothing scary — this is silent bookkeeping. Fail-open: never raises."""
+    global _STALE_BEAT_REJECTIONS
+    try:
+        _STALE_BEAT_REJECTIONS += 1
+        # The fresh beatSeq is in the message — "…(now N)…". Parse it as a first refresh.
+        m = _STALE_BEAT_NOW_RE.search(str(exc) or "")
+        if m and user is not None:
+            try:
+                _LAST_BEAT_SEQ[user] = int(m.group(1))
+            except (TypeError, ValueError):
+                pass
+        # Re-read the live board to reconcile precisely (also refreshes last-seen from the reads).
+        await _capture_beat_signature(user)
+        # Stash a re-ground so the NEXT turn pins the model back to the moved board (reuse the spine).
+        if user is not None:
+            _DESYNC_REGROUND[user] = (
+                "RE-GROUND ON THE BOARD — a game action was computed against a stale view of the "
+                "board (it had already moved on), so the engine (the source of truth) refused it and "
+                "nothing changed. Re-read the live state with gameStatus / getGameState and pick up "
+                "from where the game ACTUALLY is — do NOT repeat or build on the outcome you were "
+                "about to narrate."
+            )
+        logger.info("[orwell] reconciled a stale-beat 409 for user=%s (count=%d)",
+                    user, _STALE_BEAT_REJECTIONS)
+    except Exception as e:
+        logger.warning("[orwell] stale-beat reconcile skipped for user=%s: %s", user, _exc_detail(e))
+
+
 def _beat_signature(status: dict, state: dict) -> dict:
     """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
     of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
@@ -396,6 +522,9 @@ async def _capture_beat_signature(user) -> Optional[dict]:
     try:
         status = await orwell_engine.game_status(user=user)
         state = await orwell_engine.get_game_state(user=user)
+        # 0065 Part A: both reads carry `beatSeq` — track the freshest so the next progression call
+        # attaches the current token (never a self-409 from a stale last-seen).
+        _refresh_beat_seq(user, status, state)
         return _beat_signature(status if isinstance(status, dict) else {},
                                state if isinstance(state, dict) else {})
     except Exception as e:
@@ -557,6 +686,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         if phase not in _CEREMONY_RESOLVE_PHASES and phase not in _COMP_DRIVE_PHASES:
             return game_state
         status = await orwell_engine.game_status(user=user)
+        _refresh_beat_seq(user, status)  # 0065: track the freshest token before any progression call
         if not isinstance(status, dict) or status.get("pending") is not None:
             # The player is the decider (comp-intent, Houseguest's Choice, nominations, a vote, the
             # goodbye message…) — never auto-resolve their own decision; their card is waiting. A
@@ -578,7 +708,23 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                         "the next ceremony", phase, user, left - 1)
             return _hold_for_social(game_state)
 
-        adv = await orwell_engine.advance_game(user=user)  # advance ONE beat for real: surface the player's
+        # 0065 Part A/B: this is an FE-ISSUED progression call (the highest-value CAS point — exactly
+        # the 0064 §3.C queued-turn case). Attach the current last-seen `beatSeq` as the compare-and-
+        # swap token and a freshly-minted idempotency key (reused only on a retry of THIS action). A
+        # 409 `stale-beat` (the board moved under us) reconciles via the existing desync spine and the
+        # turn continues against the moved board — never a crash, never a blind retry into a stomp.
+        try:
+            adv = await orwell_engine.advance_game(
+                expected_beat_seq=_LAST_BEAT_SEQ.get(user),
+                idempotency_key=_mint_idempotency_key(),
+                user=user,
+            )  # advance ONE beat for real: surface the player's
+        except Exception as _adv_e:
+            if _is_stale_beat_error(_adv_e):
+                await _handle_stale_beat(user, _adv_e)
+                return game_state  # reconciled — continue the turn framed against the (moved) board
+            raise
+        _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
@@ -586,6 +732,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         refreshed = await _fetch_game_state(user, retry=retry)
+        _refresh_beat_seq(user, refreshed)  # 0065: the post-advance state read also carries beatSeq
         new_state = refreshed if isinstance(refreshed, dict) else game_state
 
         # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
@@ -598,6 +745,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
             new_sig = _runway_sig(new_state)
             if new_sig != sig:
                 post = await orwell_engine.game_status(user=user)
+                _refresh_beat_seq(user, post)  # 0065: keep last-seen fresh from this status read too
                 post_pending = post.get("pending") if isinstance(post, dict) else None
                 new_phase = (new_state.get("phase") or "").lower()
                 if post_pending is None and (
@@ -718,6 +866,9 @@ async def apply_game_framing(
     if not isinstance(game_state, dict):
         return engine_available, game_active, feed_down  # unexpected shape — treat as no framing
     engine_available = True  # engine answered; pin game tools regardless of game state
+    # 0065 Part A: this first state read of the turn carries `beatSeq` — seed the last-seen token so
+    # the pre-resolve's progression call (just below) attaches the FRESH value, never a stale one.
+    _refresh_beat_seq(user, game_state)
 
     # 2) The engine answered. Frame by whether a season is actually running.
     if game_state.get("started"):

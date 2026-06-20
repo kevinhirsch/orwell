@@ -124,7 +124,8 @@ def test_barrier_is_appended_to_the_gm_prompt(monkeypatch):
             },
         }
 
-    async def no_advance(user=None):  # no NPC pre-resolve while a player pending is present
+    async def no_advance(expected_beat_seq=None, idempotency_key=None, user=None):
+        # no NPC pre-resolve while a player pending is present (0065: accept the optional sync fields)
         raise AssertionError("must not advance while a player decision is pending")
 
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
