@@ -1,7 +1,9 @@
 # 0005 — Split authority by openness (the engine records the open set, never normalizes it)
 
-> **Status:** Principle **Accepted**; the generative-consequence mechanism **Proposed**
-> (drafted, awaiting confirmation). Mirrors 0002's "Accepted (math Proposed)" split.
+> **Status:** Principle **Accepted**; the generative-consequence mechanism **Accepted — BUILT**
+> (PR #355, 2026-06-20). Originally drafted as Proposed (mirroring 0002's "Accepted (math
+> Proposed)" split) and shipped end-to-end in the same PR — see the amended "Implementation
+> status" below. The original "Proposed" framing is kept in the body for history.
 > **Source:** human feedback (this session), worrying about sync work flattening the game:
 > *"I just think about a creative player that speaks to the LLM in an edge-case-sorta way and
 > drives the game in a really creative sense that we haven't 'coded' for, and I worry that the
@@ -173,3 +175,34 @@ split. None may rely on a prose eval alone; each has a structural assertion unde
   game" already says *hand the model facts to voice, never scripts to recite*; this record says
   *how* the consequence layer honors that under a growing sync spine — by drawing authority along
   openness, and by making non-collapse testable.
+
+## Implementation status (BUILT — PR #355, 2026-06-20)
+
+The principle and the generative-consequence mechanism shipped together, end to end — the
+"(when built)" / "(Proposed)" qualifiers above are now satisfied. The descriptor is Vault-free
+and proposes *shape* only; the engine still owns the bounded, seeded *magnitude*, so a caller can
+never inflate how much the house likes the player (mandate #3). With no descriptor, the fold is
+**byte-identical to before** — `kind` remains the floor and default.
+
+- **The port + engine** — `recordInteraction` / the 0023 `ConsequenceEngine` accept an optional,
+  Vault-free `consequence` descriptor: per-edge `{ toward, direction, emphasis? }` + `rationale`.
+  `direction` selects an engine-owned base impact; `emphasis` is a clamped multiplier
+  (`CONSEQUENCE_EMPHASIS`, `slight`/`notable`/`strong` → 0.6 / 1.0 / 1.4) over the engine's own
+  bounded deltas; the open-set *interpretation* rides the free-text `content` + `rationale`. The
+  per-call (`MAX_FOLDS_PER_INTERACTION`) and per-beat-per-edge (`MAX_FOLDS_PER_PAIR_PER_BEAT`)
+  budgets are unchanged. (`src/ports/EngineCommands.ts`, `src/engine/consequence.ts`,
+  `src/engine/relationshipConstants.ts`, `src/adapters/engine/EngineCommandsAdapter.ts`.)
+- **The MCP boundary** shape-guards the descriptor — a malformed `consequence` is a clean 400
+  naming the field, not a 500 deep in the fold (the E31/D10/R6 edge-hardening pattern;
+  `src/adapters/mcp/McpServer.ts`, cases in `tests/integration/edgeHardening.test.ts`).
+- **The model reaches it end to end.** `frontend/src/tool_schemas.py` exposes the optional
+  `consequence` object; `orwell_engine` / `tool_implementations` forward it; the 0055
+  `_auto_record_scene` back-fill can now *propose* one — validated against the living roster + the
+  direction/emphasis enums, falling back to kind-only when nothing valid remains, and forbidden
+  from proposing any number (magnitude stays engine-owned).
+- **The expressive-non-collapse gate is live** — the regression analog of the richness thresholds
+  + the Vault sentinel: `tests/unit/expressiveNonCollapse.test.ts` (engine, the lossless-record /
+  consequenced-not-dropped / recalled-in-full / distinguishable-downstream assertions) +
+  `frontend/tests/test_expressive_non_collapse.py` (the FE no-rail-correction corpus, roles-only).
+  The desync guard's WINNER / NEW-HOH branches were scoped to their committed-outcome phase so a
+  creative claim cannot trip a board-outcome rail-correction (principle #1).
