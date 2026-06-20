@@ -70,14 +70,14 @@ describe("B62 — the re-entry beat (resume opens with the store, never the chat
   });
 });
 
-describe("L31 — the premiere is a structured introductions round + a light tutorial", () => {
-  it("the premiere moment drives a built-in round of introductions (not player-prompted) and a tutorial cadence", () => {
+describe("L31 — the premiere is a producer-guided introductions round + a light tutorial", () => {
+  it("the premiere moment drives a built-in round of introductions and a tutorial cadence", () => {
     const { sb } = liveGame("premiere-l31", 8);
     const { systemPrompt } = sb.session.getMomentPrompt({ moment: "premiere" });
-    // a BUILT-IN introductions round — production gathers the house, person by person
-    expect(systemPrompt).toMatch(/ROUND OF INTRODUCTIONS/i);
-    expect(systemPrompt).toMatch(/do NOT wait for the player to ask/i);
-    // each houseguest introduces their PUBLIC persona (name / from / vocation / one real thing)
+    // a BUILT-IN introductions beat — production gathers the house, person by person
+    expect(systemPrompt).toMatch(/\(1\) INTRODUCTIONS/i);
+    expect(systemPrompt).toMatch(/production gathers the whole house/i);
+    // each houseguest introduces their PUBLIC self (name / from / what they do / one real thing)
     expect(systemPrompt).toMatch(/name, where they're from/i);
     // once introduced, the public intro is fixed (ties to 0058 byte-stable public depth)
     expect(systemPrompt).toMatch(/that intro is FIXED|never drifts/i);
