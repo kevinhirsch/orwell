@@ -28,6 +28,7 @@ import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
+import { nextPhase, restDeficitFor, bedtimeFor, DAY_START, type TimeOfDay } from "./timeOfDay";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -264,6 +265,21 @@ export interface LiveSeasonState {
   resume?: Record<EntityId, number>;
   /** This week's drawn veto comp (def id) — held across a Houseguest's-Choice pause so the resume runs the SAME comp. */
   vetoComp?: string;
+  /**
+   * The in-game TIME OF DAY (ADR 0006). OPTIONAL by design: the pure seeded sims + legacy saves omit
+   * it, and when absent the clock simply isn't running — every outcome is BYTE-IDENTICAL (the golden
+   * calibration spine never reads it). Advanced by PLAY on the live turn path; reset to morning when a
+   * new day begins. Public, Vault-free.
+   */
+  timeOfDay?: TimeOfDay;
+  /**
+   * Sleep bookkeeping (ADR 0006), ENGINE-ONLY (no number crosses the wall). `playerRetired` = the
+   * player chose to turn in for the night (NEVER auto-set — §Principle 6), cleared at the new day.
+   * `lastSleepPhase` = the latest phase the player was effectively up to last night — it drives their
+   * OWN rest cue today and their hidden comp deficit (`restOf`). Persist with the season (0030).
+   */
+  playerRetired?: boolean;
+  lastSleepPhase?: TimeOfDay;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */
@@ -278,6 +294,13 @@ export interface SeasonCtx {
    * that never crosses the wall.
    */
   emotionalOf?: (id: EntityId) => number;
+  /**
+   * The houseguest's hidden REST deficit (0..1) entering a competition (ADR 0006): staying up into
+   * late-night the night before a comp dulls performance — the social game pays for its scheming, the
+   * comp-focused protect their sleep. Optional — omitted ⇒ 0, so the outcome (and the whole seeded
+   * calibration spine) is BYTE-IDENTICAL to the pre-feature model. ENGINE-ONLY: never crosses the wall.
+   */
+  restOf?: (id: EntityId) => number;
   /**
    * The houseguest's derived LOYALTY (0043: disposition × soul state). When present, decisions
    * gain the emergent BLOC term — bloc-mates shield each other and vote together, scaled by the
@@ -645,9 +668,11 @@ function roundIntents(field: readonly EntityId[], ctx: SeasonCtx, playerApproach
   return intents;
 }
 
-/** The competitor projection (LIVE soul emotional modifier, 0041) the 0006 resolve reads. */
+/** The competitor projection (LIVE soul emotional modifier 0041 + hidden rest deficit, ADR 0006) the 0006 resolve reads. */
 function competitorsOf(field: readonly EntityId[], ctx: SeasonCtx): Competitor[] {
-  return field.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
+  return field.map((id) => ({
+    id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5, restPenalty: ctx.restOf?.(id),
+  }));
 }
 
 /** A throwaway WeekState for the legality helpers (they only read the fields they need). */
@@ -791,6 +816,58 @@ export function firstCeremonyBeatResolved(s: LiveSeasonState): boolean {
     s.hoh !== undefined ||
     s.nominees !== undefined
   );
+}
+
+// --- In-game time of day + the player's bedtime lever (ADR 0006) ----------------
+//
+// Time advances by PLAY, never a wall-clock (§Principle 1), and the clock NEVER interrupts a
+// scene — it only marks how late it is getting (§Principle 2). The diegetic bound (the house
+// thins as NPCs reach their bedtimes) lives in `awakeSet` (`./timeOfDay`); these helpers move the
+// shared clock and the player's own bedtime/rest. All ENGINE-only mutations; no number crosses the
+// wall, and an absent `timeOfDay` keeps the seeded sims byte-identical.
+
+/**
+ * Advance the clock one phase as the player lingers/plays. The day cycles morning → … → late-night,
+ * and once at late-night a further advance WRAPS to a new morning — banking that the player was up to
+ * the bitter end (their tiredness today). A new day also clears the retired flag, so the player is
+ * awake again unless they choose to turn in. A no-op once the game is over. When the player has
+ * already retired, time simply rolls them straight to the next morning (their night is done).
+ */
+export function advanceClock(s: LiveSeasonState): void {
+  if (s.finished) return;
+  if (s.playerRetired) { s.timeOfDay = DAY_START; s.playerRetired = false; return; }
+  if (s.timeOfDay === undefined) { s.timeOfDay = DAY_START; return; }
+  if (s.timeOfDay === "late-night") {
+    // A full night passed without the player turning in — they outlasted the whole house (Principle 6
+    // is theirs: nobody sent them to bed). They wake the next morning running on empty.
+    s.lastSleepPhase = "late-night";
+    s.timeOfDay = DAY_START;
+    return;
+  }
+  s.timeOfDay = nextPhase(s.timeOfDay);
+}
+
+/**
+ * The player's bedtime lever (§Principle 6): the player CHOOSES to turn in. Captures the phase they
+ * retired at as last night's bedtime (an early night ⇒ rested; outlasting the house into late-night ⇒
+ * running on empty), then rolls to the next morning. Never auto-called — only the player's own action
+ * fires it. A no-op once the game is over or the player has left.
+ */
+export function playerTurnIn(s: LiveSeasonState, player: EntityId): void {
+  if (s.finished || playerHasLeft(s, player)) return;
+  s.lastSleepPhase = s.timeOfDay ?? DAY_START;
+  s.playerRetired = true;
+  s.timeOfDay = DAY_START;
+}
+
+/** The player's hidden rest deficit today (0..1) — from how late they were up last night. */
+export function playerRestDeficit(s: LiveSeasonState): number {
+  return restDeficitFor(s.lastSleepPhase ?? DAY_START);
+}
+
+/** An NPC's hidden rest deficit (0..1) — their character-driven bedtime habit (the night owls pay). */
+export function npcRestDeficit(stats: { physical: number; social: number }): number {
+  return restDeficitFor(bedtimeFor(stats));
 }
 
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
