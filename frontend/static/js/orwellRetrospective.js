@@ -31,6 +31,7 @@
   let _failures = 0;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 180000); }
   let unsealed = null; // cached after the player opens the Vault
+  let _lastRecap = null; // last-good recap (perf/resilience): a transient recap-poll blip must not blank the open panel
 
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
@@ -162,18 +163,24 @@
   }
 
   async function tick() {
+    if (document.hidden) { timer = setTimeout(tick, _pollDelay()); return; }
+    if (_win && _win.setLoading) _win.setLoading(true); // non-blocking refresh hint over the last recap
     try {
-      if (document.hidden) return;
       const state = await getJSON("/api/orwell/state");
-      if (!state || !state.started) { render(null); unsealed = null; return; }
+      if (!state || !state.started) { _lastRecap = null; render(null); unsealed = null; _failures = 0; return; }
       const data = await getJSON("/api/orwell/recap");
-      render(data ? data.recap : null);
+      _lastRecap = data ? data.recap : null;
+      render(_lastRecap);
       _failures = 0;
     } catch (_) {
       _failures += 1;
       if (window.OrwellReport) window.OrwellReport.fail("retrospective", "recap-poll", _); // G11: fail open, never silent
-      render(null); // fail OPEN: no panel on error
+      // Reuse the last-good recap so a transient blip never blanks an open retrospective; only an
+      // honest "no game / not finished" (the try-branch above) clears it. A new game clears it via
+      // the started:false branch, so a stale finished-season panel can never linger across a reset.
+      if (_lastRecap) render(_lastRecap); else render(null);
     } finally {
+      if (_win && _win.setLoading) _win.setLoading(false);
       timer = setTimeout(tick, _pollDelay());
     }
   }

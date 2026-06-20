@@ -8,6 +8,7 @@ import {
 } from "../../src/engine/imageConstants";
 import { APPEARANCE_POOLS } from "../../src/engine/characterFactory";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import type { PhysicalCharacteristics } from "../../src/domain/physicalCharacteristics";
 
 /**
  * G24 — portrait variety (anti-sameness / anti-AI-look). Three layers, one claim each:
@@ -80,17 +81,22 @@ describe("G24/B — per-subject shot variation, deterministic per season", () =>
   });
 });
 
-describe("G24/C — appearance facets carry the differentiating axes", () => {
-  it("every cast member's appearance includes a complexion and a distinguishing feature", () => {
+describe("G24/C — the physical facet carries the differentiating axes (the single source of truth)", () => {
+  it("every cast member's physical facet carries a complexion, hair, and a distinguishing feature", () => {
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 99 });
-    const cards = view.house as ReadonlyArray<{ appearance?: string; age?: number }>;
+    // L29: a 0058 card's physical descriptor is the STRUCTURED `physicalCharacteristics` facet (what the
+    // portrait AND narration read) — the prose `appearance` no longer rides alongside it (it could
+    // contradict). Each face still carries the axes that differentiate real people.
+    const cards = view.house as ReadonlyArray<{ appearance?: string; physicalCharacteristics?: PhysicalCharacteristics }>;
     expect(cards.length).toBe(15);
     for (const hg of cards) {
-      expect(hg.appearance).toBeTruthy();
-      expect(APPEARANCE_POOLS.COMPLEXIONS.some((c) => hg.appearance!.includes(c))).toBe(true);
-      expect(APPEARANCE_POOLS.FEATURES.some((f) => hg.appearance!.includes(f))).toBe(true);
-      expect(APPEARANCE_POOLS.HAIR.some((h) => hg.appearance!.includes(h))).toBe(true);
+      expect(hg.appearance, "the redundant prose is gone from a 0058 card").toBeUndefined();
+      const pc = hg.physicalCharacteristics!;
+      expect(pc).toBeTruthy();
+      for (const axis of [pc.skinTone, pc.hair, pc.facialFeatures, pc.distinguishingMark, pc.heightBuild]) {
+        expect(typeof axis === "string" && axis.length > 0).toBe(true);
+      }
     }
   });
 
@@ -103,18 +109,20 @@ describe("G24/C — appearance facets carry the differentiating axes", () => {
     }
   });
 
-  it("a cast reads as distinct people: appearance strings barely collide", () => {
+  it("a cast reads as distinct people: physical facets barely collide", () => {
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 4242 });
-    const appearances = (view.house as ReadonlyArray<{ appearance?: string }>).map((h) => h.appearance);
-    expect(new Set(appearances).size).toBeGreaterThanOrEqual(13);
+    const faces = (view.house as ReadonlyArray<{ physicalCharacteristics?: PhysicalCharacteristics }>)
+      .map((h) => JSON.stringify(h.physicalCharacteristics));
+    expect(new Set(faces).size).toBeGreaterThanOrEqual(13);
   });
 
   it("facets stay seed-stable: the same seed deals the same faces", () => {
     const deal = (seed: number) => {
       const a = new GameSessionAdapter();
       const v = a.createCharacter({ playerName: "The Player", seed });
-      return (v.house as ReadonlyArray<{ appearance?: string; age?: number }>).map((h) => `${h.appearance}|${h.age}`).join("~");
+      return (v.house as ReadonlyArray<{ physicalCharacteristics?: PhysicalCharacteristics; age?: number }>)
+        .map((h) => `${JSON.stringify(h.physicalCharacteristics)}|${h.age}`).join("~");
     };
     expect(deal(555)).toBe(deal(555));
   });

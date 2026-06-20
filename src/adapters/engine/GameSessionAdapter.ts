@@ -9,12 +9,12 @@ import type {
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
-import { humanizeIds } from "./humanize";
+import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY, HOUSE_ROOMS } from "../../domain/house";
+import { HOUSE_ADJACENCY, resolveRoom } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -55,7 +55,7 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
-import { buildPortraitPrompt, buildCastPortraitPrompts } from "../../engine/portraitPrompts";
+import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearance } from "../../engine/portraitPrompts";
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
@@ -90,12 +90,14 @@ import { loadReserveTwists } from "../../engine/reserveTwists";
 import {
   generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
   defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
+  storyThreadToRetrospectiveProse,
   type SeasonPosition,
 } from "../../engine/deepProfile";
 import { THREAD } from "../../engine/threadConstants";
 import {
   loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
   DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
+  preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
@@ -112,6 +114,29 @@ import { cloneSession, fastClone } from "../../engine/sessionSnapshot";
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/**
+ * A READABLE category label for a hidden record's machine kind/type, for the post-season retrospective
+ * (0048). The FE renders each unsealed row as "[type] content", so a raw slug (`hidden-thread`,
+ * `seeded-relationship`, `offscreen-event`) becomes a debug tag; this maps it to plain words instead.
+ * Pure / Vault-free (a category name reveals nothing). Unknown kinds fall back to a de-slugged title.
+ */
+const RETROSPECTIVE_LABELS: Readonly<Record<string, string>> = {
+  "hidden-thread": "Secret thread",
+  "seeded-relationship": "Hidden tie",
+  "hidden-attribute": "Hidden side",
+  confessional: "Confessional",
+  "offscreen-event": "Off-screen",
+  gossip: "Whisper",
+  conversation: "Off-screen",
+  scheme: "Off-screen",
+};
+function retrospectiveLabel(kind: string): string {
+  if (RETROSPECTIVE_LABELS[kind]) return RETROSPECTIVE_LABELS[kind]!;
+  // Fallback: de-slug an unmapped kind ("some-kind" → "Some kind") so no raw machine slug ever shows.
+  const words = kind.replace(/[:_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Hidden";
+}
 
 /**
  * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
@@ -548,15 +573,19 @@ export class GameSessionAdapter implements GameSession {
         strategyStyle: npc.character.strategyStyle,
         background: npc.character.background,
         age: npc.character.age,
-        appearance: npc.character.appearance,
         presentation: npc.character.presentation,
         // L28: voice them in their STORED observable register (blunt / deadpan / anxious…), not a default.
         ...(npc.character.demeanor !== undefined ? { demeanor: npc.character.demeanor } : {}),
-        // 0058: voice the STORED biography + physical characteristics, never invent (and drift) them.
-        // Public facets only — the hidden deep profile is never on this projection (the §8 wall).
+        // 0058: voice the STORED biography, never invent (and drift) it. Public facet only — the hidden
+        // deep profile is never on this projection (the §8 wall).
         ...(npc.character.biography !== undefined ? { biography: npc.character.biography } : {}),
+        // L29 single physical descriptor (appearance/physicalCharacteristics consistency): the STRUCTURED
+        // facet is the ONE source of truth the portrait + narration share; the prose `appearance` rides
+        // ONLY as the pre-0058 fallback — NEVER both at once (they were independently generated and could
+        // contradict on build/skin/hair). When the facet is present it alone is voiced.
         ...(npc.character.physicalCharacteristics !== undefined
-          ? { physicalCharacteristics: npc.character.physicalCharacteristics } : {}),
+          ? { physicalCharacteristics: npc.character.physicalCharacteristics }
+          : npc.character.appearance !== undefined ? { appearance: npc.character.appearance } : {}),
         // 0063: voice the PUBLIC identity facets — heritage, gender presentation, and a PUBLICLY-OUT
         // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed; the houseguest
         // would never lead with it until a pathway surfaces it, §5). One true facet, never the character.
@@ -627,11 +656,20 @@ export class GameSessionAdapter implements GameSession {
     const target = this.house.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
 
-    // Validate — non-player-mirroring (L28): the cast is independent of the player, so the authored
-    // PUBLIC material must not echo the player's name. Refuse a mirror (Vault-safe: no value echoed).
+    // Validate — non-player-mirroring (L28 + the anti-sycophancy mandate #3): the cast is INDEPENDENT
+    // of the player, so NEITHER the authored PUBLIC material NOR the hidden STORYLINE material (secrets,
+    // true goals, weakness) may be built around the player — an NPC's drama must not echo the player's
+    // name. This is the airtight guard: even if an authoring model ignores the prompt and weaves the
+    // player into an NPC's secret/goal/weakness, the engine refuses it here so no player-centric story
+    // material is ever sealed. The Day-1 read of the player is the ONE legitimately player-facing field
+    // and is excluded from this check (the engine owns its seeded value regardless). Vault-safe: the
+    // refusal echoes no authored value. (A short player name is ignored to avoid false positives.)
     const playerName = (this.house.player.name ?? "").trim();
-    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`.toLowerCase();
-    if (playerName.length >= 3 && publicText.includes(playerName.toLowerCase())) {
+    const mentionsPlayer = (text: string): boolean =>
+      playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
+    const storylineText = `${(req.secrets ?? []).join(" ")} ${(req.trueGoals ?? []).join(" ")} ${req.weakness ?? ""}`;
+    if (mentionsPlayer(publicText) || mentionsPlayer(storylineText)) {
       return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
     }
 
@@ -650,7 +688,16 @@ export class GameSessionAdapter implements GameSession {
     // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
     // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
     const prev: DeepProfile = this.deepProfiles[target.id]
-      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)));
+      // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
+      // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
+      // individual hidden life, not a flat shared-pool draw. The narrative text rides a DEDICATED
+      // sub-stream (#392 RNG-isolation), matching the cast-layer key so the fallback agrees with it.
+      ?? generateDeepProfile(
+        new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)),
+        undefined,
+        target.character,
+        hashSeed(`${this.gameSeed ?? 0}:deep-narrative:${target.name}`),
+      );
     const next: DeepProfile = {
       secrets: req.secrets ?? prev.secrets,
       trueGoals: req.trueGoals ?? prev.trueGoals,
@@ -718,13 +765,31 @@ export class GameSessionAdapter implements GameSession {
    */
   seasonRetrospective(): RetrospectiveView | null {
     if (!this.live?.finished) return null; // the structural gate: no finished season, no unsealing
+    const nameOf = (id: EntityId): string => this.nameOf(id);
     const events = this.record?.events() ?? [];
+    // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
+    // slug) and `content` clean, name-resolved prose — this is the Wall's ONE sanctioned reveal, shown
+    // readably (audit: the live dump leaked "[hidden-thread] story-thread thread:npc:8:0 …").
     const hiddenStory = events
       .filter((e) => e.hidden)
-      .map((e) => ({ type: e.type, content: this.humanize(e.content) }));
+      .map((e) => ({ type: retrospectiveLabel(e.type), content: this.retroScrub(e.content) }));
+    // The structured hidden layers (threads + seeded relationships) render from the IN-MEMORY objects,
+    // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
+    // are therefore SKIPPED below when iterating the Vault records (rendered here once, readably, instead).
+    for (const t of this.storyThreads) {
+      hiddenStory.push({ type: "Secret thread", content: storyThreadToRetrospectiveProse(t, nameOf) });
+    }
+    for (const tie of this.seededRels.ties) {
+      hiddenStory.push({ type: "Hidden tie", content: preGameTieToRetrospectiveProse(tie, nameOf) });
+    }
+    for (const s of this.seededRels.showmances) {
+      hiddenStory.push({ type: "Hidden tie", content: showmanceToRetrospectiveProse(s, nameOf) });
+    }
     for (const r of this.record?.hidden() ?? []) {
-      if (r.kind === "reserved-twist") continue; // surfaced structurally via `twists` below
-      hiddenStory.push({ type: r.kind, content: this.humanize(r.content) });
+      // Rendered structurally elsewhere: twists via `twists` below; threads + seeded relationships from
+      // the structured objects above (their raw Vault strings carry ids/slugs we must not echo).
+      if (r.kind === "reserved-twist" || r.kind === "hidden-thread" || r.kind === "seeded-relationship") continue;
+      hiddenStory.push({ type: retrospectiveLabel(r.kind), content: this.retroScrub(r.content) });
     }
     const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
     const twists = (this.live.reserve ?? []).map((t) => ({
@@ -1275,19 +1340,33 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The player DIRECTS their own movement (L21/L24 — the player is a person, not engine-relocated):
-   * walk to any real room. Sets the player's room and resets their tenure; the engine holds them
-   * there (NPCs drive around them) until the next directed move. No-op for an unknown room or before
-   * presence is seeded. Returns the player's resulting whereabouts so the caller can voice the move.
+   * walk to a room they NAMED. The name is resolved FORGIVINGLY (`resolveRoom`) — case/space/hyphen-
+   * insensitive, natural aliases ("living room"/"lounge", "backyard"/"yard", "HOH", "pantry"), and a
+   * bare "bedroom" disambiguated to the player's current/adjacent bedroom — so a guessed room never
+   * silently no-ops into the narrator's 5-retry "isn't mapping" loop (the real-log bug). Sets the
+   * player's room, resets their tenure; the engine holds them there (NPCs drive around them) until the
+   * next directed move. For a truly UNKNOWN name it leaves the player put and returns the current
+   * whereabouts unchanged (the model knows the valid rooms from the moment prompt, so this is rare).
+   * Returns the resulting whereabouts so the caller can voice the move. Vault-free.
    */
   movePlayer(room: string): WhereaboutsView | null {
     if (!this.house || !this.presence) return null;
-    if (!(HOUSE_ROOMS as readonly string[]).includes(room)) return this.whereabouts();
     const me = this.house.player.id;
-    if (this.presence.get(me) === room) return this.whereabouts(); // already there — nothing to move
-    this.presence.set(me, room as Room);
+    const here = this.presence.get(me) ?? null;
+    // Forgiving resolution (Vault-free, deterministic): natural names → a canonical room id; the
+    // player's current room sharpens an ambiguous "bedroom". An ambiguous result still moves (we take
+    // the best-guess first candidate) rather than no-op — never a silent failure into a retry loop.
+    const resolved = resolveRoom(room, here);
+    const dest =
+      resolved.kind === "ok" ? resolved.room
+      : resolved.kind === "ambiguous" ? resolved.candidates[0]!
+      : null;
+    if (dest === null) return this.whereabouts(); // truly unknown — stay put, report where they are
+    if (here === dest) return this.whereabouts(); // already there — nothing to move
+    this.presence.set(me, dest);
     // L21/L24: the player's position is identical in both views — keep the calibration-neutral base in sync
     // so the society's player-overhears and `whereabouts` always agree about where the player is.
-    this.presenceBase?.set(me, room as Room);
+    this.presenceBase?.set(me, dest);
     (this.presenceTenure ??= new Map()).set(me, 0); // a fresh arrival
     this.persist();
     return this.whereabouts();
@@ -1750,6 +1829,13 @@ export class GameSessionAdapter implements GameSession {
       // the heritage the cast was guaranteed — the text and the picture never contradict the identity.
       const grounded = this.groundedSkinTones[n.id];
       if (grounded) n.character.physicalCharacteristics.skinTone = grounded;
+      // L29 single-source reconciliation (appearance/physicalCharacteristics consistency fix): the prose
+      // `appearance` is the OLDER 0004 descriptor, generated from INDEPENDENT pools — it could contradict
+      // the structured facet (different build/skin/hair/age-look). Re-derive it FROM the structured facet
+      // (the SAME builder the portrait uses) so the persisted prose can never disagree with the source of
+      // truth, and any pre-0058 fallback reader stays consistent. Done at generation, before the first
+      // persist, so the static Character still round-trips byte-stable (0007).
+      n.character.appearance = physicalFacetToAppearance(n.character.physicalCharacteristics);
     }
     // HIDDEN — engine-only, sealed off the player AND admin.
     this.deepProfiles = layer.hidden;
@@ -2890,6 +2976,18 @@ export class GameSessionAdapter implements GameSession {
     return humanizeIds(content, all);
   }
 
+  /**
+   * The POST-SEASON retrospective scrub (0048 — the Wall's ONE sanctioned reveal). Stronger than the
+   * everyday `humanize`: it also resolves ids embedded in COMPOUND machine tokens (`thread:npc:8:0`),
+   * drops the bare `thread:…` identifier, and translates the thread audit slugs (`[dormant]`, `surfaces
+   * via:`, …) into readable prose — so the unsealed story reads like prose, not a debug dump. Used ONLY
+   * here, behind the terminal-state gate.
+   */
+  private retroScrub(content: string): string {
+    const all = this.house ? [this.house.player, ...this.house.npcs] : [];
+    return humanizeForRetrospective(content, all);
+  }
+
   getGameState(): GameStateView {
     return this.view();
   }
@@ -3227,7 +3325,6 @@ export class GameSessionAdapter implements GameSession {
         strategyStyle: n.character.strategyStyle,
         background: n.character.background,
         age: n.character.age,
-        appearance: n.character.appearance,
         presentation: n.character.presentation,
         // L28: the concrete, diverse, PERSISTED backstory facets — the narrator voices the STORED
         // vocation/hometown instead of inventing (and mirroring the player's). Public, Vault-free.
@@ -3236,12 +3333,16 @@ export class GameSessionAdapter implements GameSession {
         // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
         // is not a room of identical warm professionals. Public, Vault-free.
         ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
-        // 0058: the PUBLIC deep-profile facets — the multi-sentence biography + the structured physical
-        // characteristics (the single source of truth narration AND portraits read). Public, Vault-free.
-        // The HIDDEN profile (secrets/goals/weakness/perception) is NEVER selected here.
+        // 0058: the PUBLIC multi-sentence biography. Public, Vault-free; the HIDDEN profile
+        // (secrets/goals/weakness/perception) is NEVER selected here.
         ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
+        // L29 single physical descriptor (appearance/physicalCharacteristics consistency): the STRUCTURED
+        // `physicalCharacteristics` facet is the ONE source of truth narration AND portraits read; the prose
+        // `appearance` rides ONLY as the pre-0058 fallback — NEVER both (independently generated, they could
+        // contradict on build/skin/hair). When the facet is present it alone is shipped.
         ...(n.character.physicalCharacteristics !== undefined
-          ? { physicalCharacteristics: n.character.physicalCharacteristics } : {}),
+          ? { physicalCharacteristics: n.character.physicalCharacteristics }
+          : n.character.appearance !== undefined ? { appearance: n.character.appearance } : {}),
         // 0063: the PUBLIC diversity-identity facets — the heritage/cultural identity (an authentic facet
         // of a full character, grounding the skin tone), the gender presentation, and a PUBLICLY-OUT
         // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed, §5). Descriptive

@@ -344,6 +344,12 @@
   }
 
   function render(data) {
+    // A roster fetch begun while the panel was OPEN can resolve AFTER the player closed it (the
+    // close stops the poll, but an in-flight request still settles). render() must NOT resurrect a
+    // closed window — ensurePanel() would re-mount #orwell-cast, leaving a slotted, focused panel
+    // overlapping the sidebar (it intercepted #session-sort-btn in CI). If we're closed, drop the
+    // stale result; the next open re-fetches fresh.
+    if (!_open) return;
     const el = ensurePanel();
     const grid = el.querySelector("#oc-grid");
     const empty = el.querySelector("#oc-empty");
@@ -434,18 +440,30 @@
     }
   }
 
+  // Poll backoff (perf/resilience): consecutive failures widen the cadence so a slow/502-ing engine
+  // late-game is not hammered every 30s — the keyed upsert keeps the last-good cast on screen meanwhile.
+  let _failures = 0;
+  const BACKOFF_CEIL_MS = 120000;
+
   async function refreshRoster() {
+    // Non-blocking loading affordance: the window already shows its last-good cast (keyed upsert) —
+    // this just signals a refresh is in flight, so a slow fill never reads as a frozen/blank window.
+    if (_win && _win.setLoading) _win.setLoading(true);
     try {
       const data = await getJSON("/api/orwell/roster");
       render(data);
+      _failures = 0; // recovered: the next render() restores the adaptive cadence
     } catch (_) {
       // Fail open: keep whatever's shown; an empty first load shows the empty-state copy.
       if (window.OrwellReport) window.OrwellReport.fail("cast", "roster-fetch", _); // G11: fail open, never silent
+      _failures++;
       const el = document.getElementById(PANEL_ID);
       if (el && !el.querySelector("#oc-grid").children.length) {
         el.querySelector("#oc-empty").style.display = "";
         el.querySelector("#oc-empty").textContent = "The cast list is offline right now.";
       }
+    } finally {
+      if (_win && _win.setLoading) _win.setLoading(false);
     }
   }
 
@@ -459,11 +477,16 @@
   function scheduleNextPoll() {
     if (_timer) { clearTimeout(_timer); _timer = null; }
     if (!_open) return;
+    // Under a run of failures, back off exponentially (capped) on TOP of the adaptive cadence — a
+    // late-game engine that 502s a roster read should not be re-hit every 30s. A success resets it.
+    const delay = _failures > 0
+      ? Math.min(Math.max(_pollDelay, POLL_MS) * Math.pow(2, _failures), BACKOFF_CEIL_MS)
+      : _pollDelay;
     _timer = setTimeout(async () => {
       _timer = null;
       if (_open && !document.hidden) await refreshRoster();
       scheduleNextPoll();
-    }, _pollDelay);
+    }, delay);
   }
 
   function togglePanel(open) {

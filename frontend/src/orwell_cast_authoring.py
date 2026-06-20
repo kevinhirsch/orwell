@@ -34,33 +34,50 @@ except Exception:  # pragma: no cover
 
 
 # ── the producer-framed authoring prompt ──────────────────────────────────────
-
+#
+# ANTI-SYCOPHANCY (mandate #3): an NPC's STORYLINE is authored as if the player does not exist.
+# Each houseguest is one of sixteen with their OWN life, rivalries, secrets, and arcs — most of the
+# house's drama has nothing to do with the player. The authoring prompt therefore carries NO player
+# identity at all: secrets/goals/weakness/biography must NEVER be built around, reference, or revolve
+# around the player. The NPC's Day-1 read of the player is a SEPARATE concept owned entirely by the
+# engine's seeded, net-zero-balanced floor (the LLM does not author it) — so the authored storyline
+# cannot tilt the cast toward the player and the calibration (juryReach) balance is preserved.
 _SYSTEM = (
     "You are a Big Brother CASTING PRODUCER building the secret bible for ONE houseguest. "
-    "Write a rich, believable, reality-TV-plausible person with real depth. Output STRICT JSON "
-    "only (no prose around it), with these keys:\n"
+    "Write a rich, believable, reality-TV-plausible person with real depth and a life that exists "
+    "ENTIRELY on its own. Output STRICT JSON only (no prose around it), with these keys:\n"
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
     "the portrait and the narration read, so make it concrete and distinctive,\n"
     '  "secrets": an array of 2-3 real secrets that could play out,\n'
     '  "trueGoals": an array of 2 true strategic goals (distinct from any public game),\n'
-    '  "weakness": one named blind spot the game can exploit on a delay,\n'
-    '  "dayOnePerception": one sentence — how THIS houseguest reads the PLAYER on day one.\n'
-    "Hard rules: the cast is INDEPENDENT of the player — never mirror the player's name, hometown, "
-    "or job. Make this person VISIBLY distinct from a generic warm, witty professional. JSON only."
+    '  "weakness": one named blind spot the game can exploit on a delay.\n'
+    "GROUND EVERYTHING IN THIS SPECIFIC PERSON (the core requirement): the secrets, true goals, and "
+    "weakness must be authored FROM this houseguest's OWN backstory, OCCUPATION, ARCHETYPE, and AGE in "
+    "the public skeleton — a private chef's secret should read like a private chef's, a firefighter's "
+    "weakness like a firefighter's, a 23-year-old's stakes unlike a 50-year-old's. Make the hidden life "
+    "cohere with the job and the life-stage; never a generic, interchangeable secret that could belong "
+    "to anyone. Their threads may involve OTHER houseguests, pre-show ties, or personal stakes.\n"
+    "Hard rules: this houseguest's STORYLINE is fully INDEPENDENT — their secrets, goals, weakness, "
+    "and backstory exist on their own but must NEVER be built around, reference, or revolve around any "
+    "single 'player' or main character; there is no protagonist here, only a cast of equals. Make this "
+    "person VISIBLY distinct from a generic warm, witty professional. JSON only."
 )
 
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
+# NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
+# seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
 _PUBLIC_KEYS = ("biography", "physicalCharacteristics")
-_HIDDEN_KEYS = ("secrets", "trueGoals", "weakness", "dayOnePerception")
+_HIDDEN_KEYS = ("secrets", "trueGoals", "weakness")
 _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style")
 
 
-def build_authoring_messages(npc: dict, player_name: str) -> list[dict]:
+def build_authoring_messages(npc: dict) -> list[dict]:
     """The producer prompt for ONE houseguest. Seeds the LLM with the houseguest's PUBLIC skeleton
-    (name + whatever public facets the engine already exposes) and the player's name to avoid (the
-    cast must not mirror the player). Returns chat messages for the utility model."""
+    (name + whatever public facets the engine already exposes) and NOTHING about the player — the
+    NPC's storyline is authored as if the player does not exist (anti-sycophancy, mandate #3).
+    Returns chat messages for the utility model."""
     name = str(npc.get("name") or "this houseguest")
     skeleton = {
         k: npc.get(k)
@@ -70,7 +87,9 @@ def build_authoring_messages(npc: dict, player_name: str) -> list[dict]:
     user = (
         f"Houseguest to flesh out: {name}.\n"
         f"Public skeleton (build FROM this, never contradict it): {json.dumps(skeleton, ensure_ascii=False)}\n"
-        f"The PLAYER is named {player_name!r} — do NOT mirror them. Write {name}'s secret bible as JSON now."
+        f"Ground {name}'s secrets, true goals, and weakness in THIS skeleton — their specific occupation, "
+        f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else. "
+        f"Write {name}'s secret bible as JSON now — their own independent life, no protagonist."
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
 
@@ -122,8 +141,8 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
             out["trueGoals"] = clean[:2]
     if isinstance(obj.get("weakness"), str) and obj["weakness"].strip():
         out["weakness"] = obj["weakness"].strip()
-    if isinstance(obj.get("dayOnePerception"), str) and obj["dayOnePerception"].strip():
-        out["dayOnePerception"] = obj["dayOnePerception"].strip()
+    # `dayOnePerception` is deliberately NOT forwarded (anti-sycophancy): even if a model echoes it
+    # back, the NPC's Day-1 read of the player is the engine's seeded, balanced floor — never authored.
 
     # Nothing beyond the id ⇒ nothing to write.
     if len(out) <= 1:
@@ -137,13 +156,15 @@ LlmFn = Callable[[list[dict]], Awaitable[str]]
 WriteFn = Callable[[dict], Awaitable[dict]]
 
 
-async def author_cast(cast: list[dict], player_name: str, llm_fn: LlmFn, write_fn: WriteFn) -> int:
+async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn) -> int:
     """For each NPC in `cast`: build the producer prompt → `llm_fn` → parse → `write_fn`
     (recordCastProfile). Best-effort PER houseguest: one failure never aborts the rest (the seeded
     floor stays authoritative for any NPC that couldn't be authored). Returns how many were written.
 
     The PLAYER is skipped (only the player's profile is human-authored, at OOBE). Anything without an
     id is skipped. The engine owns the wall (validation / split / seal); this never seals anything.
+    The player's identity is NOT threaded in at all — NPC storylines are authored player-independent
+    (anti-sycophancy, mandate #3).
     """
     written = 0
     for npc in cast or []:
@@ -151,7 +172,7 @@ async def author_cast(cast: list[dict], player_name: str, llm_fn: LlmFn, write_f
         if not hid or hid == "player":
             continue
         try:
-            text = await llm_fn(build_authoring_messages(npc, player_name))
+            text = await llm_fn(build_authoring_messages(npc))
         except Exception as e:  # the model can fail for one houseguest; carry on
             logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
             continue
@@ -216,8 +237,9 @@ def _delta_text(chunk) -> str:
     return s
 
 
-async def run_authoring(cast: list[dict], player_name: str, owner: Optional[str]) -> int:
-    """Resolve the live deps and author the cast. Silent no-op (returns 0) if no model resolves."""
+async def run_authoring(cast: list[dict], owner: Optional[str]) -> int:
+    """Resolve the live deps and author the cast. Silent no-op (returns 0) if no model resolves.
+    No player identity is threaded in — NPC storylines are authored player-independent."""
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
         logger.debug("[cast-authoring] no utility model — keeping the seeded floor")
@@ -227,18 +249,19 @@ async def run_authoring(cast: list[dict], player_name: str, owner: Optional[str]
     async def _write(profile: dict) -> dict:
         return await orwell_engine.record_cast_profile(profile, user=owner)
 
-    return await author_cast(cast, player_name, llm_fn, _write)
+    return await author_cast(cast, llm_fn, _write)
 
 
-def kickoff_authoring(cast: list[dict], player_name: str, owner: Optional[str],
+def kickoff_authoring(cast: list[dict], owner: Optional[str],
                       then: Optional[Callable[[], None]] = None) -> None:
     """Fire-and-forget: author the cast in the background BEFORE portraits (the authored physical
     facet feeds the portrait prompt — pipeline order), then call `then` (e.g. the portrait kickoff)
     REGARDLESS of authoring success, so the picture still generates from the seeded facets if the
-    model was unavailable. Never blocks game start; never raises into the caller."""
+    model was unavailable. Never blocks game start; never raises into the caller.
+    The player's identity is NOT passed in — NPC storylines are authored player-independent."""
     async def _runner():
         try:
-            await run_authoring(cast, player_name, owner)
+            await run_authoring(cast, owner)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"[cast-authoring] background run failed: {e}")
         finally:

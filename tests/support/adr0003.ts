@@ -98,7 +98,9 @@ export function personaDriftViolations(sb: UserSandbox, turns = 20): string[] {
   const facets = (): string =>
     JSON.stringify(sb.session.getGameState().house
       .filter((h) => h.status === "active")
-      .map((h) => [h.id, h.archetype, h.strategyStyle, h.background, h.age, h.appearance, h.presentation]));
+      // L29: the physical look rides as the STRUCTURED facet (the single source of truth); the prose
+      // `appearance` is the pre-0058 fallback only — fingerprint whichever the card carries.
+      .map((h) => [h.id, h.archetype, h.strategyStyle, h.background, h.age, h.physicalCharacteristics ?? h.appearance, h.presentation]));
   const before = facets();
   for (let i = 0; i < turns; i++) {
     const v = sb.session.advanceGame();

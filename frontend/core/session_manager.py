@@ -253,6 +253,45 @@ class SessionManager:
         finally:
             db.close()
 
+    def mark_message_phase(self, message: ChatMessage, phase: str) -> None:
+        """Durably stamp a chat phase onto an already-persisted message.
+
+        Used by the casting-leak fix (Vault Wall): pre-game / casting-interview
+        turns are OOC and must be excluded from the in-game narrator's context.
+        The user message is persisted before the turn's game framing is known,
+        so this stamps `metadata.phase` on both the in-memory message AND its DB
+        row (by `_db_id`) once the framing has been resolved. Idempotent and
+        best-effort — a stamp failure must never break the turn.
+        """
+        try:
+            if message is None or not phase:
+                return
+            if message.metadata is None:
+                message.metadata = {}
+            if message.metadata.get("phase") == phase:
+                return
+            message.metadata["phase"] = phase
+            db_id = message.metadata.get("_db_id")
+            if not db_id:
+                return
+            db = SessionLocal()
+            try:
+                row = db.query(DbChatMessage).filter(DbChatMessage.id == db_id).first()
+                if row is not None:
+                    meta = json.loads(row.meta_data) if row.meta_data else {}
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    meta["phase"] = phase
+                    row.meta_data = json.dumps(meta)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        except Exception:
+            logger.warning("Failed to stamp message phase=%s", phase, exc_info=True)
+
     def truncate_messages(self, session_id: str, keep_count: int) -> bool:
         """Truncate session history, keeping only the first `keep_count` messages."""
         session = self.get_session(session_id)

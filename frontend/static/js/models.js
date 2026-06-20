@@ -28,6 +28,14 @@ export function init(apiBase) {
   API_BASE = apiBase;
 }
 
+// True when the model list carries at least one usable (online) model — the same
+// "is a feed configured?" signal the onboarding model gate (J4) reads. Used to fire
+// orwell:models-changed only on the none→some transition (P1 OOBE auto-advance).
+function _modelsAvailable(items) {
+  return Array.isArray(items) && items.some(
+    (it) => it && Array.isArray(it.models) && it.models.length > 0 && !it.offline);
+}
+
 // ── Collapse state persistence ──
 function _loadCollapsed() {
   return Storage.getJSON(COLLAPSE_KEY, {});
@@ -188,7 +196,14 @@ export async function refreshModels(force = false) {
       }
       const data = await _fetchInflight;
       _lastFetchTime = Date.now();
+      const _hadModelsBefore = _modelsAvailable(_cachedItems);
       _cachedItems = data.items || [];
+      // P1 OOBE auto-advance: when the model list transitions from NONE → SOME (the player
+      // just configured a feed in Settings), announce it so the onboarding flow re-evaluates
+      // and proceeds to the welcome modal → image step WITHOUT a manual page reload.
+      if (!_hadModelsBefore && _modelsAvailable(_cachedItems)) {
+        try { window.dispatchEvent(new CustomEvent('orwell:models-changed')); } catch (_) {}
+      }
     } catch (e) {
       console.error(e);
       box.textContent = '(scan failed)';

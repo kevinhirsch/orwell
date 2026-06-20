@@ -6,6 +6,11 @@
 // why ("Add your cast photo to begin"). The image step is intentionally first; only once it is
 // secured do the producers reach out and the casting interview begins.
 //
+// P1 OOBE overhaul: this module no longer mounts an inline "add your cast photo" banner above the
+// composer — that was a THIRD copy of the same prompt (banner + card + placeholder). The ONE clear
+// instruction now lives in the cast-photo WINDOW (orwellHeadshot.js); the gate keeps only the
+// minimal disabled-state placeholder so the prompt appears exactly once in the window.
+//
 // This module owns ONE thing: the gate STATE + the visual lock. It is the single source of truth
 // `chat.js` consults (`window._orwellChatGate.blocked()`) so every send path — the send button,
 // Enter-to-send, and any programmatic submit — is covered by one guard. It is intentionally
@@ -57,40 +62,13 @@
     const s = document.createElement("style");
     s.id = "orwell-chat-gate-css";
     // Theme-token driven (every house theme + frost) — no hard-coded colors.
+    // P1 OOBE overhaul: the redundant banner note is GONE. The ONE clear instruction
+    // now lives in the cast-photo WINDOW (orwellHeadshot.js); the composer keeps only a
+    // minimal disabled-state placeholder. So no banner-vs-card-vs-placeholder duplication.
     s.textContent =
       "body.ow-chat-gated #message { opacity: .6; cursor: not-allowed; }" +
-      "body.ow-chat-gated .send-btn { opacity: .45; cursor: not-allowed; pointer-events: none; }" +
-      ".ow-chat-gate-note { margin: var(--space-2, .5rem) auto 0; max-width: 640px;" +
-      "  padding: var(--space-2, .5rem) var(--space-3, .7rem);" +
-      "  background: color-mix(in srgb, var(--brand-color, var(--accent, #4a9)) 12%, transparent);" +
-      "  border: 1px solid color-mix(in srgb, var(--brand-color, var(--accent, #4a9)) 40%, transparent);" +
-      "  border-radius: 10px; color: color-mix(in srgb, var(--fg) 90%, transparent);" +
-      "  font-size: var(--fs-sm, .82rem); line-height: 1.45; display: flex; gap: .5rem; align-items: baseline; }" +
-      ".ow-chat-gate-note .ow-cg-ico { flex: none; }" +
-      ".ow-chat-gate-note b { font-weight: 700; }";
+      "body.ow-chat-gated .send-btn { opacity: .45; cursor: not-allowed; pointer-events: none; }";
     document.head.appendChild(s);
-  }
-
-  function mountNote() {
-    if (document.getElementById("orwell-chat-gate-note")) return;
-    const bar = document.querySelector(".chat-input-bar");
-    if (!bar || !bar.parentNode) return;
-    ensureCss();
-    const note = document.createElement("div");
-    note.id = "orwell-chat-gate-note";
-    note.className = "ow-chat-gate-note";
-    note.setAttribute("role", "note");
-    note.innerHTML =
-      '<span class="ow-cg-ico">\u{1F4F7}</span>' +
-      "<span><b>" + GATE_REASON + ".</b> Upload a photo of yourself or generate one with AI — " +
-      "securing a cast photo is your first step. The chat unlocks the moment it's set, and the " +
-      "producers will reach out.</span>";
-    bar.parentNode.insertBefore(note, bar);
-  }
-
-  function unmountNote() {
-    const n = document.getElementById("orwell-chat-gate-note");
-    if (n) n.remove();
   }
 
   function applyLock() {
@@ -105,7 +83,6 @@
     }
     const sb = sendBtn();
     if (sb) { sb.disabled = true; sb.setAttribute("aria-disabled", "true"); }
-    mountNote();
     armReassert();
   }
 
@@ -149,7 +126,6 @@
     }
     const sb = sendBtn();
     if (sb) { sb.disabled = false; sb.removeAttribute("aria-disabled"); }
-    unmountNote();
   }
 
   // Positively (re)compute the gate from the live state. Conservative: only blocks on a confirmed

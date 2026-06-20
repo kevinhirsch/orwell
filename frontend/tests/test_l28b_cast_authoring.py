@@ -21,17 +21,70 @@ def _run(coro):
 # ── the producer prompt ───────────────────────────────────────────────────────
 
 def test_l28b_prompt_is_producer_framed_and_player_independent():
-    msgs = A.build_authoring_messages({"id": "npc:1", "name": "Dana Reyes", "vocation": "welder"}, "The Player")
+    msgs = A.build_authoring_messages({"id": "npc:1", "name": "Dana Reyes", "vocation": "welder"})
     assert msgs[0]["role"] == "system"
     assert "CASTING PRODUCER" in msgs[0]["content"]
     assert "JSON" in msgs[0]["content"]
     user = msgs[1]["content"]
     assert "Dana Reyes" in user
-    # the player's name is surfaced precisely so the cast does NOT mirror them
-    assert "The Player" in user
-    assert "do NOT mirror" in user.lower() or "not mirror" in user.lower()
     # the public skeleton is passed through to build FROM
     assert "welder" in user
+
+
+def test_l28b_prompt_grounds_the_hidden_life_in_the_specific_character():
+    """P1 — NPC story coherence: the producer prompt must INSTRUCT the model to GROUND the
+    secrets/true-goals/weakness in THIS houseguest's own occupation / archetype / age / backstory
+    (the fix for generic, cast-repeating hidden material), while STILL carrying every grounding
+    facet through the skeleton and STILL coupling to no player. The permanent grounding gate."""
+    npc = {
+        "id": "npc:5", "name": "Dana Reyes", "age": 34, "vocation": "pastry chef",
+        "hometown": "Detroit, MI", "archetype": "villain", "demeanor": "deadpan and dry",
+    }
+    msgs = A.build_authoring_messages(npc)
+    system = msgs[0]["content"].lower()
+    user = msgs[1]["content"]
+
+    # (a) the system prompt drives grounding the HIDDEN material in the individual's specifics.
+    assert "ground" in system  # the explicit "GROUND EVERYTHING IN THIS SPECIFIC PERSON" instruction
+    assert "occupation" in system
+    assert "archetype" in system
+    assert "age" in system
+    # the secrets/goals/weakness are named as the things to ground
+    assert "secret" in system and "weakness" in system
+
+    # (b) every grounding facet is actually passed through to the model (build FROM this).
+    for facet in ("pastry chef", "villain", "34", "Detroit, MI", "deadpan and dry"):
+        assert facet in user, facet
+
+    # (c) STILL no player coupling — the grounding change must not reintroduce a protagonist.
+    import inspect
+    assert list(inspect.signature(A.build_authoring_messages).parameters) == ["npc"]
+    assert "player" not in user.lower() or "no protagonist" in user.lower()
+
+
+def test_l28b_prompt_carries_no_player_coupling_and_no_protagonist():
+    """ANTI-SYCOPHANCY (mandate #3): an NPC's STORYLINE is authored as if the player does not exist.
+    The prompt must (a) take no player identity at all, and (b) instruct the model that the cast is a
+    set of equals with no protagonist — secrets/goals/weakness must never revolve around a 'player'.
+    This is the permanent gate against player-centric NPC storyline authoring."""
+    import inspect
+    # The function signature itself no longer accepts a player name (player-independent by construction).
+    params = list(inspect.signature(A.build_authoring_messages).parameters)
+    assert params == ["npc"], params
+
+    # A distinctive player name could only appear in the messages if it were threaded in — it is not.
+    player_name = "Zzqx The Player"
+    msgs = A.build_authoring_messages({"id": "npc:1", "name": "Dana Reyes", "vocation": "welder"})
+    blob = (msgs[0]["content"] + " " + msgs[1]["content"]).lower()
+    assert player_name.lower() not in blob
+
+    system = msgs[0]["content"].lower()
+    # the storyline-independence instruction is present (no protagonist / own independent life)
+    assert "independent" in system
+    assert "protagonist" in system or "only a cast" in system
+    # and the player's Day-1 read is NOT authored here (the engine owns the seeded floor)
+    assert "dayoneperception" not in system.replace(" ", "")
+    assert "dayOnePerception" not in A._HIDDEN_KEYS
 
 
 # ── the parser ────────────────────────────────────────────────────────────────
@@ -58,7 +111,9 @@ def test_l28b_parser_extracts_the_full_schema_with_the_id():
     assert prof["secrets"] == _FULL["secrets"]
     assert prof["trueGoals"] == _FULL["trueGoals"]
     assert prof["weakness"] == _FULL["weakness"]
-    assert prof["dayOnePerception"].startswith("reads the player")
+    # ANTI-SYCOPHANCY: the parser NEVER forwards a player-coupled Day-1 read even if a model returns
+    # one — the engine owns the seeded, balanced read. So `dayOnePerception` is dropped on the floor.
+    assert "dayOnePerception" not in prof
 
 
 def test_l28b_parser_tolerates_fenced_json_and_chatter():
@@ -100,12 +155,13 @@ def test_l28b_author_cast_writes_each_npc_and_skips_the_player():
         writes.append(profile)
         return {"accepted": True, "publicFields": ["biography"], "hiddenFields": ["secrets"]}
 
-    n = _run(A.author_cast(cast, "The Player", llm_fn, write_fn))
+    n = _run(A.author_cast(cast, llm_fn, write_fn))
     assert n == 2  # both NPCs, never the player
     assert [w["houseguestId"] for w in writes] == ["npc:1", "npc:2"]
-    # the write-back carries the authored schema, never a stray key
+    # the write-back carries the authored schema, never a stray key (and never the Day-1 read)
     for w in writes:
         assert set(w).issubset({"houseguestId", *A._PUBLIC_KEYS, *A._HIDDEN_KEYS})
+        assert "dayOnePerception" not in w
 
 
 def test_l28b_author_cast_is_best_effort_per_houseguest():
@@ -122,7 +178,7 @@ def test_l28b_author_cast_is_best_effort_per_houseguest():
         writes.append(profile["houseguestId"])
         return {"accepted": True}
 
-    n = _run(A.author_cast(cast, "P", llm_fn, write_fn))
+    n = _run(A.author_cast(cast, llm_fn, write_fn))
     assert n == 2
     assert writes == ["npc:1", "npc:3"]
 
@@ -136,7 +192,7 @@ def test_l28b_author_cast_does_not_count_a_refused_write():
     async def write_fn(profile):
         return {"accepted": False, "reason": "mirrors the player"}  # the engine refused (the wall held)
 
-    n = _run(A.author_cast(cast, "P", llm_fn, write_fn))
+    n = _run(A.author_cast(cast, llm_fn, write_fn))
     assert n == 0
 
 
@@ -149,7 +205,7 @@ def test_l28b_author_cast_skips_an_npc_the_model_could_not_author():
     async def write_fn(profile):  # pragma: no cover - must never be called
         raise AssertionError("must not write a profile that did not parse")
 
-    n = _run(A.author_cast(cast, "P", llm_fn, write_fn))
+    n = _run(A.author_cast(cast, llm_fn, write_fn))
     assert n == 0
 
 

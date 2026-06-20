@@ -83,4 +83,7 @@ def test_ops_page_carries_the_section(monkeypatch):
     body = client.get("/admin/status").text
     assert "OPS" in body and 'id="opsrow"' in body
     assert "/api/admin/ops/run/" in body and "trigger-update" in body
-    assert "Factory reset is deliberately not here." in body
+    # The OPS SCRIPT row still only runs read-only scripts + the update trigger; the destructive
+    # Factory Reset (OOBE) lives in the top controls and goes through its own root-side trigger.
+    assert "Factory Reset (OOBE)" in body
+    assert "goes through its own root-side trigger" in body

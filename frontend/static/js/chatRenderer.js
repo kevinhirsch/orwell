@@ -2194,12 +2194,14 @@ export function addMessage(role, content, modelName, metadata) {
     if (role === 'assistant' && metadata?.rag_sources?.length) {
       findingsSuffix += buildRagSourcesBox(metadata.rag_sources);
     }
-    // If thinking is stored in metadata (not in text), reconstruct the full display.
-    // GAME BUILD (immersion): never reconstruct the reasoning — the player must not
-    // see the model's chain-of-thought (it leaks engine lever names). Skip the
-    // reconstruction entirely and render the reply text only. (processWithThinking
-    // also drops thinking in the game build, so this is belt-and-suspenders.)
-    if (role === 'assistant' && metadata?.thinking && !isGameBuild()) {
+    // If thinking is stored in metadata (not in text), reconstruct the full display
+    // so processWithThinking can render the reasoning in its (default-collapsed)
+    // "Thinking" accordion. GAME BUILD (2026-06-20 owner ruling): the accordion is
+    // shown by default but COLLAPSED, separate from the clean public bubble — so we
+    // reconstruct here in every build and let processWithThinking decide (it renders
+    // the collapsed accordion in the game build, or drops it when an operator set
+    // `body.hide-thinking`; either way the reply text is scrubbed clean).
+    if (role === 'assistant' && metadata?.thinking) {
       const thinkTime = metadata.thinking_time || null;
       const thinkHtml = markdownModule.processWithThinking(
         '<think' + (thinkTime ? ` time="${thinkTime}"` : '') + '>' + metadata.thinking + '</think>\n\n' + text

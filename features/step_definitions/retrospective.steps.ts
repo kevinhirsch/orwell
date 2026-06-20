@@ -95,7 +95,9 @@ Then("the unsealed hidden story is returned — off-screen scheming, confessiona
   assert.ok(retro.winner, "the winner heads the retrospective");
   const story = JSON.stringify(retro.hiddenStory);
   assert.ok(story.includes(RT_SENTINEL), "the off-screen scheme is in the story");
-  assert.ok(retro.hiddenStory.some((h) => h.type === "confessional"), "the confessionals are in the story");
+  // The hidden story is rendered READABLY (0048 P1 fix): each row's `type` is a plain category label for
+  // the FE's "[type] content" line, never a raw kind slug — confessionals carry the label "Confessional".
+  assert.ok(retro.hiddenStory.some((h) => h.type === "Confessional"), "the confessionals are in the story");
   assert.deepEqual(retro.twists, [{ kind: "double-eviction", firedWeek: null }], "the unfired twist is named");
 });
 

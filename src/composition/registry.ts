@@ -291,6 +291,35 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
 }
 
 /**
+ * R3 (incremental snapshot) — a per-user cache of the last exported `SessionSnapshot`, keyed on a
+ * monotonic `rev` the registry bumps on EVERY mutation (the single `commit` seam) and on every
+ * sandbox replacement (restore/reset/resume). The integrity spine exports the snapshot repeatedly —
+ * the candidate of a commit, the baseline of the next, the supplementary off-screen tick's baseline,
+ * and again on each `getGameState` poll — and most of those exports observe the SAME underlying state.
+ * Returning the SAME object when the state hasn't changed since the last export means:
+ *   (a) the O(events)/O(edges)/O(facts) serialization runs once per actual state change, not per call;
+ *   (b) `toGameState`'s WeakMap memo (keyed on snapshot identity) hits, so the projection that feeds
+ *       the checkpoint's isSuperset/counts/playerSweep is computed once, not re-derived per export.
+ * Correctness: the cached snapshot is an IMMUTABLE point-in-time capture (its `events` array is the
+ * frozen log copy; its other fields are freshly serialized plain data). It is only ever READ. The rev
+ * is bumped BEFORE any mutation's commit re-exports, so a cache entry can never outlive the state it
+ * captured. On any doubt (a path that didn't bump the rev) the worst case is a fresh export — never a
+ * stale one — because the rev only ever advances and a miss recomputes from live state.
+ */
+interface SnapshotCacheEntry {
+  /** The mutation rev (commit + explicit invalidation + sandbox replacement) at capture time. */
+  rev: number;
+  /**
+   * The EventStore length at capture time — a cheap O(1) SECOND key that catches a direct event append
+   * that did NOT route through `commit`/`invalidateSnapshot` (the only production paths that mutate events
+   * are commit-wired or inside the orchestrator's invalidated `applyFn`; this guards a direct
+   * `engine.events.record` — e.g. a test or a future seam — from ever reading back a pre-append capture).
+   */
+  events: number;
+  snap: SessionSnapshot;
+}
+
+/**
  * Rebuild a fresh sandbox from a durable snapshot — resume the game, don't reset it. An UNKNOWN
  * (future) schema version is rejected (throws) rather than silently mis-restored (B40/audit C4); a
  * versionless legacy save migrates forward (it simply had no persisted knowledge layer).
@@ -313,6 +342,11 @@ export class GameSessionRegistry {
   private readonly sandboxes = new Map<string, UserSandbox>();
   private readonly maxResident: number;
 
+  /** R3 — per-user mutation revision; bumped on every commit and every sandbox replacement. */
+  private readonly rev = new Map<string, number>();
+  /** R3 — per-user last-export cache (`{ rev, snap }`); reused while the rev is unchanged. */
+  private readonly snapshotCache = new Map<string, SnapshotCacheEntry>();
+
   /**
    * An optional durable store (0030) makes the live game survive an engine restart:
    * `sandboxFor` recalls the user's saved game on first build, and every mutation
@@ -320,6 +354,23 @@ export class GameSessionRegistry {
    */
   constructor(private readonly saveStore?: UserSaveStore, opts: { maxResident?: number } = {}) {
     this.maxResident = Math.max(1, opts.maxResident ?? GameSessionRegistry.DEFAULT_MAX_RESIDENT);
+  }
+
+  /** R3 — invalidate the user's cached snapshot: advance the rev so the next export recomputes. */
+  private bumpRev(user: string): void {
+    this.rev.set(user, (this.rev.get(user) ?? 0) + 1);
+  }
+
+  /**
+   * R3 — PUBLIC cache invalidation for mutations that bypass the `commit` seam. The orchestrator's
+   * off-screen tick (`applyFn`) mutates the sandbox directly (records scenes, moves relationships,
+   * deepens souls) WITHOUT firing `onPersist`, then asks for the candidate snapshot — so it must
+   * invalidate first, or `snapshot` would hand back the pre-tick capture. Bumping the rev guarantees
+   * the next `snapshot` re-exports from live state (a miss is always correct; only a false HIT would
+   * be a bug, and the rev can only move forward).
+   */
+  invalidateSnapshot(user: string): void {
+    this.bumpRev(user);
   }
 
   /**
@@ -378,6 +429,7 @@ export class GameSessionRegistry {
       }
       this.wireHooks(user, sb);
       this.sandboxes.set(user, sb);
+      this.bumpRev(user); // R3 — a freshly built/resumed object graph; never reuse a prior life's cache
     } else {
       // LRU touch (R4): Map iteration is insertion-ordered — re-inserting keeps the oldest first.
       this.sandboxes.delete(user);
@@ -405,6 +457,10 @@ export class GameSessionRegistry {
       // garbage (the resume re-derives them) — drop it from the shared breathing lane.
       next[1].engine.soul.discardPending();
       this.sandboxes.delete(next[0]);
+      // R3 — release the unloaded user's cached export (it pins the whole event log in RAM) and its
+      // rev; a later resume rebuilds the sandbox (rev bumps) and re-exports fresh.
+      this.snapshotCache.delete(next[0]);
+      this.rev.delete(next[0]);
     }
   }
 
@@ -422,6 +478,10 @@ export class GameSessionRegistry {
 
   /** Invoked after every mutation (the wired `onPersist`): the orchestrator's commit, or a blind save. */
   private commit(user: string): void {
+    // R3 — a mutation just landed: the cached export (if any) is now stale. Bump BEFORE the delegate
+    // re-exports the candidate, so this commit's candidate caches at the new rev and the cache can
+    // never hand back a snapshot older than the live state.
+    this.bumpRev(user);
     if (this.commitDelegate) this.commitDelegate(user);
     else this.saveUser(user);
   }
@@ -433,9 +493,23 @@ export class GameSessionRegistry {
     if (sb && this.saveStore) this.saveStore.saveFor(user, snap ?? exportSnapshot(sb));
   }
 
-  /** The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031. */
+  /**
+   * The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031.
+   * R3 — reuse the last export while no mutation has landed (same `rev`): the candidate/baseline/
+   * off-screen-tick/poll exports of a quiet stretch all return ONE immutable object, so the O(events)
+   * serialization runs once per real change and `toGameState`'s identity memo hits. The cached object
+   * is a point-in-time capture, only ever read — a stale entry is impossible (the rev advances ahead
+   * of any re-export). `sandboxFor` runs first (it may resume/replace the sandbox, which resets rev).
+   */
   snapshot(user: string): SessionSnapshot {
-    return exportSnapshot(this.sandboxFor(user));
+    const sb = this.sandboxFor(user);
+    const rev = this.rev.get(user) ?? 0;
+    const events = sb.engine.events.count();
+    const cached = this.snapshotCache.get(user);
+    if (cached && cached.rev === rev && cached.events === events) return cached.snap;
+    const snap = exportSnapshot(sb);
+    this.snapshotCache.set(user, { rev, events, snap });
+    return snap;
   }
 
   /**
@@ -451,6 +525,7 @@ export class GameSessionRegistry {
     importSnapshot(sb, snap);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
+    this.bumpRev(user); // R3 — the sandbox object graph was replaced; any cached export is stale
     return sb;
   }
 
@@ -481,6 +556,8 @@ export class GameSessionRegistry {
     const sb = buildUserSandbox(user);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
+    this.snapshotCache.delete(user); // R3 — free the dead season's pinned export before season 2
+    this.bumpRev(user); // R3 — a fresh season's clean sandbox; any cached export is dead-season state
     return sb;
   }
 

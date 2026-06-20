@@ -114,6 +114,93 @@ describe("0058 deepProfile — deterministic generators", () => {
   });
 });
 
+describe("0058 anti-sycophancy — NPC storylines are seeded player-INDEPENDENT (mandate #3)", () => {
+  // Start a live game with a SPECIFIC seed and a SPECIFIC player profile (different player ⇒ the cast
+  // must be unchanged). Roles only — the player name is a role marker, never a real cast name.
+  function liveGameWith(user: string, seed: number, req: { playerName: string; backstory?: string; motivation?: string; privateStrategy?: string; personaArchetype?: string }) {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor(user);
+    sb.session.createCharacter({ seed, ...req });
+    return sb;
+  }
+
+  // The full seeded NPC story material from a live game — keyed by NPC id (seed-stable, player-free).
+  // Pulls every storyline facet the engine seeds: the hidden deep profile (secrets/goals/weakness +
+  // the Day-1 read TEXT), the derived story threads, and the public biographies. This is exactly the
+  // material the owner says must NOT revolve around the player.
+  function npcStoryMaterial(sb: ReturnType<typeof liveGameWith>) {
+    const core = sb.session.snapshot();
+    const biographies: Record<string, string | undefined> = {};
+    for (const h of sb.session.getGameState().house) biographies[h.id] = h.biography;
+    return JSON.stringify({
+      deepProfiles: core.deepProfiles ?? {},
+      storyThreads: core.storyThreads ?? [],
+      biographies,
+    });
+  }
+
+  it("the SAME seed with TWO DIFFERENT player profiles yields IDENTICAL NPC story material", () => {
+    const seed = 4242;
+    // Two materially different players: different name, archetype, backstory, motivation, strategy.
+    const a = liveGameWith("anti-syc-a", seed, {
+      playerName: "The Player",
+      personaArchetype: "the strategist",
+      backstory: "a quiet accountant from a small town",
+      motivation: "to prove the doubters wrong",
+      privateStrategy: "lay low, win the end",
+    });
+    const b = liveGameWith("anti-syc-b", seed, {
+      playerName: "A Different Player",
+      personaArchetype: "the social butterfly",
+      backstory: "a loud bartender from a big city",
+      motivation: "to win the prize money",
+      privateStrategy: "run the house from day one",
+    });
+    // The player perturbs NOTHING about the NPC ensemble's seeded storylines.
+    expect(npcStoryMaterial(b)).toBe(npcStoryMaterial(a));
+  });
+
+  it("NPC story-thread + secret content never embeds the player's identity (their life is their own)", () => {
+    // A distinctive, rare player name that could only appear in NPC material if it leaked in.
+    const playerName = "Zzqx The Player";
+    const sb = liveGameWith("anti-syc-leak", 77, { playerName, backstory: "Zzqx grew up far away" });
+    const core = sb.session.snapshot();
+    const needle = playerName.toLowerCase();
+    // No seeded secret / goal / weakness / Day-1-read references the player by name.
+    for (const profile of Object.values(core.deepProfiles ?? {})) {
+      for (const s of profile.secrets) expect(s.toLowerCase()).not.toContain(needle);
+      for (const g of profile.trueGoals) expect(g.toLowerCase()).not.toContain(needle);
+      expect(profile.weakness.toLowerCase()).not.toContain(needle);
+    }
+    // No story-thread premise / trigger references the player by name.
+    for (const t of core.storyThreads ?? []) {
+      expect(t.premise.toLowerCase()).not.toContain(needle);
+      expect(t.trigger.toLowerCase()).not.toContain(needle);
+    }
+    // The threads belong to NPCs (their own arcs), never to the player.
+    for (const t of core.storyThreads ?? []) expect(t.sourceId).not.toBe(PLAYER);
+  });
+
+  it("the engine REFUSES an authored profile whose HIDDEN storyline mirrors the player (airtight guard)", () => {
+    const playerName = "The Player";
+    const sb = liveGameWith("anti-syc-refuse", 88, { playerName });
+    const id = sb.session.getGameState().house[0]!.id;
+    // A player-centric secret must be refused at the write-back boundary (defense-in-depth: even if an
+    // authoring model ignored the prompt, no player-revolving storyline is ever sealed). Vault-safe.
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      secrets: [`is secretly obsessed with ${playerName} and plots around them every week`],
+    });
+    expect(res.accepted).toBe(false);
+    expect(res.reason).toMatch(/mirror/i);
+    // and a player-centric true goal / weakness is likewise refused
+    expect(sb.session.recordCastProfile({ houseguestId: id, trueGoals: [`get ${playerName} out`] }).accepted).toBe(false);
+    expect(sb.session.recordCastProfile({ houseguestId: id, weakness: `cannot stop thinking about ${playerName}` }).accepted).toBe(false);
+    // a player-INDEPENDENT storyline still seals cleanly (the guard is narrow, not a blanket refusal)
+    expect(sb.session.recordCastProfile({ houseguestId: id, secrets: ["is in real financial trouble"], weakness: "is too loyal once committed" }).accepted).toBe(true);
+  });
+});
+
 describe("0058 live wiring — the public depth crosses, the hidden depth never does", () => {
   it("every active houseguest card carries a public biography + physical facet (no hidden field)", () => {
     const { sb } = liveGame("dp-public", 4);

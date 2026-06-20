@@ -210,7 +210,20 @@ import * as modalManager from "./modalManager.js";
   }
 
   async function refresh() {
+    // Issue 2: GATE the finale poll on a STARTED game. Pre-game there is no finale to stage, and
+    // hitting /finale before casting only logged `[orwell] finale failed: no active game` every
+    // poll. /state is the cheap, always-available game-active read every panel shares.
+    try {
+      const st = await getJSON("/api/orwell/state");
+      if (!st || st.started === false) { _staging = false; _failures = 0; hidePanel(); return; }
+    } catch (_) {
+      // /state itself failed (an engine blip): don't escalate to a finale fetch — back off and hide.
+      _failures += 1;
+      hidePanel();
+      return;
+    }
     let finale = null;
+    if (_win && _win.setLoading) _win.setLoading(true); // non-blocking refresh hint over the last reveals
     try {
       const data = await getJSON("/api/orwell/finale");
       finale = data && data.finale;
@@ -219,6 +232,8 @@ import * as modalManager from "./modalManager.js";
       _failures += 1; // engine down → fail open (hide) + back the poll off (E67)
       if (window.OrwellReport) window.OrwellReport.fail("finale", "finale-poll", _); // G11: fail open, never silent
       finale = null;
+    } finally {
+      if (_win && _win.setLoading) _win.setLoading(false);
     }
     _staging = !!finale;
     if (!finale) { hidePanel(); return; }

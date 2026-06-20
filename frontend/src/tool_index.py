@@ -524,14 +524,67 @@ class ToolIndex:
 _tool_index: Optional[ToolIndex] = None
 _last_attempt = 0.0
 _RETRY_INTERVAL = 30.0
+# Quiet the ChromaDB/ToolIndex init log (Issue 3): WARN the unavailability ONCE per
+# outage, not on every 30s retry (a missing ChromaDB used to firehose the log every
+# tick). Cleared when the index comes up, so the next outage logs again (never silent).
+_warned_unavailable = False
+# Under the game build the RAG ToolIndex is unneeded (the keyword-fallback tool
+# selection in agent_loop runs without it), so when ChromaDB isn't configured we
+# DISABLE the retry loop entirely after one quiet note instead of probing every 30s.
+_disabled = False
+
+
+def _chromadb_configured() -> bool:
+    """True when an operator has explicitly pointed at a ChromaDB instance
+    (CHROMADB_HOST / CHROMADB_PORT set). With neither set we treat ChromaDB as
+    not provisioned — under the game build that means the RAG ToolIndex is simply
+    off, not an error to retry forever."""
+    import os
+    return bool(os.getenv("CHROMADB_HOST") or os.getenv("CHROMADB_PORT"))
+
+
+def _toolindex_wanted() -> bool:
+    """Whether to even ATTEMPT the RAG ToolIndex. The game build doesn't need it
+    (keyword-fallback tool selection covers the in-character loop), so when ChromaDB
+    isn't configured under the game build we skip it quietly. With ChromaDB configured
+    — OR the full-workspace build (ORWELL_GAME_BUILD=0) — the RAG path stays intact."""
+    if _chromadb_configured():
+        return True
+    try:
+        from src.settings import game_build_enabled
+        return not game_build_enabled()  # full workspace ⇒ still want RAG
+    except Exception:
+        return True  # if settings can't be read, behave as before (attempt it)
 
 
 def get_tool_index() -> Optional[ToolIndex]:
-    """Get or create the singleton ToolIndex. Returns None if unavailable."""
-    global _tool_index, _last_attempt
+    """Get or create the singleton ToolIndex. Returns None if unavailable.
+
+    Quiet by design (Issue 3): a missing/unconfigured ChromaDB logs its
+    unavailability ONCE, not on every retry, and — under the game build with no
+    ChromaDB configured — disables the retry loop entirely (the RAG index is
+    unneeded there). A CONFIGURED ChromaDB keeps the full retry/recover behavior
+    (it just stops re-logging the same outage every 30s).
+    """
+    global _tool_index, _last_attempt, _warned_unavailable, _disabled
 
     if _tool_index is not None and _tool_index.healthy:
         return _tool_index
+
+    if _disabled:
+        return None
+
+    if not _toolindex_wanted():
+        # ChromaDB isn't configured and we're under the game build: the RAG ToolIndex
+        # is unneeded — disable it after one quiet note instead of probing forever.
+        if not _warned_unavailable:
+            _warned_unavailable = True
+            logger.info(
+                "ToolIndex disabled: ChromaDB is not configured and the game build does "
+                "not need RAG tool selection (set CHROMADB_HOST to enable it)."
+            )
+        _disabled = True
+        return None
 
     now = time.monotonic()
     if now - _last_attempt < _RETRY_INTERVAL:
@@ -541,15 +594,22 @@ def get_tool_index() -> Optional[ToolIndex]:
     try:
         _tool_index = ToolIndex()
         _tool_index.index_builtin_tools()
+        _warned_unavailable = False  # recovered — the next outage logs again
         return _tool_index
     except Exception as e:
-        logger.warning(f"ToolIndex init failed (will retry in {_RETRY_INTERVAL}s): {e}")
+        # Log the unavailability ONCE per outage (not every 30s). The retry loop still
+        # runs silently, so a ChromaDB that comes up later is picked up on a later call.
+        if not _warned_unavailable:
+            _warned_unavailable = True
+            logger.warning(f"ToolIndex init failed (will retry every {_RETRY_INTERVAL}s, silently): {e}")
         _tool_index = None
         return None
 
 
 def reset_tool_index() -> None:
     """Clear the singleton so embedding endpoint changes rebuild tool lanes."""
-    global _tool_index, _last_attempt
+    global _tool_index, _last_attempt, _warned_unavailable, _disabled
     _tool_index = None
     _last_attempt = 0.0
+    _warned_unavailable = False
+    _disabled = False

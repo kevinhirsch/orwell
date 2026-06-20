@@ -54,8 +54,9 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 `FE` (front-end pytest) · `engine` (Vitest, no `.feature`) · `scripts` (deploy) · `—` (none yet).
 
 > **Audit (2026-06-20).** Every feature **0001–0063** was cross-checked against its source artifact
-> (not its prose). **No orphaned or untracked unbuilt specs.** The only not-built spec is **0022**
-> (⏸ deferred). **0062** (the move-in zeitgeist snapshot) **shipped 2026-06-20** — BDD-gated, frozen +
+> (not its prose). **No orphaned or untracked unbuilt specs.** Not-built specs: **0022**
+> (⏸ deferred) and **0064** (📝 newly authored — live multi-device game sync). **0062** (the
+> move-in zeitgeist snapshot) **shipped 2026-06-20** — BDD-gated, frozen +
 > seed-reproducible + flavor-only (outcome-invariant). Tracked here and in the authoritative
 > [open-items ledger](../audits/2026-06-10-full-product-audit.md).
 
@@ -126,6 +127,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0061 | [Player self-eviction](./0061-player-self-eviction.md) | BDD | ✅ Built |
 | 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | BDD | ✅ Built · `src/engine/zeitgeist.ts`; frozen + seed-reproducible + flavor-only (outcome-invariant) |
 | 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
+| 0064 | [Live multi-device game sync](./0064-live-multi-device-game-sync.md) | FE | 📝 Spec only |
 
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is

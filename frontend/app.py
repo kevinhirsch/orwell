@@ -576,6 +576,37 @@ from routes.admin_health_routes import setup_admin_health_routes, setup_admin_st
 app.include_router(setup_admin_health_routes())
 app.include_router(setup_admin_status_page())  # G1b: the self-contained ops page at /admin/status
 
+# Admin one-click Update — pull latest → rebuild engine → refresh FE deps → restart both. The
+# operator's deploy-merged-fixes button on the admin status page. Behind require_admin; the
+# command is FIXED (no user input); runs detached / fire-and-forget so the self-restart doesn't
+# kill it mid-flight (prefers the privilege-safe G19b root flag trigger when installed).
+from routes.admin_update_routes import setup_admin_update_routes
+app.include_router(setup_admin_update_routes())
+
+# Admin Factory Reset (OOBE) — wipe everything to exact first-run state, KEEP the API-key/LLM
+# provider config (never touches data/.env). The operator's "clear all context/db/mcp/settings"
+# button on the admin status page. Behind require_admin; FIXED argv (no user input); the
+# destructive run demands a type-"RESET" confirmation in the browser and prefers the
+# privilege-safe root flag trigger (orwell-ops-factory-reset.path) when installed.
+from routes.admin_reset_routes import setup_admin_reset_routes
+app.include_router(setup_admin_reset_routes())
+
+# Admin Update + Reset (keep API keys) — the combined middle tier of the three maintenance
+# controls (Update · Update + Reset · Reset). Pull latest + rebuild, THEN reset to first-run OOBE
+# while PRESERVING the API-key/LLM provider config (never touches data/.env). Behind require_admin;
+# FIXED argv (no user input); the destructive run demands a type-"RESET" confirmation in the
+# browser and prefers the privilege-safe root flag trigger (orwell-ops-update-reset.path) when
+# installed. Fail-closed: a failed update never proceeds to the wipe (see orwell-update-reset.sh).
+from routes.admin_update_reset_routes import setup_admin_update_reset_routes
+app.include_router(setup_admin_update_reset_routes())
+
+# Admin ops-status — the read side of the ops-progress lane. Every privileged ops button (Update,
+# Factory Reset (OOBE), Update+Reset) has its deploy script publish step-by-step progress to
+# data/ops/<action>-status.json; this admin-gated, Vault-free, read-only endpoint surfaces the
+# latest status so the status page renders a live timeline that survives the services restart.
+from routes.admin_ops_status_routes import setup_admin_ops_status_routes
+app.include_router(setup_admin_ops_status_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.

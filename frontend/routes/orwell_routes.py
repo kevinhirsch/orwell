@@ -53,6 +53,21 @@ def _clear_warn(key: str) -> None:
     _LAST_WARN.pop(key, None)
 
 
+def _err_detail(exc: Exception) -> str:
+    """A NON-EMPTY, diagnosable failure detail. The field bug: the engine log showed bare
+    `state failed:` lines with NO reason — `str(e)` is empty for several exceptions a slow/large
+    /state export can raise (a read timeout, a RemoteProtocolError from a connection dropped mid-
+    response, a 502 with no body). Always prefix the exception TYPE so the line names a cause; for
+    an httpx status error, surface the upstream status too. So a slow export reads as e.g.
+    `ReadTimeout: timed out` / `HTTPStatusError: server error '502 Bad Gateway' …`, never blank."""
+    msg = str(exc).strip()
+    status = ""
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) is not None:
+        status = f" (HTTP {resp.status_code})"
+    return f"{type(exc).__name__}: {msg}{status}" if msg else f"{type(exc).__name__}{status or ' (no detail)'}"
+
+
 # ── L15: a LAST-GOOD roster cache (per user, process-local) ─────────────────────────────────────
 # The cast panel polls /roster FAST (3.5s) while portraits land. During cast generation the engine's
 # per-user serial queue is busy committing the run's writes, so a getGameState poll can time out
@@ -334,6 +349,9 @@ def setup_orwell_routes() -> APIRouter:
             "engineUrl": detail.get("engineUrl"),
             "error": detail.get("error"),
             "lastError": detail.get("lastError"),
+            # Issue 1: a brief, soft "reconnecting…" while a transient outage is being retried —
+            # the banner shows a recover-in-progress line instead of a hard red outage.
+            "reconnecting": bool(detail.get("reconnecting")),
             # G8: "creating" while createCharacter is in flight — the banner holds in-fiction
             # (casting being finalized) instead of flashing a false "engine unavailable".
             "busy": detail.get("busy"),
@@ -346,8 +364,9 @@ def setup_orwell_routes() -> APIRouter:
             _clear_warn("state")
             return st
         except Exception as e:
-            _warn_throttled("state", f"[orwell] state failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("state", f"[orwell] state failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/moment")
     async def orwell_moment(request: Request, moment: Optional[str] = None):
@@ -360,8 +379,9 @@ def setup_orwell_routes() -> APIRouter:
         try:
             return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
-            _warn_throttled("moment", f"[orwell] moment failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("moment", f"[orwell] moment failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/status")
     async def orwell_status(request: Request):
@@ -384,11 +404,13 @@ def setup_orwell_routes() -> APIRouter:
         except orwell_engine.EngineToolError as e:
             if e.no_game:
                 return {"started": False}
-            _warn_throttled("status", f"[orwell] status failed: {e}")
-            return JSONResponse(status_code=502, content={"error": str(e)})
+            detail = _err_detail(e)
+            _warn_throttled("status", f"[orwell] status failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": detail})
         except Exception as e:
-            _warn_throttled("status", f"[orwell] status failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("status", f"[orwell] status failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/tagline")
     async def orwell_tagline(request: Request):
@@ -421,9 +443,10 @@ def setup_orwell_routes() -> APIRouter:
             # finish-detection point — log the public outcome once the season is over (idempotent).
             if isinstance(recap, dict) and recap.get("finished"):
                 await _capture_season_outcome(user)
+            _clear_warn("recap")
             return {"recap": recap}
         except Exception as e:
-            logger.warning(f"[orwell] recap failed: {e}")
+            _warn_throttled("recap", f"[orwell] recap failed: {_err_detail(e)}")
             return {"recap": None}
 
     @router.get("/retrospective")
@@ -438,11 +461,13 @@ def setup_orwell_routes() -> APIRouter:
             # a live season, never a false "engine unreachable" 502 (the engine answered, it refused).
             if e.no_game:
                 return JSONResponse(status_code=404, content={"error": "No season to unseal — there is no active game."})
-            logger.warning(f"[orwell] retrospective failed: {e}")
-            return JSONResponse(status_code=502, content={"error": str(e)})
+            detail = _err_detail(e)
+            _warn_throttled("retrospective", f"[orwell] retrospective failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": detail})
         except Exception as e:
-            logger.warning(f"[orwell] retrospective failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("retrospective", f"[orwell] retrospective failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
         if retro is None:
             return JSONResponse(status_code=404, content={"error": "The season is still live — the Vault opens only after a winner is crowned."})
         return {"retrospective": retro}
@@ -470,9 +495,18 @@ def setup_orwell_routes() -> APIRouter:
             # Calibration instrumentation: cache the full jury margin from the revealed ballots while
             # the finale is still staging (it vanishes once the season flips to `finished`).
             _remember_finale_tally(user, finale if isinstance(finale, dict) else None)
+            _clear_warn("finale")
             return {"finale": finale}
+        except orwell_engine.EngineToolError as e:
+            # Issue 2: pre-game ("no active game") is a NORMAL state, not a finale failure — the
+            # panel just isn't staging yet. Return {finale: null} quietly (no log spam) so polling
+            # before a game exists never floods `[orwell] finale failed: no active game`.
+            if e.no_game:
+                return {"finale": None}
+            _warn_throttled("finale", f"[orwell] finale failed: {_err_detail(e)}")
+            return {"finale": None}
         except Exception as e:
-            _warn_throttled("finale", f"[orwell] finale failed: {e}")
+            _warn_throttled("finale", f"[orwell] finale failed: {_err_detail(e)}")
             return {"finale": None}
 
     @router.get("/roster")
@@ -500,9 +534,9 @@ def setup_orwell_routes() -> APIRouter:
             # the cast on screen by serving the last roster we built, never an empty one.
             cached = _last_good_roster(user)
             if cached is not None:
-                _warn_throttled("roster", f"[orwell] roster read failed — serving last-good roster: {e}")
+                _warn_throttled("roster", f"[orwell] roster read failed — serving last-good roster: {_err_detail(e)}")
                 return _roster_payload(user, cached, stale=True)
-            _warn_throttled("roster", f"[orwell] roster failed: {e}")
+            _warn_throttled("roster", f"[orwell] roster failed: {_err_detail(e)}")
             return {"roster": [], "imagesAvailable": False}
 
         _clear_warn("roster")

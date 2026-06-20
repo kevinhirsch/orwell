@@ -419,9 +419,34 @@ _STATUS_PAGE = """<!doctype html>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
   <button type="button" class="btn" id="refresh-now">Refresh now</button>
+  <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
   <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
+  <!-- BEGIN update-reset-combo lane button (self-contained; endpoint + logic live in routes/admin_update_reset_routes.py) -->
+  <button type="button" class="btn" id="update-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — pulls latest, rebuilds, THEN resets to first-run OOBE: wipes ALL accounts, chats, memory, MCP configs, uploads, and every game. Keeps your API keys / LLM config so you don't re-enter them. Requires typing RESET.">Update + Reset (OOBE, keep API keys)</button>
+  <!-- END update-reset-combo lane button -->
+  <!-- BEGIN factory-oobe-reset lane button (self-contained; endpoint + logic live in routes/admin_reset_routes.py) -->
+  <button type="button" class="btn" id="factory-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — wipe ALL accounts, chats, memory, MCP configs, uploads, and every game; return to first-run OOBE. Keeps your API-key/LLM config so you don't re-enter it. Requires typing RESET.">Factory Reset (OOBE)</button>
+  <!-- END factory-oobe-reset lane button -->
 </div>
+<div id="update-msg" class="sub" style="margin:-6px 0 8px"></div>
+<!-- BEGIN ops-progress lane: live step-by-step timeline for the running ops action (Update / -->
+<!-- Factory Reset (OOBE) / Update+Reset). Hidden until an action is running or recently done; -->
+<!-- the JS region below polls /api/admin/ops-status and survives the services restart. -->
+<div id="ops-progress" style="display:none;margin:6px 0 14px;border:1px solid #2d3340;border-radius:8px;padding:10px 12px;background:#101218;max-width:760px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span id="ops-progress-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #355a66;border-top-color:#9cdef2;border-radius:50%;animation:opsspin 0.9s linear infinite"></span>
+    <strong id="ops-progress-title" style="letter-spacing:.03em">Ops</strong>
+    <span id="ops-progress-count" class="sub"></span>
+  </div>
+  <div id="ops-progress-bar-wrap" style="height:5px;background:#1b1f27;border-radius:3px;overflow:hidden;margin:6px 0 8px">
+    <div id="ops-progress-bar" style="height:100%;width:0%;background:#3cb46e;transition:width .4s ease"></div>
+  </div>
+  <ol id="ops-progress-steps" style="list-style:none;margin:0;padding:0;font-size:12.5px;line-height:1.7"></ol>
+  <div id="ops-progress-msg" class="sub" style="margin-top:6px"></div>
+</div>
+<style>@keyframes opsspin { to { transform: rotate(360deg); } }</style>
+<!-- END ops-progress lane -->
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
 <div class="sub">Every log stream in the program, selectable. Auto-follows the tail while you are at the bottom; scrolling up pauses the follow — scroll back down to resume.</div>
@@ -431,7 +456,7 @@ _STATUS_PAGE = """<!doctype html>
 </div>
 <div id="logpane" style="height:380px;overflow:auto;border:1px solid #262a33;border-radius:8px;padding:8px 10px;background:#101218;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.45"></div>
 <h1 style="margin-top:26px">OPS</h1>
-<div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. Factory reset is deliberately not here.</div>
+<div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. The destructive Factory Reset (OOBE) lives in the controls at the top and likewise goes through its own root-side trigger.</div>
 <div class="actions" id="opsrow">Loading ops…</div>
 <div id="opsmsg" class="sub"></div>
 <div id="err"></div>
@@ -461,18 +486,54 @@ function render(d) {
      "<tr><td colspan=4>No recent failures on record.</td></tr>") + "</tbody></table>" +
     (feLast ? "<div class='sub' style='margin-top:8px'>Front-end tier: " + esc(feLast.tool || "?") + " — " + esc(feLast.kind || "") + " — " + esc(feLast.error || "") + "</div>" : "");
 }
+// ── update-awareness that SURVIVES the restart (localStorage) ──
+// The Update button restarts BOTH tiers, including this page's own host. An in-memory reconnect
+// loop dies if the page reloads mid-restart (browser auto-reload, or the admin refreshes) — and
+// the regular health poll would then show a HARD "Health check failed" red during a perfectly
+// normal ~60s bounce. A persisted flag (set when an update/restart begins, cleared when the tiers
+// answer healthy) lets a fresh page load RESUME the soft "reconnecting…" state and recover quietly.
+const UPDATING_KEY = "orwell-admin-updating";
+const UPDATING_TTL_MS = 5 * 60 * 1000; // a stale flag (a crash mid-update) auto-expires after 5 min
+// `const updMsg` is declared lower in this script; load() runs before it, so reach the node lazily
+// (avoid a temporal-dead-zone ReferenceError on the resume-on-reload path).
+const updMsgEl = () => document.getElementById("update-msg");
+function markUpdating() { try { localStorage.setItem(UPDATING_KEY, String(Date.now())); } catch (e) {} }
+function clearUpdating() { try { localStorage.removeItem(UPDATING_KEY); } catch (e) {} }
+function isUpdating() {
+  try {
+    const v = localStorage.getItem(UPDATING_KEY);
+    if (!v) return false;
+    if (Date.now() - Number(v) > UPDATING_TTL_MS) { clearUpdating(); return false; }
+    return true;
+  } catch (e) { return false; }
+}
 async function load() {
   try {
-    const r = await fetch("/api/admin/health", { credentials: "same-origin" });
+    const r = await fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
+    const d = await r.json();
+    render(d);
     document.getElementById("err").textContent = "";
     document.getElementById("ts").textContent = "Last check: " + new Date().toLocaleTimeString();
-  } catch (e) { document.getElementById("err").textContent = "Health check failed: " + e.message; }
+    // The tiers answered healthy → any in-progress update/restart has landed; drop the soft state.
+    if (d && d.engine && d.engine.ok && isUpdating()) { clearUpdating(); const m = updMsgEl(); if (m) m.textContent = ""; }
+  } catch (e) {
+    // During a known update/restart a failed probe is EXPECTED — show the soft "reconnecting" line,
+    // not a hard red outage. Outside an update it is a genuine failure and reads as one.
+    if (isUpdating()) {
+      document.getElementById("err").textContent = "";
+      const m = updMsgEl(); if (m) m.textContent = "Updating… the app is restarting, reconnecting…";
+    } else {
+      document.getElementById("err").textContent = "Health check failed: " + e.message;
+    }
+  }
 }
 load();
 setInterval(load, 10000);
 document.getElementById("refresh-now").addEventListener("click", load);
+// On a fresh page load DURING a restart (the page's own host bounced and reloaded), resume the
+// reconnecting loop instead of stranding the admin on a stale/error view.
+if (isUpdating()) { const m = updMsgEl(); if (m) m.textContent = "Updating… reconnecting after the restart…"; waitForBack(); }
 
 // ── the sticky-tail multi-source log viewer (G1b) ──
 const pane = document.getElementById("logpane"), pill = document.getElementById("follow"),
@@ -588,6 +649,210 @@ async function fastForwardFinale() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
+// ── BEGIN update-reset-combo lane: destructive Update + Reset (pull+rebuild THEN OOBE; type RESET) ──
+// Pulls latest + rebuilds, THEN wipes everything to first-run OOBE — keeping the API-key/LLM config.
+// Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint in
+// routes/admin_update_reset_routes.py and rides the restart back to OOBE via waitForBack().
+async function updateReset() {
+  const typed = prompt(
+    "UPDATE + RESET (OOBE)\\n\\n" +
+    "First UPDATES: pulls latest, rebuilds the engine, refreshes front-end deps.\\n" +
+    "Then RESETS to OOBE: PERMANENTLY deletes ALL accounts, chats, memory, MCP server configs, " +
+    "uploads, every user setting, and every game — returning the app to first-run onboarding.\\n\\n" +
+    "PRESERVED: your API keys / LLM provider configuration (so you don't re-enter them).\\n" +
+    "If the update fails, the reset does NOT run and nothing is wiped.\\n\\n" +
+    "Type RESET to confirm:");
+  if (typed === null) return;                 // cancelled
+  if (typed.trim() !== "RESET") { updMsg.innerHTML = '<span class="warn">Update + Reset cancelled — you must type RESET exactly.</span>'; return; }
+  updMsg.textContent = "Starting update + reset…";
+  try {
+    const r = await fetch("/api/admin/update-reset", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.innerHTML = '<span class="warn">Updating + resetting… returning to OOBE. The app is restarting, reconnecting…</span>';
+      waitForBack();
+    } else {
+      updMsg.innerHTML = '<span class="bad">Could not start the update + reset.</span>';
+    }
+  } catch (e) {
+    // A dropped connection here can simply mean the restart already began — start reconnecting.
+    updMsg.innerHTML = '<span class="warn">Update + reset requested (connection dropped — likely already restarting); reconnecting to OOBE…</span>';
+    waitForBack();
+  }
+}
+document.getElementById("update-reset").addEventListener("click", updateReset);
+// ── END update-reset-combo lane ──
+// ── BEGIN factory-oobe-reset lane: destructive OOBE reset (type RESET to confirm) ──
+// Wipes ALL accounts/chats/memory/MCP/settings + every game; keeps the API-key/LLM config.
+// Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint
+// in routes/admin_reset_routes.py and rides the restart back to OOBE via waitForBack().
+async function factoryReset() {
+  const typed = prompt(
+    "FACTORY RESET (OOBE)\\n\\n" +
+    "This PERMANENTLY deletes ALL accounts, chats, memory, MCP server configs, uploads, every " +
+    "user setting, and every game — returning the app to first-run onboarding.\\n\\n" +
+    "PRESERVED: your API-key / LLM provider configuration (so you don't re-enter it).\\n\\n" +
+    "Type RESET to confirm:");
+  if (typed === null) return;                 // cancelled
+  if (typed.trim() !== "RESET") { updMsg.innerHTML = '<span class="warn">Reset cancelled — you must type RESET exactly.</span>'; return; }
+  updMsg.textContent = "Starting factory reset…";
+  try {
+    const r = await fetch("/api/admin/factory-reset", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.innerHTML = '<span class="warn">Resetting… returning to OOBE. The app is restarting, reconnecting…</span>';
+      waitForBack();
+    } else {
+      updMsg.innerHTML = '<span class="bad">Could not start the reset.</span>';
+    }
+  } catch (e) {
+    // A dropped connection here can simply mean the restart already began — start reconnecting.
+    updMsg.innerHTML = '<span class="warn">Reset requested (connection dropped — likely already restarting); reconnecting to OOBE…</span>';
+    waitForBack();
+  }
+}
+document.getElementById("factory-reset").addEventListener("click", factoryReset);
+// ── END factory-oobe-reset lane ──
+// ── one-click Update: pull → rebuild → refresh FE deps → restart both, then reconnect ──
+const updMsg = document.getElementById("update-msg");
+function waitForBack() {
+  // The services restart (this page's host included). Poll /api/admin/health until the engine
+  // answers again, then reload. Generous attempts (~3 min) cover a cold npm ci + rebuild.
+  let tries = 0;
+  const tick = async () => {
+    tries++;
+    try {
+      const r = await fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.engine && d.engine.ok) {
+          clearUpdating(); // the bounce landed — the persisted soft state has served its purpose
+          updMsg.innerHTML = '<span class="ok">Back online — reloading…</span>';
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
+      }
+    } catch (e) { /* still down — keep polling */ }
+    updMsg.textContent = "Updating… the app is restarting, reconnecting (" + tries + ")";
+    if (tries < 90) setTimeout(tick, 2000);
+    else updMsg.innerHTML = '<span class="warn">Still reconnecting — refresh the page manually in a moment.</span>';
+  };
+  setTimeout(tick, 4000); // give the restart a head start before the first probe
+}
+async function updateOrwell() {
+  if (!confirm("Update Orwell now?\\n\\nThis pulls latest, rebuilds the engine, refreshes front-end deps, and restarts both services — the app will briefly go down (~30–60s) and reconnect automatically.")) return;
+  // Persist the "updating" awareness BEFORE the restart can drop this page — so a reload mid-bounce
+  // resumes the reconnecting state instead of showing a false hard outage.
+  markUpdating();
+  updMsg.textContent = "Starting the update…";
+  try {
+    const r = await fetch("/api/admin/update", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.textContent = "Update started — the app will restart, reconnecting…";
+      waitForBack();
+    } else {
+      clearUpdating(); // the update never actually started — don't strand the page in soft state
+      updMsg.innerHTML = '<span class="bad">Could not start the update.</span>';
+    }
+  } catch (e) {
+    // A connection drop here can simply mean the restart already began — start reconnecting.
+    updMsg.textContent = "Update requested (connection dropped — likely already restarting); reconnecting…";
+    waitForBack();
+  }
+}
+document.getElementById("update-orwell").addEventListener("click", updateOrwell);
+// ── BEGIN ops-progress lane ──
+// Poll /api/admin/ops-status and render a live timeline for whichever ops action is running
+// (Update / Factory Reset (OOBE) / Update+Reset). Survives the services restart: the action being
+// watched is persisted to localStorage and resumed after waitForBack() reloads the page; on
+// completion it shows "done / updated / OOBE ready", on failure the error — so the old silent
+// "triggered then nothing" can never recur.
+const OPS_PROGRESS_KEY = "orwell.ops.watching";          // localStorage: the action we're tracking
+const OPS_STEP_LABELS = {
+  // The human phase names per action — index = step number (the script emits 1..total). These
+  // mirror the ops_progress_step() calls in the deploy scripts; a message from the server always
+  // wins for the CURRENT step, so a label drift never lies, it just pre-fills the upcoming rows.
+  "update": ["fetching latest code", "rebuilding engine", "refreshing front-end deps", "restarting services", "updated"],
+  "factory-reset": ["stopping services", "preserving API keys / LLM config", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+  "update-reset": ["fetching latest code", "rebuilding engine", "stopping services", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+};
+const OPS_TITLES = { "update": "Updating Orwell", "factory-reset": "Factory Reset (OOBE)", "update-reset": "Update + Reset" };
+function opsMarkWatching(action) { try { localStorage.setItem(OPS_PROGRESS_KEY, action); } catch (e) {} }
+function opsClearWatching() { try { localStorage.removeItem(OPS_PROGRESS_KEY); } catch (e) {} }
+function opsGetWatching() { try { return localStorage.getItem(OPS_PROGRESS_KEY); } catch (e) { return null; } }
+const opsPanel = document.getElementById("ops-progress");
+function renderOpsProgress(s) {
+  // s = a normalized status object from /api/admin/ops-status (or null). Hide the panel when
+  // there's nothing to show.
+  if (!s) { opsPanel.style.display = "none"; return; }
+  const action = s.action || "ops";
+  const labels = OPS_STEP_LABELS[action] || [];
+  const total = s.total || labels.length || 0;
+  const step = Math.max(0, Math.min(s.step || 0, total || (s.step || 0)));
+  opsPanel.style.display = "block";
+  document.getElementById("ops-progress-title").textContent = OPS_TITLES[action] || action;
+  document.getElementById("ops-progress-count").textContent = total ? ("step " + step + " / " + total) : "";
+  const pct = total ? Math.round((s.ok ? total : step) / total * 100) : (s.ok ? 100 : 0);
+  const bar = document.getElementById("ops-progress-bar");
+  bar.style.width = pct + "%";
+  bar.style.background = s.error ? "#e55" : (s.ok ? "#3cb46e" : "#9cdef2");
+  const spinner = document.getElementById("ops-progress-spinner");
+  spinner.style.display = s.running ? "inline-block" : "none";
+  // Build the step rows: done (✓), current (●), pending (○); the failed step gets ✗.
+  const rows = [];
+  const n = Math.max(total, labels.length, step);
+  for (let i = 1; i <= n; i++) {
+    const label = (i === step && s.message && !s.ok) ? s.message.replace(/^FAILED:\\s*/, "") : (labels[i - 1] || ("step " + i));
+    let mark, cls;
+    if (s.error && i === step) { mark = "✗"; cls = "bad"; }
+    else if (i < step || (s.ok && i <= total)) { mark = "✓"; cls = "ok"; }
+    else if (i === step && s.running) { mark = "●"; cls = ""; }
+    else { mark = "○"; cls = "sub"; }
+    const labelCls = (cls === "sub") ? "sub" : "";
+    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span class=\\"" + labelCls + "\\">" + esc(label) + "</span></li>");
+  }
+  document.getElementById("ops-progress-steps").innerHTML = rows.join("");
+  const msgEl = document.getElementById("ops-progress-msg");
+  if (s.error) msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
+  else if (s.ok) msgEl.innerHTML = '<span class="ok">' + esc(s.message || "done") + "</span>";
+  else if (s.running) msgEl.innerHTML = '<span class="sub">' + esc(s.message || "working…") + "</span>";
+  else msgEl.textContent = "";
+}
+async function pollOpsProgress() {
+  try {
+    const r = await fetch("/api/admin/ops-status", { credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    const watching = opsGetWatching();
+    // Prefer the running action, else the one we were told to watch, else the most-recently stamped.
+    const action = d.running || (watching && d.actions && d.actions[watching] ? watching : d.latest);
+    const s = action && d.actions ? d.actions[action] : null;
+    renderOpsProgress(s);
+    if (s) {
+      if (s.running) opsMarkWatching(action);       // keep tracking this one across the reload
+      else if (watching === action && (s.ok || s.error)) {
+        // The action we were watching has finished — show its terminal state once, then stop
+        // re-asserting it so a later page-load doesn't resurrect a stale completed banner.
+        opsClearWatching();
+      }
+    }
+  } catch (e) { /* transient (likely the restart) — the next poll retries */ }
+}
+// Mark which action to track the moment its button is clicked, so the timeline resumes after the
+// restart-triggered reload. Non-invasive: we ADD listeners to the existing buttons (their own
+// lanes own the click→POST flow); these only set the localStorage breadcrumb the poller reads.
+(function () {
+  const u = document.getElementById("update-orwell");
+  if (u) u.addEventListener("click", () => opsMarkWatching("update"));
+  const ur = document.getElementById("update-reset");
+  if (ur) ur.addEventListener("click", () => opsMarkWatching("update-reset"));
+  const fr = document.getElementById("factory-reset");
+  if (fr) fr.addEventListener("click", () => opsMarkWatching("factory-reset"));
+})();
+pollOpsProgress();
+setInterval(pollOpsProgress, 2000);
+// ── END ops-progress lane ──
 async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });
