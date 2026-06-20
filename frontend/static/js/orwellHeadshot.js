@@ -64,6 +64,17 @@
         display: flex; align-items: center; justify-content: center; font-size: 28px; opacity: .85; }
       .ow-headshot-studio .hs-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
       .ow-headshot-studio .hs-opts { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 8px; }
+      /* Theme the native file control so it stops rendering as the bare OS "Choose File"
+         widget inside the monospace house UI (pre-launch polish). The input keeps its
+         id/handler/accept/aria — this is style only, no behavioral change. The picker
+         button is themed to match .hs-btn-ghost; the filename text inherits the body font. */
+      .ow-headshot-studio #hs-file { font: inherit; font-size: 12px; max-width: 100%;
+        color: color-mix(in srgb, var(--fg, #cfd8e3) 78%, transparent); }
+      .ow-headshot-studio #hs-file::file-selector-button { font: inherit; font-size: 12.5px;
+        padding: 6px 12px; margin-right: 10px; border-radius: 8px; cursor: pointer; font-weight: 400;
+        background: transparent; color: var(--fg, #cfd8e3); border: 1px solid var(--border, #355a66); }
+      .ow-headshot-studio #hs-file::file-selector-button:hover {
+        border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 2px; }
       .ow-headshot-studio .hs-cand { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer;
         border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; }

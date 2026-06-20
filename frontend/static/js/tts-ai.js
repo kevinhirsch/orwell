@@ -30,6 +30,13 @@ class AITTSManager {
 
     async checkAvailability() {
         try {
+            // Game build drops the voice vertical entirely (its routes 404), so don't probe
+            // /api/tts/* — the request only littered the console with 404s on first paint.
+            if (document.body && document.body.hasAttribute('data-game-build')) {
+                this.available = false;
+                this._provider = 'disabled';
+                return;
+            }
             // Check user setting first — if TTS is disabled in settings, don't show buttons
             try {
                 const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
