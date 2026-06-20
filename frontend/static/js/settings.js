@@ -2050,6 +2050,21 @@ function initAccount() {
       }
     }).catch(() => {});
 
+  // Visible post-login build version (mirrors the login-screen footer). Derived
+  // from the deployed checkout's highest merged PR number, rendered v{PR/100}.
+  const verEl = el('settings-app-version');
+  if (verEl) {
+    const cached = window._appVersion;
+    if (cached) {
+      verEl.textContent = 'v' + cached;
+    } else {
+      fetch('/api/version', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => { if (d && d.version) { window._appVersion = d.version; verEl.textContent = 'v' + d.version; } })
+        .catch(() => {});
+    }
+  }
+
   // G28: the profile-picture studio — the SAME upload + 3-option AI flow as casting, here in
   // the user area so you can change your pic anytime. The avatar circle updates on finalize.
   try {

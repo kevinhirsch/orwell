@@ -62,6 +62,12 @@ class CreateUserRequest(BaseModel):
 
 class DeleteUserRequest(BaseModel):
     username: str
+    # Typed-confirmation guard: the admin must re-type the exact username they
+    # intend to delete. The delete only proceeds when this matches `username`
+    # (case-insensitively, after trim — usernames are stored normalized). A
+    # client that omits it (older callers) is rejected, so the typed step can
+    # never be skipped by hitting the endpoint directly.
+    confirm_username: Optional[str] = None
 
 
 class RenameUserRequest(BaseModel):
@@ -408,9 +414,29 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):
             raise HTTPException(403, "Admin only")
+        target = (body.username or "").strip().lower()
+        # Guard (c): the admin must have typed the exact username to confirm.
+        # Enforced server-side too, so the destructive step can't be skipped by
+        # calling the endpoint directly. Normalize both sides the same way the
+        # store does before comparing.
+        typed = (body.confirm_username or "").strip().lower()
+        if typed != target:
+            raise HTTPException(400, "Type the exact username to confirm deletion")
+        # Guards (a) self-delete and (b) last-admin are enforced inside
+        # auth_manager.delete_user (the single user-store mutation door).
         ok = auth_manager.delete_user(body.username, user)
         if not ok:
             raise HTTPException(400, "Cannot delete user")
+        # Clean up the deleted user's game sandbox through the engine's ONE
+        # sanctioned reset door (manageSandbox reset ⇒ OOBE) — mirrors how
+        # reset-progress / new-game wipe a sandbox. The account is gone, so its
+        # engine sandbox must not linger. Best-effort: a deleted account must
+        # not be blocked by an unreachable engine, so this never fails the call.
+        try:
+            from src import orwell_engine
+            await orwell_engine.manage_sandbox("reset", user=target)
+        except Exception:
+            logger.warning("Failed to reset game sandbox for deleted user '%s'", target)
         # delete_user removes the user's ApiToken rows, but the bearer-auth
         # middleware serves from an in-memory prefix->token cache that only
         # rebuilds when flagged dirty. Without this, a deleted user's already
