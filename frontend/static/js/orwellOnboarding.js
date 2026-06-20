@@ -360,10 +360,24 @@
   const OPEN_GAME_LINE =
     "(Production cue — begin the casting interview now. Reach out to me first, in character as the " +
     "producers; do not wait for me to speak.)";
+  // 0064 §D — the kickoff must fire ONCE PER GAME, not once per device. A second device that already
+  // received the producers' opener (via the canonical session's live sync) must NOT fire its own.
+  // DOM belt: only open the cue when the conversation is genuinely empty (no assistant turn yet); a
+  // second device finding the opener already there simply renders it and joins live.
+  function _conversationHasAssistantTurn() {
+    try {
+      const hist = document.getElementById("chat-history");
+      if (hist && hist.querySelector(".msg.msg-ai")) return true;   // chatRenderer uses .msg-ai
+    } catch (_) {}
+    return false;
+  }
   let _openSent = false;
   window._orwellOpenGameAfterCasting = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild || _openSent) return;
+    // Once-per-game: a producer opener already present (e.g. another device fired it and it synced
+    // here) means we must never fire a second one.
+    if (_conversationHasAssistantTurn()) { _openSent = true; return; }
     _openSent = true;
     // The photo is now secured — make sure the chat is unlocked before the kickoff sends.
     try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
@@ -375,6 +389,7 @@
         const box = document.getElementById("message");
         if (!box) { _openSent = false; return; }
         if (box.value.trim()) return;                 // the player is mid-thought — don't stomp it
+        if (_conversationHasAssistantTurn()) return;  // 0064: a producer opener already arrived — done
         if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
           _openSent = false; return;                  // a turn is already running — let it finish
         }

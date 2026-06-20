@@ -129,7 +129,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0061 | [Player self-eviction](./0061-player-self-eviction.md) | BDD | ✅ Built |
 | 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | BDD | ✅ Built · `src/engine/zeitgeist.ts`; frozen + seed-reproducible + flavor-only (outcome-invariant) |
 | 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
-| 0064 | [Live multi-device game sync](./0064-live-multi-device-game-sync.md) | FE | 🚧 Built · stopgap (canonical game session); Messenger-sync + window-sync owed |
+| 0064 | [Live multi-device game sync](./0064-live-multi-device-game-sync.md) | FE | 🚧 Built · canonical session (#399) + window/HUD layout sync (F) + `game-updated`/cast-photo/once-only (B/D); Messenger serialization (C) owed |
 
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
