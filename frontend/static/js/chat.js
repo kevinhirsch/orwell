@@ -160,6 +160,97 @@ import { isNarrow } from './platform.js';
            _resumingStreams.has(sessionId);
   }
 
+  // ── 0064: one driver at a time (spectator mode) ─────────────────────────────────────────────
+  // A stable per-TAB driver token: the per-game turn lock uses it to tell THIS device's own
+  // retry/reconnect apart from a second device starting a parallel reasoning chain. sessionStorage
+  // is per-tab, so two tabs (even one device) are two drivers — exactly the one-driver rule.
+  function _driverToken() {
+    try {
+      let t = sessionStorage.getItem('orwell-driver-token');
+      if (!t) {
+        t = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID()
+            : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+        sessionStorage.setItem('orwell-driver-token', t);
+      }
+      return t;
+    } catch (_) {
+      return 'd' + Math.random().toString(36).slice(2);
+    }
+  }
+
+  // Drop the just-typed user bubble when the server REFUSED the turn (another device is driving):
+  // the server discarded the message, so its bubble must not linger locally.
+  function _removeLastLocalUserBubble() {
+    const box = document.getElementById('chat-history');
+    if (!box) return;
+    const users = box.querySelectorAll('.msg.msg-user');
+    if (users.length) users[users.length - 1].remove();
+  }
+
+  // The live-spectator banner + composer lock: another device is mid-turn, so this device watches
+  // live and cannot start a second turn. An explicit "Take over" cancels the other run (POST
+  // /api/chat/stop) — which releases the turn lock — and re-enables this composer. Confirm first
+  // (accidental take-over mid-sentence is jarring — recommended default).
+  let _spectatorSession = null;
+  function enterSpectatorMode(sessionId) {
+    _spectatorSession = sessionId;
+    const bar = document.querySelector('.chat-input-bar') || document.body;
+    const box = document.getElementById('message');
+    if (box) { box.disabled = true; box.setAttribute('aria-disabled', 'true'); }
+    const sb = document.querySelector('.send-btn');
+    if (sb) { sb.disabled = true; sb.setAttribute('aria-disabled', 'true'); }
+    if (document.getElementById('orwell-spectator-banner')) return;
+    if (!document.getElementById('orwell-spectator-css')) {
+      const s = document.createElement('style');
+      s.id = 'orwell-spectator-css';
+      s.textContent =
+        '#orwell-spectator-banner{display:flex;align-items:center;gap:.6rem;justify-content:center;' +
+        'flex-wrap:wrap;padding:.4rem .7rem;margin:0 0 .4rem;border-radius:8px;font-size:.8rem;' +
+        'background:color-mix(in srgb,var(--panel,#111) 80%,transparent);color:var(--fg,#9cdef2);' +
+        'border:1px solid var(--border,#355a66);}' +
+        '#orwell-spectator-banner .ow-spec-take{font:inherit;font-size:.78rem;padding:.25rem .7rem;' +
+        'border-radius:6px;cursor:pointer;background:var(--brand-color,var(--red,#e06c75));' +
+        'color:var(--bg,#111);border:1px solid transparent;font-weight:600;}';
+      document.head.appendChild(s);
+    }
+    const banner = document.createElement('div');
+    banner.id = 'orwell-spectator-banner';
+    banner.setAttribute('role', 'status');
+    banner.innerHTML =
+      '<span>Another screen is in the house right now — you’re watching live.</span>' +
+      '<button type="button" class="ow-spec-take">Take over</button>';
+    banner.querySelector('.ow-spec-take').addEventListener('click', async () => {
+      let ok = true;
+      try {
+        if (uiModule && uiModule.styledConfirm) {
+          ok = await uiModule.styledConfirm('Take over the game turn on this screen?',
+            { confirmText: 'Take over', danger: false });
+        } else {
+          ok = window.confirm('Take over the game turn on this screen?');
+        }
+      } catch (_) { ok = true; }
+      if (!ok) return;
+      try {
+        await fetch(`${API_BASE}/api/chat/stop/${encodeURIComponent(sessionId)}`,
+          { method: 'POST', credentials: 'same-origin' });
+      } catch (_) {}
+      exitSpectatorMode();
+    });
+    try { bar.parentNode.insertBefore(banner, bar); } catch (_) { bar.prepend(banner); }
+  }
+  function exitSpectatorMode() {
+    _spectatorSession = null;
+    const b = document.getElementById('orwell-spectator-banner');
+    if (b) b.remove();
+    const box = document.getElementById('message');
+    // Only re-enable if the cast-photo gate isn't itself holding the composer.
+    const gated = !!(window._orwellChatGate && window._orwellChatGate.blocked && window._orwellChatGate.blocked());
+    if (box && !gated) { box.disabled = false; box.removeAttribute('aria-disabled'); }
+    const sb = document.querySelector('.send-btn');
+    if (sb && !gated) { sb.disabled = false; sb.removeAttribute('aria-disabled'); }
+  }
+  function isSpectating() { return _spectatorSession != null; }
+
   // Sources box builder and toggleSources are now in chatRenderer.js
   var _buildSourcesBox = chatRenderer.buildSourcesBox;
 
@@ -844,6 +935,9 @@ import { isNarrow } from './platform.js';
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      // 0064: a stable per-tab driver token so the per-game turn lock tells THIS device's own
+      // retry/reconnect apart from a SECOND device starting a parallel reasoning chain.
+      try { fd.append('driver_token', _driverToken()); } catch (_) {}
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
       // Auto-save & send active doc ID so the backend sees latest content
       if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
@@ -1081,6 +1175,26 @@ import { isNarrow } from './platform.js';
           holder.remove();
           if (sessionModule) await sessionModule.loadSessions();
           return;
+        }
+        // 0064 — one driver at a time. Another device is mid-turn on this game session: the
+        // server refused this turn (turn-in-progress) instead of stomping the live run. Become a
+        // live SPECTATOR — drop our (un-rendered) turn, show the watching-live banner + disable the
+        // composer, and attach to the other device's reply. No second reasoning chain ever runs.
+        if (res.status === 409) {
+          let body = {};
+          try { body = await res.json(); } catch (_) {}
+          const detail = (body && body.detail) || body || {};
+          if (detail && detail.error === 'turn-in-progress') {
+            try { holder.remove(); } catch (_) {}
+            // Strip our just-typed user bubble (the server discarded the message; it never ran).
+            try { _removeLastLocalUserBubble(); } catch (_) {}
+            try { enterSpectatorMode(streamSessionId); } catch (_) {}
+            try {
+              if (resumeStream && !hasActiveStream(streamSessionId)) await resumeStream(streamSessionId);
+            } catch (_) {}
+            enableResearchBtn();
+            return;
+          }
         }
         let errText = `Error ${res.status}`;
         try {
@@ -5273,6 +5387,10 @@ import { isNarrow } from './platform.js';
     _appendViewReportLink,
     hasActiveStream,
     softReloadHistory,
+    // 0064 — one driver at a time (spectator mode).
+    enterSpectatorMode,
+    exitSpectatorMode,
+    isSpectating,
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on

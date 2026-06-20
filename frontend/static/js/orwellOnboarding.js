@@ -304,15 +304,46 @@
     } catch (_) { return true; }
   }
 
-  // F7: a brand-new interview opens a FRESH chat session so a dead/reset season's transcript never
-  // rides along as narrator context. Runs ONCE per interview (sessionStorage marker). There is NO
-  // composer prefill any more — the image step is the player's first interaction and the producers
-  // open the conversation (the old casting-seat pre-prompt has been removed).
-  function openFreshInterviewSession() {
+  // 0064: every device converges on the ONE canonical game session (server-authoritative), instead
+  // of each minting its own device-local "+ New chat" (which split the game into parallel chats /
+  // parallel reasoning chains across devices). Resolve the bound session and OPEN it; the existing
+  // cross-device sync (sessionSync.js + session_events + agent_runs) then makes every screen show the
+  // same conversation live. A season reset rotates the binding server-side (no dead-season bleed).
+  //
+  // The SEAT_TAKEN_KEY marker is now an advisory per-tab fast-path only — the server store is the
+  // source of truth for "which session is the game", so two tabs/devices can never diverge.
+  async function resolveCanonicalSession() {
+    try {
+      const r = await fetch("/api/orwell/game-session", { credentials: "same-origin" });
+      if (!r.ok) return null;
+      const d = await r.json();
+      return (d && d.sessionId) || null;
+    } catch (_) { return null; }
+  }
+
+  // F7: the once-per-interview marker (the per-tab fence). Still set exactly once — now an advisory
+  // fast-path only (the server store is the source of truth for "which session is the game").
+  function _markSeated() {
+    try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
+  }
+
+  async function openFreshInterviewSession() {
     let seated = false;
     try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
+    const sm = window.sessionModule;
+    const sessionId = await resolveCanonicalSession();
+    if (sessionId && sm && sm.selectSession) {
+      const cur = sm.getCurrentSessionId ? sm.getCurrentSessionId() : null;
+      _markSeated();
+      if (cur !== sessionId) {
+        try { await sm.selectSession(sessionId); } catch (_) {}
+      }
+      return;
+    }
+    // Fallback (no canonical session resolvable — engine/route unavailable): the legacy behavior,
+    // a fresh device-local session, guarded by the per-tab marker so we don't loop.
     if (seated) return;
-    try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
+    _markSeated();
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
@@ -331,10 +362,28 @@
   const OPEN_GAME_LINE =
     "(Production cue — begin the casting interview now. Reach out to me first, in character as the " +
     "producers; do not wait for me to speak.)";
+  // 0064 §D — the kickoff must fire ONCE PER GAME, not once per device. A second device that
+  // already received the producers' opener (via the canonical session's live sync) must NOT fire
+  // its own. The server-side turn lock (0064 §C) already prevents a second CONCURRENT kickoff run;
+  // this is the client belt: only open the cue when the conversation is genuinely empty (no assistant
+  // turn present yet). A second device finding the opener already there simply renders it and joins
+  // as a spectator.
+  function _conversationHasAssistantTurn() {
+    try {
+      const hist = document.getElementById("chat-history");
+      // An assistant bubble present (rendered live or soft-reloaded from history) means the
+      // producers already reached out — the chat renderer uses `.msg-ai` for assistant turns.
+      if (hist && hist.querySelector(".msg.msg-ai")) return true;
+    } catch (_) {}
+    return false;
+  }
   let _openSent = false;
   window._orwellOpenGameAfterCasting = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild || _openSent) return;
+    // Once-per-game: if the producers have already reached out (an assistant turn is present, e.g.
+    // another device fired the kickoff and it synced here), never fire a second one.
+    if (_conversationHasAssistantTurn()) { _openSent = true; return; }
     _openSent = true;
     // The photo is now secured — make sure the chat is unlocked before the kickoff sends.
     try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
@@ -346,6 +395,7 @@
         const box = document.getElementById("message");
         if (!box) { _openSent = false; return; }
         if (box.value.trim()) return;                 // the player is mid-thought — don't stomp it
+        if (_conversationHasAssistantTurn()) return;  // 0064: a producer opener already arrived — done
         if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
           _openSent = false; return;                  // a turn is already running — let it finish
         }
@@ -433,7 +483,7 @@
       // guided sequence — the WELCOME MODAL first (once per account), which hands off to the image
       // step. The chat is already locked by orwellChatGate.js until a photo is secured; the casting
       // card (orwellHeadshot.js) is the image step itself.
-      openFreshInterviewSession();
+      await openFreshInterviewSession();
       if (!welcomeSeen()) {
         mountWelcome(); // its own modal; on "Add my cast photo" it dissolves into the image step
       }

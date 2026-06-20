@@ -15,6 +15,7 @@ no bespoke game chat route here. These endpoints are the onboarding + state seam
 """
 import json
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Request, UploadFile, File, Form
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 
 from core.middleware import require_admin
 from src import orwell_engine
+from src import orwell_game_session
 from src import orwell_portraits
 from src.auth_helpers import effective_user
 from src.rate_limiter import RateLimiter
@@ -320,8 +322,89 @@ class ResetProgressRequest(BaseModel):
     confirm: bool = False
 
 
+# ── 0064: the canonical per-user game chat session ──────────────────────────────────────────────
+# The engine enforces one game per user (0021); without a binding the FE splits the game into one
+# chat session per device. `orwell_game_session` is the server-authoritative binding; these helpers
+# mint / verify a real, owned chat session for it (so the existing per-session cross-device sync —
+# session_events + agent_runs + sessionSync.js, all keyed by session_id — finally engages). Vault-free:
+# a session id carries no game secret.
+
+def _session_exists_for_user(session_id: str, user: Optional[str]) -> bool:
+    """True iff `session_id` is a real, persisted session owned by `user` (a stale/foreign id is
+    re-minted, so a dead-season transcript or another user's session can never become the game)."""
+    if not session_id:
+        return False
+    from core.database import SessionLocal, Session as DbSession
+    db = SessionLocal()
+    try:
+        row = db.query(DbSession.owner).filter(DbSession.id == session_id).first()
+    except Exception:
+        # Can't tell — resolve_game_session keeps the stored id over re-minting on a transient
+        # failure (never split the live game on a flaky DB read).
+        raise
+    finally:
+        db.close()
+    if row is None:
+        return False
+    return row.owner == user
+
+
+def _publish_game_updated(user: Optional[str]) -> None:
+    """0064 §B.3 — ping every device viewing the canonical session that the board changed (a binding
+    decision, a self-evict, an advance) so the non-driving device reconciles its HUD INSTANTLY instead
+    of waiting up to ~2s for the next poll. Vault-free: a session id + a change-type string only, no
+    body. Best-effort — a publish failure must never break the player-facing route. (Polling stays the
+    correctness floor; this is the latency nicety, the recommended v1 default.)"""
+    try:
+        sid = orwell_game_session.get_game_session(user)
+        if sid:
+            from src import session_events
+            session_events.publish(sid, "game-updated")
+    except Exception:
+        pass
+
+
+def _mint_game_session(user: Optional[str]) -> str:
+    """Create a fresh, owned, model-less chat session for the game and return its id. Model-less is
+    fine: the client's model picker (and the chat send path's _recover_empty_session_model) populate
+    the model on first use, exactly as the '+ New chat' pending session does today."""
+    from src.ai_interaction import get_session_manager
+    sm = get_session_manager()
+    if sm is None:
+        raise RuntimeError("session manager unavailable")
+    sid = str(uuid.uuid4())
+    sm.create_session(
+        session_id=sid,
+        name="",            # auto-named on first turn, like any new chat
+        endpoint_url="",
+        model="",
+        rag=False,
+        owner=user,
+    )
+    return sid
+
+
 def setup_orwell_routes() -> APIRouter:
     router = APIRouter(prefix="/api/orwell", tags=["orwell"])
+
+    @router.get("/game-session")
+    async def orwell_game_session_route(request: Request):
+        """0064 — resolve (or mint) THIS user's canonical game chat session. Every device opens the
+        returned session so all screens converge on ONE conversation and the existing cross-device
+        sync engages. Idempotent under concurrency (the store lock serializes resolve-or-mint, so two
+        simultaneous first-opens get the SAME id, never two). `_current_user`-scoped — never returns
+        another user's session. Vault-free (a session id only)."""
+        user = _current_user(request)
+        try:
+            session_id, created = orwell_game_session.resolve_game_session(
+                user,
+                mint=lambda: _mint_game_session(user),
+                exists=lambda sid: _session_exists_for_user(sid, user),
+            )
+            return {"sessionId": session_id, "created": created}
+        except Exception as e:
+            logger.warning(f"[orwell] game-session resolve failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"could not resolve the game session: {e}"})
 
     @router.get("/health")
     async def orwell_health():
@@ -755,6 +838,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
@@ -776,6 +860,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.request_self_eviction(user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             if e.no_game:
@@ -793,6 +878,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.cancel_self_eviction(user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             if e.no_game:
@@ -831,6 +917,12 @@ def setup_orwell_routes() -> APIRouter:
             # A new season = a new cast: scrub the prior portrait set before generating (0051).
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            # 0064: rotate the canonical game session so the new season binds a CLEAN chat (a dead
+            # season's transcript never rides as narrator context). The next /game-session mints fresh.
+            try:
+                orwell_game_session.clear_game_session(user)
             except Exception:
                 pass
             res = await orwell_engine.create_character(
@@ -897,6 +989,11 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            # 0064: rotate the canonical game session for the new season (no dead-season bleed-through).
+            try:
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             if body.keep:
                 # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
                 res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
@@ -930,6 +1027,11 @@ def setup_orwell_routes() -> APIRouter:
         try:
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            # 0064: rotate the canonical game session so the restarted level binds a clean chat.
+            try:
+                orwell_game_session.clear_game_session(user)
             except Exception:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door

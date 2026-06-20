@@ -19,6 +19,7 @@ from src.agent_loop import stream_agent_loop
 from src.tool_schemas import ORWELL_GAME_TOOLS
 from src import agent_runs
 from src import session_events
+from src import game_turn_lock
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
@@ -450,6 +451,10 @@ def setup_chat_routes(
                 incognito = False
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        # 0064: an opaque per-device/-tab token identifying THIS driver. Used by the per-game
+        # turn lock to tell "my own retry/reconnect" apart from "a second device starting a
+        # parallel reasoning chain". Absent (a non-0064 client) → a fresh token is minted per turn.
+        driver_token = (form_data.get("driver_token") or "").strip() or None
         # Workspace: confine the agent's file/shell tools to this folder. Validate
         # it's a real directory; ignore (no confinement) otherwise.
         workspace = (form_data.get("workspace") or "").strip()
@@ -1339,7 +1344,41 @@ def setup_chat_routes(
         if compare_mode:
             return StreamingResponse(_safe_stream(), media_type="text/event-stream")
 
-        agent_runs.start(session, _safe_stream())
+        # 0064 — ONE driver at a time. A game-framed turn (in-game OR the casting interview) takes
+        # the per-game turn lock before the run starts. With two devices on the canonical session a
+        # second device's submit would otherwise reach agent_runs.start, which CANCELS the in-flight
+        # run for the session — a stomp + a second LLM reasoning chain writing into the one shared
+        # engine intake. If the lock is held by a DIFFERENT driver, refuse with a typed 409
+        # `turn-in-progress` (the FE renders a live-spectator banner + a Take-over affordance via
+        # POST /api/chat/stop) instead of stomping. Plain (non-game) chats are unaffected.
+        _turn_hold = None
+        if ctx.framed:
+            _turn_hold = game_turn_lock.acquire(session, driver_token)
+            if _turn_hold is None:
+                # Held by another device — never persist this refused turn (mirrors the E25 hygiene
+                # on the sync-route 409) and never stomp the live run.
+                discard_last_user_message(sess)
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "turn-in-progress", "driver": game_turn_lock.holder(session) or ""},
+                )
+
+        if _turn_hold is not None:
+            # Release the lock when THIS run reaches a terminal state (done/error/stopped/disconnect),
+            # so the next turn is open to any device. Fence-scoped: a late terminal callback from a
+            # replaced run (this device's own double-send) can't free the newer hold.
+            _locked_stream = _safe_stream()
+
+            async def _lock_guarded_stream() -> AsyncGenerator[str, None]:
+                try:
+                    async for chunk in _locked_stream:
+                        yield chunk
+                finally:
+                    game_turn_lock.release(session, _turn_hold)
+
+            agent_runs.start(session, _lock_guarded_stream())
+        else:
+            agent_runs.start(session, _safe_stream())
         # Tell every other device viewing this session that a new run started, so
         # they reconcile (load the new user message + attach to the live reply).
         session_events.publish(session, "run-started")
@@ -1383,6 +1422,11 @@ def setup_chat_routes(
     async def chat_stop(request: Request, session_id: str) -> Dict[str, Any]:
         _verify_session_owner(request, session_id)
         stopped = agent_runs.stop(session_id)
+        # 0064 — the take-over path: cancelling the run lets its wrapped generator save its partial
+        # and its finally release the lock; release here too (unconditionally) so a take-over always
+        # frees the turn even if the run already ended or its terminal callback is delayed. The
+        # spectating device can then drive the next turn.
+        game_turn_lock.release(session_id)
         return {"stopped": stopped}
 
     # ------------------------------------------------------------------ #

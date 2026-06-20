@@ -29,16 +29,21 @@
     const s = document.createElement("style");
     s.id = "orwell-headshot-css";
     s.textContent = `
-      /* P1 OOBE overhaul: the pre-game casting headshot is now a PROPER OrwellWindow
-         (composes the .ow-* kit). It GATES the chat, so it is mounted non-dismissable
-         (no close/minimize control) and stays put until a photo is secured. The kit
-         owns the frame/titlebar/drag; we only size + position it and style its body. */
+      /* P1 OOBE overhaul: the pre-game casting headshot is a PROPER OrwellWindow (composes the
+         .ow-* kit). It GATES the chat, so it is mounted non-dismissable (no close/minimize) and
+         stays put until a photo is secured.
+         0064 placement fix: it is the FOCUSED onboarding gate, so it docks as a centered dialog,
+         NOT floating at the top-right slot anchor. The slot system writes inline
+         left/top/right/bottom/transform to stack panels; we override every one with !important
+         (inline non-important loses to important CSS) so the window pins viewport-centered
+         regardless of the slot math. The old rule pinned only the left edge (left:50% with no
+         important transform), which the slot stomped to transform:none and dropped the recenter —
+         that floated it mid-screen at the wrong place. The full transform now centers it. */
       #${ID} {
-        /* a prominent, centered-ish gate — wide enough for the 3-option studio grid,
-           capped + internally scrolling so it never climbs under the "orwell" header. */
         width: 480px; max-width: min(92vw, 480px);
         left: 50% !important; right: auto !important;
-        transform: translateX(-50%);
+        top: max(12vh, var(--ow-headshot-top-clear, 88px)) !important; bottom: auto !important;
+        transform: translateX(-50%) !important;
         z-index: 1000;  /* above the welcome splash + slotted HUD, below true modals */
       }
       #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px))); }
@@ -384,9 +389,38 @@
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild) return;
     const st = await jget("/api/orwell/state");
-    if (st && st.started === false) mount(); else unmount();
+    // 0064: the gate is pre-game ONLY. But "pre-game" alone is not enough to keep it OPEN — the
+    // cast photo is a per-user, server-authoritative bit (intake.finalized). Once ANY device sets
+    // it, every device must reflect that and CLOSE (a second device must not re-prompt for a photo
+    // that's already set). Drive the gate from the SYNCED canonical state, not per-tab local state.
+    if (!(st && st.started === false)) { unmount(); return; }
+    const intake = await jget("/api/orwell/portrait/intake");
+    const secured = !!(intake && intake.finalized === true);
+    if (secured) {
+      // The headshot is set (here or on another device) — close the gate and let the chat (the
+      // canonical session, with the synced producer message) take over. Don't re-fire the kickoff:
+      // _orwellOpenGameAfterCasting is once-per-game guarded, so a second device just unmounts.
+      const wasOpen = !!(_win || document.getElementById(ID));
+      unmount();
+      if (wasOpen) {
+        try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
+      }
+      return;
+    }
+    mount();
   }
 
   window.addEventListener("orwell:gamechanged", route);
+  // 0064: a photo finalized on THIS or ANOTHER device flips intake.finalized — re-route so the gate
+  // closes everywhere. `avatarchanged` fires locally on finalize; the cross-device path is the
+  // canonical-session sync re-dispatching `orwell:gamechanged` on a `game-updated` ping, plus the
+  // light poll below catches the case where no event reaches this tab.
+  window.addEventListener("orwell:avatarchanged", route);
+  // A bounded background re-check so a second device closes the gate within a few seconds even with
+  // no event (e.g. the photo was set on a device that never pinged this one). Cheap reads; only does
+  // work while the gate is actually mounted (pre-game) — a no-op once the game is underway.
+  setInterval(function () {
+    if (_win || document.getElementById(ID)) { route(); }
+  }, 4000);
   ready(route);
 })();
