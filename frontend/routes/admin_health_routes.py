@@ -419,9 +419,11 @@ _STATUS_PAGE = """<!doctype html>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
   <button type="button" class="btn" id="refresh-now">Refresh now</button>
+  <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
   <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
 </div>
+<div id="update-msg" class="sub" style="margin:-6px 0 8px"></div>
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
 <div class="sub">Every log stream in the program, selectable. Auto-follows the tail while you are at the bottom; scrolling up pauses the follow — scroll back down to resume.</div>
@@ -588,6 +590,50 @@ async function fastForwardFinale() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
+// ── one-click Update: pull → rebuild → refresh FE deps → restart both, then reconnect ──
+const updMsg = document.getElementById("update-msg");
+function waitForBack() {
+  // The services restart (this page's host included). Poll /api/admin/health until the engine
+  // answers again, then reload. Generous attempts (~3 min) cover a cold npm ci + rebuild.
+  let tries = 0;
+  const tick = async () => {
+    tries++;
+    try {
+      const r = await fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.engine && d.engine.ok) {
+          updMsg.innerHTML = '<span class="ok">Back online — reloading…</span>';
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
+      }
+    } catch (e) { /* still down — keep polling */ }
+    updMsg.textContent = "Updating… the app is restarting, reconnecting (" + tries + ")";
+    if (tries < 90) setTimeout(tick, 2000);
+    else updMsg.innerHTML = '<span class="warn">Still reconnecting — refresh the page manually in a moment.</span>';
+  };
+  setTimeout(tick, 4000); // give the restart a head start before the first probe
+}
+async function updateOrwell() {
+  if (!confirm("Update Orwell now?\\n\\nThis pulls latest, rebuilds the engine, refreshes front-end deps, and restarts both services — the app will briefly go down (~30–60s) and reconnect automatically.")) return;
+  updMsg.textContent = "Starting the update…";
+  try {
+    const r = await fetch("/api/admin/update", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.textContent = "Update started — the app will restart, reconnecting…";
+      waitForBack();
+    } else {
+      updMsg.innerHTML = '<span class="bad">Could not start the update.</span>';
+    }
+  } catch (e) {
+    // A connection drop here can simply mean the restart already began — start reconnecting.
+    updMsg.textContent = "Update requested (connection dropped — likely already restarting); reconnecting…";
+    waitForBack();
+  }
+}
+document.getElementById("update-orwell").addEventListener("click", updateOrwell);
 async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });

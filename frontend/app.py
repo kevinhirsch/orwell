@@ -576,6 +576,13 @@ from routes.admin_health_routes import setup_admin_health_routes, setup_admin_st
 app.include_router(setup_admin_health_routes())
 app.include_router(setup_admin_status_page())  # G1b: the self-contained ops page at /admin/status
 
+# Admin one-click Update — pull latest → rebuild engine → refresh FE deps → restart both. The
+# operator's deploy-merged-fixes button on the admin status page. Behind require_admin; the
+# command is FIXED (no user input); runs detached / fire-and-forget so the self-restart doesn't
+# kill it mid-flight (prefers the privilege-safe G19b root flag trigger when installed).
+from routes.admin_update_routes import setup_admin_update_routes
+app.include_router(setup_admin_update_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.

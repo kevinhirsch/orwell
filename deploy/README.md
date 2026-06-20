@@ -168,6 +168,35 @@ lands mid-run earns exactly one follow-up run) and holds a `flock` so overlappin
 no-op. The web tier chooses *when*, never *what*. Factory reset is deliberately **not**
 web-triggerable (pending an explicit product go).
 
+The status page also carries a prominent **"Update Orwell (pull + rebuild + restart)"** button
+(`POST /api/admin/update`, admin-gated, fixed command — no user input). It confirms first, then
+shows an "Updating… reconnecting" state and polls `/api/admin/health`, reloading once both
+services answer again. The endpoint runs the update through one of two privilege doors, in
+priority order — and never silently 403s on `systemctl`:
+
+1. **The flag trigger (default, recommended).** When `data/ops/` exists (the installer creates
+   it), the endpoint just drops the existence-only flag above and the root path unit runs the
+   script. **The web tier holds zero privilege; nothing extra is required.**
+2. **The detached direct run (opt-in).** Set `ORWELL_UPDATE_DIRECT=1` to force, and
+   `ORWELL_UPDATE_SUDO=1` to wrap the run as `sudo -n bash orwell-update.sh`. This path runs the
+   fixed script with `subprocess.Popen(start_new_session=True)` (its own session, so the restart
+   of `orwell-frontend` can't kill it) and returns `{started:true}` immediately. **Operator
+   prerequisites for this path** — because the FE user is non-root and `systemctl`/`git
+   pull`/`/etc/systemd` are otherwise denied:
+   * Install the scoped sudoers drop-in: re-run `orwell-install.sh` with `ORWELL_UPDATE_SUDO=1`
+     (writes `/etc/sudoers.d/orwell-update`, validated with `visudo -c`; grants the `orwell`
+     user NOPASSWD for **exactly** `bash orwell-update.sh`, nothing else — see
+     `deploy/sudoers/orwell-update`).
+   * Clear `NoNewPrivileges=yes` for the FE unit (it blocks setuid `sudo`): add a drop-in
+     `/etc/systemd/system/orwell-frontend.service.d/20-update-sudo.conf` with
+     `[Service]\nNoNewPrivileges=no`, then `systemctl daemon-reload && systemctl restart
+     orwell-frontend`. This relaxes one hardening knob for the FE unit, which is why the
+     **flag-trigger door (1) is preferred** — it needs none of this.
+
+Path/log are overridable for tests/dev via `ORWELL_UPDATE_SCRIPT` (default
+`/opt/orwell/deploy/orwell-update.sh`) and `ORWELL_UPDATE_LOG` (default
+`/opt/orwell/data/update.log`); the command itself is always fixed.
+
 ### The login health panel
 
 Entering the container (`pct enter`, ssh) greets you with a live one-glance panel — both
