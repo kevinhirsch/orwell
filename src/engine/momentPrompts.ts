@@ -2,6 +2,7 @@ import type { GameStateView } from "../ports/GameSession";
 import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 import { neutralizeForPrompt } from "./castingIntake";
 import { dayOfWeek } from "./houseEvents";
+import { physicalFacetToAppearance } from "./portraitPrompts";
 
 /**
  * Managed system-prompt injections, per moment.
@@ -523,6 +524,23 @@ export function momentFragment(moment: string): string {
   return MOMENT_PROMPTS[moment] ?? MOMENT_PROMPTS["default"]!;
 }
 
+/**
+ * The PUBLIC physical-look clause the narrator voices for a houseguest (L29/L23/0058).
+ *
+ * THE consistency hinge: the narrated body and the cast portrait must derive from ONE source. When
+ * the structured `physicalCharacteristics` facet is present it AUTHORS the look through the SAME
+ * `physicalFacetToAppearance` the portrait prompt uses — so the prose and the picture can never
+ * drift; absent (pre-0058 saves), it falls back to the prose `appearance` blurb. Reads only PUBLIC,
+ * Vault-free fields on the card (the structured facet is a §3-presentable baseline, never the Vault).
+ */
+export function physicalLook(card: {
+  appearance?: string;
+  physicalCharacteristics?: import("../domain/physicalCharacteristics").PhysicalCharacteristics;
+}): string | undefined {
+  if (card.physicalCharacteristics) return physicalFacetToAppearance(card.physicalCharacteristics);
+  return card.appearance;
+}
+
 /** A Vault-free context block woven into the system prompt. Reads ONLY public projection fields. */
 export function renderGameContext(view: GameStateView): string {
   if (!view.started || !view.player) {
@@ -582,7 +600,13 @@ export function renderGameContext(view: GameStateView): string {
       // 0058: the STORED public biography — voice THIS established backstory, never invent (and drift)
       // one. It is the presentable §3 backstory; the hidden secrets/goals never appear here (the wall).
       h.biography,
-      [h.age, h.appearance, h.presentation].filter(Boolean).join(", "),
+      // L29/L23: the houseguest's PHYSICAL look — voice the SAME source the portrait was drawn from, so
+      // the narrated description and the cast photo never diverge. The STRUCTURED `physicalCharacteristics`
+      // facet (height/build, skin tone, hair, features, distinguishing mark, age-look + style) is the
+      // single source of truth shared with `portraitPrompts.physicalFacetToAppearance`; it AUTHORS the
+      // look when present (richer + more differentiating than the prose `appearance`), and we fall back to
+      // the prose `appearance` only for pre-0058 saves that never seeded a facet. All PUBLIC, Vault-free.
+      [h.age, physicalLook(h), h.presentation].filter(Boolean).join(", "),
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;
   }).join("\n");
