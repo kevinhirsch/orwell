@@ -2,9 +2,15 @@
 #
 # orwell — one-liner Proxmox LXC installer.
 #
-# On the Proxmox host shell (the repo is PRIVATE — this is the ONE authenticated moment, ever;
-# the fine-grained PAT needs only Contents: Read-only on kevinhirsch/orwell — A4/ruling #17):
-#   GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+# On the Proxmox host shell (the repo is PRIVATE — this is the ONE authenticated moment, ever).
+# Use a fine-grained PAT (Contents: Read-only on kevinhirsch/orwell) OR a classic PAT (repo scope)
+# — A4/ruling #17. Two non-obvious requirements, both baked into the command below:
+#   1. EXPORT the token. In `VAR=x bash -c "$(curl …$VAR…)"` the command substitution is expanded
+#      by the OUTER shell BEFORE the `VAR=` prefix applies, so curl would get an EMPTY token
+#      (→ 404 from raw / 401 from the API). `export` puts it in scope at substitution time.
+#   2. Fetch via the GitHub CONTENTS API, not raw.githubusercontent.com (which 404s for fine-grained PATs).
+#   export GIT_TOKEN=github_pat_xxx
+#   bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 #
 # The token is persisted ONCE into the container's data/.env (the file every reset preserves)
 # and git reads it through a credential helper at use time — no later command ever re-prompts,
@@ -16,8 +22,9 @@
 # UX: a community-scripts-style config menu (Use Defaults vs Advanced) with every field
 # pre-populated, shown when run on a TTY; otherwise it runs non-interactively with defaults.
 # Every setting can also be supplied / overridden via env, e.g.:
+#   export GIT_TOKEN=github_pat_xxx
 #   CTID=104 CORES=6 RAM_MB=12288 DISK_GB=16 STORAGE=local-lvm BRANCH=main \
-#     bash -c "$(curl -fsSL .../deploy/orwell.sh)"
+#     bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 # Pass --default (or set USE_DEFAULTS=1 / ORWELL_NONINTERACTIVE=1) to skip the menu.
 set -euo pipefail
 
