@@ -11,7 +11,7 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Every
-feature **0001–0063 is built and green except 0022 (MVP-2, deferred) and 0062 (zeitgeist snapshot, spec only)** — plus **0053**
+feature **0001–0065 is built and green except 0022 (MVP-2, deferred) and 0062 (zeitgeist snapshot, spec only)** — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
 including the **living, persisted consequence loop (0023)** (act → hidden impact → persist →
@@ -207,6 +207,19 @@ seeded *magnitude* (no raw number crosses; `kind` is the floor, so no descriptor
 fold). `tests/unit/expressiveNonCollapse.test.ts` + `frontend/tests/test_expressive_non_collapse.py`
 are the permanent gate, and the FE desync guard may fire only on closed-set board claims, never on
 creative prose.
+
+**The closed-set sync spine (feature 0065) hardens the above.** ADR 0005's closed-set counterpart:
+the engine issues a monotonic **`beatSeq`** on every read/advance (owned by `GameSessionAdapter`,
+bumped once per committed mutation in the registry commit funnel, persisted in the snapshot). Mutating
+tools take an optional **`expectedBeatSeq`** (stale ⇒ typed `StaleBeatError` → HTTP **409 `stale-beat`**,
+refused *before* any write) and **`idempotencyKey`** (at-most-once progression). The FE holds last-seen
+`beatSeq` per canonical session, attaches it, refreshes from every response (no self-409s), and
+reconciles a 409 through the existing desync mechanism. A **pre-emission outcome guard** corrects a
+phantom board claim *before* the player sees it (closed-set claims only — `chat_helpers.py`); a Vault-free
+per-turn **divergence ledger** (`frontend/src/orwell_sync_ledger.py`) records the sync activity; and a
+`beatSeq`-keyed **`stateDelta`** read feeds the model a tight O(Δ) "what changed since your last turn"
+delta. Every part is opt-in/back-compatible (absent field ⇒ byte-identical) and closed-set only — it
+never touches creative prose (the `expressiveNonCollapse` gates stay the proof).
 
 ## Front-end client conventions (non-obvious — verify before editing `frontend/static/js/`)
 
@@ -589,9 +602,11 @@ the next step lowers `JURY_WEIGHTS.gameRespect` ~0.9→0.6–0.7 and re-runs the
 are **done** (#353 theme particles + frosted-top + the L45 punctuation guard; #335 fly-out); the low-priority sweep defects **A8–A10** are **now closed
 (PR #292)** — `humanizeIds` substitutes entity ids as whole tokens (no more mangled "player(s)"
 in beat prose), a turn-driven *supplementary* off-screen tick no longer faults on an empty society,
-and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; and the R3
-partial (late-season latency still grows with the O(events) snapshot export — improved, not
-eliminated; an incremental-snapshot item if play feels it); and **0062** (the move-in zeitgeist
+and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; **R3 is
+resolved** (PR #422 — the snapshot export was already O(Δ); `EngineCommandsAdapter.currentBeatKey`, the
+last per-commit whole-log scan, is now incremental, O(events)→constant — one adjacent item stays
+flagged: `InMemoryKnowledgeService.pathwayAnchored` full-scans per surfacing, its own item only if
+surfacing latency shows); and **0062** (the move-in zeitgeist
 snapshot — the one remaining net-new spec, not built). **0054 Phase 2** (docking finale / cast /
 retrospective into the control-room gadget rail) is **DONE** (#335). *(The ADR 0004
 fastembed adapter is BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
@@ -635,6 +650,19 @@ ties) + **L40** (showmance overload — the narrator currently reads every high-
 romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances that surface only
 organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
 pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
+
+**Session 2026-06-20 — multi-device sync + the LLM↔engine sync spine (0064, 0065).** **0064** (live
+multi-device game sync) — a server-authoritative **canonical chat session per user**
+(`frontend/src/orwell_game_session.py`), **Messenger-style turn serialization** ("queue, don't stomp"
+— `agent_runs.start(..., queue=True)`), the `game-updated` instant-reconcile SSE ping, and cross-device
+**window/HUD layout sync** (`frontend/src/orwell_layout.py`). **0065** (the LLM↔engine **sync spine** —
+ADR 0005's closed-set counterpart, spec `docs/features/0065-llm-engine-sync-spine.md`) shipped end to
+end (PR #414 + the perf/CAS tails #422): `beatSeq` compare-and-swap (409 `stale-beat`) + idempotency
+keys, the FE attach + 409 reconcile, the same-turn **pre-emission outcome guard**, the Vault-free
+**sync ledger**, and the `beatSeq`-keyed O(Δ) **`stateDelta`** delta feed — see the architecture note in
+[The consequence & memory loop](#the-consequence--memory-loop-the-mvp-1-backbone--feature-0023) and
+ADR `docs/decisions/0005`. *(0064 §3.C's queued-turn known-minor is closed by 0065 Part A's stale-write
+guard.)*
 
 ## Open decisions (remaining)
 
