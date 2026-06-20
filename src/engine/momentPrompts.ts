@@ -444,12 +444,25 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "self to voice when they introduce themselves — never a thing the others already know). Do not write " +
     "any pre-existing familiarity, alliances, or closeness; bonds form from here, live, on screen. " +
     "WALK THE PLAYER THROUGH THESE PREMIERE BEATS, in order, lightly producer-guided: " +
-    "(1) INTRODUCTIONS — production gathers the whole house in the living room and goes person by person. " +
-    "Each houseguest introduces their PUBLIC self — name, where they're from, what they do, one real " +
-    "thing — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
+    "(1) INTRODUCTIONS — MEET EVERYONE before the first HOH. Production gathers the whole house in the " +
+    "living room and goes person by person until the player has met ALL FIFTEEN houseguests — nobody is " +
+    "skipped. Each houseguest introduces their PUBLIC self — name, where they're from, what they do, one " +
+    "real thing — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
     "CONTEXT), in their OWN register, as a STRANGER meeting strangers. Go a few at a time so it breathes; " +
-    "let the player jump in and introduce THEMSELVES. This is where the player meets all fifteen; once a " +
+    "let the player jump in and introduce THEMSELVES. " +
+    "DO NOT TRACK THE INTRODUCTIONS FROM MEMORY — the GAME CONTEXT below carries a 'PREMIERE — STILL TO " +
+    "MEET' list (the engine's truth of exactly who has NOT been introduced yet) and a met-count. Drive " +
+    "the next introduction from THAT list — introduce the people on it, never re-introduce someone already " +
+    "met, and keep going until the list is empty (every houseguest met). The instant a houseguest has " +
+    "introduced their public self, call markHouseguestMet for them so the engine records the meeting and " +
+    "the list shrinks; never call the introductions done while that list still has names on it. Once a " +
     "houseguest has introduced their public self, that intro is FIXED (it never drifts later). " +
+    "EARLY READS — the player gets to 'clock' people. As each houseguest is introduced, let the player " +
+    "form a FIRST IMPRESSION from what is OBSERVABLE — their look, how they carry themselves, the way they " +
+    "present, the energy they give off (the GAME CONTEXT's observable persona facets). This is the player " +
+    "sizing up the cast as 'their personality / their type' before the first HOH — surface the observable " +
+    "read, and NEVER an archetype label, a threat/trust level, or how the player feels ('you trust them'): " +
+    "the player draws their OWN conclusions from what they see, you never assert them. " +
     "(2) THE TOAST — production brings out champagne; the house pops it and toasts to the season ahead. A " +
     "loose, celebratory mingling beat — first impressions over a glass, the room finding its energy. " +
     "(3) PICK A BEDROOM — a REAL player choice: the house has bedrooms (the GAME CONTEXT/whereabouts names " +
@@ -474,8 +487,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "numbers — they learn the weekly rhythm by living it. " +
     "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions, the " +
     "toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the first HOH " +
-    "competition; do not let the premiere drift indefinitely. When the player signals they're ready for " +
-    "the game to start, that is your cue to advanceGame, not to keep milling.",
+    "competition; do not let the premiere drift indefinitely. " +
+    "BUT THE FIRST HOH DOES NOT BEGIN UNTIL EVERYONE HAS BEEN MET: do NOT advanceGame into the first HOH " +
+    "while the 'PREMIERE — STILL TO MEET' list below still has houseguests on it. The player should be " +
+    "able to clock every face as their own personality before the game's first power is up for grabs, so " +
+    "finish the meet-everyone introductions first. Once the list is empty (all fifteen met) and the player " +
+    "signals they're ready for the game to start, THAT is your cue to advanceGame, not to keep milling.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -758,6 +775,39 @@ export function renderGameContext(view: GameStateView): string {
       "    and do not put anyone elsewhere in the house in the scene at all.",
     ];
   })();
+  // PREMIERE — the meet-everyone tracker (feature #380 follow-on). During the premiere the engine hands
+  // the model the EXACT set of houseguests still to introduce (so it never has to REMEMBER who's been met
+  // — the real skipped-introductions bug) plus each one's OBSERVABLE persona for the player's early reads.
+  // Present ONLY in the premiere moment (`view.premiere` is absent otherwise). PUBLIC facets only — no
+  // Vault data, no numbers, never an assertion of how the player feels (anti-sycophancy).
+  const pr = view.premiere ?? null;
+  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number }): string => {
+    // The same Vault-free public facets the roster exposes — the observable read the player "clocks".
+    const bits = [
+      fi.archetype, // their archetype is the model's PRIVATE voice cue (never said aloud), but listing it
+      // here lets the producer voice the observable energy that READS as that type — the player infers it.
+      fi.presentation,
+      fi.demeanor && `comes across as ${fi.demeanor}`,
+      fi.background,
+      fi.age !== undefined ? `${fi.age}` : undefined,
+    ].filter(Boolean);
+    return bits.length ? ` — ${bits.join(", ")}` : "";
+  };
+  const premiereLines: string[] = !pr ? [] : [
+    `- PREMIERE — MEET EVERYONE (engine truth): ${pr.metCount} of ${pr.total} of the cast met so far.` +
+      (pr.complete
+        ? " Everyone has been introduced — the meet-everyone beat is COMPLETE; the first HOH may begin when the player is ready."
+        : " The first HOH must NOT begin until this is complete."),
+    ...(pr.remaining.length
+      ? [
+          "- PREMIERE — STILL TO MEET (introduce these next; call markHouseguestMet the instant each one has",
+          "  introduced their public self — drive the introductions from THIS list, never from memory, until it",
+          "  is empty; describe each by what is OBSERVABLE only, never a strategy or danger label said aloud and",
+          "  never how the player feels — the player forms their OWN read):",
+          ...pr.remaining.map((fi) => `    · ${fi.houseguest.name}${observable(fi)}`),
+        ]
+      : ["- PREMIERE — STILL TO MEET: nobody — every houseguest has been introduced."]),
+  ];
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -766,6 +816,7 @@ export function renderGameContext(view: GameStateView): string {
     "  do your own arithmetic about how many are left, on podiums, etc.).",
     ...ceremonyLines,
     ...whereaboutsLines,
+    ...premiereLines,
     // 0059/L40 — the ONLY romantic pairs the narrator may voice as a showmance: the public (visible)
     // ones the engine has surfaced. Everything else is friendship/strategy (the SHOWMANCES ARE RARE pin).
     ...((view.showmances ?? []).length

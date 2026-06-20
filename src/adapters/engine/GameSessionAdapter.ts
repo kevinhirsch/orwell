@@ -7,6 +7,7 @@ import type {
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
+  PremiereIntrosView, FirstImpressionView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -275,6 +276,18 @@ export class GameSessionAdapter implements GameSession {
   private producerSeed: number | null = null;
   /** Memoized producer for `producerSeed` (rebuilt on restore / when the seed is first set). */
   private producerCache: Producer | null = null;
+
+  // ─── PREMIERE meet-everyone tracker (feature #380 follow-on) — NEW BLOCK ─────────────────────────
+  /**
+   * The houseguests the player has been INTRODUCED to during the premiere. The STRUCTURAL guarantee
+   * that every NPC is met before the first HOH does NOT rely on the model to remember (it failed — it
+   * skipped people): the engine tracks who's met here, surfaces "who's left to introduce" into the
+   * premiere moment prompt, and exposes a `complete` gate. The player is implicitly met (they ARE the
+   * player); only NPCs accumulate here. Seeded empty at move-in; persisted (0030) so a half-done
+   * premiere resumes; cleared once the premiere is over. PUBLIC ids only — no Vault data.
+   */
+  private premiereMet: Set<EntityId> = new Set();
+  // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -933,6 +946,10 @@ export class GameSessionAdapter implements GameSession {
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
       ...(this.producerSeed !== null ? { producerSeed: this.producerSeed } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
+      // PREMIERE (feature #380 follow-on): persist who the player has met so a half-done premiere
+      // resumes after a restart (0030) — the producer never re-introduces someone or loses track of
+      // who's still to meet. Public ids; absent once the premiere is over (the set is then empty).
+      ...(this.premiereMet.size > 0 ? { premiereIntros: [...this.premiereMet] } : {}),
       // 0062 — the FROZEN move-in zeitgeist snapshot persists so it is RECALLED (never re-searched) all
       // season and survives a restart byte-identical (§3/§9). Outward-safe public flavor (§6).
       ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
@@ -1052,6 +1069,9 @@ export class GameSessionAdapter implements GameSession {
           : STYLE_ANCHOR_VARIANTS[0])
         : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
+    // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
+    // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
+    this.premiereMet = new Set(core.premiereIntros ?? []);
     // 0062 — restore the FROZEN move-in zeitgeist snapshot (recalled, never re-searched, §9). Persisted on
     // 0062+ saves; on a pre-0062 save WITH a seed, re-derive the deterministic `model-framed` snapshot off
     // the SAME seed hinge (seed-stable & player-independent, so it returns identically). Without a seed
@@ -1487,6 +1507,87 @@ export class GameSessionAdapter implements GameSession {
     return { text };
   }
 
+  // ─── PREMIERE meet-everyone (feature #380 follow-on) — NEW BLOCK ─────────────────────────────────
+  /**
+   * Is the game in the premiere moment (move-in, before the first HOH)? The tracker is meaningful ONLY
+   * here — once the first HOH begins (`phase` leaves "premiere") there is nothing left to meet, so the
+   * read methods return `null` and the (now-vestigial) set is lazily cleared so it never lingers in the
+   * persisted snapshot. Never reads `live`/the advance path — purely the public phase.
+   */
+  private inPremiere(): boolean {
+    return this.house !== null && this.phase === "premiere";
+  }
+
+  /** Lazily clear a stale tracker once the premiere is over (keeps the snapshot clean; idempotent). */
+  private clearPremiereIfOver(): void {
+    if (!this.inPremiere() && this.premiereMet.size > 0) {
+      this.premiereMet.clear();
+      this.persist();
+    }
+  }
+
+  /** The OBSERVABLE public read of one active houseguest (PUBLIC facets only — no Vault, no numbers). */
+  private firstImpressionOf(n: GameHouse["npcs"][number]): FirstImpressionView {
+    // Exactly the Vault-free facets the roster card already exposes (B61/L28): archetype, strategy
+    // style, background, age, presentation, demeanor. NEVER the soul, hiddenElements, or a number.
+    return {
+      houseguest: { id: n.id, name: n.name },
+      met: this.premiereMet.has(n.id),
+      ...(n.character.archetype !== undefined ? { archetype: n.character.archetype } : {}),
+      ...(n.character.strategyStyle !== undefined ? { strategyStyle: n.character.strategyStyle } : {}),
+      ...(n.character.background !== undefined ? { background: n.character.background } : {}),
+      ...(n.character.age !== undefined ? { age: n.character.age } : {}),
+      ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
+      ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+    };
+  }
+
+  /**
+   * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
+   * answer to "who's met, who's still to introduce?". Only ACTIVE NPCs count (the cast at move-in);
+   * the player is implicitly met (counted in `metCount`/`total`), so `total` is the whole cast. The
+   * narrator reads `remaining` to drive the next introduction; `complete` is the structural gate the
+   * first HOH waits on. `null` outside the premiere.
+   */
+  premiereIntros(): PremiereIntrosView | null {
+    this.clearPremiereIfOver();
+    if (!this.house || !this.inPremiere()) return null;
+    const activeNpcs = this.house.npcs.filter((n) => this.seatOf(n.id) === "active");
+    const remaining: FirstImpressionView[] = [];
+    const met: FirstImpressionView[] = [];
+    for (const n of activeNpcs) {
+      const fi = this.firstImpressionOf(n);
+      (fi.met ? met : remaining).push(fi);
+    }
+    // +1 on both counts for the player (they ARE met — they're playing). total = the whole cast.
+    return {
+      complete: remaining.length === 0,
+      metCount: met.length + 1,
+      total: activeNpcs.length + 1,
+      remaining,
+      met,
+    };
+  }
+
+  /**
+   * Mark a houseguest as introduced/met during the premiere (feature #380 follow-on). The structural
+   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for an
+   * unknown houseguest, the player (auto-met), an evicted/departed seat, or once the premiere is over.
+   * Persists (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
+   */
+  markHouseguestMet(id: EntityId): PremiereIntrosView | null {
+    this.clearPremiereIfOver();
+    if (!this.house || !this.inPremiere()) return null;
+    // Only a real, active NPC can be "met" — the player is implicitly met; an unknown/departed id is a no-op.
+    const isActiveNpc = this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active");
+    if (isActiveNpc && !this.premiereMet.has(id)) {
+      this.premiereMet.add(id);
+      this.persist();
+    }
+    return this.premiereIntros();
+  }
+  // ─────────────────────────────────────────────────────────────────────────────────────────────────
+
   createCharacter(req: CreateCharacterReq): GameStateView {
     // 0056 — "keep the existing character": on a CONFIRMED restart with `keepCharacter`, capture the
     // prior player's AUTHORED fields HERE (the only point the prior season still exists, before any
@@ -1569,6 +1670,10 @@ export class GameSessionAdapter implements GameSession {
     this.intake = emptyIntake(); // the interview is over — its material lives on the player now
     this.week = 1;
     this.phase = "premiere";
+    // PREMIERE (feature #380 follow-on): start the meet-everyone tracker empty — nobody has been
+    // introduced yet. The producer (driven by the premiere moment prompt's who's-left list) walks the
+    // player through all 15 NPCs before the first HOH; `premiereMet` records who's been met. Persisted.
+    this.premiereMet = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
     // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
@@ -3334,6 +3439,10 @@ export class GameSessionAdapter implements GameSession {
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
       // 0059/L40 — only PUBLIC (visible) showmances; sealed ties/showmances never surface here.
       ...(this.visibleShowmances().length ? { showmances: this.visibleShowmances() } : {}),
+      // PREMIERE (feature #380 follow-on): the meet-everyone progress — who's met + who's still to
+      // introduce + their OBSERVABLE persona — woven into the premiere moment prompt so the producer
+      // never loses track. Present ONLY during the premiere (null otherwise). Vault-free public facets.
+      ...(this.premiereIntros() ? { premiere: this.premiereIntros()! } : {}),
     };
   }
 }

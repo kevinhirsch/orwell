@@ -96,6 +96,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       return;
     case "npcVoice":
     case "getPortraitPrompt":
+    case "markHouseguestMet": // PREMIERE meet-everyone (#380) — takes a houseguest id
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
       return;
     case "recordImageBeat":
@@ -164,6 +165,11 @@ export class McpServer {
         return this.deps.session.whereabouts();
       case "moveTo":
         return this.deps.session.movePlayer(String(args["room"] ?? ""));
+      // PREMIERE meet-everyone (feature #380 follow-on): read who's still to introduce / mark a meeting.
+      case "premiereIntros":
+        return this.deps.session.premiereIntros();
+      case "markHouseguestMet":
+        return this.deps.session.markHouseguestMet(args["id"] as EntityId);
       case "seasonRecap":
         return this.deps.session.seasonRecap();
       case "seasonRetrospective":

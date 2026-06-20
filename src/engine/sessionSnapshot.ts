@@ -128,6 +128,14 @@ export interface SessionCore {
    * (the §8 fail-soft skip) — an absent snapshot round-trips as absent and changes no outcome.
    */
   worldSnapshot?: import("./zeitgeist").WorldSnapshot;
+  /**
+   * PREMIERE — the meet-everyone tracker (feature #380 follow-on): the ids of the houseguests the
+   * player has been INTRODUCED to so far during the premiere. Persisted so a half-done premiere
+   * survives a restart (0030) and resumes where it left off — the producer never re-introduces someone
+   * already met, and never loses track of who is still to meet. Public ids (no Vault data). Absent on a
+   * pre-feature save AND once the premiere is over (the tracker is cleared when the first HOH begins).
+   */
+  premiereIntros?: EntityId[];
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

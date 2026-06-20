@@ -227,6 +227,15 @@ export interface GameStateView {
   showmances?: Array<{ a: string; b: string }>;
   /** Pre-game only (0050): where the casting interview stands — what's captured, what's next. */
   casting?: CastingStatusView;
+  /**
+   * PREMIERE only (feature #380 follow-on): the engine-tracked meet-everyone progress — who the
+   * player has met so far and who is STILL to introduce before the first HOH, each with their
+   * OBSERVABLE public persona. Surfaced into the premiere moment prompt so the producer always
+   * knows the next unmet houseguest (it never relies on the model to REMEMBER, the real bug), and
+   * exposed for a player-facing "first impressions" surface. Present ONLY during the premiere
+   * moment; absent once the first HOH begins. Vault-free — public facets only (see PremiereIntrosView).
+   */
+  premiere?: PremiereIntrosView;
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
   /**
@@ -525,6 +534,53 @@ export interface PlayerTaglineView {
 }
 
 /**
+ * PREMIERE — "meet everyone before the first HOH" (feature #380 follow-on). The player's OBSERVABLE
+ * early read of one houseguest: their PUBLIC persona facets ONLY — the archetype / strategy style /
+ * background / age / presentation any houseguest can clock across the room on move-in day. This lets
+ * the player "clock people a bit earlier as their personality/archetype" BEFORE the first HOH.
+ *
+ * VAULT WALL + ANTI-SYCOPHANCY: every field here is a PUBLIC facet the engine already mints onto the
+ * roster card — NEVER the soul, hidden elements, or a trust/threat/affinity NUMBER, and NEVER an
+ * engine assertion of how the player feels ("you trust them"). The player INFERS; this is observable
+ * persona, not relationship math. `met` flips once the producer has introduced this houseguest.
+ */
+export interface FirstImpressionView {
+  houseguest: NamedRef;
+  /** True once this houseguest has been introduced/met during the premiere. */
+  met: boolean;
+  /** The OBSERVABLE public persona (the same Vault-free facets on the roster card). */
+  archetype?: string;
+  strategyStyle?: string;
+  background?: string;
+  age?: number;
+  presentation?: string;
+  /** The observable voice register / demeanor (L28) — how they come across in the room. */
+  demeanor?: string;
+}
+
+/**
+ * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
+ * answer to "who has the player met, and who is still to introduce, before the first HOH?". The
+ * narrator is HANDED this so it never has to REMEMBER who's been introduced (the real bug: the
+ * model under-tracked and skipped people). `complete` is the structural gate — true once the player
+ * has met all 15 NPCs (the player counts themselves); the first HOH should not begin until then.
+ *
+ * Public by construction: it carries only names + the same observable persona facets the roster
+ * already exposes. No Vault data, no numbers, no hidden state.
+ */
+export interface PremiereIntrosView {
+  /** True iff every active houseguest has been introduced/met (the meet-everyone gate). */
+  complete: boolean;
+  /** How many of the cast (player + NPCs) have been met so far, and the total to meet. */
+  metCount: number;
+  total: number;
+  /** The houseguests STILL to introduce (the producer drives the next one) — name + observable persona. */
+  remaining: FirstImpressionView[];
+  /** Everyone met so far — the player's early observable reads, for a "first impressions" surface. */
+  met: FirstImpressionView[];
+}
+
+/**
  * Where the player stands in the house RIGHT NOW (0049) — the Vault-free presence read. Who is in
  * the player's room and who is one room over: facts a houseguest could see or hear themselves.
  * NEVER motives, numbers, hidden state, or the occupancy of non-adjacent rooms (you can't see
@@ -799,6 +855,23 @@ export interface GameSession {
    * pre-game). Vault-free, anti-sycophantic (a weak spot is ribbed, not flattered), one line.
    */
   playerTagline(): PlayerTaglineView;
+
+  /**
+   * PREMIERE — the meet-everyone progress (feature #380 follow-on). The engine-tracked, Vault-free
+   * answer to "who has the player met, who is still to introduce before the first HOH?" — so the
+   * narrator never has to REMEMBER who's been introduced (the real skipped-introductions bug). Carries
+   * each houseguest's OBSERVABLE public persona for the player's early reads. `null` outside the
+   * premiere moment (once the first HOH begins there is nothing left to meet).
+   */
+  premiereIntros(): PremiereIntrosView | null;
+
+  /**
+   * Mark a houseguest as INTRODUCED/met during the premiere (feature #380 follow-on) — the structural
+   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for
+   * an unknown houseguest, the player (auto-met), or once the premiere is over. Returns the resulting
+   * meet-everyone progress (or `null` outside the premiere) so the caller can voice who is left.
+   */
+  markHouseguestMet(id: EntityId): PremiereIntrosView | null;
 
   /**
    * The Vault-free projection of an in-progress finale (0037 §8.1) for a polling finale panel — the

@@ -58,6 +58,9 @@ const args = (name: string): Record<string, unknown> => {
     // 0051: portrait prompts are built from PUBLIC facets only — sweep them with a real id, and
     // record an image beat (a player-witnessed, Vault-free event) — neither may carry a sentinel.
     case "getPortraitPrompt": return { id: npc(1) };
+    // PREMIERE meet-everyone (#380): mark a houseguest met — the returned reads carry PUBLIC facets
+    // only, so no soul/hidden/Vault sentinel may cross (it's also a no-op once past the premiere).
+    case "markHouseguestMet": return { id: npc(1) };
     case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };

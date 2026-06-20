@@ -36,6 +36,8 @@ export const ORWELL_TOOL_BEATS = {
   'updateCasting': '\u{1F3AC} Casting notes',
   'whereabouts': '\u{1F9ED} Around the house',
   'moveTo': '\u{1F6B6} Moving through the house',
+  'premiereIntros': '\u{1F44B} Meeting the house',
+  'markHouseguestMet': '\u{1F91D} First impressions',
   'seasonRecap': '\u{1F4DC} The season so far',
   'seasonRetrospective': '\u{1F513} The producers’ vault',
   'npcVoice': '\u{1F3AD} In their head',
