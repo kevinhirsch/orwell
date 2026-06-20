@@ -124,6 +124,35 @@ active game per user**, **unlimited users concurrently**, each fully isolated. *
 isolation** is a first-class guarantee *alongside* the Vault Wall (no call for user A may return
 user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.)
 
+### Wiring an FE-driven engine write-back (the recurring boundary gotcha)
+
+Several engine tools are **FE-driven write-backs**: the front-end (which owns a concrete provider —
+an LLM, `web_search`, the image API) produces content and writes it BACK so the **engine** stays the
+source of truth. The live ones: `recordCastProfile` (0058 deep-profile authoring), `preSeedCast`
+(0065 cast pre-warm), `recordWorldSnapshot` (0062 zeitgeist), `recordImageBeat` (0051). Adding one is
+a **four-place** change, and a missing piece fails **silently at runtime** (the FE call is rejected at
+the MCP boundary, and the best-effort caller swallows it):
+
+1. `src/ports/GameSession.ts` — the method + its req/result types.
+2. `src/adapters/engine/GameSessionAdapter.ts` — the implementation.
+3. `src/surfaces/tools/registry.ts` — add to `PLAYER_TOOLS` **and** to `INFRA_LEVERS` (these are
+   FE-driven, **not** model levers, so they stay out of the agent's lever manifest / drift gate).
+4. `src/adapters/mcp/McpServer.ts` — a `requireShape` arg-guard case **and** a `callTool` dispatch
+   case (+ the type import). A *pre-game* tool also goes in `HttpMcpServer`'s `SANDBOX_CREATING_TOOLS`.
+
+**The static gates do NOT catch a missing #4** — dependency-cruiser only checks Vault edges, the
+lever-manifest drift test only checks prose — so a write-back with steps 1–2 done but 3–4 missing
+typechecks, passes `test:arch` + the manifest test, and is **dead at runtime**. `recordCastProfile`
+and `recordWorldSnapshot` both shipped exactly this way and silently no-op'd for a long time. The fix
+is a **boundary test that dispatches the tool through `McpServer.callTool`** for every write-back
+(`tests/unit/castPrewarm.test.ts`, `tests/unit/worldSnapshotBoundary.test.ts` are the templates).
+
+The FE driver is a best-effort, **idempotent, fail-soft background task** in `frontend/src/`
+(`orwell_cast_authoring.py`, `orwell_prewarm.py`, `orwell_zeitgeist.py` — each: resolve a utility LLM
+via `_resolve_llm_fn`, optionally `web_search`, synthesize JSON, write back; **no model/provider ⇒ the
+engine's deterministic floor simply stands**). Kicked from `do_create_character`
+(`tool_implementations.py`); never blocks game start.
+
 ## The event / visibility model (build this carefully — it caused real bugs before)
 
 There is **one `EventStore`** holding every interaction. **Visibility is per-event metadata —
