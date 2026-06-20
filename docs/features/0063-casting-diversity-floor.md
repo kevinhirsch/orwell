@@ -1,6 +1,6 @@
 # 0063 — Casting diversity floor (a cast that authentically reflects the country)
 
-> **Status:** 📝 **SPEC ONLY — not built.** The guaranteed, engine-seeded diversity FLOORS for the
+> **Status:** ✅ **BUILT — BDD-gated** (#352; `0063-casting-diversity-floor.feature` in `cucumber.cjs`). The guaranteed, engine-seeded diversity FLOORS for the
 > cast (BIPOC representation, gender balance, age spread, LGBTQ+ representation) plus an **organic,
 > character-driven sexual-orientation model** that ties into **0059**'s seeded showmance layer. This
 > spec **extends** the existing variety-via-CAPS machinery (ledger **L28** spread helpers in

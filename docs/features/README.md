@@ -40,72 +40,92 @@ From `docs/CLAUDE_CODE_INSTRUCTIONS.md` §9. Draft and build in this order:
 
 ## Status legend
 
-`Draft` (authored, awaiting implementation) · `Ready` (accepted for build) ·
-`In progress` · `Done` (feature green on player **and** admin surfaces).
+The **[index](#index)** below is the single source of truth for per-feature status — the prose in
+`CLAUDE.md` and the audit ledgers can drift, so the index is reconciled against the actual code.
+
+| Token | Meaning |
+|---|---|
+| ✅ **Built** | Shipped and gated (see the **Gate** column). |
+| 🚧 **Built · follow-on owed** | Shipped, with one named remaining item (host smoke, browser render, an FE chunk…). |
+| 📝 **Spec only** | Authored, not yet built. |
+| ⏸ **Deferred** | Intentionally not built. |
+
+**Gate** — how the feature is verified: `BDD` (Cucumber, listed in `cucumber.cjs`) · `unit` (Vitest) ·
+`FE` (front-end pytest) · `engine` (Vitest, no `.feature`) · `scripts` (deploy) · `—` (none yet).
+
+> **Audit (2026-06-20).** Every feature **0001–0063** was cross-checked against its source artifact
+> (not its prose). **No orphaned or untracked unbuilt specs.** The only not-built specs are **0022**
+> (⏸ deferred) and **0062** (📝 spec only) — both tracked here and in the authoritative
+> [open-items ledger](../audits/2026-06-10-full-product-audit.md).
 
 ## Index
 
-| # | Feature | Priority | Status |
+| # | Feature | Gate | Status |
 |---|---|---|---|
-| 0001 | [Vault Wall isolation](./0001-vault-wall-isolation.md) | 1 | Done |
-| 0002 | [Event visibility & propagation](./0002-event-visibility-and-propagation.md) | 2 | Done |
-| 0003 | [Behavioral fidelity](./0003-behavioral-fidelity.md) | 3 | Done |
-| 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | 4 | Done · **amended** |
-| 0005 | [Competition eligibility](./0005-competition-eligibility.md) | 5 | Done |
-| 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | 6 | Done |
-| 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | 7 | Done |
-| 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | 8 | Done |
-| 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | M5 | Done |
-| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | MVP-1 | Done — scripts + `deploy/smoke.sh`; per its own spec **not done until host-validated**: the real-Proxmox-host smoke is still owed (deferral) |
-| 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | Gameplay | Done |
-| 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | Gameplay | Done |
-| 0013 | [The Diary Room](./0013-diary-room.md) | Gameplay | Done |
-| 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | Gameplay | Done |
-| 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | Gameplay | Done |
-| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | Foundational | Done |
-| 0017 | [Relationship model](./0017-relationship-model.md) | Foundational | Done |
-| 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | Gameplay | Done |
-| 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | Gameplay | Done |
-| 0020 | [Player experience (status panel, decisions, portraits)](./0020-player-experience.md) | Player UX | Done |
-| 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | Foundational | Done |
-| 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | Player UX | **Deferred** |
-| 0023 | [Consequence & memory (living, persisted loop)](./0023-consequence-and-memory.md) | **MVP-1 backbone** | Done |
-| 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | Foundational | Done |
-| 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | Gameplay | Done — **amended B53**: fires live (double-eviction night; Vault persisted in the snapshot) |
-| 0026 | [Relationship math (firmed update rule & constants)](./0026-relationship-math.md) | Foundational | Done |
-| 0027 | [NarrativePort LLM adapter (the real narrator)](./0027-narrative-port-llm-adapter.md) | Integration | Done |
-| 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | Foundational | Done |
-| 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | App / accounts | Done |
-| 0030 | [Durable game persistence (survive engine restart)](./0030-durable-game-persistence-survive-restart.md) | **MVP-1 / bugfix** | Done |
-| 0031 | [Game orchestrator & integrity watcher (per-sandbox)](./0031-game-orchestrator-and-integrity-watcher.md) | Foundational | Done |
-| 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | App / front-end | Done |
-| 0033 | [Dynamic player tagline (snarky, state-aware hero line)](./0033-dynamic-player-tagline.md) | Player UX | Done — **unit-gated**, not in `cucumber.cjs` (recorded deviation, E87a) |
-| 0034 | [Live weekly progression & binding-decision seam](./0034-live-weekly-progression-and-decision-seam.md) | Gameplay (as-built) | Done |
-| 0035 | [Live off-screen life (start the watcher in the runtime)](./0035-live-offscreen-life-running-watcher.md) | **Functional — behavioral fidelity** | **Done — BDD-gated (B70)**: the running watcher's five scenarios in `cucumber.cjs` (FakeClock; pure turn-driven default per the 2026-06-10 ruling) |
-| 0036 | [Live social surface: NPC approaches + the Diary Room](./0036-live-social-surface-approaches-and-diary-room.md) | **Functional — playability** | Done — **unit-gated**, not in `cucumber.cjs` (recorded deviation, E87a) |
-| 0037 | [Live jury-vote choreography (the interactive finale)](./0037-live-jury-vote-choreography.md) | Gameplay | **Done** — engine + finale UI (B26 `finaleView` read · C11 `orwellFinale.js`) |
-| 0038 | [Live off-screen society (wire the real sim into the watcher)](./0038-live-offscreen-society.md) | **Behavioral fidelity** | **Done — B27a varied society · 0041 live souls · B27b gossip→player diffusion (pathway-aware 0031 heuristic) · all six scenarios BDD-gated (B70)** |
-| 0039 | [Promise & deal tracking (first-class deals)](./0039-promise-and-deal-tracking.md) | Gameplay / anti-sycophancy | Done |
-| 0040 | [NPC Diary Room confessionals (Vault-only interiority)](./0040-npc-confessionals.md) | Behavioral fidelity | Done · soul-recall feedback live (0041) |
-| 0041 | [Character evolution & season arc](./0041-character-evolution-and-arc.md) | Foundational | **Done — linchpin: SoulStore live; souls evolve + modulate behavior + recall** |
-| 0042 | [Competition library (variety + narrative formats)](./0042-competition-library.md) | Gameplay | **Done** — curated `COMPETITION_LIBRARY` (12 defs, both phases; governing pinned to the resolution map) · seeded `drawCompetition` (no immediate repeats; persisted `compHistory`) · result view carries name/format/narrative scaffold, never a stat · B31 |
-| 0043 | [Emergent multi-party bloc behavior](./0043-emergent-bloc-behavior.md) | Foundational | **Done** — `detectBlocs` (derived per read, clique-like, never stored — ADR 0002) · loyalty = disposition × soul (weakest-weighted) · pre-betrayal defection · the bloc term bends live noms/votes · B32 |
-| 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | Gameplay / anti-sycophancy | **Done** — `nominationStrategy` (pawn/backdoor/direct, disposition-gated; political temperature; bloc-protected) · `voteChoice` (threat × mood + bloc + deal honor + light jury mgmt) · all magnitudes in `decisionConstants.ts` · B33 |
-| 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | Gameplay / correctness | **Done** — veto field degrades · F4 sole vote · F3 final-HOH eviction |
-| 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | Gameplay / player UX | **Done** — player.status active/jury/evicted · ceremonies-as-broadcast juror knowledge · B48 |
-| 0047 | [Eviction night live (reveal + goodbyes)](./0047-eviction-night-live.md) | Gameplay | **Done** — staged one-at-a-time vote reveal · goodbye→manner · Vault-free EvictionView · B49 |
-| 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | Lifecycle / payoff | **Done** — `seasonRecap` (the record, not memory) · `seasonRetrospective` gated in code on the finished state (the one sanctioned Vault read) · post-season reunion moment · B56 (C17 = the FE surface) |
-| 0049 | [House presence & lingering play (rooms, occupancy, overhearing)](./0049-house-presence-and-lingering.md) | **Behavioral fidelity / ADR 0003** | **Done** — rooms+adjacency in the pure core · seeded one-room occupancy · `whereabouts` lever · co-presence⇒witness, adjacency⇒rare bidirectional `overheard:` pathways · lingering zero-beat · B64 |
-| 0050 | [The casting interview (producer-led character creation)](./0050-casting-interview.md) | Player UX / ADR 0003 | **Done** — interview-in-chat (no modal) · incremental `updateCasting` intake (engine owns the next step; half-done survives restart) · casting card (qualitative) · Soul-memory seeding |
-| 0051 | [In-character images (analyze in, generate out)](./0051-in-character-images.md) | Player UX / immersion | **Built (2026-06-11)** — engine: `ImageGenerationPort`, Vault-free `portraitPrompts` builder + seeded photorealistic style anchor, `getPortraitPrompt`/`recordImageBeat` (INFRA levers); FE: move-in portrait pipeline → per-user persist → Cast roster sidebar + inline render → reset scrub. Unit + pytest gated (no BDD); browser-smoke render still owed |
-| 0053 | [Admin transcript retrieval (debug, quiet)](./0053-admin-transcripts.md) | App / admin · ops | **Built — FE pytest-validated** (ruling #14; `frontend/tests/test_0053_admin_transcripts.py`; never `cucumber.cjs`) |
-| 0056 | [Season-to-season character continuity (soft re-run of casting)](./0056-season-character-continuity.md) | Player UX / lifecycle | **Engine + restart-door relay built; FE keep/recreate UX shipped via 0057 chunk 3** — `keepCharacter` carries the prior houseguest into a new cast through the one D1/R1 hinge (seed-independent CHARACTER ⇒ byte-faithful); `/new-game` + relay thread it. Unit-gated (`seasonContinuity.test.ts`) + FE pytest (`test_0056_keep_character.py`). The in-chat keep/recreate choice + per-season portrait toggle are now the 0057 "New season" surface (`orwellNewSeason.js`) |
-| 0057 | [Seasons as levels (finale lobby, next-season invite, progress)](./0057-seasons-as-levels.md) | Player UX / lifecycle / progression | **SPEC + chunks 1–4 built (FE)** — chunk 1: per-user FE season store + `GET /season`, player-reachable `POST /next-season` (finished-season-gated; increments) & `POST /reset-progress` (no increment), both through the one sanctioned reset (`test_0057_seasons.py`); chunk 2: the ≤5px bottom-of-viewport accent **season progress bar** (cadence-driven 0→100%, Vault-free, reduced-motion) + the quiet **"Season N" chip** (≥2) — `orwellSeasonProgress.js`; chunk 3: the persistent post-season **"New season" surface** (OrwellWindow kit; keep/recreate + per-season portrait studio) — `orwellNewSeason.js` — plus the settings red-zone reset-progress control; chunk 4: the **producers' re-approach** post-season agent-loop nudge (engagement-driven, escalating, capped). FE pytest (`test_0057_ui.py`, `test_0057_reapproach.py`). Live browser validation owed (the progress-% fill + panel placement) |
-| 0058 | [Deep character profiles (born deep, persist, play out)](./0058-deep-character-profiles.md) | **Behavioral fidelity / Vault Wall** | ✅ **Phase 1 + Phase 2 BUILT — BDD-gated.** Born-deep §3 profile split across the wall: PUBLIC `biography` (multi-sentence) + structured `physicalCharacteristics` facet (byte-stable on the Character, on the view/`npcVoice`/roster); HIDDEN 2–3 secrets + true goals + weakness + Day-1 perception sealed in the Vault & soul-indexed (full-fidelity recall, L27b), NEVER on any player/admin surface. Day-1 read seeds the NPC→player edge; story threads (v0 §15 shape) seeded+sealed+persisted, activation+fold reuses the 0023 consequence loop. **Phase 2 LIVE:** the `recordCastProfile` write-back (commit `852f2db` — validate/split/seal/re-derive/re-index, idempotent; FE producer-LLM authoring `orwell_cast_authoring.py`); portrait consumption (L29 — the physical facet feeds `castPortraitPrompts`); premiere voicing (L31 — the public biography voiced via the `premiere` moment prompt); and the thread trigger/resolution scheduler (feature [0060](./0060-story-thread-scheduler.md)). `deepProfile.ts` · `0058-deep-character-profiles.feature` · `deepProfile.test.ts` / `.property.test.ts`. **By design (not a gap):** the write-back keeps the engine's calibrated seeded NPC→player leans (the LLM authors the Day-1 read TEXT only — anti-sycophancy; preserves the juryReach net-zero balance) |
-| 0061 | [Player self-eviction (voluntary walk-out / quit)](./0061-player-self-eviction.md) | Gameplay / player agency | ✅ **BUILT — BDD-gated** (`0061-player-self-eviction.feature` in `cucumber.cjs`). The genuine, RECORDED, confirmed voluntary quit on top of **0046** (reuses its terminal/exit `evictionOrder` door — no second hinge), the **0034** seam (an explicitly-confirmed, player-level/OOC `self-evict` decision via `submitDecision({kind:"self-evict",confirmed:true})` plus the engine `requestSelfEviction`/`cancelSelfEviction` confirmation handshake — never parsed from an in-character line), the **0023** consequence fold (the present house's souls fold the walk-out), and **0047**'s player-authored parting message (offered but skippable). Closes the **L39(a)** gap: the GM refusal stays correct for *unconfirmed/ambiguous* exits; 0061 is the sanctioned *confirmed* path, Vault-free throughout (player AND admin). **Owner calls baked in:** (1) a quit FORFEITS — exit ENTIRELY + terminal recap, never a juror's seat, in any phase; (2) parting message offered-but-skippable; (3) legal at any beat, resolved at the next safe transition; (4) NPC self-eviction out of scope. `selfEviction.test.ts` · `self_eviction.steps.ts` · FE `test_0061_self_eviction.py`. |
-| 0060 | [Story-thread trigger/resolution scheduler (0058 Phase 2)](./0060-story-thread-scheduler.md) | **Behavioral fidelity / Vault Wall** | ✅ **BUILT — BDD-gated** (#336; `0060-story-thread-scheduler.feature` in `cucumber.cjs`). The *when-to-fire* orchestrator that makes 0058's seeded threads PLAY OUT: a small seeded scheduler rides the EXISTING off-screen tick and walks each thread `dormant → active` (reuse 0023 `activateThread`) → `surfaced` (reuse 0038 gossip + 0002 pathway, anchored belief only) → `resolved`, or → `expired` (recorded, never deleted). Adds a structured `triggerCondition` enum (alongside the prose trigger), a bounded `threadConstants.ts`, and a **hard season surfacing cap ≈3–4** (the L40 restraint lesson; NPC↔NPC surfacing far more common than to the player; belief-level/atmospheric this phase). Authors nothing — purely orchestration. |
-| 0062 | [Move-in zeitgeist snapshot (frozen, shared world the cast moved in with)](./0062-world-snapshot-zeitgeist.md) | **Behavioral fidelity / immersion** | 📝 **SPEC ONLY — not built.** Promotes **C32**'s per-reference, stateless in-fiction `web_search` to **durable, shared, frozen state**: at season creation the cast collectively gets ONE `WorldSnapshot` of the real-world zeitgeist (seeded from a real search with a deliberate ~7-day lag, then **persisted byte-stable + frozen** like the static `CHARACTER` baseline, 0007 superset guard). Recalled all season, it colors **both** the player's moment prompts **and** off-screen NPC-to-NPC life/gossip (0038) — per-NPC interest filtering (sports fan vs. film buff) over a shared baseline — and **grows stale** as the weeks pass (the played "out of the loop" texture; the no-internet fiction is the *mechanism*). A **third state category**: shared *public* real-world flavor — **NOT** Vault-secret (the player shares the same world) and **NOT** game-mechanical (seeded outcomes are byte-identical with vs. without it — anti-sycophancy #3 holds). Fail-soft to model-framed/absent with no provider. **Open decisions:** the 7-day **one-time offset (recommended) vs. rolling window** (rolling breaks sequestration), live-search × seeded-replay, snapshot size/budget. `0062-world-snapshot-zeitgeist.feature` (skeleton; not in `cucumber.cjs`) |
-| 0063 | [Casting diversity floor (a cast that authentically reflects the country)](./0063-casting-diversity-floor.md) | **Behavioral fidelity / immersion** | ✅ **BUILT — BDD-gated** (#352; `0063-casting-diversity-floor.feature` in `cucumber.cjs`). Engine-GUARANTEED diversity **FLOORS** at cast creation (minimum BIPOC representation, gender balance, age spread, LGBTQ+ representation) — the symmetric **minimums** to **L28**'s variety-via-**CAPS**, validated/repaired like the caps, never hoped-for-from-the-LLM. Extends **0058**'s `physicalCharacteristics` facet with an ethnicity-grounded identity axis and adds a **sexual-orientation model** handled the ORGANIC way: each houseguest has a seeded orientation, but disclosure is **character-driven** — some publicly out (a public facet), some **private** (a **Vault-sealed** attribute surfacing ONLY through an in-game pathway, 0002, never from a stat/projection, never forced/telegraphed). Ties into **0059**: the seeded showmance layer becomes orientation-aware so it can seed a **queer showmance** that surfaces only organically under the 0025/0059 reserve governance. Authentic, never reductive (identity is a facet, not a label — L19/L28); deterministic (floors hold across seeds; same seed ⇒ same cast). Thresholds in a new tunable `diversityConstants.ts` (sibling of `decisionConstants.ts`). **Open decisions:** the exact floor numbers (min BIPOC / min LGBTQ+ / gender target); ethnicity as a full identity attribute vs. appearance-grounded-only (recommended); how strongly orientation gates the 0059 showmance seeding; gender model granularity; sensitivity/tone guidance. `0063-casting-diversity-floor.feature` (skeleton; not in `cucumber.cjs`) |
+| 0001 | [Vault Wall isolation](./0001-vault-wall-isolation.md) | BDD | ✅ Built |
+| 0002 | [Event visibility & propagation](./0002-event-visibility-and-propagation.md) | BDD | ✅ Built |
+| 0003 | [Behavioral fidelity](./0003-behavioral-fidelity.md) | BDD | ✅ Built |
+| 0004 | [Replayability & naming](./0004-replayability-and-naming.md) | BDD | ✅ Built · amended (E38/D8: real-name corpora + entropy seed) |
+| 0005 | [Competition eligibility](./0005-competition-eligibility.md) | BDD | ✅ Built |
+| 0006 | [Outcomes by stats + temperature](./0006-outcomes-by-stats-and-temperature.md) | BDD | ✅ Built |
+| 0007 | [Persistence non-degradation](./0007-persistence-non-degradation.md) | BDD | ✅ Built |
+| 0008 | [Daily-event invariant](./0008-daily-event-invariant.md) | BDD | ✅ Built |
+| 0009 | [MCP tool boundary](./0009-mcp-tool-boundary.md) | BDD | ✅ Built |
+| 0010 | [One-liner deployment & update](./0010-deployment-one-liner.md) | scripts | 🚧 Built · real-Proxmox-host smoke owed |
+| 0011 | [Weekly loop orchestration](./0011-weekly-loop-orchestration.md) | BDD | ✅ Built |
+| 0012 | [Conversation & scene system](./0012-conversation-and-scene-system.md) | BDD | ✅ Built |
+| 0013 | [The Diary Room](./0013-diary-room.md) | BDD | ✅ Built |
+| 0014 | [Jury & endgame](./0014-jury-and-endgame.md) | BDD | ✅ Built |
+| 0015 | [Character creation (OOBE)](./0015-character-creation-oobe.md) | BDD | ✅ Built |
+| 0016 | [God Mode (admin port)](./0016-god-mode-admin.md) | BDD | ✅ Built |
+| 0017 | [Relationship model](./0017-relationship-model.md) | BDD | ✅ Built |
+| 0018 | [Narrative & moment orchestration](./0018-narrative-moment-orchestration.md) | BDD | ✅ Built |
+| 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | BDD | ✅ Built |
+| 0020 | [Player experience (status, decisions, portraits)](./0020-player-experience.md) | BDD | ✅ Built |
+| 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | BDD | ✅ Built |
+| 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | — | ⏸ Deferred |
+| 0023 | [Consequence & memory (the MVP-1 backbone)](./0023-consequence-and-memory.md) | BDD | ✅ Built |
+| 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | BDD | ✅ Built |
+| 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | BDD | ✅ Built · amended B53 (fires live) |
+| 0026 | [Relationship math](./0026-relationship-math.md) | BDD | ✅ Built |
+| 0027 | [NarrativePort LLM adapter](./0027-narrative-port-llm-adapter.md) | BDD | ✅ Built |
+| 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | BDD | ✅ Built |
+| 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | FE | ✅ Built |
+| 0030 | [Durable game persistence (survive restart)](./0030-durable-game-persistence-survive-restart.md) | BDD | ✅ Built |
+| 0031 | [Game orchestrator & integrity watcher](./0031-game-orchestrator-and-integrity-watcher.md) | BDD | ✅ Built |
+| 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | FE | ✅ Built |
+| 0033 | [Dynamic player tagline](./0033-dynamic-player-tagline.md) | unit | ✅ Built · recorded deviation E87a |
+| 0034 | [Live weekly progression & decision seam](./0034-live-weekly-progression-and-decision-seam.md) | BDD | ✅ Built |
+| 0035 | [Live off-screen life (running watcher)](./0035-live-offscreen-life-running-watcher.md) | BDD | ✅ Built |
+| 0036 | [Live social surface (approaches + Diary Room)](./0036-live-social-surface-approaches-and-diary-room.md) | unit | ✅ Built · recorded deviation E87a |
+| 0037 | [Live jury-vote choreography (the finale)](./0037-live-jury-vote-choreography.md) | BDD | ✅ Built · + finale UI |
+| 0038 | [Live off-screen society](./0038-live-offscreen-society.md) | BDD | ✅ Built |
+| 0039 | [Promise & deal tracking](./0039-promise-and-deal-tracking.md) | BDD | ✅ Built |
+| 0040 | [NPC confessionals](./0040-npc-confessionals.md) | BDD | ✅ Built |
+| 0041 | [Character evolution & arc (the linchpin)](./0041-character-evolution-and-arc.md) | BDD | ✅ Built |
+| 0042 | [Competition library](./0042-competition-library.md) | BDD | ✅ Built |
+| 0043 | [Emergent bloc behavior](./0043-emergent-bloc-behavior.md) | BDD | ✅ Built |
+| 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | BDD | ✅ Built |
+| 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | BDD | ✅ Built |
+| 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | BDD | ✅ Built |
+| 0047 | [Eviction night live (reveal + goodbyes)](./0047-eviction-night-live.md) | BDD | ✅ Built |
+| 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | BDD | ✅ Built |
+| 0049 | [House presence & lingering play](./0049-house-presence-and-lingering.md) | BDD | ✅ Built |
+| 0050 | [The casting interview](./0050-casting-interview.md) | BDD | ✅ Built |
+| 0051 | [In-character images](./0051-in-character-images.md) | unit + FE | 🚧 Built · browser-smoke render owed |
+| 0052 | House themes (five seasons) | FE | ✅ Built · shipped FE-side, no standalone spec file |
+| 0053 | [Admin transcript retrieval](./0053-admin-transcripts.md) | FE | ✅ Built |
+| 0054 | [Control-room gadget rail](./0054-gadget-rail.md) | FE | ✅ Built · Phase 1 (HUD rail) + Phase 2 (dock windows) |
+| 0055 | [Social play moves the weights](./0055-social-play-weights.md) | FE | ✅ Built · the `_auto_record_scene` guarantee |
+| 0056 | [Season-to-season character continuity](./0056-season-character-continuity.md) | unit + FE | ✅ Built |
+| 0057 | [Seasons as levels](./0057-seasons-as-levels.md) | FE | 🚧 Built · FE chunks 1–4; live browser validation owed |
+| 0058 | [Deep character profiles](./0058-deep-character-profiles.md) | BDD | ✅ Built · Phase 1 + Phase 2 |
+| 0059 | [Hidden seeded relationships](./0059-hidden-seeded-relationships.md) | engine | ✅ Built · orientation-aware via 0063 |
+| 0060 | [Story-thread scheduler (0058 Phase 2)](./0060-story-thread-scheduler.md) | BDD | ✅ Built |
+| 0061 | [Player self-eviction](./0061-player-self-eviction.md) | BDD | ✅ Built |
+| 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | — | 📝 Spec only — not built |
+| 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
+
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is
 the M5 integration seam (the engine's outward tool API for the front-end / agent), 0010 is the
