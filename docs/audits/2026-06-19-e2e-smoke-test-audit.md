@@ -557,21 +557,39 @@ model's raw scratchpad **for seconds**, then the final render replaced it with c
 Both waves are **absent from the final body** (clean in-character narration) and were in the
 **body**, not the collapsed accordion (`acc=false`).
 
-**Root cause:** the agent loop streams **intermediate-round** planning text as *visible* deltas
-(`thinking:false`); the client streaming renderer **freezes leading blocks** before the
-leading-only `scrubReasoningPreamble` can recognize the whole preamble, so the reasoning stays
-painted; only the **final** full render (a fresh `processWithThinking`, where the contiguous
-`npc:<id>` run is finally recognized) scrubs it. The server's game-build scrub (`_scrub_active`)
-is not catching these per-round openers ("The player wants…", "I now have … Let me combine…").
+**Root cause — CORRECTED after deeper diagnosis (a first hypothesis was wrong, see below).**
+Capturing the **raw SSE deltas split by the `thinking` flag** (`.audit-telemetry/raw_deltas.mjs`)
+proved the **server is clean**: the *visible* channel (`thinking:false`, 5989 chars) had **zero**
+leak; the *entire* leak ("The player wants…", `npc:<id>`, "I now have NPC voice data… Let me
+combine…", 12936 chars) was correctly on the **`thinking:true` reasoning channel**. So this is a
+**client-side rendering** issue, **intermittent** (it reproduced on one turn with an ~8 s window;
+two later turns showed none — it depends on the model's reasoning shape + delta timing). The
+client wraps `thinking:true` deltas in `<think>` (chat.js:1516) and routes them to the live
+"Thinking" accordion via `processWithThinking`; in a timing window (notably round 2+ reasoning
+after tool calls) the reasoning briefly paints in the **body** before the accordion routes it.
+Separately, in the **game build the live thinking accordion is shown by default**
+(`gameBuildShowsThinkingAccordion()` = true unless `hide-thinking`) and **expands while streaming
+then collapses** — so the model's raw scratchpad (which contains machinery: `npc:<id>` ids, "the
+player", tool-planning) is itself surfaced to the player. Both are "text that streams, flashes,
+and goes away."
 
-**Proposed fix (cleanest layer = server):** do not stream **intermediate agent-round** reasoning/
-planning to the visible bubble at all — only the final narration round is player-visible (route
-intermediate-round content to the reasoning channel or suppress it). That removes the bytes at the
-source, so no client render (frozen or not) can paint them. Belt-and-suspenders on the client:
-hold the leading region "live" (un-frozen) until the reasoning-preamble boundary resolves, and
-extend the scrub openers to include "the player…", "I now have…", "I have the game state…".
-**Verify** by re-running the MutationObserver flash-detector (`.audit-telemetry/flash_analyze.mjs`)
-— `leakFlashes` must be empty across the whole turn.
+**~~First hypothesis (server streams intermediate-round reasoning as visible deltas)~~ — DISPROVEN**
+by the raw-delta split. No server change is warranted; the server's channel separation is correct.
+*(I did not implement the server change despite its approval, because the evidence showed it was
+the wrong layer — flagged back to the owner.)*
+
+**Correct fix (client-side, two parts):**
+1. **Close the body-flash window:** ensure `thinking:true` content can NEVER paint in the body —
+   route it to the accordion (or hold it) from the very first delta and across round boundaries,
+   so the round-2+ reasoning window can't leak into the bubble.
+2. **Product decision (owner's call):** in the **game build**, should the live "Thinking" accordion
+   show the model's raw reasoning at all? It contains machinery (`npc:<id>`, "the player",
+   tool-planning) that arguably shouldn't reach the player even collapsed. Options: suppress the
+   reasoning display entirely in the game build (just a neutral "Thinking…" indicator; reasoning
+   still persisted for admin/0053), or scrub machinery from the accordion content.
+**Verify** by re-running `.audit-telemetry/flash_analyze.mjs` until `leakFlashes` is empty across
+many turns. *(F1 — the earlier reply-after-thinking `mdToHtml`→`processWithThinking` unification —
+remains a valid, complementary hardening of one render path.)*
 
 ### Detection methodology (answering "can you tell if text flashes?")
 - **MutationObserver frame-log** (`flash_report.mjs` / `flash_analyze.mjs`): records every painted
