@@ -54,8 +54,9 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 `FE` (front-end pytest) · `engine` (Vitest, no `.feature`) · `scripts` (deploy) · `—` (none yet).
 
 > **Audit (2026-06-20).** Every feature **0001–0063** was cross-checked against its source artifact
-> (not its prose). **No orphaned or untracked unbuilt specs.** The only not-built specs are **0022**
-> (⏸ deferred) and **0062** (📝 spec only) — both tracked here and in the authoritative
+> (not its prose). **No orphaned or untracked unbuilt specs.** The only not-built spec is **0022**
+> (⏸ deferred). **0062** (the move-in zeitgeist snapshot) **shipped 2026-06-20** — BDD-gated, frozen +
+> seed-reproducible + flavor-only (outcome-invariant). Tracked here and in the authoritative
 > [open-items ledger](../audits/2026-06-10-full-product-audit.md).
 
 ## Index
@@ -123,7 +124,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0059 | [Hidden seeded relationships](./0059-hidden-seeded-relationships.md) | engine | ✅ Built · orientation-aware via 0063 |
 | 0060 | [Story-thread scheduler (0058 Phase 2)](./0060-story-thread-scheduler.md) | BDD | ✅ Built |
 | 0061 | [Player self-eviction](./0061-player-self-eviction.md) | BDD | ✅ Built |
-| 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | — | 📝 Spec only — not built |
+| 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | BDD | ✅ Built · `src/engine/zeitgeist.ts`; frozen + seed-reproducible + flavor-only (outcome-invariant) |
 | 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
 
 

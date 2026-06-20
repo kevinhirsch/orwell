@@ -1762,7 +1762,18 @@ wins and the drift is called out under *Ledger corrections* below.
 - **#344** — live-debug verification pass: L1–L20 confirmed fixed in code (running instance was a stale deploy); logged L43/L44/L45.
 - **#342 / #341** — CI: jury path-filter + UAT fan-out (split matrix, one file per runner).
 - **#340** — **0061 player self-eviction — BUILT, BDD-gated** (forfeit-on-quit, skippable parting message, any-beat-resolved; NPC self-eviction out of scope).
-- **#339** — **0062 move-in zeitgeist snapshot — SPEC**.
+- **0062 move-in zeitgeist snapshot — BUILT, BDD-gated** (2026-06-20). `src/engine/zeitgeist.ts` captures
+  ONE frozen, seeded `WorldSnapshot` at season creation (same seed hinge as the cast), persists it byte-
+  stable on `SessionCore`/`GameState` (recalled never re-searched; 0007 superset/byte-compare guards the
+  freeze), and renders the Vault-free "world you all moved in with" block into BOTH the player moment
+  prompt AND the off-screen/`social` prompt (the C32-beyond reach), scaling the out-of-the-loop drift by
+  the live week. FLAVOR ONLY — a seeded game advanced WITH vs. WITHOUT the snapshot is byte-identical in
+  every comp result, vote, nomination, and relationship/soul fold (the §6/§10 headline guard, proven
+  structurally). Owner recs taken: one-time 7-day lag offset (§11 #1), capture-once-persist + deterministic
+  `model-framed` fallback for tests/replays (§11 #2/#9), small-and-bounded slices (§11 #3), engine-side
+  outward `GameState` field (§11 #4). FE `web_search` capture lands via the `recordWorldSnapshot` write-back
+  seam (FE provider wiring is its own lane, like 0051). `0062-*.feature` in `cucumber.cjs`; unit `tests/unit/zeitgeist.test.ts`.
+- **#339** — **0062 move-in zeitgeist snapshot — SPEC** (superseded by the BUILT entry above).
 - **#338** — NPC movement weighting, RNG- & calibration-isolated (juryReach green).
 - **#337** — calibration instrumentation + gradient gate (no weight changes).
 - **#336** — **0060 story-thread trigger/resolution scheduler — BUILT** (`src/engine/threadConstants.ts`; `0060-*.feature` in `cucumber.cjs`).
@@ -1796,7 +1807,9 @@ and finisher agents drove each to green — fast-gate only, **no heavy sims loca
 
 ### Still genuinely open (forward backlog, after this session)
 1. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
-2. **0062** — move-in zeitgeist snapshot (📝 spec only; the one remaining net-new feature).
+2. ✅ **0062** — move-in zeitgeist snapshot **— BUILT, BDD-gated** (2026-06-20; see the ledger entry above).
+   *Forward FE follow-on (its own lane, not blocking):* wire the FE `web_search` capture into
+   `recordWorldSnapshot` at season creation (the engine seam is built; the FE owns the provider, like 0051).
 3. **0022** — MVP-2 rich game UI (the long-standing deliberate deferral; the chat *is* the UI per ADR 0003).
 4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
 5. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
