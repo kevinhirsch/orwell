@@ -58,32 +58,27 @@ Feature: One game, one canonical chat, every device live and in sync
     Then the producers' opening message is recorded once
     And both devices show that single opening message
 
-  # ── C. One driver at a time (spectator mode) ────────────────────────────────
+  # ── C. Messenger-style concurrency (one shared thread, never two chains) ─────
 
-  Scenario: A second device cannot start a parallel reasoning chain
+  Scenario: A second device never starts a parallel reasoning chain
     Given a game turn is in progress on the first device
-    When the player submits a game turn on the second device
-    Then the second device's turn is refused as turn-in-progress
-    And the first device's turn is not interrupted
-    And only one reasoning chain is ever running for the game
+    When the player sends a message on the second device
+    Then the first device's turn is not interrupted
+    And the second device's message is queued onto the same thread
+    And it is answered after the current turn finishes
+    And only one reasoning chain ever runs at a time
 
-  Scenario: The spectating device watches live with a disabled composer
+  Scenario: Every device can type at any time (no spectator lockout)
     Given a game turn is in progress on the first device
     When the player views the game on the second device
-    Then the second device shows a watching-live notice
-    And the second device's composer is disabled until the turn ends
+    Then the second device's composer stays enabled
+    And the second device shows the turn streaming live
 
-  Scenario: A device can take over a stuck turn
-    Given a game turn on the first device is in progress
-    When the player chooses to take over on the second device
-    Then the first device's run is stopped and its partial is saved
-    And the second device can drive the next turn
-
-  Scenario: The next turn is open to any device once the current one ends
-    Given a game turn has finished on the first device
-    When the player drives the next turn on the second device
-    Then the turn is accepted
-    And it streams live on the first device
+  Scenario: The thread stays in sync across devices like a messaging app
+    Given two devices are viewing the same game session
+    When the player sends a message on either device
+    Then both devices show that message and the reply in the same order
+    And neither device shows a message the other is missing
 
   # ── D. Robustness & isolation ───────────────────────────────────────────────
 
@@ -101,4 +96,37 @@ Feature: One game, one canonical chat, every device live and in sync
   Scenario: Sync payloads carry no game secrets
     When the server notifies devices that the session changed
     Then the notification carries only the session id and a change type
+    And it carries no message body and no Vault content
+
+  # ── F. Window & HUD layout sync across devices ──────────────────────────────
+
+  Scenario: Moving a window on one device moves it on the other
+    Given two devices are viewing the game
+    When the player drags a HUD window to a new position on the first device
+    Then the same window moves to that position on the second device
+    And the new position is restored when either device reloads
+
+  Scenario: Resizing a window syncs across devices
+    When the player resizes a HUD window on the first device
+    Then the same window takes the new size on the second device
+
+  Scenario: Open, minimize, and dock state sync across devices
+    When the player minimizes a window on the first device
+    Then that window is minimized on the second device
+    When the player opens or docks a window on the first device
+    Then the second device reflects that open or docked state
+
+  Scenario: A remote change never yanks a window mid-drag
+    Given the player is actively dragging a window on the second device
+    When a layout change for that same window arrives from the first device
+    Then the remote change is deferred until the drag finishes
+
+  Scenario: Layout is per-user and isolated
+    Given a second player with their own devices
+    When each player rearranges their windows
+    Then neither player's layout affects the other's
+
+  Scenario: Layout sync payloads carry no game secrets
+    When the server notifies devices that the layout changed
+    Then the notification carries only window ids and geometry numbers
     And it carries no message body and no Vault content
