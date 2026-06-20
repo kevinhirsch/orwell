@@ -53,11 +53,16 @@ _SYSTEM = (
     '  "secrets": an array of 2-3 real secrets that could play out,\n'
     '  "trueGoals": an array of 2 true strategic goals (distinct from any public game),\n'
     '  "weakness": one named blind spot the game can exploit on a delay.\n'
+    "GROUND EVERYTHING IN THIS SPECIFIC PERSON (the core requirement): the secrets, true goals, and "
+    "weakness must be authored FROM this houseguest's OWN backstory, OCCUPATION, ARCHETYPE, and AGE in "
+    "the public skeleton — a private chef's secret should read like a private chef's, a firefighter's "
+    "weakness like a firefighter's, a 23-year-old's stakes unlike a 50-year-old's. Make the hidden life "
+    "cohere with the job and the life-stage; never a generic, interchangeable secret that could belong "
+    "to anyone. Their threads may involve OTHER houseguests, pre-show ties, or personal stakes.\n"
     "Hard rules: this houseguest's STORYLINE is fully INDEPENDENT — their secrets, goals, weakness, "
-    "and backstory exist on their own and may involve OTHER houseguests, pre-show ties, or personal "
-    "stakes, but must NEVER be built around, reference, or revolve around any single 'player' or "
-    "main character; there is no protagonist here, only a cast of equals. Make this person VISIBLY "
-    "distinct from a generic warm, witty professional. JSON only."
+    "and backstory exist on their own but must NEVER be built around, reference, or revolve around any "
+    "single 'player' or main character; there is no protagonist here, only a cast of equals. Make this "
+    "person VISIBLY distinct from a generic warm, witty professional. JSON only."
 )
 
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
@@ -82,6 +87,8 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     user = (
         f"Houseguest to flesh out: {name}.\n"
         f"Public skeleton (build FROM this, never contradict it): {json.dumps(skeleton, ensure_ascii=False)}\n"
+        f"Ground {name}'s secrets, true goals, and weakness in THIS skeleton — their specific occupation, "
+        f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else. "
         f"Write {name}'s secret bible as JSON now — their own independent life, no protagonist."
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]

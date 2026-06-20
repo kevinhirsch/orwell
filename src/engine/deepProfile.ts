@@ -3,7 +3,7 @@ import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics"
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "./characterFactory";
-import type { Character, Houseguest } from "./characterFactory";
+import type { Archetype, Character, Houseguest } from "./characterFactory";
 import { THREAD } from "./threadConstants";
 
 export type { PhysicalCharacteristics };
@@ -328,6 +328,233 @@ const WEAKNESS_POOL = [
   "panics at the first sign of being on the wrong side of the house",
 ];
 
+// ── CHARACTER-CONDITIONED HIDDEN generation (the P1 coherence fix) ───────────────────────────────────
+// The owner's P1 defect: the secrets/goals/weakness above are drawn from FLAT SHARED pools, so they read
+// as a templated grab-bag — generic, repeated across the cast, and incoherent with the houseguest's
+// actual backstory/occupation/archetype/age. A private chef's secret should read like a private chef's;
+// a firefighter's weakness like a firefighter's.
+//
+// The fix below COMPOSES each secret/goal/weakness FROM the individual `Character` — interpolating the
+// houseguest's CONCRETE `vocation` (e.g. "ER nurse") and reading their `archetype` + `age` band — so the
+// generated text is grounded in THIS person's specific life. Because the cast carries DIVERSE vocations
+// (L28: capped at MAX_PER_VOCATION=2 across the 15-cast) and the templates interpolate that vocation
+// noun, two houseguests almost never produce a verbatim-identical premise (a vocation collision would
+// still differ on archetype/age/template draw). The selection is fully SEED-DETERMINISTIC (every choice
+// runs through the same side rng) and PLAYER-INDEPENDENT (it reads only the NPC's own Character, never
+// the player). Every fragment is plain English with NO banned stat-key substring and NO bare float, so
+// the §8 Vault scans stay clean.
+//
+// Determinism + the floor's job: this is the guaranteed, coherent fallback. The LLM authoring (the open
+// set) still overrides it through `recordCastProfile` for endless variety — but even the seeded floor is
+// now an individual, coherent hidden life rather than a shared-pool draw.
+
+/** The houseguest facets the conditioned generators read. All public/engine-side; never the player. */
+type ConditioningFacets = {
+  archetype: Archetype;
+  vocation: string;
+  ageBand: AgeBand;
+};
+
+type AgeBand = "young" | "established" | "seasoned";
+function ageBandOf(age: number): AgeBand {
+  if (age < 28) return "young";
+  if (age < 42) return "established";
+  return "seasoned";
+}
+
+/**
+ * A concise, gender-neutral life-stake phrase keyed to a vocation SECTOR — the occupational TEXTURE a
+ * secret/goal/weakness can borrow so it reads like THIS job's. Vocations map to a sector by keyword so
+ * the 120+ corpus needs no per-job table; an unmatched vocation falls to the generic "their work" stake
+ * (still grounded — the vocation noun is interpolated by the secret templates regardless).
+ */
+type VocationSector =
+  | "trades" | "healthcare" | "service" | "business" | "tech"
+  | "arts" | "education" | "publicService" | "outdoors" | "fitness" | "curio" | "generic";
+
+const SECTOR_KEYWORDS: ReadonlyArray<{ sector: VocationSector; words: readonly string[] }> = [
+  { sector: "trades", words: ["electrician", "plumber", "welder", "carpenter", "mechanic", "hvac", "foreman", "landscaper", "painter", "machinist", "roofer", "locksmith"] },
+  { sector: "healthcare", words: ["nurse", "paramedic", "hygienist", "therapist", "pharmacist", "technologist", "technician", "phlebotomist", "aide", "optometrist", "emt"] },
+  { sector: "service", words: ["bartender", "barista", "cook", "chef", "sommelier", "concierge", "attendant", "entertainer", "planner", "food-truck", "tattoo", "barber", "hairstylist", "nail", "massage"] },
+  { sector: "business", words: ["agent", "salesperson", "adjuster", "broker", "advisor", "analyst", "executive", "owner", "rep", "teller", "recruiter"] },
+  { sector: "tech", words: ["software", "it support", "data", "qa", "engineer", "aerospace", "robotics", "drone", "streamer", "ux", "administrator"] },
+  { sector: "arts", words: ["designer", "photographer", "podcast", "musician", "filmmaker", "comedian", "dancer", "novelist", "muralist", "voice-over", "buyer", "gallery", "dj"] },
+  { sector: "education", words: ["teacher", "counselor", "student", "tutor", "docent", "librarian"] },
+  { sector: "publicService", words: ["firefighter", "dispatcher", "paralegal", "social worker", "carrier", "planner", "reporter", "ranger", "officer"] },
+  { sector: "outdoors", words: ["fisherman", "rancher", "vineyard", "beekeeper", "florist", "trucker", "wildland", "guide", "biologist", "farmer", "zookeeper"] },
+  { sector: "fitness", words: ["trainer", "yoga", "crossfit", "athlete", "climbing", "swim coach", "boxing", "surf", "spin", "physical-education"] },
+  { sector: "curio", words: ["eating", "cuddler", "escape-room", "renaissance", "mascot", "cheese", "axe-throwing", "ghost-tour", "balloon", "poker"] },
+];
+
+function sectorOf(vocation: string): VocationSector {
+  const v = vocation.toLowerCase();
+  for (const { sector, words } of SECTOR_KEYWORDS) {
+    if (words.some((w) => v.includes(w))) return sector;
+  }
+  return "generic";
+}
+
+// A vocation-sector "stake" — the personal/financial/identity weight a hidden secret can hang on the
+// houseguest's actual working life. One short clause per sector (the vocation noun is filled in by the
+// secret template, so the clause stays job-shaped without repeating the noun).
+const SECTOR_STAKE: Record<VocationSector, readonly string[]> = {
+  trades: ["the body that does the work is starting to give out", "a job site injury they never fully reported", "a business they bankrolled on credit that is underwater"],
+  healthcare: ["a patient outcome they still carry and tell no one about", "a license board complaint they buried", "the burnout they mask with relentless cheer"],
+  service: ["a regular who knew them before all this and could talk", "tips skimmed in a desperate stretch they never made right", "a viral on-shift moment they are terrified resurfaces"],
+  business: ["a deal that went sideways and took clients' money with it", "numbers they fudged that have not caught up to them yet", "a non-compete they are quietly violating by being here"],
+  tech: ["code or data they took with them when they left", "an online life under another name no one connects to them", "a startup that imploded and the people it burned"],
+  arts: ["a body of work that flopped publicly and privately gutted them", "a collaborator they cut out who is still owed", "a persona online that is nothing like who they really are"],
+  education: ["a student or family situation that ended their last job", "a credential they overstated to get cast", "the quiet conviction that they peaked years ago"],
+  publicService: ["a call that went wrong they have never talked through", "a disciplinary file they hope stays sealed", "the toll the work takes that they refuse to admit"],
+  outdoors: ["land or a season's livelihood riding on this prize", "a remote stretch of their past nobody here can verify", "a partner back home holding it all together alone"],
+  fitness: ["an injury or diagnosis that ends the career they perform", "clients or a gym they left in the lurch to be here", "a body image they police far harder than they let on"],
+  curio: ["a stunt that went viral for the wrong reasons", "the gap between the bit they perform and a flat real life", "debts the novelty act never actually covered"],
+  generic: ["money troubles the prize would quietly fix", "a chapter of their life they have edited out of the story", "people back home depending on this far more than they say"],
+};
+
+// Archetype-keyed strategic FRAME for a secret — the hidden shape that archetype's hidden life tends to
+// take. Composed WITH the vocation stake so a villain-chef and a villain-firefighter read differently.
+const ARCHETYPE_SECRET_FRAME: Record<Archetype, readonly string[]> = {
+  "comp-beast": ["downplays just how badly they need to dominate every comp to feel safe", "is hiding that the physical edge is a front for deep insecurity about the social game"],
+  "mastermind": ["has already mapped a final-two betrayal they will deny to the end", "is running a longer con than anyone suspects and keeps a private tally of it"],
+  "social-butterfly": ["secretly cannot stand the houseguest they are publicly closest to", "trades on warmth they do not feel and is exhausted by the performance"],
+  "floater": ["has a side they will commit to the instant the numbers reveal themselves", "is far more calculating than the go-along act lets the house believe"],
+  "villain": ["enjoys the manipulation more than the win and hides how far they will go", "came in with a target they are pretending is a brand-new grudge"],
+  "underdog": ["is playing to prove something to someone who wrote them off", "hides a sharper, more ruthless game under the sympathetic story"],
+  "flirt": ["is using attraction as pure strategy and feels nothing they perform", "has a relationship on the outside the showmance would detonate"],
+  "loyalist": ["made a pre-show pact they will honor even against their own game", "is secretly bracing to betray the one person they swore loyalty to"],
+  "wildcard": ["plans the chaos that looks like impulse and hides the method in it", "is concealing how rattled the unpredictability actually leaves them"],
+  "analyst": ["keeps a private read on every houseguest they would never admit to having", "is overthinking a fear of being exposed as all theory, no nerve"],
+  "hothead": ["is one trigger from a blowup they have been told would sink them", "buries a temper that already cost them dearly outside the house"],
+  "peacemaker": ["uses the mediator role to quietly control which way fights resolve", "resents always being the one who absorbs everyone else's drama"],
+};
+
+// Archetype-keyed TRUE goal (distinct from the public game), grounded by the archetype's drive. Composed
+// with no vocation interpolation (a goal is strategic, not occupational) but still archetype-specific.
+const ARCHETYPE_GOAL: Record<Archetype, readonly string[]> = {
+  "comp-beast": ["win enough comps to never depend on anyone's loyalty", "be feared into a final two no one dares to evict"],
+  "mastermind": ["steer every eviction from the shadows and reach the end uncredited", "build one secret two-person deal the house never sees coming"],
+  "social-butterfly": ["be so universally liked the jury can't vote against them", "sit beside someone the jury clearly resents and coast to the win"],
+  "floater": ["survive to the end by never being anyone's primary target", "let the loud players burn each other and inherit the house"],
+  "villain": ["engineer a blindside big enough to make the house fear them", "control the game through pressure and dare anyone to take the shot"],
+  "underdog": ["outlast every player who counted them out and win it earned", "carry one ally as far as it goes, then make the cold cut clean"],
+  "flirt": ["ride a showmance shield to the final stretch, then cut it loose", "use charm to get every secret in the house and trade them"],
+  "loyalist": ["reach the end beside the person they trust most and let the jury decide", "play a clean, loyalty-first game the jury can respect"],
+  "wildcard": ["blow the house up at the perfect moment and win in the wreckage", "be impossible to read until the numbers force the move"],
+  "analyst": ["play the cleanest strategic game in the house and prove the theory", "stay invisible until the late game, then make every move the right one"],
+  "hothead": ["win on raw will before the temper costs them the game", "channel the fire into comps and rattle everyone else into mistakes"],
+  "peacemaker": ["broker the house into the shape that carries them to the end", "avoid blood on their hands and let others do every eviction"],
+};
+
+// Archetype-keyed WEAKNESS / blind spot — a behavioral seed the game exploits on a delay, grounded by
+// the archetype's failure mode. Composed WITH a vocation-flavored tell so a comp-beast nurse and a
+// comp-beast trucker fail a little differently.
+const ARCHETYPE_WEAKNESS: Record<Archetype, readonly string[]> = {
+  "comp-beast": ["leans on comp wins for safety long after laying low was the smarter play", "reads quiet social players as non-threats until it is far too late"],
+  "mastermind": ["plays several moves ahead of where the house actually is and gets caught alone", "trusts their own cleverness over a warm conversation that has earned nothing"],
+  "social-butterfly": ["needs to be liked and folds the instant an alliance turns cold", "talks too much when nervous and leaks their own plans"],
+  "floater": ["is so conflict-averse they let others make their decisions for them", "waits one beat too long to commit and lands on the wrong side"],
+  "villain": ["lets a bruised ego drive decisions the moment they are challenged in public", "underestimates how fast a house unites against a known threat"],
+  "underdog": ["gets attached fast and cannot play against the people they like", "lets the chip on their shoulder pick fights they cannot win"],
+  "flirt": ["confuses a showmance's loyalty for a vote they have not actually secured", "is blindsided when the charm stops working on the right person"],
+  "loyalist": ["is too loyal once committed and cannot cut anyone, even to survive", "honors a dead alliance long past the point it serves them"],
+  "wildcard": ["chases the dramatic move over the smart one for the spotlight", "panics at the first sign of being on the wrong side of the house"],
+  "analyst": ["overthinks a clear move until the window to make it closes", "freezes under direct social pressure and over-explains"],
+  "hothead": ["holds grudges and lets revenge override the smart move", "erupts at exactly the moment composure would have saved them"],
+  "peacemaker": ["avoids the hard cut so long that the house makes it for them", "absorbs everyone's conflict until they have no allies of their own"],
+};
+
+// An age-band tell — a short stake the secret/weakness can pick up so a 23-year-old and a 50-year-old of
+// the same archetype/job still read differently. Kept generic-but-grounded (no stat vocab, no float).
+const AGE_TELL: Record<AgeBand, readonly string[]> = {
+  young: ["with everything to prove and no fallback if it goes wrong", "trying to outrun how new they still are at all of this"],
+  established: ["with a real life on pause and the clock loud in their head", "knowing this is the one swing they get before responsibilities close in"],
+  seasoned: ["treating this as the last shot to be seen the way they always wanted", "carrying years of being overlooked into every move they make"],
+};
+
+/**
+ * Compose ONE character-grounded secret: the archetype's hidden frame, the houseguest's CONCRETE
+ * vocation interpolated, the vocation-sector stake, and (sometimes) an age tell. Reads like THIS
+ * person's secret. Deterministic off `rng`.
+ */
+function composeSecret(rng: RandomnessSource, f: ConditioningFacets): string {
+  const frame = rng.pick(ARCHETYPE_SECRET_FRAME[f.archetype]);
+  const stake = rng.pick(SECTOR_STAKE[sectorOf(f.vocation)]);
+  // Two grounded shapes, chosen by the rng, both naming the actual vocation:
+  if (rng.next() < 0.5) {
+    return `behind the ${f.vocation} story, ${stake} — and ${frame}`;
+  }
+  const tell = rng.pick(AGE_TELL[f.ageBand]);
+  return `is a ${f.vocation} ${tell} who ${frame}, carrying ${stake}`;
+}
+
+// A goal's personal STAKE — why THIS person wants the strategic outcome, grounded in their life-stage so
+// two same-archetype houseguests' goals still diverge. Composed onto the archetype goal (never bare).
+const GOAL_STAKE: Record<AgeBand, readonly string[]> = {
+  young: ["to finally be taken seriously", "to prove the doubters back home wrong"],
+  established: ["to make the years they put in mean something", "to give the people counting on them a reason to be proud"],
+  seasoned: ["to be remembered as more than they were ever credited for", "to get the recognition a lifetime never quite handed them"],
+};
+
+/**
+ * Compose ONE character-grounded true goal — the archetype's strategic drive ALWAYS carrying BOTH the
+ * concrete vocation AND a life-stage stake, so the goal is individual (two same-archetype, same-vocation
+ * houseguests still diverge on the stake) and effectively never collides verbatim across the cast.
+ */
+function composeGoal(rng: RandomnessSource, f: ConditioningFacets): string {
+  const goal = rng.pick(ARCHETYPE_GOAL[f.archetype]);
+  const stake = rng.pick(GOAL_STAKE[f.ageBand]);
+  // Two grounded shapes — both name the vocation AND the life-stage stake, ordered differently:
+  if (rng.next() < 0.5) return `${goal} — and walk back into the ${f.vocation} life ${stake}`;
+  return `as a ${f.vocation}, ${stake}: ${goal}`;
+}
+
+/**
+ * Compose THE character-grounded weakness — the archetype failure mode ALWAYS grounded in this
+ * houseguest's concrete vocation (+ an age tell), so two same-archetype houseguests with different jobs
+ * read differently and never collide verbatim across the cast.
+ */
+function composeWeakness(rng: RandomnessSource, f: ConditioningFacets): string {
+  const core = rng.pick(ARCHETYPE_WEAKNESS[f.archetype]);
+  const tell = rng.pick(AGE_TELL[f.ageBand]);
+  // Two grounded shapes, both naming the actual vocation so the weakness is individual:
+  if (rng.next() < 0.5) return `${core} — a tell the ${f.vocation} in them never fully shook`;
+  return `${core} — the ${f.vocation} ${tell}`;
+}
+
+/**
+ * Mint a character-CONDITIONED hidden DeepProfile off a side rng (the P1 coherence path). Every secret,
+ * the goal pair, and the weakness are COMPOSED from this houseguest's own archetype/vocation/age — so the
+ * hidden life is individual and coherent, not a shared-pool draw. Distinct within the profile (no two
+ * identical secrets/goals). Player-independent + deterministic. The Day-1 perception still comes from the
+ * net-zero-balanced PERCEPTION_POOL (anti-sycophancy: that balance is the juryReach calibration gate).
+ */
+function generateConditionedDeepProfile(
+  rng: RandomnessSource,
+  facets: ConditioningFacets,
+  perceptionCaps?: Map<string, number>,
+): DeepProfile {
+  const count = SECRET_RANGE.min + rng.int(SECRET_RANGE.max - SECRET_RANGE.min + 1); // 2..3
+  const secrets = composeDistinct(rng, count, () => composeSecret(rng, facets));
+  const trueGoals = composeDistinct(rng, 2, () => composeGoal(rng, facets));
+  const weakness = composeWeakness(rng, facets);
+  const p = perceptionCaps
+    ? pickPerceptionCapped(rng, perceptionCaps, MAX_PER_PERCEPTION)
+    : PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]!;
+  return { secrets, trueGoals, weakness, dayOnePerception: { ...p } };
+}
+
+/** Compose `n` values distinct within this profile, re-rolling on a collision (bounded guard). */
+function composeDistinct(rng: RandomnessSource, n: number, make: () => string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let guard = 0; out.length < n && guard < 200; guard++) {
+    const v = make();
+    if (!seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  return out;
+}
+
 // Day-1 reads of the player + their signed leans for the NPC→player edge (never shown).
 // BALANCED to net-zero on every axis (∑trust ≈ ∑affinity ≈ ∑threat ≈ 0) — the perception adds
 // TEXTURE (some NPCs walk in warm, some wary), never a SYSTEMATIC tilt: a net-positive affinity/trust
@@ -372,14 +599,40 @@ export function newCastSpreadCaps(): CastSpreadCaps {
   return { secretUses: new Map(), goalUses: new Map(), weaknessUses: new Map(), perceptionUses: new Map() };
 }
 
+/** The character facets the conditioned generator reads (a slice of the byte-stable static Character). */
+export type DeepProfileCharacter = Pick<Character, "archetype" | "vocation" | "age">;
+
 /**
  * Mint the full HIDDEN deep profile for one houseguest off a SIDE rng, so the main house stream stays
  * byte-stable. ENGINE-ONLY by construction — the caller seals it into the Vault and never projects it.
- * Deterministic per seed + player-independent (the name is player-independent). When `caps` is supplied
- * (the cast-wide path) the draws honor the L41 spread caps; without it (a single standalone profile)
- * the draws are uncapped.
+ * Deterministic per seed + player-independent (the rng is keyed off the NPC's player-independent name,
+ * and the conditioning reads only the NPC's OWN Character — never the player).
+ *
+ * THE P1 COHERENCE FIX: when a `character` is supplied (the live + cast-wide path), the secrets / true
+ * goals / weakness are COMPOSED from that houseguest's own archetype/vocation/age — an individual,
+ * coherent hidden life rather than a flat shared-pool draw (which read as a templated, cast-repeating
+ * grab-bag). Because the cast carries diverse vocations and the templates interpolate the concrete
+ * vocation, two NPCs almost never share a verbatim premise (no shared-pool collision is even possible).
+ *
+ * Back-compat: with NO `character`, it falls to the legacy shared-pool draw (the bare-rng generators the
+ * scheduler/standalone tests still exercise). When `caps` is supplied that legacy path honors the L41
+ * spread caps; the conditioned path needs no secret/goal/weakness caps (the conditioning makes verbatim
+ * collisions vanishingly rare) but still caps the small Day-1 PERCEPTION pool through `caps.perceptionUses`.
  */
-export function generateDeepProfile(rng: RandomnessSource, caps?: CastSpreadCaps): DeepProfile {
+export function generateDeepProfile(
+  rng: RandomnessSource,
+  caps?: CastSpreadCaps,
+  character?: DeepProfileCharacter,
+): DeepProfile {
+  // The P1 path: compose from the individual character (coherent, unique). Falls back to the shared
+  // pool only when the vocation is unknown (pre-L28 saves) — the conditioning needs a concrete vocation.
+  if (character && character.vocation) {
+    return generateConditionedDeepProfile(
+      rng,
+      { archetype: character.archetype, vocation: character.vocation, ageBand: ageBandOf(character.age) },
+      caps?.perceptionUses,
+    );
+  }
   const count = SECRET_RANGE.min + rng.int(SECRET_RANGE.max - SECRET_RANGE.min + 1); // 2..3
   if (caps) {
     const secrets = pickDistinctCapped(rng, SECRET_POOL, count, caps.secretUses, MAX_PER_SECRET);
@@ -546,8 +799,11 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
   const pub: Record<EntityId, PublicDepth> = {};
   const hidden: Record<EntityId, DeepProfile> = {};
   const threads: StoryThread[] = [];
-  // L41: one shared cap tally for the whole cast — so a secret/goal/weakness/read used to its cap is
-  // not offered to the remaining houseguests. Deterministic: the cast iteration order is seed-stable.
+  // The Day-1 PERCEPTION pool is small, so it still rides the L41 cast-wide cap tally (the secrets/goals/
+  // weakness are now CHARACTER-CONDITIONED — composed from each NPC's own archetype/vocation/age — so a
+  // verbatim cross-cast collision is vanishingly rare without a cap). Deterministic: the cast iteration
+  // order is seed-stable; the conditioning reads only the NPC's OWN Character, so the layer stays
+  // player-INDEPENDENT.
   const caps = newCastSpreadCaps();
   for (const hg of npcs) {
     const pubRng = new SeededRandom(hashSeed(`${seed}:deep-public:${hg.name}`));
@@ -557,7 +813,7 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
       biography: generateBiography(pubRng, hg.character),
       physicalCharacteristics: generatePhysicalCharacteristics(pubRng, hg.character.age),
     };
-    const profile = generateDeepProfile(hidRng, caps);
+    const profile = generateDeepProfile(hidRng, caps, hg.character);
     hidden[hg.id] = profile;
     threads.push(...deriveStoryThreads(thrRng, hg.id, profile));
   }

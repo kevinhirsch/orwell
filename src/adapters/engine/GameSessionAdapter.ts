@@ -684,7 +684,10 @@ export class GameSessionAdapter implements GameSession {
     // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
     // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
     const prev: DeepProfile = this.deepProfiles[target.id]
-      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)));
+      // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
+      // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
+      // individual hidden life, not a flat shared-pool draw.
+      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)), undefined, target.character);
     const next: DeepProfile = {
       secrets: req.secrets ?? prev.secrets,
       trueGoals: req.trueGoals ?? prev.trueGoals,
