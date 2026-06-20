@@ -93,7 +93,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, bedtimeFor } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1658,6 +1658,40 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * The houseguests still AWAKE right now (ADR 0006 — the diegetic bound, the SOCIAL half of the sleep
+   * economy). When the clock is running, anyone past their character-driven bedtime has turned in for
+   * the night and drops out of the living house; as the night thins the set shrinks toward the player +
+   * the night owls. The PLAYER is awake unless THEY chose to turn in (never auto-slept — §Principle 6).
+   * Returns `null` when the clock is OFF (or hasn't started) ⇒ "everyone is awake" ⇒ every caller below
+   * is the IDENTITY ⇒ byte-identical to the pre-feature model (the seeded juryReach/UAT calibration spine
+   * is unmoved). Pure read off the shared phase + the STATIC aptitudes (`bedtimeFor`): draws no rng, and
+   * reads no soul/Vault number.
+   */
+  private awakeNow(): Set<EntityId> | null {
+    if (!this.timeOfDayEnabled || !this.live?.timeOfDay || !this.house) return null;
+    return new Set(
+      awakeSet({
+        active: this.presenceActive(),
+        phase: this.live.timeOfDay,
+        player: this.house.player.id,
+        playerRetired: this.live.playerRetired ?? false,
+        bedtimeOf: (id) => bedtimeFor(this.statsOf(id)),
+      }),
+    );
+  }
+
+  /**
+   * The subset of `ids` still awake (ADR 0006) — the off-screen society pairs only houseguests who are
+   * UP, so the night owls scheme on while the early-to-bed (and a turned-in player) miss it. The
+   * orchestrator's off-screen tick routes the living NPCs through here. IDENTITY (a stable-order copy)
+   * when the clock is off ⇒ the hidden society + its calibration spine are byte-identical.
+   */
+  awakeAmong(ids: readonly EntityId[]): EntityId[] {
+    const awake = this.awakeNow();
+    return awake ? ids.filter((id) => awake.has(id)) : [...ids];
+  }
+
+  /**
    * The CALIBRATION-NEUTRAL occupancy the OFF-SCREEN SOCIETY pairs on (L21/L24). The society's co-present
    * pairing feeds relationship folds → (downstream) nominations/votes, so it must be INVARIANT to the
    * personality-movement constants — the base assignment is, which keeps the seeded competition/vote
@@ -1665,7 +1699,15 @@ export class GameSessionAdapter implements GameSession {
    * for pre-L21/L24 saves (no base yet) or before the first tick.
    */
   societyOccupancy(): Occupancy | null {
-    return this.presenceBase ?? this.presence;
+    const base = this.presenceBase ?? this.presence;
+    if (!base) return base;
+    const awake = this.awakeNow();
+    if (!awake) return base; // clock off ⇒ identity ⇒ byte-identical society + calibration spine
+    // ADR 0006: asleep houseguests have left the floor for the night — drop them so the off-screen
+    // society pairs (and overhears) only happen among those still up. A fresh map; `presenceBase` is never mutated.
+    const up = new Map<EntityId, Room>();
+    for (const [id, room] of base) if (awake.has(id)) up.set(id, room);
+    return up;
   }
 
   /** Drop anyone presence still seats who is no longer active (the just-evicted are nowhere). */
@@ -1683,10 +1725,14 @@ export class GameSessionAdapter implements GameSession {
     const me = this.house.player.id;
     const room = this.presence.get(me);
     if (!room) return null; // the player is nowhere (out of the house)
+    // ADR 0006: as the night thins, houseguests who have turned in are no longer "around" — the house
+    // empties for the player. `null` when the clock is off ⇒ everyone shows ⇒ byte-identical whereabouts.
+    const awake = this.awakeNow();
+    const isUp = (id: EntityId): boolean => !awake || awake.has(id);
     const inRoom = (r: Room): NamedRef[] => {
       const out: NamedRef[] = [];
       for (const [id, where] of this.presence!) {
-        if (where === r && id !== me) out.push({ id, name: this.nameOf(id) });
+        if (where === r && id !== me && isUp(id)) out.push({ id, name: this.nameOf(id) });
       }
       return out;
     };
@@ -1717,7 +1763,11 @@ export class GameSessionAdapter implements GameSession {
     const player = this.house.player.id;
     // B52/audit D5: an evicted houseguest can't pull you aside — only LIVING NPCs approach.
     const evicted = new Set(this.live?.evictionOrder ?? []);
-    const npcIds = this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id);
+    const npcIds0 = this.house.npcs.filter((n) => !evicted.has(n.id)).map((n) => n.id);
+    // ADR 0006: a houseguest who has turned in for the night won't pull you aside at 3am — only those
+    // still up approach. Identity when the clock is off ⇒ byte-identical approach ranking.
+    const npcAwake = this.awakeNow();
+    const npcIds = npcAwake ? npcIds0.filter((id) => npcAwake.has(id)) : npcIds0;
     // Deterministic per moment (the temperature roll cannot flip a clear relationship gap, 0012),
     // so the same week/phase reproduces the same approaches. The hidden drive NUMBER is NOT
     // surfaced — only the name + the coarse motive category (E60: the fact the GM voices in its
