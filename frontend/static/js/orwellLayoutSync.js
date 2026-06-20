@@ -24,47 +24,22 @@
   // self-echo on, unlike a chat run).
   var ORIGIN = 'low-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-  function userKey() { return (document.body && document.body.dataset.user) || ''; }
-
-  // Land a server window-state into the kit's OWN localStorage keys, so the kit's existing restore
-  // (loadParked / loadDocked / winsize) shows the synced state from the first mount. Position (x,y)
-  // is slot-relative and can't be a pre-written key — the kit's seed-on-open applies it instead.
-  function prewriteLS(id, st) {
-    if (!id || !st) return;
-    try {
-      var u = userKey();
-      if (typeof st.minimized === 'boolean') {
-        if (st.minimized) localStorage.setItem('orwell-win-parked:' + id + ':' + u, '1');
-        else localStorage.removeItem('orwell-win-parked:' + id + ':' + u);
-      }
-      if (typeof st.docked === 'boolean') {
-        localStorage.setItem('orwell-' + id + '-docked:' + u, st.docked ? '1' : '0');
-      }
-      if (typeof st.w === 'number' && typeof st.h === 'number') {
-        localStorage.setItem('winsize-' + id, JSON.stringify({ w: Math.round(st.w), h: Math.round(st.h) }));
-      }
-    } catch (_) {}
-  }
-
-  function rememberSeed(id, st) {
+  // Hand a synced layout to the kit. The kit OWNS its persistence keys (audit F5 / the F-3 ratchet:
+  // one position system) — so this module NEVER writes geometry/dock localStorage itself; it routes
+  // through orwellWindow.js's _orwellSeedLayout (pre-write + seed-on-open + apply-to-open). With the
+  // kit absent it falls back to remembering the seed only (no kit ⇒ no windows to place anyway).
+  function rememberSeedOnly(windows) {
     try {
       window._orwellLayoutSeed = window._orwellLayoutSeed || {};
-      window._orwellLayoutSeed[id] = Object.assign(window._orwellLayoutSeed[id] || {}, st);
+      Object.keys(windows || {}).forEach(function (id) {
+        window._orwellLayoutSeed[id] = Object.assign(window._orwellLayoutSeed[id] || {}, windows[id] || {});
+      });
     } catch (_) {}
-  }
-
-  function applyToOpen(id, st) {
-    try { if (window._orwellApplyRemoteLayout) window._orwellApplyRemoteLayout(id, st); } catch (_) {}
   }
 
   function seedFrom(windows) {
-    var w = windows || {};
-    Object.keys(w).forEach(function (id) {
-      var st = w[id] || {};
-      rememberSeed(id, st);
-      prewriteLS(id, st);     // so the kit's own restore is right from the first mount
-      applyToOpen(id, st);    // and any already-open window catches up now
-    });
+    if (window._orwellSeedLayout) { try { window._orwellSeedLayout(windows || {}); return; } catch (_) {} }
+    rememberSeedOnly(windows || {});
   }
 
   function load() {
@@ -97,7 +72,7 @@
     var d = e && e.detail;
     if (!d || !d.id || !d.state) return;
     _pending[d.id] = Object.assign(_pending[d.id] || {}, d.state);
-    rememberSeed(d.id, d.state);  // keep our own seed current for a later re-open
+    rememberSeedOnly({ [d.id]: d.state });  // keep our own seed current for a later re-open (no LS write)
     if (_timers[d.id]) clearTimeout(_timers[d.id]);
     // State flips (open/min/dock) sync immediately; geometry settles after the gesture.
     var immediate = ('open' in d.state) || ('minimized' in d.state) || ('docked' in d.state);
@@ -110,9 +85,7 @@
     var d = e && e.detail;
     if (!d || !d.windowId || !d.state) return;
     if (d.origin && d.origin === ORIGIN) return;   // our own echo — ignore
-    rememberSeed(d.windowId, d.state);
-    prewriteLS(d.windowId, d.state);
-    applyToOpen(d.windowId, d.state);
+    seedFrom({ [d.windowId]: d.state });   // kit pre-writes its own keys + applies to an open window
   });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);

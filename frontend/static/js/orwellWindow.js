@@ -269,6 +269,27 @@ function applyRemoteLayout(id, state) {
 }
 try { window._orwellApplyRemoteLayout = applyRemoteLayout; } catch (_) {}
 
+// Seed a synced layout (from another device, via orwellLayoutSync) into the kit. The kit owns its
+// OWN persistence keys (audit F5 / the F-3 ratchet: ONE position system) — so the geometry/state
+// keys are written HERE, through the kit's existing helpers, never minted by the sync module. We
+// pre-write min/dock/size so the kit's existing restore lands them at first mount, stash the blob
+// for seed-on-open, and apply to any already-open window now.
+function seedLayout(windows) {
+  const w = windows || {};
+  try { window._orwellLayoutSeed = window._orwellLayoutSeed || {}; } catch (_) {}
+  Object.keys(w).forEach((id) => {
+    const st = w[id] || {};
+    try { window._orwellLayoutSeed[id] = Object.assign(window._orwellLayoutSeed[id] || {}, st); } catch (_) {}
+    if (typeof st.minimized === 'boolean') saveParked(id, st.minimized);   // kit's own parked key
+    if (typeof st.docked === 'boolean') saveDocked(id, st.docked);         // kit's own docked key
+    if (typeof st.w === 'number' && typeof st.h === 'number') {
+      try { localStorage.setItem('winsize-' + id, JSON.stringify({ w: Math.round(st.w), h: Math.round(st.h) })); } catch (_) {}
+    }
+    applyRemoteLayout(id, st);  // a live window catches up immediately
+  });
+}
+try { window._orwellSeedLayout = seedLayout; } catch (_) {}
+
 export class OrwellWindow {
   /**
    * opts: { id, title, icon, slot='top-right', slotKey=null, role='complementary',
