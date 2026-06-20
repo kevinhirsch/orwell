@@ -1513,14 +1513,28 @@ _LULL_READY_RE = re.compile(
 _LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
 
 
+# A hidden PRODUCTION CUE is engine/FE-authored text injected as a user message (e.g. the post-photo
+# "continue the casting interview" auto-cue from orwellOnboarding.js via sendHiddenCue) — NOT the
+# player speaking. It must never read as a player "lull" / "ready" signal, or it would silently march
+# the casting stall counter toward a forced finalize with no real player intent (the mobile bug).
+_PRODUCTION_CUE_PREFIX = "(Production cue"
+
+
+def _is_production_cue(text: str) -> bool:
+    """True when the message is an engine/FE hidden production cue, not the player."""
+    return (text or "").lstrip().startswith(_PRODUCTION_CUE_PREFIX)
+
+
 def _player_turn_is_lull(messages) -> bool:
     """A lull = the player disengaged or signalled readiness on THEIR last message — the
     cue to seize the moment and advance. Substantive play (long, strategic, scheming) is
-    engagement and is never a lull."""
+    engagement and is never a lull. A hidden production cue is NOT the player and is never a lull."""
     last = _extract_last_user_message(messages) or ""
     s = last.strip()
     if not s:
         return True
+    if _is_production_cue(s):
+        return False
     if _LULL_READY_RE.search(s):
         return True
     # short and non-substantial: a stripped reply under the threshold with no question/scheme
@@ -3639,7 +3653,12 @@ async def stream_agent_loop(
                 # player-asked only). createCharacter THIS turn short-circuits (model-driven wins).
                 _created_this_turn = "createCharacter" in {
                     (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
-                if not _created_this_turn and owner is not None and _player_turn_is_lull(messages):
+                # A cancelled / empty turn (the player hit Stop, or nothing was produced) must NOT march
+                # the stall counter — a string of mobile cancellations would otherwise reach the forced
+                # finalize on a name-only intake. `_emitted_visible` is False on such a turn.
+                _turn_was_cancelled = not _emitted_visible
+                if (not _created_this_turn and not _turn_was_cancelled
+                        and owner is not None and _player_turn_is_lull(messages)):
                     try:
                         from src import orwell_engine as _oec
                         _cs = await _oec.get_game_state(owner)
@@ -3649,10 +3668,14 @@ async def stream_agent_loop(
                         _cs = None
                     _casting = (_cs or {}).get("casting") if isinstance(_cs, dict) else None
                     _ready = bool(_casting and _casting.get("ready")) and not (_cs or {}).get("started")
+                    # The FORCED finalize requires a GENUINE interview (engine `finalizable`), not the
+                    # name-only `ready` — name+photo alone minted a default-archetype "floater" (the mobile
+                    # bug). Absent on an older engine ⇒ treat as False (never force on a missing signal).
+                    _finalizable = bool(_casting and _casting.get("finalizable"))
                     if _ready:
                         _clv = _CASTING_STALL_LEVEL.get(owner, 0)
                         _CASTING_STALL_LEVEL[owner] = _clv + 1
-                        if _clv >= _CASTING_FORCE_LEVEL:
+                        if _clv >= _CASTING_FORCE_LEVEL and _finalizable:
                             try:
                                 from src.tool_implementations import do_create_character
                                 _cres = await do_create_character("{}", owner=owner)
