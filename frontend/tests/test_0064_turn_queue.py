@@ -11,6 +11,20 @@ import importlib
 agent_runs = importlib.import_module("src.agent_runs")
 
 
+def _run(coro):
+    """Run a coroutine on a REUSED event loop. Deliberately NOT asyncio.run(): asyncio.run closes
+    the loop AND unsets the thread's current loop, which poisons every later test in the process that
+    calls asyncio.get_event_loop() (the repo's async-test idiom). Reuse/create-and-keep instead."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+
 async def _gen(label, events, *, n=3, delay=0.03):
     try:
         for i in range(n):
@@ -32,7 +46,7 @@ def test_queue_chains_without_stomping_the_live_run():
         await asyncio.gather(a.task, b.task, return_exceptions=True)
         return events
 
-    events = asyncio.run(main())
+    events = _run(main())
     assert "A-cancelled" not in events                 # A was NOT stomped — it finished in full
     assert "A2" in events and "B2" in events           # both turns ran to completion
     assert events.index("A2") < events.index("B0")     # strictly serialized: all of A, then B
@@ -48,7 +62,7 @@ def test_default_still_cancels_inflight_for_plain_chat():
         await asyncio.gather(a.task, b.task, return_exceptions=True)
         return events
 
-    events = asyncio.run(main())
+    events = _run(main())
     assert "A-cancelled" in events                     # the in-flight run was cancelled (historical behavior)
     assert "B2" in events                              # the replacing run still completes
 
