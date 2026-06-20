@@ -49,17 +49,26 @@ describe("the casting-interview moment prompt (0050)", () => {
     expect(prompt).toMatch(/NOT required|never block/i);
   });
 
-  // The producer persona is PROFESSIONAL, not jokey: a real casting producer running a tight
-  // session — no schtick, no narrated body language, no gushing. (Playtest fix.)
-  it("pins a professional, non-jokey producer voice", () => {
+  // The producer is PROFESSIONAL with a real personality: CALCULATED, strategic humor IS allowed
+  // (wit in service of the read — disarm / provoke / test), what's banned is RANDOM comedy, gushing,
+  // and narrated stage directions. (Owner feedback: #373's hard "no jokes" ban went too far.)
+  it("allows calculated, strategic humor — never random comedy or gushing", () => {
     expect(prompt).toMatch(/PRODUCER VOICE/);
     expect(prompt).toMatch(/professional/i);
-    expect(prompt).toMatch(/not a comedian/i);
-    // the specific schtick the playtest flagged is named so the model knows what to avoid
-    expect(prompt).toMatch(/NO schtick/i);
+    // calculated humor is explicitly PERMITTED, and tied to the read (disarm / provoke / test)
+    expect(prompt).toMatch(/CALCULATED HUMOR/i);
+    expect(prompt).toMatch(/can be funny/i);
+    expect(prompt).toMatch(/deliberate and\s+strategic/i);
+    expect(prompt).toMatch(/disarm/i);
+    // the bans that REMAIN: random comedy bits, stage directions, gushing
+    expect(prompt).toMatch(/RANDOM comedy|comedian bits|no routine/i);
     expect(prompt).toMatch(/NO stage directions/i); // no "I lean back with a grin" narration
     expect(prompt).toMatch(/NO gushing/i); // no "that's a hell of a tagline"
-    expect(prompt).toMatch(/realistic over playful/i);
+    expect(prompt).toMatch(/Sharp and calculated/i);
+    // the hard "no jokes / not a comedian / realistic over playful" #373 ban is GONE (humor is allowed)
+    expect(prompt).not.toMatch(/not a comedian/i);
+    expect(prompt).not.toMatch(/NO schtick\b/);
+    expect(prompt).not.toMatch(/realistic over playful/i);
   });
 
   // The interview goes DEEP and probing — strategy, what they want, who they think they are —
