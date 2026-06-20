@@ -9,6 +9,7 @@ import type {
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
+  StateDeltaView, DeltaEventView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -53,6 +54,11 @@ const TAGLINE_INSTRUCTION =
 function oneLine(s: string): string {
   return (s.split("\n")[0] ?? "").trim().slice(0, 120);
 }
+
+/** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
+function sameIds(a: readonly EntityId[], b: readonly EntityId[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
 /** Reject empty/over-long output and the Echo stub's context dump (so we fall open to the template). */
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
@@ -76,7 +82,7 @@ import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import { EngineRefusal } from "../../domain/errors";
+import { EngineRefusal, StaleBeatError } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
@@ -226,6 +232,26 @@ export class GameSessionAdapter implements GameSession {
   private intake: CastingIntake = emptyIntake();
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
   private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
+  /**
+   * The monotonic per-sandbox beat counter (feature 0065 Part A). Bumped exactly ONCE per committed
+   * state mutation by the registry's commit funnel (`bumpBeatSeq`, called before the candidate
+   * snapshot is exported), so it increments by one per beat / aux commit and stays stable on a no-op
+   * (a no-op never fires `onPersist`). Persisted in the snapshot (restart-safe; co-versioned with the
+   * save). Surfaced on every read/advance view; a mutating call may carry `expectedBeatSeq` and is
+   * refused (`stale-beat`/409) when it no longer matches. A rolled-back commit restores the pre-commit
+   * value through `restore` (the baseline snapshot carries it). NOT secret — a counter has no Vault
+   * content, so it crosses the wall freely.
+   */
+  private beatSeq = 0;
+  /**
+   * The at-most-once idempotency cache (feature 0065 Part B) — a small bounded per-sandbox LRU
+   * `idempotencyKey → AdvanceView` for `advanceGame`/`submitDecision`. A repeated key returns the
+   * ORIGINAL view (its `beatSeq` included) WITHOUT advancing again, so a flaky-socket retry never
+   * double-applies. Best-effort + in-memory (a restart drops it and degrades safely — Part A's
+   * `expectedBeatSeq` still guards a double-apply); insertion-ordered so the oldest evicts first.
+   */
+  private readonly idempotencyCache = new Map<string, AdvanceView>();
+  private static readonly IDEMPOTENCY_CACHE_MAX = 32;
   // The incremental weekly-loop state (0011); null until a game starts.
   private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
@@ -372,6 +398,90 @@ export class GameSessionAdapter implements GameSession {
       this.onPersist?.(); // may throw (a refused/failed commit) — AFTER all state mutation (E3)
     }
     return out;
+  }
+
+  /** The current monotonic beat counter (0065 Part A) — surfaced on every read/advance view. */
+  beatSeqNow(): number {
+    return this.beatSeq;
+  }
+
+  /**
+   * Bump the beat counter (0065 Part A) — the registry's commit funnel calls this exactly ONCE per
+   * committed mutation, BEFORE the candidate snapshot is exported, so the new value is persisted. A
+   * commit that is then refused/rolled back is restored from the baseline snapshot (which carries the
+   * pre-commit value), so a refused write never leaves the counter advanced. (Bumping here, not inside
+   * `persist`, keeps an interior deferred `persist` from double-counting one logical commit.)
+   */
+  bumpBeatSeq(): void {
+    this.beatSeq++;
+    this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — seed the delta ring's BASELINE checkpoint at the CURRENT `beatSeq` (the resumed value),
+   * capturing the current event-log length + board. The registry calls this once after a resume finishes
+   * loading the events (`restore` clears the ring; the events arrive AFTER it), so the very FIRST delta a
+   * resumed session serves — keyed on the resumed `beatSeq` — can slice its tail instead of full-refreshing
+   * forever. A no-op if a checkpoint for the current beat already exists (a fresh game's first commit
+   * captured it). Vault-free (ids/counts only).
+   */
+  seedDeltaBaseline(): void {
+    if (!this.beatCheckpoints.has(this.beatSeq)) this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — snapshot the lightweight board state AT the new `beatSeq` so the delta feed can later
+   * slice the event tail (O(Δ)) and diff the ceremony WITHOUT re-deriving "what existed then". Called
+   * once per committed mutation (right after the counter bumps), the events for this commit are already
+   * recorded, so `count()` here is the event-log length AS OF this beat. Bounded to the last
+   * `DELTA_WINDOW` beats (the oldest checkpoint evicts) so a busy season's ring stays small; a token
+   * older than the retained window correctly full-refreshes. Vault-free (ids/counts only).
+   */
+  private captureBeatCheckpoint(): void {
+    const eventCount = this.deltaSource?.count() ?? this.record?.events().length ?? 0;
+    this.beatCheckpoints.set(this.beatSeq, {
+      eventCount,
+      week: this.week,
+      phase: this.phase,
+      ...(this.ceremony.hoh !== undefined ? { hoh: this.ceremony.hoh } : {}),
+      nominees: [...this.ceremony.nominees],
+      ...(this.ceremony.vetoHolder !== undefined ? { vetoHolder: this.ceremony.vetoHolder } : {}),
+      vetoUsed: this.ceremony.vetoUsed,
+      finished: !!this.live?.finished,
+      ...(this.live?.winner !== undefined ? { winner: this.live.winner } : {}),
+    });
+    // Evict the oldest beyond the window (insertion-ordered Map ⇒ the first key is the oldest).
+    while (this.beatCheckpoints.size > GameSessionAdapter.DELTA_WINDOW) {
+      const oldest = this.beatCheckpoints.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      this.beatCheckpoints.delete(oldest);
+    }
+  }
+
+  /**
+   * Compare-and-swap stale-write guard (0065 Part A). When a mutating call supplies `expectedBeatSeq`
+   * and it no longer matches the committed `beatSeq`, the board moved under it (the 0064 queued-turn
+   * case) — refuse BEFORE any mutation with a typed `stale-beat` conflict carrying the CURRENT counter
+   * and the Vault-free current board, so the caller can re-ground immediately. `undefined` ⇒ opt out
+   * (byte-identical to the pre-0065 path). The board is the same ceremony-level public status
+   * `gameStatus()` exposes — no Vault content.
+   */
+  private guardBeatSeq(expected: number | undefined): void {
+    if (expected !== undefined && expected !== this.beatSeq) {
+      throw new StaleBeatError(this.beatSeq, this.gameStatus());
+    }
+  }
+
+  /** 0065 Part B — remember an `AdvanceView` under its idempotency key (bounded LRU; oldest evicts). */
+  private rememberIdempotent(key: string, view: AdvanceView): AdvanceView {
+    this.idempotencyCache.delete(key); // re-insert at the tail (insertion-ordered = LRU)
+    this.idempotencyCache.set(key, view);
+    while (this.idempotencyCache.size > GameSessionAdapter.IDEMPOTENCY_CACHE_MAX) {
+      const oldest = this.idempotencyCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.idempotencyCache.delete(oldest);
+    }
+    return view;
   }
 
   /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
@@ -554,6 +664,59 @@ export class GameSessionAdapter implements GameSession {
     hidden: () => ReadonlyArray<{ kind: string; content: string }>;
   }): void {
     this.record = p;
+  }
+
+  /**
+   * 0065 Part E — the delta feed's O(Δ) providers, wired by the registry. `count` is the O(1) event-log
+   * length (used to anchor each beat checkpoint at commit time). `visibleEventsSince(fromCount)` returns
+   * the PLAYER-VISIBLE events appended AT OR AFTER `fromCount` — the registry slices the immutable log
+   * tail (O(Δ)) and runs the SAME witness-filter + roster scrub the player surface uses, so the delta is
+   * Vault-free by construction and never re-scans the whole log. Absent on a standalone adapter (no
+   * registry) ⇒ the delta degrades to a full refresh (it cannot fetch a Vault-safe tail without them).
+   */
+  private deltaSource?: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  };
+
+  setDeltaProviders(p: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  }): void {
+    this.deltaSource = p;
+  }
+
+  /**
+   * 0065 Part E — a per-turn beat checkpoint ring: `beatSeq → { eventCount, ceremony/board snapshot,
+   * finished/winner }` captured at each `bumpBeatSeq` (the single commit funnel). The delta looks up the
+   * checkpoint AT `sinceBeatSeq` to slice the event tail (O(Δ)) and diff the ceremony — so it never
+   * re-derives "what existed then" by scanning. Bounded (the last `DELTA_WINDOW` beats); a token older
+   * than the oldest retained checkpoint (or after a restart, which starts the ring empty) ⇒ a full
+   * refresh, never a guessed partial delta. NOT persisted — it is a process-local read accelerator; on a
+   * resume the FE's last-seen token resets too, so an unknown token correctly full-refreshes.
+   */
+  private readonly beatCheckpoints = new Map<number, {
+    eventCount: number;
+    week: number;
+    phase: string;
+    hoh?: EntityId;
+    nominees: EntityId[];
+    vetoHolder?: EntityId;
+    vetoUsed: boolean;
+    finished: boolean;
+    winner?: EntityId;
+  }>();
+  private static readonly DELTA_WINDOW = 64;
+
+  /**
+   * 0065 Part E — an OPTIONAL diagnostic seam (Vault-free, no behavior change): reports how many tail
+   * events the last `stateDelta` MATERIALIZED, so a complexity test can assert the work is bounded by Δ
+   * (never O(events)). Off by default; set only in tests. It carries a count, never any event content.
+   */
+  private deltaScanProbe?: (scanned: number) => void;
+
+  setDeltaScanProbe(fn: ((scanned: number) => void) | undefined): void {
+    this.deltaScanProbe = fn;
   }
 
   /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
@@ -987,6 +1150,10 @@ export class GameSessionAdapter implements GameSession {
   snapshot(): SessionCore {
     return {
       started: this.house !== null,
+      // 0065 Part A — persist the monotonic beat counter so the CAS token is restart-safe (co-versioned
+      // with the save). Conditional spread keeps a never-bumped (pre-game/legacy) snapshot byte-shaped
+      // as before (absent ⇒ 0 on restore), so a pre-0065 save round-trips unchanged.
+      ...(this.beatSeq > 0 ? { beatSeq: this.beatSeq } : {}),
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
@@ -1105,6 +1272,16 @@ export class GameSessionAdapter implements GameSession {
     // on the OLD array references) must be dropped; a stale clone could otherwise be reused for a new
     // soul that happens to match a length, persisting the wrong history.
     this.soulCloneCache.clear();
+    // 0065 Part A — resume the beat counter at the saved value (restart-safe CAS). Absent on a pre-0065
+    // save ⇒ 0 (the next commit bumps it). A resume replaces the houseguest objects wholesale, so the
+    // process-local idempotency cache (Part B) is for the dead in-memory life — drop it (best-effort;
+    // Part A's counter still guards a double-apply after the cache is gone).
+    this.beatSeq = core.beatSeq ?? 0;
+    this.idempotencyCache.clear();
+    // 0065 Part E — the delta ring is a process-local read accelerator (not persisted); a resume starts
+    // it empty, so the FE's pre-restart token (which also resets across a restart) correctly full-
+    // refreshes rather than slicing against a window that no longer holds its checkpoint.
+    this.beatCheckpoints.clear();
     this.house = core.house ? cloneSession(core.house) : null;
     this.week = core.week;
     this.phase = core.phase;
@@ -1268,6 +1445,7 @@ export class GameSessionAdapter implements GameSession {
 
   gameStatus(): PublicGameStatus {
     return {
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token; Vault-free
       week: this.week,
       phase: this.phase,
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
@@ -1442,7 +1620,9 @@ export class GameSessionAdapter implements GameSession {
    * whereabouts unchanged (the model knows the valid rooms from the moment prompt, so this is rare).
    * Returns the resulting whereabouts so the caller can voice the move. Vault-free.
    */
-  movePlayer(room: string): WhereaboutsView | null {
+  movePlayer(room: string, expectedBeatSeq?: number): WhereaboutsView | null {
+    // 0065 Part A — refuse a move computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(expectedBeatSeq);
     if (!this.house || !this.presence) return null;
     const me = this.house.player.id;
     const here = this.presence.get(me) ?? null;
@@ -2725,11 +2905,24 @@ export class GameSessionAdapter implements GameSession {
     return new SeededRandom(hashSeed(`${root}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
-  advanceGame(): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+  advanceGame(req: { expectedBeatSeq?: number; idempotencyKey?: string } = {}): AdvanceView {
+    // 0065 Part B — an at-most-once replay returns the ORIGINAL view (its beatSeq included) WITHOUT
+    // advancing again; it WINS even if beatSeq has since moved (the cache is the authority on the
+    // already-applied result). Checked before the CAS guard so a retry of a now-stale key still
+    // returns the cached success rather than a spurious stale-beat conflict.
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a write computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
-    return this.inOneCommit(() => {
+    const view = this.inOneCommit(() => {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
@@ -2739,31 +2932,47 @@ export class GameSessionAdapter implements GameSession {
       // and every ceremony beat are visible in the view, not only recorded to the event store.
       return this.advanceView(ev);
     });
+    // 0065 Part B — cache the committed result under its key, so a retry replays it verbatim.
+    return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, view) : view;
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+    // 0065 Part B — replay an already-resolved decision verbatim (wins even if beatSeq moved).
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a decision computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
+    // 0065 Part B — every resolved/no-op path below caches its committed view under the key, so a
+    // retry replays it verbatim (and never re-applies the decision).
+    const remember = (v: AdvanceView): AdvanceView =>
+      req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
     // 0061 — self-eviction is the sanctioned CONFIRMED quit. It rides the SAME `submitDecision`
     // seam but resolves through its own dedicated path (NOT the ceremony-pending machinery): the
     // confirmation must already be raised (the OOC step-1 gate), AND `confirmed` must be true.
     // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
-    if (req.kind === "self-evict") return this.resolveSelfEviction(req.confirmed === true);
+    if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
     const compApproach = (k: string): boolean => k === "comp-intent" || k === "comp-round";
     const pendingKind = this.live.pending?.kind;
     const kindMatches = !!pendingKind && (pendingKind === req.kind || (compApproach(pendingKind) && compApproach(req.kind)));
-    if (!kindMatches) return this.advanceView(null);
+    if (!kindMatches) return remember(this.advanceView(null));
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
-    return this.inOneCommit(() => {
+    return remember(this.inOneCommit(() => {
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
       return this.advanceView(ev);
-    });
+    }));
   }
 
   /**
@@ -2820,6 +3029,8 @@ export class GameSessionAdapter implements GameSession {
    * deals are made off-screen and held in the Vault (never crosses this outward seam).
    */
   makeDeal(req: MakeDealReq): DealView | null {
+    // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
@@ -3222,6 +3433,7 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     return {
       started: this.house !== null,
+      beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
       event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
       pending: this.pendingView(),
       status: this.gameStatus(),
@@ -3295,6 +3507,72 @@ export class GameSessionAdapter implements GameSession {
 
   getGameState(): GameStateView {
     return this.view();
+  }
+
+  /**
+   * 0065 Part E — the `beatSeq`-keyed delta state feed. Given the caller's last-seen `beatSeq`, return
+   * exactly WHAT CHANGED since: the player-visible events appended, the ceremony field transitions, and
+   * any finished/winner flip — plus the freshest board to re-anchor on. A pure READ (no mutation).
+   *
+   * O(Δ): the per-beat checkpoint ring (`beatCheckpoints`) holds the event-log length + the board AS OF
+   * `sinceBeatSeq`, so the delta slices ONLY the event tail (`visibleEventsSince(eventCountThen)`) and
+   * diffs the ceremony against the captured snapshot — it never re-scans the whole log. VAULT-FREE: the
+   * event tail comes through the player's witness-filtered visible projection (no hidden content), and
+   * the board/changes are the same ceremony-level public facts `gameStatus` exposes.
+   *
+   * Full-refresh signal (never a guessed partial delta): the token is ahead of the current counter,
+   * negative, or older than the retained window (e.g. after a restart, which empties the ring). Empty
+   * delta: `sinceBeatSeq === current` — nothing committed since.
+   */
+  stateDelta(sinceBeatSeq: number): StateDeltaView {
+    const board = this.gameStatus();
+    const current = this.beatSeq;
+    const empty = (fullRefresh: boolean): StateDeltaView => ({ beatSeq: current, fullRefresh, events: [], board });
+
+    // Nothing committed since (the FE is already up to date) — an empty, non-refresh delta.
+    if (sinceBeatSeq === current) return empty(false);
+    // A token ahead of the current counter, or negative/malformed ⇒ full refresh (never guess forward).
+    if (sinceBeatSeq < 0 || sinceBeatSeq > current) return empty(true);
+    // A token older than the retained window (or after a restart, when the ring is empty) ⇒ full refresh.
+    const cp = this.beatCheckpoints.get(sinceBeatSeq);
+    if (!cp) return empty(true);
+
+    // O(Δ) event tail: only the player-visible events appended AT OR AFTER the checkpoint's event count.
+    // Without the registry-wired providers (a standalone adapter) we cannot fetch a Vault-safe tail, so
+    // we fall back to a full refresh rather than risk an unscrubbed/over-broad projection.
+    if (!this.deltaSource) return empty(true);
+    const events = this.deltaSource.visibleEventsSince(cp.eventCount);
+    this.deltaScanProbe?.(events.length); // diagnostic only — a count, never content (Part E perf guard)
+
+    // Ceremony field diffs (only the fields that actually moved appear). Compare the captured board AS OF
+    // `sinceBeatSeq` against the live ceremony — the same public ceremony-level facts `gameStatus` exposes.
+    const changes: NonNullable<StateDeltaView["changes"]> = {};
+    if (cp.week !== this.week) changes.week = { from: cp.week, to: this.week };
+    if (cp.phase !== this.phase) changes.phase = { from: cp.phase, to: this.phase };
+    if (cp.hoh !== this.ceremony.hoh) changes.hoh = { from: this.card(cp.hoh), to: this.card(this.ceremony.hoh) };
+    if (!sameIds(cp.nominees, this.ceremony.nominees)) {
+      changes.nominees = {
+        from: cp.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+        to: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+      };
+    }
+    if (cp.vetoHolder !== this.ceremony.vetoHolder) {
+      changes.vetoHolder = { from: this.card(cp.vetoHolder), to: this.card(this.ceremony.vetoHolder) };
+    }
+    if (cp.vetoUsed !== this.ceremony.vetoUsed) changes.vetoUsed = { from: cp.vetoUsed, to: this.ceremony.vetoUsed };
+
+    const finishedNow = !!this.live?.finished;
+    const finishedChanged = cp.finished !== finishedNow || cp.winner !== this.live?.winner;
+    const hasChanges = Object.keys(changes).length > 0;
+    return {
+      beatSeq: current,
+      fullRefresh: false,
+      events,
+      ...(hasChanges ? { changes } : {}),
+      ...(finishedChanged ? { finishedChanged: true } : {}),
+      ...(finishedNow ? { winner: this.named(this.live?.winner) } : {}),
+      board,
+    };
   }
 
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
@@ -3558,7 +3836,7 @@ export class GameSessionAdapter implements GameSession {
       // Pre-game, the view carries the interview's status (0050): the engine — not the model —
       // says which building blocks are in and what the next step is.
       return {
-        started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
+        started: false, beatSeq: this.beatSeq, finished: false, week: 0, phase: this.phase, moment: "character-creation",
         ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         whereabouts: null,
         player: null, house: [], casting: castingStatusOf(this.intake),
@@ -3578,6 +3856,7 @@ export class GameSessionAdapter implements GameSession {
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
       finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
       // C8-04: the live ceremony state in the model's persistent context (the same Vault-free public
       // facts gameStatus() exposes), so the narrator voices the REAL HOH/nominees/veto, never invents.

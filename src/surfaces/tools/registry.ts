@@ -18,6 +18,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "createCharacter", channel: "player", readsVault: false, description: "End the casting interview and start the season (0050): finalizes from everything updateCasting recorded (args may fill gaps or override; the recorded name is required). Returns the Vault-free game state with the player's casting card." },
   { name: "getGameState", channel: "player", readsVault: false, description: "Current Vault-free game state: phase, the player's card, and the house roster (names)." },
   { name: "gameStatus", channel: "player", readsVault: false, description: "Vault-free public status for the status panel: week/phase/HOH/nominees/veto (ceremony-level facts only)." },
+  { name: "stateDelta", channel: "player", readsVault: false, description: "WHAT CHANGED since your last beatSeq ({sinceBeatSeq}): the player-visible events appended, the ceremony field diffs (HOH/noms/veto/phase/week), and any finished/winner flip — plus the current board (0065 Part E). Vault-free and O(Δ). An unknown/too-old token returns { fullRefresh: true } (fetch getGameState instead); an up-to-date token returns an empty delta." },
   { name: "playerTagline", channel: "player", readsVault: false, description: "A snarky, state-aware one-line Big Brother hero tagline for the player (Vault-free; reflects current standing)." },
   { name: "finaleView", channel: "player", readsVault: false, description: "Vault-free projection of an in-progress finale for the finale panel: finalists, stage, and the votes revealed so far (null when no finale is staging)." },
   { name: "getMomentPrompt", channel: "player", readsVault: false, description: "The managed system prompt to inject for the current moment (persona + framing; Vault-free)." },
@@ -74,6 +75,10 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
 // (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
 // competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
 const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView", "getPortraitPrompt", "recordImageBeat",
+  // 0065 Part E: `stateDelta` is FE/harness infrastructure (the per-turn "what changed since" feed the
+  // FE weaves into the moment context) — NOT a game-driving lever the model pulls. Excluded from the
+  // base prompt's lever manifest so the manifest↔registry drift test stays green.
+  "stateDelta",
   // 0058/0065: the cast pre-warm + authoring write-back are FE-driven seams (the producer-LLM authors
   // the cast, the FE pre-warms it before portraits), NOT game-driving levers the GM model pulls — so
   // they stay OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).

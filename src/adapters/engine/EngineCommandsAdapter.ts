@@ -11,6 +11,7 @@ import type { RelationshipModel, InteractionType } from "../../engine/relationsh
 import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import type { Occupancy } from "../../domain/house";
+import { StaleBeatError } from "../../domain/errors";
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
   "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
@@ -52,6 +53,15 @@ export class EngineCommandsAdapter implements EngineCommands {
    * recalled (ADR 0003), never the chat window. Unset = standalone (no recall index — prior behavior).
    */
   private soulMemo?: (hg: EntityId, content: string) => void;
+  /**
+   * 0065 Part A — the compare-and-swap stale-write guard for this command port. The authoritative
+   * monotonic `beatSeq` lives on the session adapter (it owns the snapshot it is persisted in); the
+   * registry wires these so this adapter can READ the current counter + the Vault-free current board
+   * to compose the typed `stale-beat` refusal. Unset (standalone) ⇒ the guard is skipped (a missing
+   * `expectedBeatSeq` is always opt-out anyway — byte-identical to today).
+   */
+  private beatSeqProvider?: () => number;
+  private boardProvider?: () => unknown;
   /** E21: the beat window the fold budget counts within, plus the per-edge tallies inside it. */
   private foldBeatKey = "";
   private readonly foldCounts = new Map<string, number>();
@@ -83,7 +93,34 @@ export class EngineCommandsAdapter implements EngineCommands {
     this.soulMemo = fn;
   }
 
+  /**
+   * 0065 Part A — wire the session's monotonic `beatSeq` reader + the Vault-free board reader so this
+   * command port can enforce the compare-and-swap stale-write guard (the counter is owned/persisted by
+   * the session adapter). Standalone adapters that never wire these simply skip the guard.
+   */
+  setBeatSeqProvider(fn: () => number): void {
+    this.beatSeqProvider = fn;
+  }
+
+  setBoardProvider(fn: () => unknown): void {
+    this.boardProvider = fn;
+  }
+
+  /**
+   * 0065 Part A — refuse a write computed against a superseded board BEFORE any mutation. A present
+   * `expectedBeatSeq` that no longer matches the session's committed counter throws a typed
+   * `stale-beat` conflict carrying the CURRENT counter + the Vault-free board (HTTP 409). Absent ⇒
+   * opt-out (byte-identical to the pre-0065 path); unwired providers ⇒ skipped.
+   */
+  private guardBeatSeq(expected: number | undefined): void {
+    if (expected === undefined || !this.beatSeqProvider) return;
+    const current = this.beatSeqProvider();
+    if (expected !== current) throw new StaleBeatError(current, this.boardProvider?.() ?? null);
+  }
+
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
+    // 0065 Part A — refuse a scene computed against a superseded board BEFORE recording/folding.
+    this.guardBeatSeq(req.expectedBeatSeq);
     // Validated references (B39/audit A4): an interaction may only name LIVING houseguests — never an
     // evicted or invented one. The player is always living. Skipped when no roster is wired (standalone).
     if (this.livingProvider) {
@@ -237,6 +274,8 @@ export class EngineCommandsAdapter implements EngineCommands {
   }
 
   surfaceInformationTo(req: SurfaceReq): { ok: true; surfaced: boolean } {
+    // 0065 Part A — refuse a surfacing computed against a superseded board BEFORE anything anchors.
+    this.guardBeatSeq(req.expectedBeatSeq);
     // Anchored ⇒ knowledge; unanchored ⇒ a suspicion (A4). Either way it persists (the prior bug: it
     // never called onPersist, so a surfaced fact was lost on restart — mandate #4).
     const fact = this.knowledge.surfaceInformationTo(req.entity, req.fact, req.pathway);

@@ -1994,6 +1994,100 @@ def _scrub_game_leak(text: str) -> str:
     )
 
 
+async def _pre_emission_outcome_guard(text: str, owner) -> str:
+    """0065 Part C — the PRE-EMISSION outcome guard, applied to already-leak-scrubbed text just
+    before it streams to the player. Splits `text` into sentences and, for any sentence that asserts
+    a CLOSED-SET board outcome (the cheap `chat_helpers._sentence_has_closed_set_claim` pre-filter),
+    verifies it against the LIVE board: a phantom the engine never committed is DROPPED here (before
+    the player sees it) and a next-turn re-ground is stashed; everything else streams verbatim.
+
+    ADR 0005 principle #1 (hard): jurisdiction is closed-set board claims ONLY. Sentences with no
+    closed-set claim language never reach the async verify — they are kept untouched, delimiters and
+    all (creative/social prose is never held). Fail-open by construction: no owner, or any hiccup,
+    returns the text unchanged. Granularity is the SENTENCE — never the whole chunk — so a suspect
+    sentence is dropped while its neighbours still stream live."""
+    if not text or not owner:
+        return text
+    try:
+        from routes import chat_helpers
+    except Exception:
+        return text
+    # Cheap synchronous pass first: if NO sentence even mentions a closed-set outcome, emit verbatim
+    # without splitting/awaiting (the common case — and the open-set guarantee in the hot path).
+    try:
+        if not chat_helpers._sentence_has_closed_set_claim(text):
+            return text
+    except Exception:
+        return text
+    # At least one sentence carries closed-set claim language — split and screen sentence-by-sentence,
+    # preserving the original delimiters so non-suspect prose streams byte-identically.
+    parts = re.split(r"(?<=[.!?\n])", text)
+    out = []
+    for part in parts:
+        try:
+            if chat_helpers._sentence_has_closed_set_claim(part):
+                if not await chat_helpers.screen_streamed_outcome(owner, part):
+                    continue  # phantom closed-set outcome — DROP this sentence before emission
+        except Exception:
+            pass  # any screening hiccup falls through to emit (conservatism)
+        out.append(part)
+    return "".join(out)
+
+
+def _record_sync_ledger_turn(owner, *, session_id, tool_events, beat_seq_before, stale_before,
+                             nudges_fired, auto_backfills) -> None:
+    """0065 Part D — emit ONE Vault-free sync-ledger entry for a finished live-game turn.
+
+    Captures the closed-set sync activity of the turn and hands it to `orwell_sync_ledger.record_turn`
+    (which is itself Vault-free and fail-open by construction). Counters are read cheaply from per-turn
+    signals the loop already tracks:
+
+      • beatSeqBefore/After — the last-seen engine `beatSeq` at turn START vs END (the turn's movement);
+      • staleRejections     — the stale-beat 409s the FE reconciled DURING this turn (the process-global
+                              counter's delta since turn start; reset afterwards so the next turn measures
+                              its own — `last_beat_seq` survives, it is the live token, not a counter);
+      • desyncDetected      — whether a re-ground is stashed for this user (by the post-turn check OR a
+                              mid-turn stale-beat handler) — the spine's own signal;
+      • toolsCalled         — the tool NAMES the turn called (never a body);
+      • nudgesFired / autoBackfills — the per-turn nudge + back-fill caps the loop already holds;
+      • idempotencyHits     — 0 (not cheaply available here — observability stays cheap, no new tracking).
+
+    Fail-open: any hiccup is swallowed (a missing owner records nothing)."""
+    if not owner:
+        return
+    try:
+        from routes import chat_helpers as _ch
+        from src import orwell_sync_ledger as _led
+        beat_after = _ch.last_beat_seq(owner)
+        stale_this_turn = max(0, _ch.stale_beat_rejections() - (stale_before or 0))
+        try:
+            _ch.reset_stale_beat_rejections()
+        except Exception:
+            pass
+        desync_seen = owner in _ch._DESYNC_REGROUND
+        tool_names = [ev.get("tool") for ev in (tool_events or [])
+                      if isinstance(ev, dict) and ev.get("tool")]
+        _led.record_turn(
+            owner,
+            session=session_id,
+            turn_id=session_id,  # no per-turn id in this loop; the canonical session id keys the entry
+            beat_seq_before=beat_seq_before if beat_seq_before is not None else 0,
+            beat_seq_after=beat_after if beat_after is not None
+            else (beat_seq_before if beat_seq_before is not None else 0),
+            tools_called=tool_names,
+            nudges_fired=nudges_fired,
+            auto_backfills=auto_backfills,
+            desync_detected=desync_seen,
+            stale_rejections=stale_this_turn,
+            idempotency_hits=0,
+        )
+    except Exception as _led_err:
+        try:
+            logger.debug(f"[orwell] sync-ledger record skipped: {_led_err}")
+        except Exception:
+            pass
+
+
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
     """True when this turn was a scene with a houseguest — the player's line or the narration
     names someone on the roster (full name or first name). Cheap, name-based; good enough to
@@ -2655,6 +2749,20 @@ async def stream_agent_loop(
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
 
+    # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
+    # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
+    # DURING this turn (the process-global counter is diffed against its turn-start value). Cheap
+    # reads of process-local state — never any new tracking. Fail-open: a hiccup leaves them None.
+    _ledger_beat_seq_before = None
+    _ledger_stale_before = 0
+    if _is_live_game and owner:
+        try:
+            from routes import chat_helpers as _ch_ledger
+            _ledger_beat_seq_before = _ch_ledger.last_beat_seq(owner)
+            _ledger_stale_before = _ch_ledger.stale_beat_rejections()
+        except Exception:
+            pass
+
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
     # "Let me tail the output to see the error" and then ends the turn with
@@ -2877,10 +2985,21 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
-                                    full_response += _clean
-                                    if _clean.strip():
-                                        _emitted_visible = True
-                                    yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                                    # 0065 Part C — the PRE-EMISSION outcome guard: drop any sentence
+                                    # that asserts a CLOSED-SET board outcome the live engine never
+                                    # committed (a phantom eviction/winner/HOH/tally), BEFORE it reaches
+                                    # the player; everything non-suspect (and all creative/social prose)
+                                    # streams through untouched (ADR 0005 #1). Fall back to the raw clean
+                                    # text if the guard would empty a turn the player hasn't seen any
+                                    # narration in yet — better the post-turn re-ground than a blank turn.
+                                    _guarded = await _pre_emission_outcome_guard(_clean, owner)
+                                    if not _guarded.strip() and _clean.strip() and not _emitted_visible:
+                                        _guarded = _clean
+                                    if _guarded:
+                                        full_response += _guarded
+                                        if _guarded.strip():
+                                            _emitted_visible = True
+                                        yield f'data: {json.dumps({"delta": _guarded})}\n\n'
                             if _visible_halted:
                                 _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
@@ -2971,10 +3090,17 @@ async def stream_agent_loop(
             _clean = _scrub_game_leak(_game_buf)
             _game_buf = ""
             if _clean:
-                full_response += _clean
-                if _clean.strip():
-                    _emitted_visible = True
-                yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                # 0065 Part C — pre-emission guard on the trailing sentence too (same jurisdiction:
+                # closed-set board claims only; creative prose streams untouched). Fall back to raw
+                # clean text if holding it would leave the player a blank turn.
+                _guarded = await _pre_emission_outcome_guard(_clean, owner)
+                if not _guarded.strip() and _clean.strip() and not _emitted_visible:
+                    _guarded = _clean
+                if _guarded:
+                    full_response += _guarded
+                    if _guarded.strip():
+                        _emitted_visible = True
+                    yield f'data: {json.dumps({"delta": _guarded})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
@@ -3341,10 +3467,29 @@ async def stream_agent_loop(
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
                             turn that already narrated a scene does not get a second one. Resets the
                             staleness clock on success. Fail-open: any hiccup just returns False so the
-                            caller can fall back to the (re-prompting) text nudge."""
+                            caller can fall back to the (re-prompting) text nudge.
+
+                            0065 Part A/B: this is an FE-ISSUED progression call, so it carries the
+                            current last-seen `beatSeq` as the compare-and-swap token and a freshly-
+                            minted idempotency key (reused only on a retry of THIS action). A 409
+                            `stale-beat` (the board moved under us) reconciles via the existing desync
+                            spine — the re-ground fires next turn — and we report False so the caller
+                            does NOT then blindly retry into a stomp."""
                             try:
                                 from src import orwell_engine as _oe3
-                                await _oe3.advance_game(owner)
+                                from routes import chat_helpers as _ch3
+                                try:
+                                    _adv = await _oe3.advance_game(
+                                        expected_beat_seq=_ch3.last_beat_seq(owner),
+                                        idempotency_key=_ch3._mint_idempotency_key(),
+                                        user=owner,
+                                    )
+                                except Exception as _stale_e:
+                                    if _ch3._is_stale_beat_error(_stale_e):
+                                        await _ch3._handle_stale_beat(owner, _stale_e)
+                                        return False  # board moved — reconciled, do not blind-retry
+                                    raise
+                                _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
                                 if owner:
                                     # The beat moved — reset the staleness clock AND clear the
                                     # persisted escalation so the next stall (if any) starts gentle,
@@ -3954,6 +4099,22 @@ async def stream_agent_loop(
             await record_post_turn_desync_check(owner, _turn_narration_full)
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
+
+        # 0065 Part D — one Vault-free sync-ledger entry per live-game turn (observability). Records
+        # the closed-set sync activity of THIS turn: the beatSeq it moved (before→after), the tools
+        # it called (NAMES only), how many nudges fired / back-fills the FE made, whether a desync was
+        # detected, and how many stale-beat 409s were reconciled. Fail-open — observability must never
+        # hurt a turn. Counters that aren't cheaply available (idempotencyHits) pass 0 by design.
+        _record_sync_ledger_turn(
+            owner,
+            session_id=session_id,
+            tool_events=tool_events,
+            beat_seq_before=_ledger_beat_seq_before,
+            stale_before=_ledger_stale_before,
+            nudges_fired=(_turn_advance_nudges + _turn_approach_nudges
+                          + _turn_narrate_nudges + _turn_reapproach_nudges + _intent_nudge_count),
+            auto_backfills=(_turn_record_nudges + _turn_deal_nudges + _turn_move_nudges),
+        )
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
