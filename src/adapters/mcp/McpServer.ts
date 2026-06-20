@@ -47,6 +47,25 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
       if (args["kind"] !== undefined && typeof args["kind"] !== "string") refuse("kind", "a string when present");
       if (args["toward"] !== undefined && !isStrArray(args["toward"])) refuse("toward", "an array of houseguest ids when present");
+      // 0005: the optional generative-consequence descriptor. Shape-guard only (R6 class: a string
+      // where an array/object is expected dies deep in the fold) — the engine owns the magnitude and
+      // degrades gracefully on an unknown direction, so domain validation stays there, not here.
+      if (args["consequence"] !== undefined) {
+        const c = args["consequence"];
+        if (typeof c !== "object" || c === null || Array.isArray(c)) refuse("consequence", "an object when present");
+        const cons = c as Record<string, unknown>;
+        if (cons["edges"] !== undefined) {
+          if (!Array.isArray(cons["edges"])) refuse("consequence.edges", "an array when present");
+          for (const e of cons["edges"] as unknown[]) {
+            if (typeof e !== "object" || e === null || Array.isArray(e)) refuse("consequence.edges[]", "objects with a toward + direction");
+            const edge = e as Record<string, unknown>;
+            if (!isStr(edge["toward"])) refuse("consequence.edges[].toward", "a houseguest id (string)");
+            if (!isStr(edge["direction"])) refuse("consequence.edges[].direction", "a direction (string)");
+            if (edge["emphasis"] !== undefined && typeof edge["emphasis"] !== "string") refuse("consequence.edges[].emphasis", "a string when present");
+          }
+        }
+        if (cons["rationale"] !== undefined && typeof cons["rationale"] !== "string") refuse("consequence.rationale", "a string when present");
+      }
       return;
     case "surfaceInformationTo": {
       if (!isStr(args["entity"])) refuse("entity", "an entity id (string)");
