@@ -430,6 +430,23 @@ _STATUS_PAGE = """<!doctype html>
   <!-- END factory-oobe-reset lane button -->
 </div>
 <div id="update-msg" class="sub" style="margin:-6px 0 8px"></div>
+<!-- BEGIN ops-progress lane: live step-by-step timeline for the running ops action (Update / -->
+<!-- Factory Reset (OOBE) / Update+Reset). Hidden until an action is running or recently done; -->
+<!-- the JS region below polls /api/admin/ops-status and survives the services restart. -->
+<div id="ops-progress" style="display:none;margin:6px 0 14px;border:1px solid #2d3340;border-radius:8px;padding:10px 12px;background:#101218;max-width:760px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span id="ops-progress-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #355a66;border-top-color:#9cdef2;border-radius:50%;animation:opsspin 0.9s linear infinite"></span>
+    <strong id="ops-progress-title" style="letter-spacing:.03em">Ops</strong>
+    <span id="ops-progress-count" class="sub"></span>
+  </div>
+  <div id="ops-progress-bar-wrap" style="height:5px;background:#1b1f27;border-radius:3px;overflow:hidden;margin:6px 0 8px">
+    <div id="ops-progress-bar" style="height:100%;width:0%;background:#3cb46e;transition:width .4s ease"></div>
+  </div>
+  <ol id="ops-progress-steps" style="list-style:none;margin:0;padding:0;font-size:12.5px;line-height:1.7"></ol>
+  <div id="ops-progress-msg" class="sub" style="margin-top:6px"></div>
+</div>
+<style>@keyframes opsspin { to { transform: rotate(360deg); } }</style>
+<!-- END ops-progress lane -->
 <div id="failwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
 <div class="sub">Every log stream in the program, selectable. Auto-follows the tail while you are at the bottom; scrolling up pauses the follow — scroll back down to resume.</div>
@@ -745,6 +762,97 @@ async function updateOrwell() {
   }
 }
 document.getElementById("update-orwell").addEventListener("click", updateOrwell);
+// ── BEGIN ops-progress lane ──
+// Poll /api/admin/ops-status and render a live timeline for whichever ops action is running
+// (Update / Factory Reset (OOBE) / Update+Reset). Survives the services restart: the action being
+// watched is persisted to localStorage and resumed after waitForBack() reloads the page; on
+// completion it shows "done / updated / OOBE ready", on failure the error — so the old silent
+// "triggered then nothing" can never recur.
+const OPS_PROGRESS_KEY = "orwell.ops.watching";          // localStorage: the action we're tracking
+const OPS_STEP_LABELS = {
+  // The human phase names per action — index = step number (the script emits 1..total). These
+  // mirror the ops_progress_step() calls in the deploy scripts; a message from the server always
+  // wins for the CURRENT step, so a label drift never lies, it just pre-fills the upcoming rows.
+  "update": ["fetching latest code", "rebuilding engine", "refreshing front-end deps", "restarting services", "updated"],
+  "factory-reset": ["stopping services", "preserving API keys / LLM config", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+  "update-reset": ["fetching latest code", "rebuilding engine", "stopping services", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+};
+const OPS_TITLES = { "update": "Updating Orwell", "factory-reset": "Factory Reset (OOBE)", "update-reset": "Update + Reset" };
+function opsMarkWatching(action) { try { localStorage.setItem(OPS_PROGRESS_KEY, action); } catch (e) {} }
+function opsClearWatching() { try { localStorage.removeItem(OPS_PROGRESS_KEY); } catch (e) {} }
+function opsGetWatching() { try { return localStorage.getItem(OPS_PROGRESS_KEY); } catch (e) { return null; } }
+const opsPanel = document.getElementById("ops-progress");
+function renderOpsProgress(s) {
+  // s = a normalized status object from /api/admin/ops-status (or null). Hide the panel when
+  // there's nothing to show.
+  if (!s) { opsPanel.style.display = "none"; return; }
+  const action = s.action || "ops";
+  const labels = OPS_STEP_LABELS[action] || [];
+  const total = s.total || labels.length || 0;
+  const step = Math.max(0, Math.min(s.step || 0, total || (s.step || 0)));
+  opsPanel.style.display = "block";
+  document.getElementById("ops-progress-title").textContent = OPS_TITLES[action] || action;
+  document.getElementById("ops-progress-count").textContent = total ? ("step " + step + " / " + total) : "";
+  const pct = total ? Math.round((s.ok ? total : step) / total * 100) : (s.ok ? 100 : 0);
+  const bar = document.getElementById("ops-progress-bar");
+  bar.style.width = pct + "%";
+  bar.style.background = s.error ? "#e55" : (s.ok ? "#3cb46e" : "#9cdef2");
+  const spinner = document.getElementById("ops-progress-spinner");
+  spinner.style.display = s.running ? "inline-block" : "none";
+  // Build the step rows: done (✓), current (●), pending (○); the failed step gets ✗.
+  const rows = [];
+  const n = Math.max(total, labels.length, step);
+  for (let i = 1; i <= n; i++) {
+    const label = (i === step && s.message && !s.ok) ? s.message.replace(/^FAILED:\\s*/, "") : (labels[i - 1] || ("step " + i));
+    let mark, cls;
+    if (s.error && i === step) { mark = "✗"; cls = "bad"; }
+    else if (i < step || (s.ok && i <= total)) { mark = "✓"; cls = "ok"; }
+    else if (i === step && s.running) { mark = "●"; cls = ""; }
+    else { mark = "○"; cls = "sub"; }
+    const labelCls = (cls === "sub") ? "sub" : "";
+    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span class=\\"" + labelCls + "\\">" + esc(label) + "</span></li>");
+  }
+  document.getElementById("ops-progress-steps").innerHTML = rows.join("");
+  const msgEl = document.getElementById("ops-progress-msg");
+  if (s.error) msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
+  else if (s.ok) msgEl.innerHTML = '<span class="ok">' + esc(s.message || "done") + "</span>";
+  else if (s.running) msgEl.innerHTML = '<span class="sub">' + esc(s.message || "working…") + "</span>";
+  else msgEl.textContent = "";
+}
+async function pollOpsProgress() {
+  try {
+    const r = await fetch("/api/admin/ops-status", { credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    const watching = opsGetWatching();
+    // Prefer the running action, else the one we were told to watch, else the most-recently stamped.
+    const action = d.running || (watching && d.actions && d.actions[watching] ? watching : d.latest);
+    const s = action && d.actions ? d.actions[action] : null;
+    renderOpsProgress(s);
+    if (s) {
+      if (s.running) opsMarkWatching(action);       // keep tracking this one across the reload
+      else if (watching === action && (s.ok || s.error)) {
+        // The action we were watching has finished — show its terminal state once, then stop
+        // re-asserting it so a later page-load doesn't resurrect a stale completed banner.
+        opsClearWatching();
+      }
+    }
+  } catch (e) { /* transient (likely the restart) — the next poll retries */ }
+}
+// Mark which action to track the moment its button is clicked, so the timeline resumes after the
+// restart-triggered reload. Non-invasive: we ADD listeners to the existing buttons (their own
+// lanes own the click→POST flow); these only set the localStorage breadcrumb the poller reads.
+(function () {
+  const u = document.getElementById("update-orwell");
+  if (u) u.addEventListener("click", () => opsMarkWatching("update"));
+  const ur = document.getElementById("update-reset");
+  if (ur) ur.addEventListener("click", () => opsMarkWatching("update-reset"));
+  const fr = document.getElementById("factory-reset");
+  if (fr) fr.addEventListener("click", () => opsMarkWatching("factory-reset"));
+})();
+pollOpsProgress();
+setInterval(pollOpsProgress, 2000);
+// ── END ops-progress lane ──
 async function loadOps() {
   try {
     const r = await fetch("/api/admin/ops", { credentials: "same-origin" });

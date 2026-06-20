@@ -600,6 +600,13 @@ app.include_router(setup_admin_reset_routes())
 from routes.admin_update_reset_routes import setup_admin_update_reset_routes
 app.include_router(setup_admin_update_reset_routes())
 
+# Admin ops-status — the read side of the ops-progress lane. Every privileged ops button (Update,
+# Factory Reset (OOBE), Update+Reset) has its deploy script publish step-by-step progress to
+# data/ops/<action>-status.json; this admin-gated, Vault-free, read-only endpoint surfaces the
+# latest status so the status page renders a live timeline that survives the services restart.
+from routes.admin_ops_status_routes import setup_admin_ops_status_routes
+app.include_router(setup_admin_ops_status_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.

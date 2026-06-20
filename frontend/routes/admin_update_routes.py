@@ -70,19 +70,74 @@ def _ops_dir() -> str:
     return os.path.join(_data_dir(), "ops")
 
 
+# The root-side path unit that consumes the flag and runs the updater AS ROOT (deploy/systemd).
+# Its presence is the TRUE signal that dropping a flag will actually do something. Overridable
+# for tests via ORWELL_UPDATE_WATCHER_UNIT.
+_WATCHER_UNIT = "/etc/systemd/system/orwell-ops-update.path"
+
+
+def _watcher_unit_path() -> str:
+    return os.environ.get("ORWELL_UPDATE_WATCHER_UNIT") or _WATCHER_UNIT
+
+
+def _watcher_installed() -> bool:
+    """True when the root-side G19b path unit is installed — the privileged door that actually
+    runs the updater with root (the unit watches ``data/ops/update-requested`` and runs as root)."""
+    return os.path.isfile(_watcher_unit_path())
+
+
 def _flag_trigger_installed() -> bool:
-    """True when the root-side G19b path unit's flag dir exists — the privilege-safe door."""
-    return os.path.isdir(_ops_dir())
+    """True when the privilege-safe flag door is usable. Back-compat: a present ``data/ops/`` dir
+    counts too (the install/update create it alongside the units, and tests stand it up directly)."""
+    return _watcher_installed() or os.path.isdir(_ops_dir())
+
+
+def _ensure_ops_dir() -> bool:
+    """Create ``data/ops/`` if missing so the flag can be dropped. Best-effort: returns whether the
+    dir exists afterwards (the non-root FE may fail to create it if the parent isn't writable)."""
+    ops = _ops_dir()
+    try:
+        os.makedirs(ops, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.isdir(ops)
 
 
 def _trigger_via_flag() -> dict:
     """Drop the existence-only flag the root ``orwell-ops-update.path`` unit watches (G19b).
-    The content is ignored by the unit; we stamp a timestamp for human log readability only."""
+    The content is ignored by the unit; we stamp a timestamp for human log readability only.
+    Ensures ``data/ops/`` exists first (so a box that just gained the units works)."""
+    _ensure_ops_dir()
     ops = _ops_dir()
     flag = os.path.join(ops, "update-requested")
     with open(flag, "w", encoding="utf-8") as fh:
         fh.write(_dt.datetime.now(timezone.utc).isoformat() + "\n")
     return {"started": True, "via": "flag-trigger", "log": "ops-update.log"}
+
+
+def _write_failed_status(action: str, reason: str) -> None:
+    """FAIL LOUDLY through the ops-progress channel the status page polls: stamp
+    ``data/ops/<action>-status.json`` with a terminal FAILED entry so the UI surfaces the error
+    instead of a silent no-op. Best-effort — never raises into the request."""
+    if not _ensure_ops_dir():
+        return
+    payload = {
+        "action": action, "step": 0, "total": 0,
+        "message": f"FAILED: {reason}", "running": False, "ok": False,
+        "error": reason, "ts": _dt.datetime.now(timezone.utc).isoformat(),
+    }
+    import json as _json
+    path = os.path.join(_ops_dir(), f"{action}-status.json")
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _run_detached() -> dict:
@@ -136,14 +191,35 @@ def setup_admin_update_routes() -> APIRouter:
         except Exception:
             pass
         force_direct = os.environ.get("ORWELL_UPDATE_DIRECT", "").lower() in ("1", "true", "yes")
+        has_sudo = os.environ.get("ORWELL_UPDATE_SUDO", "").lower() in ("1", "true", "yes")
+
+        # PRIVILEGE FIX (ops-run lane): prefer the root-side flag watcher (G19b) — the only door
+        # that runs the updater with root. Create data/ops/ first so a box that just gained the
+        # watcher units works on the very next click.
         if _flag_trigger_installed() and not force_direct:
+            _ensure_ops_dir()
             logger.info("[update] admin '%s' triggered update via the root flag trigger (G19b)", who)
             try:
                 return _trigger_via_flag()
             except OSError as e:
-                logger.warning("[update] flag trigger failed (%s); falling back to detached run", e)
-        logger.info("[update] admin '%s' triggered update via detached run of %s",
-                    who, _update_script())
-        return _run_detached()
+                logger.warning("[update] flag trigger failed (%s); evaluating detached run", e)
+
+        # The detached Popen runs the updater as the NON-ROOT FE user — which EPERMs partway through
+        # (git pull into /opt, write /etc/systemd, systemctl restart). Only take it with a genuine
+        # privileged path: ORWELL_UPDATE_SUDO=1 (the scoped sudoers drop-in) or an explicit
+        # ORWELL_UPDATE_DIRECT=1 override (dev / a box the operator vouches is root-able).
+        if has_sudo or force_direct:
+            logger.info("[update] admin '%s' triggered update via detached run of %s",
+                        who, _update_script())
+            return _run_detached()
+
+        # FAIL LOUDLY — no privileged path. Surface it through the ops-progress channel the status
+        # page polls so the operator sees the error instead of a silent "started" that never runs.
+        reason = ("no privileged path to run the update — the root-side flag watcher "
+                  "(orwell-ops-update.path) is not installed and sudo is not enabled. "
+                  "Re-run the deploy installer/updater on the host or set ORWELL_UPDATE_SUDO=1.")
+        logger.error("[update] admin '%s' could NOT start the update: %s", who, reason)
+        _write_failed_status("update", reason)
+        return {"started": False, "via": "none", "error": reason}
 
     return router
