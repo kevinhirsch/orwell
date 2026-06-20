@@ -4752,6 +4752,16 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         cast, owner, then=_refresh_authored_portraits)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
+        # 0062 — capture the REAL move-in zeitgeist (web_search) in the background, replacing the engine's
+        # deterministic fallback ONCE per season. Best-effort: no model/search ⇒ the fallback stands. Gated
+        # on a GENUINE start (never a no-op refusal of an already-running season), so it fires once per
+        # season — including a confirmed restart (season 2 captures its own fresh, later snapshot).
+        try:
+            if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+                from src import orwell_zeitgeist
+                orwell_zeitgeist.kickoff_capture(owner)
+        except Exception:
+            pass  # the zeitgeist is pure flavor — never let it affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
