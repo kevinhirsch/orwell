@@ -1128,7 +1128,12 @@ import { isNarrow } from './platform.js';
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)
-      let roundText = '';             // Text accumulated for current round
+      let roundText = '';             // Text accumulated for current round (MERGED reply+reasoning)
+      // F8: per-round channel-split buffers. The BODY renders roundReplyText (reasoning-free by
+      // construction); the live "Thinking" accordion renders roundReasoningText. These MUST be
+      // reset wherever roundText is reset (agent_step / teacher_takeover) — see those sites.
+      let roundReplyText = '';        // deltas with json.thinking falsy (the public reply)
+      let roundReasoningText = '';    // deltas with json.thinking truthy (reasoning → accordion)
       let currentToolBubble = null;   // Current tool execution bubble
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -1262,94 +1267,34 @@ import { isNarrow } from './platform.js';
 
       // Direct render helper for streaming text
       _renderStream = () => {
-        let dt = stripToolBlocks(roundText);
+        // F8: the BODY renders the reply-only buffer (roundReplyText — deltas with json.thinking
+        // falsy). Reasoning is structurally ABSENT here, so it can NEVER paint in the public
+        // bubble; the live "Thinking" accordion renders roundReasoningText separately. (A model
+        // that inlines literal <think> tags on the CONTENT channel still works: processWithThinking
+        // extracts/handles inline <think> and, in the game build, scrubs operator asides.)
+        const dt = stripToolBlocks(roundReplyText);
         const bodyEl = roundHolder.querySelector('.body');
         const contentEl = _ensureStreamLayout(bodyEl);
 
-        // If thinking was already collapsed in-place, only render the reply portion
-        let liveReply = contentEl.querySelector('.live-reply-content');
+        // When the reasoning accordion has collapsed in-place, a dedicated reply container exists
+        // — render the reply into it (preserve the thinking bar when there's no reply yet).
+        const liveReply = contentEl.querySelector('.live-reply-content');
         if (liveReply) {
-          // Extract reply text — handle native <think> tags and non-tag patterns
-          const closedThinkReply = _replyAfterClosedThinking(dt);
-          const { thinkingBlocks, content: replyText } = closedThinkReply
-            ? { thinkingBlocks: [''], content: closedThinkReply }
-            : markdownModule.extractThinkingBlocks(dt);
-          let replyTrimmed = '';
-          if (thinkingBlocks.length) {
-            replyTrimmed = (replyText || '').trim();
-          } else {
-            // Non-tag: check for garbled <think> (reasoning\n<think>reply)
-            const _gm = dt.match(/^[\s\S]+?<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>\s*([\s\S]*?)(?:<\/(?:think(?:ing)?|thought)>)?\s*$/i);
-            if (_gm && _gm[1].trim()) {
-              replyTrimmed = _gm[1].trim();
-            } else {
-              // Pure non-tag: find reply boundary
-              const _rPrefixes = markdownModule.startsWithReasoningPrefix;
-              const _rpStarts = ['Hey', 'Hi ', 'Hi!', 'Hello', 'Sure', 'Yes', 'No ', 'No,', 'Yo', 'OK', 'Here', 'Absolutely', 'Of course', 'Great', 'Alright', 'Thanks', 'Welcome', 'Good ', "I'm happy", "I'd be"];
-              const _rt = (replyText || '').trimStart();
-              if (_rPrefixes(_rt)) {
-                const _rLines = _rt.split('\n');
-                for (let _ri = 1; _ri < _rLines.length; _ri++) {
-                  const _rl = _rLines[_ri].trim();
-                  if (!_rl) continue;
-                  if (_rpStarts.some(rp => _rl.startsWith(rp))) { replyTrimmed = _rLines.slice(_ri).join('\n'); break; }
-                }
-                if (!replyTrimmed) {
-                  for (const rp of _rpStarts) {
-                    const rx = new RegExp('[.!?]\\s*(' + rp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')');
-                    const m = rx.exec(_rt);
-                    if (m && m.index > 20) { replyTrimmed = _rt.slice(m.index + 1).trim(); break; }
-                  }
-                }
-              }
-            }
-          }
+          const replyTrimmed = dt.trim();
           if (replyTrimmed) {
             const r = liveReply._streamRenderer ||
               (liveReply._streamRenderer = createStreamRenderer(liveReply, {
-                render: (t) => markdownModule.mdToHtml(markdownModule.squashOutsideCode(t)),
+                render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
                 hljs: window.hljs,
               }));
             r.update(replyTrimmed);
           }
-          // Reply empty or not — preserve thinking bar, don't fall through to full re-render
           uiModule.scrollHistory();
           return;
         }
 
-        // If thinking is still streaming (unclosed <think>), show indicator instead of raw text
-        if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
-          // GAME BUILD: the live-think accordion (built in the main stream loop) owns the
-          // reasoning display; this secondary render path is reached only AFTER reasoning
-          // closes, so it should never see an open <think> here. If an operator fully hid
-          // the accordion (`body.hide-thinking`), hold the bubble empty while reasoning is
-          // open; the clean reply-only render lands when it closes.
-          if (isGameBuild() && document.body.classList.contains('hide-thinking')) {
-            uiModule.scrollHistory();
-            return;
-          }
-          const thinkStart = dt.search(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought/i);
-          const thinkContent = dt.substring(Math.max(thinkStart, 0))
-            .replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought\s*\n?/i, '')
-            .replace(/<channel\|>/gi, '')
-            .trim();
-          const lines = thinkContent.split('\n').length;
-          // Don't show beforeThink text during streaming — it'll appear in the final render
-          // This prevents the "split into two" duplication
-          contentEl.innerHTML =
-            '<div class="thinking-section"><div class="thinking-header"><div class="thinking-header-left">Thinking' +
-            (lines > 1 ? ` (${lines} lines)` : '') + '</div></div></div>';
-          // The stream renderer self-heals when it next sees this overwritten
-          // container (streamingRenderer.js), so no explicit reset is needed here.
-          uiModule.scrollHistory();
-          return;
-        }
-
-        // Incremental streaming render: freeze finalized blocks, re-render only the
-        // growing tail, and highlight each code block once on completion. This is
-        // what keeps code-block hover buttons from flickering and avoids the O(N^2)
-        // re-parse/re-highlight of the whole message on every token.
-        // See streamingRenderer.js / streamingSegmenter.js.
+        // Normal streaming: incremental render (freeze finalized blocks, re-render only the
+        // growing tail, highlight each code block once). See streamingRenderer.js.
         const renderer = contentEl._streamRenderer ||
           (contentEl._streamRenderer = createStreamRenderer(contentEl, {
             render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
@@ -1506,6 +1451,11 @@ import { isNarrow } from './platform.js';
                 // of a multi-round agent response gets its own <think>…</think> — otherwise
                 // only round 1 is wrapped and rounds 2+ reasoning leaks into the answer.
                 let _delta = json.delta;
+                // F8: split the RAW delta by channel BEFORE the <think>-wrapping below, so the
+                // reply buffer carries zero reasoning/markup and the accordion buffer carries raw
+                // reasoning. The BODY render reads roundReplyText → reasoning can't leak into it.
+                if (json.thinking) roundReasoningText += json.delta;
+                else               roundReplyText += json.delta;
                 if (json.thinking) {
                   if (!_thinkOpen) { _delta = '<think>' + _delta; _thinkOpen = true; }
                 } else if (_thinkOpen) {
@@ -1690,12 +1640,17 @@ import { isNarrow } from './platform.js';
                   }
                 } else if (hasUnclosedThink && isThinking) {
                   if (_liveThinkInner) {
-                    // Extract raw thinking text (strip known thinking wrappers and prefixes)
-                    var thinkText = roundText
-                      .replace(/<\/?(?:think(?:ing)?|thought)(?:\s+[^>]*)?>/gi, '')
-                      .replace(/<\|channel>thought\s*\n?/gi, '')
-                      .replace(/<\|channel>response\s*\n?/gi, '')
-                      .replace(/<channel\|>/gi, '');
+                    // F8: prefer the dedicated reasoning buffer (channel-flagged thinking:true —
+                    // raw, no tag-strip needed). Fall back to stripping roundText for models whose
+                    // reasoning arrives inline/untagged on the CONTENT channel (then the reasoning
+                    // sits in roundText, and roundReasoningText is empty).
+                    var thinkText = roundReasoningText.trim()
+                      ? roundReasoningText
+                      : roundText
+                          .replace(/<\/?(?:think(?:ing)?|thought)(?:\s+[^>]*)?>/gi, '')
+                          .replace(/<\|channel>thought\s*\n?/gi, '')
+                          .replace(/<\|channel>response\s*\n?/gi, '')
+                          .replace(/<channel\|>/gi, '');
                     thinkText = thinkText.replace(/^\s*Thinking(?:\s+Process)?:\s*/i, '');
                     _liveThinkInner.innerHTML = markdownModule.mdToHtml(thinkText);
                     // Keep thinking box scrolled to bottom
@@ -2146,7 +2101,7 @@ import { isNarrow } from './platform.js';
                 if (!roundFinalized) {
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
-                  const dt = stripToolBlocks(roundText);
+                  const dt = stripToolBlocks(roundReplyText);  // F8: reply-only (reasoning → accordion)
                   // L6b (game build): a tool now follows this round's text, so it
                   // is an INTERMEDIATE agent round — its free text is the model's
                   // planning ("Looking at the roster… npc:1 … Let me stay in
@@ -2669,6 +2624,8 @@ import { isNarrow } from './platform.js';
                 box.appendChild(newWrap);
                 roundHolder = newWrap;
                 roundText = '';
+                roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
+                roundReasoningText = '';
                 // Destroy any previous spinner before creating new one
                 if (spinner && spinner.element) spinner.destroy();
                 // Show spinner while waiting for text (skip for research — has its own progress)
@@ -2707,6 +2664,8 @@ import { isNarrow } from './platform.js';
                 // Reset round bubble state so the teacher's first text starts a new bubble
                 roundHolder = null;
                 roundText = '';
+                roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
+                roundReasoningText = '';
                 roundFinalized = false;
                 currentToolBubble = null;
                 uiModule.scrollHistory();
@@ -2817,50 +2776,18 @@ import { isNarrow } from './platform.js';
         const _streamContent = roundHolder.querySelector('.stream-content');
         if (_streamContent) _streamContent.style.minHeight = '';
 
-        // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM
-        const finalDisplay = stripToolBlocks(roundText);
+        // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM.
+        // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion
+        // already, so no extraction is needed (the old garbled-<think>/prefix dance is gone).
+        const finalDisplay = stripToolBlocks(roundReplyText);
         if (finalDisplay.trim()) {
           var _body4 = roundHolder.querySelector('.body');
           // Preserve sources expanded state before final render
           var _wasExpanded = _sourcesExpanded || !!(_body4 && _body4.querySelector('.sources-content.expanded'));
 
-          // If thinking was collapsed in-place during streaming, preserve it
+          // If thinking was collapsed in-place during streaming, a reply container exists.
           var _liveReplyEl = _body4 && _body4.querySelector('.live-reply-content');
-          var _extracted = _liveReplyEl ? markdownModule.extractThinkingBlocks(finalDisplay) : null;
-          var _finalReply = '';
-          if (_liveReplyEl) {
-            // Try standard extraction first (for native <think> tags)
-            if (_extracted?.thinkingBlocks?.length) {
-              _finalReply = (_extracted.content || '').trim();
-            } else {
-              // Non-tag thinking: extract reply from raw text
-              // Handle garbled thinking tag: "Thinking: reasoning\n<think>reply"
-              const _garbledMatch = finalDisplay.match(/^[\s\S]+?<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>\s*([\s\S]*?)(?:<\/(?:think(?:ing)?|thought)>)?\s*$/i);
-              if (_garbledMatch && _garbledMatch[1].trim()) {
-                _finalReply = _garbledMatch[1].trim();
-              } else {
-                // Pure non-tag: find reply boundary by prefix patterns
-                const _rs2 = ['Hey', 'Hi ', 'Hi!', 'Hello', 'Sure', 'Yes', 'No ', 'No,', 'Yo', 'OK', 'Here', 'Absolutely', 'Of course', 'Great', 'Alright', 'Thanks', 'Welcome', 'Good ', "I'm happy", "I'd be"];
-                const _fr = (finalDisplay || '').trimStart();
-                if (markdownModule.startsWithReasoningPrefix(_fr)) {
-                  const _fLines = _fr.split('\n');
-                  for (let _fi = 1; _fi < _fLines.length; _fi++) {
-                    const _fl = _fLines[_fi].trim();
-                    if (!_fl) continue;
-                    if (_rs2.some(rp => _fl.startsWith(rp))) { _finalReply = _fLines.slice(_fi).join('\n'); break; }
-                  }
-                  // Within-line check
-                  if (!_finalReply) {
-                    for (const rp of _rs2) {
-                      const rx = new RegExp('[.!?]\\s*(' + rp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')');
-                      const m = rx.exec(_fr);
-                      if (m && m.index > 20) { _finalReply = _fr.slice(m.index + 1).trim(); break; }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          var _finalReply = _liveReplyEl ? finalDisplay.trim() : '';
           if (_liveReplyEl && _finalReply) {
             // Render reply into the live-reply container (thinking bar already showing).
             // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs —
