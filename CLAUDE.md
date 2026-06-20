@@ -123,9 +123,36 @@ returns no Vault data.
 Each running game is its own isolated sandbox — keyed to the **physical-world user**: **one
 active game per user**, **unlimited users concurrently**, each fully isolated. **Cross-user
 isolation** is a first-class guarantee *alongside* the Vault Wall (no call for user A may return
-user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.) A user's **one
-game is canonical across all their devices** (feature 0064 stopgap, 2026-06-20 — every device shares the one
-session/chat; full Messenger-style live sync + window/HUD layout sync are the owed follow-on).
+user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.)
+
+### Wiring an FE-driven engine write-back (the recurring boundary gotcha)
+
+Several engine tools are **FE-driven write-backs**: the front-end (which owns a concrete provider —
+an LLM, `web_search`, the image API) produces content and writes it BACK so the **engine** stays the
+source of truth. The live ones: `recordCastProfile` (0058 deep-profile authoring), `preSeedCast`
+(0065 cast pre-warm), `recordWorldSnapshot` (0062 zeitgeist), `recordImageBeat` (0051). Adding one is
+a **four-place** change, and a missing piece fails **silently at runtime** (the FE call is rejected at
+the MCP boundary, and the best-effort caller swallows it):
+
+1. `src/ports/GameSession.ts` — the method + its req/result types.
+2. `src/adapters/engine/GameSessionAdapter.ts` — the implementation.
+3. `src/surfaces/tools/registry.ts` — add to `PLAYER_TOOLS` **and** to `INFRA_LEVERS` (these are
+   FE-driven, **not** model levers, so they stay out of the agent's lever manifest / drift gate).
+4. `src/adapters/mcp/McpServer.ts` — a `requireShape` arg-guard case **and** a `callTool` dispatch
+   case (+ the type import). A *pre-game* tool also goes in `HttpMcpServer`'s `SANDBOX_CREATING_TOOLS`.
+
+**The static gates do NOT catch a missing #4** — dependency-cruiser only checks Vault edges, the
+lever-manifest drift test only checks prose — so a write-back with steps 1–2 done but 3–4 missing
+typechecks, passes `test:arch` + the manifest test, and is **dead at runtime**. `recordCastProfile`
+and `recordWorldSnapshot` both shipped exactly this way and silently no-op'd for a long time. The fix
+is a **boundary test that dispatches the tool through `McpServer.callTool`** for every write-back
+(`tests/unit/castPrewarm.test.ts`, `tests/unit/worldSnapshotBoundary.test.ts` are the templates).
+
+The FE driver is a best-effort, **idempotent, fail-soft background task** in `frontend/src/`
+(`orwell_cast_authoring.py`, `orwell_prewarm.py`, `orwell_zeitgeist.py` — each: resolve a utility LLM
+via `_resolve_llm_fn`, optionally `web_search`, synthesize JSON, write back; **no model/provider ⇒ the
+engine's deterministic floor simply stands**). Kicked from `do_create_character`
+(`tool_implementations.py`); never blocks game start.
 
 ## The event / visibility model (build this carefully — it caused real bugs before)
 
@@ -190,15 +217,14 @@ lull, let substantive play run"), nudges the model to `advanceGame`; and (2) **`
 constrained extraction call (`{withIds, kind, content}`, model-proposed direction) and calls
 `recordInteraction` itself, GUARANTEEING the social play moves the hidden weights. Model-driven
 recording always takes precedence. When debugging "the game won't advance" or "social play has no
-consequence," look here, not only at the engine.
-
-**The LLM↔engine turn protocol is versioned and at-most-once (feature 0065 — the sync spine).** Every advance
-carries a `beatSeq` **compare-and-swap** token + an **idempotency key**, so a retried or racing turn cannot
-double-advance the game; the engine serves an **O(Δ) `StateDeltaView` delta feed** keyed by `beatSeq` (the FE
-pulls only what changed since its last token, with a `fullRefresh` fallback); and the FE runs a **pre-emission
-outcome guard** that catches a phantom board claim — an outcome the model narrates that the engine never produced
-— *before* the player sees it. When debugging stale/duplicated state or a chat-vs-board divergence, this is the
-layer: `beatSeq`, the delta feed, and the FE sync/divergence ledger.
+consequence," look here, not only at the engine. The **same under-call bites the game-start and premiere
+seams**, error-corrected by the same family (audit 2026-06-20): the casting framing (`apply_game_framing`
+in `routes/chat_helpers.py`) tells the model the **headshot is already on file** so it stops re-asking and
+finalizes; a **`createCharacter` finalize fallback** starts the season when casting is engine-`ready` and
+the player signals readiness; the advance stall-nudge **escalates to a forced `advanceGame` (L39b)** when
+the model ignores every rung; and a **premiere `markHouseguestMet` auto-belt** keeps the #380
+meet-everyone gate progressing. These guardrails fire only where the model SKIPS a call — the engine is
+fine; never engine-author content.
 
 **Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
 *openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
@@ -211,6 +237,53 @@ seeded *magnitude* (no raw number crosses; `kind` is the floor, so no descriptor
 fold). `tests/unit/expressiveNonCollapse.test.ts` + `frontend/tests/test_expressive_non_collapse.py`
 are the permanent gate, and the FE desync guard may fire only on closed-set board claims, never on
 creative prose.
+
+**The closed-set sync spine (feature 0065) hardens the above.** ADR 0005's closed-set counterpart:
+the engine issues a monotonic **`beatSeq`** on every read/advance (owned by `GameSessionAdapter`,
+bumped once per committed mutation in the registry commit funnel, persisted in the snapshot). Mutating
+tools take an optional **`expectedBeatSeq`** (stale ⇒ typed `StaleBeatError` → HTTP **409 `stale-beat`**,
+refused *before* any write) and **`idempotencyKey`** (at-most-once progression). The FE holds last-seen
+`beatSeq` per canonical session, attaches it, refreshes from every response (no self-409s), and
+reconciles a 409 through the existing desync mechanism. A **pre-emission outcome guard** corrects a
+phantom board claim *before* the player sees it (closed-set claims only — `chat_helpers.py`); a Vault-free
+per-turn **divergence ledger** (`frontend/src/orwell_sync_ledger.py`) records the sync activity; and a
+`beatSeq`-keyed **`stateDelta`** read feeds the model a tight O(Δ) "what changed since your last turn"
+delta. Every part is opt-in/back-compatible (absent field ⇒ byte-identical) and closed-set only — it
+never touches creative prose (the `expressiveNonCollapse` gates stay the proof).
+
+## Front-end client conventions (non-obvious — verify before editing `frontend/static/js/`)
+
+The sections above govern the engine/closed set; these are the **player-tier client** conventions
+that span several JS files, aren't captured elsewhere, and have each caused a real regression. Read
+them before touching the chat stream or the HUD.
+
+- **`orwell:gamechanged` has exactly ONE dispatcher (the g15 freshness seam).** The HUD/sidebar
+  panels are poll-based (20–30s) and stay fresh by *listening* for the debounced `orwell:gamechanged`
+  window event whose **only** dispatcher is `orwellGameChanged(reason)` in
+  `frontend/static/js/platform.js` (~250ms trailing debounce, also `window`-exposed). Every FE
+  mutation seam **calls that helper** — the chat tool-result seam (each game-mutating tool) and the
+  decision-card POST success — and **nothing** may `new CustomEvent('orwell:gamechanged')` ad-hoc.
+  `frontend/tests/test_g15_gamechanged.py` enforces "exactly one dispatcher" + that every mutating
+  tool routes through it. Cross-**device** reconcile is a *separate* seam: `_publish_game_updated`
+  (feature 0064, server-push) in `frontend/routes/orwell_routes.py`. Wiring a new mutation? Call the
+  helper; don't add a poll or an ad-hoc dispatch.
+
+- **The live stream splits by channel — reasoning must NEVER reach the public bubble.** In
+  `frontend/static/js/chat.js` the streaming loop keeps two per-round buffers: `roundReplyText`
+  (deltas with `json.thinking` falsy) and `roundReasoningText` (truthy). The message **body** renders
+  ONLY `roundReplyText` through `markdown.js processWithThinking` (which, in the game build, also
+  scrubs operator-aside / raw `npc:<id>` leaks); the live **"Thinking" accordion** renders
+  `roundReasoningText`. Reasoning is kept out of the body *by construction* — do not reintroduce
+  regex extraction of the reply from a merged buffer. Reset both buffers in lockstep with `roundText`
+  (at `agent_step` / `teacher_takeover`); the merged `roundText` / `accumulated` stay intact for the
+  other consumers (doc-fence, TTS, persistence `dataset.raw`, background streams, `<think time=…>`).
+  The **stall watchdog (`_startStallWatchdog`) is deliberately DISABLED** — the server-side stall
+  detector + auto-continue loop-breaker supersede the old "still working?" banner; don't re-enable it.
+
+- **Run the WHOLE FE suite before pushing FE changes.** `cd frontend && python3 -m pytest tests/`
+  (venv at `frontend/.venv`). Many gates are source-pinned convention checks (g15, the reasoning
+  scrub, the render contract) that live outside obvious keywords — a `-k` subset can pass green while
+  the real gate fails (the CI `frontend` job runs the full suite).
 
 ## Characters, souls & per-moment temperature
 
@@ -268,6 +341,16 @@ creative prose.
   player. Emotional state is a *character/soul* attribute, not a fourth competition stat. The
   player may declare intent (compete / throw / play safe) before a comp and cannot change it
   retroactively.
+- **Staged competitions (0006) are presentation over ONE roll.** An endurance comp resolves as a
+  single calibrated `resolveCompetition` roll **up front** (byte-identical to the non-staged model),
+  then plays out as a **presentation-only** staged elimination: the crown and the full drop order are
+  fixed, and the per-round `comp-elimination` beats are **inert** (no rng, no fold, no soul inflection),
+  so the staging can never perturb the winner or any downstream seeded roll. **Changing the staging is a
+  calibration footgun** — `tests/unit/stagedTrajectoryNeutral.test.ts` is the byte-identity guard. Drops
+  are **batched to ~4–8 rounds/comp** (`STAGED_TARGET_ROUNDS` in `liveSeason.ts`; owner ruling
+  2026-06-20), and **only the first `comp-round` approach binds** — later rounds are non-binding flavor
+  (the `binding` flag on the pending/`PendingDecisionView` drives the FE to render them as color, not a
+  fresh decision). Lives in `src/engine/liveSeason.ts` (`advanceCompetition`) + `competitionOutcome.ts`.
 - **Daily-event invariant:** every in-game day contains ≥1 meaningful event
   (comp, nomination/veto ceremony, vote/eviction, or significant house event).
 - **Standard weekly cadence:** Day 1 HOH comp → Day 2 nominations → Day 3 veto comp →
@@ -357,6 +440,13 @@ sqlite-vec** save store is **built and opt-in** (`ORWELL_STORE=sqlite`, engine-o
 - **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it). `ORWELL_STORE=sqlite` selects the built SQLite + sqlite-vec save store (engine-only, #330); unset ⇒ the default in-memory + file path. **Pure turn-driven is the DEFAULT** (`ORWELL_WATCHER_TICK_MS=0` — ruling 2026-06-10: the game clock is the player's play-clock; the house lives between the player's own turns via one bounded off-screen tick per turn and does **not** exist while the player is away — NPCs can't leave the house, the player can, so background advances during an absence are a structural disadvantage). `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` opt in to the wall-clock watcher — never the default. HTTP edge: `ORWELL_ENGINE_HOST` (default loopback), `ORWELL_ENGINE_TOKEN` (shared secret on every tool route), `ORWELL_ENGINE_ADMIN_TOKEN` (a **separate** secret for `/admin/*` — player ⊉ admin, audit E27), `ORWELL_ENGINE_MULTIUSER` (reject a missing `x-orwell-user` instead of routing to "default"). Semantic recall: `ORWELL_EMBEDDINGS=fastembed` (the deploy default; unset ⇒ deterministic fake), `ORWELL_EMBED_CACHE` (model cache dir), `ORWELL_TEST_FASTEMBED=1` (opt-in real-model integration test — tests never depend on real embeddings otherwise).
 - **Front-end tests:** `cd frontend && python3 -m pytest tests/` (its own pytest gate, quarantined — never touches `cucumber.cjs` / `npm test`); `frontend/scripts/boot_smoke.py` boots the real app and proves the game-build gating server-side; `frontend/scripts/browser_smoke.py` is the headless-browser keep-set gate; `frontend/scripts/responsive_matrix.py` is the viewport×surface matrix gate (Stream S, ruling #16 — overflow/overlap/tap-target checks with an XFAIL registry). The reduced game surface is controlled by `ORWELL_GAME_BUILD` (default **on**; `=0` restores the full inherited workspace).
 - **Running locally (two processes):** the engine and front-end are **separate services**. Engine — `npm run build && npm start` (HTTP MCP on `ORWELL_ENGINE_PORT`, default 8765). Front-end — `cd frontend && python3 -m uvicorn app:app --host 127.0.0.1 --port 7000`, pointed at the engine via `ORWELL_ENGINE_MCP_URL` (default `http://127.0.0.1:8765`); it consumes **only** Vault-free projections (handshake in `frontend/INTEGRATION.md`). `deploy/smoke.sh` boots both and drives a full turn end-to-end (the same path CI's deploy-smoke job runs).
+- **Live (real-LLM) manual testing:** every automated gate **stubs the LLM** (`DeterministicNarrator`/`Echo…`),
+  so the real player journey (casting interview → in-character narration → the agent loop) is exercised
+  **only** by wiring a real model into the FE: `POST /api/model-endpoints` with the provider `base_url` +
+  `api_key` (admin-gated, but `require_admin` short-circuits when `AUTH_ENABLED=false`), then set
+  `default_model` + `default_endpoint_id` in `frontend/data/settings.json` (read per-request — no restart).
+  `GET /api/default-chat` confirms what resolves. This is the path to reproduce LLM-only bugs (tool
+  under-calls, narration desyncs) the gates can't see.
 - **CI** (`.github/workflows/ci.yml`, #351): **per-job path-filtering** + **sharded heavy lanes** under a single required check. A `changes` job emits booleans; each job gates on the relevant paths (a docs-only/FE-only PR skips the engine + heavy lanes) and a unified **`ci-gate`** (always-runs, `success`/`skipped` ⇒ pass) is the one required check — deadlock-free on an all-skip. Jobs: the engine gate (`npm run test:ci`: typecheck → build → unit/property/arch minus the heavy sims → BDD), the **heavy-sims** lane **sharded** for wall-clock (UAT 12→3 `uat-12seed-{a,b,c}`, `uat-5seed`, `uat-decisions`; **jury** 20→5 `jury-shard` + `jury-aggregate`; **gradient** 6→2 `gradient-shard` + `gradient-aggregate` — each shard plays a disjoint seed slice, the aggregate recombines and asserts the full band; every heavy lane now < ~3 min), the coverage gate (`npm run test:cov`, per-directory **branch thresholds** in `vitest.config.ts`: engine 90 / composition 88 / adapters-engine 82 — ratchet up only; heavy sims **and** the calibration data instrument `tests/calibration/**` excluded), the deploy smoke (`bash -n` every script + `deploy/smoke.sh`, which boots the real engine **and** front-end and drives a full turn), and the front-end job (py_compile → pytest → boot smoke → browser smoke (Playwright chromium cached) → responsive matrix).
 - **Deploy** (`deploy/`): the repo is **private** (ruling #17) — `orwell.sh` (run on the Proxmox host) creates the LXC, persists the one-time `GIT_TOKEN` PAT into `data/.env` with a git credential helper, and runs `orwell-install.sh` (apt + Node 22 + Python, pinned `requirements.lock.txt`, systemd units from `deploy/systemd/`, hardened per E85; UI ports <1024 get a `CAP_NET_BIND_SERVICE` drop-in; optional `CT_ROOT_PASSWORD` for console login). Maintenance scripts are host-aware (bridge into the LXC via `pct`), run from the **local checkout** (never a GitHub fetch of branch tips), and fall back to a legacy container named `bbai` (ruling #6): `orwell-update.sh` (also `--set-token` for PAT rotation) · `orwell-doctor.sh` (diagnose/bounce) · `orwell-backup.sh` / `orwell-restore.sh` · **three reset tiers** — `orwell-game-reset.sh` (new season: clears every engine sandbox, **preserves** accounts/sessions/LLM config/`data/.env`, ruling #2) · `orwell-oobe-reset.sh` (back to OOBE, **keeps the API keys + selected models + model defaults** via `frontend/scripts/oobe_reset.py`; wipes the rest of the FE store) · `orwell-factory-reset.sh` (the host "factory reset" — now **delegates to `orwell-oobe-reset.sh`** so "factory reset" keeps your LLM config everywhere, matching the admin **Factory Reset (OOBE)** button + the `orwell-ops-factory-reset` unit; preserves API keys/selected models/model defaults + `data/.env`, wipes everything else) · `orwell-login-panel.sh` (the interactive-shell health panel, ruling #21 — never blocks a login) · the **`orwell` control panel** (`orwell-menu.sh` + the shared whiptail helpers `orwell-tui.sh`, installed as `/usr/local/bin/orwell`) — a TUI menu wrapping update/doctor/backup/restore/resets/ready; the maintenance scripts also show inline whiptail dialogs (token password box, type-`RESET` confirm, doctor mode picker) on a TTY and stay fully non-interactive (flags/env) for automation/CI/the `pct` bridge — `whiptail` is apt-installed, absent ⇒ plain-prompt fallback · `orwell-ready.sh` · `deploy/smoke.sh` + `smoke_turn.py` (post-deploy checks). Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
@@ -551,9 +641,11 @@ the next step lowers `JURY_WEIGHTS.gameRespect` ~0.9→0.6–0.7 and re-runs the
 are **done** (#353 theme particles + frosted-top + the L45 punctuation guard; #335 fly-out); the low-priority sweep defects **A8–A10** are **now closed
 (PR #292)** — `humanizeIds` substitutes entity ids as whole tokens (no more mangled "player(s)"
 in beat prose), a turn-driven *supplementary* off-screen tick no longer faults on an empty society,
-and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; and the R3
-partial (late-season latency still grows with the O(events) snapshot export — improved, not
-eliminated; an incremental-snapshot item if play feels it); and **0062** (the move-in zeitgeist
+and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; **R3 is
+resolved** (PR #422 — the snapshot export was already O(Δ); `EngineCommandsAdapter.currentBeatKey`, the
+last per-commit whole-log scan, is now incremental, O(events)→constant — one adjacent item stays
+flagged: `InMemoryKnowledgeService.pathwayAnchored` full-scans per surfacing, its own item only if
+surfacing latency shows); and **0062** (the move-in zeitgeist
 snapshot — the one remaining net-new spec, not built). **0054 Phase 2** (docking finale / cast /
 retrospective into the control-room gadget rail) is **DONE** (#335). *(The ADR 0004
 fastembed adapter is BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
@@ -598,14 +690,28 @@ romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances
 organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
 pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
 
-**Session 2026-06-20 — sync spine, in-game time & multi-device (features 0062/0064/0065/0066, ADR 0006):**
-**0065** (the LLM↔engine **sync spine**) shipped — `beatSeq` compare-and-swap + idempotency keys (at-most-once
-advances), the O(Δ) `StateDeltaView` delta feed, the pre-emission phantom-outcome guard, and the FE
-sync/divergence ledger. **0064** (multi-device) shipped its **stopgap** — one canonical game session per user
-across every device; the Messenger-style live sync + window/HUD layout sync are the owed follow-on. **0062**
-(the move-in zeitgeist snapshot) shipped. And **ADR 0006** + feature **0066** landed the **in-game time-of-day +
-sleep economy** (opt-in): time-of-day on the live season, presence (0049) made time-driven, and a hidden bounded
-rest penalty in `resolveCompetition` — see the mechanics and open-decisions sections above.
+**Session 2026-06-20 — multi-device sync + the LLM↔engine sync spine (0064, 0065).** **0064** (live
+multi-device game sync) — a server-authoritative **canonical chat session per user**
+(`frontend/src/orwell_game_session.py`), **Messenger-style turn serialization** ("queue, don't stomp"
+— `agent_runs.start(..., queue=True)`), the `game-updated` instant-reconcile SSE ping, and cross-device
+**window/HUD layout sync** (`frontend/src/orwell_layout.py`). **0065** (the LLM↔engine **sync spine** —
+ADR 0005's closed-set counterpart, spec `docs/features/0065-llm-engine-sync-spine.md`) shipped end to
+end (PR #414 + the perf/CAS tails #422): `beatSeq` compare-and-swap (409 `stale-beat`) + idempotency
+keys, the FE attach + 409 reconcile, the same-turn **pre-emission outcome guard**, the Vault-free
+**sync ledger**, and the `beatSeq`-keyed O(Δ) **`stateDelta`** delta feed — see the architecture note in
+[The consequence & memory loop](#the-consequence--memory-loop-the-mvp-1-backbone--feature-0023) and
+ADR `docs/decisions/0005`. *(0064 §3.C's queued-turn known-minor is closed by 0065 Part A's stale-write
+guard.)*
+
+**Session 2026-06-20 — in-game time of day & the sleep economy (ADR 0006 + feature 0066; opt-in).** Gated
+by `ORWELL_TIME_OF_DAY` (default off ⇒ the seeded calibration spine stays byte-identical; the deploy sets
+it on). Time-of-day (morning → late-night) is first-class live-season state (`src/engine/timeOfDay.ts`);
+presence (0049) is made **time-driven** — houseguests reach their **character-driven bedtimes**, the
+*awake set* shrinks, and the player **owns their own bedtime** (no curfew). Staying up applies a **hidden,
+bounded** `sleepPenalty` (~0.15) in `resolveCompetition`, beside the 0041 emotional modifier — never
+protective, never shown to the player, **0 ⇒ byte-identical** when absent. FE: the House Status panel
+shows a time-of-day graphic + the player's rest cue. See the mechanics + open-decisions sections above and
+ADR `docs/decisions/0006`.
 
 ## Open decisions (remaining)
 

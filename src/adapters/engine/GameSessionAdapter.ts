@@ -1883,6 +1883,29 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
+    // Completeness backstop (the mobile short-circuit fix, 0050): the forced FE finalize fires
+    // `createCharacter("{}")` — empty args that pull the whole identity from a thin, name-only intake
+    // (name+photo, no real interview), minting the default-archetype "floater with no stats." Refuse
+    // that exact shape (typed) so the interview continues instead of silently minting a floater.
+    // The guard fires ONLY when BOTH are true: (a) zero authored substance anywhere in `merged`
+    // (cast photo is NOT substance), and (b) the explicit args carried no identity intent of their own
+    // (no `playerName`/`seed`/`archetype`). That keeps every direct, intentional creation working — the
+    // admin debug door (archetype), tests/fixtures (an explicit name+seed), and a real interview (which
+    // arrives with backstory/motivation/persona substance) — and blocks only the empty-args bug path.
+    const hasSubstance =
+      !!merged.archetype ||
+      !!merged.strategyStyle ||
+      !!merged.backstory ||
+      !!merged.motivation ||
+      !!merged.personaArchetype ||
+      !!merged.personaStrategyStyle ||
+      !!merged.privateStrategy ||
+      merged.interviewNotes.length > 0;
+    const argsCarriedIdentity =
+      !!effReq.playerName || effReq.seed !== undefined || !!effReq.archetype || !!effReq.strategyStyle;
+    if (!hasSubstance && !argsCarriedIdentity) {
+      return { ...this.view(), createRefused: "casting-incomplete" };
+    }
     // 0065 — ADOPT a pre-warmed cast. If `preSeedCast` already generated (and the FE deeply authored)
     // the cast during the interview, finalize ATOP it: reuse its seed so the warmed cast is the cast that
     // ships, and skip re-seeding the thin floor below. An explicit seed that DIFFERS discards the stale
@@ -2187,7 +2210,7 @@ export class GameSessionAdapter implements GameSession {
     // model narrate a fresh casting interview post-season while the engine never started one. The
     // refusal names whether a season is live (`in-progress`) or already crowned (`over`).
     if (this.house) {
-      return { known: {}, missing: [], next: null, ready: false, refused: this.live?.finished ? "over" : "in-progress" };
+      return { known: {}, missing: [], next: null, ready: false, finalizable: false, refused: this.live?.finished ? "over" : "in-progress" };
     }
     const before = this.intake;
     // C8: which already-captured scalars this update replaces — computed against the PRIOR intake,
@@ -3719,8 +3742,26 @@ export class GameSessionAdapter implements GameSession {
   private worldContext(moment: string): string | undefined {
     if (!this.worldSnapshot || !this.house) return undefined;
     const channel = moment === "social" || moment === "diary-room" ? "offscreen" : "player";
-    const block = renderZeitgeist(this.worldSnapshot, { week: this.week, channel });
+    // 0062 HOH music perk: the player has LIVE music only when they hold it — the reigning HOH (the real-BB
+    // luxury) or in the HOH room overhearing it; otherwise the music slice is frozen memory like the rest.
+    const block = renderZeitgeist(this.worldSnapshot, {
+      week: this.week, channel, musicAccess: this.hasMusicPerk(this.house.player.id),
+    });
     return block.length > 0 ? block : undefined;
+  }
+
+  /**
+   * 0062 media-fidelity (the HOH music perk): who currently has LIVE music — the one live-media exception
+   * in the sealed house. The reigning HOH gets the music luxury (real BB), and anyone in the HOH room
+   * overhears it. No HOH (premiere / between reigns) ⇒ nobody. Reads ONLY public state (the HOH + room
+   * co-presence already cross to the player via gameStatus/whereabouts), so it leaks nothing — and it is a
+   * prompt-rendering read, never a game input, so the §6 outcome-invariance holds.
+   */
+  private hasMusicPerk(id: EntityId): boolean {
+    const hoh = this.ceremony.hoh;
+    if (!hoh) return false;
+    if (id === hoh) return true;
+    return this.presence?.get(id) === "hoh-room";
   }
 
   /**

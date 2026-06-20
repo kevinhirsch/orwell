@@ -10,8 +10,13 @@
 > (the §6/§10 headline guard, proven structurally). The owner's recommendations were taken: the one-time
 > 7-day lag offset (§11 #1), capture-once-persist-forever with the deterministic `model-framed` fallback
 > for tests/replays (§11 #2/#9), small-and-bounded slices (§11 #3), and an engine-side outward field on
-> `GameState` (§11 #4 — for the 0007 guard). The FE-owned `web_search` capture lands via the
-> `recordWorldSnapshot` write-back seam (FE provider wiring is its own lane, like the 0051 image port).
+> `GameState` (§11 #4 — for the 0007 guard). **The FE-owned `web_search` capture lane is now built**
+> (`frontend/src/orwell_zeitgeist.py`): at season creation (a genuine `do_create_character` start) it
+> fires a best-effort background capture — a bounded `web_search` over the move-in-era zeitgeist (a ~7-day
+> one-time lag, §11 #1) synthesized to the slice JSON and written back via `recordWorldSnapshot` (the seam
+> the boundary fix in PR #416 opened), REPLACING the deterministic fallback ONCE per season; no model /
+> no search ⇒ the deterministic snapshot simply stands (§8). FE-pytested (`tests/test_0062_zeitgeist_capture.py`,
+> injected deps — never depends on a live search, §9/§10).
 > Feature file `0062-world-snapshot-zeitgeist.feature` (in `cucumber.cjs`); unit `tests/unit/zeitgeist.test.ts`.
 >
 > *(Original spec status, retained:)* 📝 **SPEC ONLY — not built.** Authored 2026-06-19. Extends the shipped **C32** in-fiction

@@ -264,8 +264,13 @@ export interface GameStateView {
    * that prior season, not a new one). `in-progress` (a season is live) or `over` (a winner is
    * crowned). The producer must NOT narrate a new season — direct the player to the menu / a
    * confirmed restart. Absent on a real (fresh or confirmed) creation.
+   *
+   * `casting-incomplete` (the mobile short-circuit fix, 0050): the finalize carried a name but ZERO
+   * authored substance (no archetype/strategy/backstory/motivation/persona/notes) — minting it would
+   * produce the default-archetype "floater with no stats." The interview must continue; this is NOT a
+   * started season (the prior state, if any, is untouched).
    */
-  createRefused?: "in-progress" | "over";
+  createRefused?: "in-progress" | "over" | "casting-incomplete";
 }
 
 /**
@@ -313,6 +318,13 @@ export interface CastingStatusView {
   next: string | null;
   /** True once the required minimum (a name) is in — createCharacter may finalize. */
   ready: boolean;
+  /**
+   * True once a GENUINE interview has happened (name + backstory + motivation + at least one persona/
+   * strategy answer; the cast photo does NOT count). `ready` is the floor for an EXPLICIT, player-driven
+   * finalize; `finalizable` is the floor for an AUTOMATED/forced finalize — without it the mobile short-
+   * circuit minted a default-archetype "floater with no stats" after only name+photo. Vault-free.
+   */
+  finalizable: boolean;
   /**
    * Scalar fields this update OVERWROTE — an already-captured value replaced by a different one
    * (audit C8's third sub-item). Present only on the `updateCasting` that caused it, so the
