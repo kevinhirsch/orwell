@@ -102,9 +102,9 @@ def test_l36_normal_line_is_never_ooc_and_unmodified():
     assert res["text"] == "Let's talk strategy after the comp."
 
 
-# ── STRUCTURAL — the module's exports + hint contract ────────────────────────
+# ── STRUCTURAL — the module's exports (detector only — the tip is gone) ──────
 
-def test_l36_module_exports_detector_and_hint():
+def test_l36_module_exports_detector():
     js = _read("static", "js", "orwellOocAside.js")
     assert "export function detectOocAside" in js
     assert "export function isOocAside" in js
@@ -112,20 +112,22 @@ def test_l36_module_exports_detector_and_hint():
     assert "_DOUBLE_PARENS" in js and "_OOC_PREFIX" in js
 
 
-def test_l36_hint_is_game_build_gated_and_per_user_dismiss():
+def test_l36_old_composer_tip_is_removed():
+    """The one-time OOC composer TIP was DELETED. The detector (input handling)
+    stays; the tip text + its mount/dismiss code must be gone from this module
+    (the chat-bar hint surface now lives in the shared orwellChatHint.js, with no
+    active tips)."""
     js = _read("static", "js", "orwellOocAside.js")
-    # game-build only
-    assert "data-game-build" in js
-    # per-user dismiss key (E71 pattern) persisted in localStorage
-    assert "orwell-ooc-hint-dismissed:" in js
-    assert "document.body.dataset.user" in js
-    assert "localStorage.setItem" in js and "localStorage.getItem" in js
-    # the hint element + a real dismiss control
-    assert "orwell-ooc-hint" in js
-    assert "orwell-ooc-hint-dismiss" in js
-    # it surfaces BOTH conventions to the player
-    assert "((double parens))" in js
-    assert "ooc:" in js
+    # the exact tip copy and its DOM/dismiss plumbing are gone
+    assert "double parens" not in js
+    assert "the house won" not in js  # "the house won't hear it"
+    assert "orwell-ooc-hint" not in js
+    assert "_mountHint" not in js
+    assert "orwell-ooc-hint-dismissed" not in js
+    # the module no longer builds any composer hint element here
+    assert "createElement('div')" not in js
+    # …but the load-bearing input detector is untouched
+    assert "detectOocAside" in js
 
 
 def test_l36_module_loaded_in_index():
@@ -172,9 +174,10 @@ def test_l36_aside_and_hint_css_is_theme_token_driven():
     assert ".msg-user.msg-ooc .role::after" in css
     # L36 follow-on — the MODEL's OOC answer aside (producer/HUD), same token-driven treatment
     assert ".msg-ooc.msg-ooc-producer" in css
-    # the one-time composer hint
-    assert ".orwell-ooc-hint" in css
-    assert ".orwell-ooc-hint-dismiss" in css
+    # the shared chat-bar hint surface (orwellChatHint.js) — the old .orwell-ooc-hint is gone
+    assert ".orwell-chat-hint" in css
+    assert ".orwell-chat-hint-dismiss" in css
+    assert ".orwell-ooc-hint" not in css
     # no hard-coded hex colors in the aside/hint block — all derive from --fg
     # (so the frosted house themes stay readable). Pull the block and check.
     start = css.index(".msg-user.msg-ooc")

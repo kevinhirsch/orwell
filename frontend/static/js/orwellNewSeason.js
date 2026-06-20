@@ -149,7 +149,10 @@
     _open = true;
     _win = window.OrwellWindowKit.create({
       id: WIN_ID,
-      title: "A new season",
+      // Cohesive window-title contract: emoji + a single space + a Title-Case name
+      // (matches the Cast 🎬 / Finale 🏆 / Retrospective 📼 windows). ✨ = a fresh
+      // start (distinct from the Cast clapperboard, which the dock chip keeps below).
+      title: "✨ A New Season",
       icon: "🎬",
       slot: "bottom-right",
       slotKey: "new-season",

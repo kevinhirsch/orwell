@@ -63,7 +63,7 @@
       </style>
       <div class="oretro-body" data-role="body"></div>`;
     _win = window.OrwellWindowKit.create({
-      id: ID, title: "📼 The season, watched back", icon: ICON,
+      id: ID, title: "📼 The Season, Watched Back", icon: ICON,
       // top-right slot: the retrospective must NOT share a slot with the post-season
       // "New season" window (bottom-right) — post-season both are open, and stacking
       // two windows in one corner shoved the second off-screen. Distinct slots ⇒ no
