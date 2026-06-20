@@ -257,17 +257,25 @@ outcome (and sometimes a houseguest), bypassing the engine and desyncing the gam
 *(Note: State 6 — responsive, themes, windowing, Producer's Vault, WCAG — is appended below
 this summary; its findings are folded into the triage here.)*
 
+> **Round-4 status (synced `main`, 2026-06-20):** S3-CORE **FIXED**; S1-1 **likely addressed** by
+> the onboarding redesign; **S6-2 STILL PRESENT**; S4-1 unverified on synced main. See State 8.
+
 ### [Launch-Blocking]
-- **S3-CORE** — model bypasses the engine on decision resolution; invents outcomes and
-  houseguests; narration/engine desync compounds across turns. *(The core-loop bug; fix via the
-  pending-decision interlock + roster validation + outcome guard.)*
-- **S4-1** — the structured decision card is only reachable through the chat agent; the status
-  HUD offers no fallback, so when S3-CORE fires the player is **stuck** with a pending decision
-  and no control. *(The structural escape hatch that de-fangs S3-CORE.)*
-- **S1-1** — the very first screen (zero-data landing) overlaps the casting card on top of the
-  welcome message — unreadable text-over-text for every first-time user.
-- **S6-2** — the **Cast window covers the entire left sidebar** and intercepts its clicks
-  (default slot at x=14 over the 240px sidebar); also **breaks the `browser_smoke` CI gate**.
+- **S3-CORE** — *(original)* model bypasses the engine on decision resolution; invents outcomes
+  and houseguests; desync compounds. **→ FIXED on synced `main`** (State 8): the premiere
+  engine-truth gate makes the model defer to the engine; the first HOH resolved to a real roster
+  member with no fabrication/desync.
+- **S6-2** — the **Cast window covers the left sidebar** and intercepts its clicks (default slot at
+  x=14 over the 240px sidebar). **→ STILL PRESENT on synced `main`** (narrowed to w=360 by the 0064
+  layout sync but not moved off the sidebar). browser_smoke only stopped flagging it because it now
+  parks the window before the sidebar click.
+- **S4-1** — the structured decision card is only reachable through the chat agent; the status HUD
+  offers no fallback. *(Less critical now that S3-CORE is fixed, but the structural escape hatch is
+  still worth adding; not re-verified on synced main.)*
+- **S1-1** — *(original)* zero-data landing overlaps the casting card on the welcome message. **→
+  Likely addressed on synced `main`** by the onboarding redesign (welcome modal + non-dismissable
+  cast-photo window; browser_smoke's "cast-photo window does not overlap the welcome brand mark"
+  passes). Worth a fresh-onboarding visual confirm.
 
 ### [High-Priority Polish]
 - **S2-1 / S5-1** — model under-finalizes casting; add a structural "Enter the house" when ready.
@@ -429,4 +437,61 @@ With the engine unreachable (`/api/orwell/health` → `engine:false`), the onboa
 shows a polished, on-brand holding screen — **"The house is dark — Big Brother will return. The
 game engine isn't reachable right now — this screen will clear the moment the feeds come back."**
 with a "Continue anyway" dismiss (`onboarding-f5.png`). Graceful degradation; no defect.
+
+---
+
+## State 8 — Re-audit against synced `main` (round 4, 2026-06-20)
+
+The branch was **synced with current `main`** (merged 235 commits; PR #320 updated). `main` had
+advanced heavily since the audit's base (79a498c), incl. **0064 window/HUD layout sync**,
+**premiere "meet every houseguest"**, **pacing "social runway between ceremonies"**, **admin LLM
+I/O trace**, SQLite persistence, and a **redesigned onboarding** (a "Welcome to the house" modal +
+a non-dismissable "Your Cast Photo" gating window; chat locked until a photo is secured). Engine
+rebuilt + stack restarted on the synced code; the prior `findings` re-checked.
+
+### Confirmed FIXED / improved by `main`
+- **★ S3-CORE (the centerpiece launch-blocker) is FIXED.** Re-tested live at the first HOH comp on
+  synced main: the merged premiere work feeds an **engine-truth gate** into the moment prompt
+  (*"PREMIERE — MEET EVERYONE (engine truth): N of 16 met. The first HOH must NOT begin until this
+  is complete."*) and the model now **respects the engine and defers to the pending decision
+  instead of fabricating**. On declaring intent it said "everyone declares their intent… let's make
+  it official" (no fabricated outcome); on confirming, it **resolved through the engine** — engine
+  advanced to `veto-competition` with **HOH = Wendy Mueller** (a *real* roster member, npc:14) and
+  real nominees (Zara Morrow, Melissa Abbott), **pending cleared, no desync**. The visible
+  narration named the real HOH, invented **zero** houseguests, and carried **no machinery leak**.
+  The old "fabricate Cassidy Holloway + desync" failure mode did not reproduce. *(One game, one
+  comp — strong evidence; worth a broader playtest sweep to confirm consistency, but the structural
+  guardrail is clearly in place.)*
+- **Persistence across engine restart now works** — Season 4 (kept character "Nadia") survived a
+  full engine restart on the same data dir (the merged SQLite store), where before it was
+  in-memory only.
+- The onboarding redesign adds a proper **cast-photo gating window** (kit `OrwellWindow`,
+  non-dismissable, title-cased) and explicitly tests "the cast-photo window does not overlap the
+  welcome brand mark" — addressing the *spirit* of **S1-1** (see re-check note below).
+
+### Still PRESENT on synced `main` (re-confirmed)
+| ID | Sev | Status | Evidence (synced main) |
+|---|---|---|---|
+| **S6-2** | **BLOCK** | **STILL PRESENT** — the 0064 layout sync **narrowed** the Cast window (x=14, **w=360** vs 560 before) but did **not** move it off the sidebar; it still mounts at x=14 over the 240px sidebar and `elementFromPoint` at `#session-sort-btn` returns `oc-portrait`. browser_smoke stopped flagging it only because the test now **parks** the window before the sidebar click — the open-window overlap remains. | `cast-overlap.png` (re-captured); `castOverlapsSidebar:true`. |
+| **S6-1** | POLISH | **STILL PRESENT** — HUD roster header (now "The House · N/16") is 9.1–10.4px at ≤1024px (below the 11px floor). | `responsive_matrix.py` re-run: 34 pass / 9 FAIL. |
+
+### New finding (from the merged onboarding redesign)
+| ID | Sev | Finding | Evidence | Proposed direction |
+|---|---|---|---|---|
+| **S8-1** | POLISH | **The welcome modal's "Got it" button is below the touch-target floor** — 61×**32**px at coarse-pointer viewports (the contract floor is 36px height). New "Welcome to the house — premiere week" modal. | `responsive_matrix.py` re-run: `touch: 'Got it' 61x32` at tiny-320 / phone-390. | Bump the "Got it" button to ≥36px height (min-height) on coarse pointers. |
+
+### Re-verified PASS on synced `main`
+- **Vault Wall** holds after the `VaultStore`/`VisibleStateService`/`registry` changes: player
+  `getGameState` has no sentinels; `seasonRetrospective` refuses while live; admin channel refuses
+  Vault tools; GM prompt carries no numeric Vault data.
+- **Engine-offline (F5) holding card** still mounts ("The house is dark") — browser_smoke's 3
+  "engine-down holding card" failures in the standalone run are **false negatives** (timing/setup);
+  the card works in a direct dead-engine boot.
+
+### Gate caveat (regression-net hole)
+`responsive_matrix.py` only catches **S6-1/S8-1 when a game is staged** (`ORWELL_MATRIX_ENGINE`
+set). A chrome-only CI run (no engine) wouldn't render the HUD roster header or the welcome modal,
+so these slip through — the gate has a hole for engine-staged surfaces. browser_smoke surfaced 4
+failures in the standalone run (3 false-negative holding-card + 1 `G3` collapse-chevron on a
+≤1-child `sessions-section`); the chevron one is worth a quick look but is low impact.
 
