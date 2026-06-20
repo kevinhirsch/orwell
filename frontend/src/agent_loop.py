@@ -3081,12 +3081,25 @@ async def stream_agent_loop(
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
                 _moved = bool(_tool_names & _MOVE_TOOLS)  # L21/L24: did the model call moveTo itself?
+                # SOCIAL RUNWAY (the never-fast-forward fix): the framing layer may be DELIBERATELY
+                # holding a social runway for this user — a ceremony just resolved and the next is
+                # held a few turns so the player can scheme. Those turns are intentional lingering,
+                # NOT a stall: read the flag once here so the staleness clock and the advance-nudge
+                # both respect it.
+                try:
+                    from routes import chat_helpers as _ch
+                    _runway_holding = _ch._RUNWAY_LEFT.get(owner or "", 0) > 0
+                except Exception:
+                    _runway_holding = False
                 # Track staleness: this finishing block runs once per player turn. A turn that
-                # advanced resets the clock; otherwise the beat has sat one more turn. The lull-nudge
-                # waits until the night has genuinely stopped moving (>= grace), so engaging play and
-                # a just-started beat are never shoved (owner ruling 2026-06-18).
+                # advanced — or that the runway is intentionally holding — resets the clock; otherwise
+                # the beat has sat one more turn. The lull-nudge waits until the night has genuinely
+                # stopped moving (>= grace), so engaging play, a just-started beat, AND a deliberately
+                # held social runway are never shoved (owner ruling 2026-06-18 + the runway fix).
                 if owner:
-                    _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
+                    _TURNS_SINCE_PROGRESS[owner] = (
+                        0 if (_progressed or _runway_holding)
+                        else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1)
                 # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
                 # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
                 _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _effective_advance_grace(owner)
@@ -3103,10 +3116,17 @@ async def stream_agent_loop(
                              if t in _BEAT_TOOLS]
                 _previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"
                 _decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"
+                # SOCIAL RUNWAY precedence (the never-fast-forward fix): when the framing layer is
+                # DELIBERATELY holding a social runway for this user (`_runway_holding`, read above), the
+                # plain-stall advance-nudge must NOT fire — that would force-march straight past the
+                # social play the runway is protecting (the L6/L7 FORCED advanceGame the playtest
+                # caught). It does NOT suppress a genuine desync (a previewed-but-uncommitted outcome /
+                # an undelivered decision result): the model narrated an outcome ahead of the engine
+                # and still owes the commit.
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
-                    or ((not _progressed) and _is_lull and _stale)))
+                    or ((not _progressed) and _is_lull and _stale and not _runway_holding)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -3168,7 +3188,9 @@ async def stream_agent_loop(
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
-                        logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                        logger.warning(
+                            f"[orwell] error-correction state fetch failed: "
+                            f"{type(_e).__name__}: {_e}".rstrip(': '))
                     # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
                     # The player walked to a room this turn but the model never called moveTo, so the
                     # engine still has them in the OLD room and next turn's whereabouts would snap back.
@@ -3249,7 +3271,12 @@ async def stream_agent_loop(
                                             f"phase={_phase}) round {round_num} user={owner}")
                                 return True
                             except Exception as _e:
-                                logger.warning(f"[orwell] silent advanceGame failed ({_why}): {_e}")
+                                # Diagnosable detail (#393 advance-path): str(_e) is empty for several
+                                # transient engine errors (a read timeout, a connection dropped mid-
+                                # response) — name the TYPE so the line is never a bare "failed: ".
+                                logger.warning(
+                                    f"[orwell] silent advanceGame failed ({_why}): "
+                                    f"{type(_e).__name__}: {_e}".rstrip(': '))
                                 return False
 
                         # If the player has already seen a scene this turn, NEVER narrate a second one.
