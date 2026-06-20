@@ -495,3 +495,47 @@ so these slip through — the gate has a hole for engine-staged surfaces. browse
 failures in the standalone run (3 false-negative holding-card + 1 `G3` collapse-chevron on a
 ≤1-child `sessions-section`); the chevron one is worth a quick look but is low impact.
 
+---
+
+## State 9 — FE/BE sync & realtime streamed-text filtering (round 5, **fixes applied**)
+
+This round shifts from DOC-ONLY to **finding & resolving**, building on **PR #408** ("persist
+clean-channel reasoning + unify the resume renderer"), which I merged into this branch as the
+foundation. #408 unified the reasoning *channel* (`thinking:true`) across the live / resume /
+history renderers + persistence. Two complementary fixes were applied on top, plus a backlog of
+lower-severity sync items.
+
+### ✅ Fixed this round (code, tested)
+
+| ID | Area | Fix | Files |
+|---|---|---|---|
+| **F1** | **Realtime content-channel flash** | The model also leaks planning as *normal reply text* (operator openers "Let me…", raw `npc:<id>` ids), scrubbed by `processWithThinking` (L6b) in the game build. Every streaming render path must use that *same* renderer per-delta or the leak flashes visible until the final render. The **live reply-after-thinking** path rendered raw `mdToHtml`; it now routes through `processWithThinking` like the no-thinking path and the final render. (Extends #408's render unification to the last inconsistent path.) | `frontend/static/js/chat.js` (liveReply renderer) |
+| **F2** | **Decision-card dismiss vs `gamechanged` race** | The rearm reset the dismissal flag on *any* pending, so a game change (e.g. another device advancing) re-mounted the very card the player just dismissed. It now keys the dismissal to the pending's **signature** (`kind|option-ids|prompt`): a genuinely new decision re-arms; the same one stays dismissed. | `frontend/static/js/orwellDecision.js` |
+
+**Verification:** new source-level tests (`frontend/tests/test_realtime_filter_and_decision_sync.py`)
++ #408's `test_reasoning_persistence_sync.py` pass; the render/chat/thinking/scrub/decision/stream
+subset is **186 passed, 2 skipped, 0 regressions**. Live confirmation: a turn whose raw stream
+carried a content-channel planning preamble ("The player is in the kitchen… Let me check…")
+rendered a **clean** body (no preamble, no "Let me check", no raw `npc:` id) — the scrub runs in
+realtime. `node --check` clean on both edited files.
+
+**Methodology note (corrects a sub-agent mis-read):** the *primary* stream's content renderer
+already routes per-delta through `processWithThinking` (chat.js:1355), so it scrubs in realtime —
+the flash was specific to the **reply-after-thinking** sub-path (chat.js:1310, raw `mdToHtml`),
+now fixed. The DSML/tool-call markup is halted server-side (`tool_parsing.py` /
+`agent_loop.py`) — solid, no client risk.
+
+### Backlog — sync findings NOT yet resolved (lower severity; documented for follow-up)
+
+| ID | Sev | Finding | Direction |
+|---|---|---|---|
+| **F3** | POLISH | **Status projection omits `finished`/`winner`** (= the old S4-2): a status-only client hangs on "finale" post-season; FE recovers only via `/state`. | Add `finished`/`winner`/`post-season` to the `gameStatus` projection (Vault-safe post-season), and gate the status panel on `started && !finished`. |
+| **F4** | POLISH | **SSE drop doesn't reconcile the pollers** — after a dropped stream / `run-started` from another device, the HUD lags up to the 20 s poll cadence. | On `run-started`/`run-done`, fire an immediate status/state re-fetch instead of waiting for the next poll. |
+| **F5** | LOW | **Pending cache can survive a key-omitting engine response** (`orwell_engine.remember_pending`): only clears on a truthy `pending`; an older engine omitting the key leaves a stale card on reload. | Treat an omitted `pending` as cache-clear, or require the engine to always send `pending` (incl. `null`). |
+| **F6** | LOW | **Stall watchdog can false-fire** during a legitimate 25 s+ tool call (60 s threshold vs the engine's 30 s read timeout). | Reset the watchdog on `tool_start`/`tool_end` events, not just deltas. |
+| **F7** | LOW | **Forced-advance race** (`agent_loop.py`): the FE's last-resort `advanceGame` can double-advance if another device advances between the state read and the POST. | Re-read the beat immediately before the forced POST; skip if it already moved. |
+
+**Verified clean (no race):** the **0064 Messenger turn-queue** serialization — concurrent game
+turns chain via `prev_task` and never stomp; **optimistic UI** — the FE never renders a user
+bubble before the server confirms (a failed send leaves the text in the composer).
+

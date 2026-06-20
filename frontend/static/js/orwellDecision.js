@@ -157,7 +157,7 @@
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
     x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", () => { _userDismissed = true; removeCard(); });
+    x.addEventListener("click", () => { _userDismissed = true; _dismissedSig = _sig(pending); removeCard(); });
     head.appendChild(x);
     card.appendChild(head);
     // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
@@ -169,6 +169,7 @@
       e.preventDefault();
       e.stopPropagation();
       _userDismissed = true;
+      _dismissedSig = _sig(pending);
       removeCard();
     });
 
@@ -347,6 +348,12 @@
   // route's cached `pending` — the engine's own legal-options view. Without this,
   // refreshing mid-decision left the player with no card and no signal.
   let _userDismissed = false;   // set when the player explicitly dismisses (×/Escape)
+  let _dismissedSig = null;     // signature of the pending the player dismissed, so a game
+                                // change re-arms a genuinely NEW decision but never re-mounts
+                                // the SAME card the player just waved away (cross-device race).
+  const _sig = (p) => (p && p.kind)
+    ? p.kind + "|" + (p.options || []).map((o) => o && o.id).join(",") + "|" + (p.prompt || "")
+    : "";
   async function rearmFromStatus() {
     try {
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -354,6 +361,10 @@
       const st = await r.json();
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
       if (!pending) return;
+      // Respect an explicit dismissal of THIS exact decision — a `gamechanged` (e.g. another
+      // device advancing, or a re-poll of the same pending) must not re-mount the card the
+      // player just waved away. A genuinely NEW decision (different signature) still re-arms.
+      if (_userDismissed && _sig(pending) === _dismissedSig) return;
       _userDismissed = false;   // a fresh pending arrived — honor it again
       // The game build mounts #chat-history ASYNCHRONOUSLY and then renders the session's
       // history INTO it after DOMContentLoaded — a boot rearm that fired early either had

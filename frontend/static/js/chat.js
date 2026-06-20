@@ -1307,7 +1307,13 @@ import { isNarrow } from './platform.js';
           if (replyTrimmed) {
             const r = liveReply._streamRenderer ||
               (liveReply._streamRenderer = createStreamRenderer(liveReply, {
-                render: (t) => markdownModule.mdToHtml(markdownModule.squashOutsideCode(t)),
+                // Route the live reply-after-thinking through the SAME renderer the sibling
+                // no-thinking path (contentEl) and the final render use — processWithThinking
+                // runs the game-build content-channel scrub (L6b: leading operator asides /
+                // raw `npc:<id>` ids) PER DELTA. With raw mdToHtml here, such a leak rendered
+                // visible while streaming and was only cleaned at the final render — a realtime
+                // flash. (Extends #408's render unification to this path.)
+                render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
                 hljs: window.hljs,
               }));
             r.update(replyTrimmed);
