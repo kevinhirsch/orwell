@@ -27,6 +27,12 @@ let _sttProvider = 'disabled';
  * Fetch current STT provider from server settings
  */
 async function refreshSttProvider() {
+  // Game build drops the voice vertical (its routes 404); skip the probe so the
+  // console stays clean on first paint. STT stays 'disabled', which is correct here.
+  if (document.body && document.body.hasAttribute('data-game-build')) {
+    _sttProvider = 'disabled';
+    return;
+  }
   try {
     const res = await fetch('/api/stt/stats', { credentials: 'same-origin' });
     if (res.ok) {
