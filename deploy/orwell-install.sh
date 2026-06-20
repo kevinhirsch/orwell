@@ -275,8 +275,13 @@ ownership() {
   install -d -m 750 "${DATA_DIR}/ops"
   chown orwell:orwell "${DATA_DIR}/ops"
   rm -f "${DATA_DIR}/ops/update-requested"   # a stale pre-install request must not fire mid-install
+  rm -f "${DATA_DIR}/ops/factory-reset-requested"  # likewise: no stale OOBE-reset request fires mid-install
   touch "${DATA_DIR}/ops-update.log"
   chmod 644 "${DATA_DIR}/ops-update.log"
+  # The OOBE-reset trigger (admin "Factory Reset (OOBE)" button) appends to its own live log,
+  # tailed by the same admin status page viewer. Touched, never `install`ed (keep the history).
+  touch "${DATA_DIR}/ops-factory-reset.log"
+  chmod 644 "${DATA_DIR}/ops-factory-reset.log"
 }
 
 systemd_services() {
@@ -289,6 +294,11 @@ systemd_services() {
   # page tails it). Root-by-design — the WHY is documented in the unit files themselves.
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.path"    /etc/systemd/system/orwell-ops-update.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.service" /etc/systemd/system/orwell-ops-update.service
+  # Same G19b seam for the admin "Factory Reset (OOBE)" button: the web tier drops the flag
+  # data/ops/factory-reset-requested and this root-side PATH unit runs the one fixed reset
+  # script (orwell-oobe-reset.sh --yes), output appended live to data/ops-factory-reset.log.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.path"    /etc/systemd/system/orwell-ops-factory-reset.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.service" /etc/systemd/system/orwell-ops-factory-reset.service
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -334,11 +344,11 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
-  # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
-  systemctl enable --now orwell-ops-update.path
+  # The ops TRIGGERS are path units (their services are started by the watcher, never enabled).
+  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
-  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path
+  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path
 }
 
 login_panel() {

@@ -422,6 +422,9 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
   <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
+  <!-- BEGIN factory-oobe-reset lane button (self-contained; endpoint + logic live in routes/admin_reset_routes.py) -->
+  <button type="button" class="btn" id="factory-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — wipe ALL accounts, chats, memory, MCP configs, uploads, and every game; return to first-run OOBE. Keeps your API-key/LLM config so you don't re-enter it. Requires typing RESET.">Factory Reset (OOBE)</button>
+  <!-- END factory-oobe-reset lane button -->
 </div>
 <div id="update-msg" class="sub" style="margin:-6px 0 8px"></div>
 <div id="failwrap"></div>
@@ -433,7 +436,7 @@ _STATUS_PAGE = """<!doctype html>
 </div>
 <div id="logpane" style="height:380px;overflow:auto;border:1px solid #262a33;border-radius:8px;padding:8px 10px;background:#101218;white-space:pre-wrap;word-break:break-word;font-size:12.5px;line-height:1.45"></div>
 <h1 style="margin-top:26px">OPS</h1>
-<div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. Factory reset is deliberately not here.</div>
+<div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. The destructive Factory Reset (OOBE) lives in the controls at the top and likewise goes through its own root-side trigger.</div>
 <div class="actions" id="opsrow">Loading ops…</div>
 <div id="opsmsg" class="sub"></div>
 <div id="err"></div>
@@ -590,6 +593,37 @@ async function fastForwardFinale() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
+// ── BEGIN factory-oobe-reset lane: destructive OOBE reset (type RESET to confirm) ──
+// Wipes ALL accounts/chats/memory/MCP/settings + every game; keeps the API-key/LLM config.
+// Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint
+// in routes/admin_reset_routes.py and rides the restart back to OOBE via waitForBack().
+async function factoryReset() {
+  const typed = prompt(
+    "FACTORY RESET (OOBE)\\n\\n" +
+    "This PERMANENTLY deletes ALL accounts, chats, memory, MCP server configs, uploads, every " +
+    "user setting, and every game — returning the app to first-run onboarding.\\n\\n" +
+    "PRESERVED: your API-key / LLM provider configuration (so you don't re-enter it).\\n\\n" +
+    "Type RESET to confirm:");
+  if (typed === null) return;                 // cancelled
+  if (typed.trim() !== "RESET") { updMsg.innerHTML = '<span class="warn">Reset cancelled — you must type RESET exactly.</span>'; return; }
+  updMsg.textContent = "Starting factory reset…";
+  try {
+    const r = await fetch("/api/admin/factory-reset", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.innerHTML = '<span class="warn">Resetting… returning to OOBE. The app is restarting, reconnecting…</span>';
+      waitForBack();
+    } else {
+      updMsg.innerHTML = '<span class="bad">Could not start the reset.</span>';
+    }
+  } catch (e) {
+    // A dropped connection here can simply mean the restart already began — start reconnecting.
+    updMsg.innerHTML = '<span class="warn">Reset requested (connection dropped — likely already restarting); reconnecting to OOBE…</span>';
+    waitForBack();
+  }
+}
+document.getElementById("factory-reset").addEventListener("click", factoryReset);
+// ── END factory-oobe-reset lane ──
 // ── one-click Update: pull → rebuild → refresh FE deps → restart both, then reconnect ──
 const updMsg = document.getElementById("update-msg");
 function waitForBack() {

@@ -54,7 +54,8 @@ Non-interactive subcommands:
   orwell restore [FILE]          restore a backup (newest if FILE is omitted)
   orwell ready                   readiness check (engine + front-end + an LLM)
   orwell reset-game --yes        new season — clears games, keeps accounts + config
-  orwell reset-factory --yes     factory reset — back to first-run OOBE
+  orwell reset-oobe --yes        OOBE reset — back to first-run, KEEP the API-key/LLM config
+  orwell reset-factory --yes     factory reset — back to first-run OOBE (wipes the FE store)
   orwell --help                  this help
 EOF
 }
@@ -167,6 +168,16 @@ do_reset_game() {
   run "Game reset" bash "${DEPLOY_DIR}/orwell-game-reset.sh" --yes
 }
 
+do_reset_oobe() {
+  if ! tui_active; then
+    [[ "${1:-}" == "--yes" ]] || die "reset-oobe is destructive — pass --yes to run it non-interactively."
+    run "OOBE reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-oobe-reset.sh" --yes; return $?
+  fi
+  wt_confirm_phrase "RESET" "OOBE RESET — back to first-run onboarding, KEEPING your API keys.\n\nPERMANENTLY DELETES all games AND the front-end store (accounts, sessions, settings, MCP configs, uploads).\n\nPRESERVED: your LLM / image provider config + the keys that decrypt them, and data/.env.\n\nThe next visit starts at first-run OOBE — with an LLM already configured." \
+    || { wt_msgbox "Cancelled — nothing was changed."; return 0; }
+  run "OOBE reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-oobe-reset.sh" --yes
+}
+
 do_reset_factory() {
   if ! tui_active; then
     [[ "${1:-}" == "--yes" ]] || die "reset-factory is destructive — pass --yes to run it non-interactively."
@@ -185,6 +196,7 @@ case "${1:-}" in
   restore)       shift; do_restore "$@";       exit $? ;;
   ready)                do_ready;              exit $? ;;
   reset-game)    shift; do_reset_game "$@";    exit $? ;;
+  reset-oobe)    shift; do_reset_oobe "$@";    exit $? ;;
   reset-factory) shift; do_reset_factory "$@"; exit $? ;;
   "")            : ;;  # no subcommand → fall through to the interactive menu
   *)             usage; die "unknown command: $1" ;;
@@ -208,7 +220,8 @@ while :; do
     backup        "Back up game + user data" \
     restore       "Restore from a backup" \
     reset-game    "New season (keeps accounts + config)" \
-    reset-factory "Factory reset (back to OOBE)" \
+    reset-oobe    "OOBE reset (back to OOBE, KEEP API keys)" \
+    reset-factory "Factory reset (back to OOBE, wipe everything)" \
     quit          "Quit" \
     || break
   case "$choice" in
@@ -218,6 +231,7 @@ while :; do
     backup)        do_backup ;;
     restore)       do_restore ;;
     reset-game)    do_reset_game ;;
+    reset-oobe)    do_reset_oobe ;;
     reset-factory) do_reset_factory ;;
     quit|"")       break ;;
   esac
