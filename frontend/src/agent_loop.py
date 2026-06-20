@@ -1922,6 +1922,46 @@ def _scrub_game_leak(text: str) -> str:
     )
 
 
+async def _pre_emission_outcome_guard(text: str, owner) -> str:
+    """0065 Part C — the PRE-EMISSION outcome guard, applied to already-leak-scrubbed text just
+    before it streams to the player. Splits `text` into sentences and, for any sentence that asserts
+    a CLOSED-SET board outcome (the cheap `chat_helpers._sentence_has_closed_set_claim` pre-filter),
+    verifies it against the LIVE board: a phantom the engine never committed is DROPPED here (before
+    the player sees it) and a next-turn re-ground is stashed; everything else streams verbatim.
+
+    ADR 0005 principle #1 (hard): jurisdiction is closed-set board claims ONLY. Sentences with no
+    closed-set claim language never reach the async verify — they are kept untouched, delimiters and
+    all (creative/social prose is never held). Fail-open by construction: no owner, or any hiccup,
+    returns the text unchanged. Granularity is the SENTENCE — never the whole chunk — so a suspect
+    sentence is dropped while its neighbours still stream live."""
+    if not text or not owner:
+        return text
+    try:
+        from routes import chat_helpers
+    except Exception:
+        return text
+    # Cheap synchronous pass first: if NO sentence even mentions a closed-set outcome, emit verbatim
+    # without splitting/awaiting (the common case — and the open-set guarantee in the hot path).
+    try:
+        if not chat_helpers._sentence_has_closed_set_claim(text):
+            return text
+    except Exception:
+        return text
+    # At least one sentence carries closed-set claim language — split and screen sentence-by-sentence,
+    # preserving the original delimiters so non-suspect prose streams byte-identically.
+    parts = re.split(r"(?<=[.!?\n])", text)
+    out = []
+    for part in parts:
+        try:
+            if chat_helpers._sentence_has_closed_set_claim(part):
+                if not await chat_helpers.screen_streamed_outcome(owner, part):
+                    continue  # phantom closed-set outcome — DROP this sentence before emission
+        except Exception:
+            pass  # any screening hiccup falls through to emit (conservatism)
+        out.append(part)
+    return "".join(out)
+
+
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
     """True when this turn was a scene with a houseguest — the player's line or the narration
     names someone on the roster (full name or first name). Cheap, name-based; good enough to
@@ -2805,10 +2845,21 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
-                                    full_response += _clean
-                                    if _clean.strip():
-                                        _emitted_visible = True
-                                    yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                                    # 0065 Part C — the PRE-EMISSION outcome guard: drop any sentence
+                                    # that asserts a CLOSED-SET board outcome the live engine never
+                                    # committed (a phantom eviction/winner/HOH/tally), BEFORE it reaches
+                                    # the player; everything non-suspect (and all creative/social prose)
+                                    # streams through untouched (ADR 0005 #1). Fall back to the raw clean
+                                    # text if the guard would empty a turn the player hasn't seen any
+                                    # narration in yet — better the post-turn re-ground than a blank turn.
+                                    _guarded = await _pre_emission_outcome_guard(_clean, owner)
+                                    if not _guarded.strip() and _clean.strip() and not _emitted_visible:
+                                        _guarded = _clean
+                                    if _guarded:
+                                        full_response += _guarded
+                                        if _guarded.strip():
+                                            _emitted_visible = True
+                                        yield f'data: {json.dumps({"delta": _guarded})}\n\n'
                             if _visible_halted:
                                 _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
@@ -2899,10 +2950,17 @@ async def stream_agent_loop(
             _clean = _scrub_game_leak(_game_buf)
             _game_buf = ""
             if _clean:
-                full_response += _clean
-                if _clean.strip():
-                    _emitted_visible = True
-                yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                # 0065 Part C — pre-emission guard on the trailing sentence too (same jurisdiction:
+                # closed-set board claims only; creative prose streams untouched). Fall back to raw
+                # clean text if holding it would leave the player a blank turn.
+                _guarded = await _pre_emission_outcome_guard(_clean, owner)
+                if not _guarded.strip() and _clean.strip() and not _emitted_visible:
+                    _guarded = _clean
+                if _guarded:
+                    full_response += _guarded
+                    if _guarded.strip():
+                        _emitted_visible = True
+                    yield f'data: {json.dumps({"delta": _guarded})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 

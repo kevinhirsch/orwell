@@ -641,6 +641,92 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
 
 
+# ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
+#
+# `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the
+# turn — the player has already read "X is evicted", and the re-ground fires the NEXT turn. Part C
+# moves that closed-set check BEFORE emission, reusing the agent-loop's existing sentence-buffered
+# stream scrubber. When a streamed SENTENCE asserts a closed-set board outcome, the agent loop hands
+# it here; we verify it against the LIVE board and tell the loop whether to emit or hold it.
+#
+# HARD jurisdiction (ADR 0005 principle #1 — the open set is constitutionally protected): this guard
+# touches CLOSED-SET BOARD CLAIMS ONLY. It reuses `_narration_claims_outcome`'s exact detectors +
+# phase-gating — it invents NO broader matching, and it must NEVER hold, drop, or rewrite creative /
+# social prose. A false hold on creative prose is worse than a missed phantom, so:
+#   • a sentence with NO closed-set claim language is never even sent here (the cheap pre-filter
+#     `_sentence_has_closed_set_claim` below short-circuits in the hot loop);
+#   • when sent, the SAME comparison the post-turn check makes — narration vs. the turn's BEFORE
+#     signature vs. the LIVE board — decides it. `_narration_claims_outcome` returning None (the
+#     board backs the claim, OR the phase-gating ruled it flavor/creative) ⇒ EMIT. A directive
+#     (a phantom the engine never committed) ⇒ HOLD/DROP, and we stash the existing `_DESYNC_REGROUND`
+#     directive as the next-turn backstop;
+#   • UNCERTAIN (no before-signature this turn, or the live board read hiccups) ⇒ EMIT (fall through
+#     to the post-turn re-ground). Conservatism is mandatory.
+
+# The cheap, synchronous PRE-FILTER: does this sentence even contain closed-set OUTCOME language? This
+# is the only thing that runs on every streamed sentence — it short-circuits the live-board read (and
+# all of the phase-gated jurisdiction) so creative/social prose never pays a cost and is never sent to
+# the verifier at all. It is the UNION of the four `_CLAIM_*` detectors `_narration_claims_outcome`
+# already owns (eviction / winner / new-HOH / finale tally) — NOT a broader matcher (ADR 0005 #1).
+def _sentence_has_closed_set_claim(text: str) -> bool:
+    """Does `text` contain ANY of the four closed-set board-outcome claim patterns? Cheap and
+    synchronous — the hot-loop gate that keeps the pre-emission guard off creative prose entirely.
+    A True here only means "worth verifying against the live board"; the phase-gated
+    `_narration_claims_outcome` makes the actual emit/hold call (so flavor like 'crowned the winner
+    someday' still streams — it never reaches the async verify, and would pass it anyway)."""
+    if not text or not text.strip():
+        return False
+    return bool(
+        _CLAIM_EVICTED_RE.search(text)
+        or _CLAIM_WINNER_RE.search(text)
+        or _CLAIM_NEW_HOH_RE.search(text)
+        or _CLAIM_TALLY_RE.search(text)
+    )
+
+
+async def screen_streamed_outcome(user, sentence: str) -> bool:
+    """0065 Part C — verify ONE streamed sentence that asserts a closed-set board outcome against the
+    LIVE board, BEFORE the player sees it. Returns:
+
+      • True  → EMIT the sentence (the board backs the claim — the outcome really committed; OR the
+                phase-gating ruled it flavor; OR we are uncertain and emit conservatively).
+      • False → HOLD/DROP the sentence (a phantom the engine never committed) and stash the existing
+                `_DESYNC_REGROUND` next-turn backstop.
+
+    The caller (`agent_loop`'s stream scrubber) only invokes this for a sentence that already passed
+    the cheap `_sentence_has_closed_set_claim` pre-filter, so creative prose never reaches here. The
+    verify reuses the SAME field-specific comparison the post-turn check makes — the turn's BEFORE
+    signature (`_LAST_BEAT_SIG`) vs. the live board — so it can never reach into the open set
+    (ADR 0005 principle #1). Fail-open by construction: any hiccup returns True (emit)."""
+    try:
+        if not sentence or not sentence.strip():
+            return True
+        before = _LAST_BEAT_SIG.get(user)
+        # No BEFORE baseline this turn (a fresh process, a framing hiccup) — we cannot tell phantom
+        # from real, so EMIT and let the post-turn re-ground be the backstop (conservatism).
+        if not before:
+            return True
+        live = await _capture_beat_signature(user)
+        if not live:
+            return True  # live board read hiccupped — uncertain, emit.
+        directive = _narration_claims_outcome(sentence, before, live)
+        if not directive:
+            return True  # the board backs the claim (or phase-gating ruled it flavor) → emit.
+        # The engine never committed this outcome — HOLD it before the player sees it, and stash the
+        # next-turn re-ground as a backstop (reuse the existing desync mechanism, do not invent a
+        # second one). The post-turn check would otherwise have produced this same directive a turn
+        # too late; Part C just gets there one turn earlier.
+        _DESYNC_REGROUND[user] = directive
+        logger.warning(
+            "[orwell] pre-emission guard HELD a phantom closed-set outcome for user=%s — "
+            "dropped before emission, re-grounding next turn", user,
+        )
+        return False
+    except Exception as e:
+        logger.warning("[orwell] pre-emission outcome guard skipped for user=%s: %s", user, _exc_detail(e))
+        return True  # fail-open: never suppress on an error.
+
+
 def _runway_sig(game_state: dict) -> str:
     """The `(week:phase)` signature of the beat the player is currently sitting in. A change in this
     signature means a ceremony resolved and we entered a new beat — the cue to arm a fresh runway."""
