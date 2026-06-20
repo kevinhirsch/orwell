@@ -73,14 +73,22 @@
     show("degraded", "🎬 Production is building the house…", "Casting is being finalized — the live feeds return in a moment.");
   }
 
+  // Issue 1: a brief, transient outage is being retried — show a SOFT amber "reconnecting…"
+  // line (it recovers on its own) instead of the hard red "engine unavailable".
+  function showReconnecting() {
+    show("degraded", "📡 Reconnecting to Big Brother…", "The live feeds blinked — restoring the connection.");
+  }
+
   async function refresh() {
     try {
       const r = await fetch("/api/orwell/health", { credentials: "same-origin" });
       if (!r.ok) { show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service. The show can't load until it's back."); return; }
       const d = await r.json();
       const busy = !!(d && d.busy === "creating"); // G8: createCharacter in flight
+      const reconnecting = !!(d && d.reconnecting); // Issue 1: transient outage being retried
       if (!d || !d.engine) {
         if (busy) { showHolding(); return; } // a probe timeout DURING creation is not an outage
+        if (reconnecting) { showReconnecting(); return; } // a momentary blip — recovering, not down
         const reason = (d && d.error ? "Reason: " + d.error + " " : "") + (d && d.engineUrl ? "(" + d.engineUrl + ") " : "");
         show("down", "⚠ Big Brother engine unavailable.", reason + "The show can't load until it's back.");
       } else if (d.lastError && d.lastError.error) {

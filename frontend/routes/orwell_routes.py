@@ -334,6 +334,9 @@ def setup_orwell_routes() -> APIRouter:
             "engineUrl": detail.get("engineUrl"),
             "error": detail.get("error"),
             "lastError": detail.get("lastError"),
+            # Issue 1: a brief, soft "reconnecting…" while a transient outage is being retried —
+            # the banner shows a recover-in-progress line instead of a hard red outage.
+            "reconnecting": bool(detail.get("reconnecting")),
             # G8: "creating" while createCharacter is in flight — the banner holds in-fiction
             # (casting being finalized) instead of flashing a false "engine unavailable".
             "busy": detail.get("busy"),
@@ -470,7 +473,16 @@ def setup_orwell_routes() -> APIRouter:
             # Calibration instrumentation: cache the full jury margin from the revealed ballots while
             # the finale is still staging (it vanishes once the season flips to `finished`).
             _remember_finale_tally(user, finale if isinstance(finale, dict) else None)
+            _clear_warn("finale")
             return {"finale": finale}
+        except orwell_engine.EngineToolError as e:
+            # Issue 2: pre-game ("no active game") is a NORMAL state, not a finale failure — the
+            # panel just isn't staging yet. Return {finale: null} quietly (no log spam) so polling
+            # before a game exists never floods `[orwell] finale failed: no active game`.
+            if e.no_game:
+                return {"finale": None}
+            _warn_throttled("finale", f"[orwell] finale failed: {e}")
+            return {"finale": None}
         except Exception as e:
             _warn_throttled("finale", f"[orwell] finale failed: {e}")
             return {"finale": None}
