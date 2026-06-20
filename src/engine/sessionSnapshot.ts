@@ -143,6 +143,49 @@ export function cloneSession<T>(value: T): T {
 }
 
 /**
+ * R3 — a structural deep clone that is BYTE-IDENTICAL to `cloneSession` (the JSON round-trip) for any
+ * JSON-safe value, without paying to serialize+reparse every string char-by-char. It mirrors
+ * `JSON.parse(JSON.stringify(x))` semantics exactly for the value types a `SessionCore`/`GameHouse`
+ * holds (objects, arrays, string/number/boolean/null): a property whose value is `undefined`, a
+ * function, or a symbol is DROPPED (as JSON does); the same in an array position becomes `null`; a
+ * non-finite number becomes `null`; a `toJSON()` method (e.g. on a Date) is honored before recursion.
+ * Immutable primitives (strings/numbers) are shared, not re-allocated — that is the whole win: the
+ * per-turn snapshot export deep-clones each houseguest's ever-growing append-only `soul.memory`, and
+ * re-JSON-serializing the full log every turn was the O(events) cost behind the late-season latency
+ * (audit R3). Used ONLY where the input is known JSON-safe (the house/live clones); `cloneSession`
+ * stays the default elsewhere. Verified equivalent in `tests/unit/incrementalSnapshot.test.ts`.
+ */
+export function fastClone<T>(value: T): T {
+  return cloneJsonLike(value) as T;
+}
+
+function cloneJsonLike(v: unknown): unknown {
+  if (v === null) return null;
+  const t = typeof v;
+  if (t === "string" || t === "boolean") return v;
+  if (t === "number") return Number.isFinite(v as number) ? v : null; // JSON: NaN/±Infinity → null
+  if (t !== "object") return undefined; // function/symbol/undefined → caller drops (object/array path)
+  // Honor toJSON (Date etc.) exactly like JSON.stringify would, then clone the produced value.
+  const obj = v as { toJSON?: (key?: string) => unknown };
+  if (typeof obj.toJSON === "function") return cloneJsonLike(obj.toJSON());
+  if (Array.isArray(v)) {
+    const out = new Array(v.length);
+    for (let i = 0; i < v.length; i++) {
+      const c = cloneJsonLike(v[i]);
+      out[i] = c === undefined ? null : c; // JSON: undefined/function in an array slot → null
+    }
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const k in v as Record<string, unknown>) {
+    if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+    const c = cloneJsonLike((v as Record<string, unknown>)[k]);
+    if (c !== undefined) out[k] = c; // JSON: a property whose value is undefined/function is dropped
+  }
+  return out;
+}
+
+/**
  * Project a durable snapshot into the 0007 `GameState` shape so the existing
  * non-degradation helpers (`counts`/`isSuperset`/`countsNonDecreasing`) apply
  * across a restart. Characters map to the static baseline; souls to the dynamic
