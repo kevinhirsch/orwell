@@ -97,15 +97,22 @@ clear_game_session(user) -> None             # unbind (season reset / new season
 `data/` already takes it back to OOBE; the in-app reset-progress / new-season rotates it explicitly
 (below).
 
-**New route — `GET /api/orwell/game-session`** (in `routes/orwell_routes.py`), `_current_user`-scoped:
+**Routes (in `routes/orwell_routes.py`), `_current_user`-scoped — _as shipped (stopgap)_:**
 
-- Resolve the bound id. If it is **missing**, or **no longer exists** in the session store, or is
-  **not owned by this user**, mint a fresh chat session (server-side, owner = the user), bind it,
-  and return `{ "sessionId": "<id>", "created": true }`. Otherwise `{ "sessionId": "<id>",
-  "created": false }`.
-- **Idempotent under concurrency** (the whole point): two devices hitting it at the same instant
-  must get the **same** id. Guard with the store lock; first writer wins; a racing second caller
-  reads back the just-written id (re-check inside the lock before minting).
+- `GET /api/orwell/game-session` → `{ "sessionId": <bound id | null> }` (read-only; null ⇒ nothing
+  bound yet).
+- `POST /api/orwell/game-session { sessionId }` → bind **first-writer-wins**; returns
+  `{ "sessionId": <effective>, "bound": <bool> }`. A racing second caller **adopts** the
+  already-bound id (`bound:false`).
+
+**Binding happens server-side on first frame (no fragile client mint-then-bind).** Rather than have
+`GET` mint a chat (server-side session minting needs endpoint/model resolution) or the client bind
+after an async create (the new session has no id until its first message), the binding is performed
+inside **`apply_game_framing`** (`routes/chat_helpers.py`): the **first** session that drives a
+game/casting turn for a user is bound as canonical (`_bind_canonical_game_session`, first-writer-
+wins, best-effort). So the device that opens the interview owns the binding the moment its first
+turn frames; every other device's `GET` then resolves it. The `POST` route remains for explicit
+binding/tests.
 
 **Season-reset rotation.** The three reset doors already exist in `orwell_routes.py`
 (`/new-game`, `/next-season`, `/reset-progress`). Each must `clear_game_session(user)` as part of
@@ -114,10 +121,14 @@ a dead season's transcript never rides as narrator context. This makes the exist
 "fresh session on restart" behavior **server-authoritative** instead of per-tab `sessionStorage`.
 
 **Onboarding change — `static/js/orwellOnboarding.js`.** `openFreshInterviewSession()` no longer
-blindly clicks "+ New chat" (which mints a *device-local* session). Instead it:
+blindly clicks "+ New chat" (which mints a *device-local* session). Instead it (fail-open at every
+step):
 
 1. `GET /api/orwell/game-session` → `sessionId`.
-2. If the currently open session ≠ `sessionId`, `sessionModule.selectSession(sessionId)` (load it).
+2. If a `sessionId` is bound **and it exists in this device's session list**,
+   `sessionModule.selectSession(sessionId)` (open it) and stop — never a second chat.
+3. Otherwise open a fresh chat as before; the server binds **that** session on its first framed turn
+   (above), so the next device resolves and converges onto it.
 
 Every device — first load, second device, a reload — lands on the **same** session id. The
 per-device `SEAT_TAKEN_KEY` (`sessionStorage`) and `WELCOME_KEY` (`localStorage`) guards become

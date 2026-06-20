@@ -880,6 +880,13 @@ def setup_orwell_routes() -> APIRouter:
             # decision card so no phantom pending bleeds onto the status route until season 2's
             # first advance. The casting card has no `pending`, so this clears _LAST_PENDING.
             orwell_engine.remember_pending(res, user=user)
+            # 0064: a new season is a new chat — unbind the canonical game session so devices
+            # rebind to a fresh chat (a dead season's transcript never narrates the new one).
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             # Kick off move-in cast portraits (0051) — background, never blocks the response,
             # silent no-op when no image model is configured (graceful absence).
             try:
@@ -892,6 +899,34 @@ def setup_orwell_routes() -> APIRouter:
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    # ── 0064: the canonical game chat session (one game = one chat, every device on it) ──────
+    class BindGameSessionRequest(BaseModel):
+        sessionId: str = ""
+
+    @router.get("/game-session")
+    async def orwell_game_session(request: Request):
+        """Feature 0064: the user's CANONICAL game chat session id — the one chat every device
+        opens for the game, so the existing cross-device sync engages instead of each device
+        running its own parallel casting interview. Vault-free (a session id carries no secret);
+        scoped to the caller's own user. ``{sessionId: <id or null>}`` — null means nothing is
+        bound yet (the first device binds it via POST after it creates the chat)."""
+        from src import orwell_game_session
+        return {"sessionId": orwell_game_session.get_game_session(_current_user(request))}
+
+    @router.post("/game-session")
+    async def orwell_bind_game_session(body: BindGameSessionRequest, request: Request):
+        """Feature 0064: bind a chat session as the user's canonical game session — FIRST-WRITER-
+        WINS, so two devices racing the first open converge on ONE id (a racing second caller
+        adopts the already-bound id). Returns the EFFECTIVE bound id and whether the caller's id
+        was the one bound. Per-user keyed ⇒ a caller can only ever bind within their own bucket."""
+        from src import orwell_game_session
+        user = _current_user(request)
+        requested = (body.sessionId or "").strip()
+        if not requested:
+            return JSONResponse(status_code=400, content={"error": "sessionId is required"})
+        effective = orwell_game_session.bind_game_session(user, requested)
+        return {"sessionId": effective, "bound": effective == requested}
 
     # ── 0057: seasons as levels — the per-user season number + the two restart actions ──────
     @router.get("/season")
@@ -940,6 +975,12 @@ def setup_orwell_routes() -> APIRouter:
             # D3/E66 restart-door hygiene: clear the prior season's cached decision card so no phantom
             # pending (e.g. last season's juror-vote) rides the status route into the new season.
             orwell_engine.remember_pending(res, user=user)
+            # 0064: rotate the canonical game session so the new season opens in a fresh chat.
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             season = orwell_seasons.increment_season(user)  # the level is cleared — advance the counter
             try:
                 prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
@@ -968,6 +1009,12 @@ def setup_orwell_routes() -> APIRouter:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
             orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
+            # 0064: rotate the canonical game session so the restarted level opens in a fresh chat.
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             return {"reset": True, "state": res}  # season number is deliberately UNTOUCHED
         except Exception as e:
             logger.warning(f"[orwell] reset-progress failed: {e}")

@@ -304,15 +304,44 @@
     } catch (_) { return true; }
   }
 
-  // F7: a brand-new interview opens a FRESH chat session so a dead/reset season's transcript never
-  // rides along as narrator context. Runs ONCE per interview (sessionStorage marker). There is NO
-  // composer prefill any more — the image step is the player's first interaction and the producers
-  // open the conversation (the old casting-seat pre-prompt has been removed).
-  function openFreshInterviewSession() {
+  // F7 + 0064: open the interview in the user's CANONICAL game chat so every device converges on the
+  // SAME conversation (the existing cross-device live-sync then keeps both screens in sync) — instead
+  // of each device starting its own parallel casting interview (the two-device bug). Runs ONCE per
+  // interview per tab (sessionStorage marker). There is NO composer prefill — the image step is the
+  // player's first interaction and the producers open the conversation.
+  //
+  // Fail-open at every step: any hiccup falls back to the old behavior (open a fresh local chat; the
+  // server binds THAT session as canonical on its first framed casting turn, so the next device
+  // resolves and converges onto it).
+  async function openFreshInterviewSession() {
     let seated = false;
     try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
     if (seated) return;
     try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
+
+    const sm = window.sessionModule;
+    // 1) Is a canonical game session already bound for this user (e.g. another device opened it)?
+    let bound = null;
+    try {
+      const r = await fetch("/api/orwell/game-session", { credentials: "same-origin" });
+      if (r.ok) bound = (await r.json()).sessionId || null;
+    } catch (_) { /* fail open — fall through to creating one */ }
+
+    // 2) If it exists in our session list, OPEN it (the convergence) — never a second chat.
+    if (bound && sm && sm.selectSession) {
+      try {
+        const known = !sm.getSessions || (sm.getSessions() || []).some((s) => s && s.id === bound);
+        if (known) {
+          if (!(sm.getCurrentSessionId && sm.getCurrentSessionId() === bound)) {
+            await sm.selectSession(bound);
+          }
+          return;
+        }
+      } catch (_) { /* fall through to creating one */ }
+    }
+
+    // 3) Nothing bound (or it's gone): open a fresh chat as before. The server binds this session
+    //    as canonical on its first framed (casting) turn, so the next device converges onto it.
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
@@ -433,7 +462,7 @@
       // guided sequence — the WELCOME MODAL first (once per account), which hands off to the image
       // step. The chat is already locked by orwellChatGate.js until a photo is secured; the casting
       // card (orwellHeadshot.js) is the image step itself.
-      openFreshInterviewSession();
+      await openFreshInterviewSession();
       if (!welcomeSeen()) {
         mountWelcome(); // its own modal; on "Add my cast photo" it dissolves into the image step
       }

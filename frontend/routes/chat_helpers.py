@@ -42,6 +42,20 @@ _SESSION_GAME_FRAMED: set = set()
 RE_ENTRY_MOMENT = "re-entry"
 
 
+def _bind_canonical_game_session(user, session_id) -> None:
+    """0064: bind the session that is actually driving this user's game/casting as their CANONICAL
+    game session (first-writer-wins), so every other device resolves it via GET /api/orwell/game-session
+    and converges — instead of each device running its own parallel casting interview. Best-effort:
+    a bind failure must never break a turn."""
+    if not session_id:
+        return
+    try:
+        from src import orwell_game_session
+        orwell_game_session.bind_game_session(user, session_id)
+    except Exception:
+        logger.debug("[orwell] canonical game-session bind skipped", exc_info=True)
+
+
 def unmark_session_framed(session_id) -> None:
     """Give a session its first-turn `re-entry` moment back (P2). Used when a framed turn is
     refused after framing ran (the sync route's game-turn 409), so the refusal doesn't consume
@@ -561,6 +575,7 @@ async def apply_game_framing(
             gm_prompt = FALLBACK_GM_PROMPT
         if session_id is not None:
             _SESSION_GAME_FRAMED.add(session_id)
+            _bind_canonical_game_session(user, session_id)  # 0064: converge every device here
         # The pending-decision BARRIER (a chat↔engine desync class): if the engine is BLOCKED on a
         # player decision, HARD-BLOCK the model from narrating past it (no new day/ceremony/week/
         # comp/eviction) and pin it to bringing the player to THAT decision. The engine is the
@@ -616,6 +631,7 @@ async def apply_game_framing(
             # createCharacter in THIS session is the premiere, not a re-entry (P2).
             if session_id is not None:
                 _SESSION_GAME_FRAMED.add(session_id)
+                _bind_canonical_game_session(user, session_id)  # 0064: converge every device here
             # E16 + P8 apply to the framed casting turn as well (same steering hole,
             # same wasted context).
             _drop_preset_persona(preface, preset_system_prompt)
