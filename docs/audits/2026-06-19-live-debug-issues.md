@@ -1,5 +1,7 @@
 # Live-debug issue ledger — 2026-06-19
 
+> 📋 **Audit record** · 2026-06-19 · Live-debug issue ledger (L-series) · **Status:** **ACTIVE — live L-ledger**
+
 Logged from a live play session (real FE + engine, deepseek-v4-pro). Each item is an issue to
 resolve. Status: ☐ open · ◐ in progress · ☑ done. Lane: FE (front-end), ENG (engine), OPS (deploy),
 COPY (text). This ledger is the authoritative open-items list for this batch.

@@ -1,5 +1,7 @@
 # Hand-off — LLM-discipline + FE-render cluster (pro play-through) → THIS PR
 
+> 📋 **Audit record** · 2026-06-18 · LLM-discipline + FE-render lane hand-off · **Status:** Historical record
+
 **Source:** parallel implementer's live pro play-through (deepseek-v4-pro, authentic casting flow,
 20 turns / 1292 engine calls). **Status:** being IMPLEMENTED on `claude/brave-wozniak-pdw685`
 (owner ruling, 2026-06-18: "you are to implement; the other implementer is moving to a different

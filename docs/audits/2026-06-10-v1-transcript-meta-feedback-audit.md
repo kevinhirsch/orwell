@@ -1,5 +1,7 @@
 # 2026-06-10 — v1 transcript & meta-feedback audit
 
+> 📋 **Audit record** · 2026-06-10 · v1 transcript & meta-feedback reconstruction · **Status:** Reference record (why the Bible's emphatic passages exist)
+
 **Scope.** The human recovered the complete logged record of the **v1 chat-prompt game** —
 the genesis design session plus every logged gameplay session (in-game Days 2–14, Mar 22 –
 Jun 2026): "the LLM version worked until it didn't, and that meta-feedback was mostly

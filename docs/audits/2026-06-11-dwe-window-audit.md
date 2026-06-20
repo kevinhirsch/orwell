@@ -1,5 +1,7 @@
 # 2026-06-11 — DWE window audit (Phase 1): every window-like surface vs. desktop-window-environment norms
 
+> 📋 **Audit record** · 2026-06-11 · DWE windowing (Phase 1, DOC-ONLY) · **Status:** Historical record
+
 **Scope.** Every window-like surface and interactive element of the front-end, audited against
 the behavioral norms of a desktop window environment (DWE) by driving the **real UI with
 Playwright** — real pointer drags, real keyboard, real reloads; `page.evaluate` asserts state,

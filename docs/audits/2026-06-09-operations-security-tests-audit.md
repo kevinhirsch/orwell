@@ -1,5 +1,7 @@
 # Orwell operations, security & test-integrity audit — 2026-06-09 (round 3)
 
+> 📋 **Audit record** · 2026-06-09 · Operations · security · test-integrity (round 3) · **Status:** Historical record
+
 The third audit pass, covering the ground the first two (product/engine/wiring; front-end
 experience) did not: **deploy & operations**, **front-end application security**, and the
 **test suite / CI as a quality gate**. Synthesized from three parallel deep audits against

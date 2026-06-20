@@ -1,5 +1,7 @@
 # Orwell full UI & runtime audit — 2026-06-10 (round 4)
 
+> 📋 **Audit record** · 2026-06-10 · UI & runtime (round 4) · **Status:** Historical record
+
 **Scope.** The complete player-facing surface, audited THREE ways at once: (1) a static map of
 every AI-callable game tool to its UI display path; (2) an inventory of the 121 stated UI
 behaviors (from the prior audits, the C12–C33 queue items, the FE test suite, the browser
