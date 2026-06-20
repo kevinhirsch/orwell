@@ -130,6 +130,37 @@ export function showmanceToVaultContent(s: Showmance): string {
   return `showmance ${s.a} <-> ${s.b} [${s.stage}] (hidden — develops over weeks, never telegraphed)`;
 }
 
+// ── Post-season retrospective rendering (0048 — the Wall's ONE sanctioned reveal) ──────────────────
+// The `…ToVaultContent` serializers above are the engine-only AUDIT format (raw ids + slugs — fine, the
+// Vault is engine-only). They are NOT player-readable, so the 0048 retrospective must NOT show them raw
+// (the live repro: "[seeded-relationship] pre-game-tie Emilio Shepard <-> npc:3: old-acquaintance …" —
+// note the bare `npc:3`: a tie can be written with one party as a name and the other as a raw id). These
+// helpers render the SAME tie/showmance as plain prose with BOTH parties resolved to names. Pure / Vault-free.
+
+const TIE_NATURE_PROSE: Record<TieNature, string> = {
+  "casting-callback": "crossed paths in casting before the show",
+  "mutual-friend": "shared a mutual friend coming in",
+  "shared-hometown": "are from the same hometown",
+  "old-acquaintance": "already knew each other before the show",
+};
+
+const SHOWMANCE_STAGE_PROSE: Record<ShowmanceStage, string> = {
+  spark: "an early spark that never went public",
+  bond: "a quiet bond that stayed under the radar",
+  visible: "a showmance the house came to see",
+  resolved: "a showmance that ran its course",
+};
+
+/** Render one pre-game tie as readable post-season prose, both ids resolved to names. No raw token. */
+export function preGameTieToRetrospectiveProse(t: PreGameTie, nameOf: (id: EntityId) => string): string {
+  return `${nameOf(t.a)} and ${nameOf(t.b)} ${TIE_NATURE_PROSE[t.nature]} — it stayed hidden unless it came out in the house.`;
+}
+
+/** Render one showmance as readable post-season prose, both ids resolved to names. No raw token. */
+export function showmanceToRetrospectiveProse(s: Showmance, nameOf: (id: EntityId) => string): string {
+  return `${nameOf(s.a)} and ${nameOf(s.b)}: ${SHOWMANCE_STAGE_PROSE[s.stage]}.`;
+}
+
 // ── Organic surfacing (L40) — a showmance advances ONLY as the live relationship genuinely develops ──
 // Sustained mutual affinity carries the arc spark → bond → visible → resolved. The bias gives the
 // seeded pair a head start, but they must still grow into it over weeks (never instant). Tuned so a
