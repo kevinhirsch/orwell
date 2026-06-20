@@ -1795,10 +1795,25 @@ and finisher agents drove each to green — fast-gate only, **no heavy sims loca
 - **live-debug ledger:** L43 fixed (#345); L15/L17 shipped (#329); L45 guard extended (#353).
 
 ### Still genuinely open (forward backlog, after this session)
-1. **0058 Phase 2 remainder** — in flight (`claude/0058-phase2-build`); see above.
-2. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
-3. **0022** — MVP-2 (the one long-deferred feature).
+1. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
+2. **0062** — move-in zeitgeist snapshot (📝 spec only; the one remaining net-new feature).
+3. **0022** — MVP-2 rich game UI (the long-standing deliberate deferral; the chat *is* the UI per ADR 0003).
 4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
-5. **Postgres / pgvector tier** — the relational follow-on beyond SQLite (#330 shipped SQLite + sqlite-vec only).
-6. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
+5. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
+6. **Browser-render validations owed** — 0051 portrait render · 0057 progress-bar / panel placement.
 7. **A11** — onnxruntime cpuset log noise inside the LXC (documentation-only).
+8. **Postgres + pgvector** → reclassified under **MVP-002** (see below).
+
+### MVP-002 — post-launch scale-out (milestone)
+
+A deliberate **second-wave** milestone for infrastructure that only earns its keep *beyond* the
+single-container deploy — not blocking launch, filed here so it's a planned wave rather than a vague
+"someday". (2026-06-20.)
+
+- **Postgres + pgvector** — the relational/vector storage tier behind the existing `UserSaveStore`
+  and engine-only `VectorIndex` ports. A clean adapter swap (no domain/engine change; Vault-walled by
+  dependency-cruiser exactly like the SQLite adapter). SQLite + sqlite-vec already shipped **opt-in**
+  (#330, `ORWELL_STORE=sqlite`) and are sufficient for *one container per host, one game per user*.
+  Postgres buys what SQLite does not: **multi-instance shared state, a managed cloud database, heavier
+  concurrent write throughput, and replication / point-in-time recovery** — i.e. it matters only when
+  Orwell scales past a single host. No gameplay impact.
