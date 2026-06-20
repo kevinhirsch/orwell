@@ -103,11 +103,15 @@ def test_update_reset_sudo_wraps_argv(monkeypatch, tmp_path):
 
 
 def test_update_reset_prefers_flag_trigger_when_installed(monkeypatch, tmp_path):
-    # With the flag dir present, the privilege-safe trigger is used — NO subprocess spawns —
-    # and the EXISTENCE-only `update-reset-requested` flag is written.
+    # With the root-side watcher UNIT installed, the privilege-safe trigger is used — NO subprocess
+    # spawns — and the EXISTENCE-only `update-reset-requested` flag is written. (The watcher unit,
+    # not a bare data/ops dir, is what proves the flag will actually be consumed.)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("ORWELL_UPDATE_RESET_DIRECT", raising=False)
+    unit = tmp_path / "orwell-ops-update-reset.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(unit))
     (tmp_path / "ops").mkdir()
 
     def _boom(*a, **k):  # the detached path must NOT be taken here
@@ -145,13 +149,15 @@ def test_update_reset_force_direct_overrides_flag(monkeypatch, tmp_path):
 
 
 def test_update_reset_fails_loudly_when_no_privileged_path(monkeypatch, tmp_path):
-    # PRIVILEGE FIX (ops-run lane): no watcher unit, no data/ops, no sudo, no direct override →
-    # fail loudly (started:false + error + a FAILED ops-status file), never a silent detached no-op.
+    # PRIVILEGE FIX (ops-run lane): the reported bug — data/ops EXISTS (the installer makes it for
+    # the update lane) but the watcher unit does NOT, no sudo, no direct override → fail loudly
+    # (started:false + error + a FAILED ops-status file), never the silent flag/detached no-op.
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(tmp_path / "no-such.path"))
     monkeypatch.delenv("ORWELL_UPDATE_RESET_SUDO", raising=False)
     monkeypatch.delenv("ORWELL_UPDATE_RESET_DIRECT", raising=False)
+    (tmp_path / "ops").mkdir()
 
     def _boom(*a, **k):
         raise AssertionError("no subprocess may run when there is no privileged path")

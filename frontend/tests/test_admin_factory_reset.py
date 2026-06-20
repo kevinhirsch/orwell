@@ -103,11 +103,15 @@ def test_factory_reset_sudo_wraps_argv(monkeypatch, tmp_path):
 
 
 def test_factory_reset_prefers_flag_trigger_when_installed(monkeypatch, tmp_path):
-    # With the flag dir present, the privilege-safe trigger is used — NO subprocess spawns —
-    # and the EXISTENCE-only `factory-reset-requested` flag is written.
+    # With the root-side watcher UNIT installed, the privilege-safe trigger is used — NO subprocess
+    # spawns — and the EXISTENCE-only `factory-reset-requested` flag is written. (The watcher unit,
+    # not a bare data/ops dir, is what proves the flag will actually be consumed.)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("ORWELL_OOBE_RESET_DIRECT", raising=False)
+    unit = tmp_path / "orwell-ops-factory-reset.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setenv("ORWELL_OOBE_RESET_WATCHER_UNIT", str(unit))
     (tmp_path / "ops").mkdir()
 
     def _boom(*a, **k):  # the detached path must NOT be taken here
@@ -154,6 +158,10 @@ def test_factory_reset_fails_loudly_when_no_privileged_path(monkeypatch, tmp_pat
     monkeypatch.setenv("ORWELL_OOBE_RESET_WATCHER_UNIT", str(tmp_path / "no-such.path"))
     monkeypatch.delenv("ORWELL_OOBE_RESET_SUDO", raising=False)
     monkeypatch.delenv("ORWELL_OOBE_RESET_DIRECT", raising=False)
+    # The EXACT reported scenario: data/ops EXISTS (the installer makes it for the update lane) but
+    # the reset watcher unit does NOT. The old `or os.path.isdir(_ops_dir())` clause took the flag
+    # path here → silent no-op. It must now fail loudly instead of masquerading as installed.
+    (tmp_path / "ops").mkdir()
 
     def _boom(*a, **k):
         raise AssertionError("no subprocess may run when there is no privileged path")

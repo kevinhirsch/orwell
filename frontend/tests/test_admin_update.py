@@ -101,10 +101,14 @@ def test_admin_update_sudo_wraps_argv(monkeypatch, tmp_path):
 
 
 def test_admin_update_prefers_flag_trigger_when_installed(monkeypatch, tmp_path):
-    # With the G19b flag dir present, the privilege-safe trigger is used — NO subprocess spawns.
+    # With the root-side G19b watcher UNIT installed, the privilege-safe trigger is used — NO
+    # subprocess spawns. (The watcher unit, not a bare data/ops dir, proves the flag is consumed.)
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("ORWELL_UPDATE_DIRECT", raising=False)
+    unit = tmp_path / "orwell-ops-update.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(unit))
     (tmp_path / "ops").mkdir()
 
     def _boom(*a, **k):  # the detached path must NOT be taken here
@@ -150,6 +154,7 @@ def test_admin_update_fails_loudly_when_no_privileged_path(monkeypatch, tmp_path
     monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(tmp_path / "no-such.path"))
     monkeypatch.delenv("ORWELL_UPDATE_SUDO", raising=False)
     monkeypatch.delenv("ORWELL_UPDATE_DIRECT", raising=False)
+    (tmp_path / "ops").mkdir()  # data/ops present (the installer makes it) must NOT fake "installed"
 
     def _boom(*a, **k):
         raise AssertionError("no subprocess may run when there is no privileged path")

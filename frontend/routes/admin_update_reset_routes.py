@@ -93,9 +93,15 @@ def _watcher_installed() -> bool:
 
 
 def _flag_trigger_installed() -> bool:
-    """True when the privilege-safe flag door is usable. Back-compat: a present ``data/ops/`` dir
-    counts too (the install/update create it alongside the units, and tests stand it up directly)."""
-    return _watcher_installed() or os.path.isdir(_ops_dir())
+    """True ONLY when the root-side path watcher unit is actually installed — the lone privileged
+    door that genuinely runs the combined Update + Reset as root.
+
+    A bare ``data/ops/`` dir is NOT proof: the installer creates ``data/ops/`` for the UPDATE lane
+    on EVERY box, so the old ``or os.path.isdir(_ops_dir())`` clause made a missing watcher look
+    'installed' — the flag got written, nothing consumed it, and the button silently no-opped
+    ('completes too quickly'). Requiring the unit lets a watcher-less box fall through to a genuine
+    privileged path (sudo/direct) or FAIL LOUDLY, instead of pretending the action ran."""
+    return _watcher_installed()
 
 
 def _ensure_ops_dir() -> bool:
