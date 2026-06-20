@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Optional
@@ -412,6 +413,88 @@ def _save_manifest(user: Optional[str], manifest: dict) -> None:
     os.replace(tmp, _manifest_path(user))
 
 
+# ── Cross-season cache-busting: the per-cast "epoch" version ────────────────────────────────
+# Portraits are keyed by the engine's ROLE id (`npc:3`, `player`), which is byte-identical in
+# EVERY season (src/domain/ids.ts: npc(n) -> "npc:N"). Without a version, season 2's `npc:3`
+# reuses season 1's file AND its `/api/orwell/portrait/npc_3` URL — so a browser that cached the
+# face for a day (Cache-Control: max-age=86400) keeps showing last season's houseguest on the new
+# one, and "generate once" never overwrites it (root cause #1/#2). The cast epoch is a short
+# token, persisted per cast, that (a) stamps every portrait URL (`?v=<epoch>`) so a NEW cast
+# yields NEW URLs (cache miss → the new face), and (b) is rotated the moment a different cast is
+# detected in the stored slots. It is STABLE within a season, so each houseguest keeps a single
+# persisted image all season (generate-once still holds); it changes only when the cast does.
+def _cast_meta_path(user: Optional[str]) -> Path:
+    return user_portrait_dir(user) / "cast.json"
+
+
+def _load_cast_epoch(user: Optional[str]) -> Optional[str]:
+    try:
+        with open(_cast_meta_path(user), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    ep = data.get("epoch") if isinstance(data, dict) else None
+    return str(ep) if ep else None
+
+
+def _save_cast_epoch(user: Optional[str], epoch: str) -> None:
+    d = user_portrait_dir(user)
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / "cast.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"epoch": str(epoch)}, f)
+    os.replace(tmp, _cast_meta_path(user))
+
+
+def _ensure_cast_epoch(user: Optional[str]) -> str:
+    """The current cast's cache-busting version — minted + persisted on first use (and after a
+    wipe), then stable for the life of the cast (so a season keeps one URL per houseguest)."""
+    ep = _load_cast_epoch(user)
+    if not ep:
+        ep = secrets.token_hex(4)
+        try:
+            _save_cast_epoch(user, ep)
+        except OSError as e:
+            logger.info("[portraits] could not persist cast epoch for %s: %s", _safe_user(user), e)
+    return ep
+
+
+def _rotate_if_new_cast(prompts: list, user: Optional[str]) -> None:
+    """Wipe last season's portraits when a DIFFERENT cast now occupies the stored slots.
+
+    The engine reuses role ids (`npc:3`) every season, so a stored portrait whose NAME no longer
+    matches the incoming prompt for the same id means a new cast inherited an old face — exactly
+    what happens when a reset's portrait scrub was skipped or failed (root cause #1/#3). Wiping
+    here both clears the stale file (so generate-once regenerates the slot) and drops the old
+    epoch sidecar (so `_ensure_cast_epoch` mints a fresh URL version). A no-op for a fresh dir or
+    a same-season backfill (matching names) — so a season's portraits are generated once and persist.
+    """
+    manifest = load_manifest(user)
+    if not manifest:
+        return
+    for entry in prompts:
+        if not isinstance(entry, dict):
+            continue
+        hid = entry.get("houseguestId") or entry.get("id")
+        if not hid:
+            continue
+        sid = _safe_id(str(hid))
+        if sid == PLAYER_PORTRAIT_ID:
+            continue  # the player's portrait is account-level — never the rotation trigger
+        prev = manifest.get(sid)
+        if not isinstance(prev, dict):
+            continue
+        prev_name = str(prev.get("name") or "").strip().casefold()
+        new_name = str(entry.get("name") or "").strip().casefold()
+        if prev_name and new_name and prev_name != new_name:
+            logger.info(
+                "[portraits] new cast detected for %s (slot %s: %r -> %r) — wiping stale portraits",
+                _safe_user(user), sid, prev.get("name"), entry.get("name"),
+            )
+            scrub_user(user)  # remove every stale face + manifest + the old epoch sidecar
+            return
+
+
 def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
     """The HTTP ref the browser uses for a stored portrait, or None if none is stored.
 
@@ -427,7 +510,11 @@ def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
         return None
     if not (user_portrait_dir(user) / fname).exists():
         return None
-    return f"/api/orwell/portrait/{_safe_id(houseguest_id)}"
+    ref = f"/api/orwell/portrait/{_safe_id(houseguest_id)}"
+    # Stamp the per-cast version so a new season's reused id (`npc:3`) can never serve a
+    # browser-cached face from the prior cast (root cause #1/#2). Stable within a season.
+    epoch = _load_cast_epoch(user)
+    return f"{ref}?v={epoch}" if epoch else ref
 
 
 def portrait_file(user: Optional[str], houseguest_id: str) -> Optional[Path]:
@@ -830,6 +917,7 @@ def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: s
     (the player's literal cropped photo — LOCKED: the regenerate lever never discards it)."""
     d = user_portrait_dir(user)
     d.mkdir(parents=True, exist_ok=True)
+    _ensure_cast_epoch(user)  # the per-cast URL version exists the moment any portrait is persisted
     filename = f"{_safe_id(houseguest_id)}.png"
     (d / filename).write_bytes(png)
     manifest = load_manifest(user)
@@ -1172,6 +1260,15 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     """
     if not isinstance(prompts, list) or not prompts:
         return {"generated": 0, "skipped": 0, "total": 0}
+
+    # Cross-season hygiene (root cause #1/#3): if a DIFFERENT cast now occupies this user's
+    # portrait slots (the engine reuses role ids like `npc:3` every season), last season's
+    # faces survived a reset — wipe them so no new houseguest inherits an old face and
+    # generate-once regenerates the slot. A no-op for a same-season run, so each houseguest
+    # keeps ONE persisted image all season (generate-once preserved). The cache-busting cast
+    # epoch is minted lazily in `_write_portrait` (only once something is actually persisted,
+    # so "no image model" stays a true no-op — no dir, no artifacts).
+    _rotate_if_new_cast(prompts, user)
 
     generated = 0
     skipped = 0

@@ -57,7 +57,7 @@ Non-interactive subcommands:
   orwell update-reset --yes      update (pull + rebuild) THEN OOBE reset, KEEP the API-key/LLM config
   orwell reset-game --yes        new season — clears games, keeps accounts + config
   orwell reset-oobe --yes        OOBE reset — back to first-run, KEEP the API-key/LLM config
-  orwell reset-factory --yes     factory reset — back to first-run OOBE (wipes the FE store)
+  orwell reset-factory --yes     factory reset — back to first-run OOBE, KEEP the API-key/LLM config
   orwell --help                  this help
 EOF
 }
@@ -198,7 +198,7 @@ do_reset_factory() {
     [[ "${1:-}" == "--yes" ]] || die "reset-factory is destructive — pass --yes to run it non-interactively."
     run "Factory reset" bash "${DEPLOY_DIR}/orwell-factory-reset.sh" --yes; return $?
   fi
-  wt_confirm_phrase "RESET" "FACTORY RESET — back to first-run onboarding.\n\nPERMANENTLY DELETES all game data AND the entire front-end store (accounts, sessions, settings, uploads).\n\nPRESERVED: only data/.env (ports, tokens, LLM keys).\n\nThe next visit starts at first-run OOBE." \
+  wt_confirm_phrase "RESET" "FACTORY RESET — back to first-run onboarding, KEEPING your LLM setup.\n\nPERMANENTLY DELETES all games AND the entire front-end store (accounts, sessions, settings, MCP configs, uploads, and EVERY cast portrait / avatar / headshot).\n\nPRESERVED: your API keys, selected models, and model defaults (+ data/.env).\n\nThe next visit starts at first-run OOBE — with an LLM already configured." \
     || { wt_msgbox "Cancelled — nothing was changed."; return 0; }
   run "Factory reset" bash "${DEPLOY_DIR}/orwell-factory-reset.sh" --yes
 }
@@ -238,7 +238,7 @@ while :; do
     restore       "Restore from a backup" \
     reset-game    "New season (keeps accounts + config)" \
     reset-oobe    "OOBE reset (back to OOBE, KEEP API keys)" \
-    reset-factory "Factory reset (back to OOBE, wipe everything)" \
+    reset-factory "Factory reset (back to OOBE, KEEP API keys + models)" \
     quit          "Quit" \
     || break
   case "$choice" in

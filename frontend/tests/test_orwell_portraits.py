@@ -189,10 +189,81 @@ def test_portrait_ref_points_at_route_only_when_file_exists(tmp_portraits, monke
 
     assert orwell_portraits.portrait_ref("fay", "npc:1") is None  # nothing yet
     _run(orwell_portraits.generate_and_store(_PROMPTS[:1] + [_PROMPTS[1]], "fay", record_beats=False))
-    assert orwell_portraits.portrait_ref("fay", "npc:1") == "/api/orwell/portrait/npc_1"
+    # The ref points at the route AND carries the per-cast cache-busting version (`?v=`).
+    ref = orwell_portraits.portrait_ref("fay", "npc:1")
+    epoch = orwell_portraits._load_cast_epoch("fay")
+    assert epoch and ref == f"/api/orwell/portrait/npc_1?v={epoch}"
     # A scrubbed file → ref goes back to None (no broken <img>).
     (tmp_portraits / "fay" / "npc_1.png").unlink()
     assert orwell_portraits.portrait_ref("fay", "npc:1") is None
+
+
+# --- cross-season: a NEW cast on REUSED role ids never inherits an old face ----------------
+# Root cause #1 (portrait id reused every season) + #3 (generate-once skips the new cast). The
+# engine hands out role ids (`npc:3`) that are byte-identical every season, so a reset whose
+# portrait scrub was skipped/failed leaves last season's face on the new houseguest at that id.
+
+def test_new_cast_on_reused_ids_wipes_and_regenerates_with_a_fresh_version(tmp_portraits, monkeypatch):
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    async def fake_gen(prompt, user, reference_png=None):
+        return b"PNG:" + prompt.encode()  # bytes track the prompt so we can spot a regen
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    cast_a = [
+        {"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "A-one"},
+        {"houseguestId": "npc:2", "name": "Houseguest Two", "prompt": "A-two"},
+    ]
+    _run(orwell_portraits.generate_and_store(cast_a, "u", record_beats=False))
+    bytes_a = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+    epoch_a = orwell_portraits._load_cast_epoch("u")
+    assert epoch_a and orwell_portraits.portrait_ref("u", "npc:1").endswith(f"?v={epoch_a}")
+
+    # A NEW season's cast lands on the SAME role ids with DIFFERENT names, and the reset's
+    # portrait scrub did NOT run (we deliberately do not call scrub_user — simulating the bug).
+    cast_b = [
+        {"houseguestId": "npc:1", "name": "Fresh Alpha", "prompt": "B-one"},
+        {"houseguestId": "npc:2", "name": "Fresh Beta", "prompt": "B-two"},
+    ]
+    summary = _run(orwell_portraits.generate_and_store(cast_b, "u", record_beats=False))
+
+    # The stale faces were wiped and regenerated for the new cast (root cause #1/#3 fixed)…
+    assert summary["generated"] == 2
+    bytes_b = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+    assert bytes_b == b"PNG:B-one" and bytes_b != bytes_a
+    assert orwell_portraits.load_manifest("u")["npc_1"]["name"] == "Fresh Alpha"
+    # …and the cache-busting version rotated, so a 24h-cached browser fetches the new face.
+    epoch_b = orwell_portraits._load_cast_epoch("u")
+    assert epoch_b and epoch_b != epoch_a
+    assert orwell_portraits.portrait_ref("u", "npc:1").endswith(f"?v={epoch_b}")
+
+
+def test_same_season_rerun_keeps_one_persisted_image_per_npc(tmp_portraits, monkeypatch):
+    """Generate-once is preserved WITHIN a season: one image per NPC persists, the URL version is
+    stable, and a re-run (backfill / restart) regenerates nothing — the requested behavior."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+    calls = []
+
+    async def fake_gen(prompt, user, reference_png=None):
+        calls.append(prompt)
+        return b"PNG:" + prompt.encode() + b":" + str(len(calls)).encode()
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    cast = [
+        {"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "one"},
+        {"houseguestId": "npc:2", "name": "Houseguest Two", "prompt": "two"},
+    ]
+    _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    bytes_first = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+    epoch_first = orwell_portraits._load_cast_epoch("u")
+    calls_after_first = len(calls)
+
+    # Same cast (same names): generate-once must hold — nothing regenerated, version unchanged.
+    summary = _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    assert summary["generated"] == 0 and summary["skipped"] == 2
+    assert len(calls) == calls_after_first  # no fresh generation calls
+    assert (tmp_portraits / "u" / "npc_1.png").read_bytes() == bytes_first  # same persisted image
+    assert orwell_portraits._load_cast_epoch("u") == epoch_first  # stable URL version all season
 
 
 # --- the cast roster route: name + status + portrait, Vault-free ------------------------
@@ -347,11 +418,21 @@ def test_scrub_user_and_scrub_all_remove_portraits(tmp_portraits, monkeypatch):
 
 
 def test_factory_reset_script_scrubs_portraits_dir():
-    """The deploy script names the portraits dir in its scrub (feature 0051)."""
+    """The reset scripts remove the cast portraits (feature 0051).
+
+    The factory reset delegates to orwell-oobe-reset.sh, which wipes the WHOLE front-end store
+    (portraits included) while keeping the LLM config — proven end-to-end in
+    test_factory_reset_keeps_llm_config.py. The game reset preserves the FE store, so it must
+    name the portraits dir explicitly.
+    """
     root = Path(__file__).resolve().parents[2]
     factory = (root / "deploy" / "orwell-factory-reset.sh").read_text()
+    oobe = (root / "deploy" / "orwell-oobe-reset.sh").read_text()
     game = (root / "deploy" / "orwell-game-reset.sh").read_text()
-    assert "portraits" in factory.lower()
-    assert "portraits" in game.lower()
+    # Factory reset hands off to the OOBE-reset implementation (which scrubs the FE store)…
+    assert "orwell-oobe-reset.sh" in factory
+    # …and that implementation wipes the front-end store wholesale (portraits live under it).
+    assert "scrubbing front-end store" in oobe.lower() or "fe_data_dir" in oobe.lower()
     # Game reset preserves the FE store, so it MUST name the portraits dir explicitly.
+    assert "portraits" in game.lower()
     assert "PORTRAITS_DIR" in game
