@@ -104,7 +104,7 @@ import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
-import { cloneSession } from "../../engine/sessionSnapshot";
+import { cloneSession, fastClone } from "../../engine/sessionSnapshot";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
@@ -134,6 +134,22 @@ const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-e
  */
 export class GameSessionAdapter implements GameSession {
   private house: GameHouse | null = null;
+  /**
+   * R3 — per-houseguest cache for the append-only soul arrays the snapshot export deep-clones every
+   * turn (`memory`/`emotionalHistory`). Both are append-only (every off-screen scene pushes a note; the
+   * arc samples grow each tick) — the ONLY in-place memory write is `replaceMemoryNote`, which now swaps
+   * the array reference so this `(ref,len)`-keyed cache invalidates. Keyed by houseguest id, each entry
+   * holds the LIVE source array ref + length + the produced clone. On the next export an UNCHANGED soul
+   * (same ref, same length) reuses its clone by reference — O(1) — so the export re-clones only the
+   * handful of souls actually touched that turn instead of every soul's full history (audit R3). The
+   * cached clone is never mutated (a grown source rebuilds a NEW array), so a baseline snapshot that
+   * still references the old clone keeps its point-in-time length — the non-degradation check stays
+   * exact. Cleared on `restore` (the live houseguest objects are replaced wholesale).
+   */
+  private readonly soulCloneCache = new Map<EntityId, {
+    memSrc: readonly string[]; memLen: number; memClone: string[];
+    histSrc: readonly number[]; histLen: number; histClone: number[];
+  }>();
   private week = 0;
   private phase = "setup";
   /**
@@ -624,7 +640,16 @@ export class GameSessionAdapter implements GameSession {
     const oldNote = deepProfileToVaultContent(target.id, prev);
     const newNote = deepProfileToVaultContent(target.id, next);
     const idx = target.soul.memory.lastIndexOf(oldNote);
-    if (idx >= 0) target.soul.memory[idx] = newNote; else target.soul.memory.push(newNote);
+    if (idx >= 0) {
+      // R3 — the ONLY in-place same-length memory write. Swap the array REFERENCE (not just the slot)
+      // so the snapshot clone cache's `(ref,len)` reuse key invalidates and the authored note is not
+      // lost behind a stale clone. The replacement is content-preserving in spirit (re-derived authored
+      // detail, never a deletion), so non-degradation still holds.
+      target.soul.memory = target.soul.memory.slice();
+      target.soul.memory[idx] = newNote;
+    } else {
+      target.soul.memory.push(newNote);
+    }
     this.soul?.recordToSoul(target.id, newNote);
 
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
@@ -790,8 +815,12 @@ export class GameSessionAdapter implements GameSession {
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
-      house: this.house ? cloneSession(this.house) : null,
-      live: this.live ? cloneSession(this.live) : null,
+      // R3 — the house is the per-turn export's dominant cost (each houseguest's append-only
+      // `soul.memory` is deep-cloned every turn). `cloneHouse` is byte-identical to `cloneSession`
+      // (JSON round-trip) but shares the unchanged souls' clones by reference, so the export re-clones
+      // only the souls touched this turn — not the whole, ever-growing history. See `soulCloneCache`.
+      house: this.house ? this.cloneHouse(this.house) : null,
+      live: this.live ? fastClone(this.live) : null,
       deals: this.deals.serialize(),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
@@ -823,8 +852,71 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
+  /**
+   * R3 — clone the house byte-identically to `cloneSession(house)` while reusing each UNCHANGED soul's
+   * append-only array clones (`memory`/`emotionalHistory`) by reference. The per-turn export used to
+   * JSON-serialize every houseguest's entire (ever-growing) memory every turn — the O(events) cost
+   * behind the late-season latency (audit R3). Per houseguest only the small bounded parts (character +
+   * soul scalars) are re-cloned each turn; the two big append-only arrays are re-sliced ONLY when their
+   * live source grew (or was rewritten — `replaceMemoryNote` swaps the array ref, invalidating the
+   * cache). An unchanged soul (same array ref + length) reuses its prior clone, so the export's
+   * per-turn work tracks the souls TOUCHED this turn, not the total accumulated history.
+   *
+   * Correctness: a cached clone is NEVER mutated in place — a grown source produces a fresh array — so a
+   * baseline snapshot still holding the old clone keeps its point-in-time length and the non-degradation
+   * checkpoint stays exact (baseline vs candidate counts differ precisely by what grew). Every cloned
+   * leaf is an immutable primitive (string/number), so sharing it across snapshots is safe.
+   */
+  private cloneHouse(house: GameHouse): GameHouse {
+    return {
+      player: this.cloneHouseguest(house.player),
+      npcs: house.npcs.map((n) => this.cloneHouseguest(n)),
+    } as GameHouse;
+  }
+
+  private cloneHouseguest<T extends GameHouse["player"] | GameHouse["npcs"][number]>(hg: T): T {
+    const memSrc = hg.soul.memory;
+    const histSrc = hg.soul.emotionalHistory ?? [];
+    const cached = this.soulCloneCache.get(hg.id as EntityId);
+    // Reuse the prior clone iff the live array is the SAME object at the SAME length (an append grows
+    // the length; `replaceMemoryNote` swaps the reference) — otherwise re-slice and re-cache. A slice
+    // is a faithful, independent clone of a `string[]`/`number[]` (immutable elements; no deep work).
+    const memClone = cached && cached.memSrc === memSrc && cached.memLen === memSrc.length
+      ? cached.memClone : memSrc.slice();
+    const histClone = cached && cached.histSrc === histSrc && cached.histLen === histSrc.length
+      ? cached.histClone : histSrc.slice();
+    this.soulCloneCache.set(hg.id as EntityId, {
+      memSrc, memLen: memSrc.length, memClone,
+      histSrc, histLen: histSrc.length, histClone,
+    });
+    // Clone the houseguest WITHOUT re-cloning the two big append-only arrays (the whole point — they are
+    // handled above). To stay BYTE-identical to `cloneSession(hg)` we must preserve the soul's ORIGINAL
+    // key ORDER (JSON.stringify is order-sensitive), so we clone each key in place and merely SUBSTITUTE
+    // the (reused-or-fresh) array clone for memory/emotionalHistory at their existing positions — never
+    // reorder. `fastClone` handles every other small, bounded field (the static character + soul scalars).
+    const soulSrc = hg.soul as unknown as Record<string, unknown>;
+    const soul: Record<string, unknown> = {};
+    for (const k in soulSrc) {
+      if (!Object.prototype.hasOwnProperty.call(soulSrc, k)) continue;
+      soul[k] = k === "memory" ? memClone
+        : k === "emotionalHistory" ? histClone
+        : fastClone(soulSrc[k]);
+    }
+    const hgSrc = hg as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k in hgSrc) {
+      if (!Object.prototype.hasOwnProperty.call(hgSrc, k)) continue;
+      out[k] = k === "soul" ? soul : fastClone(hgSrc[k]);
+    }
+    return out as unknown as T;
+  }
+
   /** Rebuild the live session from a durable snapshot (0030) — resume instead of reset. */
   restore(core: SessionCore): void {
+    // R3 — the live houseguest objects are replaced wholesale below, so the per-soul clone cache (keyed
+    // on the OLD array references) must be dropped; a stale clone could otherwise be reused for a new
+    // soul that happens to match a length, persisting the wrong history.
+    this.soulCloneCache.clear();
     this.house = core.house ? cloneSession(core.house) : null;
     this.week = core.week;
     this.phase = core.phase;
