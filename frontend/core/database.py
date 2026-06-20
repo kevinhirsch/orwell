@@ -1580,15 +1580,36 @@ def _migrate_seed_email_account():
         logging.getLogger(__name__).warning(f"seed email account migration: {e}")
 
 
+# ── Boot resilience (P1) ──────────────────────────────────────────────────────
+# A root-run reset can leave data/app.db root-owned / unreadable, the file can be
+# truncated/corrupt, or the data dir can be missing/inaccessible. init_db() runs at
+# IMPORT time (the bottom of this module), which app.py imports — so an UNCAUGHT
+# failure here used to abort the whole process, and /admin/status (the operator's
+# recovery surface) could not even be reached. The owner's ruling: "the status page
+# needs to be hardened. it should never refuse to connect." So init_db() now NEVER
+# raises: it records the failure in DB_INIT_ERROR and lets the app boot DEGRADED so
+# the status page + its recovery actions (Update / Reset / Update+Reset) stay
+# reachable and the operator can always act. A still-broken DB makes individual
+# DB-touching routes fail per-call (best-effort, as they already guard), not the
+# whole server.
+DB_INIT_ERROR: dict | None = None
+
+
+def db_init_error() -> dict | None:
+    """The recorded init_db() failure, or None when the DB initialized cleanly.
+
+    Read by the admin health/debug surfaces so a degraded boot is VISIBLE to the
+    operator (a clear diagnostic) instead of silently swallowed."""
+    return DB_INIT_ERROR
+
+
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
 # temporarily disabled around the migration workflow.
-def init_db():
-    """
-    Initialize the database by creating all tables.
-    Should be called when starting the application.
-    """
+def _init_db_inner():
+    """The real schema-create + migration sequence. May raise — the public
+    ``init_db()`` wrapper catches it so an import-time failure can never crash boot."""
     _migrate_model_endpoints()
     Base.metadata.create_all(bind=engine)
     _migrate_add_hidden_models_column()
@@ -1632,6 +1653,58 @@ def init_db():
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
     _migrate_backfill_task_folders()
+
+
+def init_db():
+    """Initialize the database — create tables + run migrations — but NEVER raise.
+
+    P1 boot resilience: this is called at import time (bottom of the module), so an
+    uncaught failure (root-owned/corrupt/unreadable app.db, a missing data dir, a
+    failed migration) would abort the whole front-end process and make /admin/status
+    unreachable exactly when the operator needs it to recover. Instead we degrade:
+    record the failure in DB_INIT_ERROR (visible to the admin health surfaces) and
+    let the app boot. Individual DB-touching routes already guard their own queries,
+    so a still-broken store fails per-call, not process-wide.
+
+    Best-effort self-heal first: ensure the data directory exists, so the single most
+    common breakage (the dir was wiped by a reset and never recreated) is fixed before
+    create_all even runs."""
+    global DB_INIT_ERROR
+    # Best-effort: make sure the SQLite parent dir exists before create_all tries to
+    # open the file. A missing dir is the cheapest, most common failure to self-heal.
+    try:
+        if DATABASE_URL.startswith("sqlite"):
+            db_path = DATABASE_URL.replace("sqlite:///", "")
+            if db_path and db_path != ":memory:":
+                parent = os.path.dirname(os.path.abspath(db_path))
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        _init_db_inner()
+        DB_INIT_ERROR = None
+    except BaseException as e:
+        # Record a clear, secret-free diagnostic and keep serving. We intentionally
+        # catch BaseException so even an odd low-level error (e.g. a permission/OS
+        # error surfacing oddly) can't take the process down at import time. The DB URL
+        # is scrubbed of any embedded credentials (postgres://user:pass@host) before it
+        # is recorded — the admin health surfaces read this dict.
+        import re as _re
+        safe_url = _re.sub(r"//[^/@\s]+:[^/@\s]+@", "//***@", DATABASE_URL)
+        DB_INIT_ERROR = {
+            "error": f"{type(e).__name__}: {e}",
+            "databaseUrl": safe_url,
+            "at": utcnow_naive().isoformat(),
+        }
+        try:
+            logging.getLogger(__name__).error(
+                "DATABASE INIT FAILED — booting DEGRADED so /admin/status stays reachable. "
+                "Recover via the status page (Reset / Update). Cause: %s: %s",
+                type(e).__name__, e,
+            )
+        except Exception:
+            pass
 
 
 def _migrate_backfill_task_folders():

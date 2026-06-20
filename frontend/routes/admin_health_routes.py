@@ -8,24 +8,38 @@ silent placeholder failures were the trigger). Two read-only, admin-gated routes
   GET /api/admin/health        — one aggregated snapshot: the engine's /health
                                  (uptime, call counters, the G1 recent-failure ring,
                                  embeddings provider + degrade flag) measured with
-                                 round-trip latency, the FE store stats, the FE's own
-                                 view of the engine (lastError), whether the two
-                                 tiers AGREE, and the image-generation provider state.
-  GET /api/admin/debug-bundle  — the same snapshot as a downloadable JSON file plus
-                                 a config section with every secret-shaped value
-                                 REDACTED (tokens/keys/passwords never leave the box).
+                                 round-trip latency, the FE store stats (incl. a
+                                 DEGRADED-boot flag when the DB failed to init), the
+                                 FE's own view of the engine (lastError), whether the
+                                 two tiers AGREE, and the image-generation provider
+                                 state. NEVER hard-fails (P1) — it renders what it can.
+  GET /api/admin/debug-bundle  — the same snapshot as a downloadable JSON file, BEEFED
+                                 UP (owner: "let's beef up that file") with: FE + engine
+                                 versions/build, recent app logs + recent errors, the
+                                 ops-status files, engine /health + reachability, the
+                                 REDACTED settings/provider config, a Vault-free game/
+                                 session-state summary (counts/phase/week only), system
+                                 info (python/node/disk/memory), feature flags, and
+                                 recent chat-session METADATA (never transcripts).
 
 Boundaries:
   * Vault-free by construction — everything here is operational metadata (the engine's
     /health carries tool names + sanitized error classes + timings only; G1 engine side).
-  * READ-ONLY — no mutating verb exists on this surface.
-  * Secrets never cross: the bundle redacts by key pattern BEFORE serialization.
+    The game-state summary is reduced to scalar counts/phase — no roster, no Vault/soul.
+  * READ-ONLY — no mutating verb exists on this surface (the ops POST triggers excepted).
+  * Secrets never cross: the bundle redacts by key pattern BEFORE serialization, AND
+    every value that crosses is a name/model/url/count — never an api key, token, or .env.
+  * P1 resilience: the status page + its health endpoints never refuse to connect or 500;
+    a broken DB, a down engine, or partial state degrade into a diagnostic, not a wall.
 """
 
 import inspect
 import logging
 import os
+import platform
 import re
+import shutil
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -95,8 +109,22 @@ async def _engine_raw_health() -> tuple[dict | None, int | None]:
 
 
 def _store_stats() -> dict:
-    """Light FE-store counts (sessions/messages + db size) — best-effort, never raises."""
+    """Light FE-store counts (sessions/messages + db size) — best-effort, never raises.
+
+    P1: surfaces the DEGRADED-boot flag when init_db() failed (the operator's signal that
+    the store is broken and the app is serving in recovery mode), so the status page can
+    say so and the recovery buttons remain the obvious next action."""
     stats: dict = {}
+    # The degraded-boot diagnostic comes first — it explains WHY the counts below may be
+    # missing (a broken/inaccessible DB the app booted past on purpose, P1).
+    try:
+        from core.database import db_init_error
+        err = db_init_error()
+        if err:
+            stats["degraded"] = True
+            stats["initError"] = err.get("error")
+    except Exception:
+        pass
     try:
         from core.database import SessionLocal, Session as DbSession, ChatMessage as DbChatMessage
         db = SessionLocal()
@@ -135,6 +163,254 @@ async def _image_state(user: str | None) -> dict:
     except Exception:
         state["portraits"] = None
     return state
+
+
+# ── Debug-bundle enrichment (owner: "let's beef up that file") ────────────────
+# Every helper below is best-effort and Vault-free by construction: it returns ONLY
+# operational metadata (versions, counts, names, models, urls, phases, sizes) and
+# NEVER an api key, token, .env value, transcript body, roster, or any Vault/soul
+# state. A failure reads as an {"error": "..."} string, never a 500 — the bundle is
+# the operator's last resort, so it must always assemble.
+
+def _versions() -> dict:
+    """FE + engine build/version strings (no secrets) for one-glance triage."""
+    out: dict = {}
+    try:
+        from src.orwell_version import get_display_version
+        out["frontend"] = get_display_version()
+    except Exception as e:
+        out["frontend"] = f"error: {type(e).__name__}"
+    try:
+        from core.constants import APP_VERSION
+        out["frontendApp"] = APP_VERSION
+    except Exception:
+        pass
+    return out
+
+
+def _recent_logs(limit: int = 200) -> dict:
+    """The tail of the live FE log ring + a recent-ERRORs slice, so a pasted bundle
+    carries the in-process log without the operator hunting for files. The ring already
+    redacts nothing sensitive (it is the app's own log lines), but we still cap the size."""
+    out: dict = {"frontendTail": [], "recentErrors": []}
+    try:
+        _, lines = log_rings.LIVE.since(0)
+        tail = lines[-limit:]
+        out["frontendTail"] = [
+            {"ts": l.get("ts"), "level": l.get("level"), "logger": l.get("logger"),
+             "msg": (l.get("msg") or "")[:1000]}
+            for l in tail
+        ]
+        out["recentErrors"] = [
+            e for e in out["frontendTail"]
+            if str(e.get("level") or "").upper() in ("ERROR", "CRITICAL", "WARNING")
+        ][-60:]
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
+def _ops_status_files() -> dict:
+    """The ops-status files under the data dir: which log basenames exist, their sizes,
+    and a short TAIL of each (the most recent maintenance/diagnostic output). These are the
+    app's own ops logs — operational, not secret. Sizes are bounded; tails are clipped."""
+    out: dict = {"updateTriggerInstalled": False, "logs": []}
+    data_dir = _data_dir()
+    try:
+        out["updateTriggerInstalled"] = os.path.isdir(os.path.join(data_dir, "ops"))
+    except Exception:
+        pass
+    for name in _log_files():
+        entry: dict = {"name": name}
+        try:
+            path = os.path.join(data_dir, name)
+            entry["sizeBytes"] = os.path.getsize(path)
+            with open(path, "rb") as fh:
+                size = entry["sizeBytes"]
+                fh.seek(max(0, size - 4096))
+                chunk = fh.read(4096)
+            entry["tail"] = chunk.decode("utf-8", "replace").splitlines()[-30:]
+        except Exception as e:
+            entry["error"] = f"{type(e).__name__}: {e}"
+        out["logs"].append(entry)
+    return out
+
+
+def _provider_config() -> dict:
+    """The configured LLM/image providers — REDACTED: names, models, and base-urls only,
+    NEVER the api key. Pulled from the model_endpoints table (the key column is dropped here,
+    not just redacted). Best-effort; an unreadable store reads as an error string."""
+    out: dict = {"endpoints": []}
+    try:
+        from core.database import SessionLocal, ModelEndpoint
+        db = SessionLocal()
+        try:
+            for ep in db.query(ModelEndpoint).all():
+                # Whitelist of non-secret fields ONLY — api_key is never read.
+                out["endpoints"].append({
+                    "name": getattr(ep, "name", None),
+                    "baseUrl": getattr(ep, "base_url", None),
+                    "modelType": getattr(ep, "model_type", None),
+                    "endpointKind": getattr(ep, "endpoint_kind", None),
+                    "isEnabled": bool(getattr(ep, "is_enabled", False)),
+                    "supportsTools": getattr(ep, "supports_tools", None),
+                    "hasApiKey": bool(getattr(ep, "api_key", None)),  # presence only, never the value
+                })
+        finally:
+            db.close()
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
+async def _game_state_summary(user: str | None) -> dict:
+    """A Vault-free, SCALAR-ONLY game/session summary: started?, phase, week, whose-turn,
+    cast/jury counts, the player's status/placement. Reduced from the engine's public
+    ceremony projection (gameStatus / getGameState) — NO roster names, NO Vault/soul/secret
+    state. Pre-game and engine-down both read as a clean status, never a 500."""
+    out: dict = {"available": False}
+    try:
+        st = await orwell_engine.game_status(user=user)
+        if isinstance(st, dict):
+            if st.get("started") is False:
+                return {"available": True, "started": False}
+            out["available"] = True
+            out["started"] = bool(st.get("started", True))
+            for k in ("week", "phase", "day"):
+                if k in st:
+                    out[k] = st[k]
+            # Whose-turn / pending decision SHAPE only — a key/kind, never content.
+            pend = st.get("pending")
+            if isinstance(pend, dict):
+                out["pendingKind"] = pend.get("kind") or pend.get("type")
+            elif pend is not None:
+                out["pendingKind"] = str(pend)[:60]
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    # Counts come from getGameState (still Vault-free) but reduced to integers only.
+    try:
+        gs = await orwell_engine.get_game_state(user=user)
+        if isinstance(gs, dict) and gs.get("started") is not False:
+            roster = gs.get("houseguests") or gs.get("cast") or gs.get("roster")
+            if isinstance(roster, list):
+                out["castCount"] = len(roster)
+                out["activeCount"] = sum(
+                    1 for h in roster
+                    if isinstance(h, dict) and (h.get("status") or "active") == "active"
+                )
+            jury = gs.get("jury")
+            if isinstance(jury, list):
+                out["juryCount"] = len(jury)
+            player = gs.get("player")
+            if isinstance(player, dict):
+                out["playerStatus"] = player.get("status")
+    except Exception:
+        # The scalar summary above is enough; a counts failure is not worth surfacing twice.
+        pass
+    return out
+
+
+def _system_info() -> dict:
+    """Host/runtime info: python + node versions, platform, disk + memory headroom. All
+    operational — no secrets. Memory comes from /proc/meminfo (Linux) when psutil is absent."""
+    out: dict = {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "pid": os.getpid(),
+    }
+    try:
+        import subprocess
+        node = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=3)
+        out["node"] = (node.stdout or "").strip() or (node.stderr or "").strip()[:40]
+    except Exception:
+        out["node"] = None
+    try:
+        du = shutil.disk_usage(_data_dir())
+        out["disk"] = {"totalMb": du.total // (1024 * 1024),
+                       "freeMb": du.free // (1024 * 1024),
+                       "usedPct": round(100 * du.used / du.total, 1) if du.total else None}
+    except Exception:
+        pass
+    try:
+        # Linux /proc/meminfo — kB. Avoids a hard psutil dependency.
+        meminfo: dict = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                kb = rest.strip().split(" ")[0]
+                if kb.isdigit() and key in ("MemTotal", "MemAvailable", "SwapTotal"):
+                    meminfo[key] = int(kb)
+        if meminfo:
+            out["memory"] = {"totalMb": meminfo.get("MemTotal", 0) // 1024,
+                             "availableMb": meminfo.get("MemAvailable", 0) // 1024,
+                             "swapTotalMb": meminfo.get("SwapTotal", 0) // 1024}
+    except Exception:
+        pass
+    return out
+
+
+def _feature_flags() -> dict:
+    """The build/feature posture: game-build on?, auth on?, embeddings provider, localhost
+    bypass. Pure booleans/labels — never a secret value."""
+    out: dict = {}
+    try:
+        from src.settings import game_build_enabled
+        out["gameBuild"] = bool(game_build_enabled())
+    except Exception:
+        out["gameBuild"] = None
+    out["authEnabled"] = os.getenv("AUTH_ENABLED", "true").lower() != "false"
+    out["localhostBypass"] = os.getenv("LOCALHOST_BYPASS", "false").lower() == "true"
+    out["embeddings"] = os.getenv("ORWELL_EMBEDDINGS") or "fake"
+    out["multiuser"] = bool(os.getenv("ORWELL_ENGINE_MULTIUSER"))
+    return out
+
+
+def _session_metadata(limit: int = 25) -> dict:
+    """Recent chat-session METADATA — id, name, owner, model, message count, timestamps —
+    so a playtest report carries which sessions exist WITHOUT shipping a single transcript
+    line. Strictly counts/labels: no message content ever leaves the box. Best-effort."""
+    out: dict = {"recent": []}
+    try:
+        from core.database import SessionLocal, Session as DbSession
+        db = SessionLocal()
+        try:
+            rows = (db.query(DbSession)
+                      .order_by(DbSession.last_accessed.desc())
+                      .limit(limit).all())
+            for s in rows:
+                out["recent"].append({
+                    "id": getattr(s, "id", None),
+                    "name": getattr(s, "name", None),  # a user-chosen title, not transcript content
+                    "owner": getattr(s, "owner", None),
+                    "model": getattr(s, "model", None),
+                    "messageCount": getattr(s, "message_count", None),
+                    "mode": getattr(s, "mode", None),
+                    "createdAt": s.created_at.isoformat() if getattr(s, "created_at", None) else None,
+                    "lastAccessed": s.last_accessed.isoformat() if getattr(s, "last_accessed", None) else None,
+                })
+        finally:
+            db.close()
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
+async def _bundle_extras(user: str | None) -> dict:
+    """Assemble the BEEFED-UP sections of the debug bundle. Each is best-effort and
+    Vault-free; the whole assembly is wrapped so the bundle always serializes."""
+    extras: dict = {}
+    extras["versions"] = _versions()
+    extras["systemInfo"] = _system_info()
+    extras["featureFlags"] = _feature_flags()
+    extras["logs"] = _recent_logs()
+    extras["opsStatus"] = _ops_status_files()
+    extras["providerConfig"] = _provider_config()
+    extras["sessions"] = _session_metadata()
+    try:
+        extras["gameState"] = await _game_state_summary(user)
+    except Exception as e:
+        extras["gameState"] = {"error": f"{type(e).__name__}: {e}"}
+    return extras
 
 
 async def _health_snapshot(user: str | None) -> dict:
@@ -192,7 +468,22 @@ def setup_admin_health_routes() -> APIRouter:
             user = effective_user(request)
         except Exception:
             pass
-        return await _health_snapshot(user)
+        # P1: the status page polls this every 10s and depends on it NEVER hard-failing —
+        # the recovery surface must stay reachable when the engine/DB is broken. The
+        # snapshot helpers are already best-effort; this is the final belt-and-braces so
+        # an unexpected error returns a 200 diagnostic, not a 500 that blanks the page.
+        try:
+            return await _health_snapshot(user)
+        except Exception as e:
+            logger.warning("admin health snapshot failed (degraded): %s", e)
+            return {
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "engine": {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                "frontend": {"lastError": None, "store": {}},
+                "tiersAgree": False,
+                "images": {"available": False},
+                "error": "health snapshot degraded — recovery actions remain available",
+            }
 
     @router.get("/logs/sources")
     async def admin_log_sources(request: Request):
@@ -356,15 +647,36 @@ def setup_admin_health_routes() -> APIRouter:
             user = effective_user(request)
         except Exception:
             pass
-        snapshot = await _health_snapshot(user)
+        # P1: the bundle is the operator's last-resort diagnostic, so it must ALWAYS
+        # assemble — never 500. Each section is best-effort; the snapshot/extras calls
+        # are guarded so a single broken probe degrades to an error string, not a wall.
+        try:
+            snapshot = await _health_snapshot(user)
+        except Exception as e:
+            snapshot = {"generatedAt": datetime.now(timezone.utc).isoformat(),
+                        "error": f"health snapshot failed: {type(e).__name__}: {e}"}
+        try:
+            extras = await _bundle_extras(user)
+        except Exception as e:
+            extras = {"error": f"bundle extras failed: {type(e).__name__}: {e}"}
         bundle = {
             "bundle": "orwell-debug",
-            "generatedAt": snapshot["generatedAt"],
+            "schema": 2,  # bumped: the beefed-up bundle (versions/logs/ops/system/sessions/gameState)
+            "generatedAt": snapshot.get("generatedAt") or datetime.now(timezone.utc).isoformat(),
             "health": snapshot,
             # The engine's recent-failure ring, hoisted for one-glance triage
             # (tool name + sanitized error class + timing only — G1 engine side).
             "recentFailures": (snapshot.get("engine") or {}).get("recentFailures", []),
             "config": _redact_config(dict(os.environ)),
+            # ── BEEFED-UP sections (owner) — all Vault-free + secret-free by construction ──
+            "versions": extras.get("versions"),
+            "systemInfo": extras.get("systemInfo"),
+            "featureFlags": extras.get("featureFlags"),
+            "logs": extras.get("logs"),
+            "opsStatus": extras.get("opsStatus"),
+            "providerConfig": extras.get("providerConfig"),
+            "gameState": extras.get("gameState"),
+            "sessions": extras.get("sessions"),
         }
         import json as _json
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -415,6 +727,10 @@ _STATUS_PAGE = """<!doctype html>
 <body>
 <h1>ORWELL · STATUS</h1>
 <div class="sub">Self-contained ops page — renders even when the app shell is broken. Polls every 10s. <span id="ts"></span></div>
+<!-- P1: the DEGRADED-boot banner. Shown only when the FE booted past a broken/inaccessible
+     data store (init_db failed) — the operator's cue that the recovery actions below are the
+     next step. Hidden when the store is healthy. -->
+<div id="degraded" style="display:none;margin:0 0 14px;border:1px solid #7a3b3b;border-radius:8px;padding:10px 12px;background:#231414;max-width:760px;color:#f0a6a6"></div>
 <div class="grid" id="grid">Loading…</div>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
@@ -474,9 +790,21 @@ function render(d) {
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],
     ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "") + (img.portraits && img.portraits.total ? " · portraits " + (img.portraits.missing ? '<span class="warn">' : '<span class="ok">') + esc(img.portraits.present) + "/" + esc(img.portraits.total) + "</span>" : "")],
     ["Tool calls", esc(tc.total ?? 0) + " total · " + esc(tc.failed ?? 0) + " failed"],
-    ["Front-end store", esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
+    ["Front-end store", (st.degraded ? B(false, "DEGRADED") + " · " : "") + esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
   ];
   document.getElementById("grid").innerHTML = rows.map(r => '<div class="k">' + esc(r[0]) + "</div><div>" + r[1] + "</div>").join("");
+  // P1: surface a clear DEGRADED-boot banner when the data store failed to initialize.
+  // The app booted past it on purpose so this page stays reachable — point the operator at
+  // the recovery actions above.
+  const deg = document.getElementById("degraded");
+  if (st.degraded) {
+    deg.style.display = "";
+    deg.innerHTML = "<strong>Data store DEGRADED.</strong> The front-end booted in recovery mode because the database could not be initialized" +
+      (st.initError ? " — <code>" + esc(st.initError) + "</code>" : "") +
+      ". The app is serving so you can act: use <strong>Update</strong> (if a fix is merged) or <strong>Factory Reset (OOBE)</strong> below to recover. Your API-key / LLM config is preserved by the reset.";
+  } else {
+    deg.style.display = "none";
+  }
   const fails = (eng.recentFailures || []).slice().reverse();
   const feLast = (d.frontend || {}).lastError;
   const fmt = ms => { try { return new Date(ms).toISOString().slice(0, 19).replace("T", " "); } catch { return ""; } };
