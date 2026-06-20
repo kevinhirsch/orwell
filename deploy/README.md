@@ -130,6 +130,46 @@ one script that deliberately **does**.
 > `.env` and handles both layouts** — an earlier version only scrubbed `data/` and so left the
 > game intact on default installs.
 
+### OOBE reset (back to first-run, **keep the API-key / LLM config**)
+
+The "clear everything but my LLM setup" tier — and the one the admin status page's **Factory
+Reset (OOBE)** button runs. It wipes **exactly** what a factory reset does (every game sandbox
+*and* the whole front-end store — all accounts, chats, sessions, memory, MCP server configs,
+uploads, portraits, and every user setting) **except** it preserves the configuration an
+operator should never have to re-enter:
+
+* the configured **LLM / image providers** (the `model_endpoints` table in the FE `app.db`),
+* the **LLM-selection settings** (which endpoint/model is the default for chat / utility /
+  research / vision / image),
+* the **encryption keys** that decrypt them (`frontend/data/.app_key`, `.key`) and the legacy
+  `frontend/data/api_keys.json`,
+* and — like every reset — the engine config **`data/.env`** (ports, tokens, the deploy
+  `GIT_TOKEN`, LLM keys), which is **never touched**.
+
+So after the reset the app sits at first-run onboarding (account creation / casting) **with an
+LLM already configured**. Same host-aware bridge and flags as the other resets:
+
+```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash deploy/orwell-oobe-reset.sh
+bash deploy/orwell-oobe-reset.sh --dry-run
+bash deploy/orwell-oobe-reset.sh --yes
+
+# or directly inside the container
+bash /opt/orwell/deploy/orwell-oobe-reset.sh             # prompts: type RESET
+bash /opt/orwell/deploy/orwell-oobe-reset.sh --dry-run   # preview what would be removed
+
+# or from the control panel
+orwell reset-oobe --yes
+```
+
+The selective FE-store surgery (export the `model_endpoints` rows + the LLM-selection settings,
+wipe the rest, rebuild a fresh `app.db` / `settings.json`) is done by the quarantined Python
+helper `frontend/scripts/oobe_reset.py`; the shell script orchestrates the service stop, the
+file keep-list, the engine-save scrub, and the restart. The encrypted provider keys are carried
+**verbatim** (no re-encryption, no plaintext ever materialized) so they still decrypt under the
+preserved `.app_key`. Use the **factory reset** (below) when you want the LLM config gone too.
+
 ### Game reset (new season, keep accounts + LLM config)
 
 The lighter sibling of the factory reset: it removes **only game progression** — every per-user
@@ -165,8 +205,16 @@ fixed script** (`deploy/orwell-update.sh`) via a oneshot root service, appending
 to `data/ops-update.log` — the same `data/*.log` surface the status page already tails (G1b).
 The runner removes the flag *before* the run (a finished run never re-triggers; a request that
 lands mid-run earns exactly one follow-up run) and holds a `flock` so overlapping triggers
-no-op. The web tier chooses *when*, never *what*. Factory reset is deliberately **not**
-web-triggerable (pending an explicit product go).
+no-op. The web tier chooses *when*, never *what*.
+
+The **OOBE reset** (keep-API-keys, above) is web-triggerable through the **same pattern**: the
+admin status page's **Factory Reset (OOBE)** button (`POST /api/admin/factory-reset`,
+admin-gated, demanding a typed **`RESET`** in the browser first) drops the existence-only flag
+`data/ops/factory-reset-requested`, and the root-side path unit `orwell-ops-factory-reset.path`
+runs the **one fixed script** `deploy/orwell-oobe-reset.sh --yes` via its oneshot root service,
+appending output to `data/ops-factory-reset.log`. The full-wipe **factory reset**
+(`orwell-factory-reset.sh`, which also drops the LLM config) is deliberately **not**
+web-triggerable — only via the shell / control panel.
 
 The status page also carries a prominent **"Update Orwell (pull + rebuild + restart)"** button
 (`POST /api/admin/update`, admin-gated, fixed command — no user input). It confirms first, then
@@ -298,10 +346,14 @@ CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
 | `orwell-install.sh` | apt + Node 22 (apt-signed repo, no `curl \| bash`) + Python; checkout; verify + `npm run build`; front-end deps from the **pinned `requirements.lock.txt`** (E83); write `.env` (engine token, multi-user mode); register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
 | `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) via its **local copy** (or the in-container copy — never a GitHub fetch); inside the container it runs directly. `--set-token` persists/rotates the deploy PAT. Auto-detects the app dir (`/opt/orwell`, or legacy `/opt/bbai`) and the matching service names. |
 | `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
+| `orwell-oobe-reset.sh` | **Wipe back to OOBE, but KEEP the API-key / LLM config.** Same scrub as the factory reset (all accounts, chats, memory, MCP configs, settings, uploads, and every game) **except** it preserves the configured LLM/image providers (`model_endpoints`), the LLM-selection settings, and the keys that decrypt them (`.app_key`, `.key`, `api_keys.json`) — so an LLM is still configured at OOBE. Never touches `data/.env`. Delegates the FE-store surgery to `frontend/scripts/oobe_reset.py`. This is the script the admin **Factory Reset (OOBE)** button runs. Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
+| `frontend/scripts/oobe_reset.py` | The keep-API-keys FE-store surgery: export `model_endpoints` + the LLM-selection settings, rebuild a fresh `app.db` / `settings.json` carrying ONLY those, so no other table survives. Stdlib-`sqlite3` only (no SQLAlchemy/`core`); idempotent; honors `DATA_DIR` / `DATABASE_URL`. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
 | `systemd/orwell-ops-update.path` | Root-side watcher (G19b): `PathExists=` on `data/ops/update-requested` (written by the sandboxed FE) → starts the runner. Existence-only — flag content is never parsed or executed. |
 | `systemd/orwell-ops-update.service` | Oneshot **root** runner (G19b — deliberately unsandboxed; the unit documents why): removes the flag first, takes a `flock`, runs **only** `deploy/orwell-update.sh`, output appended to `data/ops-update.log` (tailed live by the status page). |
+| `systemd/orwell-ops-factory-reset.path` | Root-side watcher for the admin **Factory Reset (OOBE)** button: `PathExists=` on `data/ops/factory-reset-requested` → starts the reset runner. Existence-only, same contract as the update watcher. |
+| `systemd/orwell-ops-factory-reset.service` | Oneshot **root** runner: removes the flag first, takes a `flock`, runs **only** `deploy/orwell-oobe-reset.sh --yes` (the browser already confirmed `RESET`), output appended to `data/ops-factory-reset.log`. |
 
 ## Proxmox guest tools
 
