@@ -647,14 +647,32 @@ export function renderGameContext(view: GameStateView): string {
           return t >= 2 ? `${p.name} (lingering, ${tenureWord(t)})` : `${p.name} (${tenureWord(t)})`;
         }).join(", ")
       : "no one — you have this room to yourself";
-    const nearby = wa.nearby.filter((n) => n.present.length).map((n) => `${roomLabel(n.room)}: ${n.present.map((p) => p.name).join(", ")}`);
+    // L-LOC: EVERY adjacent room, occupied AND empty — the engine's occupancy for each room the player
+    // can see into is a FACT to voice, so the narrator never invents "empty" for a room the engine
+    // populated (the live-playtest bug: the panel showed houseguests in a room the narrator called empty,
+    // and bent it to match the player's wish for "a room to themselves"). This reads the SAME Vault-free
+    // `whereabouts` projection the FE "The House" panel renders — by construction it carries only the
+    // player's room + adjacent rooms, so nothing the player can't legitimately observe ever appears.
+    const nearby = wa.nearby.map((n) =>
+      n.present.length
+        ? `    · ${roomLabel(n.room)}: ${n.present.map((p) => p.name).join(", ")}.`
+        : `    · ${roomLabel(n.room)}: empty.`,
+    );
     return [
-      "- WHERE YOU ARE (engine truth — voice THIS room and THESE people; NEVER invent positions, room",
-      "  changes, or \"still to arrive\" houseguests — the whole cast is already in the house):",
+      "- WHERE YOU ARE (engine truth — voice THIS room and THESE people EXACTLY; NEVER invent positions,",
+      "  room changes, or \"still to arrive\" houseguests — the whole cast is already in the house):",
       `    Your room: the ${roomLabel(wa.room)} (you've been here ${tenureWord(wa.turnsHere)}).`,
       `    With you: ${here}.`,
-      nearby.length ? `    One room over: ${nearby.join("  ·  ")}.` : "    Adjacent rooms are empty (or you can't see in).",
-      "    You only see/hear your room and the rooms next to it — do NOT place anyone elsewhere in the scene.",
+      ...(nearby.length
+        ? ["    One room over (each adjacent room and EXACTLY who is in it — voice this occupancy, never invent it):", ...nearby]
+        : ["    No adjacent rooms are in view."]),
+      "    THIS IS THE WHOLE OF WHAT THE PLAYER CAN SEE OR HEAR: your room and the rooms next to it. Whether",
+      "    a room is full or empty is the GAME's to say, never yours — voice EXACTLY the people listed for a",
+      "    room, and call a room empty ONLY when it is listed empty above. If the player checks, glances into,",
+      "    or asks about an adjacent room, report the people the engine lists there (or its emptiness) — do",
+      "    NOT improvise its contents, and NEVER bend a room to be empty or occupied to fit what the player",
+      "    wants (e.g. a room to themselves). Do not place anyone in a room the engine did not put them in,",
+      "    and do not put anyone elsewhere in the house in the scene at all.",
     ];
   })();
   return [
