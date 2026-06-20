@@ -2016,19 +2016,74 @@ def main() -> int:
                   "P1: the chat input is LOCKED pre-image (disabled)")
             check(f4.evaluate("() => { const s = document.querySelector('.send-btn'); return !!(s && s.disabled); }") is True,
                   "P1: the send affordance is LOCKED pre-image (disabled)")
-            check(f4.evaluate("!!document.getElementById('orwell-chat-gate-note')") is True,
-                  "P1: an inline note explains the cast-photo gate")
+            # P1 OOBE overhaul: the cast-photo step is a PROPER OrwellWindow (composes the kit),
+            # title-cased, and — because it GATES the chat — NON-DISMISSABLE (no close/minimize
+            # control). The single instruction lives in the window.
+            f4.wait_for_timeout(400)  # let the headshot window's route() mount it
+            cast_win = f4.evaluate("""() => {
+              const el = document.getElementById('orwell-headshot');
+              if (!el) return { mounted: false };
+              return {
+                mounted: true,
+                kit: el.classList.contains('ow-window') && el.hasAttribute('data-ow-window'),
+                title: (el.querySelector('.ow-title') || {}).textContent || '',
+                hasBody: !!el.querySelector('.ow-body'),
+                close: !!el.querySelector('.ow-close'),
+                min: !!el.querySelector('.ow-min'),
+                lead: !!el.querySelector('.hs-lead'),
+              };
+            }""")
+            check(cast_win.get("mounted") is True and cast_win.get("kit") is True,
+                  f"P1: the cast-photo step is a kit OrwellWindow ({cast_win})")
+            check(cast_win.get("title", "").strip().lower() == "your cast photo",
+                  f"P1: the cast-photo window is title-cased ({cast_win})")
+            check(cast_win.get("close") is False and cast_win.get("min") is False,
+                  f"P1: the gating cast-photo window is NON-DISMISSABLE (no close/minimize) ({cast_win})")
+            check(cast_win.get("lead") is True,
+                  f"P1: the ONE cast-photo instruction lives in the window body ({cast_win})")
+            # the redundant inline banner note is GONE (no banner-vs-card-vs-placeholder dupes)
+            check(f4.evaluate("!document.getElementById('orwell-chat-gate-note')") is True,
+                  "P1: the redundant inline gate banner is removed (consolidated to the window)")
             check(f4.evaluate("(document.getElementById('message').getAttribute('placeholder') || '')")
                   == "Add your cast photo to begin",
-                  "P1: the composer placeholder states the gate reason")
+                  "P1: the composer placeholder states the gate reason (the minimal hint)")
+            # DE-OVERLAP (item 2): the splash tagline + rotating tip are SUPPRESSED during the
+            # cast-photo step (ow-onboarding / ow-casting-headshot-open), and the cast-photo
+            # window does not intersect the visible welcome brand mark.
+            overlap = f4.evaluate("""() => {
+              const onb = document.body.classList.contains('ow-onboarding')
+                       || document.body.classList.contains('ow-casting-headshot-open');
+              const tip = document.getElementById('welcome-tip');
+              const sub = document.getElementById('welcome-sub');
+              const vis = (e) => { if (!e) return false; const cs = getComputedStyle(e);
+                return cs.display !== 'none' && parseFloat(cs.opacity) > 0.01 && e.getBoundingClientRect().height > 1; };
+              const win = document.getElementById('orwell-headshot');
+              const splash = document.getElementById('welcome-screen');
+              const name = document.querySelector('#welcome-screen .welcome-name');
+              const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+              // The splash is faded out while the window is up — a non-visible brand mark
+              // is not a visual overlap. Only a VISIBLE splash that geometrically intersects
+              // the window counts.
+              const splashVisible = vis(splash);
+              let nameOverlap = false;
+              if (win && name && splashVisible) {
+                const wr = win.getBoundingClientRect(), nr = name.getBoundingClientRect();
+                if (nr.height > 1 && wr.height > 1) nameOverlap = inter(wr, nr);
+              }
+              return { onb, tipVisible: vis(tip), subVisible: vis(sub), splashVisible, nameOverlap };
+            }""")
+            check(overlap.get("onb") is True,
+                  f"P1: an onboarding body flag is set during the cast-photo step ({overlap})")
+            check(overlap.get("tipVisible") is False and overlap.get("subVisible") is False,
+                  f"P1: the splash tip + tagline are suppressed during onboarding ({overlap})")
+            check(overlap.get("nameOverlap") is False,
+                  f"P1: the cast-photo window does not overlap the welcome brand mark ({overlap})")
             # securing a photo releases the gate (intake now finalized + the avatarchanged signal)
             _intake_finalized["v"] = True
             f4.evaluate("window.dispatchEvent(new CustomEvent('orwell:avatarchanged'))")
             f4.wait_for_timeout(600)  # the gate re-derives from the finalized intake
             check(f4.evaluate("!document.getElementById('message').disabled") is True,
                   "P1: securing a cast photo UNLOCKS the chat input")
-            check(f4.evaluate("!document.getElementById('orwell-chat-gate-note')") is True,
-                  "P1: the cast-photo gate note clears once a photo is secured")
             check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
                   "P1: the fresh-session fence is still set once per interview (F7)")
             f4.close()

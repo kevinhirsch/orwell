@@ -80,8 +80,10 @@ def test_l3_studio_keeps_the_card_open_when_options_appear():
     gen = js[js.index("async function studioGenerate"):]
     gen = gen[: gen.index("\n    }")]
     assert "ensureOpen()" in gen
-    # the body scrolls internally rather than growing the card upward
-    assert "overflow-y: auto" in js
+    # P1 OOBE overhaul: the studio now mounts inside the OrwellWindow kit, whose .ow-body
+    # scrolls internally (overflow:auto) — the casting window caps its body height so the
+    # generated photos never grow the surface up into the header.
+    assert "> .ow-body { max-height" in js
 
 
 # ── L4: picking a headshot dismisses the picker and hands off ────────────────────────
@@ -95,7 +97,9 @@ def test_l4_finalize_hands_off_instead_of_painting_the_finalized_state():
     assert "onCastingHeadshotChosen" in js
     chosen = js[js.index("function onCastingHeadshotChosen"):]
     chosen = chosen[: chosen.index("\n  }")]
-    assert "unmount()" in chosen
+    # tear the WINDOW down (item 6: keep the composer-lift drop through the handoff) and
+    # hand off into the producers' open
+    assert "teardownWindow()" in chosen
     assert "_orwellOpenGameAfterCasting" in chosen
 
 
