@@ -1118,6 +1118,12 @@ import { isNarrow } from './platform.js';
       if (_chatLog) _chatLog.setAttribute('aria-busy', 'true');
 
       const reader = res.body.getReader();
+      // F4: the streamed run has begun — tell the status HUD to reconcile NOW
+      // instead of waiting out its 20s poll. The 'orwell:gamechanged' window
+      // event already exists (orwellDecision.js / orwellStatusPanel.js listen),
+      // so dispatching it is safe and idempotent — the panel just re-fetches
+      // Vault-free status. No new polling is introduced.
+      try { window.dispatchEvent(new CustomEvent('orwell:gamechanged')); } catch (_) {}
       const decoder = new TextDecoder();
       let buffer = '';
       let metrics = null;
@@ -3252,6 +3258,11 @@ import { isNarrow } from './platform.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      // F4: the streamed run has ended/finalized — reconcile the status HUD now
+      // (a turn just completed, or one ran on another device). Same idempotent
+      // 'orwell:gamechanged' event as run-start; the panel just re-fetches the
+      // Vault-free status. No new polling.
+      try { window.dispatchEvent(new CustomEvent('orwell:gamechanged')); } catch (_) {}
       // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
       // ended (or errored) without any narration token to clear it.
       if (_orwellFinalizingActive) {
