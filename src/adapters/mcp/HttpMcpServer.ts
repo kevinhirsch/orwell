@@ -91,7 +91,10 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // 0050: the casting interview happens BEFORE a game exists, so its tools must be able to mint the
 // user's sandbox — updateCasting records the first answers; getMomentPrompt serves the interview
 // manual to a brand-new user (the front-end frames the pre-game chat with it).
-const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt"]);
+const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt",
+  // 0065: pre-warming the cast happens pre-game (it mints + persists the season seed into a fresh
+  // sandbox during casting), so it legitimately runs BEFORE a game exists — like updateCasting.
+  "preSeedCast"]);
 
 function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
   return typeof (d as HttpMcpResolver).resolve === "function";

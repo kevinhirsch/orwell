@@ -144,6 +144,15 @@ export class BbWorld extends World {
   labelParanoid?: string;
   labelTrusting?: string;
 
+  // Cast pre-warm (0065) scratch state.
+  pwSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  pwServer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  pwWarm?: import("../../src/ports/GameSession").PreSeedCastView;
+  pwView?: import("../../src/ports/GameSession").GameStateView;
+  pwId?: string;
+  pwAuthored?: string;
+  pwWriteAccepted?: boolean;
+
   // Narrative & moment orchestration (0018) scratch state.
   gsView?: import("../../src/ports/GameSession").GameStateView;
   gsMoment?: string;

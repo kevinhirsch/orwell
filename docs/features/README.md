@@ -130,6 +130,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | BDD | ✅ Built · `src/engine/zeitgeist.ts`; frozen + seed-reproducible + flavor-only (outcome-invariant) |
 | 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
 | 0064 | [Live multi-device game sync](./0064-live-multi-device-game-sync.md) | FE | ✅ Built · canonical session (A) + Messenger serialization (C) + window/HUD layout sync (F) + `game-updated`/cast-photo/once-only (B/D) |
+| 0065 | [Cast pre-warm: deep-author before portraits](./0065-cast-prewarm.md) | BDD + FE | ✅ Built · wired the `recordCastProfile` write-back onto the player channel (was rejected at the MCP boundary) + `preSeedCast` pre-game cast + `createCharacter` adoption + FE author-warm-early / portrait-warm-gated |
 
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is

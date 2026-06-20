@@ -811,9 +811,46 @@ export interface RecordCastProfileResult {
   reason?: string;
 }
 
+/**
+ * 0065 — pre-warm the cast. Generate the player-INDEPENDENT cast (composition + diversity + deep
+ * layer) off the season seed BEFORE the player finishes the casting interview, into an engine-side
+ * pre-game holding store, so the FE can author it deeply (`recordCastProfile`) and the portrait
+ * prompts read the FINISHED store. The whole cast is deterministic off the seed (no player field is
+ * read), so this is safe to run the instant a model is selectable.
+ */
+export interface PreSeedCastReq {
+  /**
+   * Optional explicit seed (tests/replays). Default: mint + persist real entropy now — and the
+   * later `createCharacter` ADOPTS this same seed, so the warmed cast is the cast that ships.
+   */
+  seed?: number;
+}
+
+/** The Vault-free pre-warmed cast (0065) — the same public roster facets `createCharacter` ships, plus the portrait prompts. */
+export interface PreSeedCastView {
+  /** True once the cast is warmed (the roster + prompts are available to author + shoot against). */
+  warmed: boolean;
+  /** The season seed the warmed cast was generated off (the one `createCharacter` will adopt). */
+  seed: number;
+  /** The Vault-free public roster — the same observable facets as `GameStateView.house` (no player). */
+  house: HouseguestCard[];
+  /** Portrait prompts (0051) built from the warmed PUBLIC facets — NPCs only (the player has their own headshot). */
+  portraitPrompts: PortraitPromptEntry[];
+  /** True when this call returned an ALREADY-warmed cast (idempotent re-call) rather than warming afresh. */
+  alreadyWarmed?: boolean;
+  /** Set when the cast could NOT be warmed (a season is already running) — Vault-free reason. */
+  refused?: "in-progress" | "over";
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
+  /**
+   * 0065 — pre-warm the player-INDEPENDENT cast off the season seed BEFORE the interview ends, so the
+   * FE can author it deeply and portraits read the finished store. Idempotent; durable (a warmed cast
+   * survives a restart). `createCharacter` ADOPTS the warmed cast (same seed) at finalize. Vault-free.
+   */
+  preSeedCast(req: PreSeedCastReq): PreSeedCastView;
   /**
    * Record casting-interview answers as they land (0050) — any subset of fields, callable any
    * number of times pre-game. Returns where the interview stands (known / missing / next / ready);
