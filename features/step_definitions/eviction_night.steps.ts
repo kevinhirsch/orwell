@@ -17,6 +17,7 @@ function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>):
   if (p.kind === "veto-decision") return submit({ kind: "veto-decision", use: false });
   if (p.kind === "replacement") return submit({ kind: "replacement", replacement: p.options[0]!.id });
   if (p.kind === "comp-intent") return submit({ kind: "comp-intent", intent: "compete" });
+  if (p.kind === "comp-round") return submit({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   if (p.kind === "finale-statement") return submit({ kind: "finale-statement", statement: "x" });
   if (p.kind === "finale-answer") return submit({ kind: "finale-answer", appeal: p.appeals![0]! });
   if (p.kind === "juror-vote") return submit({ kind: "juror-vote", vote: p.options[0]!.id });

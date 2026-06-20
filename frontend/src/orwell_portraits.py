@@ -32,10 +32,12 @@ removes it; ``orwell-game-reset.sh`` is taught to clear it too (a new season = a
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Optional
@@ -412,6 +414,88 @@ def _save_manifest(user: Optional[str], manifest: dict) -> None:
     os.replace(tmp, _manifest_path(user))
 
 
+# ── Cross-season cache-busting: the per-cast "epoch" version ────────────────────────────────
+# Portraits are keyed by the engine's ROLE id (`npc:3`, `player`), which is byte-identical in
+# EVERY season (src/domain/ids.ts: npc(n) -> "npc:N"). Without a version, season 2's `npc:3`
+# reuses season 1's file AND its `/api/orwell/portrait/npc_3` URL — so a browser that cached the
+# face for a day (Cache-Control: max-age=86400) keeps showing last season's houseguest on the new
+# one, and "generate once" never overwrites it (root cause #1/#2). The cast epoch is a short
+# token, persisted per cast, that (a) stamps every portrait URL (`?v=<epoch>`) so a NEW cast
+# yields NEW URLs (cache miss → the new face), and (b) is rotated the moment a different cast is
+# detected in the stored slots. It is STABLE within a season, so each houseguest keeps a single
+# persisted image all season (generate-once still holds); it changes only when the cast does.
+def _cast_meta_path(user: Optional[str]) -> Path:
+    return user_portrait_dir(user) / "cast.json"
+
+
+def _load_cast_epoch(user: Optional[str]) -> Optional[str]:
+    try:
+        with open(_cast_meta_path(user), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    ep = data.get("epoch") if isinstance(data, dict) else None
+    return str(ep) if ep else None
+
+
+def _save_cast_epoch(user: Optional[str], epoch: str) -> None:
+    d = user_portrait_dir(user)
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / "cast.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"epoch": str(epoch)}, f)
+    os.replace(tmp, _cast_meta_path(user))
+
+
+def _ensure_cast_epoch(user: Optional[str]) -> str:
+    """The current cast's cache-busting version — minted + persisted on first use (and after a
+    wipe), then stable for the life of the cast (so a season keeps one URL per houseguest)."""
+    ep = _load_cast_epoch(user)
+    if not ep:
+        ep = secrets.token_hex(4)
+        try:
+            _save_cast_epoch(user, ep)
+        except OSError as e:
+            logger.info("[portraits] could not persist cast epoch for %s: %s", _safe_user(user), e)
+    return ep
+
+
+def _rotate_if_new_cast(prompts: list, user: Optional[str]) -> None:
+    """Wipe last season's portraits when a DIFFERENT cast now occupies the stored slots.
+
+    The engine reuses role ids (`npc:3`) every season, so a stored portrait whose NAME no longer
+    matches the incoming prompt for the same id means a new cast inherited an old face — exactly
+    what happens when a reset's portrait scrub was skipped or failed (root cause #1/#3). Wiping
+    here both clears the stale file (so generate-once regenerates the slot) and drops the old
+    epoch sidecar (so `_ensure_cast_epoch` mints a fresh URL version). A no-op for a fresh dir or
+    a same-season backfill (matching names) — so a season's portraits are generated once and persist.
+    """
+    manifest = load_manifest(user)
+    if not manifest:
+        return
+    for entry in prompts:
+        if not isinstance(entry, dict):
+            continue
+        hid = entry.get("houseguestId") or entry.get("id")
+        if not hid:
+            continue
+        sid = _safe_id(str(hid))
+        if sid == PLAYER_PORTRAIT_ID:
+            continue  # the player's portrait is account-level — never the rotation trigger
+        prev = manifest.get(sid)
+        if not isinstance(prev, dict):
+            continue
+        prev_name = str(prev.get("name") or "").strip().casefold()
+        new_name = str(entry.get("name") or "").strip().casefold()
+        if prev_name and new_name and prev_name != new_name:
+            logger.info(
+                "[portraits] new cast detected for %s (slot %s: %r -> %r) — wiping stale portraits",
+                _safe_user(user), sid, prev.get("name"), entry.get("name"),
+            )
+            scrub_user(user)  # remove every stale face + manifest + the old epoch sidecar
+            return
+
+
 def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
     """The HTTP ref the browser uses for a stored portrait, or None if none is stored.
 
@@ -427,7 +511,11 @@ def portrait_ref(user: Optional[str], houseguest_id: str) -> Optional[str]:
         return None
     if not (user_portrait_dir(user) / fname).exists():
         return None
-    return f"/api/orwell/portrait/{_safe_id(houseguest_id)}"
+    ref = f"/api/orwell/portrait/{_safe_id(houseguest_id)}"
+    # Stamp the per-cast version so a new season's reused id (`npc:3`) can never serve a
+    # browser-cached face from the prior cast (root cause #1/#2). Stable within a season.
+    epoch = _load_cast_epoch(user)
+    return f"{ref}?v={epoch}" if epoch else ref
 
 
 def portrait_file(user: Optional[str], houseguest_id: str) -> Optional[Path]:
@@ -821,19 +909,44 @@ async def _generate_one(prompt: str, user: Optional[str],
         return None
 
 
+# ── 0065 follow-up: the facet FINGERPRINT — an intra-season re-shoot backstop ───────────────
+# The cast EPOCH versions URLs across SEASONS (a new cast on reused role ids). But a houseguest's
+# deep FACET can change WITHIN a season at the SAME id+name — e.g. the no-key→key path, or a
+# seeded-floor portrait shot BEFORE LLM authoring lands the §3-depth physicalCharacteristics. The
+# engine bakes the full facet into the deterministic portrait PROMPT string, so a stable hash of
+# that prompt is a faithful change signal: same prompt ⇒ same face (generate-once holds); a changed
+# prompt ⇒ the stored face is stale and must be re-shot. This is ADDITIONAL to the epoch (which it
+# leaves intact) — it only guards a facet change at an unchanged id+name within the same season.
+def _prompt_fingerprint(prompt: Optional[str]) -> Optional[str]:
+    """A short, stable hex hash of the engine's portrait PROMPT string (the deterministic facet
+    output). None for an empty prompt (no signal ⇒ never a re-shoot trigger)."""
+    text = str(prompt or "")
+    if not text:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: str,
-                    source: str = "generated") -> str:
+                    source: str = "generated", fingerprint: Optional[str] = None) -> str:
     """Persist one portrait + update the manifest; return its stored filename.
 
     `source` (G26) records HOW the portrait was made: 'generated' (text-to-image, the default),
     'reference' (image-to-image off the player's headshot — still AI, re-creatable), or 'upload'
-    (the player's literal cropped photo — LOCKED: the regenerate lever never discards it)."""
+    (the player's literal cropped photo — LOCKED: the regenerate lever never discards it).
+
+    `fingerprint` (0065 follow-up) is a stable hash of the PROMPT string the face was shot from,
+    stamped so a LATER facet change at the same id+name re-shoots a stale face (see
+    `generate_and_store`). None when there is no prompt to fingerprint (e.g. an uploaded photo)."""
     d = user_portrait_dir(user)
     d.mkdir(parents=True, exist_ok=True)
+    _ensure_cast_epoch(user)  # the per-cast URL version exists the moment any portrait is persisted
     filename = f"{_safe_id(houseguest_id)}.png"
     (d / filename).write_bytes(png)
     manifest = load_manifest(user)
-    manifest[_safe_id(houseguest_id)] = {"file": filename, "name": name, "source": source}
+    entry = {"file": filename, "name": name, "source": source}
+    if fingerprint:
+        entry["fingerprint"] = fingerprint
+    manifest[_safe_id(houseguest_id)] = entry
     _save_manifest(user, manifest)
     return filename
 
@@ -1173,6 +1286,15 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     if not isinstance(prompts, list) or not prompts:
         return {"generated": 0, "skipped": 0, "total": 0}
 
+    # Cross-season hygiene (root cause #1/#3): if a DIFFERENT cast now occupies this user's
+    # portrait slots (the engine reuses role ids like `npc:3` every season), last season's
+    # faces survived a reset — wipe them so no new houseguest inherits an old face and
+    # generate-once regenerates the slot. A no-op for a same-season run, so each houseguest
+    # keeps ONE persisted image all season (generate-once preserved). The cache-busting cast
+    # epoch is minted lazily in `_write_portrait` (only once something is actually persisted,
+    # so "no image model" stays a true no-op — no dir, no artifacts).
+    _rotate_if_new_cast(prompts, user)
+
     generated = 0
     skipped = 0
     newly_shown = []  # (houseguestId, ref) for beat recording
@@ -1232,6 +1354,15 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             continue
         if portrait_file(user, hid) is None:
             to_generate += 1
+        else:
+            # 0065 follow-up: a stored face whose fingerprint DIFFERS from the current facet's
+            # prompt will be re-shot below — count it so the progress total stays honest. A
+            # legacy entry with no stored fingerprint backfills (no re-shoot) ⇒ not counted.
+            stored = load_manifest(user).get(_safe_id(str(hid)))
+            stored_fp = stored.get("fingerprint") if isinstance(stored, dict) else None
+            cur_fp = _prompt_fingerprint(str(entry.get("prompt")))
+            if stored_fp and cur_fp and stored_fp != cur_fp:
+                to_generate += 1
     if to_generate:
         _progress_start(user, to_generate)
 
@@ -1246,10 +1377,32 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
 
-        # Generate-once: a stored portrait is never regenerated on restart.
+        # The current facet's fingerprint (a stable hash of the engine's deterministic prompt).
+        fp = _prompt_fingerprint(str(prompt))
+
+        # Generate-once: a stored portrait is never regenerated on restart — UNLESS the facet
+        # changed. 0065 follow-up: compare the stored entry's fingerprint to the CURRENT prompt's.
+        #   • stored fingerprint EXISTS and DIFFERS  ⇒ the stored face is stale → re-shoot (fall
+        #     through to regenerate from the new prompt, overwriting it).
+        #   • stored fingerprint EXISTS and MATCHES  ⇒ unchanged facet → skip (generate-once holds).
+        #   • NO stored fingerprint (legacy/pre-this-change) ⇒ DON'T mass-re-shoot just for the
+        #     missing field: BACKFILL the current fingerprint onto the entry without regenerating,
+        #     so it self-heals quietly and only re-shoots on a FUTURE genuine facet change.
         if portrait_file(user, hid) is not None:
-            skipped += 1
-            continue
+            stored = load_manifest(user).get(_safe_id(str(hid)))
+            stored_fp = stored.get("fingerprint") if isinstance(stored, dict) else None
+            if stored_fp and fp and stored_fp != fp:
+                pass  # facet changed → stale face → fall through and re-shoot from the new prompt
+            else:
+                if (not stored_fp) and fp and isinstance(stored, dict):
+                    # Backfill quietly (no regeneration) so this self-heals and the NEXT genuine
+                    # facet change re-shoots. The image bytes are untouched (generate-once preserved).
+                    stored["fingerprint"] = fp
+                    manifest = load_manifest(user)
+                    manifest[_safe_id(str(hid))] = stored
+                    _save_manifest(user, manifest)
+                skipped += 1
+                continue
 
         # G26: the PLAYER may have chosen 'reference' mode — image-to-image off their headshot
         # (exact mode already landed in the pre-pass above). NPCs always text-to-image.
@@ -1269,7 +1422,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             skipped += 1
             continue
         try:
-            _write_portrait(user, str(hid), png, str(name), source=source)
+            _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp)
             log_attempt(str(hid), True, None, duration_ms)
             generated += 1
             _progress_tick(user)  # L15: one more face landed — the panel sees the live count move

@@ -280,7 +280,11 @@ async def update_casting(fields: dict | None = None, user: str | None = None) ->
     the season starts records nothing and reports done."""
     allowed = {"playerName", "archetype", "strategyStyle", "personaArchetype",
                "personaStrategyStyle", "backstory", "motivation", "privateStrategy",
-               "interviewNotes"}
+               "interviewNotes",
+               # The cast photo is the FIRST casting step (optional/skippable): the FE records
+               # how it was handled — "uploaded" (photo finalized) or "skipped". A plain string
+               # scalar, so the generic `elif str(value).strip()` branch below carries it through.
+               "castPhoto"}
     args: dict = {}
     for key, value in (fields or {}).items():
         if key not in allowed or value is None:
@@ -369,6 +373,18 @@ async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> di
     return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
 
 
+async def pre_seed_cast(seed: int | None = None, user: str | None = None) -> dict:
+    """Feature 0065: pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting
+    interview ends, so the FE can deeply author it (``record_cast_profile``) and the portrait prompts
+    read the FINISHED store. Returns ``{ warmed, seed, house, portraitPrompts, alreadyWarmed?, refused? }``
+    — the Vault-free roster + cast portrait prompts. Mints + persists the season seed (which
+    ``createCharacter`` then adopts). Idempotent; a no-op refusal once a season is running."""
+    args: dict = {}
+    if seed is not None:
+        args["seed"] = seed
+    return await _call("preSeedCast", args, user=user)
+
+
 async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
     becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the
@@ -377,6 +393,17 @@ async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     splits across the Vault Wall, re-derives threads, and re-seals — returning field NAMES only
     (never a hidden value). Vault-free response by construction."""
     return await _call("recordCastProfile", profile, user=user)
+
+
+async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict:
+    """Feature 0062: write a REAL captured move-in zeitgeist BACK to the engine, which persists it
+    as the single FROZEN artifact and RECALLS it (never re-searches) all season. ``snapshot`` carries
+    an optional ``capturedFor`` / ``capturedAt`` plus any subset of the PUBLIC ``slices``
+    (``screen``, ``music``, ``sports``, ``news``, ``internet``, ``mood``) — the shared real-world
+    flavor the whole cast moved in WITH. The FE owns the concrete web-search capture (like the 0051
+    image port); empty slices keep the fallback's value (non-degradation). Returns
+    ``{ accepted, source }``. Public flavor only — no Vault, no game input."""
+    return await _call("recordWorldSnapshot", snapshot, user=user)
 
 
 async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
@@ -419,12 +446,17 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
     knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
     an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
     houseguests' feelings move, in which direction, with what relative emphasis — the engine still
-    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path."""
+    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path.
+
+    0065 Part A — an optional `expected_beat_seq` compare-and-swap token is threaded in ONLY when
+    provided; if it no longer matches the engine's committed beatSeq the call is refused (409
+    `stale-beat`). Absent ⇒ the request is identical to today (the FE owns the per-turn capture/
+    attach of the token — sequenced after this engine slice)."""
     witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
     if "player" not in witness:
         witness.append("player")
@@ -433,13 +465,19 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["kind"] = kind
     if consequence:
         req["consequence"] = consequence
+    if expected_beat_seq is not None:
+        req["expectedBeatSeq"] = expected_beat_seq
     return await _call("recordInteraction", req, user=user)
 
 
-async def surface_information(information: str, pathway: str, user: str | None = None) -> dict:
+async def surface_information(information: str, pathway: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
     """Surface a fact into this user's player knowledge via a named in-game pathway
-    (e.g. "overheard", "told-by:npc:2")."""
-    return await _call("surfaceInformationTo", {"entity": "player", "fact": {"content": information}, "pathway": pathway}, user=user)
+    (e.g. "overheard", "told-by:npc:2"). 0065 Part A — an optional `expected_beat_seq` CAS token is
+    threaded in only when provided (absent ⇒ identical request to today)."""
+    req: dict = {"entity": "player", "fact": {"content": information}, "pathway": pathway}
+    if expected_beat_seq is not None:
+        req["expectedBeatSeq"] = expected_beat_seq
+    return await _call("surfaceInformationTo", req, user=user)
 
 
 async def game_status(user: str | None = None) -> dict:
@@ -450,6 +488,20 @@ async def game_status(user: str | None = None) -> dict:
     instead of inventing who competes.
     """
     return await _call("gameStatus", {}, user=user)
+
+
+async def state_delta(since_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """0065 Part E — the beatSeq-keyed DELTA: what changed since the caller's last-seen `beatSeq`.
+
+    Returns ``{ beatSeq, events:[{id,ts,type,content}], changes?:{field:{from,to}}, finishedChanged?,
+    winner?, board, fullRefresh }`` — Vault-free by construction (the same closed-set ceremony fields
+    the full projection already exposes). ``fullRefresh`` is true when the engine cannot compute an
+    incremental delta (no/odd `sinceBeatSeq`, a restart) — the FE then leaves the full context alone.
+    The model never sees the token; the FE holds the last-seen `beatSeq` and passes it here."""
+    args: dict = {}
+    if since_beat_seq is not None:
+        args["sinceBeatSeq"] = since_beat_seq
+    return await _call("stateDelta", args, user=user)
 
 
 async def get_visible_state(user: str | None = None) -> dict:
@@ -486,18 +538,37 @@ async def end_of_session_summary(user: str | None = None) -> dict:
     return await _call("endOfSessionSummary", {}, user=user)
 
 
-async def advance_game(user: str | None = None) -> dict:
+async def advance_game(expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale).
     NPC beats resolve automatically; returns the beat event, any pending player decision,
-    and the public status. Vault-free."""
-    return await _call("advanceGame", {}, user=user)
+    and the public status. Vault-free.
+
+    0065 — both optional sync-spine fields are threaded in ONLY when provided: `expected_beat_seq`
+    (Part A compare-and-swap; a stale token ⇒ 409 `stale-beat`) and `idempotency_key` (Part B
+    at-most-once; a replayed key returns the original AdvanceView without advancing again). Absent ⇒
+    the request is byte-identical to today (the FE owns per-turn token capture + key minting — that
+    wiring is sequenced after this engine slice)."""
+    args: dict = {}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
+    return await _call("advanceGame", args, user=user)
 
 
-async def submit_decision(decision: dict, user: str | None = None) -> dict:
+async def submit_decision(decision: dict, expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Resolve the player's pending decision (nominations / use veto / replacement /
     eviction vote) and continue the loop. `decision` is the validated payload.
-    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}."""
-    return await _call("submitDecision", decision or {}, user=user)
+    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}.
+
+    0065 — `expected_beat_seq` (Part A CAS) and `idempotency_key` (Part B at-most-once) are merged
+    into the decision payload ONLY when provided; absent ⇒ identical to today."""
+    payload = dict(decision or {})
+    if expected_beat_seq is not None:
+        payload["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        payload["idempotencyKey"] = idempotency_key
+    return await _call("submitDecision", payload, user=user)
 
 
 async def request_self_eviction(user: str | None = None) -> dict:
@@ -526,9 +597,14 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
-async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None) -> dict:
-    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it."""
-    return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
+async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it. 0065 Part A — an
+    optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
+    today)."""
+    args: dict = {"with": with_id, "kind": kind, "terms": terms}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("makeDeal", args, user=user)
 
 
 async def season_recap(user: str | None = None) -> dict:
@@ -554,10 +630,15 @@ async def whereabouts(user: str | None = None):
     return await _call("whereabouts", {}, user=user)
 
 
-async def move_to(room: str, user: str | None = None):
+async def move_to(room: str, expected_beat_seq: int | None = None, user: str | None = None):
     """L21/L24: the player walks to a room they named — the engine moves them (it never auto-relocates
-    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game."""
-    return await _call("moveTo", {"room": room}, user=user)
+    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game. 0065 Part A —
+    an optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
+    today)."""
+    args: dict = {"room": room}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("moveTo", args, user=user)
 
 
 async def premiere_intros(user: str | None = None):
@@ -723,16 +804,63 @@ _LAST_PENDING: dict = {}
 
 
 def remember_pending(view, user=None) -> None:
-    """Record (or clear) the pending decision from any AdvanceView-shaped dict."""
+    """Record (or clear) the pending decision from any AdvanceView-shaped dict.
+
+    The cache mirrors the engine's `pending` so GET /api/orwell/status can re-arm the
+    decision card after a reload WITHOUT a poll ever advancing the game. It is the route's
+    OMIT-fallback: the status route trusts a PRESENT `pending` (including null) as engine
+    truth and only falls back to this cache when the engine response OMITS the key entirely
+    (an older engine). So the three cases are distinct (F5):
+
+      * present & truthy → UPDATE the cache (a real pending decision to re-arm);
+      * present & null/None → CLEAR the cache (the engine says "no pending" — the prior
+        card is resolved; keeping it would re-surface a stale card on reload);
+      * key ABSENT → KEEP the prior cache (an old engine that never exposed `pending` — the
+        route's omit-fallback still serves the last-seen card).
+
+    The earlier cut popped on any falsy `view.get("pending")`, which conflated absent with
+    null — harmless for the route, but it meant an explicit `pending: null` and a missing key
+    were indistinguishable here. The distinction matters for the clear-on-submit safety in the
+    decision route (a successful submit returns `pending: null` ⇒ this clears; a result that
+    happens to OMIT the key must NOT silently keep a stale card — see clear_pending).
+
+    ONE deliberate exception to "absent ⇒ keep": a LIFECYCLE result (a createCharacter /
+    manageSandbox casting card or a refused-restart GameStateView) carries no `pending` field
+    by construction, yet the restart-door call sites pass it here SPECIFICALLY to wipe the prior
+    season's stale card (D3/E66 restart-door hygiene). Those views are recognizable by their
+    lifecycle markers (`started` / `characterType` / `createRefused` / `castingCard`); when we
+    see one, an absent `pending` means CLEAR, not keep. A decision/advance/status view that an
+    old engine returned without a `pending` key has none of those markers, so its omit-fallback
+    still keeps the last-seen card."""
     try:
+        if not isinstance(view, dict):
+            return
         key = user or ""
-        pending = view.get("pending") if isinstance(view, dict) else None
+        if "pending" not in view:
+            # A lifecycle/restart-door view (casting card / refused restart) carries no `pending`
+            # but is passed here to CLEAR the prior season's card — honor that intent. Anything
+            # else that merely omits `pending` (an old engine's advance/status view) is KEPT so the
+            # route's omit-fallback can still re-arm the last-seen card.
+            if any(k in view for k in ("started", "characterType", "createRefused", "castingCard")):
+                _LAST_PENDING.pop(key, None)
+            return
+        pending = view.get("pending")
         if pending:
-            _LAST_PENDING[key] = pending
+            _LAST_PENDING[key] = pending  # present & truthy: a real card to re-arm
         else:
-            _LAST_PENDING.pop(key, None)
+            _LAST_PENDING.pop(key, None)  # present & null/None: the engine says "no pending"
     except Exception:
         pass
+
+
+def clear_pending(user=None) -> None:
+    """Unconditionally drop the cached pending decision for a user (F5 clear-on-submit safety).
+
+    `remember_pending` now KEEPS the cache when a view OMITS the `pending` key, so a path that
+    KNOWS the card is resolved (e.g. a successful decision submit whose result happens not to
+    carry `pending`) must clear explicitly rather than rely on the omit-fallback — otherwise a
+    stale card could re-arm on the next status reload."""
+    _LAST_PENDING.pop(user or "", None)
 
 
 def last_pending(user=None):

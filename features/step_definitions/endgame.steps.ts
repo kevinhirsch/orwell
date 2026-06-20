@@ -106,9 +106,15 @@ Given("three houseguests remain", function (this: BbWorld) {
 
 When("the endgame advances", function (this: BbWorld) {
   const rng = new SeededRandom(1);
-  advance(this.egState!, this.egCtx!, rng); // B46: the player plays the final HOH comp ⇒ declares intent first
-  const ev = applyDecision(this.egState!, { kind: "comp-intent", intent: "compete" }, this.egCtx!, rng);
-  assert.equal(ev.beat, "hoh-competition");
+  // 0006 staged-rounds: the final HOH comp plays out in elimination rounds; declare a per-round
+  // approach each round the player is in, driving through to the crown.
+  const s = this.egState!;
+  let ev: ReturnType<typeof advance> = null;
+  for (let g = 0; g < 20 && s.beat === "hoh-competition"; g++) {
+    if (s.pending?.kind === "comp-round") ev = applyDecision(s, { kind: "comp-round", intent: "compete" }, this.egCtx!, rng);
+    else ev = advance(s, this.egCtx!, rng);
+  }
+  assert.equal(ev!.beat, "hoh-competition"); // the crowning beat
 });
 
 Then("nominations and the veto are skipped", function (this: BbWorld) {

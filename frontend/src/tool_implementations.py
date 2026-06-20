@@ -4703,37 +4703,53 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             cast = res.get("house") if isinstance(res, dict) else None
             # (the player's name is intentionally NOT read here — cast authoring is player-independent)
 
-            if prompts:
-                from src import orwell_portraits
-                # (a) start the move-in portraits NOW, from the seeded facets — ready by move-in.
-                orwell_portraits.kickoff_generation(prompts, owner)
+            # 0065 — did author warm already run during the casting interview? If so, the engine just
+            # ADOPTED the deeply-authored cast, and the gated portrait warm owns the faces (it shoots only
+            # AFTER authoring fully finished). We must NOT shoot here from the seeded facets (that would
+            # race authoring) NOR re-author (it's already done) — just ENSURE the gated portrait warm is
+            # kicked (idempotent), so faces land even if the interview-open trigger was missed.
+            prewarmed = False
+            try:
+                from src import orwell_prewarm
+                prewarmed = orwell_prewarm.warm_state(owner).get("authorStarted", False)
+            except Exception:
+                prewarmed = False
 
-            # (b) author the cast's rich backstories in the background; when it finishes, top up
-            #     any portrait that hasn't landed yet, refetching the now-authored facet (idempotent).
-            #     NPC storylines are authored player-INDEPENDENT (anti-sycophancy): the player's name
-            #     is never threaded into authoring — each houseguest's life is fleshed out on its own.
-            if cast:
-                from src import orwell_cast_authoring
-                from src import orwell_portraits
+            if prewarmed:
+                try:
+                    from src import orwell_prewarm
+                    await orwell_prewarm.warm_portraits(owner)  # gated: never shoots before authoring done
+                except Exception:
+                    pass
+            else:
+                # FALLBACK (no pre-warm — no model at casting open, or the trigger didn't fire): the
+                # original in-line pipeline. (a) start the move-in portraits NOW from the seeded facets,
+                # and (b) author the cast in the background, then top up any portrait not yet on disk.
+                if prompts:
+                    from src import orwell_portraits
+                    orwell_portraits.kickoff_generation(prompts, owner)
+                if cast:
+                    from src import orwell_cast_authoring
+                    from src import orwell_portraits
 
-                def _refresh_authored_portraits():
-                    # The ids whose portrait is still missing after the immediate pass — refetch
-                    # their (now possibly authored) prompt and generate. Skips any already on disk.
-                    try:
-                        ids = []
-                        for entry in (prompts or []):
-                            if not isinstance(entry, dict):
-                                continue
-                            hid = entry.get("houseguestId") or entry.get("id")
-                            if hid and orwell_portraits.portrait_file(owner, hid) is None:
-                                ids.append(str(hid))
-                        if ids:
-                            orwell_portraits.kickoff_backfill(ids, owner, force=True)
-                    except Exception:
-                        pass
+                    def _refresh_authored_portraits():
+                        # The ids whose portrait is still missing after the immediate pass — refetch
+                        # their (now possibly authored) prompt and generate. Skips any already on disk.
+                        try:
+                            ids = []
+                            for entry in (prompts or []):
+                                if not isinstance(entry, dict):
+                                    continue
+                                hid = entry.get("houseguestId") or entry.get("id")
+                                if hid and orwell_portraits.portrait_file(owner, hid) is None:
+                                    ids.append(str(hid))
+                            if ids:
+                                orwell_portraits.kickoff_backfill(ids, owner, force=True)
+                        except Exception:
+                            pass
 
-                orwell_cast_authoring.kickoff_authoring(
-                    cast, owner, then=_refresh_authored_portraits)
+                    orwell_cast_authoring.kickoff_authoring(
+                        cast, owner, then=_refresh_authored_portraits)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
@@ -4775,7 +4791,7 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
     # Mirror the engine's SubmitDecisionReq kinds (src/ports/GameSession.ts) exactly — the engine
     # validates legality; the relay must never be the thing that makes a pending kind unplayable.
     _DECISION_KINDS = {
-        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",

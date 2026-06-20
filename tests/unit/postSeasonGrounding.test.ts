@@ -17,10 +17,14 @@ function resolve(s: GameSessionAdapter, p: Pending): void {
     case "nominations": s.submitDecision({ kind: "nominations", choice: [o(0), o(1)] }); break;
     case "veto-decision": s.submitDecision({ kind: "veto-decision", use: false }); break;
     case "comp-intent": s.submitDecision({ kind: "comp-intent", intent: "compete" }); break;
+    case "comp-round": s.submitDecision({ kind: "comp-round", intent: "compete" }); break; // 0006 staged-rounds
     case "houseguests-choice": s.submitDecision({ kind: "houseguests-choice", choice: [o(0)] }); break;
     case "replacement": s.submitDecision({ kind: "replacement", replacement: o(0) }); break;
     case "eviction-vote": s.submitDecision({ kind: "eviction-vote", vote: o(0) }); break;
     case "goodbye-message": s.submitDecision({ kind: "goodbye-message", vote: o(0), statement: "x" }); break;
+    case "finale-statement": s.submitDecision({ kind: "finale-statement", statement: "x" }); break;
+    case "finale-answer": s.submitDecision({ kind: "finale-answer", appeal: p.appeals?.[0] ?? "own-game" }); break;
+    case "juror-question": s.submitDecision({ kind: "juror-question", statement: "x" }); break;
     default: s.submitDecision({ kind: (p as any).kind, vote: o(0) }); break;
   }
 }
@@ -48,7 +52,8 @@ describe("post-season recap is grounded in the real finale facts (anti-confabula
     for (let seed = 1; seed <= 10 && !checked; seed++) {
       const s = new GameSessionAdapter();
       s.createCharacter({ playerName: "P", seed });
-      for (let i = 0; i < 400; i++) {
+      // 0006 staged-rounds adds many per-round beats per week; raise the budget so a full season finishes.
+      for (let i = 0; i < 1500; i++) {
         const adv = s.advanceGame();
         if (adv.pending) resolve(s, adv.pending);
         if (adv.finished) break;

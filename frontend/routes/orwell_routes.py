@@ -603,6 +603,34 @@ def setup_orwell_routes() -> APIRouter:
             kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
 
+    # ── 0065: cast pre-warm — author the cast deeply BEFORE any portrait is generated ──────
+    @router.post("/prewarm-cast")
+    async def orwell_prewarm_cast(request: Request):
+        """AUTHOR WARM (earliest): the FE calls this the instant a model is selectable (casting open,
+        before the season begins). The engine pre-seeds the player-INDEPENDENT cast and the FE deeply
+        authors it in the background. Idempotent; fail-open. Player-channel (Vault-free roster only)."""
+        user = _current_user(request)
+        try:
+            from src import orwell_prewarm
+            return await orwell_prewarm.prewarm_cast(user)
+        except Exception as e:  # never block onboarding on a pre-warm hiccup
+            logger.info(f"[orwell] prewarm-cast failed: {e}")
+            return {"warmed": False, "count": 0}
+
+    @router.post("/warm-portraits")
+    async def orwell_warm_portraits(request: Request):
+        """PORTRAIT WARM (held until the first interview turn): generate the cast portraits in the
+        background — but ONLY after author warm has fully finished. A fully warmed authorship before any
+        photo, ever. Idempotent; fail-open; declines if no author warm ran (createCharacter's fallback
+        owns portraits then)."""
+        user = _current_user(request)
+        try:
+            from src import orwell_prewarm
+            return await orwell_prewarm.warm_portraits(user)
+        except Exception as e:
+            logger.info(f"[orwell] warm-portraits failed: {e}")
+            return {"started": False}
+
     # ── G26/G27: the player's own casting headshot + the account avatar ───────────────────
     # Player-channel (not admin): it sets the PLAYER's OWN portrait and the account's circle
     # avatar — the same exposure as the backfill lever. 'exact' = the cropped photo, finalized
@@ -641,6 +669,47 @@ def setup_orwell_routes() -> APIRouter:
     async def orwell_portrait_intake_clear(request: Request):
         orwell_portraits.clear_player_intake(_current_user(request))
         return {"ok": True}
+
+    # ── Cast-photo casting step (the FIRST step of the casting interview, optional) ────────
+    # The cast photo opens casting (0050) and is SKIPPABLE. The FE records how the player
+    # handled it into the engine's casting state machine via updateCasting({castPhoto}) so
+    # the engine can advance `casting.next`/`ready`. Idempotent and Vault-free — it records
+    # only the player's OWN step metadata. Pre-game only; the engine no-ops once a season has
+    # started (we pass through whatever it returns).
+    #
+    # B66 (augment-not-replace, ADR 0003 §4): this is a SANCTIONED FE-side casting record, not a
+    # UI replacement of the interview. The photo box is a FE-only affordance the narration model
+    # genuinely CANNOT observe (it never sees the upload/skip), so the FE must mark the outcome —
+    # exactly the error-correction the other sanctioned paths (ensure_turn_recorded,
+    # _pre_resolve_npc_ceremony) embody. It records ONLY the photo-step marker, never a
+    # substantive casting answer, never advances the week, and never replaces the model-run
+    # interview. `_CAST_PHOTO_STATUSES` is the scoping allowlist guard (the b66 marker).
+    _CAST_PHOTO_STATUSES = ("uploaded", "skipped")
+
+    class CastPhotoRequest(BaseModel):
+        status: str
+
+    @router.post("/casting/photo")
+    async def orwell_casting_photo(body: CastPhotoRequest, request: Request):
+        if body.status not in _CAST_PHOTO_STATUSES:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "status must be 'uploaded' or 'skipped'"},
+            )
+        try:
+            return await orwell_engine.update_casting(
+                {"castPhoto": body.status}, user=_current_user(request)
+            )
+        except orwell_engine.EngineToolError as e:
+            # "No active game" is the benign pre/post-game state (the engine is reachable; it
+            # refused), NOT an outage — a clean 409 so the FE never shows a false "unreachable".
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] casting/photo failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] casting/photo failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/portrait/studio/generate")
     async def orwell_portrait_studio_generate(request: Request):
@@ -784,7 +853,7 @@ def setup_orwell_routes() -> APIRouter:
         confirmed: Optional[bool] = None
 
     _DECISION_KINDS = {
-        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
@@ -803,7 +872,15 @@ def setup_orwell_routes() -> APIRouter:
         decision = {k: v for k, v in body.model_dump().items() if v is not None}
         try:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
-            orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            # D3/E66 + F5: mirror the engine's `pending` into the FE cache. remember_pending now KEEPS
+            # the cache when a view OMITS `pending` (the route's omit-fallback for an old engine). A
+            # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
+            # didn't carry an explicit `pending`, clear it here rather than keep a stale card that would
+            # re-arm on the next status reload. (A present `pending`, incl. null, is handled as engine truth.)
+            if isinstance(res, dict) and "pending" not in res:
+                orwell_engine.clear_pending(user=_current_user(request))
+            else:
+                orwell_engine.remember_pending(res, user=_current_user(request))
             _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
@@ -883,6 +960,13 @@ def setup_orwell_routes() -> APIRouter:
             # A new season = a new cast: scrub the prior portrait set before generating (0051).
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
             except Exception:
                 pass
             res = await orwell_engine.create_character(
@@ -1022,6 +1106,13 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
+            except Exception:
+                pass
             if body.keep:
                 # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
                 res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
@@ -1061,6 +1152,13 @@ def setup_orwell_routes() -> APIRouter:
         try:
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
             except Exception:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door

@@ -62,6 +62,14 @@ const args = (name: string): Record<string, unknown> => {
     // only, so no soul/hidden/Vault sentinel may cross (it's also a no-op once past the premiere).
     case "markHouseguestMet": return { id: npc(1) };
     case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
+    // 0065: the FE authoring write-back (live house — the season is already running here) + the pre-warm
+    // (a no-op refusal once started). Both are Vault-free by construction; the sweep proves the canary
+    // never bites their outputs either.
+    case "recordCastProfile": return { houseguestId: npc(1), biography: "A two-sentence public backstory. It has presentable parts." };
+    case "preSeedCast": return { seed: 1 };
+    // 0062: the FE zeitgeist write-back — PUBLIC real-world flavor only (no Vault, no game input).
+    // The sweep proves the canary never bites its output (an empty subset is a valid capture).
+    case "recordWorldSnapshot": return { slices: {} };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels

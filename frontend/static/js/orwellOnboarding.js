@@ -1,19 +1,23 @@
-// Orwell onboarding — one continuous, guided OOBE flow (P1 redesign).
+// Orwell onboarding — one continuous, guided OOBE flow (P1 redesign; OOBE re-sequence 2026-06-20).
 //
 // The flow, in order:
 //   1. Settings → the player enters their LLM info (provider/key/model). The MODEL GATE (J4)
 //      below holds the flow until a feed is configured — production literally cannot speak
 //      without one.
-//   2. A WELCOME MODAL — kept as its own modal (NOT folded into the chat) — greets the player
-//      and points them at their first task: securing a cast photo.
-//   3. The houseguest IMAGE step is the player's FIRST interaction (orwellHeadshot.js mounts the
-//      casting card; orwellChatGate.js LOCKS the chat until a photo is secured). The card makes
-//      the upload-or-generate choice explicit; the chat input is disabled with a clear reason.
-//   4. The moment the photo is confirmed, the PRODUCERS reach out FIRST — a hidden kickoff
-//      (no player bubble) opens the casting interview so the player never types the opening word.
-//   5. The casting interview proceeds in the chat (the engine's character-creation moment prompt
-//      + incremental updateCasting → createCharacter).
-//   6. House entry + a light-touch guided first week (the engine premiere + the agent-loop pacing).
+//   2. A WELCOME MODAL — kept as its own modal (NOT folded into the chat) — greets the player on
+//      EVERY fresh game/season and proceeds straight into the interview. Dismissing it opens the
+//      fresh interview session AND fires the producers' hidden kickoff — the producers reach out
+//      FIRST, before the player types anything.
+//   3. The casting interview proceeds in the chat (the engine's character-creation moment prompt
+//      + incremental updateCasting → createCharacter). The producers ask about the CAST PHOTO
+//      first; only THEN does the in-chat photo upload box pop up (orwellHeadshot.js) — it follows
+//      the producers' question and is OPTIONAL/skippable (it never gates the chat or createCharacter).
+//   4. House entry + a light-touch guided first week (the engine premiere + the agent-loop pacing).
+//
+// OOBE re-sequence (2026-06-20): the OLD flow was photo-FIRST and HARD-LOCKED the chat until a
+// photo was secured. That is reversed here: the welcome opens the interview, the producers ask
+// about the photo, and the photo box appears MID-interview (engine-gated on state.casting.missing
+// including "castPhoto") and is skippable. The chat is no longer locked for the photo.
 //
 // This module's remaining jobs:
 //   • J4 (model gate): no chat model configured → a game-framed holding card ("Production needs a
@@ -21,8 +25,8 @@
 //   • F5 (engine down): the dark-house holding card instead of a generic workspace welcome.
 //   • F7 (fresh season): the FIRST seat-taking of a new interview opens a fresh chat session so a
 //     dead season's transcript never rides along as narrator context.
-//   • The WELCOME MODAL (its own modal) shown once per account pre-game, before the image step.
-//   • The PRODUCERS-OPEN kickoff after the photo is secured.
+//   • The WELCOME MODAL (its own modal) shown on EVERY fresh game/season pre-game; on dismiss it
+//     opens the fresh interview session and fires the PRODUCERS-OPEN kickoff.
 //
 // On a non-game build an unreachable engine never blocks the normal chat (fail open).
 (function () {
@@ -194,11 +198,16 @@
   }
 
   // ── The WELCOME MODAL (kept as its OWN modal — never folded into the chat) ──────────────
-  // Shown once per account, pre-game, AFTER the model is configured and BEFORE the image step.
-  // It greets the player, frames the show, and lays out the first-run sequence, then hands off
-  // to the image step (the casting card + the chat lock are already in place underneath). Unlike
-  // the holding cards this is NOT a blocker — it is the welcome — so dismissing it ("Let's go")
-  // simply proceeds. Per-user persisted so it greets once, not every reload.
+  // Shown on EVERY fresh game/season, pre-game, AFTER the model is configured. It greets the
+  // player, frames the show, then on dismiss opens the fresh interview session AND fires the
+  // producers' hidden kickoff (the producers reach out first). Unlike the holding cards this is
+  // NOT a blocker — it is the welcome — so dismissing it ("Let's go") simply proceeds.
+  //
+  // OOBE re-sequence (2026-06-20): the welcome now shows on every fresh game/season, not once per
+  // account. The per-user seen-marker still prevents it re-showing on every page RELOAD within the
+  // same pre-game session (set on dismiss); the restart/new-season/reset entry points CLEAR the
+  // marker (via clearWelcomeSeen() in _orwellMarkRestart) so a brand-new season greets again. The
+  // first-ever game shows it with the marker unset.
   const WELCOME_KEY = "orwell-welcome-seen";
 
   function welcomeKey() {
@@ -209,6 +218,13 @@
   }
   function markWelcomeSeen() {
     try { localStorage.setItem(welcomeKey(), "1"); } catch (_) {}
+  }
+  // OOBE re-sequence: a fresh game/season must greet again. The restart entry points clear the
+  // per-user marker so route()'s `!welcomeSeen()` re-shows the welcome for the new season. Kept
+  // server-agnostic (it's a local reload-debounce only; the authoritative pre-game signal is the
+  // engine's `started === false`), so clearing it never desyncs cross-device casting state.
+  function clearWelcomeSeen() {
+    try { localStorage.removeItem(welcomeKey()); } catch (_) {}
   }
 
   function mountWelcome(onProceed) {
@@ -222,8 +238,8 @@
         <h1>Welcome to the house</h1>
         <p class="ob-hold-sub">You're cast on <b>Big Brother</b>. One house, sixteen strangers,
           one winner — and production is watching everything.</p>
-        <p class="ob-hold-sub">First up: your cast photo. The producers are due any minute for
-          your casting interview.</p>
+        <p class="ob-hold-sub">The producers are due any minute for your casting interview —
+          they'll reach out the moment you're ready.</p>
         <div class="ob-hold-actions"></div>
       </div>`;
     const row = card.querySelector(".ob-hold-actions");
@@ -231,8 +247,10 @@
       markWelcomeSeen();
       uninertBackground();
       el.remove();
-      // The welcome modal is gone; the cast-photo WINDOW keeps the splash suppressed via
-      // its own body flag, so clearing ow-onboarding here is safe (the window re-asserts it).
+      // The welcome modal is gone. OOBE re-sequence: dismissing the welcome IS the proceed —
+      // onProceed opens the fresh interview session and fires the producers' kickoff. The photo
+      // box now appears MID-interview (after the producers ask), not before, so there is no
+      // separate "image step" to hand off to here.
       setOnboardingActive(false);
       try { onProceed && onProceed(); } catch (_) {}
     };
@@ -240,7 +258,7 @@
     go.type = "button";
     go.className = "ob-btn ob-btn-primary";
     go.setAttribute("data-ob-welcome-go", "");
-    go.textContent = "Add my cast photo";
+    go.textContent = "Meet the producers";
     go.addEventListener("click", dismiss);
     row.appendChild(go);
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
@@ -348,15 +366,20 @@
     } catch (_) {}
   }
 
-  // L5 → P1: the casting cutover. Securing the cast photo is the player's FIRST step
-  // (orwellHeadshot.js calls this on finalize); the PRODUCERS open the show — the player never
-  // types the opening word. We auto-send ONE kickoff with the user bubble HIDDEN, so the first
-  // VISIBLE message in the chat is the producers reaching out, not a player line. The model (under
-  // the pre-game/casting moment prompt) finalizes casting if needed (createCharacter) and narrates
-  // the producers' reach-out. This is a deliberate, scoped departure from "the player owns the
-  // first keypress" — only at this single handoff, game-build only, fired once. Guards: never
-  // override the player's own typing or an in-flight stream, and never fire if a started game's
-  // conversation is already underway.
+  // L5 → P1 → OOBE re-sequence (2026-06-20): the casting cutover. The PRODUCERS open the show — the
+  // player never types the opening word. We auto-send ONE kickoff with the user bubble HIDDEN, so
+  // the first VISIBLE message in the chat is the producers reaching out, not a player line. The
+  // model (under the pre-game/casting moment prompt) opens the interview, and — per the new
+  // sequence — asks about the CAST PHOTO first (the photo box pops up after that question lands).
+  //
+  // OOBE re-sequence: this kickoff now fires when the WELCOME is dismissed (route()'s onProceed),
+  // NOT after the photo is secured. The photo is no longer the first step — the interview is, and
+  // the photo box appears mid-interview. (orwellHeadshot.js no longer calls this on finalize; it
+  // fires the SEPARATE _orwellResumeAfterPhoto cue instead.)
+  //
+  // This is a deliberate, scoped departure from "the player owns the first keypress" — only at this
+  // single handoff, game-build only, fired once. Guards: never override the player's own typing or
+  // an in-flight stream, and never fire if a started game's conversation is already underway.
   const OPEN_GAME_LINE =
     "(Production cue — begin the casting interview now. Reach out to me first, in character as the " +
     "producers; do not wait for me to speak.)";
@@ -371,6 +394,15 @@
     } catch (_) {}
     return false;
   }
+  // 0065 — cast pre-warm triggers (fire-and-forget; the server endpoints are idempotent). AUTHOR WARM
+  // fires the instant a model is selectable (route(), before the interview); PORTRAIT WARM fires at the
+  // first interview turn (the producers' opener) and the server holds it until authoring fully finishes.
+  function _orwellWarm(path) {
+    try {
+      fetch("/api/orwell/" + path, { method: "POST", credentials: "same-origin" }).catch(() => {});
+    } catch (_) {}
+  }
+
   let _openSent = false;
   window._orwellOpenGameAfterCasting = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
@@ -379,9 +411,10 @@
     // here) means we must never fire a second one.
     if (_conversationHasAssistantTurn()) { _openSent = true; return; }
     _openSent = true;
-    // The photo is now secured — make sure the chat is unlocked before the kickoff sends.
-    try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
-    // Give the headshot card's teardown a beat, then auto-send through the normal submit path
+    // 0065 PORTRAIT WARM: the interview is opening (the first turn) — kick the portrait warm. The server
+    // HOLDS it until author warm has fully finished, so faces are never shot from a half-authored store.
+    _orwellWarm("warm-portraits");
+    // Give the welcome modal's teardown a beat, then auto-send through the normal submit path
     // (the same seam chat.js uses for its own programmatic sends), with the user bubble hidden so
     // the producers appear to reach out first.
     setTimeout(() => {
@@ -393,17 +426,60 @@
         if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
           _openSent = false; return;                  // a turn is already running — let it finish
         }
-        // Hide the kickoff bubble so the FIRST thing the player sees is the producers' message.
-        try { if (window.chatModule && window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
-        box.value = OPEN_GAME_LINE;
-        box.dispatchEvent(new Event("input", { bubbles: true }));
-        if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
+        // BUG FIX (item 6 — composer hangs mid-page): clear the welcome-active state NOW, at send
+        // time, so the composer DOCKS at the bottom immediately instead of staying lifted ~30vh up
+        // the page until the first narration token clears it. (With the photo box now appearing
+        // over an already-docked chat, the old mid-page hang can't recur.)
+        try { if (window.chatModule && window.chatModule.hideWelcomeScreen) window.chatModule.hideWelcomeScreen(); } catch (_) {}
+        // BUG FIX (item 7 — cue text flashes): send via the hidden-cue seam, which hides the user
+        // bubble AND clears the composer synchronously so OPEN_GAME_LINE never lingers visibly.
+        if (window.chatModule && typeof window.chatModule.sendHiddenCue === "function") {
+          window.chatModule.sendHiddenCue(OPEN_GAME_LINE);
+        } else if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
+          // Legacy fallback: best-effort hide + submit (may flash the cue for a beat).
+          try { if (window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
+          box.value = OPEN_GAME_LINE;
+          box.dispatchEvent(new Event("input", { bubbles: true }));
           window.chatModule.handleChatSubmit({ preventDefault() {} });
         } else {
           // No send seam available — fall back to a focused composer so the player can nudge it.
           box.focus();
         }
       } catch (_) { _openSent = false; /* fail open — the composer is still the way in */ }
+    }, 250);
+  };
+
+  // OOBE re-sequence (2026-06-20): the post-photo RESUME cue. After the player finalizes or skips
+  // the cast photo (orwellHeadshot.js tears the box down and calls this), nudge the producers to
+  // acknowledge and CONTINUE the interview — so the conversation resumes smoothly instead of
+  // sitting silent after the box disappears. Mirrors the open-game kickoff: hidden user bubble,
+  // synchronous composer clear, game-build only, never over the player's own typing or an
+  // in-flight stream. Unlike the opener this may fire AFTER the conversation is already underway
+  // (the producers asked about the photo, the box came and went), so it does NOT bail on an
+  // existing assistant turn — but it DOES bail if the player is mid-thought or a stream is running.
+  const RESUME_AFTER_PHOTO_LINE =
+    "(Production cue — the cast photo step is done; acknowledge it briefly, in character as the " +
+    "producers, and continue the casting interview.)";
+  window._orwellResumeAfterPhoto = function () {
+    const gameBuild = document.body && document.body.hasAttribute("data-game-build");
+    if (!gameBuild) return;
+    setTimeout(() => {
+      try {
+        const box = document.getElementById("message");
+        if (!box) return;
+        if (box.value.trim()) return;  // the player is mid-thought — don't stomp it
+        if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
+          return;                       // a turn is already running — let it finish
+        }
+        if (window.chatModule && typeof window.chatModule.sendHiddenCue === "function") {
+          window.chatModule.sendHiddenCue(RESUME_AFTER_PHOTO_LINE);
+        } else if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
+          try { if (window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
+          box.value = RESUME_AFTER_PHOTO_LINE;
+          box.dispatchEvent(new Event("input", { bubbles: true }));
+          window.chatModule.handleChatSubmit({ preventDefault() {} });
+        }
+      } catch (_) { /* fail open — the composer is still the way in */ }
     }, 250);
   };
 
@@ -426,7 +502,15 @@
   // the dead transcript before casting re-opens — and the redundant chat.js createCharacter call
   // that follows finds the flag disarmed and does nothing. The seam stays referenced from chat.js
   // (the createCharacter success path) so a future engine-driven restart can still arm it.
-  window._orwellMarkRestart = () => { try { window._orwellRestartArmed = true; } catch (_) {} };
+  window._orwellMarkRestart = () => {
+    try { window._orwellRestartArmed = true; } catch (_) {}
+    // OOBE re-sequence (2026-06-20): a restart/new-season/reset begins a FRESH casting flow, so the
+    // welcome must greet again. Both genuine restart entry points (settings.js reset-progress and
+    // orwellNewSeason.js next-season) call this, so clearing the per-user seen-marker here covers
+    // them centrally — route() then re-shows the welcome (`!welcomeSeen()`) for the new season. The
+    // initial first-season onboarding never calls markRestart, and the marker is already unset there.
+    try { clearWelcomeSeen(); } catch (_) {}
+  };
   window._orwellFreshSession = () => {
     // Initial first-season onboarding: NOT a restart — keep it ONE continuous conversation,
     // never blank/switch the chat (the casting interview IS the lead-in into the game).
@@ -473,13 +557,27 @@
           admin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
         return;
       }
-      // Pre-game with a model configured: open the fresh interview session (F7), then run the
-      // guided sequence — the WELCOME MODAL first (once per account), which hands off to the image
-      // step. The chat is already locked by orwellChatGate.js until a photo is secured; the casting
-      // card (orwellHeadshot.js) is the image step itself.
+      // Pre-game with a model configured: open the fresh interview session (F7), then show the
+      // WELCOME MODAL (on EVERY fresh game/season). OOBE re-sequence (2026-06-20): dismissing the
+      // welcome IS the proceed — onProceed opens the fresh interview session (idempotent: the
+      // SEAT_TAKEN_KEY one-shot makes the second call a no-op) and fires the producers' kickoff, so
+      // the interview opens AFTER the welcome (not after a photo). The chat is no longer locked for
+      // the photo; the photo box appears mid-interview once the producers ask (orwellHeadshot.js).
       await openFreshInterviewSession();
+      // 0065 AUTHOR WARM: a model is configured and the season hasn't started — pre-seed + deeply author
+      // the cast in the background NOW, before the interview, so it is fully authored before any portrait.
+      _orwellWarm("prewarm-cast");
+      const onProceed = async () => {
+        try { await openFreshInterviewSession(); } catch (_) {}
+        try { if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting(); } catch (_) {}
+      };
       if (!welcomeSeen()) {
-        mountWelcome(); // its own modal; on "Add my cast photo" it dissolves into the image step
+        mountWelcome(onProceed); // its own modal; on "Meet the producers" it opens the interview
+      } else {
+        // Already greeted this pre-game session (a reload mid-OOBE): don't re-show the welcome, but
+        // still ensure the producers' kickoff has had its chance to open the interview (idempotent —
+        // _openSent + the empty-conversation belt guard against a double opener).
+        try { if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting(); } catch (_) {}
       }
     } catch (_) {
       // Engine unreachable: on the game build that's a dark house, not a silent skip (F5).
@@ -492,6 +590,9 @@
   // the flow should show — chiefly when the player configures an LLM model in Settings.
   //
   //   Settings → LLM  →  welcome modal  →  image (required)  →  producers reach out first
+  //
+  // OOBE re-sequence:  Settings → LLM  →  welcome modal  →  producers reach out first  →
+  //                    photo box mid-interview (optional)
   //
   // models.js fires orwell:models-changed on the none→some transition. When it lands and a
   // blocking holding card (e.g. "Production needs a feed source") is still up, clear it

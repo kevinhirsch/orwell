@@ -75,12 +75,24 @@ export interface RecordInteractionReq {
    * the engine's base magnitude. When ABSENT, behavior is byte-identical to the `kind`-only path.
    */
   consequence?: ConsequenceDescriptor;
+  /**
+   * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this scene
+   * against. When present and `!== current`, the recording is REFUSED with a typed `stale-beat`
+   * conflict (HTTP 409, no event recorded, no fold). Absent ⇒ byte-identical to the pre-0065 path.
+   */
+  expectedBeatSeq?: number;
 }
 
 export interface SurfaceReq {
   entity: EntityId;
   fact: { content: string };
   pathway: string;
+  /**
+   * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this surfacing
+   * against. When present and `!== current`, it is REFUSED with a typed `stale-beat` conflict (HTTP
+   * 409, nothing surfaced). Absent ⇒ byte-identical to the pre-0065 path.
+   */
+  expectedBeatSeq?: number;
 }
 
 export interface DiaryRoomReq {

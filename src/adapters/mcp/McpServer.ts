@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -40,8 +40,21 @@ function requireShape(name: string, args: Record<string, unknown>): void {
   const refuse = (field: string, want: string): never => {
     throw new EngineRefusal(`invalid args for ${name}: "${field}" must be ${want}`);
   };
+  // 0065 — shape-guard the OPTIONAL sync-spine fields the SAME way E31/D10/R6 guards every other
+  // optional arg (a malformed value would otherwise cast blindly into the adapter): `expectedBeatSeq`
+  // must be a number when present (the CAS token, Part A); `idempotencyKey` a string when present
+  // (the at-most-once retry key, Part B). Absent ⇒ unchanged (fully opt-in).
+  const guardSyncFields = (allowIdempotency: boolean): void => {
+    if (args["expectedBeatSeq"] !== undefined && typeof args["expectedBeatSeq"] !== "number") {
+      refuse("expectedBeatSeq", "a number when present");
+    }
+    if (allowIdempotency && args["idempotencyKey"] !== undefined && typeof args["idempotencyKey"] !== "string") {
+      refuse("idempotencyKey", "a string when present");
+    }
+  };
   switch (name) {
     case "recordInteraction":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq (no idempotency key here)
       if (!isStr(args["initiator"])) refuse("initiator", "a houseguest id (string)");
       if (!isStrArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids");
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
@@ -68,6 +81,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       }
       return;
     case "surfaceInformationTo": {
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["entity"])) refuse("entity", "an entity id (string)");
       const fact = args["fact"];
       if (typeof fact !== "object" || fact === null || !isStr((fact as Record<string, unknown>)["content"])) {
@@ -79,11 +93,19 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "diaryRoom":
       if (!isStr(args["entry"])) refuse("entry", "a non-empty string");
       return;
+    case "advanceGame":
+      guardSyncFields(true); // 0065 Parts A+B — optional expectedBeatSeq + idempotencyKey
+      return;
     case "submitDecision":
+      guardSyncFields(true); // 0065 Parts A+B — optional expectedBeatSeq + idempotencyKey
       if (!isStr(args["kind"])) refuse("kind", "a decision kind (string)");
       if (args["choice"] !== undefined && !isStrArray(args["choice"])) refuse("choice", "an array of houseguest ids when present");
       return;
+    case "moveTo":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      return;
     case "makeDeal":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
       if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
       if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
@@ -102,6 +124,25 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "recordImageBeat":
       if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
       if (!isStr(args["imageRef"])) refuse("imageRef", "a non-empty string");
+      return;
+    case "recordCastProfile":
+      // 0058/0065: the FE authoring write-back. Only `houseguestId` is structurally required; every
+      // authored field is optional (the engine keeps the prior/seeded value for any omitted field) and
+      // domain-validated (non-player-mirroring) inside the adapter, not here.
+      if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
+      return;
+    case "preSeedCast":
+      // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
+      if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
+      return;
+    case "recordWorldSnapshot":
+      // 0062: the FE zeitgeist write-back. `slices` is OPTIONAL — refuse only if present and not an
+      // object (a string/array where an object is expected is the R6 class that dies deep in the merge);
+      // each slice's own shape (bounded, public flavor) is sanitized inside the adapter, not here.
+      if (args["slices"] !== undefined) {
+        const s = args["slices"];
+        if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
+      }
       return;
     default:
       return; // read tools and free-text tools take no required structure
@@ -129,10 +170,25 @@ export class McpServer {
         return this.deps.session.createCharacter(args as unknown as CreateCharacterReq);
       case "updateCasting":
         return this.deps.session.updateCasting(args as unknown as UpdateCastingReq);
+      case "preSeedCast":
+        // 0065: pre-warm the player-independent cast before the interview ends (Vault-free roster + prompts out).
+        return this.deps.session.preSeedCast(args as unknown as PreSeedCastReq);
+      case "recordCastProfile":
+        // 0058/0065: seal one houseguest's authored §3 profile (PUBLIC/HIDDEN split; never echoes a hidden value).
+        return this.deps.session.recordCastProfile(args as unknown as RecordCastProfileReq);
+      case "recordWorldSnapshot":
+        // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
+        return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
       case "getGameState":
         return this.deps.session.getGameState();
       case "gameStatus":
         return this.deps.session.gameStatus();
+      case "stateDelta":
+        // 0065 Part E — the beatSeq-keyed delta read. `sinceBeatSeq` is the caller's last-seen token;
+        // an absent/non-number value reads as 0 (the engine then signals full-refresh when it's stale).
+        return this.deps.session.stateDelta(
+          typeof args["sinceBeatSeq"] === "number" ? args["sinceBeatSeq"] : 0,
+        );
       case "playerTagline":
         return this.deps.session.playerTagline();
       case "finaleView":
@@ -142,7 +198,8 @@ export class McpServer {
       case "runCompetition":
         return this.deps.session.runCompetition(args as unknown as RunCompetitionReq);
       case "advanceGame":
-        return this.deps.session.advanceGame();
+        // 0065 — optional expectedBeatSeq (CAS) + idempotencyKey (at-most-once) ride the args.
+        return this.deps.session.advanceGame(args as { expectedBeatSeq?: number; idempotencyKey?: string });
       case "submitDecision":
         return this.deps.session.submitDecision(args as unknown as SubmitDecisionReq);
       case "requestSelfEviction":
@@ -164,7 +221,11 @@ export class McpServer {
       case "whereabouts":
         return this.deps.session.whereabouts();
       case "moveTo":
-        return this.deps.session.movePlayer(String(args["room"] ?? ""));
+        // 0065 Part A — optional expectedBeatSeq CAS token rides the args.
+        return this.deps.session.movePlayer(
+          String(args["room"] ?? ""),
+          typeof args["expectedBeatSeq"] === "number" ? args["expectedBeatSeq"] : undefined,
+        );
       // PREMIERE meet-everyone (feature #380 follow-on): read who's still to introduce / mark a meeting.
       case "premiereIntros":
         return this.deps.session.premiereIntros();

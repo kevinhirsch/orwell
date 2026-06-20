@@ -31,6 +31,7 @@ import pytest
 
 chat_helpers = importlib.import_module("routes.chat_helpers")
 orwell_engine = importlib.import_module("src.orwell_engine")
+agent_loop = importlib.import_module("src.agent_loop")
 
 
 def _run(coro):
@@ -392,4 +393,96 @@ def test_record_post_turn_desync_check_still_catches_a_phantom_eviction(monkeypa
         user, "After a tense vote, a houseguest is evicted from the house and the others sit stunned."))
     assert user in chat_helpers._DESYNC_REGROUND
     assert "RE-GROUND" in chat_helpers._DESYNC_REGROUND[user]
+    chat_helpers._DESYNC_REGROUND.pop(user, None)
+
+
+# ── 0065 Part C: the SAME corpus, but through the PRE-EMISSION guard (stream-side) ──────── #
+#
+# The post-turn check above is the NEXT-turn backstop. Part C moves the closed-set check BEFORE
+# emission, into the agent loop's sentence-buffered stream scrubber. The anti-flattening guarantee
+# (ADR 0005 principle #1) must hold THERE too: every dynamism-corpus entry must stream through the
+# pre-emission guard UNTOUCHED, against the very board that would trip a real closed-set claim. This
+# is the critical non-collapse coverage of the pre-emission path required by feature 0065 §5.
+
+
+def _board_unchanged_fakes(monkeypatch):
+    """Patch the engine reads so the live board matches _UNCHANGED (the board did NOT move this turn)
+    — the strictest setting in which a real closed-set claim WOULD be held. If the guard reaches the
+    board for creative prose at all, these get hit; if it stays out of the open set (correct), the
+    cheap pre-filter short-circuits before they are ever called."""
+    async def fake_status(user=None):
+        return {
+            "week": 4, "phase": "social", "hoh": {"id": "npc:1"},
+            "nominees": [{"id": "npc:2"}, {"id": "npc:3"}],
+            "veto": {"holder": None, "used": False, "players": []},
+            "pending": None, "beatSeq": 7,
+        }
+
+    async def fake_state(user=None, **kw):
+        return {
+            "week": 4, "phase": "social", "finished": False, "beatSeq": 7,
+            "house": [
+                {"id": "player", "status": "active"},
+                {"id": "npc:8", "status": "evicted"},
+                {"id": "npc:9", "status": "evicted"},
+                {"id": "npc:2", "status": "active"},
+            ],
+        }
+
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+
+@pytest.mark.parametrize(
+    "purpose,narration", _DYNAMISM_CORPUS, ids=[c[0] for c in _DYNAMISM_CORPUS],
+)
+def test_creative_narration_streams_through_the_pre_emission_guard_untouched(purpose, narration, monkeypatch):
+    """ADR 0005 principle #1 on the PRE-EMISSION path: every uncoded creative/social narration must
+    stream through `agent_loop._pre_emission_outcome_guard` BYTE-IDENTICAL (no sentence held), and
+    must queue NO next-turn re-ground — even against a board that did not move. The pre-emission
+    guard has no jurisdiction over the open set; holding creative prose is a defect."""
+    user = "u-preemit-noncollapse"
+    chat_helpers._DESYNC_REGROUND.pop(user, None)
+    chat_helpers._LAST_BEAT_SIG[user] = dict(_UNCHANGED)
+    _board_unchanged_fakes(monkeypatch)
+
+    out = _run(agent_loop._pre_emission_outcome_guard(narration, user))
+    assert out == narration, (
+        f"creative narration ({purpose}) was altered by the pre-emission guard — it reached into the "
+        f"OPEN set, violating ADR 0005 principle #1.\nGot:\n{out!r}"
+    )
+    assert user not in chat_helpers._DESYNC_REGROUND, (
+        f"creative narration ({purpose}) queued a re-ground via the pre-emission guard (ADR 0005 #1)"
+    )
+    chat_helpers._LAST_BEAT_SIG.pop(user, None)
+    chat_helpers._DESYNC_REGROUND.pop(user, None)
+
+
+def test_pre_emission_guard_still_holds_a_phantom_eviction(monkeypatch):
+    """The mirror — the pre-emission guard stays USEFUL: a streamed eviction the board never moved on
+    is HELD (dropped) before emission and queues a re-ground (ADR 0005 #5 — closed-set strictness)."""
+    user = "u-preemit-phantom"
+    chat_helpers._DESYNC_REGROUND.pop(user, None)
+    chat_helpers._LAST_BEAT_SIG[user] = {**_UNCHANGED, "phase": "eviction"}
+
+    async def fake_status(user=None):
+        return {"week": 4, "phase": "eviction", "hoh": {"id": "npc:1"},
+                "nominees": [{"id": "npc:2"}, {"id": "npc:3"}],
+                "veto": {"holder": None, "used": False, "players": []}, "pending": None, "beatSeq": 7}
+
+    async def fake_state(user=None, **kw):  # still 2 evicted — the board did NOT move
+        return {"week": 4, "phase": "eviction", "finished": False, "beatSeq": 7,
+                "house": [{"id": "player", "status": "active"},
+                          {"id": "npc:8", "status": "evicted"},
+                          {"id": "npc:9", "status": "evicted"},
+                          {"id": "npc:2", "status": "active"}]}
+
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    out = _run(agent_loop._pre_emission_outcome_guard(
+        "After a tense vote, one houseguest is evicted from the house.", user))
+    assert "is evicted" not in out  # the phantom sentence was held before emission
+    assert user in chat_helpers._DESYNC_REGROUND and "RE-GROUND" in chat_helpers._DESYNC_REGROUND[user]
+    chat_helpers._LAST_BEAT_SIG.pop(user, None)
     chat_helpers._DESYNC_REGROUND.pop(user, None)

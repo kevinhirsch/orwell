@@ -43,6 +43,8 @@ function playToEnd(s: LiveSeasonState, ctx: SeasonCtx, seed: number): BeatEvent[
       else if (p.kind === "tie-break") events.push(applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx));
       else if (p.kind === "houseguests-choice") events.push(applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng));
       else if (p.kind === "comp-intent") events.push(applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng));
+      // 0006 staged-rounds: the player declares an approach PER elimination round while still in.
+      else if (p.kind === "comp-round") events.push(applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng));
       else if (p.kind === "goodbye-message") events.push(applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx));
       else if (p.kind === "juror-question") events.push(applyDecision(s, { kind: "juror-question", question: "q" }, ctx));
       else if (p.kind === "juror-vote") events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
@@ -111,6 +113,7 @@ describe("live weekly loop (incremental 0011)", () => {
           else if (p.kind === "tie-break") applyDecision(s, { kind: "tie-break", evict: p.nominees[0] }, ctx);
           else if (p.kind === "houseguests-choice") applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng);
           else if (p.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
+          else if (p.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
           else if (p.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx);
           else if (p.kind === "juror-question") applyDecision(s, { kind: "juror-question", question: "q" }, ctx);
           else if (p.kind === "juror-vote") applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);

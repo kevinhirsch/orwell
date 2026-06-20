@@ -4,10 +4,12 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
-  UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
+  UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
+  PreSeedCastReq, PreSeedCastView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
+  StateDeltaView, DeltaEventView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -52,6 +54,11 @@ const TAGLINE_INSTRUCTION =
 function oneLine(s: string): string {
   return (s.split("\n")[0] ?? "").trim().slice(0, 120);
 }
+
+/** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
+function sameIds(a: readonly EntityId[], b: readonly EntityId[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
+}
 /** Reject empty/over-long output and the Echo stub's context dump (so we fall open to the template). */
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
@@ -75,7 +82,7 @@ import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import { EngineRefusal } from "../../domain/errors";
+import { EngineRefusal, StaleBeatError } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
@@ -150,6 +157,31 @@ function entropySeed(): number {
 }
 
 /**
+ * 0065 — the pre-game holding store for a PRE-WARMED cast (see `GameSessionAdapter.prewarm`). Holds
+ * exactly the player-INDEPENDENT cast state that `createCharacter` would otherwise generate at finalize:
+ * the NPC roster (with their PUBLIC facets + any AUTHORED enrichment), the HIDDEN deep layer, the derived
+ * story threads, the sealed private orientations, the grounded skin tones, and the per-season portrait
+ * style anchor. ENGINE-ONLY (it carries the hidden layer); persisted in the snapshot so a half-warmed
+ * cast survives a restart.
+ */
+interface PrewarmCast {
+  seed: number;
+  npcs: GameHouse["npcs"];
+  deepProfiles: Record<EntityId, DeepProfile>;
+  storyThreads: StoryThread[];
+  privateOrientations: Record<EntityId, Orientation>;
+  groundedSkinTones: Record<EntityId, string>;
+  portraitStyleAnchor: string;
+}
+
+/**
+ * 0065 — the throwaway player name `preSeedCast` builds its temporary house with. The pre-warm cast is
+ * player-INDEPENDENT, so this never reaches the warmed NPCs (their generation runs before any player
+ * material) and the placeholder player is discarded the instant the cast is captured.
+ */
+const PREWARM_PLAYER_NAME = "(pre-warm)";
+
+/**
  * Flatten untrusted FE text before it rides into a SYSTEM prompt (the C8 pattern): collapse ALL
  * whitespace (newlines/tabs/control chars that could forge a prompt line) into single spaces and cap the
  * length. Used by the 0062 zeitgeist write-back (`recordWorldSnapshot`) — the snapshot is non-secret
@@ -200,6 +232,26 @@ export class GameSessionAdapter implements GameSession {
   private intake: CastingIntake = emptyIntake();
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
   private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
+  /**
+   * The monotonic per-sandbox beat counter (feature 0065 Part A). Bumped exactly ONCE per committed
+   * state mutation by the registry's commit funnel (`bumpBeatSeq`, called before the candidate
+   * snapshot is exported), so it increments by one per beat / aux commit and stays stable on a no-op
+   * (a no-op never fires `onPersist`). Persisted in the snapshot (restart-safe; co-versioned with the
+   * save). Surfaced on every read/advance view; a mutating call may carry `expectedBeatSeq` and is
+   * refused (`stale-beat`/409) when it no longer matches. A rolled-back commit restores the pre-commit
+   * value through `restore` (the baseline snapshot carries it). NOT secret — a counter has no Vault
+   * content, so it crosses the wall freely.
+   */
+  private beatSeq = 0;
+  /**
+   * The at-most-once idempotency cache (feature 0065 Part B) — a small bounded per-sandbox LRU
+   * `idempotencyKey → AdvanceView` for `advanceGame`/`submitDecision`. A repeated key returns the
+   * ORIGINAL view (its `beatSeq` included) WITHOUT advancing again, so a flaky-socket retry never
+   * double-applies. Best-effort + in-memory (a restart drops it and degrades safely — Part A's
+   * `expectedBeatSeq` still guards a double-apply); insertion-ordered so the oldest evicts first.
+   */
+  private readonly idempotencyCache = new Map<string, AdvanceView>();
+  private static readonly IDEMPOTENCY_CACHE_MAX = 32;
   // The incremental weekly-loop state (0011); null until a game starts.
   private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
@@ -348,6 +400,90 @@ export class GameSessionAdapter implements GameSession {
     return out;
   }
 
+  /** The current monotonic beat counter (0065 Part A) — surfaced on every read/advance view. */
+  beatSeqNow(): number {
+    return this.beatSeq;
+  }
+
+  /**
+   * Bump the beat counter (0065 Part A) — the registry's commit funnel calls this exactly ONCE per
+   * committed mutation, BEFORE the candidate snapshot is exported, so the new value is persisted. A
+   * commit that is then refused/rolled back is restored from the baseline snapshot (which carries the
+   * pre-commit value), so a refused write never leaves the counter advanced. (Bumping here, not inside
+   * `persist`, keeps an interior deferred `persist` from double-counting one logical commit.)
+   */
+  bumpBeatSeq(): void {
+    this.beatSeq++;
+    this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — seed the delta ring's BASELINE checkpoint at the CURRENT `beatSeq` (the resumed value),
+   * capturing the current event-log length + board. The registry calls this once after a resume finishes
+   * loading the events (`restore` clears the ring; the events arrive AFTER it), so the very FIRST delta a
+   * resumed session serves — keyed on the resumed `beatSeq` — can slice its tail instead of full-refreshing
+   * forever. A no-op if a checkpoint for the current beat already exists (a fresh game's first commit
+   * captured it). Vault-free (ids/counts only).
+   */
+  seedDeltaBaseline(): void {
+    if (!this.beatCheckpoints.has(this.beatSeq)) this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — snapshot the lightweight board state AT the new `beatSeq` so the delta feed can later
+   * slice the event tail (O(Δ)) and diff the ceremony WITHOUT re-deriving "what existed then". Called
+   * once per committed mutation (right after the counter bumps), the events for this commit are already
+   * recorded, so `count()` here is the event-log length AS OF this beat. Bounded to the last
+   * `DELTA_WINDOW` beats (the oldest checkpoint evicts) so a busy season's ring stays small; a token
+   * older than the retained window correctly full-refreshes. Vault-free (ids/counts only).
+   */
+  private captureBeatCheckpoint(): void {
+    const eventCount = this.deltaSource?.count() ?? this.record?.events().length ?? 0;
+    this.beatCheckpoints.set(this.beatSeq, {
+      eventCount,
+      week: this.week,
+      phase: this.phase,
+      ...(this.ceremony.hoh !== undefined ? { hoh: this.ceremony.hoh } : {}),
+      nominees: [...this.ceremony.nominees],
+      ...(this.ceremony.vetoHolder !== undefined ? { vetoHolder: this.ceremony.vetoHolder } : {}),
+      vetoUsed: this.ceremony.vetoUsed,
+      finished: !!this.live?.finished,
+      ...(this.live?.winner !== undefined ? { winner: this.live.winner } : {}),
+    });
+    // Evict the oldest beyond the window (insertion-ordered Map ⇒ the first key is the oldest).
+    while (this.beatCheckpoints.size > GameSessionAdapter.DELTA_WINDOW) {
+      const oldest = this.beatCheckpoints.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      this.beatCheckpoints.delete(oldest);
+    }
+  }
+
+  /**
+   * Compare-and-swap stale-write guard (0065 Part A). When a mutating call supplies `expectedBeatSeq`
+   * and it no longer matches the committed `beatSeq`, the board moved under it (the 0064 queued-turn
+   * case) — refuse BEFORE any mutation with a typed `stale-beat` conflict carrying the CURRENT counter
+   * and the Vault-free current board, so the caller can re-ground immediately. `undefined` ⇒ opt out
+   * (byte-identical to the pre-0065 path). The board is the same ceremony-level public status
+   * `gameStatus()` exposes — no Vault content.
+   */
+  private guardBeatSeq(expected: number | undefined): void {
+    if (expected !== undefined && expected !== this.beatSeq) {
+      throw new StaleBeatError(this.beatSeq, this.gameStatus());
+    }
+  }
+
+  /** 0065 Part B — remember an `AdvanceView` under its idempotency key (bounded LRU; oldest evicts). */
+  private rememberIdempotent(key: string, view: AdvanceView): AdvanceView {
+    this.idempotencyCache.delete(key); // re-insert at the tail (insertion-ordered = LRU)
+    this.idempotencyCache.set(key, view);
+    while (this.idempotencyCache.size > GameSessionAdapter.IDEMPOTENCY_CACHE_MAX) {
+      const oldest = this.idempotencyCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.idempotencyCache.delete(oldest);
+    }
+    return view;
+  }
+
   /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
   setOnEvent(fn: (ev: BeatEvent) => void): void {
     this.onEvent = fn;
@@ -418,6 +554,18 @@ export class GameSessionAdapter implements GameSession {
    */
   private deepProfiles: Record<EntityId, DeepProfile> = {};
   private storyThreads: StoryThread[] = [];
+
+  /**
+   * 0065 — the engine-side pre-game holding store for a PRE-WARMED cast. Before the casting interview
+   * ends, `preSeedCast` generates the player-INDEPENDENT cast (composition + diversity + deep layer)
+   * off the season seed into here; the FE then authors it deeply (`recordCastProfile` lands HERE
+   * pre-game), and the portrait prompts read it. When `createCharacter` finalizes it ADOPTS this
+   * finished cast (the SAME seed) instead of regenerating the thin seeded floor — so portraits, shot
+   * from the warmed store, match the finished person. Null until a warm happens; cleared on adoption.
+   * Durable (0030): a warmed-but-not-finalized cast survives a restart. ENGINE-ONLY — it holds the
+   * hidden deep layer + private orientations (sealed at warm time; never projected).
+   */
+  private prewarm: PrewarmCast | null = null;
 
   /**
    * The engine-only HIDDEN seeded relationship layer (0059): sparse pre-game ties + showmances, sealed
@@ -516,6 +664,59 @@ export class GameSessionAdapter implements GameSession {
     hidden: () => ReadonlyArray<{ kind: string; content: string }>;
   }): void {
     this.record = p;
+  }
+
+  /**
+   * 0065 Part E — the delta feed's O(Δ) providers, wired by the registry. `count` is the O(1) event-log
+   * length (used to anchor each beat checkpoint at commit time). `visibleEventsSince(fromCount)` returns
+   * the PLAYER-VISIBLE events appended AT OR AFTER `fromCount` — the registry slices the immutable log
+   * tail (O(Δ)) and runs the SAME witness-filter + roster scrub the player surface uses, so the delta is
+   * Vault-free by construction and never re-scans the whole log. Absent on a standalone adapter (no
+   * registry) ⇒ the delta degrades to a full refresh (it cannot fetch a Vault-safe tail without them).
+   */
+  private deltaSource?: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  };
+
+  setDeltaProviders(p: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  }): void {
+    this.deltaSource = p;
+  }
+
+  /**
+   * 0065 Part E — a per-turn beat checkpoint ring: `beatSeq → { eventCount, ceremony/board snapshot,
+   * finished/winner }` captured at each `bumpBeatSeq` (the single commit funnel). The delta looks up the
+   * checkpoint AT `sinceBeatSeq` to slice the event tail (O(Δ)) and diff the ceremony — so it never
+   * re-derives "what existed then" by scanning. Bounded (the last `DELTA_WINDOW` beats); a token older
+   * than the oldest retained checkpoint (or after a restart, which starts the ring empty) ⇒ a full
+   * refresh, never a guessed partial delta. NOT persisted — it is a process-local read accelerator; on a
+   * resume the FE's last-seen token resets too, so an unknown token correctly full-refreshes.
+   */
+  private readonly beatCheckpoints = new Map<number, {
+    eventCount: number;
+    week: number;
+    phase: string;
+    hoh?: EntityId;
+    nominees: EntityId[];
+    vetoHolder?: EntityId;
+    vetoUsed: boolean;
+    finished: boolean;
+    winner?: EntityId;
+  }>();
+  private static readonly DELTA_WINDOW = 64;
+
+  /**
+   * 0065 Part E — an OPTIONAL diagnostic seam (Vault-free, no behavior change): reports how many tail
+   * events the last `stateDelta` MATERIALIZED, so a complexity test can assert the work is bounded by Δ
+   * (never O(events)). Off by default; set only in tests. It carries a count, never any event content.
+   */
+  private deltaScanProbe?: (scanned: number) => void;
+
+  setDeltaScanProbe(fn: ((scanned: number) => void) | undefined): void {
+    this.deltaScanProbe = fn;
   }
 
   /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
@@ -665,8 +866,27 @@ export class GameSessionAdapter implements GameSession {
    * author omits keeps its prior (seeded) value, so the profile always stays complete.
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult {
-    if (!this.house) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
-    const target = this.house.npcs.find((n) => n.id === req.houseguestId);
+    // 0065: the authored profile lands on the PRE-WARMED cast pre-game (the cast is generated before the
+    // player finishes the interview — `preSeedCast` → `prewarm`), or on the live house once a season is
+    // running (e.g. a season-2 re-author). Same split/seal logic either way; the only difference is which
+    // store holds the cast + which name guards the non-mirroring check (the live player, or the intake name).
+    const ctx = this.house
+      ? {
+        npcs: this.house.npcs, playerName: (this.house.player.name ?? "").trim(), prewarm: false,
+        profiles: this.deepProfiles,
+        getThreads: (): StoryThread[] => this.storyThreads,
+        setThreads: (t: StoryThread[]): void => { this.storyThreads = t; },
+      }
+      : this.prewarm
+      ? {
+        npcs: this.prewarm.npcs, playerName: (this.intake.playerName ?? "").trim(), prewarm: true,
+        profiles: this.prewarm.deepProfiles,
+        getThreads: (): StoryThread[] => this.prewarm!.storyThreads,
+        setThreads: (t: StoryThread[]): void => { this.prewarm!.storyThreads = t; },
+      }
+      : null;
+    if (!ctx) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
+    const target = ctx.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
 
     // Validate — non-player-mirroring (L28 + the anti-sycophancy mandate #3): the cast is INDEPENDENT
@@ -677,7 +897,7 @@ export class GameSessionAdapter implements GameSession {
     // material is ever sealed. The Day-1 read of the player is the ONE legitimately player-facing field
     // and is excluded from this check (the engine owns its seeded value regardless). Vault-safe: the
     // refusal echoes no authored value. (A short player name is ignored to avoid false positives.)
-    const playerName = (this.house.player.name ?? "").trim();
+    const playerName = ctx.playerName;
     const mentionsPlayer = (text: string): boolean =>
       playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
     const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
@@ -700,7 +920,7 @@ export class GameSessionAdapter implements GameSession {
     // The author supplies the Day-1 read as PROSE only — the engine KEEPS the calibrated seeded leans
     // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
     // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
-    const prev: DeepProfile = this.deepProfiles[target.id]
+    const prev: DeepProfile = ctx.profiles[target.id]
       // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
       // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
       // individual hidden life, not a flat shared-pool draw. The narrative text rides a DEDICATED
@@ -719,13 +939,13 @@ export class GameSessionAdapter implements GameSession {
         ? { ...prev.dayOnePerception, read: req.dayOnePerception }
         : prev.dayOnePerception,
     };
-    this.deepProfiles[target.id] = next;
+    ctx.profiles[target.id] = next;
 
     // (3) Re-derive THIS source's story threads (replace), deterministic off the name. The NPC→player
     // edge keeps its seeded lean (the engine owns the numbers — see above), so no edge re-seed here.
     const thrRng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-thread-authored:${target.name}`));
-    this.storyThreads = this.storyThreads.filter((t) => t.sourceId !== target.id)
-      .concat(deriveStoryThreads(thrRng, target.id, next));
+    ctx.setThreads(ctx.getThreads().filter((t) => t.sourceId !== target.id)
+      .concat(deriveStoryThreads(thrRng, target.id, next)));
 
     // (4) Full-fidelity recall (L27b): replace the prior deep-profile note in the authoritative soul
     // memory (engine-only; never crosses) so the authored detail is recall-able in full and persists +
@@ -746,7 +966,12 @@ export class GameSessionAdapter implements GameSession {
     this.soul?.recordToSoul(target.id, newNote);
 
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
-    this.onResealProfile?.(target.id, next, this.storyThreads.filter((t) => t.sourceId === target.id));
+    this.onResealProfile?.(target.id, next, ctx.getThreads().filter((t) => t.sourceId === target.id));
+
+    // 0065: a pre-game authored profile lands on `prewarm`, which is durable state — persist it (the
+    // live path commits through the orchestrator hook around the tool call, as before). `persist()` is
+    // re-entrancy-guarded, so a wrapping commit still defers to one write.
+    if (ctx.prewarm) this.persist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
@@ -872,6 +1097,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "veto-decision", use: input.use, ...(input.save ? { save: input.save } : {}) };
       case "comp-intent":
         return { kind: "comp-intent", intent: input.intent };
+      case "comp-round":
+        return { kind: "comp-round", intent: input.intent };
       case "houseguests-choice":
         return { kind: "houseguests-choice", vote: input.pick };
       case "replacement":
@@ -923,6 +1150,10 @@ export class GameSessionAdapter implements GameSession {
   snapshot(): SessionCore {
     return {
       started: this.house !== null,
+      // 0065 Part A — persist the monotonic beat counter so the CAS token is restart-safe (co-versioned
+      // with the save). Conditional spread keeps a never-bumped (pre-game/legacy) snapshot byte-shaped
+      // as before (absent ⇒ 0 on restore), so a pre-0065 save round-trips unchanged.
+      ...(this.beatSeq > 0 ? { beatSeq: this.beatSeq } : {}),
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
@@ -955,6 +1186,9 @@ export class GameSessionAdapter implements GameSession {
       ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
+      // 0065 — a pre-warmed (possibly FE-authored) cast is durable pre-game state: persist it so a
+      // half-warmed cast resumes after a restart rather than re-warming from scratch. Cleared on adoption.
+      ...(this.prewarm ? { prewarm: cloneSession(this.prewarm) } : {}),
       // 0058: the engine-only HIDDEN deep layer — persisted so an ACTIVATED thread stays activated and
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
@@ -1038,6 +1272,16 @@ export class GameSessionAdapter implements GameSession {
     // on the OLD array references) must be dropped; a stale clone could otherwise be reused for a new
     // soul that happens to match a length, persisting the wrong history.
     this.soulCloneCache.clear();
+    // 0065 Part A — resume the beat counter at the saved value (restart-safe CAS). Absent on a pre-0065
+    // save ⇒ 0 (the next commit bumps it). A resume replaces the houseguest objects wholesale, so the
+    // process-local idempotency cache (Part B) is for the dead in-memory life — drop it (best-effort;
+    // Part A's counter still guards a double-apply after the cache is gone).
+    this.beatSeq = core.beatSeq ?? 0;
+    this.idempotencyCache.clear();
+    // 0065 Part E — the delta ring is a process-local read accelerator (not persisted); a resume starts
+    // it empty, so the FE's pre-restart token (which also resets across a restart) correctly full-
+    // refreshes rather than slicing against a window that no longer holds its checkpoint.
+    this.beatCheckpoints.clear();
     this.house = core.house ? cloneSession(core.house) : null;
     this.week = core.week;
     this.phase = core.phase;
@@ -1069,6 +1313,9 @@ export class GameSessionAdapter implements GameSession {
           : STYLE_ANCHOR_VARIANTS[0])
         : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
+    // 0065 — restore a half-warmed (possibly FE-authored) cast so author/portrait warm resume rather than
+    // re-warming from scratch. Engine-only; absent on all prior saves and once the season has started.
+    this.prewarm = core.prewarm ? cloneSession(core.prewarm) : null;
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
@@ -1198,6 +1445,7 @@ export class GameSessionAdapter implements GameSession {
 
   gameStatus(): PublicGameStatus {
     return {
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token; Vault-free
       week: this.week,
       phase: this.phase,
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
@@ -1214,6 +1462,11 @@ export class GameSessionAdapter implements GameSession {
       // The live pending (Vault-free legal options) so the decision card re-arms from engine truth
       // on reload — not the FE's process-local last-seen cache, which a FE restart wipes.
       pending: this.pendingView(),
+      // F3: the same public over-signal + broadcast winner the AdvanceView/SeasonRecap expose, so a
+      // status-only client learns the season ended (and who won) without separately hitting /state or
+      // /recap — otherwise it hangs on the last ceremony state post-season. Vault-free (public winner).
+      finished: !!this.live?.finished,
+      winner: this.named(this.live?.winner),
     };
   }
 
@@ -1367,7 +1620,9 @@ export class GameSessionAdapter implements GameSession {
    * whereabouts unchanged (the model knows the valid rooms from the moment prompt, so this is rare).
    * Returns the resulting whereabouts so the caller can voice the move. Vault-free.
    */
-  movePlayer(room: string): WhereaboutsView | null {
+  movePlayer(room: string, expectedBeatSeq?: number): WhereaboutsView | null {
+    // 0065 Part A — refuse a move computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(expectedBeatSeq);
     if (!this.house || !this.presence) return null;
     const me = this.house.player.id;
     const here = this.presence.get(me) ?? null;
@@ -1625,11 +1880,17 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
+    // 0065 — ADOPT a pre-warmed cast. If `preSeedCast` already generated (and the FE deeply authored)
+    // the cast during the interview, finalize ATOP it: reuse its seed so the warmed cast is the cast that
+    // ships, and skip re-seeding the thin floor below. An explicit seed that DIFFERS discards the stale
+    // warm (the caller asked for a specific cast); same/absent seed adopts.
+    const adopt = this.prewarm && (effReq.seed === undefined || effReq.seed === this.prewarm.seed)
+      ? this.prewarm : null;
     // E39/C7/D8: the DEFAULT seed is real entropy, persisted with the snapshot — the same player
     // name must never replay the byte-identical season (incl. its hidden elements and twist
     // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
-    // first-class for tests and replays.
-    const seed = effReq.seed ?? entropySeed();
+    // first-class for tests and replays. An adopted warm reuses its already-minted seed.
+    const seed = adopt ? adopt.seed : (effReq.seed ?? entropySeed());
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     // The producer persona (producer-persona feature): keep the producer the player has been interviewing
     // with if one was already established pre-game; otherwise bind it to the season seed so a direct
@@ -1639,7 +1900,8 @@ export class GameSessionAdapter implements GameSession {
     this.producerCache = null;
     // 0051: draw ONE per-season portrait style anchor, seeded off the game seed — same seed always
     // draws the same anchor, so the house looks like itself across restarts and through the season.
-    this.portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
+    // (An adopted warm already drew it off the same seed — reuse it so it is byte-identical.)
+    this.portraitStyleAnchor = adopt ? adopt.portraitStyleAnchor : STYLE_ANCHOR_VARIANTS[
       new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
     ];
     // 0062 — capture the move-in zeitgeist snapshot ONCE, here, off the SAME season-seed hinge as the
@@ -1667,6 +1929,11 @@ export class GameSessionAdapter implements GameSession {
       ...(merged.motivation ? { motivation: merged.motivation } : {}),
       ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
     });
+    // 0065 — when adopting a pre-warmed cast, keep the freshly-built PLAYER but swap in the warmed NPCs
+    // (which carry any FE-authored §3 depth). The warmed NPCs are byte-identical to the floor
+    // `startNewGame` just regenerated PLUS the authoring, so the seeded competition/vote calibration is
+    // unchanged; only the authored prose/secrets differ. The cast is consumed — clear the holding store.
+    if (adopt) this.house = { player: this.house.player, npcs: adopt.npcs };
     this.intake = emptyIntake(); // the interview is over — its material lives on the player now
     this.week = 1;
     this.phase = "premiere";
@@ -1686,19 +1953,35 @@ export class GameSessionAdapter implements GameSession {
       this.live.reserve = reserve;
       this.onSeal?.(reserve);
     }
-    // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
-    // isolated sub-stream (never the shared house/competition stream — the #338 RNG-isolation lesson),
-    // validate/repair to the four floors (BIPOC / gender balance / age spread / LGBTQ+), fold the PUBLIC
-    // facets (ethnicity, gender presentation, an out orientation) onto each byte-stable Character, GROUND
-    // physicalCharacteristics.skinTone from the ethnicity, and SEAL each private orientation into the
-    // Vault. Done BEFORE seedDeepProfiles so the deep layer's skin-tone reads the grounded ethnicity.
-    this.seedDiversity(seed);
-    // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
-    // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
-    // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
-    // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
-    // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
-    this.seedDeepProfiles(seed);
+    if (adopt) {
+      // 0065 — adopt the warmed cast's already-sealed layers wholesale (the diversity floor + the §3
+      // deep layer + threads were generated and sealed to the Vault at `preSeedCast` time, and the FE
+      // may have authored over them). Re-running the seeders here would regenerate the thin floor and
+      // CLOBBER the authoring, so they are SKIPPED — the warm is the source of truth from here.
+      this.deepProfiles = adopt.deepProfiles;
+      this.storyThreads = adopt.storyThreads;
+      this.privateOrientations = adopt.privateOrientations;
+      this.groundedSkinTones = adopt.groundedSkinTones;
+      this.nominationWeeks = {};
+      this.surfacedThreadCount = 0;
+      this.prewarm = null; // consumed
+    } else {
+      // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
+      // isolated sub-stream (never the shared house/competition stream — the #338 RNG-isolation lesson),
+      // validate/repair to the four floors (BIPOC / gender balance / age spread / LGBTQ+), fold the PUBLIC
+      // facets (ethnicity, gender presentation, an out orientation) onto each byte-stable Character, GROUND
+      // physicalCharacteristics.skinTone from the ethnicity, and SEAL each private orientation into the
+      // Vault. Done BEFORE seedDeepProfiles so the deep layer's skin-tone reads the grounded ethnicity.
+      this.seedDiversity(seed);
+      // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
+      // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
+      // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
+      // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
+      // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
+      this.seedDeepProfiles(seed);
+      // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
+      this.prewarm = null;
+    }
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -1767,9 +2050,12 @@ export class GameSessionAdapter implements GameSession {
    * fields the visible projection exports on the HouseguestCard. No stats, no soul, no hidden
    * elements ever reach `buildCastPortraitPrompts`.
    */
-  private castPortraitPrompts(): PortraitPromptEntry[] {
-    if (!this.house || !this.portraitStyleAnchor) return [];
-    const everyone = [this.house.player, ...this.house.npcs];
+  private castPortraitPrompts(roster?: GameHouse["npcs"], anchor?: string): PortraitPromptEntry[] {
+    // 0065: pre-warm passes the NPC-only roster + the warmed anchor (no player exists yet); the live
+    // path defaults to the whole house (player + NPCs). Same builder either way.
+    const styleAnchor = anchor ?? this.portraitStyleAnchor;
+    const everyone = roster ?? (this.house ? [this.house.player, ...this.house.npcs] : []);
+    if (!styleAnchor || everyone.length === 0) return [];
     const publicCast = everyone.map((h) => ({
       id: h.id,
       name: h.name,
@@ -1787,7 +2073,103 @@ export class GameSessionAdapter implements GameSession {
       ...(h.character.genderPresentation !== undefined ? { genderPresentation: h.character.genderPresentation } : {}),
       ...(h.character.demeanor !== undefined ? { demeanor: h.character.demeanor } : {}),
     }));
-    return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
+    return buildCastPortraitPrompts(publicCast, styleAnchor);
+  }
+
+  /**
+   * 0065 — the Vault-free public roster card for ONE houseguest: exactly the observable facets the
+   * visible projection's `house` array ships (id/name/persona/age/presentation/diverse facets/the public
+   * biography + physical facet). NO stats, soul, hidden elements, or relationship number. Shared by the
+   * live `view()` mapping AND `preSeedCast` (the pre-warm roster) so the FE authors/shoots against the
+   * same shape it will see at season start. `status` defaults to ACTIVE (pre-game everyone is in).
+   */
+  private castCard(n: GameHouse["npcs"][number], status: HouseguestCard["status"] = "active"): HouseguestCard {
+    return {
+      id: n.id, name: n.name, status,
+      archetype: n.character.archetype,
+      strategyStyle: n.character.strategyStyle,
+      background: n.character.background,
+      age: n.character.age,
+      presentation: n.character.presentation,
+      ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
+      ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
+      ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
+      ...(n.character.physicalCharacteristics !== undefined
+        ? { physicalCharacteristics: n.character.physicalCharacteristics }
+        : n.character.appearance !== undefined ? { appearance: n.character.appearance } : {}),
+      ...(n.character.ethnicity !== undefined ? { ethnicity: n.character.ethnicity } : {}),
+      ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
+      ...(n.character.outOrientation !== undefined ? { outOrientation: n.character.outOrientation } : {}),
+    } as HouseguestCard;
+  }
+
+  /**
+   * 0065 — pre-warm the cast. Generate the player-INDEPENDENT cast off the season seed into the
+   * `prewarm` holding store BEFORE the interview ends, so the FE can deeply author it
+   * (`recordCastProfile` lands on `prewarm` pre-game) and portraits read the FINISHED store. The whole
+   * cast is deterministic off the seed (no player field is read), so this is safe the instant a model
+   * is selectable. Idempotent (a second call returns the already-warmed cast); durable (0030). The
+   * SAME seed is adopted by `createCharacter`, so the warmed cast is the cast that ships. Vault-free out.
+   */
+  preSeedCast(req: PreSeedCastReq): PreSeedCastView {
+    // A season is already running (or crowned): casting is closed — refuse honestly, change nothing.
+    if (this.house) {
+      return { warmed: false, seed: this.gameSeed ?? 0, house: [], portraitPrompts: [],
+        refused: this.live?.finished ? "over" : "in-progress" };
+    }
+    // Idempotent: a cast is already warmed. Re-warm only if an explicit seed DIFFERS (tests/replays);
+    // otherwise return the existing warm so author/portrait warm never restart mid-flight.
+    if (this.prewarm && (req.seed === undefined || req.seed === this.prewarm.seed)) {
+      return {
+        warmed: true, alreadyWarmed: true, seed: this.prewarm.seed,
+        house: this.prewarm.npcs.map((n) => this.castCard(n)),
+        portraitPrompts: this.castPortraitPrompts(this.prewarm.npcs, this.prewarm.portraitStyleAnchor),
+      };
+    }
+    // Mint + persist the season seed NOW (E39/C7 entropy by default) so the warmed cast is reproducible
+    // and `createCharacter` adopts THIS seed. An explicit seed stays first-class (tests/replays).
+    const seed = req.seed ?? entropySeed();
+    this.gameSeed = seed;
+    if (this.producerSeed === null) this.producerSeed = seed; // keep the casting producer stable pre-game
+    const portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
+      new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
+    ]!;
+    this.portraitStyleAnchor = portraitStyleAnchor;
+    // Generate the cast by REUSING the exact live seeding path against a temporary house — so the warmed
+    // seeded floor is BYTE-IDENTICAL to what `createCharacter` would produce un-warmed (no golden-test
+    // drift). The NPC roster is player-independent: `generateHouse(rng)` runs fully BEFORE `runPlayerOOBE`
+    // (which never consumes the rng), so these NPCs equal the ones `createCharacter` regenerates off the
+    // same seed. The placeholder player is type-scaffolding ONLY — discarded below; `seedDiversity` /
+    // `seedDeepProfiles` touch `npcs` exclusively, never the player.
+    const temp = startNewGame({ seed, playerName: PREWARM_PLAYER_NAME });
+    const npcs = temp.npcs;
+    this.house = { player: temp.player, npcs };
+    this.seedDiversity(seed);    // folds public diversity facets + seals private orientations to the Vault
+    this.seedDeepProfiles(seed); // folds the §3 deep layer + seals the hidden profile/threads to the Vault
+    // Capture the finished cast into the holding store, then RESET back to a clean pre-game state (the
+    // cast lives in `prewarm` from here; the live house does not exist until `createCharacter`).
+    this.prewarm = {
+      seed, npcs,
+      deepProfiles: this.deepProfiles,
+      storyThreads: this.storyThreads,
+      privateOrientations: this.privateOrientations,
+      groundedSkinTones: this.groundedSkinTones,
+      portraitStyleAnchor,
+    };
+    this.house = null;
+    this.deepProfiles = {};
+    this.storyThreads = [];
+    this.privateOrientations = {};
+    this.groundedSkinTones = {};
+    this.nominationWeeks = {};
+    this.surfacedThreadCount = 0;
+    this.persist(); // a warmed cast is durable pre-game state (0030)
+    return {
+      warmed: true, seed,
+      house: npcs.map((n) => this.castCard(n)),
+      portraitPrompts: this.castPortraitPrompts(npcs, portraitStyleAnchor),
+    };
   }
 
   /**
@@ -2175,6 +2557,13 @@ export class GameSessionAdapter implements GameSession {
    * player is rarer (gated behind `surfaceToPlayerProb` AND a real modeled pathway via the registry's
    * `surfaceInformationTo`, E9). Either way it counts ONCE against the hard season cap (§5). What
    * crosses is a belief with source + confidence — never the premise, never a number (§7).
+   *
+   * FIDELITY by pathway (2026-06-20): when the source is a genuine CONFIDANT of the player — the
+   * player→source bond (the engine's own trust+affinity read) sits at/above `THREAD.confidantBondThreshold`
+   * — the player hears a FULLER, less-glossed version (`confidantThreadRumor`), the way a close ally
+   * actually confides. A stranger's gossip stays the ordinary vague `threadRumor`. The fuller variant is
+   * STILL Vault-safe: keyed only by the public source CLASS (the same `weakness`/`true goal`/secret
+   * prefix the class gloss already uses), never the verbatim premise/trigger, never a number (§7).
    */
   private surfaceThread(thread: StoryThread, pos: SeasonPosition, rng: RandomnessSource): void {
     const name = this.nameOf(thread.sourceId);
@@ -2187,8 +2576,12 @@ export class GameSessionAdapter implements GameSession {
     if (toPlayer && this.onThreadSurfaceToPlayer) {
       // Rare: a modeled pathway already reaches the player — surface a content-lineage-anchored belief
       // (E9). An unanchored attempt is correctly downgraded to a suspicion by 0002; either way the
-      // thread is spent (it "surfaced" — the house's drama broke into the open).
-      this.onThreadSurfaceToPlayer(thread.sourceId, rumor);
+      // thread is spent (it "surfaced" — the house's drama broke into the open). Fuller fidelity ONLY
+      // when this is a close-relationship/confidant pathway (a confidant confides; a stranger glosses).
+      const belief = this.isPlayerConfidant(thread.sourceId)
+        ? this.confidantThreadRumor(thread, name)
+        : rumor;
+      this.onThreadSurfaceToPlayer(thread.sourceId, belief);
     } else if (livingNpcs.length > 0 && this.onThreadGossip) {
       // The common case: hand the paraphrase to the 0038 gossip engine to diffuse NPC↔NPC.
       const origin = livingNpcs[rng.int(livingNpcs.length)]!;
@@ -2197,6 +2590,39 @@ export class GameSessionAdapter implements GameSession {
     thread.status = "surfaced";
     thread.lifecycleWeek = this.week;
     this.surfacedThreadCount++;
+  }
+
+  /**
+   * Is the thread's source a genuine CONFIDANT of the player? (2026-06-20 — gates the higher-fidelity
+   * surfacing.) Derived ONLY from the existing relationship model: the player's OWN read of the source
+   * (`player→source`). When that bond — trust + affinity, the engine's directed read — sits at/above
+   * `THREAD.confidantBondThreshold` (the `ally`-grade band), the source is someone the player is close
+   * to, the kind of houseguest who CONFIDES rather than has their secret merely whispered about. This is
+   * a pure engine read (no number crosses the wall — it only chooses WHICH Vault-safe paraphrase, never
+   * exposes the value). A stranger (bond below the band) always gets the ordinary vague gloss.
+   */
+  private isPlayerConfidant(sourceId: EntityId): boolean {
+    const e = this.rel.edge(PLAYER, sourceId);
+    return e.trust + e.affinity >= THREAD.confidantBondThreshold;
+  }
+
+  /**
+   * The FULLER (but still Vault-safe) paraphrase a CONFIDANT surfacing gives the player (2026-06-20):
+   * a richer, less-glossed belief than `threadRumor`, reading like a close ally actually confiding —
+   * "they told me, in confidence, that …". It is keyed ONLY by the public source CLASS (the same
+   * `weakness`/`true goal`/secret prefix the existing class gloss reads — never the verbatim premise,
+   * never the trigger, never a number, §7), so the no-leak sentinel sweep stays strict: the SECRET text
+   * never crosses, only a fuller-textured BELIEF with a known source. The §7 leak gate verifies this.
+   */
+  private confidantThreadRumor(thread: StoryThread, name: string): string {
+    // The public source CLASS only — the same rule the engine's class gloss uses (a prefix on the
+    // premise label, NOT the secret body). No premise/trigger/number is read here.
+    const fuller = thread.premise.startsWith("weakness")
+      ? `there's a real soft spot in their game they keep covering for`
+      : thread.premise.startsWith("true goal")
+        ? `their plan in here runs deeper and quieter than they let the house believe`
+        : `they're sitting on something heavy they've hidden from almost the whole house`;
+    return `${name} confided in you — you came away believing ${fuller}`;
   }
 
   /** 0060 §3 (`nominated-twice`) — accrue the DISTINCT weeks each current nominee has been on the block. */
@@ -2523,11 +2949,24 @@ export class GameSessionAdapter implements GameSession {
     return new SeededRandom(hashSeed(`${root}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
-  advanceGame(): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+  advanceGame(req: { expectedBeatSeq?: number; idempotencyKey?: string } = {}): AdvanceView {
+    // 0065 Part B — an at-most-once replay returns the ORIGINAL view (its beatSeq included) WITHOUT
+    // advancing again; it WINS even if beatSeq has since moved (the cache is the authority on the
+    // already-applied result). Checked before the CAS guard so a retry of a now-stale key still
+    // returns the cached success rather than a spurious stale-beat conflict.
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a write computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
-    return this.inOneCommit(() => {
+    const view = this.inOneCommit(() => {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
@@ -2537,27 +2976,47 @@ export class GameSessionAdapter implements GameSession {
       // and every ceremony beat are visible in the view, not only recorded to the event store.
       return this.advanceView(ev);
     });
+    // 0065 Part B — cache the committed result under its key, so a retry replays it verbatim.
+    return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, view) : view;
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+    // 0065 Part B — replay an already-resolved decision verbatim (wins even if beatSeq moved).
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a decision computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
+    // 0065 Part B — every resolved/no-op path below caches its committed view under the key, so a
+    // retry replays it verbatim (and never re-applies the decision).
+    const remember = (v: AdvanceView): AdvanceView =>
+      req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
     // 0061 — self-eviction is the sanctioned CONFIRMED quit. It rides the SAME `submitDecision`
     // seam but resolves through its own dedicated path (NOT the ceremony-pending machinery): the
     // confirmation must already be raised (the OOC step-1 gate), AND `confirmed` must be true.
     // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
-    if (req.kind === "self-evict") return this.resolveSelfEviction(req.confirmed === true);
+    if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
-    // to malformed calls — the boundary must never throw an unhandled error).
-    if (!this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
+    // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
+    const compApproach = (k: string): boolean => k === "comp-intent" || k === "comp-round";
+    const pendingKind = this.live.pending?.kind;
+    const kindMatches = !!pendingKind && (pendingKind === req.kind || (compApproach(pendingKind) && compApproach(req.kind)));
+    if (!kindMatches) return remember(this.advanceView(null));
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
-    return this.inOneCommit(() => {
+    return remember(this.inOneCommit(() => {
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
       return this.advanceView(ev);
-    });
+    }));
   }
 
   /**
@@ -2614,6 +3073,8 @@ export class GameSessionAdapter implements GameSession {
    * deals are made off-screen and held in the Vault (never crosses this outward seam).
    */
   makeDeal(req: MakeDealReq): DealView | null {
+    // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
@@ -2856,13 +3317,14 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
-      case "comp-intent": { // B46: the player declares compete/throw/play-safe.
+      case "comp-intent":
+      case "comp-round": { // B46 / 0006 staged-rounds: the player declares compete/throw/play-safe.
         // The pending presents this as a generic options/pick decision (id = the intent value), so a
         // caller may submit it as `intent`, `vote`, OR `choice` like every other options/pick decision.
         // `singlePickId` covers `vote`/`choice`; `intent` stays first (R4-02 — `choice` was rejected).
         const intent = (req.intent ?? singlePickId(req)) as Intent | undefined;
-        if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
-        return { kind: "comp-intent", intent };
+        if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition approach is required");
+        return { kind: req.kind, intent };
       }
       case "houseguests-choice": { // B45: the player picks the sixth veto player (A10: `vote` or `choice`).
         const pick = singlePickId(req);
@@ -2953,6 +3415,20 @@ export class GameSessionAdapter implements GameSession {
         // The "options" ARE the three intents (id = the intent value), so the generic decision path
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
         return { kind: p.kind, by, prompt: "Declare your approach to this competition: compete, throw, or play it safe.", options: COMP_INTENTS.map((i) => ({ id: i, name: i })), pick: 1 };
+      case "comp-round": {
+        // 0006 staged-rounds: the player picks their approach for THIS elimination round, seeing who is
+        // STILL IN. Options are the three approaches (compete first = default); `stillIn` carries the
+        // narrowed field so they can adapt (everyone left an ally → throw; a threat still in → compete).
+        const stillIn = refs(p.stillIn);
+        const others = stillIn.filter((r) => r.id !== PLAYER).map((r) => r.name);
+        const fieldLine = others.length ? ` Still in with you: ${others.join(", ")}.` : " You are the last one in.";
+        return {
+          kind: p.kind, by,
+          prompt: `Round ${p.round} — set your approach for THIS round: compete, throw (drop out), or play it safe.${fieldLine} Your choice locks for this round only; you'll choose again as the field narrows.`,
+          options: COMP_INTENTS.map((i) => ({ id: i, name: i })),
+          round: p.round, stillIn, pick: 1,
+        };
+      }
       case "houseguests-choice":
         return { kind: p.kind, by, prompt: "You drew Houseguest's Choice — pick the sixth houseguest to play in the veto competition.", options: refs(p.options), pick: 1 };
       case "replacement":
@@ -3001,6 +3477,7 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     return {
       started: this.house !== null,
+      beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
       event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
       pending: this.pendingView(),
       status: this.gameStatus(),
@@ -3074,6 +3551,72 @@ export class GameSessionAdapter implements GameSession {
 
   getGameState(): GameStateView {
     return this.view();
+  }
+
+  /**
+   * 0065 Part E — the `beatSeq`-keyed delta state feed. Given the caller's last-seen `beatSeq`, return
+   * exactly WHAT CHANGED since: the player-visible events appended, the ceremony field transitions, and
+   * any finished/winner flip — plus the freshest board to re-anchor on. A pure READ (no mutation).
+   *
+   * O(Δ): the per-beat checkpoint ring (`beatCheckpoints`) holds the event-log length + the board AS OF
+   * `sinceBeatSeq`, so the delta slices ONLY the event tail (`visibleEventsSince(eventCountThen)`) and
+   * diffs the ceremony against the captured snapshot — it never re-scans the whole log. VAULT-FREE: the
+   * event tail comes through the player's witness-filtered visible projection (no hidden content), and
+   * the board/changes are the same ceremony-level public facts `gameStatus` exposes.
+   *
+   * Full-refresh signal (never a guessed partial delta): the token is ahead of the current counter,
+   * negative, or older than the retained window (e.g. after a restart, which empties the ring). Empty
+   * delta: `sinceBeatSeq === current` — nothing committed since.
+   */
+  stateDelta(sinceBeatSeq: number): StateDeltaView {
+    const board = this.gameStatus();
+    const current = this.beatSeq;
+    const empty = (fullRefresh: boolean): StateDeltaView => ({ beatSeq: current, fullRefresh, events: [], board });
+
+    // Nothing committed since (the FE is already up to date) — an empty, non-refresh delta.
+    if (sinceBeatSeq === current) return empty(false);
+    // A token ahead of the current counter, or negative/malformed ⇒ full refresh (never guess forward).
+    if (sinceBeatSeq < 0 || sinceBeatSeq > current) return empty(true);
+    // A token older than the retained window (or after a restart, when the ring is empty) ⇒ full refresh.
+    const cp = this.beatCheckpoints.get(sinceBeatSeq);
+    if (!cp) return empty(true);
+
+    // O(Δ) event tail: only the player-visible events appended AT OR AFTER the checkpoint's event count.
+    // Without the registry-wired providers (a standalone adapter) we cannot fetch a Vault-safe tail, so
+    // we fall back to a full refresh rather than risk an unscrubbed/over-broad projection.
+    if (!this.deltaSource) return empty(true);
+    const events = this.deltaSource.visibleEventsSince(cp.eventCount);
+    this.deltaScanProbe?.(events.length); // diagnostic only — a count, never content (Part E perf guard)
+
+    // Ceremony field diffs (only the fields that actually moved appear). Compare the captured board AS OF
+    // `sinceBeatSeq` against the live ceremony — the same public ceremony-level facts `gameStatus` exposes.
+    const changes: NonNullable<StateDeltaView["changes"]> = {};
+    if (cp.week !== this.week) changes.week = { from: cp.week, to: this.week };
+    if (cp.phase !== this.phase) changes.phase = { from: cp.phase, to: this.phase };
+    if (cp.hoh !== this.ceremony.hoh) changes.hoh = { from: this.card(cp.hoh), to: this.card(this.ceremony.hoh) };
+    if (!sameIds(cp.nominees, this.ceremony.nominees)) {
+      changes.nominees = {
+        from: cp.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+        to: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+      };
+    }
+    if (cp.vetoHolder !== this.ceremony.vetoHolder) {
+      changes.vetoHolder = { from: this.card(cp.vetoHolder), to: this.card(this.ceremony.vetoHolder) };
+    }
+    if (cp.vetoUsed !== this.ceremony.vetoUsed) changes.vetoUsed = { from: cp.vetoUsed, to: this.ceremony.vetoUsed };
+
+    const finishedNow = !!this.live?.finished;
+    const finishedChanged = cp.finished !== finishedNow || cp.winner !== this.live?.winner;
+    const hasChanges = Object.keys(changes).length > 0;
+    return {
+      beatSeq: current,
+      fullRefresh: false,
+      events,
+      ...(hasChanges ? { changes } : {}),
+      ...(finishedChanged ? { finishedChanged: true } : {}),
+      ...(finishedNow ? { winner: this.named(this.live?.winner) } : {}),
+      board,
+    };
   }
 
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
@@ -3337,7 +3880,7 @@ export class GameSessionAdapter implements GameSession {
       // Pre-game, the view carries the interview's status (0050): the engine — not the model —
       // says which building blocks are in and what the next step is.
       return {
-        started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
+        started: false, beatSeq: this.beatSeq, finished: false, week: 0, phase: this.phase, moment: "character-creation",
         ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         whereabouts: null,
         player: null, house: [], casting: castingStatusOf(this.intake),
@@ -3357,6 +3900,7 @@ export class GameSessionAdapter implements GameSession {
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
       finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
       // C8-04: the live ceremony state in the model's persistent context (the same Vault-free public
       // facts gameStatus() exposes), so the narrator voices the REAL HOH/nominees/veto, never invents.

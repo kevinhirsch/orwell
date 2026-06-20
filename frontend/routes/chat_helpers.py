@@ -116,6 +116,18 @@ PRE_GAME_PROMPT = (
     "You may help with anything unrelated to the game."
 )
 
+# Audit 2026-06-20 (live walkthrough): the casting prompt finalizes only "when the status shows
+# ready AND the photo is handled", but the model is never told the headshot is already on file —
+# so it loops asking for a cast photo the player ALREADY uploaded and never calls createCharacter,
+# stranding them in an endless interview. When the intake/avatar exists, tell the model the photo
+# is handled so the only remaining gate is the engine's casting-ready status.
+CASTING_HEADSHOT_ON_FILE_NOTE = (
+    "PRODUCTION NOTE (not for the player): the player's cast headshot is ALREADY on file — the photo "
+    "is handled. Do NOT ask them for a headshot again or wait on one. With the photo done, the moment "
+    "the casting status shows it is ready, call createCharacter to finalize and start the season; do "
+    "not keep interviewing once everything required is on file and the player is ready to go."
+)
+
 # Used ONLY when the game is confirmed started but the per-moment prompt fetch hiccups: the game is
 # real, so we must stay in character and never claim the feeds are down — but we lack the precise
 # moment context, so we forbid inventing specific outcomes (the Vault Wall / anti-fabrication line).
@@ -276,6 +288,14 @@ _PENDING_KIND_HINTS = {
         "ceremony in the fiction and take their two explicit picks from the legal options, then "
         "submit them via submitDecision."
     ),
+    "comp-round": (
+        "The competition is playing out in ELIMINATION ROUNDS (0006 staged-rounds). Voice WHO IS "
+        "STILL IN this round (the engine supplies the still-in field), then take the player's "
+        "approach for THIS ROUND ONLY — compete (keep going), throw (drop out), or play it safe — "
+        "and submit it via submitDecision (kind 'comp-round', intent=...). Their pick is committed "
+        "BEFORE the round resolves and is locked once it does; they will choose again as the field "
+        "narrows. Never resolve a winner yourself and never re-label a finished round."
+    ),
 }
 
 # The general fallback hint for every other player pending (votes, veto decision, replacement,
@@ -344,6 +364,132 @@ _LAST_BEAT_SIG: dict = {}
 _DESYNC_REGROUND: dict = {}
 
 
+# ── 0065 Part A/B — the per-turn LAST-SEEN beatSeq + compare-and-swap wiring ──────────────── #
+#
+# Part A (engine, commit e9c03b4) gives every read/advance/submit result a monotonic `beatSeq`, and
+# lets the two PROGRESSION tools carry an optional `expectedBeatSeq` compare-and-swap token — a write
+# computed against a board that has since moved (the 0064 queued-turn case) is REFUSED with HTTP 409
+# `stale-beat` rather than applied to the moved board. Part B adds an `idempotencyKey` so a retried
+# advance/submit returns the original result instead of double-advancing.
+#
+# The MODEL never sees these tokens — the FE holds them. This slice wires the FE-ISSUED progression
+# calls (the C-02 pre-resolve here + the agent-loop forced/silent advance) to:
+#   1. track the last-seen `beatSeq` per user (mirroring `_LAST_BEAT_SIG`), refreshed from EVERY
+#      engine response that carries one (status/state reads AND every mutation's response — critical:
+#      within one turn the FE makes multiple engine calls, each bumps `beatSeq`, so the last-seen
+#      value MUST update from each response or the FE would inflict a SELF-409 on its own next call);
+#   2. attach that last-seen token as `expected_beat_seq` + a freshly-minted `idempotency_key` to its
+#      progression calls (the highest-value CAS point — the queued-turn case);
+#   3. handle a 409 `stale-beat` gracefully — refresh last-seen, stash a re-ground via the EXISTING
+#      desync mechanism (`_DESYNC_REGROUND`), and surface nothing scary to the player.
+# Process-local (like `_LAST_BEAT_SIG`); a front-end restart simply re-seeds from the first read.
+#
+# Future refinement (documented, not built here): the lower-value mutating tools
+# (`recordInteraction`/`makeDeal`/`moveTo`/`surfaceInformationTo`) are left CAS-FREE in this slice —
+# attaching a token mid-turn to a sequence of those risks a self-409 for little gain (they are not the
+# queued-turn double-apply case). They keep the client param available; the wiring is deferred.
+_LAST_BEAT_SEQ: dict = {}
+
+# Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
+# (the ledger hook, feature 0065 Part D, is a separate slice; this counter is its data source).
+_STALE_BEAT_REJECTIONS = 0
+
+# The fresh `beatSeq` is embedded in the StaleBeatError message the engine raised — "…(now N)…". We
+# can't read the structured 409 body here (the thin client surfaces only the message + status), so we
+# parse it from the message and re-read the board to reconcile. A 409 whose message lacks the marker
+# is a DIFFERENT 409 (a TurnRefusedError integrity refusal) and is NOT a stale-beat.
+_STALE_BEAT_MARKER = "stale write refused"
+_STALE_BEAT_NOW_RE = re.compile(r"\(now\s+(\d+)\)")
+
+
+def last_beat_seq(user):
+    """The last-seen engine `beatSeq` for `user` (or None) — the compare-and-swap token the FE
+    attaches to its next progression call. Test/ops visibility."""
+    return _LAST_BEAT_SEQ.get(user)
+
+
+def stale_beat_rejections() -> int:
+    """How many 409 `stale-beat` writes the FE has reconciled this process-run (0065 diagnostic)."""
+    return _STALE_BEAT_REJECTIONS
+
+
+def reset_stale_beat_rejections() -> None:
+    """Reset the stale-beat counter (tests/ops)."""
+    global _STALE_BEAT_REJECTIONS
+    _STALE_BEAT_REJECTIONS = 0
+
+
+def _refresh_beat_seq(user, *responses) -> None:
+    """Refresh `user`'s last-seen `beatSeq` from one or more engine responses. EVERY engine response
+    that carries `beatSeq` (status/state reads and every mutation's response) flows through here so the
+    next progression call attaches the freshest token (avoiding a self-inflicted 409). Fail-safe: a
+    non-dict / a response without `beatSeq` is skipped; the LAST carrying response wins (a 0 token is
+    legitimate — a brand-new sandbox — so the guard is `isinstance(int)`, never truthiness)."""
+    if user is None:
+        return
+    for resp in responses:
+        if not isinstance(resp, dict):
+            continue
+        seq = resp.get("beatSeq")
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            _LAST_BEAT_SEQ[user] = seq
+
+
+def _mint_idempotency_key() -> str:
+    """A fresh idempotency key for ONE intended progression action (0065 Part B). Reused only if THAT
+    action is retried (so a flaky-socket retry returns the original result instead of double-advancing);
+    never reused across distinct advances."""
+    import uuid
+    return uuid.uuid4().hex
+
+
+def _is_stale_beat_error(exc) -> bool:
+    """Is `exc` the engine's 409 `stale-beat` compare-and-swap refusal (0065 Part A)? Detected at the
+    seam where the thin client surfaces engine errors: an `EngineToolError` with status 409 whose
+    message carries the stale-beat marker. A 409 WITHOUT the marker is a different refusal (an integrity
+    `TurnRefusedError`) and must not be treated as stale-beat."""
+    from src.orwell_engine import EngineToolError
+    if not isinstance(exc, EngineToolError):
+        return False
+    if getattr(exc, "status", None) != 409:
+        return False
+    return _STALE_BEAT_MARKER in (str(exc) or "").lower()
+
+
+async def _handle_stale_beat(user, exc) -> None:
+    """Reconcile a 409 `stale-beat` refusal (0065 Part A) — the whole point of the spine: the board
+    moved under a write computed against a stale token, so we DON'T crash or blindly retry into a
+    stomp. We (1) refresh last-seen from the fresh `beatSeq` the engine put in the message, then
+    re-read the live board to be sure; (2) stash a re-ground directive via the EXISTING desync
+    mechanism so the next turn reconciles to the moved board; (3) count it for the ledger hook. The
+    player sees nothing scary — this is silent bookkeeping. Fail-open: never raises."""
+    global _STALE_BEAT_REJECTIONS
+    try:
+        _STALE_BEAT_REJECTIONS += 1
+        # The fresh beatSeq is in the message — "…(now N)…". Parse it as a first refresh.
+        m = _STALE_BEAT_NOW_RE.search(str(exc) or "")
+        if m and user is not None:
+            try:
+                _LAST_BEAT_SEQ[user] = int(m.group(1))
+            except (TypeError, ValueError):
+                pass
+        # Re-read the live board to reconcile precisely (also refreshes last-seen from the reads).
+        await _capture_beat_signature(user)
+        # Stash a re-ground so the NEXT turn pins the model back to the moved board (reuse the spine).
+        if user is not None:
+            _DESYNC_REGROUND[user] = (
+                "RE-GROUND ON THE BOARD — a game action was computed against a stale view of the "
+                "board (it had already moved on), so the engine (the source of truth) refused it and "
+                "nothing changed. Re-read the live state with gameStatus / getGameState and pick up "
+                "from where the game ACTUALLY is — do NOT repeat or build on the outcome you were "
+                "about to narrate."
+            )
+        logger.info("[orwell] reconciled a stale-beat 409 for user=%s (count=%d)",
+                    user, _STALE_BEAT_REJECTIONS)
+    except Exception as e:
+        logger.warning("[orwell] stale-beat reconcile skipped for user=%s: %s", user, _exc_detail(e))
+
+
 def _beat_signature(status: dict, state: dict) -> dict:
     """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
     of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
@@ -388,6 +534,9 @@ async def _capture_beat_signature(user) -> Optional[dict]:
     try:
         status = await orwell_engine.game_status(user=user)
         state = await orwell_engine.get_game_state(user=user)
+        # 0065 Part A: both reads carry `beatSeq` — track the freshest so the next progression call
+        # attaches the current token (never a self-409 from a stale last-seen).
+        _refresh_beat_seq(user, status, state)
         return _beat_signature(status if isinstance(status, dict) else {},
                                state if isinstance(state, dict) else {})
     except Exception as e:
@@ -504,6 +653,161 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
 
 
+# ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
+#
+# `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the
+# turn — the player has already read "X is evicted", and the re-ground fires the NEXT turn. Part C
+# moves that closed-set check BEFORE emission, reusing the agent-loop's existing sentence-buffered
+# stream scrubber. When a streamed SENTENCE asserts a closed-set board outcome, the agent loop hands
+# it here; we verify it against the LIVE board and tell the loop whether to emit or hold it.
+#
+# HARD jurisdiction (ADR 0005 principle #1 — the open set is constitutionally protected): this guard
+# touches CLOSED-SET BOARD CLAIMS ONLY. It reuses `_narration_claims_outcome`'s exact detectors +
+# phase-gating — it invents NO broader matching, and it must NEVER hold, drop, or rewrite creative /
+# social prose. A false hold on creative prose is worse than a missed phantom, so:
+#   • a sentence with NO closed-set claim language is never even sent here (the cheap pre-filter
+#     `_sentence_has_closed_set_claim` below short-circuits in the hot loop);
+#   • when sent, the SAME comparison the post-turn check makes — narration vs. the turn's BEFORE
+#     signature vs. the LIVE board — decides it. `_narration_claims_outcome` returning None (the
+#     board backs the claim, OR the phase-gating ruled it flavor/creative) ⇒ EMIT. A directive
+#     (a phantom the engine never committed) ⇒ HOLD/DROP, and we stash the existing `_DESYNC_REGROUND`
+#     directive as the next-turn backstop;
+#   • UNCERTAIN (no before-signature this turn, or the live board read hiccups) ⇒ EMIT (fall through
+#     to the post-turn re-ground). Conservatism is mandatory.
+
+# The cheap, synchronous PRE-FILTER: does this sentence even contain closed-set OUTCOME language? This
+# is the only thing that runs on every streamed sentence — it short-circuits the live-board read (and
+# all of the phase-gated jurisdiction) so creative/social prose never pays a cost and is never sent to
+# the verifier at all. It is the UNION of the four `_CLAIM_*` detectors `_narration_claims_outcome`
+# already owns (eviction / winner / new-HOH / finale tally) — NOT a broader matcher (ADR 0005 #1).
+def _sentence_has_closed_set_claim(text: str) -> bool:
+    """Does `text` contain ANY of the four closed-set board-outcome claim patterns? Cheap and
+    synchronous — the hot-loop gate that keeps the pre-emission guard off creative prose entirely.
+    A True here only means "worth verifying against the live board"; the phase-gated
+    `_narration_claims_outcome` makes the actual emit/hold call (so flavor like 'crowned the winner
+    someday' still streams — it never reaches the async verify, and would pass it anyway)."""
+    if not text or not text.strip():
+        return False
+    return bool(
+        _CLAIM_EVICTED_RE.search(text)
+        or _CLAIM_WINNER_RE.search(text)
+        or _CLAIM_NEW_HOH_RE.search(text)
+        or _CLAIM_TALLY_RE.search(text)
+    )
+
+
+async def screen_streamed_outcome(user, sentence: str) -> bool:
+    """0065 Part C — verify ONE streamed sentence that asserts a closed-set board outcome against the
+    LIVE board, BEFORE the player sees it. Returns:
+
+      • True  → EMIT the sentence (the board backs the claim — the outcome really committed; OR the
+                phase-gating ruled it flavor; OR we are uncertain and emit conservatively).
+      • False → HOLD/DROP the sentence (a phantom the engine never committed) and stash the existing
+                `_DESYNC_REGROUND` next-turn backstop.
+
+    The caller (`agent_loop`'s stream scrubber) only invokes this for a sentence that already passed
+    the cheap `_sentence_has_closed_set_claim` pre-filter, so creative prose never reaches here. The
+    verify reuses the SAME field-specific comparison the post-turn check makes — the turn's BEFORE
+    signature (`_LAST_BEAT_SIG`) vs. the live board — so it can never reach into the open set
+    (ADR 0005 principle #1). Fail-open by construction: any hiccup returns True (emit)."""
+    try:
+        if not sentence or not sentence.strip():
+            return True
+        before = _LAST_BEAT_SIG.get(user)
+        # No BEFORE baseline this turn (a fresh process, a framing hiccup) — we cannot tell phantom
+        # from real, so EMIT and let the post-turn re-ground be the backstop (conservatism).
+        if not before:
+            return True
+        live = await _capture_beat_signature(user)
+        if not live:
+            return True  # live board read hiccupped — uncertain, emit.
+        directive = _narration_claims_outcome(sentence, before, live)
+        if not directive:
+            return True  # the board backs the claim (or phase-gating ruled it flavor) → emit.
+        # The engine never committed this outcome — HOLD it before the player sees it, and stash the
+        # next-turn re-ground as a backstop (reuse the existing desync mechanism, do not invent a
+        # second one). The post-turn check would otherwise have produced this same directive a turn
+        # too late; Part C just gets there one turn earlier.
+        _DESYNC_REGROUND[user] = directive
+        logger.warning(
+            "[orwell] pre-emission guard HELD a phantom closed-set outcome for user=%s — "
+            "dropped before emission, re-grounding next turn", user,
+        )
+        return False
+    except Exception as e:
+        logger.warning("[orwell] pre-emission outcome guard skipped for user=%s: %s", user, _exc_detail(e))
+        return True  # fail-open: never suppress on an error.
+
+
+# ── 0065 Part E2 — weave the engine DELTA into the moment context (additive, concise) ─────────── #
+#
+# The model is handed the full authoritative GAME CONTEXT block every turn (it needs the whole board
+# to stay grounded). Part E adds, ALONGSIDE it, a tight "Since your last turn: …" line built from the
+# engine's `stateDelta` — the closed-set ceremony fields that MOVED + any new player-visible beats —
+# so staleness is self-evident to the model (ADR 0003: prefer a crisp diff to more context). This is
+# purely ADDITIVE: the full block is never replaced. A `fullRefresh` (no/odd last-seen, a restart) or
+# an EMPTY delta (nothing committed since) ⇒ NO line at all (today's full context stands). Fail-open:
+# any hiccup fetching/rendering the delta leaves the turn exactly as it is today.
+
+# Cap the diff line so it can never balloon (ADR 0003 §1 — prefer removing context): a phrase or two.
+_DELTA_MAX_CHANGES = 6
+_DELTA_MAX_EVENTS = 4
+_DELTA_EVENT_CHARS = 120
+
+
+def _render_delta_line(delta: dict) -> Optional[str]:
+    """Build the tight 'Since your last turn: …' line from a `stateDelta` result, or None when there
+    is nothing to say. Returns None on a `fullRefresh` (the caller leaves the full context alone) and
+    on an empty delta (no ceremony field moved and no new player-visible beat). Closed-set + Vault-free
+    by construction — it only voices the ceremony fields the projection already exposes + beat content
+    the player witnessed. Fail-safe on every field."""
+    if not isinstance(delta, dict) or delta.get("fullRefresh"):
+        return None
+    parts: list[str] = []
+    # (1) Ceremony field diffs — what moved on the board (HOH crowned, noms set, veto used…).
+    changes = delta.get("changes")
+    if isinstance(changes, dict):
+        for field_name, move in list(changes.items())[:_DELTA_MAX_CHANGES]:
+            if not isinstance(move, dict):
+                continue
+            frm = move.get("from")
+            to = move.get("to")
+            parts.append(f"{field_name} {frm!r}→{to!r}" if frm is not None else f"{field_name} now {to!r}")
+    # The terminal transition + winner, when the delta carries it (closed-set, Vault-free).
+    if delta.get("finishedChanged"):
+        winner = delta.get("winner")
+        parts.append(f"the season FINISHED (winner: {winner})" if winner else "the season FINISHED")
+    # (2) New player-visible beats since last turn — a phrase each, bounded.
+    events = delta.get("events")
+    if isinstance(events, list):
+        for ev in events[:_DELTA_MAX_EVENTS]:
+            if not isinstance(ev, dict):
+                continue
+            content = str(ev.get("content") or ev.get("type") or "").strip()
+            if content:
+                parts.append(content[:_DELTA_EVENT_CHARS])
+    if not parts:
+        return None  # nothing committed since last turn → omit the line entirely
+    return "Since your last turn: " + "; ".join(parts) + "."
+
+
+async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
+    """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
+    turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
+    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction."""
+    if user is None or not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
+        return None  # no prior turn to diff against → leave today's full context untouched
+    try:
+        from src import orwell_engine
+        delta = await orwell_engine.state_delta(last_seen_beat_seq, user=user)
+        # Keep the last-seen token fresh from the delta's own beatSeq (it carries one like every read).
+        _refresh_beat_seq(user, delta if isinstance(delta, dict) else {})
+        return _render_delta_line(delta if isinstance(delta, dict) else {})
+    except Exception as e:
+        logger.debug("[orwell] state-delta line skipped for user=%s: %s", user, _exc_detail(e))
+        return None
+
+
 def _runway_sig(game_state: dict) -> str:
     """The `(week:phase)` signature of the beat the player is currently sitting in. A change in this
     signature means a ceremony resolved and we entered a new beat — the cue to arm a fresh runway."""
@@ -549,6 +853,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         if phase not in _CEREMONY_RESOLVE_PHASES and phase not in _COMP_DRIVE_PHASES:
             return game_state
         status = await orwell_engine.game_status(user=user)
+        _refresh_beat_seq(user, status)  # 0065: track the freshest token before any progression call
         if not isinstance(status, dict) or status.get("pending") is not None:
             # The player is the decider (comp-intent, Houseguest's Choice, nominations, a vote, the
             # goodbye message…) — never auto-resolve their own decision; their card is waiting. A
@@ -570,7 +875,23 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                         "the next ceremony", phase, user, left - 1)
             return _hold_for_social(game_state)
 
-        adv = await orwell_engine.advance_game(user=user)  # advance ONE beat for real: surface the player's
+        # 0065 Part A/B: this is an FE-ISSUED progression call (the highest-value CAS point — exactly
+        # the 0064 §3.C queued-turn case). Attach the current last-seen `beatSeq` as the compare-and-
+        # swap token and a freshly-minted idempotency key (reused only on a retry of THIS action). A
+        # 409 `stale-beat` (the board moved under us) reconciles via the existing desync spine and the
+        # turn continues against the moved board — never a crash, never a blind retry into a stomp.
+        try:
+            adv = await orwell_engine.advance_game(
+                expected_beat_seq=_LAST_BEAT_SEQ.get(user),
+                idempotency_key=_mint_idempotency_key(),
+                user=user,
+            )  # advance ONE beat for real: surface the player's
+        except Exception as _adv_e:
+            if _is_stale_beat_error(_adv_e):
+                await _handle_stale_beat(user, _adv_e)
+                return game_state  # reconciled — continue the turn framed against the (moved) board
+            raise
+        _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
@@ -578,6 +899,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         refreshed = await _fetch_game_state(user, retry=retry)
+        _refresh_beat_seq(user, refreshed)  # 0065: the post-advance state read also carries beatSeq
         new_state = refreshed if isinstance(refreshed, dict) else game_state
 
         # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
@@ -590,6 +912,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
             new_sig = _runway_sig(new_state)
             if new_sig != sig:
                 post = await orwell_engine.game_status(user=user)
+                _refresh_beat_seq(user, post)  # 0065: keep last-seen fresh from this status read too
                 post_pending = post.get("pending") if isinstance(post, dict) else None
                 new_phase = (new_state.get("phase") or "").lower()
                 if post_pending is None and (
@@ -692,6 +1015,10 @@ async def apply_game_framing(
     if incognito and not game_build:
         return engine_available, game_active, feed_down
     _gkey = user or "__anon__"
+    # 0065 Part E2: the last-seen `beatSeq` from the PREVIOUS turn, captured BEFORE this turn's first
+    # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
+    # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
+    _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
 
     # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
@@ -710,6 +1037,9 @@ async def apply_game_framing(
     if not isinstance(game_state, dict):
         return engine_available, game_active, feed_down  # unexpected shape — treat as no framing
     engine_available = True  # engine answered; pin game tools regardless of game state
+    # 0065 Part A: this first state read of the turn carries `beatSeq` — seed the last-seen token so
+    # the pre-resolve's progression call (just below) attaches the FRESH value, never a stale one.
+    _refresh_beat_seq(user, game_state)
 
     # 2) The engine answered. Frame by whether a season is actually running.
     if game_state.get("started"):
@@ -765,6 +1095,16 @@ async def apply_game_framing(
             _LAST_BEAT_SIG[user] = await _capture_beat_signature(user)
         except Exception as e:
             logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)
+        # 0065 Part E2: ADDITIVE — alongside the full authoritative GAME CONTEXT block (built into the
+        # moment prompt), append a tight "Since your last turn: …" diff so staleness is self-evident to
+        # the model. Built from the engine's `stateDelta` since the PREVIOUS turn's last-seen beatSeq;
+        # a fullRefresh / no last-seen / an empty delta ⇒ NO line (the full block stands). Fail-open.
+        try:
+            _delta_line = await _maybe_delta_line(user, _prev_seen_beat_seq)
+            if _delta_line:
+                gm_prompt = gm_prompt + "\n\n" + _delta_line
+        except Exception as e:
+            logger.warning("[orwell] state-delta framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
@@ -793,6 +1133,17 @@ async def apply_game_framing(
             except Exception as e:
                 logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
                 pre_prompt = PRE_GAME_PROMPT
+            # A/C fix (2026-06-20): once the cast headshot is on file, tell the model the photo is
+            # handled so it stops re-asking for it and can finalize. Fail-open — never block a turn.
+            try:
+                from src import orwell_portraits
+                _intake = orwell_portraits.intake_status(user)
+                _has_photo = bool(_intake.get("present") or _intake.get("finalized")) \
+                    or bool(orwell_portraits.user_avatar_path(user))
+                if _has_photo:
+                    pre_prompt = pre_prompt + "\n\n" + CASTING_HEADSHOT_ON_FILE_NOTE
+            except Exception as e:
+                logger.warning("[orwell] casting headshot-status check skipped for user=%s: %s", _gkey, e)
             # The casting interview marks the session too: the premiere that follows
             # createCharacter in THIS session is the premiere, not a re-entry (P2).
             if session_id is not None:

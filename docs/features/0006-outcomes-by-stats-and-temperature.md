@@ -2,6 +2,8 @@
 
 > **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #6.
 > **Executable spec:** [`0006-outcomes-by-stats-and-temperature.feature`](./0006-outcomes-by-stats-and-temperature.feature)
+> **Amendment (staged rounds):** competitions now play out in **visible elimination ROUNDS** — see
+> [§8 — Staged-rounds evolution](#8-staged-rounds-evolution-the-per-round-approach) below.
 
 ## 1. Summary
 
@@ -70,3 +72,70 @@ TemperatureRoll:
 `bb-sim-spec.md` §8, §12 (Randomness and temperature; archetype/temperature outcome scenario),
 §5; `docs/legacy/BB_GameBible.md` §5 (stats Physical/Mental/Social/Luck; intent);
 `CLAUDE_CODE_INSTRUCTIONS.md` §6, §8.
+
+## 8. Staged-rounds evolution (the per-round approach)
+
+**Owner decision (this amendment).** The single, up-front, irrevocable approach declaration
+(compete / throw / play-safe) was too rigid: the player committed once, blind to how the field
+would narrow. Competitions are now **endurance-style, played out in visible ELIMINATION ROUNDS**.
+
+### 8.1 The round model (winner outcome-neutral)
+
+- A competition is a sequence of visible rounds over the **still-in field** until one remains. The
+  rounds are a **re-telling of the 0006 calibrated outcome, not a re-roll of it** (the anti-sycophancy
+  backstop — see §8.3). Concretely:
+  - **The CROWN is decided up front** by a single `resolveCompetition` roll over the **full field** with
+    the player's committed approach — **byte-identical to the pre-staging single-shot model** for the
+    same seed/field. The staged rounds can never overturn it (the engine's single outcome authority, B37).
+  - **The drama is the elimination ORDER of the losers.** Everyone but the calibrated winner is dropped
+    one per round, lowest-first, computed on an **ISOLATED sub-stream** (`fork("comp-elimination-order")`)
+    that can never perturb the winner or any downstream roll. The winner survives every round by
+    construction. No new outcome system: `resolveElimination` reuses `resolveCompetition` verbatim and
+    reads the SAME scores to pick the lowest (`src/domain/competitionOutcome.ts`); the staged sub-loop
+    lives in `src/engine/liveSeason.ts` (`CompetitionProgress` carries the decided `winner` + `dropOrder`;
+    `advanceCompetition` reveals one drop at a time), the sibling of the staged eviction (0047) and
+    finale (0037) sub-loops.
+- **The player picks their approach for THAT round, seeing who remains** — adapting to the narrowing
+  field. The player's committed (first-round) approach is folded into the calibrated crown exactly as
+  the single declaration was (compete = full; play-safe = the middling 0028 penalty; throw = the deep
+  penalty — a throwing player loses the crown at the SAME rate the single-roll throw produces, so
+  anti-sycophancy holds in BOTH directions). Subsequent rounds shape **the player's own placement /
+  how far they personally last**, never the crown. NPCs choose by soul motivation (relationship-driven,
+  as comp decisions already are — for now they compete).
+- Seeded + reproducible + **position-independent**: the crown and the drop-order forks are derived from
+  the FRESH per-beat rng (`fork("comp-winner")` / `fork("comp-elimination-order")`), so the staged comp
+  draws the library def + pauses for the player's approach across separate advances **without** the
+  outcome depending on how much of the beat rng those steps consumed — restart-stable (0030). The
+  decision seam surfaces a per-round `comp-round` pending carrying the **still-in field** + the round
+  number; `peekCompetition` reports the SAME decided winner, so the single-authority preview (B37)
+  equals what the loop crowns when the player competes the rest of the way.
+
+### 8.2 Anti-sycophancy, preserved PER ROUND (the non-negotiable)
+
+The old popup was binding for one reason — **mandate #3**: the player must commit BEFORE seeing a
+result, so a loss can never be retroactively re-labeled a "throw." That guarantee is preserved
+**per round**:
+
+- Each round's approach is **committed BEFORE that round resolves**; the engine uses the **structured
+  selection only — never parsed from prose** (the FE posts it engine-direct via `submitDecision`,
+  exactly as the single declaration did).
+- Once a round (and the comp) resolves, it is **LOCKED** — no retroactive change. Submitting an
+  approach for a round that already resolved is refused; a late submit after the crown is a no-op.
+- **Adaptation happens forward** (the next round, over the narrowed field), **never backward**. There
+  is no door to re-label a finished round.
+
+### 8.3 Calibration holds (preserved EXACTLY)
+
+Because the staged crown **is** the single-roll `resolveCompetition` winner (§8.1, winner outcome-
+neutrality), the END distribution is **byte-identical to the pre-staging 0006 calibration** — it cannot
+drift: a clear stat favorite wins a **strong majority** (the 65–80% band) but loses a real minority;
+equal-stat houseguests each win their fair share (symmetry → no hidden favor, the player unprotected);
+a throw measurably lowers the player's win rate at the SAME rate as the single roll. This was the fix
+for the regression where a re-rolled per-round survival ladder gave weak players "extra lives" and let
+a passive player reach Final 2 and win the jury with too thin a comp resume (the juryReach
+`EARNED_WINS` band). Pinned by `tests/unit/stagedCompetition.test.ts` — the **winner-outcome-neutrality
+litmus** (the staged crown equals the single-roll `resolveCompetition` winner across fixed seeds + field
+sizes; the drop order never includes the winner; the isolated drop stream never perturbs the crown),
+the favorite band, symmetry, reproducibility, and the preview↔crown single-authority match — held on the
+live loop by `tests/property/liveFairness.property.test.ts`, and validated end-to-end by the
+heavy `juryReach` / `calibrationGradient` aggregate bands on CI.

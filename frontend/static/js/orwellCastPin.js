@@ -50,10 +50,14 @@
       "  background: color-mix(in srgb, var(--panel, #111) 70%, transparent);" +
       "  color: var(--fg, #9cdef2); border: 1px solid var(--border, #355a66); border-radius: 10px;" +
       "  font-family: 'Fira Code', ui-monospace, monospace; font-size: var(--fs-xs, .72rem); }" +
-      "#orwell-cast-pin .ocp-hd { display: flex; align-items: center; gap: .4rem; margin-bottom: .35rem; }" +
-      "#orwell-cast-pin .ocp-ttl { flex: 1; font-weight: 600; letter-spacing: .03em;" +
+      // header wraps at a narrow rail width so the title + buttons never overlap.
+      "#orwell-cast-pin .ocp-hd { display: flex; align-items: center; gap: .4rem;" +
+      "  flex-wrap: wrap; margin-bottom: .35rem; }" +
+      "#orwell-cast-pin .ocp-ttl { flex: 1 1 auto; min-width: 0; font-weight: 600; letter-spacing: .03em;" +
+      "  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" +
       "  color: color-mix(in srgb, var(--fg, #9cdef2) 80%, var(--panel, #111)); }" +
-      "#orwell-cast-pin .ocp-btn { background: rgba(255,255,255,.06); border: 1px solid var(--border, #355a66);" +
+      "#orwell-cast-pin .ocp-btn { flex: 0 0 auto; background: rgba(255,255,255,.06);" +
+      "  border: 1px solid var(--border, #355a66);" +
       "  color: inherit; cursor: pointer; border-radius: 6px; font: inherit; font-size: .68rem;" +
       "  min-height: 24px; padding: 0 .45rem; opacity: .8; }" +
       "#orwell-cast-pin .ocp-btn:hover, #orwell-cast-pin .ocp-btn:focus-visible { opacity: 1;" +

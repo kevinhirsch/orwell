@@ -72,6 +72,11 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
   // knows who's still in the house (player + non-evicted NPCs).
   commands.setLivingProvider(() => session.livingIds());
+  // 0065 Part A — the command port enforces the compare-and-swap stale-write guard against the SAME
+  // monotonic beatSeq the session owns/persists, and composes its typed `stale-beat` refusal with the
+  // session's Vault-free board. Both readers are Vault-free (a counter + ceremony-level public status).
+  commands.setBeatSeqProvider(() => session.beatSeqNow());
+  commands.setBoardProvider(() => session.gameStatus());
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
@@ -94,6 +99,18 @@ function buildUserSandbox(user = "default"): UserSandbox {
   session.setRecordProviders({
     events: () => engine.events.query(),
     hidden: () => engine.vault.readHidden(),
+  });
+  // 0065 Part E — the delta feed's O(Δ) providers. `count` anchors each beat checkpoint at commit time
+  // (O(1) log length). `visibleEventsSince` slices the immutable log TAIL from the checkpoint's count and
+  // runs the SAME witness-filter + roster scrub the player surface uses — so the delta is Vault-free by
+  // construction (hidden events the player never witnessed are dropped) and never re-scans the whole log.
+  // The shape mapped here is the player-facing `DeltaEventView` (id/ts/type/content), not the raw event.
+  session.setDeltaProviders({
+    count: () => engine.events.count(),
+    visibleEventsSince: (fromCount) =>
+      outward.visible.visibleEventsSince(PLAYER, fromCount).map((e) => ({
+        id: e.id, ts: e.ts, type: e.type as string, content: e.content,
+      })),
   });
   // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
   // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
@@ -333,6 +350,10 @@ function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   sb.engine.relationships.load(snap.relationships);
   if (snap.knowledge) sb.engine.knowledge.load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
+  // 0065 Part E — the events are now loaded: seed the delta ring's BASELINE at the resumed beatSeq so the
+  // first delta a resumed session serves (keyed on the resumed token) slices its tail instead of looping
+  // on full-refresh. (`restore` clears the ring; events arrive only above, after it.)
+  sb.session.seedDeltaBaseline();
 }
 
 export class GameSessionRegistry {
@@ -482,6 +503,12 @@ export class GameSessionRegistry {
     // re-exports the candidate, so this commit's candidate caches at the new rev and the cache can
     // never hand back a snapshot older than the live state.
     this.bumpRev(user);
+    // 0065 Part A — the single commit funnel both adapters route their `onPersist` through: bump the
+    // session's monotonic beat counter ONCE per committed mutation, BEFORE the delegate exports the
+    // candidate snapshot (so the new value is persisted). A commit the integrity checkpoint then
+    // refuses is rolled back via `restore(baseline)`, which resets the counter from the baseline
+    // snapshot — so a refused/failed commit never leaves the counter advanced.
+    this.sandboxes.get(user)?.session.bumpBeatSeq();
     if (this.commitDelegate) this.commitDelegate(user);
     else this.saveUser(user);
   }

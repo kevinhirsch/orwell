@@ -310,6 +310,131 @@ describe("0060 — the no-leak sentinel holds even AFTER surfacing (§7 / §10c)
   });
 });
 
+/**
+ * 2026-06-20 — making the rich (0065-landed) backstories pay off MORE for the player, tastefully.
+ * Two surfacing knobs were enriched (still bounded): the hard season cap (4→6) lets the player learn a
+ * few more secrets across a season, and a CONFIDANT pathway hands a FULLER (but still Vault-safe,
+ * class-keyed, number-free) belief than a stranger's vague gloss. These tests lock in (a) the higher
+ * cap genuinely admits more surfaces, (b) confidant ⇒ fuller / stranger ⇒ vague, and (c) the Vault Wall
+ * holds on BOTH variants (no premise, no number crosses). Roles only — no names.
+ */
+describe("0060 — the rich backstories pay off MORE (2026-06-20)", () => {
+  /** An rng that always routes a surfacing TO the player (first `next()` < surfaceToPlayerProb) and is
+   *  deterministic for any incidental int/pick — so we exercise the to-player fidelity path on demand. */
+  const toPlayerRng = (): SeededRandom => {
+    const r = new SeededRandom(1);
+    (r as unknown as { next: () => number }).next = () => 0; // 0 < surfaceToPlayerProb ⇒ always to-player
+    return r;
+  };
+
+  /** A fresh sandbox with a created character (so `house` + seeded story threads exist), no sim run. */
+  function freshUnplayed(seed: number, user: string): UserSandbox {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor(user);
+    sb.session.createCharacter({ playerName: "The Player", seed });
+    return sb;
+  }
+
+  /** Reach the private surfacing internals (deterministic, focused — the public seam is exercised by the
+   *  season-level tests above). We only READ the Vault-safe belief the player would receive. */
+  type Internals = {
+    storyThreads: StoryThread[];
+    seasonPosition: () => SeasonPosition;
+    surfaceThread: (t: StoryThread, p: SeasonPosition, rng: SeededRandom) => void;
+    isPlayerConfidant: (sourceId: string) => boolean;
+    surfacedThreadCount: number;
+    rel: { edge: (a: string, b: string) => { trust: number; affinity: number } };
+  };
+  const peek = (sb: UserSandbox): Internals => sb.session as unknown as Internals;
+
+  /** Drive ONE active thread to surface to the player and return the belief string the player got. */
+  function captureSurfacedBelief(sb: UserSandbox, thread: StoryThread): string | undefined {
+    const internals = peek(sb);
+    let captured: string | undefined;
+    sb.session.setOnThreadSurfaceToPlayer((_subject, rumor) => { captured = rumor; return true; });
+    thread.status = "active";
+    internals.surfaceThread(thread, internals.seasonPosition(), toPlayerRng());
+    return captured;
+  }
+
+  it("(a) the higher season cap admits MORE surfaces — past the old 4, up to the new ceiling", () => {
+    // The cap was 4; it is now 6. Drive forced to-player surfaces and confirm the season cap lets the
+    // count climb past the OLD ceiling and stops exactly at the NEW one (a HARD bound — still restrained).
+    expect(THREAD.maxSurfacedPerSeason).toBeGreaterThanOrEqual(5); // genuinely raised above the old 3–4
+    const sb = freshUnplayed(7, "sts-cap");
+    const internals = peek(sb);
+    sb.session.setOnThreadSurfaceToPlayer(() => true);
+    // Make sure we have enough threads to exceed the old cap; the seeded cast derives many (>10 asserted
+    // above). Re-arm each to "active" and force a to-player surface, respecting only the season cap.
+    let surfaced = 0;
+    for (const t of internals.storyThreads) {
+      if (internals.surfacedThreadCount >= THREAD.maxSurfacedPerSeason) break;
+      t.status = "active";
+      internals.surfaceThread(t, internals.seasonPosition(), toPlayerRng());
+      surfaced++;
+    }
+    expect(surfaced).toBeGreaterThan(4);                                  // got past the OLD cap of 4
+    expect(internals.surfacedThreadCount).toBe(THREAD.maxSurfacedPerSeason); // and stopped AT the new cap
+  });
+
+  it("(b) a CONFIDANT surfaces a FULLER belief; a stranger stays the vague class gloss", () => {
+    const sbClose = freshUnplayed(11, "sts-close");
+    const sbFar = freshUnplayed(11, "sts-far");
+    const tClose = peek(sbClose).storyThreads[0]!;
+    const tFar = peek(sbFar).storyThreads[0]!;
+
+    // Make the source a genuine confidant of the player: lift the player→source bond above the band.
+    const ec = peek(sbClose).rel.edge(PLAYER, tClose.sourceId);
+    ec.trust = 0.6; ec.affinity = 0.6; // trust+affinity = 1.2 ≥ confidantBondThreshold (0.7)
+    expect(peek(sbClose).isPlayerConfidant(tClose.sourceId)).toBe(true);
+
+    // Keep the other a stranger: bond well below the band (baseline-ish).
+    const ef = peek(sbFar).rel.edge(PLAYER, tFar.sourceId);
+    ef.trust = 0.1; ef.affinity = 0.1; // 0.2 < 0.7
+    expect(peek(sbFar).isPlayerConfidant(tFar.sourceId)).toBe(false);
+
+    const closeBelief = captureSurfacedBelief(sbClose, tClose)!;
+    const farBelief = captureSurfacedBelief(sbFar, tFar)!;
+
+    // The stranger's belief is the ordinary vague atmospheric gloss (the `threadRumor` family — the
+    // GLOSS regex the season tests use); the confidant's is the fuller "confided in you" variant —
+    // strictly different and not the vague gloss.
+    expect(GLOSS.test(farBelief)).toBe(true);          // the vague class gloss reached the stranger
+    expect(GLOSS.test(closeBelief)).toBe(false);       // the confidant did NOT get the vague gloss
+    expect(closeBelief).toContain("confided in you");  // the fuller confidant phrasing
+    expect(closeBelief).not.toBe(farBelief);           // genuinely higher fidelity
+  });
+
+  it("(c) the Vault Wall holds on BOTH pathways — no premise text, no number crosses", () => {
+    const sb = freshUnplayed(7, "sts-leak");
+    const internals = peek(sb);
+    // Plant a sentinel into the source thread's premise/trigger and a numeric tell — neither may cross.
+    const SENT = "SENTINEL-PAYOFF";
+    const t = internals.storyThreads[0]!;
+    t.premise = `${t.premise} ${SENT} 0.4242`;
+    t.trigger = `${t.trigger} ${SENT}`;
+
+    // Vague (stranger) pathway.
+    const e = internals.rel.edge(PLAYER, t.sourceId);
+    e.trust = 0.05; e.affinity = 0.05;
+    const vague = captureSurfacedBelief(sb, { ...t, status: "active" })!;
+
+    // Fuller (confidant) pathway — re-arm a fresh sandbox so the cap isn't already spent.
+    const sb2 = freshUnplayed(7, "sts-leak2");
+    const t2 = peek(sb2).storyThreads[0]!;
+    t2.premise = `${t2.premise} ${SENT} 0.4242`;
+    t2.trigger = `${t2.trigger} ${SENT}`;
+    const e2 = peek(sb2).rel.edge(PLAYER, t2.sourceId);
+    e2.trust = 0.65; e2.affinity = 0.65;
+    const fuller = captureSurfacedBelief(sb2, { ...t2, status: "active" })!;
+
+    for (const belief of [vague, fuller]) {
+      expect(belief.includes(SENT)).toBe(false);   // the verbatim premise/trigger never crosses
+      expect(belief.includes("0.4242")).toBe(false); // and no hidden number crosses (§7)
+    }
+  });
+});
+
 describe("0060 — the constants grep gate (B59) covers threadConstants", () => {
   it("the scheduler's magnitudes live ONLY in threadConstants, never inlined at a call site", () => {
     const adapter = readFileSync("src/adapters/engine/GameSessionAdapter.ts", "utf8");
@@ -320,6 +445,9 @@ describe("0060 — the constants grep gate (B59) covers threadConstants", () => 
     expect(adapter).not.toMatch(/surfaceProb\s*[=:]\s*0\.15/);
     expect(orch).toContain("scheduleStoryThreads"); // the orchestrator only CALLS the scheduler
     expect(THREAD.maxSurfacedPerSeason).toBeGreaterThan(0);
-    expect(THREAD.maxSurfacedPerSeason).toBeLessThanOrEqual(4); // range guidance 3–4
+    // Range guidance 5–6 (2026-06-20, post-0065): the cap was raised 4→6 so the now-genuinely-rich
+    // backstories pay off a little more across a season. It stays a HARD ceiling that leaves most
+    // threads off-screen — still firmly bounded, never "every secret detonates" (the L40 restraint).
+    expect(THREAD.maxSurfacedPerSeason).toBeLessThanOrEqual(6);
   });
 });

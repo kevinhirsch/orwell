@@ -176,6 +176,14 @@ export interface RecordWorldSnapshotResult {
 /** The Vault-free projection of the running game the front-end may render. */
 export interface GameStateView {
   started: boolean;
+  /**
+   * The monotonic per-sandbox beat counter (0065 Part A) — increments by one on every committed state
+   * mutation; stable on a no-op. NOT secret (a counter carries no Vault content), so it crosses freely.
+   * The FE holds the last-seen value per canonical session and attaches it as `expectedBeatSeq` on the
+   * next mutating call, so a write computed against a superseded board is refused (409 `stale-beat`),
+   * not applied. Restart-safe (persisted in the snapshot, co-versioned with the save, 0007/0030).
+   */
+  beatSeq: number;
   week: number;
   phase: string;
   /**
@@ -256,6 +264,15 @@ export interface GameStateView {
  * a restart, 0030). `createCharacter` finalizes from it.
  */
 export interface UpdateCastingReq {
+  /**
+   * The cast photo step (casting step #1, the photo-first OOBE): FE-set when the in-chat photo box
+   * closes — `"uploaded"` (a cast photo was finalized) or `"skipped"` (the player declined). Any
+   * non-empty string marks the step handled. The FIRST entry of `CASTING_COVERAGE`, so a fresh
+   * interview's `next` asks for it before anything else — but it is OPTIONAL: it does NOT gate
+   * `ready` (which stays name-only), so finalization proceeds whether the photo was uploaded or
+   * skipped. Vault-free: the player's own metadata, never secret.
+   */
+  castPhoto?: string;
   /** The player's display name — the one REQUIRED field before casting can finalize. */
   playerName?: string;
   /** The producer's canonical casting-sheet mapping (drives balanced hidden stats). */
@@ -312,6 +329,12 @@ export interface MakeDealReq {
   with: EntityId;
   kind: "safety" | "vote" | "final-two" | "target-other";
   terms: string;
+  /**
+   * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this write
+   * against. When present and `!== current`, the engine REFUSES with a typed `stale-beat` conflict
+   * (HTTP 409, no state change). Absent ⇒ byte-identical to the pre-0065 path (opt-in).
+   */
+  expectedBeatSeq?: number;
 }
 
 export interface CreateCharacterReq {
@@ -394,6 +417,12 @@ export interface CompetitionResultView {
 
 /** Vault-free public status for the status panel (0020): ceremony-level facts only. */
 export interface PublicGameStatus {
+  /**
+   * The monotonic per-sandbox beat counter (0065 Part A) — see `GameStateView.beatSeq`. Surfaced on
+   * every read/advance result so the FE always has the freshest token to attach to its next mutating
+   * call. Vault-free (a counter carries no Vault content); restart-safe (persisted in the snapshot).
+   */
+  beatSeq: number;
   week: number;
   phase: string;
   /**
@@ -424,6 +453,77 @@ export interface PublicGameStatus {
    * out-of-band advance (the FE's last-seen cache is process-local and goes stale; this never does).
    */
   pending: PendingDecisionView | null;
+  /**
+   * F3: whether the season is OVER (a winner is crowned). Mirrors the same public over-signal as
+   * `AdvanceView.finished` / `SeasonRecap.finished` (`this.live.finished`). Surfaced here so a client
+   * that only watches the status panel learns the game ended without separately hitting `/state` or
+   * `/recap` — otherwise it hangs on the last ceremony state post-season.
+   */
+  finished: boolean;
+  /**
+   * F3: the PUBLIC broadcast season winner (id + display name), post-season only, else null. The same
+   * Vault-free public winner exposed for the finale/retrospective (`this.live.winner`) — a broadcast
+   * fact the whole house knows, NEVER any secret/Vault data.
+   */
+  winner: NamedRef | null;
+}
+
+/**
+ * A player-visible event the delta feed (0065 Part E) emits — the SAME Vault-free projection the
+ * player surface reads (ids→names scrubbed; never hidden/Vault content). `id`/`ts` let the FE de-dupe
+ * against what it already showed; `content` is the player-facing prose.
+ */
+export interface DeltaEventView {
+  id: string;
+  ts: number;
+  type: string;
+  content: string;
+}
+
+/**
+ * The `beatSeq`-keyed delta state feed (0065 Part E) — given the caller's last-seen `beatSeq`, exactly
+ * WHAT CHANGED since: the player-visible events appended, the ceremony field transitions, and any
+ * finished/winner flip. The FE weaves a tight "since your last turn: …" line into the moment context
+ * so staleness is self-evident, and the engine's per-turn export stops growing with season length (the
+ * delta is O(Δ) — it materializes only the events after the token, never the whole log; the R3 cure).
+ *
+ * VAULT-FREE BY CONSTRUCTION: `events` reuse the player's witness-filtered visible projection (no hidden
+ * content), `board`/`changes` are the same ceremony-level public facts `gameStatus` exposes, and a
+ * counter carries no Vault content. CROSS-USER ISOLATED: it reads only this sandbox's session.
+ *
+ * Two non-delta signals the FE must honor instead of guessing:
+ *  - `fullRefresh` — the token is UNKNOWN (ahead of the current counter, negative, or older than the
+ *    retained history window — e.g. after a restart, which resets the window). The FE should fetch the
+ *    full projection (`getGameState`) rather than trust an incomplete delta. `events` is then empty.
+ *  - an EMPTY delta (`events: []`, `changes` absent, `finishedChanged` false) — `sinceBeatSeq` equals
+ *    the current `beatSeq`: nothing has committed since ("since last turn: nothing committed").
+ */
+export interface StateDeltaView {
+  /** The current committed beat counter (what the caller should re-ground its last-seen token to). */
+  beatSeq: number;
+  /** True iff the token was unknown/too-old: fetch the full projection instead of trusting this delta. */
+  fullRefresh: boolean;
+  /** The player-visible events appended since the token, in order (empty on full-refresh / no change). */
+  events: DeltaEventView[];
+  /**
+   * The ceremony field transitions since the token — only the fields that actually CHANGED appear
+   * (so an unchanged field is absent, not echoed). Present only when at least one changed; absent on a
+   * full refresh or an empty delta. Vault-free (the same ceremony-level public facts as `board`).
+   */
+  changes?: {
+    week?: { from: number; to: number };
+    phase?: { from: string; to: string };
+    hoh?: { from: NamedRef | null; to: NamedRef | null };
+    nominees?: { from: NamedRef[]; to: NamedRef[] };
+    vetoHolder?: { from: NamedRef | null; to: NamedRef | null };
+    vetoUsed?: { from: boolean; to: boolean };
+  };
+  /** True iff the season's finished/winner flipped since the token (the terminal transition). */
+  finishedChanged?: boolean;
+  /** The winner now (name only), if the season is over; null otherwise. */
+  winner?: NamedRef | null;
+  /** The CURRENT Vault-free board (ceremony-level public status) — the freshest ground to re-anchor on. */
+  board: PublicGameStatus;
 }
 
 /** A named houseguest reference for decisions/options (Vault-free — id + name only). */
@@ -440,7 +540,7 @@ export interface BeatEventView {
 
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
-  kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
     | "self-evict";
@@ -463,6 +563,14 @@ export interface PendingDecisionView {
   finalist?: NamedRef;
   /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
   evictee?: NamedRef;
+  /**
+   * STAGED competition (0006 staged-rounds evolution) — for a `comp-round` decision: which round this is
+   * (1-based) and WHO IS STILL IN this round, so the player picks their approach based on the narrowed
+   * field (e.g. everyone left is an ally → throw; a threat is still in → keep competing). Absent for every
+   * other kind. Vault-free: the still-in field is a public ceremony fact (the houseguests still standing).
+   */
+  round?: number;
+  stillIn?: NamedRef[];
   /** How many to pick (nominations = 2; others = 1; finale-statement / juror-question = 0). */
   pick: number;
 }
@@ -502,6 +610,13 @@ export interface EvictionView {
 /** The Vault-free result of advancing the game or resolving a decision. */
 export interface AdvanceView {
   started: boolean;
+  /**
+   * The monotonic per-sandbox beat counter (0065 Part A) AFTER this advance/decision committed — see
+   * `GameStateView.beatSeq`. The FE captures it as the new last-seen token. On an idempotency REPLAY
+   * (Part B) this is the cached view's original `beatSeq`, returned verbatim (the replay advances
+   * nothing). Vault-free; restart-safe.
+   */
+  beatSeq: number;
   /** The beat that just resolved (null if blocked on a decision or the game is over). */
   event: BeatEventView | null;
   /** Set when the loop now needs a player decision before it can continue. */
@@ -715,7 +830,7 @@ export interface FinaleFastForwardView {
 
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
-  kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
     | "self-evict";
@@ -743,8 +858,39 @@ export interface SubmitDecisionReq {
   statement?: string;
   /** finale-answer: the structured appeal the player makes (engine-scored; never the prose). */
   appeal?: string;
-  /** comp-intent: the player's declared approach — "compete" | "throw" | "play-safe" (B46). */
+  /** comp-intent / comp-round: the player's declared approach — "compete" | "throw" | "play-safe" (B46;
+   *  0006 staged-rounds: `comp-round` carries the approach for THAT elimination round). */
   intent?: string;
+  /**
+   * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this decision
+   * against. When present and `!== current`, the decision is REFUSED with a typed `stale-beat`
+   * conflict (HTTP 409, no state change) — the board moved under the queued turn (0064 §3.C). Absent
+   * ⇒ byte-identical to the pre-0065 path (opt-in).
+   */
+  expectedBeatSeq?: number;
+  /**
+   * Optional at-most-once idempotency key (0065 Part B): a stable key the FE mints per INTENDED
+   * decision and reuses on retry. A repeated key returns the ORIGINAL `AdvanceView` (its `beatSeq`
+   * included) WITHOUT resolving the decision again — so a flaky-socket retry never double-applies.
+   * Absent ⇒ unchanged behavior; the cache is bounded + best-effort (a restart that drops it degrades
+   * safely, since the `expectedBeatSeq` guard still protects against a double-apply).
+   */
+  idempotencyKey?: string;
+}
+
+/** Optional progression controls (0065) carried alongside an `advanceGame` call. */
+export interface AdvanceGameReq {
+  /**
+   * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this advance
+   * against. When present and `!== current`, the advance is REFUSED with a typed `stale-beat`
+   * conflict (HTTP 409, no state change). Absent ⇒ byte-identical to the pre-0065 path (opt-in).
+   */
+  expectedBeatSeq?: number;
+  /**
+   * Optional at-most-once idempotency key (0065 Part B): see `SubmitDecisionReq.idempotencyKey`. A
+   * repeated key returns the original `AdvanceView` without advancing again. Absent ⇒ unchanged.
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -793,9 +939,46 @@ export interface RecordCastProfileResult {
   reason?: string;
 }
 
+/**
+ * 0065 — pre-warm the cast. Generate the player-INDEPENDENT cast (composition + diversity + deep
+ * layer) off the season seed BEFORE the player finishes the casting interview, into an engine-side
+ * pre-game holding store, so the FE can author it deeply (`recordCastProfile`) and the portrait
+ * prompts read the FINISHED store. The whole cast is deterministic off the seed (no player field is
+ * read), so this is safe to run the instant a model is selectable.
+ */
+export interface PreSeedCastReq {
+  /**
+   * Optional explicit seed (tests/replays). Default: mint + persist real entropy now — and the
+   * later `createCharacter` ADOPTS this same seed, so the warmed cast is the cast that ships.
+   */
+  seed?: number;
+}
+
+/** The Vault-free pre-warmed cast (0065) — the same public roster facets `createCharacter` ships, plus the portrait prompts. */
+export interface PreSeedCastView {
+  /** True once the cast is warmed (the roster + prompts are available to author + shoot against). */
+  warmed: boolean;
+  /** The season seed the warmed cast was generated off (the one `createCharacter` will adopt). */
+  seed: number;
+  /** The Vault-free public roster — the same observable facets as `GameStateView.house` (no player). */
+  house: HouseguestCard[];
+  /** Portrait prompts (0051) built from the warmed PUBLIC facets — NPCs only (the player has their own headshot). */
+  portraitPrompts: PortraitPromptEntry[];
+  /** True when this call returned an ALREADY-warmed cast (idempotent re-call) rather than warming afresh. */
+  alreadyWarmed?: boolean;
+  /** Set when the cast could NOT be warmed (a season is already running) — Vault-free reason. */
+  refused?: "in-progress" | "over";
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
+  /**
+   * 0065 — pre-warm the player-INDEPENDENT cast off the season seed BEFORE the interview ends, so the
+   * FE can author it deeply and portraits read the finished store. Idempotent; durable (a warmed cast
+   * survives a restart). `createCharacter` ADOPTS the warmed cast (same seed) at finalize. Vault-free.
+   */
+  preSeedCast(req: PreSeedCastReq): PreSeedCastView;
   /**
    * Record casting-interview answers as they land (0050) — any subset of fields, callable any
    * number of times pre-game. Returns where the interview stands (known / missing / next / ready);
@@ -806,6 +989,15 @@ export interface GameSession {
   gameStatus(): PublicGameStatus;
   /** The current Vault-free game state (phase, the player's card, the house roster). */
   getGameState(): GameStateView;
+  /**
+   * The `beatSeq`-keyed delta state feed (0065 Part E): given the caller's last-seen `beatSeq`, return
+   * exactly WHAT CHANGED since (player-visible events appended, ceremony field diffs, finished/winner
+   * flip). Vault-free by construction (reuses the player's witness-filtered visible projection) and
+   * O(Δ) (materializes only the events after the token — the R3 latency cure). An unknown/too-old token
+   * signals `fullRefresh` instead of guessing a partial delta; `sinceBeatSeq === current` ⇒ an empty
+   * delta. A pure READ (never mutates / commits); safe to poll.
+   */
+  stateDelta(sinceBeatSeq: number): StateDeltaView;
   /** The managed system prompt to inject for the current (or requested) moment. */
   getMomentPrompt(req: MomentPromptReq): MomentPromptView;
   /**
@@ -819,9 +1011,14 @@ export interface GameSession {
    * veto comp → veto ceremony → eviction → finale. NPC beats resolve automatically
    * (relationship-driven); when the next beat is the PLAYER's own decision the loop
    * stops and returns it as `pending`. Idempotent while a decision is pending.
+   *
+   * 0065: an OPTIONAL `req` may carry `expectedBeatSeq` (compare-and-swap stale-write guard, Part A)
+   * and/or `idempotencyKey` (at-most-once retry guard, Part B). Calling `advanceGame()` with no req is
+   * byte-identical to the pre-0065 path.
    */
-  advanceGame(): AdvanceView;
-  /** Resolve the current pending decision and continue the loop (validated; 0011). */
+  advanceGame(req?: AdvanceGameReq): AdvanceView;
+  /** Resolve the current pending decision and continue the loop (validated; 0011). `req` may carry the
+   *  optional 0065 `expectedBeatSeq` / `idempotencyKey` (absent ⇒ byte-identical to today). */
   submitDecision(req: SubmitDecisionReq): AdvanceView;
   /**
    * Self-eviction step 1 (0061 §4.2) — the player expresses an OOC intent to leave: surface the
@@ -893,8 +1090,11 @@ export interface GameSession {
    * the engine never auto-relocates them, only holds them where they chose (NPCs drive around them).
    * Sets the player's room + resets their tenure and returns the resulting whereabouts. No-op for an
    * unknown room / before a game starts (returns the current whereabouts unchanged). Vault-free.
+   *
+   * 0065: an OPTIONAL `expectedBeatSeq` compare-and-swap token (Part A) refuses a stale write
+   * (`stale-beat` / 409, no move) when the board moved under it; absent ⇒ byte-identical to today.
    */
-  movePlayer(room: string): WhereaboutsView | null;
+  movePlayer(room: string, expectedBeatSeq?: number): WhereaboutsView | null;
 
   /** The season's public arc from the event record (0048) — Vault-free, reproducible, any time. */
   seasonRecap(): SeasonRecapView;

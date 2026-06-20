@@ -285,6 +285,7 @@ describe("0063 — RNG isolation: identity never bends a seeded outcome (the #33
             p.kind === "nominations" ? { kind: p.kind, choice: [o[0]?.id, o[1]?.id] }
             : p.kind === "veto-decision" ? { kind: p.kind, use: false }
             : p.kind === "comp-intent" ? { kind: p.kind, intent: "compete" }
+            : p.kind === "comp-round" ? { kind: p.kind, intent: "compete" } // 0006 staged-rounds
             : p.kind === "houseguests-choice" ? { kind: p.kind, vote: o[0]?.id }
             : p.kind === "replacement" ? { kind: p.kind, replacement: o[0]?.id }
             : p.kind === "eviction-vote" ? { kind: p.kind, vote: o[0]?.id }

@@ -18,6 +18,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "createCharacter", channel: "player", readsVault: false, description: "End the casting interview and start the season (0050): finalizes from everything updateCasting recorded (args may fill gaps or override; the recorded name is required). Returns the Vault-free game state with the player's casting card." },
   { name: "getGameState", channel: "player", readsVault: false, description: "Current Vault-free game state: phase, the player's card, and the house roster (names)." },
   { name: "gameStatus", channel: "player", readsVault: false, description: "Vault-free public status for the status panel: week/phase/HOH/nominees/veto (ceremony-level facts only)." },
+  { name: "stateDelta", channel: "player", readsVault: false, description: "WHAT CHANGED since your last beatSeq ({sinceBeatSeq}): the player-visible events appended, the ceremony field diffs (HOH/noms/veto/phase/week), and any finished/winner flip — plus the current board (0065 Part E). Vault-free and O(Δ). An unknown/too-old token returns { fullRefresh: true } (fetch getGameState instead); an up-to-date token returns an empty delta." },
   { name: "playerTagline", channel: "player", readsVault: false, description: "A snarky, state-aware one-line Big Brother hero tagline for the player (Vault-free; reflects current standing)." },
   { name: "finaleView", channel: "player", readsVault: false, description: "Vault-free projection of an in-progress finale for the finale panel: finalists, stage, and the votes revealed so far (null when no finale is staging)." },
   { name: "getMomentPrompt", channel: "player", readsVault: false, description: "The managed system prompt to inject for the current moment (persona + framing; Vault-free)." },
@@ -48,6 +49,10 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "cancelSelfEviction", channel: "player", readsVault: false, description: "Cancel a raised self-eviction confirmation (0061): the player decided to stay. Clears the confirmation; they remain ACTIVE and in the house, unchanged." },
   { name: "makeDeal", channel: "player", readsVault: false, description: "Make a deal with a houseguest (safety / vote / final-two / target-other). Tracked as a first-class promise; the engine reconciles it against later binding actions and a broken promise hurts." },
   { name: "recordImageBeat", channel: "player", readsVault: false, description: "Record that an in-character image was shown to the player (0051) — a player-witnessed image-shown event so it has memory ('recorded or it didn't happen'). Returns its id." },
+  // FE-driven authoring/pre-warm seams (0058/0065) — NOT model levers (the FE producer-LLM drives them).
+  { name: "preSeedCast", channel: "player", readsVault: false, description: "FE-driven (0065): pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting interview ends, so the FE can deeply author it and the portrait prompts read the finished store. Returns the Vault-free roster + the cast portrait prompts; mints + persists the season seed (which createCharacter then adopts). Idempotent; durable. Not a model lever." },
+  { name: "recordCastProfile", channel: "player", readsVault: false, description: "FE-driven write-back (0058/0065): seal one houseguest's authored §3 profile — the PUBLIC biography + structured physical facet (cross to the player) SPLIT from the HIDDEN secrets/true-goals/weakness/Day-1 read (Vault-sealed). Reports accepted field NAMES only, never a hidden value; refuses a player-mirroring profile. Lands on the pre-warmed cast pre-game, the live house once a season runs. Not a model lever." },
+  { name: "recordWorldSnapshot", channel: "player", readsVault: false, description: "FE-driven write-back (0062): freeze the move-in zeitgeist — the PUBLIC, shared real-world flavor the whole cast moved in WITH (an optional subset of public slices: screen/music/sports/news/internet/mood). The FE owns the concrete web-search capture (like the 0051 image port); the engine persists it as the single FROZEN artifact and RECALLS it (never re-searches) all season. Empty slices keep the fallback's value (non-degradation). Public flavor only — no Vault, no game input. Not a model lever." },
 ];
 
 export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
@@ -71,6 +76,18 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
 // (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
 // competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
 const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView", "getPortraitPrompt", "recordImageBeat",
+  // 0065 Part E: `stateDelta` is FE/harness infrastructure (the per-turn "what changed since" feed the
+  // FE weaves into the moment context) — NOT a game-driving lever the model pulls. Excluded from the
+  // base prompt's lever manifest so the manifest↔registry drift test stays green.
+  "stateDelta",
+  // 0058/0065: the cast pre-warm + authoring write-back are FE-driven seams (the producer-LLM authors
+  // the cast, the FE pre-warms it before portraits), NOT game-driving levers the GM model pulls — so
+  // they stay OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
+  "preSeedCast", "recordCastProfile",
+  // 0062: the move-in zeitgeist write-back is an FE-driven seam (the front-end owns the concrete
+  // web-search capture and freezes it onto the season), NOT a game-driving lever the GM model pulls —
+  // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
+  "recordWorldSnapshot",
   // 0061: `cancelSelfEviction` is the confirmation card's own Cancel action (FE-driven), NOT a model
   // lever. `requestSelfEviction` IS advertised (below): on a clear OOC intent the model raises the
   // confirmation — which changes NO state — and the player's explicit confirm (the card) is what binds.

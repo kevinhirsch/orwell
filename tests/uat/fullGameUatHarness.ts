@@ -43,7 +43,7 @@ import type { McpServer } from "../../src/adapters/mcp/McpServer";
 export interface NamedRef { id: string; name: string; }
 
 export interface PendingDecision {
-  kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
       | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
   by: NamedRef;
   options: NamedRef[];
@@ -114,6 +114,8 @@ export function autoResolve(p: PendingDecision, strategy: DecisionStrategy): Rec
       return { kind: "veto-decision", use: false };
     case "comp-intent": // B46: declare the player's competition approach (default compete).
       return { kind: "comp-intent", intent: "compete" };
+    case "comp-round": // 0006 staged-rounds: declare the per-round approach (default compete).
+      return { kind: "comp-round", intent: "compete" };
     case "houseguests-choice": // B45: the player drew the chip — pick the sixth veto player.
       return { kind: "houseguests-choice", vote: p.options[0]!.id };
     case "replacement":

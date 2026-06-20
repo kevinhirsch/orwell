@@ -1347,7 +1347,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "kind": {
                         "type": "string",
                         "enum": [
-                            "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+                            "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
                             "replacement", "eviction-vote", "tie-break", "final-eviction",
                             "goodbye-message", "finale-statement", "finale-answer",
                             "juror-question", "juror-vote", "self-evict",
@@ -1362,7 +1362,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "vote": {"type": "string", "description": "eviction-vote: the nominee id to evict. juror-vote: the finalist id the juror crowns. goodbye-message: the player's chosen tone — warm | respectful | cold (E34)."},
                     "statement": {"type": "string", "description": "finale-statement / juror-question: the player's free text (flavor; carries no score). goodbye-message: the optional message text accompanying the chosen tone."},
                     "appeal": {"type": "string", "enum": ["own-game", "mend", "connect", "discredit-rival"], "description": "finale-answer: the structured appeal the player makes to the asking juror (engine-scored; never the prose)."},
-                    "intent": {"type": "string", "enum": ["compete", "throw", "play-safe"], "description": "comp-intent: the player's declared approach for the upcoming competition (locked once the comp runs)."},
+                    "intent": {"type": "string", "enum": ["compete", "throw", "play-safe"], "description": "comp-intent / comp-round: the player's declared approach for the competition. 0006 staged-rounds: comp-round is the approach for THIS elimination round only — committed before the round resolves, locked after; the player re-chooses as the field narrows."},
                 },
                 "required": ["kind"],
             },

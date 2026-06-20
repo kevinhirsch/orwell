@@ -23,6 +23,7 @@ function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>):
   if (p.kind === "veto-decision") return s.submitDecision({ kind: "veto-decision", use: false });
   if (p.kind === "replacement") return s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
   if (p.kind === "comp-intent") return s.submitDecision({ kind: "comp-intent", intent: "compete" });
+  if (p.kind === "comp-round") return s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   if (p.kind === "finale-statement") return s.submitDecision({ kind: "finale-statement", statement: "x" });
   if (p.kind === "finale-answer") return s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   if (p.kind === "juror-vote") return s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
@@ -54,10 +55,12 @@ function gameWithPlayerOnTheBlock(): { sb: Sandbox; reg: GameSessionRegistry } {
     const sb = reg.sandboxFor("deal-user");
     sb.session.createCharacter({ playerName: "P", seed });
 
-    // Resolve the opening HOH comp (the player declares an intent first).
-    const first = sb.session.advanceGame();
-    if (first.pending?.kind === "comp-intent") {
-      sb.session.submitDecision({ kind: "comp-intent", intent: "compete" });
+    // Resolve the opening HOH comp — 0006 staged-rounds: drive the elimination ladder to the crown
+    // (the player declares a per-round approach each round they are in).
+    for (let g = 0; g < 200 && !sb.session.gameStatus().hoh; g++) {
+      const adv = sb.session.advanceGame();
+      if (adv.pending) resolve(sb.session as GameSessionAdapter, adv.pending);
+      if (adv.finished) break;
     }
     const hoh = sb.session.gameStatus().hoh;
     if (!hoh || hoh.id === PLAYER) continue; // need an NPC HOH — try the next seed
@@ -165,21 +168,25 @@ describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () =>
     sb.session.createCharacter({ playerName: "P", seed: 5 });
     const session = sb.session as GameSessionAdapter;
 
-    // Two NPCs grow genuinely tight off-screen (mutual trust over the final-two floor).
-    const core = sb.session.snapshot();
-    const [a, b] = [core.house!.npcs[0]!.id, core.house!.npcs[1]!.id] as [EntityId, EntityId];
-    const ab = sb.engine.relationships.edge(a, b);
-    const ba = sb.engine.relationships.edge(b, a);
-    ab.trust = 0.9; ba.trust = 0.9;
-
     // Play forward until a nomination ceremony mints the pact (seeded, bounded probability per week).
+    // 0006 staged-rounds adds many per-round beats per week, so raise the iteration bound to give the
+    // bounded-probability per-week mint enough nomination ceremonies. Keep the two tightest SURVIVING
+    // NPCs tight EACH turn (the live decay/folds + evictions otherwise erode the forced pair away before
+    // a probabilistic mint week lands; the mint reads current trust over the still-active house).
     let npcDeal: { parties: { id: EntityId }[] } | undefined;
     driveUntil(sb, () => {
+      const live = sb.session.snapshot().live;
+      const npcs = (live?.active ?? []).filter((id) => id !== PLAYER);
+      if (npcs.length >= 2) {
+        const [a, b] = [npcs[0]!, npcs[1]!] as [EntityId, EntityId];
+        sb.engine.relationships.edge(a, b).trust = 0.9;
+        sb.engine.relationships.edge(b, a).trust = 0.9;
+      }
       npcDeal = (sb.session.snapshot().deals ?? [])
         .map((d) => ({ parties: d.parties.map((id) => ({ id })) }))
         .find((d) => !d.parties.some((p) => p.id === PLAYER));
       return !!npcDeal;
-    }, 800);
+    }, 2500);
     expect(npcDeal, "the off-screen society sealed at least one NPC↔NPC pact").toBeTruthy();
 
     // The pact's made-event is HIDDEN (no player witness ⇒ the Vault layer, 0002)...

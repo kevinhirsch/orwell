@@ -21,6 +21,7 @@ function resolve(s: ReturnType<GameSessionRegistry["sandboxFor"]>["session"], p:
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
   else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
   else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
+  else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);

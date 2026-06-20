@@ -305,7 +305,7 @@ else
       || die "the OOBE preserve/rebuild helper failed — NOTHING removed (config is intact). Fix Python deps and retry."
   else
     warn "OOBE helper ${OOBE_HELPER} not found — cannot preserve the provider config; ABORTING to avoid losing API keys."
-    die "expected ${OOBE_HELPER}. (Use orwell-factory-reset.sh for a full wipe that does NOT keep keys.)"
+    die "expected ${OOBE_HELPER} — install the front-end Python deps and retry. (To also drop the API keys, remove frontend/data/.app_key, .key, api_keys.json and app.db by hand.)"
   fi
 
   # Now scrub every OTHER file in the FE store: keep the key files AND the just-rebuilt

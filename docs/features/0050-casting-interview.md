@@ -202,3 +202,28 @@ persistence), ADR **0003** (the conversation is the game).
 `docs/bb-sim-spec.md` §7 (OOBE); ADR 0003 ("UI may augment the chat but never replace an
 interaction that builds the game" — character creation is exactly such an interaction);
 mandate #2 (no numbers cross), #3 (engine decides), #4 (authored detail persists).
+
+## Amendment (0065) — the cast photo is the FIRST casting step (photo-first OOBE)
+
+> **Status:** Built. Engine + tests + this note (the FE Python relay and the in-chat photo box
+> are sibling FE work to the same contract).
+
+The casting interview now **opens on the cast photo** — "producers ask what you look like before
+anything else." It is the engine's casting **step #1**: `castPhoto` is the **first entry of
+`CASTING_COVERAGE`** (`src/engine/castingIntake.ts`), so on a fresh interview the casting status's
+`next` (and `missing[0]`) points at the cast photo before the name or any other question. The
+casting-interview moment prompt opens the producer on the 📷 panel accordingly (`momentPrompts.ts`).
+
+- **Contract.** New scalar field `castPhoto` on `UpdateCastingReq` (camelCase string). The FE sets
+  it when the in-chat photo box closes: `"uploaded"` (a cast photo was finalized) or `"skipped"`
+  (the player declined). Any non-empty string marks the step **handled** (it leaves `missing` and
+  `next` advances). It is an **ordinary scalar** — merge/overwrite/capture/status all flow it
+  automatically (they iterate `CASTING_COVERAGE`); persistence rides the existing `casting` intake
+  snapshot (no per-field plumbing).
+- **Optional / skippable.** `castPhoto` does **NOT** gate casting `ready` (which stays **name-only**):
+  the photo never blocks the interview or `createCharacter`, whether uploaded or skipped. Producers
+  are told not to push past a clear "no" and to move on once it's handled.
+- **Vault Wall.** `castPhoto` is the player's **own** metadata (what they look like) — Vault-free,
+  never secret, no NPC pathway. It crosses no boundary it shouldn't (it rides the same Vault-free
+  `UpdateCastingReq` every other casting field does; no allowlist/schema strips it — `updateCasting`
+  takes the request wholesale and the MCP `requireShape` has no field allowlist for it).
