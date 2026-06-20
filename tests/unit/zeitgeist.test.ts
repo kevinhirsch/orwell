@@ -244,3 +244,79 @@ describe("0062 — adapter integration (frozen, persisted, Vault-free, fail-soft
     expect(/"trust":|"affinity":|"threat":|"physical":|"mental":|"social":/.test(view)).toBe(false);
   });
 });
+
+describe("0062 — media fidelity: no live media + the HOH music perk", () => {
+  const snap = buildWorldSnapshot({ seed: 5, capturedFor: MOVE_IN });
+
+  it("the block always carries the no-live-media + feeds-cut guardrail (singing → the jingle, never lyrics)", () => {
+    const block = renderZeitgeist(snap, { week: 2, channel: "player" });
+    expect(block).toMatch(/no live media/i);
+    expect(block).toMatch(/feeds[\s\S]*cut/i);
+    expect(block).toMatch(/never actual copyrighted lyrics/i);
+  });
+
+  it("without the perk, music is frozen MEMORY like every other slice (no live framing)", () => {
+    const block = renderZeitgeist(snap, { week: 2, channel: "player", musicAccess: false });
+    expect(block).not.toMatch(/HOH MUSIC PERK/);
+    expect(block).not.toMatch(/RIGHT NOW/);
+    expect(block).toMatch(/· Music:/); // a plain memory line
+  });
+
+  it("with the HOH music perk, the music slice reads as PLAYING NOW — the one live exception", () => {
+    const block = renderZeitgeist(snap, { week: 2, channel: "player", musicAccess: true });
+    expect(block).toMatch(/HOH MUSIC PERK/);
+    expect(block).toMatch(/RIGHT NOW/);
+    expect(block).not.toMatch(/· Music:/);  // the music line is the perk variant, not the plain one
+    expect(block).toMatch(/· Screen \(/);   // the OTHER slices stay frozen memory
+  });
+});
+
+describe("0062 — the HOH music perk flows into the live moment prompt", () => {
+  // Mirror the lifecycleMoments driver: resolve any player decision with a legal default.
+  function resolve(s: GameSessionAdapter, p: NonNullable<ReturnType<GameSessionAdapter["advanceGame"]>["pending"]>): void {
+    if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+    else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+    else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
+    else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" } as never);
+    else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
+  }
+
+  it("the base prompt always states the no-live-media rule + the HOH music perk exception", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 3 });
+    const prompt = s.getMomentPrompt({ moment: "social" }).systemPrompt;
+    expect(prompt).toMatch(/NO LIVE MEDIA/);
+    expect(prompt).toMatch(/HOH MUSIC PERK/);
+    expect(prompt).toMatch(/NEVER actual copyrighted lyrics/i);
+  });
+
+  it("the perk reaches the moment prompt: live in the HOH room, memory elsewhere", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 7 });
+    s.recordWorldSnapshot({ slices: { music: ["a song the whole house loved"] } });
+
+    // Drive to the first crowned HOH (the premiere does not stall).
+    let hoh: string | null = null;
+    for (let i = 0; i < 60 && !hoh; i++) {
+      const v = s.advanceGame();
+      if (v.pending) resolve(s, v.pending);
+      hoh = s.gameStatus().hoh?.id ?? null;
+      if (v.finished) break;
+    }
+    expect(hoh).not.toBeNull();
+    const me = s.getGameState().player.id;
+
+    // The LIVE music framing in the per-moment world block (distinct from the always-on base-prompt rule,
+    // which states the perk exists regardless): "on rotation in the HOH room RIGHT NOW".
+    const LIVE = /on rotation in the HOH room RIGHT NOW/;
+    // In the HOH room → the player has live music (as HOH, or overhearing it).
+    s.movePlayer("hoh-room");
+    expect(s.getMomentPrompt({ moment: "social" }).systemPrompt).toMatch(LIVE);
+
+    // Out in the kitchen → live ONLY if the player IS the HOH (they carry the perk); otherwise memory.
+    s.movePlayer("kitchen");
+    const inKitchen = s.getMomentPrompt({ moment: "social" }).systemPrompt;
+    if (hoh === me) expect(inKitchen).toMatch(LIVE);
+    else expect(inKitchen).not.toMatch(LIVE);
+  });
+});
