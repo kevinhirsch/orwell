@@ -348,6 +348,22 @@ describe("whereabouts (0049) — the Vault-free presence read", () => {
     expect(sb.session.movePlayer("nowhere-room")!.room).toBe(dest);
   });
 
+  it("movePlayer is FORGIVING — natural names resolve to real rooms, no silent no-op loop (the moveTo bug)", () => {
+    const { sb } = liveGame(8);
+    // The narrator's guessed natural names — case/space/hyphen-insensitive + aliases — all MOVE for real.
+    expect(sb.session.movePlayer("living room")!.room).toBe("living-room");
+    expect(sb.session.movePlayer("KITCHEN")!.room).toBe("kitchen");
+    expect(sb.session.movePlayer("backyard")!.room).toBe("backyard");
+    expect(sb.session.movePlayer("HOH")!.room).toBe("hoh-room");
+    expect(sb.session.movePlayer("pantry")!.room).toBe("storage-room");
+    // A bare "bedroom" (the exact real-log failure) resolves to a real bedroom rather than no-op.
+    const afterBedroom = sb.session.movePlayer("bedroom")!;
+    expect(["bedroom-a", "bedroom-b"]).toContain(afterBedroom.room);
+    // Standing in a bedroom, "bedroom" keeps them put (idempotent, not unknown).
+    const stay = sb.session.movePlayer("bedroom")!;
+    expect(stay.room).toBe(afterBedroom.room);
+  });
+
   it("L21/L24 — presence tenure round-trips through a save (continuity survives a restart)", () => {
     const { sb } = liveGame(5);
     for (let i = 0; i < 4; i++) sb.session.presenceTick(new SeededRandom(70 + i));

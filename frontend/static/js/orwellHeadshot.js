@@ -29,23 +29,24 @@
     const s = document.createElement("style");
     s.id = "orwell-headshot-css";
     s.textContent = `
-      #${ID} { margin: 0 auto 8px; max-width: 760px; width: 100%;
-        /* L1: never ride up under the "orwell" header in the welcome-lifted state —
-           cap the whole card to the space below the top bar and let it scroll. */
-        max-height: min(60vh, calc(100vh - var(--ow-headshot-top-clear, 96px)));
-        display: flex; flex-direction: column;
-        border: 1px solid var(--border, #355a66); border-radius: 10px;
-        background: color-mix(in srgb, var(--panel, #1b1f27) 92%, transparent);
-        font-size: 13px; overflow: hidden; }
-      #${ID} .hs-head { display: flex; align-items: center; gap: 8px; cursor: pointer;
-        padding: 8px 12px; user-select: none; color: var(--fg, #cfd8e3); flex: none; }
-      #${ID} .hs-head .hs-chev { margin-left: auto; opacity: .6; transition: transform .15s; }
-      #${ID}.hs-open .hs-head .hs-chev { transform: rotate(90deg); }
-      /* L3: generated photos must show expanded — the body scrolls internally rather
-         than growing the card upward into the header. */
-      #${ID} .hs-body { display: none; padding: 4px 12px 12px; overflow-y: auto; min-height: 0; }
-      #${ID}.hs-open .hs-body { display: block; }
-      /* the studio body — shared by the casting card AND Settings (scoped to the class) */
+      /* P1 OOBE overhaul: the pre-game casting headshot is now a PROPER OrwellWindow
+         (composes the .ow-* kit). It GATES the chat, so it is mounted non-dismissable
+         (no close/minimize control) and stays put until a photo is secured. The kit
+         owns the frame/titlebar/drag; we only size + position it and style its body. */
+      #${ID} {
+        /* a prominent, centered-ish gate — wide enough for the 3-option studio grid,
+           capped + internally scrolling so it never climbs under the "orwell" header. */
+        width: 480px; max-width: min(92vw, 480px);
+        left: 50% !important; right: auto !important;
+        transform: translateX(-50%);
+        z-index: 1000;  /* above the welcome splash + slotted HUD, below true modals */
+      }
+      #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px))); }
+      /* the ONE instruction lives in the window body — no duplicate banner/placeholder copy */
+      #${ID} .hs-lead { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5;
+        color: color-mix(in srgb, var(--fg, #cfd8e3) 88%, transparent); }
+      #${ID} .hs-lead b { font-weight: 700; }
+      /* the studio body — shared by the casting window AND Settings (scoped to the class) */
       .ow-headshot-studio { font-size: 13px; }
       .ow-headshot-studio .hs-msg { opacity: .75; font-size: 12px; }
       .ow-headshot-studio .hs-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
@@ -73,7 +74,7 @@
         border-radius: 50%; border: none; cursor: pointer; font-size: 12px; padding: 0;
         background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .12s; }
       .ow-headshot-studio .hs-libitem:hover .hs-libdel { opacity: 1; }
-      @media (prefers-reduced-motion: reduce) { #${ID} .hs-head .hs-chev, .ow-headshot-studio .hs-libdel { transition: none; } }`;
+      @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }`;
     document.head.appendChild(s);
   }
 
@@ -286,62 +287,96 @@
   // expose the reusable studio for Settings → Account (G28)
   window.OrwellHeadshotStudio = { mount: buildStudio };
 
-  // ── the pre-game casting card (collapsible host for the studio) ─────────────
-  function build() {
-    const el = document.createElement("div");
-    el.id = ID;
-    el.innerHTML = `
-      <div class="hs-head" role="button" tabindex="0" aria-expanded="false">
-        <span>📷</span><b>Casting headshot</b><span class="hs-msg" id="hs-summary">make your portrait</span>
-        <span class="hs-chev">▶</span>
-      </div>
-      <div class="hs-body" id="hs-body"></div>`;
-    return el;
+  // ── the pre-game casting WINDOW (composes the .ow-* kit) ─────────────────────
+  // P1 OOBE overhaul: the image step is a PROPER OrwellWindow, not a collapsible
+  // inline card. Because it GATES the chat (orwellChatGate.js locks send until a photo
+  // is secured), it is mounted NON-DISMISSABLE — no close/minimize control, no collapse
+  // affordance — so the mandatory step can never be hidden away. It is draggable +
+  // resizable (the player can move it off something), but it stays present until the
+  // photo lands and the window hands off into the game.
+  const CAST_ICON =
+    "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' " +
+    "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
+    "<path d='M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z'/>" +
+    "<circle cx='12' cy='13' r='3.5'/></svg>";
+
+  let _win = null; // the kit window instance (one at a time)
+
+  function buildBody() {
+    const body = document.createElement("div");
+    // The ONE clear instruction — consolidated here, in the window. The chat gate's
+    // banner is gone and the composer keeps only a minimal disabled-state placeholder,
+    // so the "add your cast photo" prompt appears exactly once.
+    const lead = document.createElement("p");
+    lead.className = "hs-lead";
+    lead.innerHTML =
+      "<b>This is your cast photo.</b> Every houseguest needs one before the season can " +
+      "start. Upload a photo of yourself or generate one with AI — the chat opens the " +
+      "moment it's set, and the producers will reach out.";
+    const studioHost = document.createElement("div");
+    body.appendChild(lead);
+    body.appendChild(studioHost);
+    return { body, studioHost };
   }
 
-  function wire(el, openByDefault) {
-    const head = el.querySelector(".hs-head");
-    const summary = el.querySelector("#hs-summary");
-    const open = () => { el.classList.add("hs-open"); head.setAttribute("aria-expanded", "true"); };
-    const toggle = () => { const o = el.classList.toggle("hs-open"); head.setAttribute("aria-expanded", o ? "true" : "false"); };
-    head.addEventListener("click", toggle);
-    head.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
-    if (openByDefault) open();
-    buildStudio(el.querySelector("#hs-body"), {
-      onSummary: (t) => { summary.textContent = t; },
-      ensureOpen: open,                 // L3: keep the card open while options/results show
-      onFinalized: () => onCastingHeadshotChosen(el), // L4/L5: dismiss + hand off into the game
+  function mount() {
+    if (_win || document.getElementById(ID)) return;
+    if (!window.OrwellWindowKit || !window.OrwellWindowKit.create) return; // kit not ready → fail open
+    ensureCss();
+    const { body, studioHost } = buildBody();
+    // L1: while the casting window is mounted, drop the welcome-screen's 30vh composer
+    // lift so the composer docks normally (never hangs mid-screen) and the splash tips
+    // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
+    try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
+    // Compose the kit. NON-DISMISSABLE (no close/minimize) because it gates the chat. It is
+    // a centered, mandatory dialog-style gate (CSS pins it horizontally-centered), so it is
+    // NOT draggable/resizable — there is nothing to move it off (the splash is hidden while
+    // it's up). The kit still owns the chrome, titlebar, focus, and the .ow-* family.
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "Your Cast Photo", icon: CAST_ICON,
+      slot: "top-right", slotKey: "castphoto", role: "dialog",
+      minimizable: false, closable: false, draggable: false, resizable: false,
+      minWidth: 320, minHeight: 240,
+      content: body, focus: true,
+    });
+    _win.open();
+    // Mount the reusable studio into the window body.
+    buildStudio(studioHost, {
+      // No persistent "set ✓" chip in the casting window (item 5) — the titlebar carries
+      // the title and the window hands off on finalize, so nothing lingers above the
+      // composer. The summary callback is intentionally a no-op here.
+      onSummary: function () {},
+      ensureOpen: function () {},        // a window is always "open" — nothing to expand
+      onFinalized: onCastingHeadshotChosen, // L4/L5: dismiss + hand off into the game
     });
   }
 
-  // L4/L5: the player has picked their casting headshot — the last pre-game step. Dismiss
-  // the picker (unmount the card) and let the PRODUCERS open the game with the first message,
-  // so the player never has to type the opening word. Returns true so the studio stops
-  // repainting its own "finalized" state behind the teardown.
-  function onCastingHeadshotChosen(el) {
-    unmount();
+  // L4/L5: the player has secured their casting headshot — the last pre-game step. Tear
+  // down the window and let the PRODUCERS open the game with the first message, so the
+  // player never has to type the opening word. Returns true so the studio stops repainting
+  // its own "finalized" state behind the teardown.
+  //
+  // item 6 (no composer jump): destroy the WINDOW immediately, but KEEP the composer-lift
+  // drop (.ow-casting-headshot-open) through the handoff — otherwise the welcome-active 30vh
+  // lift would snap the composer up mid-screen for the ~beat between teardown and the
+  // producers' first message clearing the welcome state. The flag is cleared by the next
+  // route()/unmount() once the game is underway (the composer is no longer welcome-active).
+  function onCastingHeadshotChosen() {
+    teardownWindow();
     try {
       if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting();
     } catch (_) { /* fail open — the chat composer is still the way in */ }
     return true;
   }
 
-  function mount() {
-    if (document.getElementById(ID)) return;
-    const bar = document.querySelector(".chat-input-bar");
-    if (!bar || !bar.parentNode) return;
-    ensureCss();
-    const el = build();
-    bar.parentNode.insertBefore(el, bar);
-    // L1: while the casting card is mounted, drop the welcome-screen's 30vh composer
-    // lift so the card + composer sit near the bottom and never climb under the
-    // "orwell" header. The flag is scoped to the game build in game-trim.css.
-    try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
-    wire(el, true); // G29: producers push it — the casting card opens expanded, not tucked away
-  }
-  function unmount() {
+  function teardownWindow() {
+    if (_win) { try { _win.destroy(); } catch (_) {} _win = null; }
     const el = document.getElementById(ID);
     if (el) el.remove();
+  }
+
+  function unmount() {
+    teardownWindow();
     try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
   }
 

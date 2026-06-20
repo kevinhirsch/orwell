@@ -1,8 +1,18 @@
 import type { GameStateView } from "../ports/GameSession";
+import { WALKABLE_ROOMS, roomDisplayName } from "../domain/house";
 import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 import { neutralizeForPrompt } from "./castingIntake";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
+
+/**
+ * The canonical list of room names the narrator may walk the player to (Vault-free; the house's
+ * public floor plan). Surfaced VERBATIM in the moment prompt so the model never GUESSES a room id
+ * and stumbles through the "isn't mapping" retry loop — it always knows the exact set `moveTo`
+ * accepts. `moveTo` itself is forgiving (case/space/hyphen-insensitive + natural aliases), so any of
+ * these — or a near-natural variant — resolves; this is just the model's authoritative menu.
+ */
+const WALKABLE_ROOM_NAMES: string = WALKABLE_ROOMS.map(roomDisplayName).join(", ");
 
 /**
  * Managed system-prompt injections, per moment.
@@ -310,7 +320,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    so the game MOVES them for real, then voice the new room from what it returns. The player is a",
   "    person — they choose where to go; they are never relocated on their own. Until you call this, they",
   "    are still in their current `whereabouts` room — never narrate them somewhere the game has not moved",
-  "    them. (The houseguests drift on their own; you only moveTo the PLAYER.)",
+  "    them. (The houseguests drift on their own; you only moveTo the PLAYER.) The valid rooms are listed",
+  "    in the GAME CONTEXT under \"ROOMS YOU CAN WALK THE PLAYER TO\" — pass one of THOSE; moveTo is",
+  "    forgiving about phrasing (\"living room\", \"backyard\", \"HOH\" all resolve), but never invent a",
+  "    room that isn't on that list. A bare \"bedroom\" resolves to the player's own bedroom.",
   "  • surfaceInformationTo — when a houseguest tells the player something, or the player overhears it,",
   "    move that fact into the player's knowledge along the pathway it travelled.",
   "  • diaryRoom — record the player's private, out-of-character confessional. Nothing here reaches any",
@@ -731,6 +744,11 @@ export function renderGameContext(view: GameStateView): string {
       ...(nearby.length
         ? ["    One room over (each adjacent room and EXACTLY who is in it — voice this occupancy, never invent it):", ...nearby]
         : ["    No adjacent rooms are in view."]),
+      // The model used to GUESS a room id for moveTo ("bedroom"?) and loop through "isn't mapping"
+      // retries. Hand it the EXACT walkable rooms so it always names a real one (moveTo is forgiving,
+      // but this removes the guessing entirely). These are the WHOLE house — only the player's room +
+      // the adjacent rooms above are VISIBLE; the others exist and can be walked to, just not seen yet.
+      `    ROOMS YOU CAN WALK THE PLAYER TO (the whole house; pass any of these to moveTo): ${WALKABLE_ROOM_NAMES}.`,
       "    THIS IS THE WHOLE OF WHAT THE PLAYER CAN SEE OR HEAR: your room and the rooms next to it. Whether",
       "    a room is full or empty is the GAME's to say, never yours — voice EXACTLY the people listed for a",
       "    room, and call a room empty ONLY when it is listed empty above. If the player checks, glances into,",

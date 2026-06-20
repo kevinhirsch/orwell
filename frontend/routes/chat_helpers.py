@@ -742,6 +742,26 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
         _fallback_in_flight.discard(user)
 
 
+def mark_message_phase(message, phase: str) -> None:
+    """Vault Wall (casting-leak fix): durably stamp a chat phase onto a persisted message.
+
+    Delegates to the session manager (it owns persistence) so the marker lands on the DB
+    row too — future turns reload it and the in-game context build excludes pre-game/casting
+    turns. Best-effort: a stamp failure must never break the turn."""
+    try:
+        from core.models import _session_manager as _sm
+        if _sm is not None and hasattr(_sm, "mark_message_phase"):
+            _sm.mark_message_phase(message, phase)
+        elif message is not None:
+            # No session manager (e.g. unit harness): stamp in-memory only so the
+            # same-turn context build still excludes it.
+            if getattr(message, "metadata", None) is None:
+                message.metadata = {}
+            message.metadata["phase"] = phase
+    except Exception:
+        logger.warning("Failed to mark message phase=%s", phase, exc_info=True)
+
+
 def discard_last_user_message(sess) -> None:
     """E25 (belt): remove the just-persisted trailing user message when a turn is REFUSED
     after build_chat_context already added it (the sync route's game-turn 409) — otherwise
@@ -1309,6 +1329,20 @@ async def build_chat_context(
     from src.settings import game_build_enabled as _gb
     framed = bool(game_active or feed_down or (engine_available and _gb()))
 
+    # Vault Wall — casting-leak fix. The pre-game casting interview (0050) is an OOC,
+    # producer-level channel (like the Diary Room): it has NO in-game pathway to any NPC's
+    # knowledge. `game_active` is the engine's authoritative house-entry boundary (a season
+    # is started). When it is FALSE this turn is pre-game/casting, so stamp the just-persisted
+    # user message `phase=casting`; that marker (durably on the DB row) is what the in-game
+    # context build below excludes, so the narrator never receives the player's private
+    # strategy/OOC reads and cannot leak them to the houseguests. The player still SEES the
+    # interview in scrollback — one continuous conversation. (The assistant reply is stamped at
+    # save time in save_assistant_response.)
+    if not game_active and getattr(sess, "history", None):
+        _last = sess.history[-1]
+        if getattr(_last, "role", None) == "user":
+            mark_message_phase(_last, "casting")
+
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
 
@@ -1326,8 +1360,13 @@ async def build_chat_context(
     if norm:
         sess.model = norm
 
-    # Build messages
-    messages = preface + sess.get_context_messages()
+    # Build messages. Vault Wall (casting-leak fix): once a season is live, the in-game
+    # narrator must NOT receive the pre-game casting-interview turns (OOC, no NPC pathway —
+    # treated exactly like the Diary Room). They are stamped `phase=casting`; exclude them
+    # here so the model cannot leak the player's private strategy to the houseguests. The model
+    # cannot leak what it never receives. Pre-game/casting turns keep the full transcript.
+    _exclude_phases = {"casting"} if game_active else None
+    messages = preface + sess.get_context_messages(exclude_phases=_exclude_phases)
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
@@ -1565,9 +1604,16 @@ def save_assistant_response(
     do_research: bool = False,
     tool_events: list = None,
     incognito: bool = False,
+    phase: str = None,
 ):
-    """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence."""
+    """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence.
+
+    `phase` (Vault Wall / casting-leak fix): when this reply is part of the OOC pre-game
+    casting interview (game not yet started), stamp `phase=casting` so the in-game narrator's
+    context build excludes it later — the producer interview never becomes house-knowable."""
     md = dict(last_metrics) if last_metrics else {}
+    if phase:
+        md["phase"] = phase
     def _model_value(value) -> str:
         if value is None:
             return ""
