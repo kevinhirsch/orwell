@@ -131,6 +131,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0063 | [Casting diversity floor](./0063-casting-diversity-floor.md) | BDD | ✅ Built |
 | 0064 | [Live multi-device game sync](./0064-live-multi-device-game-sync.md) | FE | ✅ Built · canonical session (A) + Messenger serialization (C) + window/HUD layout sync (F) + `game-updated`/cast-photo/once-only (B/D) |
 | 0065 | [Cast pre-warm: deep-author before portraits](./0065-cast-prewarm.md) | BDD + FE | ✅ Built · wired the `recordCastProfile` write-back onto the player channel (was rejected at the MCP boundary) + `preSeedCast` pre-game cast + `createCharacter` adoption + FE author-warm-early / portrait-warm-gated |
+| 0066 | [In-game time of day & the nightly sleep economy](./0066-in-game-time-and-sleep.md) | unit + integration | ✅ Built (ADR 0006) · the five-phase clock + character-driven bedtimes + the diegetic bound + the player's `turnIn` bedtime lever + a hidden bounded sleep→comp penalty + the HUD clock/rest cue. **Opt-in** (`ORWELL_TIME_OF_DAY`, default off) so the seeded calibration spine is byte-identical. Gate: `tests/unit/timeOfDay*.test.ts` + `sleepCompetition.test.ts` (recorded deviation, like 0033/0036/0055) |
 
 
 Each row is shipped as its own auto-merged PR. 0001–0008 are the priority invariants; 0009 is

@@ -119,6 +119,8 @@ import { onNarrowChange } from './platform.js';
         }
         #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
         #orwell-status .os-hdr .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
+        #orwell-status .os-hdr .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
+        #orwell-status .os-rest { opacity: .6; font-weight: 400; font-style: italic; margin-left: .45em; font-size: .9em; }
         #orwell-status .os-chev { opacity: .55; margin-left: auto; transition: transform .15s; }
         #orwell-status.os-collapsed .os-chev { transform: rotate(-90deg); }
         #orwell-status.os-collapsed .os-body { display: none; }
@@ -146,13 +148,13 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-done .os-winner { color: var(--accent, var(--red, #e06c75)); }
       </style>
       <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
+        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
         <span class="os-chev" aria-hidden="true">▾</span>
       </div>
       <div class="os-body">
         <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
         <div class="os-ceremony" id="os-ceremony">
-          <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
+          <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span></div>
           <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
           <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
           <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
@@ -213,6 +215,13 @@ import { onNarrowChange } from './platform.js';
   };
   const phaseLabel = (p) => PHASE_LABELS[p] || String(p || "").replace(/-/g, " ");
 
+  // ADR 0006 — the in-game clock. A simple time-of-day graphic (no 12/24h), morning → late night.
+  const TOD_LABELS = {
+    "morning": "🌅 Morning", "afternoon": "🌞 Afternoon", "evening": "🌆 Evening",
+    "night": "🌙 Night", "late-night": "🌌 Late night",
+  };
+  const todLabel = (t) => TOD_LABELS[t] || "";
+
   // E69: a correct English ordinal — 11/12/13 (and 111/112/113…) take "th".
   function ordinal(n) {
     const mod100 = n % 100;
@@ -267,6 +276,7 @@ import { onNarrowChange } from './platform.js';
     if (done) {
       el.querySelector("#os-week").textContent = "Season complete";
       el.querySelector("#os-phase").textContent = "";
+      { const t = el.querySelector("#os-tod"); if (t) t.hidden = true; } // ADR 0006: no clock post-season
       if (ceremonyEl) ceremonyEl.hidden = true;
       if (doneEl) {
         doneEl.hidden = false;
@@ -284,6 +294,9 @@ import { onNarrowChange } from './platform.js';
 
     el.querySelector("#os-week").textContent = "Week " + st.week;
     el.querySelector("#os-phase").textContent = phaseLabel(st.phase);
+    // ADR 0006: the in-game clock (opt-in engine side; absent ⇒ the chip simply stays hidden).
+    { const todEl = el.querySelector("#os-tod"); const tod = todLabel(st.timeOfDay);
+      if (todEl) { if (tod) { todEl.textContent = tod; todEl.hidden = false; } else todEl.hidden = true; } }
     el.querySelector("#os-hoh").textContent = name(st.hoh);
     const noms = Array.isArray(st.nominees) ? st.nominees.map((n) => n.name).filter(Boolean) : [];
     el.querySelector("#os-noms").textContent = noms.length ? noms.join(", ") : "—";
@@ -308,6 +321,15 @@ import { onNarrowChange } from './platform.js';
     const badge = selfBadge(st, state);
     if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
     else { badgeEl.hidden = true; }
+
+    // ADR 0006 §Principle 5: the player's OWN qualitative tiredness — a cue (never a number), and only
+    // ever the player's own (no NPC's). Absent ⇒ hidden (the clock isn't running).
+    const restEl = el.querySelector("#os-you-rest");
+    if (restEl) {
+      const rest = state && state.player && state.player.restStatus;
+      if (rest) { restEl.textContent = "· " + rest; restEl.hidden = false; }
+      else { restEl.hidden = true; }
+    }
 
     // E71: key panel state to this user's game (same derivation as render()'s
     // pre-build assignment — computeGameKey is the single source, F1).

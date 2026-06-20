@@ -18,8 +18,8 @@ function resolveLegally(s: Pick<GameSession, "submitDecision">, p: NonNullable<A
   else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
   else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
   else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" });
-  else if (p.kind === "houseguests-choice") s.submitDecision({ kind: "houseguests-choice", pick: p.options[0]!.id });
-  else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", tone: p.tones![0]! });
+  else if (p.kind === "houseguests-choice") s.submitDecision({ kind: "houseguests-choice", vote: p.options[0]!.id });
+  else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id });
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
