@@ -20,7 +20,9 @@ describe("cast voices (B61)", () => {
       expect(card.strategyStyle).toBeTruthy();
       expect(card.background).toBeTruthy();
       expect(typeof card.age).toBe("number");
-      expect(card.appearance).toBeTruthy();
+      // L29: the card's physical descriptor is the STRUCTURED facet (the single source of truth the
+      // portrait + narration share); the redundant prose `appearance` no longer rides on a 0058 card.
+      expect(card.physicalCharacteristics).toBeTruthy();
       expect(card.presentation).toBeTruthy();
       // the Vault stays out: no stats, soul, relationship, or hidden-element keys
       const keys = Object.keys(card);
@@ -33,8 +35,10 @@ describe("cast voices (B61)", () => {
 
   it("facets are seed-stable — the voice anchor cannot drift between reads", () => {
     const { s } = start(23);
-    const a = s.getGameState().house.map((h) => `${h.archetype}|${h.background}|${h.appearance}`);
-    const b = s.getGameState().house.map((h) => `${h.archetype}|${h.background}|${h.appearance}`);
+    const sig = (h: { archetype?: string; background?: string; appearance?: string; physicalCharacteristics?: unknown }) =>
+      `${h.archetype}|${h.background}|${JSON.stringify(h.physicalCharacteristics ?? h.appearance)}`;
+    const a = s.getGameState().house.map(sig);
+    const b = s.getGameState().house.map(sig);
     expect(a).toEqual(b);
   });
 
