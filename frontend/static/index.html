@@ -1266,11 +1266,10 @@
       <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
     </div>
     <div class="gadget-rail-body" id="gadget-rail-body"></div>
-    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-hidden="true">
-      <button class="grail-ico" type="button" data-grail-expand title="House status" aria-label="House status">📋</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Wants a word" aria-label="Wants a word">🚪</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Where you are" aria-label="Where you are">🧭</button>
-    </div>
+    <!-- The collapsed icon strip is DERIVED from the gadget registry in orwellGadgetRail.js —
+         one icon per mounted-and-visible gadget, in the rail's current order, each acting on
+         THAT gadget. Built dynamically so an icon can never mismatch or outlive its gadget. -->
+    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-label="Control-room gadgets"></div>
   </aside>
   <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden>📋</button>
   <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
