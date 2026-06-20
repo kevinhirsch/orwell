@@ -23,6 +23,21 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+
+def _exc_detail(exc: Exception) -> str:
+    """A NON-EMPTY, diagnosable failure detail (mirrors orwell_routes._err_detail; kept local to
+    avoid a routes→routes import). The field bug (#393): some exceptions a slow/large engine call
+    raises (a read timeout, a connection dropped mid-response, a 502 with no body) have an empty
+    `str(e)`, so a bare `pre-resolve skipped: ` / `advance failed: ` line named no cause. Always
+    prefix the exception TYPE (and an upstream HTTP status when present) so the line is diagnosable."""
+    msg = str(exc).strip()
+    resp = getattr(exc, "response", None)
+    status = ""
+    if resp is not None and getattr(resp, "status_code", None) is not None:
+        status = f" (HTTP {resp.status_code})"
+    return f"{type(exc).__name__}: {msg}{status}" if msg else f"{type(exc).__name__}{status or ' (no detail)'}"
+
+
 # Users whose sandbox had a STARTED game this process-run. Lets a turn fail CLOSED for game
 # content when the engine goes down mid-season (audit F2 / queue C12): the in-character
 # transcript is still in context, so an unframed turn would keep "narrating" a season the
@@ -150,6 +165,83 @@ _CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"
 # and when they are not it RESOLVES the NPC comp for real. The veto CHIP DRAW (E35) is just the first
 # beat of veto-competition and is driven the same way (the model then voices the real six).
 _COMP_DRIVE_PHASES = frozenset({"hoh-competition", "veto-competition"})
+
+
+# ── The SOCIAL RUNWAY (critical — the "force-march through ceremonies" defect) ──────────── #
+#
+# The pre-resolve above advances ONE engine beat per turn whenever no player decision is pending.
+# For a spectator player (not HOH, not a nominee) that quietly STEAMROLLS the week: the HOH comp
+# resolves on turn 1, the very next turn pre-resolves the nominations, the next the veto, the next
+# the ceremony… so the chain HOH → noms → veto → eviction marches with ZERO social opportunity
+# between ceremonies. The owner's emphatic playtest verdict: "It should never fast forward… it skips
+# all of the social narrative gameplay… zero social opportunity… a critical failure."
+#
+# The fix is PACING, not authoring (the engine still decides every outcome): after a ceremony lands
+# the player in a NEW spectator beat, we DO NOT immediately drive the next one. We hold a SOCIAL
+# RUNWAY of player turns — the player walks the house, talks, schemes, campaigns — and override the
+# moment to the engine's own `social` beat (a real, Vault-free engine moment: "conversations,
+# bonding, paranoia, off-screen scheming") so the GM plays the lull instead of the ceremony. ONLY
+# when the runway is spent (or the player explicitly signals they're ready to move on) does the
+# pre-resolve drive the next ceremony for real — preserving the C-02 guarantee (the ceremony's real
+# outcome is grounded, never invented) exactly as before, just no longer on the player's heels.
+#
+# Pacing is ENGAGEMENT, never a turn count (owner ruling): the runway is a CEILING on how long we
+# wait — it is cut short the instant the player signals readiness, and a player who keeps engaging
+# simply keeps lingering (the runway counts down only while the beat sits, and the cooldown re-arms
+# on each fresh ceremony). It NEVER delays a beat the player must act on (a pending always advances
+# straight through this gate — their decision card is waiting). Tunable.
+_SOCIAL_RUNWAY_TURNS = 2  # spectator turns of guaranteed lingering after a ceremony, before the next
+
+# Per-user runway state. `_RUNWAY_LEFT` is how many social turns remain before the next ceremony may
+# be driven; `_RUNWAY_SIG` is the `(week:phase)` we armed it for, so a genuinely new beat re-arms a
+# fresh runway and a phase we've already lingered through is not re-held. Process-local (pacing only,
+# no schema change); a front-end restart simply re-arms on the next ceremony, which is harmless.
+_RUNWAY_LEFT: dict = {}
+_RUNWAY_SIG: dict = {}
+
+# The engine's own social beat (a real moment prompt, momentPrompts.ts `social`): a quieter beat of
+# conversations/bonding/scheming. Used as the moment OVERRIDE while a runway holds, so the GM plays
+# the lingering, never the not-yet-resolved ceremony.
+_SOCIAL_MOMENT = "social"
+
+# The player explicitly asks to move the night along — readiness CUTS the runway short (we stop
+# lingering and drive the next ceremony now). Mirrors the agent-loop lull/ready cue; kept local so
+# chat_helpers has no import cycle into the agent loop. Substantive play never matches (it is the
+# opposite of a "skip ahead").
+_RUNWAY_READY_RE = re.compile(
+    r"\b(what'?s next|let'?s (go|move|do this|see it|get on|roll)|move (on|it along|ahead)|"
+    r"i'?m ready|bring it on|get on with it|run it|skip ahead|fast.?forward|next (comp|round|beat|"
+    r"ceremony|one)|nominate|noms?|start the|begin the|hold the|let'?s see (the )?(noms|nominations|"
+    r"veto|comp|competition))\b",
+    re.IGNORECASE,
+)
+
+
+def _player_signals_ready(player_msg) -> bool:
+    """Did the player's own latest message ask to move past the social lull to the next ceremony?
+    Readiness ends the runway early (seize the lull). Anything substantive is engagement — the
+    runway keeps the player lingering until it is spent."""
+    s = (player_msg or "").strip()
+    if not s:
+        return False  # an empty/absent message is not an explicit "move on"
+    return bool(_RUNWAY_READY_RE.search(s))
+
+
+def _arm_runway(user, sig: str) -> None:
+    """Arm a fresh social runway for `user` keyed to the `(week:phase)` we just entered. Called when
+    the pre-resolve drives a ceremony and lands the player in a NEW spectator beat — the NEXT few
+    turns are theirs to socialize before the following ceremony is driven."""
+    if user is None:
+        return
+    _RUNWAY_LEFT[user] = _SOCIAL_RUNWAY_TURNS
+    _RUNWAY_SIG[user] = sig
+
+
+def clear_social_runway(user) -> None:
+    """Drop any held runway for a user — the game reset/ended, so the next ceremony should not be
+    held back by stale lingering state. Pacing only; safe to call when none is armed."""
+    _RUNWAY_LEFT.pop(user, None)
+    _RUNWAY_SIG.pop(user, None)
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -412,11 +504,28 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
 
 
-async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
+def _runway_sig(game_state: dict) -> str:
+    """The `(week:phase)` signature of the beat the player is currently sitting in. A change in this
+    signature means a ceremony resolved and we entered a new beat — the cue to arm a fresh runway."""
+    return f"{game_state.get('week')}:{(game_state.get('phase') or '').lower()}"
+
+
+def _hold_for_social(game_state: dict) -> dict:
+    """Return the state with its moment overridden to the engine's `social` beat, so the framing
+    builds the social moment prompt (lingering/scheming) instead of the not-yet-resolved ceremony.
+    A copy — never mutate the caller's dict (the original phase/week stay intact for the HUD)."""
+    held = dict(game_state)
+    held["moment"] = _SOCIAL_MOMENT
+    return held
+
+
+async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, player_msg=None) -> dict:
     """If the live game sits at an unresolved engine-driven beat with NO player decision pending,
     advance that single beat (one advanceGame) so the moment prompt carries the engine's real
-    outcome. Returns the (possibly re-fetched) game state. Best-effort: any hiccup leaves the turn
-    exactly as it was — this never blocks or fails a turn, it only prevents an invented/stalled beat.
+    outcome — but ONLY after the player has had their SOCIAL RUNWAY in the current beat (the
+    force-march fix above). Returns the (possibly re-fetched / social-overridden) game state.
+    Best-effort: any hiccup leaves the turn exactly as it was — this never blocks or fails a turn,
+    it only prevents an invented/stalled beat OR a fast-forward past the player's social play.
 
     Covers the intent-free CEREMONIES (nominations, veto ceremony, eviction reveal) AND the
     COMPETITIONS (hoh-competition, veto-competition incl. the chip draw) — owner ruling 2026-06-18:
@@ -427,8 +536,13 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> d
     it never auto-decides one. We still check the pending first and skip when the player is the
     decider (HOH naming noms, veto holder, an eligible voter, the Houseguest's-Choice picker, a
     comp-intent), so the player keeps their agency and their decision card. One advance per turn
-    preserves the staged
-    eviction-vote reveal (E12)."""
+    preserves the staged eviction-vote reveal (E12).
+
+    The SOCIAL RUNWAY (the never-fast-forward fix): when a held runway is still counting down for the
+    current `(week:phase)` AND the player has not signalled readiness, we HOLD — override the moment
+    to `social` and do NOT advance, so the player walks the house and schemes before the next
+    ceremony. When the runway is spent (or the player asks to move on), we resolve the next ceremony
+    for real and, if it landed the player in a NEW spectator beat, arm a fresh runway for it."""
     from src import orwell_engine
     try:
         phase = (game_state.get("phase") or "").lower()
@@ -437,8 +551,25 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> d
         status = await orwell_engine.game_status(user=user)
         if not isinstance(status, dict) or status.get("pending") is not None:
             # The player is the decider (comp-intent, Houseguest's Choice, nominations, a vote, the
-            # goodbye message…) — never auto-resolve their own decision; their card is waiting.
+            # goodbye message…) — never auto-resolve their own decision; their card is waiting. A
+            # pending also means the night is genuinely theirs, so drop any held runway: the next
+            # turn after they decide should drive the result, not linger.
+            clear_social_runway(user)
             return game_state
+
+        sig = _runway_sig(game_state)
+        ready = _player_signals_ready(player_msg)
+        left = _RUNWAY_LEFT.get(user, 0)
+        # HOLD the social runway: still counting down for THIS beat and the player hasn't asked to
+        # move on. We give them the engine's `social` moment and do not advance — genuine social
+        # opportunity before the next ceremony (the force-march fix). Readiness cuts it short.
+        if _RUNWAY_SIG.get(user) == sig and left > 0 and not ready:
+            if user is not None:
+                _RUNWAY_LEFT[user] = left - 1
+            logger.info("[orwell] social runway holding %s for user=%s (%d left) — lingering before "
+                        "the next ceremony", phase, user, left - 1)
+            return _hold_for_social(game_state)
+
         adv = await orwell_engine.advance_game(user=user)  # advance ONE beat for real: surface the player's
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
@@ -447,9 +578,38 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> d
         _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         refreshed = await _fetch_game_state(user, retry=retry)
-        return refreshed if isinstance(refreshed, dict) else game_state
+        new_state = refreshed if isinstance(refreshed, dict) else game_state
+
+        # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
+        # beat (a different week:phase, no new pending) — so the NEXT turns are theirs to socialize
+        # before that ceremony is driven. We skip arming when a player decision now pends (their card
+        # leads, not a lull) or when nothing changed (a staged eviction reveal ticking ballots stays
+        # at the same signature — never re-held mid-reveal). Best-effort status read; arm-on-doubt is
+        # the safe default for pacing (a needless runway only adds social turns, never skips them).
+        try:
+            new_sig = _runway_sig(new_state)
+            if new_sig != sig:
+                post = await orwell_engine.game_status(user=user)
+                post_pending = post.get("pending") if isinstance(post, dict) else None
+                new_phase = (new_state.get("phase") or "").lower()
+                if post_pending is None and (
+                        new_phase in _CEREMONY_RESOLVE_PHASES or new_phase in _COMP_DRIVE_PHASES):
+                    _arm_runway(user, new_sig)
+                    logger.info("[orwell] armed social runway for user=%s at %s (%d social turns)",
+                                user, new_phase, _SOCIAL_RUNWAY_TURNS)
+                    # Give the player the social beat THIS turn too — UNLESS they explicitly asked to
+                    # move on: a "let's see the veto" wants the just-resolved beat NARRATED now, not
+                    # another lull, so we return the real moment and let the NEXT turns linger (the
+                    # runway counter is armed either way). Otherwise frame the lingering, not the
+                    # unresolved beat ahead.
+                    return new_state if ready else _hold_for_social(new_state)
+                # The new beat is the player's to decide (or off the ceremony ladder) — no runway.
+                clear_social_runway(user)
+        except Exception as _e:
+            logger.warning("[orwell] social-runway arm skipped for user=%s: %s", user, _exc_detail(_e))
+        return new_state
     except Exception as e:
-        logger.warning("[orwell] C-02/C-03 pre-resolve skipped for user=%s: %s", user, e)
+        logger.warning("[orwell] C-02/C-03 pre-resolve skipped for user=%s: %s", user, _exc_detail(e))
         return game_state
 
 
@@ -493,6 +653,7 @@ async def apply_game_framing(
     session_id=None,
     preset_system_prompt=None,
     has_attachments: bool = False,
+    player_msg=None,
 ):
     """Big Brother game framing for one turn. Vault-free; mutates `preface` in place.
 
@@ -556,8 +717,12 @@ async def apply_game_framing(
         _GAME_WAS_ACTIVE.add(_gkey)
         # C-02: resolve an unresolved NPC-driven ceremony FOR REAL before building the moment prompt,
         # so the model voices the engine's actual nominees/outcome instead of inventing one. No-op
-        # unless the game sits at such a beat with no player decision pending (best-effort).
-        game_state = await _pre_resolve_npc_ceremony(user, game_state, retry=game_build)
+        # unless the game sits at such a beat with no player decision pending (best-effort). The
+        # social-runway gate inside HOLDS the next ceremony for a few social turns (overriding the
+        # moment to `social`) so the player is never fast-forwarded past their scheming; the player's
+        # own message lets a "let's move on" cut the runway short.
+        game_state = await _pre_resolve_npc_ceremony(
+            user, game_state, retry=game_build, player_msg=player_msg)
         # P2: a session this process has never framed is a FRESH CONTEXT — request the
         # re-entry moment so the engine's prompt carries THE RECORD (ADR 0003 §6: long-term
         # memory is the store recalled, never the chat remembered). Subsequent turns in the
@@ -614,6 +779,7 @@ async def apply_game_framing(
             preface.insert(0, {"role": "system", "content": gm_prompt})
     else:
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+        clear_social_runway(user)  # no live season — drop any held runway so a new one starts clean
         if game_build:
             # The game IS the product but this sandbox has no season: pre-game, the chat IS
             # the producer's casting interview (0050). Fetch the engine's interview moment
@@ -1338,6 +1504,7 @@ async def build_chat_context(
         session_id=session_id,                              # P2: re-entry on a fresh context
         preset_system_prompt=preset.system_prompt,          # E16: persona never rides the GM stack
         has_attachments=bool(preprocessed.attachment_meta),  # E94: showing something in the scene
+        player_msg=_ctx_msg,                                # social runway: "let's move on" cuts it short
     )
     # P3: did ANY framing land on this turn? A live game and a feeds-down refusal frame
     # explicitly; the pre-game casting interview frames exactly when the engine answered

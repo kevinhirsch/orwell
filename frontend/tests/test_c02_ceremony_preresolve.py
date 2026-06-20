@@ -19,6 +19,15 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+@pytest.fixture(autouse=True)
+def _clear_runway():
+    """The social runway (the never-fast-forward fix) keeps process-local per-user state; clear it
+    between cases so one test's armed runway never holds another's first advance."""
+    chat_helpers.clear_social_runway("u")
+    yield
+    chat_helpers.clear_social_runway("u")
+
+
 def _wire(monkeypatch, *, phase, pending, calls):
     async def fake_status(user=None):
         calls.append("status")
@@ -159,11 +168,13 @@ def test_is_best_effort_never_raises(monkeypatch):
 
 
 def test_framing_invokes_the_pre_resolve():
-    # Source-pin: apply_game_framing calls the pre-resolve on a started game BEFORE the moment fetch.
+    # Source-pin: apply_game_framing calls the pre-resolve on a started game BEFORE the moment fetch,
+    # and threads the player's message so a "let's move on" can cut the social runway short.
     import os
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "routes", "chat_helpers.py"), encoding="utf-8").read()
-    assert "_pre_resolve_npc_ceremony(user, game_state" in src
-    pre = src.index("_pre_resolve_npc_ceremony(user, game_state")
+    assert "_pre_resolve_npc_ceremony(\n            user, game_state" in src
+    assert "player_msg=player_msg" in src, "the player's message must reach the runway gate"
+    pre = src.index("_pre_resolve_npc_ceremony(\n            user, game_state")
     mom = src.index('moment = game_state.get("moment")')
     assert pre < mom, "pre-resolve must run before the moment prompt is built"
