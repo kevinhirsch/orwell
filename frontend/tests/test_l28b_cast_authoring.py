@@ -31,6 +31,37 @@ def test_l28b_prompt_is_producer_framed_and_player_independent():
     assert "welder" in user
 
 
+def test_l28b_prompt_grounds_the_hidden_life_in_the_specific_character():
+    """P1 — NPC story coherence: the producer prompt must INSTRUCT the model to GROUND the
+    secrets/true-goals/weakness in THIS houseguest's own occupation / archetype / age / backstory
+    (the fix for generic, cast-repeating hidden material), while STILL carrying every grounding
+    facet through the skeleton and STILL coupling to no player. The permanent grounding gate."""
+    npc = {
+        "id": "npc:5", "name": "Dana Reyes", "age": 34, "vocation": "pastry chef",
+        "hometown": "Detroit, MI", "archetype": "villain", "demeanor": "deadpan and dry",
+    }
+    msgs = A.build_authoring_messages(npc)
+    system = msgs[0]["content"].lower()
+    user = msgs[1]["content"]
+
+    # (a) the system prompt drives grounding the HIDDEN material in the individual's specifics.
+    assert "ground" in system  # the explicit "GROUND EVERYTHING IN THIS SPECIFIC PERSON" instruction
+    assert "occupation" in system
+    assert "archetype" in system
+    assert "age" in system
+    # the secrets/goals/weakness are named as the things to ground
+    assert "secret" in system and "weakness" in system
+
+    # (b) every grounding facet is actually passed through to the model (build FROM this).
+    for facet in ("pastry chef", "villain", "34", "Detroit, MI", "deadpan and dry"):
+        assert facet in user, facet
+
+    # (c) STILL no player coupling — the grounding change must not reintroduce a protagonist.
+    import inspect
+    assert list(inspect.signature(A.build_authoring_messages).parameters) == ["npc"]
+    assert "player" not in user.lower() or "no protagonist" in user.lower()
+
+
 def test_l28b_prompt_carries_no_player_coupling_and_no_protagonist():
     """ANTI-SYCOPHANCY (mandate #3): an NPC's STORYLINE is authored as if the player does not exist.
     The prompt must (a) take no player identity at all, and (b) instruct the model that the cast is a
