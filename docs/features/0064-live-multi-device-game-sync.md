@@ -24,6 +24,21 @@ These resolve §7's open questions and steer the build:
    immediately, not on the ~2s poll).
 3. **Build order:** **stopgap first** (§7 *Build order*), then the full Messenger-sync build.
 
+### Shipped so far (2026-06-20)
+
+- **A — canonical game session** (#399, merged): every device converges on one chat; existing
+  cross-device sync engages.
+- **F — window/HUD layout sync** (this PR): open/minimized/docked + size + position sync across
+  devices (`orwell_layout.py` store + `GET/PATCH /api/orwell/layout` + a `layout-changed` SSE event
+  + kit capture/apply in `orwellWindow.js` + `orwellLayoutSync.js`).
+- **B/D — `game-updated` instant HUD reconcile, the cast-photo onboarding fix, and the once-only
+  kickoff** (this PR): salvaged from the parallel build (PR #400) in the **Messenger** model — i.e.
+  **without** that build's turn-lock / spectator / take-over (owner ruling). `game-updated` fires on
+  `/decision` + `/self-eviction/*`; the cast-photo gate pins centered and closes across devices.
+- **C — Messenger serialization (queue-don't-stomp)** remains **owed**: today a truly simultaneous
+  two-device send can still cancel the in-flight run (the rare race). The lock-based design from #400
+  was deliberately *not* taken; the queue-based Messenger serialization is the follow-up.
+
 ---
 
 ## 1. Why (the bug this closes)

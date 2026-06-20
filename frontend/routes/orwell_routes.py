@@ -110,6 +110,21 @@ def _current_user(request: Request) -> Optional[str]:
         return getattr(getattr(request, "state", None), "current_user", None)
 
 
+def _publish_game_updated(user: Optional[str]) -> None:
+    """0064 §B/D — ping every device viewing the canonical game session that the board changed (a
+    binding decision, a self-evict) so the non-driving device reconciles its HUD INSTANTLY instead of
+    waiting up to ~2s for the next poll. Vault-free: a session id + a change-type string only, no
+    body. Best-effort — a publish failure must never break the player-facing route (polling stays the
+    correctness floor; this is just the latency nicety)."""
+    try:
+        from src import orwell_game_session, session_events
+        sid = orwell_game_session.get_game_session(user)
+        if sid:
+            session_events.publish(sid, "game-updated")
+    except Exception:
+        logger.debug("[orwell] game-updated publish skipped", exc_info=True)
+
+
 # ── Calibration instrumentation: capture the per-season PUBLIC outcome when a season finishes ─────
 # The owner chose "instrument & gather data first" over tuning the calibration weights. This is the
 # data-gathering half: when a season ends, we durably log the public, player-known outcome facts a
@@ -789,6 +804,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
@@ -810,6 +826,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.request_self_eviction(user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             if e.no_game:
@@ -827,6 +844,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.cancel_self_eviction(user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             if e.no_game:
@@ -927,6 +945,44 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=400, content={"error": "sessionId is required"})
         effective = orwell_game_session.bind_game_session(user, requested)
         return {"sessionId": effective, "bound": effective == requested}
+
+    # ── 0064 Part F: window / HUD layout, synced across the user's devices ──────────────────
+    class LayoutPatchRequest(BaseModel):
+        windowId: str
+        state: dict = {}
+        # An opaque per-tab token so the originating device can ignore its OWN broadcast echo
+        # (there is no stream to key self-echo on, unlike a chat run).
+        origin: str = ""
+
+    @router.get("/layout")
+    async def orwell_layout(request: Request):
+        """Feature 0064 (F): the user's synced window/HUD layout — open/minimized/docked + size +
+        position per window. Vault-free (geometry carries no secret); scoped to the caller. The kit
+        seeds from this on load so every device shows the same arrangement."""
+        from src import orwell_layout
+        return orwell_layout.get_layout(_current_user(request))
+
+    @router.patch("/layout")
+    async def orwell_patch_layout(body: LayoutPatchRequest, request: Request):
+        """Feature 0064 (F): persist a window's state change (last-write-wins per field) and FAN it
+        out to the user's other devices over the canonical game session's SSE channel as a
+        `layout-changed` event (ids + geometry numbers only — never a message body or Vault). The
+        originating device ignores the echo via `origin`."""
+        from src import orwell_layout, orwell_game_session, session_events
+        user = _current_user(request)
+        saved = orwell_layout.patch_layout(user, body.windowId, body.state)
+        if not saved:
+            return JSONResponse(status_code=400, content={"error": "no usable layout fields"})
+        # Broadcast to the user's other devices (best-effort): they all view the canonical game
+        # session, so its existing per-session SSE channel reaches every one of them.
+        try:
+            sid = orwell_game_session.get_game_session(user)
+            if sid:
+                session_events.publish(sid, "layout-changed",
+                                       {"windowId": body.windowId, "state": saved, "origin": body.origin or ""})
+        except Exception:
+            logger.debug("[orwell] layout-changed publish skipped", exc_info=True)
+        return {"windowId": body.windowId, "state": saved}
 
     # ── 0057: seasons as levels — the per-user season number + the two restart actions ──────
     @router.get("/season")

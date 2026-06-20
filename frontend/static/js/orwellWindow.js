@@ -244,6 +244,52 @@ function saveDocked(id, on) {
   try { localStorage.setItem(dockedKey(id), on ? '1' : '0'); } catch (_) {}
 }
 
+// ── 0064 Part F: cross-device layout sync ──────────────────────────────────
+// A live registry of open kit windows by id, so a remote layout change (from
+// another of the user's devices, delivered via the canonical session's SSE
+// channel → orwellLayoutSync.js) can be applied to the matching window. Capture
+// works the other way: each local geometry/state change emits an
+// `orwell:window-layout` CustomEvent that orwellLayoutSync debounces into a
+// PATCH /api/orwell/layout. Self-echo is suppressed both by an `origin` token
+// (in the sync module) and by the `_applyingRemote` guard here (so applying a
+// remote change never re-emits it). Fail-open everywhere: with the sync module
+// absent, the kit behaves exactly as before (localStorage-only).
+const _byId = new Map();
+
+function emitWindowLayout(id, state) {
+  if (!id || !state) return;
+  try { window.dispatchEvent(new CustomEvent('orwell:window-layout', { detail: { id, state } })); } catch (_) {}
+}
+
+// The seam orwellLayoutSync calls to apply a remote change to a live window.
+function applyRemoteLayout(id, state) {
+  const w = _byId.get(id);
+  if (w && typeof w._applyLayout === 'function') { w._applyLayout(state); return true; }
+  return false;
+}
+try { window._orwellApplyRemoteLayout = applyRemoteLayout; } catch (_) {}
+
+// Seed a synced layout (from another device, via orwellLayoutSync) into the kit. The kit owns its
+// OWN persistence keys (audit F5 / the F-3 ratchet: ONE position system) — so the geometry/state
+// keys are written HERE, through the kit's existing helpers, never minted by the sync module. We
+// pre-write min/dock/size so the kit's existing restore lands them at first mount, stash the blob
+// for seed-on-open, and apply to any already-open window now.
+function seedLayout(windows) {
+  const w = windows || {};
+  try { window._orwellLayoutSeed = window._orwellLayoutSeed || {}; } catch (_) {}
+  Object.keys(w).forEach((id) => {
+    const st = w[id] || {};
+    try { window._orwellLayoutSeed[id] = Object.assign(window._orwellLayoutSeed[id] || {}, st); } catch (_) {}
+    if (typeof st.minimized === 'boolean') saveParked(id, st.minimized);   // kit's own parked key
+    if (typeof st.docked === 'boolean') saveDocked(id, st.docked);         // kit's own docked key
+    if (typeof st.w === 'number' && typeof st.h === 'number') {
+      try { localStorage.setItem('winsize-' + id, JSON.stringify({ w: Math.round(st.w), h: Math.round(st.h) })); } catch (_) {}
+    }
+    applyRemoteLayout(id, st);  // a live window catches up immediately
+  });
+}
+try { window._orwellSeedLayout = seedLayout; } catch (_) {}
+
 export class OrwellWindow {
   /**
    * opts: { id, title, icon, slot='top-right', slotKey=null, role='complementary',
@@ -360,6 +406,7 @@ export class OrwellWindow {
         onDragEnd: ({ rect }) => this._persist(rect),
       });
     }
+    // (resize capture for 0064 is wired in the makeWindowResizable call below)
     // L11: pointer edge/corner resize from the kit — every .ow-* window inherits
     // it (sane min/max, clamped to the viewport, persisted under winsize-<id>).
     // mobileSkip 768 keeps the sheet/drawer tier untouched. Its capture-phase
@@ -370,6 +417,11 @@ export class OrwellWindow {
         minWidth: this.o.minWidth, minHeight: this.o.minHeight,
         storageKey: 'winsize-' + this.o.id,
         isLocked: () => this.isMinimized(),
+        // 0064: capture a user resize for cross-device sync (suppressed while APPLYING a remote one).
+        onResizeEnd: ({ rect }) => {
+          if (this._applyingRemote) return;
+          emitWindowLayout(this.o.id, { w: Math.round(rect.width), h: Math.round(rect.height) });
+        },
       });
     }
     return el;
@@ -383,6 +435,44 @@ export class OrwellWindow {
       rect = this.el.getBoundingClientRect();
     }
     if (this._slot) this._slot.saveDragOffset(rect);
+    // 0064: capture the new position for cross-device sync (not while applying a remote change).
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { x: Math.round(rect.left), y: Math.round(rect.top) });
+  }
+
+  /** 0064: apply a layout change that arrived from another of the user's devices. Sets
+   *  `_applyingRemote` so the resulting state changes don't re-emit (no echo loop). Floating
+   *  geometry only (docked windows have no geometry — F5). Fail-open; never throws. */
+  _applyLayout(state) {
+    if (!state || typeof state !== 'object') return;
+    this._applyingRemote = true;
+    try {
+      if (typeof state.docked === 'boolean' && this.o.dockable && state.docked !== this._docked) {
+        this.toggleDock();
+      }
+      if (typeof state.minimized === 'boolean' && !this._docked) {
+        if (state.minimized && !this.isMinimized()) this.minimize();
+        else if (!state.minimized && this.isMinimized()) this.restore();
+      }
+      // Don't yank geometry out from under an ACTIVE local resize (spec F: defer during a live
+      // gesture). min/dock still apply; the geometry re-syncs on the gesture's own end-emit.
+      const gestureActive = document.body.classList.contains('window-resizing-active');
+      if (this.el && !this._docked && !gestureActive) {
+        if (typeof state.w === 'number' && typeof state.h === 'number') {
+          this.el.style.width = Math.max(this.o.minWidth, Math.min(state.w, window.innerWidth)) + 'px';
+          this.el.style.height = Math.max(this.o.minHeight, Math.min(state.h, window.innerHeight)) + 'px';
+          this.el.style.maxWidth = 'none'; this.el.style.maxHeight = 'none';
+          try { localStorage.setItem('winsize-' + this.o.id, JSON.stringify({ w: Math.round(state.w), h: Math.round(state.h) })); } catch (_) {}
+        }
+        if (typeof state.x === 'number' && typeof state.y === 'number') {
+          const r = this.el.getBoundingClientRect();
+          const c = clampPos(state.x, state.y, r.width, r.height);
+          this.el.style.left = c.left + 'px'; this.el.style.top = c.top + 'px';
+          this.el.style.right = 'auto'; this.el.style.bottom = 'auto'; this.el.style.transform = 'none';
+          if (this._slot) this._slot.saveDragOffset(this.el.getBoundingClientRect());
+        }
+      }
+    } catch (_) {}
+    this._applyingRemote = false;
   }
 
   // Re-anchor + clamp this window into the CURRENT viewport (the global resize
@@ -459,6 +549,8 @@ export class OrwellWindow {
     // re-open) needs a live controller so _build's listeners actually attach.
     if (this.ac.signal.aborted) this.ac = new AbortController();
     const el = this._build();
+    _byId.set(this.o.id, this);                                            // 0064: live registry for remote apply
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { open: true }); // 0064: capture open state
     // 0054 Phase 2: a docked window mounts straight into #gadget-rail-body (the
     // rail owns visibility/order/collapse/mobile-drawer). NO slot register, NO
     // dock-chip register, NO z-band raise — docked = no geometry, the F5 invariant
@@ -494,6 +586,13 @@ export class OrwellWindow {
     if (!REDUCED()) { el.classList.add('ow-anim-open'); setTimeout(() => el.classList.remove('ow-anim-open'), 220); }
     this.raise();
     if (this.o.focus) this.titlebar.focus();
+    // 0064 Part F: apply a synced layout seed from another device once layout settles. min/dock/size
+    // also restore via localStorage (the kit's existing load); this additionally covers POSITION and
+    // keeps a just-opened window consistent with a change made elsewhere while it was closed.
+    try {
+      const seed = window._orwellLayoutSeed && window._orwellLayoutSeed[this.o.id];
+      if (seed) requestAnimationFrame(() => { if (this.el) this._applyLayout(seed); });
+    } catch (_) {}
     return this;
   }
 
@@ -513,6 +612,7 @@ export class OrwellWindow {
   minimize() {
     if (!this.el || this._docked) return;  // docked windows live in the rail, no chip dock
     saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { minimized: true });  // 0064
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     this.el.classList.remove('ow-focused');
@@ -553,6 +653,7 @@ export class OrwellWindow {
     // a dock restore must always yield a VISIBLE window.
     if (getComputedStyle(this.el).display === 'none') this.el.style.display = 'block';
     saveParked(this.o.id, false); // F2 (G16): an explicit restore un-parks durably
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { minimized: false });  // 0064
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();
@@ -597,6 +698,7 @@ export class OrwellWindow {
     if (!this.o.dockable) return;
     const next = !this._docked;
     saveDocked(this.o.id, next);
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { docked: next });  // 0064
     const opener = this.opener;
     // A dock toggle is a RE-HOME, not a dismissal: suppress the consumer's onClose
     // (it resets the module's _win reference — which we keep, since it's the same
@@ -630,6 +732,7 @@ export class OrwellWindow {
   _teardown() {
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
+    _byId.delete(this.o.id);  // 0064: drop from the live registry
     saveParked(this.o.id, false); // F2 (G16): a closed window forgets its parked state
     this.ac.abort();
     const opener = this.opener;
@@ -637,6 +740,8 @@ export class OrwellWindow {
     // A dock-toggle re-home keeps the same instance + the module's _win reference,
     // so skip the consumer's onClose reset and the focus-return (open() refocuses).
     if (this._rehoming) return;
+    // 0064: a genuine close (not a dock re-home) syncs the closed state to other devices.
+    if (!this._applyingRemote) emitWindowLayout(this.o.id, { open: false, minimized: false });
     try { this.o.onClose && this.o.onClose(); } catch (_) {}
     // audit F8: focus returns to the opener
     if (opener && opener.isConnected && typeof opener.focus === 'function') {

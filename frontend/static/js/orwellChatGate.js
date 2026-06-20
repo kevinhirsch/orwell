@@ -168,6 +168,11 @@
     // (avatarchanged), the game starting/restarting (gamechanged), and on load.
     window.addEventListener("orwell:avatarchanged", recompute);
     window.addEventListener("orwell:gamechanged", recompute);
+    // 0064: the cast photo is server-authoritative (per-user), so it can be secured on ANOTHER
+    // device. While this tab is BLOCKED, poll lightly so the gate releases once the synced
+    // finalized-state lands here even if no event reached this tab (the headshot window does the
+    // same). Only runs while gated — a no-op once the chat is open.
+    setInterval(function () { if (isBlocked()) recompute(); }, 4000);
     ready(recompute);
   }
 })();
