@@ -228,6 +228,10 @@ export class Orchestrator {
     let produced = 0;
     if (trigger !== "audit") {
       produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now(), this.offscreenInteractions);
+      // R3 — `applyFn` mutated the sandbox OUTSIDE the `commit` seam (it never fires `onPersist`), so the
+      // registry's snapshot cache must be invalidated before we read the candidate, or it would hand back
+      // the pre-tick capture. (An `audit` produces nothing, so its candidate IS the current cache.)
+      this.registry.invalidateSnapshot(user);
     }
 
     const candidate = this.registry.snapshot(user);
