@@ -153,6 +153,23 @@ def test_status_page_carries_the_update_button(monkeypatch):
     assert "/api/admin/update" in body
 
 
+def test_status_page_persists_update_awareness_across_the_restart(monkeypatch):
+    # The Update button restarts both tiers — including this page's host. The page must persist the
+    # "updating… reconnecting" awareness in localStorage so a reload mid-bounce RESUMES the soft state
+    # (and recovers when the tiers answer) instead of showing a false hard "Health check failed".
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    body = client.get("/admin/status").text
+    # The persisted flag is set when an update begins and cleared on a healthy poll / a no-start.
+    assert "orwell-admin-updating" in body
+    assert "localStorage.setItem" in body and "localStorage.removeItem" in body
+    assert "markUpdating()" in body and "clearUpdating()" in body
+    # On a fresh load DURING a restart, the reconnect loop is resumed rather than erroring out.
+    assert "if (isUpdating())" in body and "waitForBack()" in body
+    # A known update turns a failed health probe into a SOFT reconnecting line, not a hard outage.
+    assert "reconnecting" in body.lower()
+
+
 def test_routes_wired_into_app_py():
     # The router is registered in app.py (the surface is actually mounted, not just defined).
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

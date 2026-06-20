@@ -463,18 +463,54 @@ function render(d) {
      "<tr><td colspan=4>No recent failures on record.</td></tr>") + "</tbody></table>" +
     (feLast ? "<div class='sub' style='margin-top:8px'>Front-end tier: " + esc(feLast.tool || "?") + " — " + esc(feLast.kind || "") + " — " + esc(feLast.error || "") + "</div>" : "");
 }
+// ── update-awareness that SURVIVES the restart (localStorage) ──
+// The Update button restarts BOTH tiers, including this page's own host. An in-memory reconnect
+// loop dies if the page reloads mid-restart (browser auto-reload, or the admin refreshes) — and
+// the regular health poll would then show a HARD "Health check failed" red during a perfectly
+// normal ~60s bounce. A persisted flag (set when an update/restart begins, cleared when the tiers
+// answer healthy) lets a fresh page load RESUME the soft "reconnecting…" state and recover quietly.
+const UPDATING_KEY = "orwell-admin-updating";
+const UPDATING_TTL_MS = 5 * 60 * 1000; // a stale flag (a crash mid-update) auto-expires after 5 min
+// `const updMsg` is declared lower in this script; load() runs before it, so reach the node lazily
+// (avoid a temporal-dead-zone ReferenceError on the resume-on-reload path).
+const updMsgEl = () => document.getElementById("update-msg");
+function markUpdating() { try { localStorage.setItem(UPDATING_KEY, String(Date.now())); } catch (e) {} }
+function clearUpdating() { try { localStorage.removeItem(UPDATING_KEY); } catch (e) {} }
+function isUpdating() {
+  try {
+    const v = localStorage.getItem(UPDATING_KEY);
+    if (!v) return false;
+    if (Date.now() - Number(v) > UPDATING_TTL_MS) { clearUpdating(); return false; }
+    return true;
+  } catch (e) { return false; }
+}
 async function load() {
   try {
-    const r = await fetch("/api/admin/health", { credentials: "same-origin" });
+    const r = await fetch("/api/admin/health", { credentials: "same-origin", cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
+    const d = await r.json();
+    render(d);
     document.getElementById("err").textContent = "";
     document.getElementById("ts").textContent = "Last check: " + new Date().toLocaleTimeString();
-  } catch (e) { document.getElementById("err").textContent = "Health check failed: " + e.message; }
+    // The tiers answered healthy → any in-progress update/restart has landed; drop the soft state.
+    if (d && d.engine && d.engine.ok && isUpdating()) { clearUpdating(); const m = updMsgEl(); if (m) m.textContent = ""; }
+  } catch (e) {
+    // During a known update/restart a failed probe is EXPECTED — show the soft "reconnecting" line,
+    // not a hard red outage. Outside an update it is a genuine failure and reads as one.
+    if (isUpdating()) {
+      document.getElementById("err").textContent = "";
+      const m = updMsgEl(); if (m) m.textContent = "Updating… the app is restarting, reconnecting…";
+    } else {
+      document.getElementById("err").textContent = "Health check failed: " + e.message;
+    }
+  }
 }
 load();
 setInterval(load, 10000);
 document.getElementById("refresh-now").addEventListener("click", load);
+// On a fresh page load DURING a restart (the page's own host bounced and reloaded), resume the
+// reconnecting loop instead of stranding the admin on a stale/error view.
+if (isUpdating()) { const m = updMsgEl(); if (m) m.textContent = "Updating… reconnecting after the restart…"; waitForBack(); }
 
 // ── the sticky-tail multi-source log viewer (G1b) ──
 const pane = document.getElementById("logpane"), pill = document.getElementById("follow"),
@@ -603,6 +639,7 @@ function waitForBack() {
       if (r.ok) {
         const d = await r.json();
         if (d && d.engine && d.engine.ok) {
+          clearUpdating(); // the bounce landed — the persisted soft state has served its purpose
           updMsg.innerHTML = '<span class="ok">Back online — reloading…</span>';
           setTimeout(() => location.reload(), 800);
           return;
@@ -617,6 +654,9 @@ function waitForBack() {
 }
 async function updateOrwell() {
   if (!confirm("Update Orwell now?\\n\\nThis pulls latest, rebuilds the engine, refreshes front-end deps, and restarts both services — the app will briefly go down (~30–60s) and reconnect automatically.")) return;
+  // Persist the "updating" awareness BEFORE the restart can drop this page — so a reload mid-bounce
+  // resumes the reconnecting state instead of showing a false hard outage.
+  markUpdating();
   updMsg.textContent = "Starting the update…";
   try {
     const r = await fetch("/api/admin/update", { method: "POST", credentials: "same-origin" });
@@ -625,6 +665,7 @@ async function updateOrwell() {
       updMsg.textContent = "Update started — the app will restart, reconnecting…";
       waitForBack();
     } else {
+      clearUpdating(); // the update never actually started — don't strand the page in soft state
       updMsg.innerHTML = '<span class="bad">Could not start the update.</span>';
     }
   } catch (e) {
