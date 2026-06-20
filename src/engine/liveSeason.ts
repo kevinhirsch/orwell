@@ -2,7 +2,7 @@ import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { resolveCompetition, resolveElimination, CompetitionIntents } from "../domain/competitionOutcome";
-import type { CompetitionType, Intent } from "../domain/competitionOutcome";
+import type { CompetitionType, Intent, Competitor } from "../domain/competitionOutcome";
 
 /** The competition intents the player may declare (Bible: compete / throw / play-safe), 0006/0034. */
 export const COMP_INTENTS: readonly Intent[] = ["compete", "throw", "play-safe"];
@@ -168,6 +168,22 @@ export interface CompetitionProgress {
   round: number;
   /** The houseguests eliminated so far, in drop order (engine bookkeeping; never crosses the wall). */
   eliminated: EntityId[];
+  /**
+   * The CALIBRATED winner of this competition (anti-sycophancy, the 0006 single-outcome authority):
+   * the byte-identical `resolveCompetition` crown over the FULL field with the player's committed
+   * approach, drawn ONCE up front from the beat rng exactly as the single-shot model did. The staged
+   * rounds are a RE-TELLING of this outcome — they can never overturn it. Undefined only before the
+   * first round resolves (an empty field guard); set the moment the comp's outcome is decided.
+   */
+  winner?: EntityId;
+  /**
+   * The pre-computed ELIMINATION ORDER of the LOSERS (everyone but `winner`), the drop drama —
+   * derived on an ISOLATED sub-stream (`comp-elimination-order`) that never perturbs the calibrated
+   * winner or any downstream roll. The per-round loop reveals one entry at a time; `winner` is never
+   * in this list, so the crown survives every round by construction (the player's per-round approach
+   * shapes their PLACEMENT here, never the crown). Empty until the outcome is decided.
+   */
+  dropOrder?: EntityId[];
 }
 
 export interface LiveSeasonState {
@@ -326,15 +342,18 @@ function recordDraw(s: LiveSeasonState, phase: CompetitionPhase, def: Competitio
  * both with the same seeded rng, so a narrator's `runCompetition` can never disagree with the loop.
  */
 function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): { def: CompetitionDef; field: EntityId[]; winner: EntityId } {
-  // The comp is drawn FIRST (one rng draw) so `advance` and `peekCompetition` replay identically.
+  // Fork the crown sub-stream from the FRESH beat rng FIRST (position zero) — the winner must not
+  // depend on the def draw's consumption, so the live crown (which draws the def on a different advance)
+  // forks the SAME sub-stream and agrees exactly (single authority, B37).
+  const crownRng = rng.fork("comp-winner");
+  // The comp is drawn (one rng draw) so `advance` and `peekCompetition` replay the def identically.
   const def = drawFor(s, "hoh", rng);
   // Final 3 (0045): the final-HOH competition lifts the outgoing-HOH restriction — everyone plays.
   const finalThree = s.active.length === 3;
   const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
-  // The staged (endurance-style) WINNER — the elimination ladder played out with the player competing
-  // every round (the preview/default). `advance` crowns the SAME houseguest when the player competes;
-  // a different per-round approach changes the live outcome forward, never this default preview.
-  return { def, field, winner: stagedWinner(field, def.type, ctx, rng) };
+  // The CALIBRATED winner — the single-roll 0006 outcome (player competing, the preview default). The
+  // staged rounds only re-tell this; they can never overturn it (anti-sycophancy, single authority B37).
+  return { def, field, winner: winnerFromStream(field, def.type, ctx, crownRng, "compete") };
 }
 
 /**
@@ -399,12 +418,18 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessS
     s.pending = { kind: "comp-round", by: ctx.player, comp: c.comp, round: c.round, stillIn: [...c.stillIn] };
     return null;
   }
-  const playerApproach = c.stillIn.includes(ctx.player) ? (s.compIntent ?? "compete") : "compete";
-  const dropped = eliminateRound(c.stillIn, c.type, ctx, roundRng(rng, c.round), playerApproach);
+  // Decide the CALIBRATED outcome ONCE, the moment the player commits their (first) approach: the
+  // single-roll 0006 winner over the full field (byte-identical to the pre-staging model — the jury
+  // calibration is exactly preserved) plus the loser drop ORDER on an ISOLATED sub-stream. The winner
+  // is fixed here and can NEVER be eliminated by a later round; the player's per-round approach only
+  // shapes their own placement in the drop drama, never the crown (anti-sycophancy, direction 1).
+  if (!c.winner) decideCompetitionOutcome(c, ctx, rng, s.compIntent);
+  s.compIntent = undefined; // the round's approach is consumed + LOCKED — the next round re-asks
+  // Reveal the next scheduled DROP from the isolated-stream order; the winner survives by construction.
+  const dropped = c.dropOrder![c.eliminated.length]!;
   c.stillIn = c.stillIn.filter((id) => id !== dropped);
   c.eliminated.push(dropped);
   c.round += 1;
-  s.compIntent = undefined; // the round's approach is consumed + LOCKED — the next round re-asks
   if (c.stillIn.length === 1) return crownCompetition(s, ctx);
   return {
     // A per-round DROP — NOT the crown (which keeps the comp beat key so its consequence still folds).
@@ -414,10 +439,12 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessS
   };
 }
 
-/** The last houseguest standing is crowned (HOH / veto holder); the beat transitions + the draw is recorded. */
+/** The crowned winner stands alone (HOH / veto holder); the beat transitions + the draw is recorded. */
 function crownCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent {
   const c = s.competition!;
-  const winner = c.stillIn[0]!;
+  // The CALIBRATED winner (anti-sycophancy): the up-front single-roll crown, never a survivor of the
+  // re-rolled rounds. A trivial one-competitor field never decided an outcome — fall back to the lone id.
+  const winner = c.winner ?? c.stillIn[0]!;
   s.competition = undefined;
   s.compIntent = undefined;
   creditResume(s, winner); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
@@ -493,28 +520,28 @@ export interface CompetitionPeek {
 }
 export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionPeek | null {
   if (s.pending || s.finished) return null;
-  // If the staged comp is ALREADY in progress, the preview continues the elimination from the live
-  // still-in field + current round (the committed approach this round, then compete) — so a poll mid-comp
-  // previews the SAME houseguest the loop will crown when the player competes the rest of the way.
+  // If the staged comp is ALREADY in progress, the preview reports the SAME calibrated winner the loop
+  // will crown (single authority, B37): once the outcome is decided it is fixed; before the first round
+  // commits, it is the single-roll crown over the full field with the player competing (the default
+  // `advance` resolves when the player competes the rest of the way). The drop rounds never move it.
   if (s.competition) {
     const c = s.competition;
     const def = competitionDefFor(s, c);
     if (!def) return null;
-    const approach = (round: number): Intent => (round === c.round ? (s.compIntent ?? "compete") : "compete");
-    const winner = stagedWinner(c.stillIn, c.type, ctx, rng, c.round, approach);
-    return { beat: c.comp, type: c.type, def, field: [...c.stillIn], winner };
+    const winner = c.winner ?? calibratedWinner(c.field, c.type, ctx, rng, "compete");
+    return { beat: c.comp, type: c.type, def, field: [...c.field], winner };
   }
   if (s.beat === "hoh-competition") { const { def, field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: def.type, def, field, winner }; }
   if (s.beat === "veto-competition") {
     // E35: before the chips are drawn there IS no field — nothing to preview (the draw is a
-    // witnessed ceremony of its own). Once drawn, the preview replays the staged comp exactly: the same
+    // witnessed ceremony of its own). Once drawn, the preview replays the comp exactly: the same
     // stored comp over the same completed field with the same per-beat rng from position zero.
     if (!s.vetoField || !s.vetoComp) return null;
     const def = competitionById(s.vetoComp);
     if (!def) return null;
-    // The staged preview (player competing every round) — `advance` crowns the same holder when the
-    // player competes; per-round approach changes the live outcome forward, not this default preview.
-    const winner = stagedWinner(s.vetoField, def.type, ctx, rng);
+    // The calibrated preview (player competing) — `advance` crowns the same holder when the player
+    // competes; the player's committed approach is folded into the crown when the comp begins, not here.
+    const winner = calibratedWinner(s.vetoField, def.type, ctx, rng, "compete");
     return { beat: s.beat, type: def.type, def, field: s.vetoField, winner };
   }
   return null;
@@ -535,71 +562,90 @@ export function newLiveSeason(active: EntityId[]): LiveSeasonState {
   };
 }
 
-function winnerOf(ids: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource, playerIntent: Intent = "compete"): EntityId {
-  // The LIVE emotional state (0041) feeds the competition emotional modifier (0006/0028): a rattled
-  // houseguest competes differently. Defaults to the calm baseline so pure tests stay byte-stable.
-  const competitors = ids.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
-  // The player's declared intent (B46/audit B5): throw/play-safe carry the 0028 penalties. NPCs stay
-  // compete for now. The CompetitionIntents lock fires inside resolveCompetition once the result is given.
-  const intents = new CompetitionIntents();
-  intents.declare(ctx.player, playerIntent);
-  return resolveCompetition(competitors, type, intents, rng).winner;
-}
-
 // --- Staged (endurance-style) competition: visible elimination rounds (0006 staged-rounds evolution) ---
+//
+// Winner outcome-neutrality (the anti-sycophancy backstop, mandate #3): the staged rounds are a
+// RE-TELLING of the SAME 0006 calibrated outcome, never a re-roll of it. The CROWN is the single-roll
+// `resolveCompetition` winner over the full field with the player's committed approach — byte-identical
+// to the pre-staging model, so the jury's earned-wins calibration is preserved exactly. Only the
+// elimination ORDER of the losers is the new drama, and it runs on an ISOLATED sub-stream that can
+// never perturb the winner or any downstream roll. The player's per-round approach shapes how far THEY
+// personally last (their placement), but the engine's calibrated winner is never overturned.
 
 /**
- * Build the competitor list for ONE staged elimination round, applying the player's per-round
- * approach. The math is verbatim 0006/0028: stat-vs-type + bounded temperature + the LIVE soul
- * emotional modifier (0041) + the declared intent penalties (0028). NPCs compete (their per-round
- * approach is soul-motivated; for now they always compete, matching the single-shot model's NPC path).
+ * Build the competitor `CompetitionIntents` applying the player's approach. The math is verbatim
+ * 0006/0028: stat-vs-type + bounded temperature + the LIVE soul emotional modifier (0041) + the declared
+ * intent penalties (0028). NPCs compete (their approach is soul-motivated; for now they always compete,
+ * matching the single-shot model's NPC path).
  */
 function roundIntents(field: readonly EntityId[], ctx: SeasonCtx, playerApproach: Intent): CompetitionIntents {
   const intents = new CompetitionIntents();
-  // The player's per-round approach carries the 0028 penalties; everyone else competes (the default).
+  // The player's approach carries the 0028 penalties; everyone else competes (the default).
   if (field.includes(ctx.player)) intents.declare(ctx.player, playerApproach);
   return intents;
 }
 
-/**
- * A per-round seeded rng derived from the beat rng + the round index (restart-stable, 0030): round k
- * forks the SAME child stream every time it is reached, regardless of how many advances/pauses
- * happened — so the staged comp reproduces identically across a restart, and the preview
- * (`stagedWinner`) replays each round exactly as `advance` resolves it.
- */
-function roundRng(beatRng: RandomnessSource, round: number): RandomnessSource {
-  return beatRng.fork(`comp-round:${round}`);
+/** The competitor projection (LIVE soul emotional modifier, 0041) the 0006 resolve reads. */
+function competitorsOf(field: readonly EntityId[], ctx: SeasonCtx): Competitor[] {
+  return field.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
 }
 
 /**
- * Resolve ONE staged elimination round over the still-in field with the player's committed approach:
- * the lowest-scoring houseguest drops. Pure; the SAME 0006/0028 math as the single-shot resolve.
+ * The CALIBRATED competition winner over an ALREADY-FORKED crown sub-stream: a pure single 0006
+ * `resolveCompetition` roll over the full field with the player's committed approach. Byte-identical
+ * to the single-shot model for the same seed/field — the jury earned-wins calibration is preserved.
  */
-function eliminateRound(field: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource, playerApproach: Intent): EntityId {
-  const competitors = field.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
-  const intents = roundIntents(field, ctx, playerApproach);
-  return resolveElimination(competitors, type, intents, rng).eliminated;
+function winnerFromStream(field: EntityId[], type: CompetitionType, ctx: SeasonCtx, crownRng: RandomnessSource, playerApproach: Intent): EntityId {
+  return resolveCompetition(competitorsOf(field, ctx), type, roundIntents(field, ctx, playerApproach), crownRng).winner;
 }
 
 /**
- * The endurance-style staged WINNER, computed by playing out every elimination round with a given
- * per-round player approach (default: compete every round) — the deterministic preview authority
- * (`peekCompetition` runs this so the preview equals what `advance` crowns when the player competes).
- * Pure: forks a per-round child stream from `beatRng`, eliminates the lowest each round until one
- * remains. NPC fields (no player) reduce to the same elimination ladder.
+ * The CALIBRATED competition winner from the FRESH beat rng: forks the dedicated `comp-winner` sub-stream
+ * (position zero) and resolves the single roll. POSITION-INDEPENDENT by construction — the staged comp
+ * draws the library def + pauses for the player's approach across separate advances, so the crown can
+ * NOT depend on how much of the beat rng those steps consumed. The preview and the live crown both fork
+ * from position zero, so they agree exactly (single authority, B37). The drop drama is a SEPARATE fork,
+ * so it can never perturb the winner or any downstream roll.
  */
-function stagedWinner(
-  field: EntityId[], type: CompetitionType, ctx: SeasonCtx, beatRng: RandomnessSource,
-  startRound = 1, playerApproach: (round: number) => Intent = () => "compete",
-): EntityId {
-  let live = [...field];
-  let round = startRound;
+function calibratedWinner(field: EntityId[], type: CompetitionType, ctx: SeasonCtx, beatRng: RandomnessSource, playerApproach: Intent): EntityId {
+  return winnerFromStream(field, type, ctx, beatRng.fork("comp-winner"), playerApproach);
+}
+
+/**
+ * The drop ORDER of the LOSERS (everyone but `winner`) — the per-round drama. Computed on an ISOLATED
+ * sub-stream forked off the beat rng (`fork` does not advance the parent, so this can never perturb the
+ * calibrated winner or any downstream roll). It plays out the elimination ladder over the loser field
+ * with the player's committed approach: the lowest-scoring loser drops first, then the next, etc. The
+ * winner is excluded by construction, so they survive every revealed round. Deterministic + restart-safe
+ * (the same beat rng + the same fixed fork label reproduce the same order, regardless of consumption).
+ */
+function loserDropOrder(field: EntityId[], winner: EntityId, type: CompetitionType, ctx: SeasonCtx, beatRng: RandomnessSource, playerApproach: Intent): EntityId[] {
+  const drama = beatRng.fork("comp-elimination-order");
+  let live = field.filter((id) => id !== winner);
+  const order: EntityId[] = [];
+  let round = 1;
   while (live.length > 1) {
-    const dropped = eliminateRound(live, type, ctx, roundRng(beatRng, round), playerApproach(round));
-    live = live.filter((id) => id !== dropped);
+    const intents = roundIntents(live, ctx, playerApproach);
+    const { eliminated } = resolveElimination(competitorsOf(live, ctx), type, intents, drama.fork(`drop:${round}`));
+    order.push(eliminated);
+    live = live.filter((id) => id !== eliminated);
     round += 1;
   }
-  return live[0]!;
+  if (live.length === 1) order.push(live[0]!); // the runner-up drops last (the final two-up)
+  return order;
+}
+
+/**
+ * Decide the staged competition's outcome ONCE: the calibrated winner + the loser drop order, both
+ * from the player's committed (first-round) approach. Mutates the progress in place. The winner is the
+ * single authority (B37); the drop order is pure drama on an isolated stream. Idempotent — only ever
+ * called when `c.winner` is unset.
+ */
+function decideCompetitionOutcome(c: CompetitionProgress, ctx: SeasonCtx, beatRng: RandomnessSource, committed: Intent | undefined): void {
+  const playerApproach: Intent = c.field.includes(ctx.player) ? (committed ?? "compete") : "compete";
+  const winner = calibratedWinner(c.field, c.type, ctx, beatRng, playerApproach);
+  c.winner = winner;
+  c.dropOrder = loserDropOrder(c.field, winner, c.type, ctx, beatRng, playerApproach);
 }
 
 /** A throwaway WeekState for the legality helpers (they only read the fields they need). */

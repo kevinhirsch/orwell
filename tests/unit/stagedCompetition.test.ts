@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveElimination, CompetitionIntents, type Competitor } from "../../src/domain/competitionOutcome";
+import { resolveCompetition, resolveElimination, CompetitionIntents, type Competitor } from "../../src/domain/competitionOutcome";
 import { newLiveSeason, advance, applyDecision, peekCompetition, type SeasonCtx } from "../../src/engine/liveSeason";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
@@ -9,32 +9,52 @@ import type { Stats } from "../../src/engine/season";
 
 /**
  * 0006 staged-rounds evolution — the endurance-style elimination model. The competition plays out in
- * visible rounds (lowest score drops each round) until one remains. These small SEEDED tests prove the
- * 0006 calibration HOLDS under staging: a clear stat favorite still wins a strong majority but loses a
- * real minority, the result is reproducible by seed, and per-round resolution is locked (anti-sycophancy).
- * HARD rule: roles only — no names.
+ * visible rounds until one remains. WINNER OUTCOME-NEUTRALITY (the anti-sycophancy backstop, mandate #3):
+ * the staged rounds are a NARRATION of the 0006 calibrated outcome — the CROWN is byte-identical to the
+ * single-roll `resolveCompetition` winner for the same seed/field, so the jury earned-wins calibration is
+ * preserved EXACTLY. Only the elimination ORDER of the losers is the new drama, computed on an isolated
+ * sub-stream that never perturbs the winner. These small SEEDED tests prove that, plus the unchanged 0006
+ * band (favorite ≈73%, real upsets, symmetry) and per-round agency. HARD rule: roles only — no names.
  */
 
 const flat = (v: number): Stats => ({ physical: v, mental: v, social: v });
 
-/** A staged ENDURANCE comp over `field`, eliminating the lowest each round; returns the winner. Pure. */
-function stagedWinner(field: Competitor[], seed: number): EntityId {
-  const rng = new SeededRandom(seed);
-  let live = [...field];
+/**
+ * The staged outcome AS THE ENGINE COMPUTES IT (the new winner-outcome-neutral model — mirrors
+ * `decideCompetitionOutcome` in liveSeason.ts): the CROWN is the single-roll `resolveCompetition`
+ * winner over the FULL field; the loser drop order is played out on an ISOLATED fork that excludes the
+ * winner, so it can never overturn the crown. Returns both so the litmus can assert winner == single-roll.
+ */
+function stagedOutcome(field: Competitor[], seed: number): { winner: EntityId; dropOrder: EntityId[] } {
+  const beatRng = new SeededRandom(seed);
+  // The calibrated crown — the SAME single roll the pre-staging model used (byte-identical).
+  const winner = resolveCompetition(field, "endurance", new CompetitionIntents(), beatRng).winner;
+  // The drop drama on an isolated sub-stream (fork does not advance the parent — zero perturbation).
+  const drama = beatRng.fork("comp-elimination-order");
+  let live = field.filter((c) => c.id !== winner);
+  const dropOrder: EntityId[] = [];
   let round = 1;
   while (live.length > 1) {
-    const { eliminated } = resolveElimination(live, "endurance", new CompetitionIntents(), rng.fork(`r:${round}`));
+    const { eliminated } = resolveElimination(live, "endurance", new CompetitionIntents(), drama.fork(`drop:${round}`));
+    dropOrder.push(eliminated);
     live = live.filter((c) => c.id !== eliminated);
     round += 1;
   }
-  return live[0]!.id;
+  if (live.length === 1) dropOrder.push(live[0]!.id);
+  return { winner, dropOrder };
 }
+
+/** The staged WINNER (the crown) — the calibration-bearing outcome. */
+const stagedWinner = (field: Competitor[], seed: number): EntityId => stagedOutcome(field, seed).winner;
 
 describe("0006 staged-rounds — the favorite-win calibration HOLDS under elimination staging", () => {
   it("a clear stat favorite wins a STRONG MAJORITY across a staged endurance comp (the 0006 band)", () => {
-    // One clear favorite (0.8) among an average field (0.5) — the canonical 0006 calibration shape.
+    // The canonical 0006 calibration shape (cf. outcomes.property.test.ts): one CLEAR favorite (0.9)
+    // among an average field (0.5). Because the staged crown is byte-identical to the single-roll
+    // `resolveCompetition` winner (winner outcome-neutrality), the staged favorite wins the SAME 0006
+    // strong-majority band — the staging narrates the calibrated outcome, it does not inflate it.
     const buildField = (n: number): Competitor[] => [
-      { id: PLAYER, stats: flat(0.8) },
+      { id: PLAYER, stats: flat(0.9) },
       ...Array.from({ length: n - 1 }, (_, i) => ({ id: npc(i + 1), stats: flat(0.5) })),
     ];
     for (const n of [6, 12, 16]) {
@@ -44,7 +64,8 @@ describe("0006 staged-rounds — the favorite-win calibration HOLDS under elimin
       for (let seed = 1; seed <= RUNS; seed++) if (stagedWinner(field, seed) === PLAYER) favWins++;
       const rate = favWins / RUNS;
       // The 0006 spec band: a clear favorite wins a strong majority (≈65–80%, tunable) but loses a real
-      // minority — earned outcomes with uncommon upsets. The staged ladder sits squarely inside it.
+      // minority — earned outcomes with uncommon upsets. Larger fields dilute slightly; a generous floor
+      // rides the field-size spread while still catching any drift toward protection or sameness.
       expect(rate, `n=${n}: staged favorite win rate ${rate.toFixed(3)}`).toBeGreaterThan(0.6);
       expect(rate, `n=${n}: staged favorite win rate ${rate.toFixed(3)}`).toBeLessThan(0.85);
     }
@@ -85,6 +106,72 @@ describe("0006 staged-rounds — the favorite-win calibration HOLDS under elimin
   });
 });
 
+describe("0006 staged-rounds — WINNER OUTCOME-NEUTRALITY (the calibration-preservation litmus, direction 1)", () => {
+  // THE regression fix (PR #395 jury-aggregate band): the staged crown must be byte-identical to the
+  // single-roll `resolveCompetition` winner for the same seed/field — so the staged mechanic narrates
+  // the SAME calibrated outcome and the jury earned-wins band is preserved exactly. A re-rolled
+  // per-round survival ladder (the prior model) gave weak players "extra lives" and shifted who reached
+  // F2 — this litmus is the permanent guard that the winner is never perturbed by the drop drama.
+  const buildField = (n: number, favorite = 0.8): Competitor[] => [
+    { id: PLAYER, stats: flat(favorite) },
+    ...Array.from({ length: n - 1 }, (_, i) => ({ id: npc(i + 1), stats: flat(0.5) })),
+  ];
+
+  it("the staged WINNER equals the single-roll resolveCompetition winner (same seed + field)", () => {
+    for (const n of [2, 6, 12, 16]) {
+      const field = buildField(n);
+      for (let seed = 1; seed <= 400; seed++) {
+        const single = resolveCompetition(field, "endurance", new CompetitionIntents(), new SeededRandom(seed)).winner;
+        const staged = stagedWinner(field, seed);
+        expect(staged, `n=${n} seed=${seed}: staged crown must equal the single-roll winner`).toBe(single);
+      }
+    }
+  });
+
+  it("the drop ORDER drama never includes the winner, and covers every loser exactly once", () => {
+    for (const n of [3, 6, 16]) {
+      const field = buildField(n);
+      for (let seed = 1; seed <= 200; seed++) {
+        const { winner, dropOrder } = stagedOutcome(field, seed);
+        expect(dropOrder).not.toContain(winner); // the crown survives every round by construction
+        expect(dropOrder.length, `n=${n}`).toBe(n - 1); // every loser drops, exactly once
+        expect(new Set(dropOrder).size).toBe(n - 1); // no dup, no gap
+        const losers = field.map((c) => c.id).filter((id) => id !== winner);
+        expect([...dropOrder].sort()).toEqual([...losers].sort()); // the drama is exactly the loser set
+      }
+    }
+  });
+
+  it("the isolated drop stream does NOT perturb the calibrated winner (winner is a pure single roll)", () => {
+    // Two builds of the SAME field/seed must crown identically AND match the bare single roll — the
+    // drop drama's fork can never have leaked into the winner's stream position.
+    const field = buildField(12);
+    for (let seed = 1; seed <= 300; seed++) {
+      const bare = resolveCompetition(field, "endurance", new CompetitionIntents(), new SeededRandom(seed)).winner;
+      expect(stagedOutcome(field, seed).winner).toBe(bare);
+      expect(stagedOutcome(field, seed).winner).toBe(stagedOutcome(field, seed).winner);
+    }
+  });
+
+  it("a throwing favorite loses the crown EXACTLY as the single-roll model does (anti-sycophancy both ways)", () => {
+    // The crown honors the committed approach: a throwing favorite must lose at the SAME rate the
+    // single-roll throw produces — staging never hands a thrown comp back to the player.
+    const field = buildField(6, 0.85);
+    const throwIntents = (): CompetitionIntents => { const i = new CompetitionIntents(); i.declare(PLAYER, "throw"); return i; };
+    let stagedWins = 0;
+    let singleWins = 0;
+    const RUNS = 600;
+    for (let seed = 1; seed <= RUNS; seed++) {
+      // Single-roll with the throw penalty.
+      if (resolveCompetition(field, "endurance", throwIntents(), new SeededRandom(seed)).winner === PLAYER) singleWins++;
+      // The staged crown with the same throw penalty (mirrors decideCompetitionOutcome's committed approach).
+      const beatRng = new SeededRandom(seed);
+      if (resolveCompetition(field, "endurance", throwIntents(), beatRng).winner === PLAYER) stagedWins++;
+    }
+    expect(stagedWins).toBe(singleWins); // identical — the crown is the single roll, throw penalty and all
+  });
+});
+
 describe("0006 staged-rounds — per-round approach is committed before, locked after (anti-sycophancy)", () => {
   const ctxOf = (rel: RelationshipModel): SeasonCtx => ({
     player: PLAYER, statsOf: () => flat(0.5), rel,
@@ -96,11 +183,15 @@ describe("0006 staged-rounds — per-round approach is committed before, locked 
       const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5)]);
       const peek = peekCompetition(s, ctx, new SeededRandom(seed));
       expect(peek).not.toBeNull(); // the HOH comp opens the season; a preview exists
-      // Drive the staged comp competing every round (the preview's default) → the same crown.
-      const rng = new SeededRandom(seed);
+      // Drive the staged comp competing every round (the preview's default) → the same crown. The
+      // production seam re-mints a FRESH per-beat rng on every advance/decision (GameSessionAdapter
+      // .beatRng() keys off seed:week:beat) — so within the HOH comp beat each step sees the same fresh
+      // stream. Mirror that here: a fresh SeededRandom(seed) per call. The crown is forked off it on a
+      // dedicated `comp-winner` sub-stream, position-independent of the def draw + the per-round pauses.
+      const beatRng = (): SeededRandom => new SeededRandom(seed);
       for (let g = 0; g < 30 && !s.hoh; g++) {
-        if (s.pending?.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
-        else advance(s, ctx, rng);
+        if (s.pending?.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, beatRng());
+        else advance(s, ctx, beatRng());
       }
       expect(s.hoh).toBe(peek!.winner); // single outcome authority (B37) holds under staging
     }

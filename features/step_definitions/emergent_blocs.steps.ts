@@ -80,12 +80,12 @@ interface BlocCoordination {
   mateNomViolations: string[];
 }
 
-// 0006 staged-rounds shifted which seeds the trio reaches HOH, nominates a mate in the unbonded baseline,
-// and votes more in lockstep when bonded (the two lifts this scenario measures). Seed 22 over a 10-week
-// window reliably produces BOTH: a baseline mate-nomination the bloc then shields, and a clear vote-
-// alignment lift. The mechanism itself is seed-independent (unit-pinned below: every member computes the
-// same negative shielded read).
-const BL_LIFT_SEED = 22;
+// 0006 staged-rounds (winner-outcome-neutral) shifted which seeds the trio reaches HOH, nominates a mate
+// in the unbonded baseline, and votes more in lockstep when bonded (the two lifts this scenario measures).
+// Seed 1 over a 10-week window reliably produces BOTH: a baseline mate-nomination the bloc then shields
+// (1→0), and a clear vote-alignment lift (≈0.50→0.75 over the trio's ballots). The mechanism itself is
+// seed-independent (unit-pinned below: every member computes the same negative shielded read).
+const BL_LIFT_SEED = 1;
 const BL_LIFT_WEEKS = 10;
 let blBaseline: BlocCoordination | undefined;
 let blConditioned: BlocCoordination | undefined;
