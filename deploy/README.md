@@ -68,8 +68,10 @@ untouched.
 
 After install, **`orwell`** (a launcher for `orwell-menu.sh`, installed to `/usr/local/bin/orwell`)
 opens a **whiptail** menu over every task below — update, doctor, backup, restore, the two reset
-tiers, and the readiness check — so you don't have to remember script paths or flags. The login
-health panel advertises it.
+tiers, and the readiness check — so you don't have to remember script paths or flags. It opens on an
+ASCII **ORWELL** banner and runs each action with sectioned, step-by-step status lines (`▸` working,
+`✓` done, `✗` failed); the installer and the login health panel share the same banner + glyphs. The
+login health panel advertises it.
 
 ```bash
 orwell                      # the interactive menu (inside the container)
@@ -84,8 +86,10 @@ when run directly on a terminal (the updater's action menu + token box, the doct
 the resets' confirm) and remain **fully non-interactive** for automation, CI, and the
 host→container `pct exec` bridge (which has no PTY) — exactly today's flags/env. `whiptail` is
 installed by `orwell-install.sh`; without it (or off a TTY) every prompt falls back to plain text.
-Shared dialog helpers live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh`
-(the curl-bootstrapped installer) keeps its own inline whiptail copies — it must stay one
+Shared dialog helpers — and the matching presentation helpers (`ow_logo` / `ow_section` /
+`ow_step` / `ow_ok` / `ow_warn` / `ow_fail`, colour auto-disabled off a TTY or under `NO_COLOR`) —
+live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh` (the curl-bootstrapped
+installer) and `orwell-install.sh` keep their own inline copies — they must each stay one
 standalone file.
 
 ### Factory reset (back to OOBE)

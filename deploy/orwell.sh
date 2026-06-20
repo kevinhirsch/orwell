@@ -22,8 +22,25 @@
 set -euo pipefail
 
 TITLE="orwell installer"
-msg()  { echo -e "==> $*"; }
+# Inline presentation (this file is the curl-bootstrapped one-liner — it must stay standalone, so
+# no sourcing the TUI lib). Colour auto-disables off a TTY / under NO_COLOR / TERM=dumb. Pure echo.
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'; C_GRN=$'\e[32m'; C_CYN=$'\e[36m'; C_OFF=$'\e[0m'
+else
+  C_BOLD=""; C_DIM=""; C_GRN=""; C_CYN=""; C_OFF=""
+fi
+msg()  { echo -e "${C_CYN}▸${C_OFF} $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
+banner() {
+  printf '%s\n' \
+"${C_CYN} _____ _____ _ _ _ _____ __    __    ${C_OFF}" \
+"${C_CYN}|     |  _  | | | |   __|  |  |  |   ${C_OFF}" \
+"${C_CYN}|  |  |    -| | | |   __|  |__|  |__ ${C_OFF}" \
+"${C_CYN}|_____|__|__|_____|_____|_____|_____|${C_OFF}" \
+"${C_BOLD}            O R W E L L${C_OFF}" \
+"   ${C_DIM}${1:-}${C_OFF}"
+  printf '\n'
+}
 
 case "${1:-}" in
   -h|--help)
@@ -35,6 +52,7 @@ esac
 [[ "$(id -u)" -eq 0 ]] || die "run this on the Proxmox host as root."
 command -v pct   >/dev/null 2>&1 || die "this must run on a Proxmox VE host (pct not found)."
 command -v pveam >/dev/null 2>&1 || die "this must run on a Proxmox VE host (pveam not found)."
+banner "Proxmox LXC installer"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────────────────
 # First active storage that supports a content type (rootdir for the CT rootfs, vztmpl for the
@@ -261,10 +279,15 @@ pct exec "$CTID" -- bash -c \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
    bash '${APP_DIR}/deploy/orwell-install.sh'"
 
-msg "done. orwell UI: http://${IP}:${ORWELL_PORT}"
+echo
+echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
+echo "  ${C_BOLD}${C_GRN}orwell is deployed in LXC ${CTID}.${C_OFF}"
+echo "  ${C_BOLD}play:${C_OFF}    http://${IP}:${ORWELL_PORT}"
+echo "  ${C_DIM}enter:${C_OFF}   pct enter ${CTID}    ${C_DIM}then:${C_OFF} ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}"
 if [[ -n "$CT_ROOT_PASSWORD" ]]; then
-  msg "console login: root + the password you set (or 'pct enter ${CTID}' from this host)."
+  echo "  ${C_DIM}console:${C_OFF} root + the password you set (or 'pct enter ${CTID}' from this host)"
 else
-  msg "no container root password was set — console login is disabled. Use 'pct enter ${CTID}'"
-  msg "from this host, or set one later: pct exec ${CTID} -- passwd"
+  echo "  ${C_DIM}console:${C_OFF} disabled (no root password). Use 'pct enter ${CTID}', or set one:"
+  echo "           pct exec ${CTID} -- passwd"
 fi
+echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"

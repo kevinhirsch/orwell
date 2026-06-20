@@ -30,7 +30,14 @@ ENGINE_PORT="$(envv ORWELL_ENGINE_PORT)"; ENGINE_PORT="${ENGINE_PORT:-$(envv BBA
 FE_PORT="$(envv ORWELL_PORT)"; FE_PORT="${FE_PORT:-$(envv BBAI_PORT)}"; FE_PORT="${FE_PORT:-8080}"
 
 # ---- probes (each bounded; never block the prompt) ----
-ok="\e[32m●\e[0m"; bad="\e[31m●\e[0m"; warn="\e[33m●\e[0m"; dim="\e[2m"; off="\e[0m"; bold="\e[1m"
+# Colour the dots on a real terminal; on a pipe (the admin status page tees this to a log file —
+# admin_health_routes.py) or under NO_COLOR, fall back to plain ASCII markers so the captured log
+# reads cleanly instead of carrying raw escape codes.
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  ok="\e[32m●\e[0m"; bad="\e[31m●\e[0m"; warn="\e[33m●\e[0m"; dim="\e[2m"; off="\e[0m"; bold="\e[1m"
+else
+  ok="[+]"; bad="[x]"; warn="[!]"; dim=""; off=""; bold=""
+fi
 
 svc() { systemctl is-active --quiet "$1" 2>/dev/null && echo -e "$ok up" || echo -e "$bad down"; }
 ENGINE_UNIT="$(svc "$ENGINE_SVC")"
@@ -62,8 +69,13 @@ MEM="$(free -m 2>/dev/null | awk '/^Mem:/{printf "%d/%dMB", $3, $2}' || echo '?'
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
 # ---- render ----
+# A compact ASCII wordmark (ASCII-only so it renders on any terminal/codepage; the dim cyan is the
+# same auto-off colour as the dots) followed by the one-glance health table.
+cyn="\e[36m"; [[ -z "$off" ]] && cyn=""
 echo -e ""
-echo -e "${bold}  ◉ ORWELL${off}  ${dim}${APP_DIR} @ ${SHA}${off}"
+echo -e "  ${cyn} _____ _____ _ _ _ _____ __    __${off}"
+echo -e "  ${cyn}|  |  |    -| | | |   __|  |__|  |__${off}    ${bold}ORWELL${off} ${dim}${APP_DIR} @ ${SHA}${off}"
+echo -e "  ${cyn}|_____|__|__|_____|_____|_____|_____|${off}"
 echo -e "  ─────────────────────────────────────────────"
 echo -e "  engine   ${ENGINE_UNIT}   ${dim}unit${off}   ${ENGINE_HTTP}   ${dim}:${ENGINE_PORT}/health${off}"
 echo -e "  frontend ${FE_UNIT}   ${dim}unit${off}   ${FE_HTTP}   ${dim}:${FE_PORT}${off}${TIERS:+   ${dim}tiers${off} ${TIERS}}"
