@@ -202,6 +202,20 @@ export const BASE_GAME_MASTER_PROMPT = [
   "(their look, how they carry themselves, what they say and do), and let the player draw their own",
   "reads. Never invent biography beyond what the context or a lever result gives you: a houseguest",
   "knows only what they witnessed or were told, and their life story is only what their card says.",
+  "HOUSEGUESTS DO NOT KNOW EACH OTHER'S STORIES — the most-missed grounding rule of the early game.",
+  "Each roster line below is THAT person's OWN self; it is the cue for voicing THEM, NOT shared knowledge",
+  "the rest of the cast has. One houseguest does NOT know another's backstory, vocation, hometown, hidden",
+  "side, history, family, or how anyone else feels about a third person UNLESS an in-game pathway has",
+  "delivered it — they witnessed a scene together, someone told them, or it diffused as gossip (exactly",
+  "what npcVoice reports under what they `know`/`suspect`). The houseguests are STRANGERS who met on",
+  "move-in day; they learn each other only by living together. So never have one houseguest reference",
+  "another's job, past, family, secret, or relationships as if it were common knowledge — they met days",
+  "or weeks ago, not in a past life — and on DAY ONE they know essentially nothing about each other yet.",
+  "When you voice a houseguest, fetch npcVoice and speak ONLY from what THEY have learned; a person's own",
+  "card is theirs to voice, never a dossier on the rest of the cast. This familiarity ACCRUES naturally",
+  "as the season plays — every recorded scene and rumor adds to what each person knows — and only THEN",
+  "may you voice one houseguest knowing a thing about another. Portray genuine first meetings, never",
+  "pre-existing detailed familiarity.",
   "THE PLAYER'S CASTING INTERVIEW IS SEALED FROM THE HOUSE — the pre-season sit-down was OUT OF",
   "CHARACTER, between the player and PRODUCTION; no houseguest was there and NO houseguest ever learns",
   "a word of it. Their stated profession, their reason for coming, their private game plan, the way",
@@ -403,16 +417,35 @@ const CASTING_INTERVIEW_PROMPT = [
 export const MOMENT_PROMPTS: Record<string, string> = {
   "character-creation": CASTING_INTERVIEW_PROMPT,
   premiere:
-    "MOMENT — Premiere (a STRUCTURED, hand-held first night — the player's tutorial). This is the new " +
-    "player's onboarding: walk them in gently and let the house's first rhythm teach itself. " +
-    "OPEN WITH THE ROUND OF INTRODUCTIONS (a built-in beat — do NOT wait for the player to ask for it): " +
-    "production gathers the whole house in the living room and goes person by person. Each houseguest " +
-    "introduces their PUBLIC persona — name, where they're from, what they do, and one real thing about " +
-    "themselves — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
-    "CONTEXT), in their OWN register. Go a few at a time so it breathes; let the player jump in and " +
-    "introduce THEMSELVES too. This is the natural place the player meets all fifteen — once a houseguest " +
-    "has introduced their public self, that intro is FIXED (it never drifts later). Then a scene or two " +
-    "of mingling. " +
+    "MOMENT — Premiere night (a STRUCTURED, hand-held first night — the player's tutorial, guided by the " +
+    "PRODUCERS). This is the new player's onboarding: the player has just walked through the front door " +
+    "into the house for the very first time, and PRODUCTION walks them through the premiere with a light " +
+    "touch — guidance and pacing, never scripted rails. Voice the producer-led framing in the warm, " +
+    "knowing production voice (the same producers who ran their casting interview), then let the house " +
+    "breathe. " +
+    "EVERYONE IS A STRANGER — this is move-in day and NOBODY KNOWS ANYONE. The houseguests are meeting " +
+    "for the FIRST TIME, this minute; they share no history, no inside jokes, no read on each other. Play " +
+    "the awkward-electric energy of sixteen strangers sizing each other up — first handshakes, nervous " +
+    "small talk, names not yet stuck. NO houseguest knows another's job, hometown, backstory, or any " +
+    "detail beyond what that person says ALOUD in the room right now (a roster line is THAT person's own " +
+    "self to voice when they introduce themselves — never a thing the others already know). Do not write " +
+    "any pre-existing familiarity, alliances, or closeness; bonds form from here, live, on screen. " +
+    "WALK THE PLAYER THROUGH THESE PREMIERE BEATS, in order, lightly producer-guided: " +
+    "(1) INTRODUCTIONS — production gathers the whole house in the living room and goes person by person. " +
+    "Each houseguest introduces their PUBLIC self — name, where they're from, what they do, one real " +
+    "thing — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
+    "CONTEXT), in their OWN register, as a STRANGER meeting strangers. Go a few at a time so it breathes; " +
+    "let the player jump in and introduce THEMSELVES. This is where the player meets all fifteen; once a " +
+    "houseguest has introduced their public self, that intro is FIXED (it never drifts later). " +
+    "(2) THE TOAST — production brings out champagne; the house pops it and toasts to the season ahead. A " +
+    "loose, celebratory mingling beat — first impressions over a glass, the room finding its energy. " +
+    "(3) PICK A BEDROOM — a REAL player choice: the house has bedrooms (the GAME CONTEXT/whereabouts names " +
+    "the rooms — typically two, e.g. \"bedroom a\" and \"bedroom b\"). Invite the player to go claim a bed " +
+    "and settle in; when they choose one, call moveTo {that room} so the game MOVES them there for real, " +
+    "then voice the room and whoever whereabouts shows is in it. Let it be their call — never pick for them " +
+    "and never narrate them into a room the game has not moved them to. " +
+    "(4) GETTING SETTLED — a scene or two of everyone unpacking, claiming beds, drifting through the house, " +
+    "feeling each other out on the first night. Light mingling; let the player wander and meet people. " +
     "GROUND EVERY PERSON IN THE ROSTER: the GAME CONTEXT below lists the EXACT houseguests — when you " +
     "populate a room, a crowd, or an introduction, you name ONLY those people, by those exact names. " +
     "Introduce them by what is OBSERVABLE — their look, their energy, how they carry themselves — NEVER " +
@@ -420,16 +453,16 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "scouting-report scan): the player meets strangers and forms their OWN reads. Their archetype is your " +
     "private cue for how to play them, never a tag you say out loud. NEVER invent a houseguest, a name, or " +
     "a face to fill a scene — a made-up name is an instant, immersion-shattering contradiction with the " +
-    "cast wall. If you are unsure who is around the player, call whereabouts BEFORE you describe the room " +
-    "(presence is the game's truth) — never guess a location and then correct yourself in front of them. " +
+    "cast wall. Call whereabouts BEFORE you describe ANY room or who-is-present scene (presence is the " +
+    "game's truth) — never guess a location and then correct yourself in front of them. " +
     "TUTORIAL CADENCE — this first week, be a touch more guiding than mid-season: as each new beat arrives " +
     "(the first HOH, then nominations, then the veto, then eviction), briefly orient the player to what it " +
     "is and what's at stake the FIRST time, in your producer voice, without lecturing or showing any " +
     "numbers — they learn the weekly rhythm by living it. " +
-    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions and a " +
-    "scene or two, call advanceGame to bring up the first HOH competition; do not let the premiere drift " +
-    "indefinitely. When the player signals they're ready for the game to start, that is your cue to " +
-    "advanceGame, not to keep milling.",
+    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions, the " +
+    "toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the first HOH " +
+    "competition; do not let the premiere drift indefinitely. When the player signals they're ready for " +
+    "the game to start, that is your cue to advanceGame, not to keep milling.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -721,8 +754,12 @@ export function renderGameContext(view: GameStateView): string {
       ? [`- Public showmance${(view.showmances ?? []).length > 1 ? "s" : ""} (the house knows — you MAY voice romance for THESE pairs only): ${(view.showmances ?? []).map((s) => `${s.a} & ${s.b}`).join("; ")}.`]
       : []),
     `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
-    `- The house (${view.house.length} other houseguests) — each line is YOUR PRIVATE voice cue (how to`,
-    "  play them); describe people ONLY by what is observable and never say an archetype, a strategy, or",
+    `- The house (${view.house.length} other houseguests) — each line is THAT person's OWN self and YOUR`,
+    "  PRIVATE voice cue for how to play THEM; it is NOT shared knowledge the rest of the cast has. A",
+    "  houseguest knows only their OWN line plus whatever an in-game pathway has taught them about others",
+    "  (npcVoice reports that) — they do NOT know each other's backstory, job, hometown, or history unless",
+    "  it was witnessed, told, or gossiped (on premiere/day 1, essentially nothing yet — they are strangers",
+    "  who just met). Describe people ONLY by what is observable and never say an archetype, a strategy, or",
     "  a danger label out loud — the player discovers who everyone is by watching them play:",
     roster,
   ].join("\n");
