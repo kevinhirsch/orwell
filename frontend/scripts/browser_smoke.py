@@ -1975,51 +1975,79 @@ def main() -> int:
                   "G17/F5: the confessional text itself is restored")
             g17.close()
 
-            # P1 OOBE: the houseguest IMAGE is the player's FIRST interaction. Pre-game with a model
-            # configured but NO cast photo secured, the chat is LOCKED (gate up, composer NOT
-            # prefilled — the old seat-line pre-prompt is gone) and the WELCOME MODAL greets the
-            # player. Securing a photo releases the gate. Pre-game is staged with routed fakes — the
-            # sanctioned G5-audit pattern: state started:false, models live, intake NOT finalized.
+            # P1 OOBE re-sequence (2026-06-20 owner ruling): the casting INTERVIEW is the player's
+            # first interaction; the cast photo is now the FIRST casting STEP (engine-driven) and
+            # OPTIONAL — a mid-interview box that appears only AFTER the producers ask (a rendered
+            # .msg.msg-ai) and only while the engine still wants it (state.casting.missing includes
+            # "castPhoto"). It no longer hard-gates the chat and never auto-mounts at page load.
+            # Pre-game is staged with routed fakes (the sanctioned G5-audit pattern): state
+            # started:false WITH the engine casting status, models live, intake not finalized.
             f4 = new_page(browser)
+            # the engine still wants the cast-photo step until the FE POSTs uploaded/skipped; flip to
+            # drop "castPhoto" from `missing` so the box closes (mirrors the engine advancing `next`).
+            _photo_wanted = {"v": True}
+            def _f4_state_body():
+                if _photo_wanted["v"]:
+                    return ('{"started": false, "casting": {"known": {}, '
+                            '"missing": ["castPhoto", "playerName"], "next": "their cast photo", "ready": false}}')
+                return ('{"started": false, "casting": {"known": {"castPhoto": "skipped"}, '
+                        '"missing": ["playerName"], "next": "their name", "ready": false}}')
             f4.route("**/api/orwell/state",
-                     lambda r: r.fulfill(status=200, content_type="application/json",
-                                         body='{"started": false}'))
+                     lambda r: r.fulfill(status=200, content_type="application/json", body=_f4_state_body()))
             f4.route("**/api/models",
                      lambda r: r.fulfill(status=200, content_type="application/json",
                                          body='{"items": [{"models": ["m"], "offline": false}]}'))
-            # the gate's "is a photo secured?" probe — NOT finalized yet, so the chat must lock
-            _intake_finalized = {"v": False}
             f4.route("**/api/orwell/portrait/intake",
                      lambda r: r.fulfill(status=200, content_type="application/json",
-                                         body=('{"present": true, "mode": "reference", "finalized": '
-                                               + ("true" if _intake_finalized["v"] else "false")
-                                               + ', "candidates": 0}')))
+                                         body='{"present": false, "finalized": false, "candidates": 0}'))
+            f4.route("**/api/orwell/portrait/library",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body='{"headshots": []}'))
+            f4.route("**/api/orwell/game-session",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body='{"sessionId": null}'))
+            # the FE marks the cast-photo step handled here (uploaded/skipped) — fake a clean record
+            f4.route("**/api/orwell/casting/photo",
+                     lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'))
             f4.goto(base + "/", wait_until="load", timeout=30000)
-            f4.wait_for_timeout(3000)  # route() probes + the gate recompute + the welcome modal
-            # the composer is NOT prefilled — the pre-prompt is removed; the image step comes first
+            f4.wait_for_timeout(3000)  # route() probes + the welcome modal
+            # the composer is NOT prefilled — the producers open the interview; the player never types first
             f4_seat0 = f4.input_value("#message")
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
-            # the welcome modal is its own modal (greets, points at the cast photo)
+            # the welcome modal is its own modal, shown on every fresh game/season; it now points the
+            # player at the casting INTERVIEW (the photo is asked for mid-interview, not up front)
             f4_welcome = f4.evaluate(
                 "() => { const c = document.querySelector('#orwell-onboarding .ob-card');"
                 "  return c ? c.textContent : ''; }")
-            check("cast photo" in (f4_welcome or "").lower(),
-                  f"P1: the welcome modal greets and points at the cast photo ({(f4_welcome or '')[:60]!r})")
-            # dismiss the welcome (its own modal) to reach the locked chat underneath
+            check("interview" in (f4_welcome or "").lower(),
+                  f"P1: the welcome modal greets and points at the casting interview ({(f4_welcome or '')[:80]!r})")
+            # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
+            # welcome (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
+            check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
+                  "P1: the cast-photo box is hidden at boot (it follows the producers' question)")
+            # dismiss the welcome (its own modal) — dismissing IS the proceed: it opens the interview
             if f4.query_selector("#orwell-onboarding [data-ob-welcome-go]"):
                 f4.click("#orwell-onboarding [data-ob-welcome-go]")
-                f4.wait_for_timeout(400)
-            # HARD GATE: the chat input + send are LOCKED until a photo is secured, and the page
-            # says why ("Add your cast photo to begin").
-            check(f4.evaluate("!!document.getElementById('message').disabled") is True,
-                  "P1: the chat input is LOCKED pre-image (disabled)")
-            check(f4.evaluate("() => { const s = document.querySelector('.send-btn'); return !!(s && s.disabled); }") is True,
-                  "P1: the send affordance is LOCKED pre-image (disabled)")
-            # P1 OOBE overhaul: the cast-photo step is a PROPER OrwellWindow (composes the kit),
-            # title-cased, and — because it GATES the chat — NON-DISMISSABLE (no close/minimize
-            # control). The single instruction lives in the window.
-            f4.wait_for_timeout(400)  # let the headshot window's route() mount it
+                f4.wait_for_timeout(800)
+            # NO HARD GATE: the chat input + send are USABLE immediately — the interview runs before
+            # any photo (the old "locked until a photo is secured" gate is retired).
+            check(f4.evaluate("!document.getElementById('message').disabled") is True,
+                  "P1: the chat input is USABLE pre-photo (the hard gate is retired)")
+            check(f4.evaluate("() => { const s = document.querySelector('.send-btn'); return !(s && s.disabled); }") is True,
+                  "P1: the send affordance is USABLE pre-photo")
+            check(f4.evaluate("(document.getElementById('message').getAttribute('placeholder') || '')")
+                  != "Add your cast photo to begin",
+                  "P1: the composer placeholder is NOT the old hard-gate reason")
+            # MID-INTERVIEW REVEAL: simulate the producers' opener (a rendered .msg.msg-ai); the
+            # engine-gated box (casting.missing includes "castPhoto") now pops up, AFTER the question.
+            f4.evaluate("""() => {
+              const h = document.getElementById('chat-history');
+              if (h) { const m = document.createElement('div'); m.className = 'msg msg-ai';
+                       m.textContent = 'producer opener'; h.appendChild(m); }
+              window.dispatchEvent(new CustomEvent('orwell:gamechanged'));
+            }""")
+            f4.wait_for_timeout(900)  # let the headshot route() mount the box + the studio refresh
             cast_win = f4.evaluate("""() => {
               const el = document.getElementById('orwell-headshot');
               if (!el) return { mounted: false };
@@ -2027,63 +2055,25 @@ def main() -> int:
                 mounted: true,
                 kit: el.classList.contains('ow-window') && el.hasAttribute('data-ow-window'),
                 title: (el.querySelector('.ow-title') || {}).textContent || '',
-                hasBody: !!el.querySelector('.ow-body'),
-                close: !!el.querySelector('.ow-close'),
-                min: !!el.querySelector('.ow-min'),
                 lead: !!el.querySelector('.hs-lead'),
+                skip: !!el.querySelector('#hs-skip'),
               };
             }""")
             check(cast_win.get("mounted") is True and cast_win.get("kit") is True,
-                  f"P1: the cast-photo step is a kit OrwellWindow ({cast_win})")
+                  f"P1: the cast-photo box reveals mid-interview as a kit OrwellWindow ({cast_win})")
             check(cast_win.get("title", "").strip().lower() == "your cast photo",
                   f"P1: the cast-photo window is title-cased ({cast_win})")
-            check(cast_win.get("close") is False and cast_win.get("min") is False,
-                  f"P1: the gating cast-photo window is NON-DISMISSABLE (no close/minimize) ({cast_win})")
             check(cast_win.get("lead") is True,
                   f"P1: the ONE cast-photo instruction lives in the window body ({cast_win})")
-            # the redundant inline banner note is GONE (no banner-vs-card-vs-placeholder dupes)
-            check(f4.evaluate("!document.getElementById('orwell-chat-gate-note')") is True,
-                  "P1: the redundant inline gate banner is removed (consolidated to the window)")
-            check(f4.evaluate("(document.getElementById('message').getAttribute('placeholder') || '')")
-                  == "Add your cast photo to begin",
-                  "P1: the composer placeholder states the gate reason (the minimal hint)")
-            # DE-OVERLAP (item 2): the splash tagline + rotating tip are SUPPRESSED during the
-            # cast-photo step (ow-onboarding / ow-casting-headshot-open), and the cast-photo
-            # window does not intersect the visible welcome brand mark.
-            overlap = f4.evaluate("""() => {
-              const onb = document.body.classList.contains('ow-onboarding')
-                       || document.body.classList.contains('ow-casting-headshot-open');
-              const tip = document.getElementById('welcome-tip');
-              const sub = document.getElementById('welcome-sub');
-              const vis = (e) => { if (!e) return false; const cs = getComputedStyle(e);
-                return cs.display !== 'none' && parseFloat(cs.opacity) > 0.01 && e.getBoundingClientRect().height > 1; };
-              const win = document.getElementById('orwell-headshot');
-              const splash = document.getElementById('welcome-screen');
-              const name = document.querySelector('#welcome-screen .welcome-name');
-              const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
-              // The splash is faded out while the window is up — a non-visible brand mark
-              // is not a visual overlap. Only a VISIBLE splash that geometrically intersects
-              // the window counts.
-              const splashVisible = vis(splash);
-              let nameOverlap = false;
-              if (win && name && splashVisible) {
-                const wr = win.getBoundingClientRect(), nr = name.getBoundingClientRect();
-                if (nr.height > 1 && wr.height > 1) nameOverlap = inter(wr, nr);
-              }
-              return { onb, tipVisible: vis(tip), subVisible: vis(sub), splashVisible, nameOverlap };
-            }""")
-            check(overlap.get("onb") is True,
-                  f"P1: an onboarding body flag is set during the cast-photo step ({overlap})")
-            check(overlap.get("tipVisible") is False and overlap.get("subVisible") is False,
-                  f"P1: the splash tip + tagline are suppressed during onboarding ({overlap})")
-            check(overlap.get("nameOverlap") is False,
-                  f"P1: the cast-photo window does not overlap the welcome brand mark ({overlap})")
-            # securing a photo releases the gate (intake now finalized + the avatarchanged signal)
-            _intake_finalized["v"] = True
-            f4.evaluate("window.dispatchEvent(new CustomEvent('orwell:avatarchanged'))")
-            f4.wait_for_timeout(600)  # the gate re-derives from the finalized intake
-            check(f4.evaluate("!document.getElementById('message').disabled") is True,
-                  "P1: securing a cast photo UNLOCKS the chat input")
+            check(cast_win.get("skip") is True,
+                  f"P1: the OPTIONAL 'Skip for now' affordance is present ({cast_win})")
+            # SKIP closes the box: the engine drops "castPhoto" from `missing`, so it never re-prompts
+            # (and the chat was usable the whole time).
+            _photo_wanted["v"] = False
+            f4.click("#orwell-headshot #hs-skip")
+            f4.wait_for_timeout(900)
+            check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
+                  "P1: skipping the cast photo closes the box (the step is optional)")
             check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
                   "P1: the fresh-session fence is still set once per interview (F7)")
             f4.close()
