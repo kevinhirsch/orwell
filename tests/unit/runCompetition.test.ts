@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { GameSessionRegistry } from "../../src/composition/registry";
-import type { AdvanceView } from "../../src/ports/GameSession";
+import type { AdvanceView, GameSession } from "../../src/ports/GameSession";
 import { npc } from "../../src/domain/ids";
 
 const PLAYER_NAME = "The Player";
@@ -12,14 +12,28 @@ function started(seed = 11): GameSessionAdapter {
 }
 
 /** Resolve the standalone adapter's pending decision legally (drives a game forward in tests). */
-function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
+function resolveLegally(s: Pick<GameSession, "submitDecision">, p: NonNullable<AdvanceView["pending"]>): void {
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
   else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
   else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
   else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+/**
+ * Drive the live loop until the next HOH is crowned (0006 staged-rounds: the comp now plays out across
+ * many elimination rounds + the player's per-round approach, so a single submit no longer finishes it).
+ */
+function crownHoh(s: Pick<GameSession, "gameStatus" | "advanceGame" | "submitDecision">): void {
+  for (let g = 0; g < 200; g++) {
+    if (s.gameStatus().hoh) return;
+    const adv = s.advanceGame();
+    if (adv.pending) resolveLegally(s, adv.pending);
+    if (adv.finished) return;
+  }
 }
 
 /**
@@ -45,10 +59,10 @@ describe("runCompetition — single outcome authority (B37)", () => {
   it("PREVIEWS exactly the winner advanceGame then crowns (no second roll)", () => {
     const s = started(2); // a fresh game opens on the HOH competition beat
     const preview = s.runCompetition({ type: "physical" });
-    s.advanceGame(); // B46: the player declares competition intent first
-    const adv = s.submitDecision({ kind: "comp-intent", intent: "compete" }); // then the loop RESOLVES the HOH comp
-    expect(adv.event!.beat).toBe("hoh-competition");
-    expect(adv.status.hoh!.id).toBe(preview.winner!.id); // the same houseguest — one authority
+    // 0006 staged-rounds: the comp plays out in elimination rounds; the player competes every round
+    // (the preview's default), so the staged crown matches the preview — one outcome authority.
+    crownHoh(s);
+    expect(s.gameStatus().hoh!.id).toBe(preview.winner!.id); // the same houseguest — one authority
   });
 
   it("reports the loop's competition type, ignoring the caller's requested type (foreign field)", () => {
@@ -94,8 +108,9 @@ describe("runCompetition — single outcome authority (B37)", () => {
     const sb = reg.sandboxFor("u");
     sb.session.createCharacter({ playerName: PLAYER_NAME, seed: 2 });
     const preview = sb.session.runCompetition({ type: "physical" });
-    sb.session.advanceGame(); // B46: comp-intent pause
-    sb.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // crown the HOH — recorded via the registry's event sink
+    // 0006 staged-rounds: drive the elimination ladder to the crown (the player competes every round —
+    // the preview's default), recorded via the registry's event sink. The final HOH win is one beat.
+    crownHoh(sb.session);
     const winName = preview.winner!.name;
     const hasWin = (r: GameSessionRegistry): boolean =>
       r.sandboxFor("u").engine.events.query().some((e) => !e.hidden && e.content.includes(winName) && /Head of Household/.test(e.content));

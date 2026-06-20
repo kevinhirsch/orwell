@@ -26,10 +26,12 @@ describe("0040 — confessionals at the live nomination ceremony", () => {
     });
     s.createCharacter({ playerName: "P", seed: 7 });
     // Advance until a nomination ceremony resolves (auto if an NPC is HOH; else submit the player's noms).
-    for (let i = 0; i < 16; i++) {
+    // 0006 staged-rounds: the opening HOH comp now spans many elimination rounds, so allow more iterations.
+    for (let i = 0; i < 80; i++) {
       const v = s.advanceGame();
       const pending = v.pending;
       if (pending?.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" }); // B46
+      else if (pending?.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
       else if (pending?.kind === "nominations") {
         const opts = pending.options.map((o) => o.id);
         s.submitDecision({ kind: "nominations", choice: [opts[0]!, opts[1]!] });

@@ -22,10 +22,21 @@ function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>):
   if (p.kind === "veto-decision") return s.submitDecision({ kind: "veto-decision", use: false });
   if (p.kind === "replacement") return s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
   if (p.kind === "comp-intent") return s.submitDecision({ kind: "comp-intent", intent: "compete" });
+  if (p.kind === "comp-round") return s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   if (p.kind === "finale-statement") return s.submitDecision({ kind: "finale-statement", statement: "x" });
   if (p.kind === "finale-answer") return s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   if (p.kind === "juror-vote") return s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
   return s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+/** Drive the live loop until the opening HOH is crowned (0006 staged-rounds: many elimination rounds). */
+function crownHoh(s: GameSessionAdapter): void {
+  for (let g = 0; g < 200; g++) {
+    if (s.gameStatus().hoh) return;
+    const adv = s.advanceGame();
+    if (adv.pending) resolve(s, adv.pending);
+    if (adv.finished) return;
+  }
 }
 
 function driveUntil(sb: Sandbox, stop: (adv: AdvanceView) => boolean, max = 400): AdvanceView | null {
@@ -51,13 +62,12 @@ function newGame(seed: number): Sandbox {
 describe("E47 — a comp win is a threat read, not a grievance", () => {
   it("after the opening HOH comp the house's threat rises while affinity toward the winner does NOT drop", () => {
     const sb = newGame(4);
-    sb.session.advanceGame(); // comp-intent pause
     const session = sb.session as GameSessionAdapter;
 
     // Snapshot every onlooker's read BEFORE the comp resolves.
     const ids = session.livingIds();
     const before = new Map(ids.map((id) => [id, ids.map((o) => ({ ...sb.engine.relationships.edge(id, o) }))]));
-    sb.session.submitDecision({ kind: "comp-intent", intent: "compete" });
+    crownHoh(session); // 0006 staged-rounds: drive the comp to its crown
     const winner = sb.session.gameStatus().hoh!.id;
 
     for (const onlooker of ids) {
@@ -74,9 +84,8 @@ describe("E47 — a comp win is a threat read, not a grievance", () => {
 describe("E48/E49/E51 — eviction night's folds and arc beats", () => {
   it("manner scales the evictee's resentment: a betrayed read burns far more trust than a respected one", () => {
     const sb = newGame(9);
-    sb.session.advanceGame();
-    sb.session.submitDecision({ kind: "comp-intent", intent: "compete" });
     const session = sb.session as GameSessionAdapter;
+    crownHoh(session); // 0006 staged-rounds: drive the opening HOH comp to its crown
 
     // Reach the eviction stage, then rig the future evictee's reads of two voters.
     const staged = driveUntil(sb, (adv) => adv.status.phase === "eviction" && !!sb.session.snapshot().live!.finalNominees);

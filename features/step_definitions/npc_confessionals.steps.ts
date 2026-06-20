@@ -42,6 +42,7 @@ Given("a started game that reaches a nomination ceremony", function (this: BbWor
   for (let i = 0; i < 16; i++) {
     const v = session.advanceGame();
     if (v.pending?.kind === "comp-intent") session.submitDecision({ kind: "comp-intent", intent: "compete" }); // B46
+    else if (v.pending?.kind === "comp-round") session.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
     else if (v.pending?.kind === "nominations") {
       const opts = v.pending.options.map((o) => o.id);
       session.submitDecision({ kind: "nominations", choice: [opts[0]!, opts[1]!] });

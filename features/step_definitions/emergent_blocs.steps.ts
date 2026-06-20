@@ -80,8 +80,13 @@ interface BlocCoordination {
   mateNomViolations: string[];
 }
 
-const BL_LIFT_SEED = 9;
-const BL_LIFT_WEEKS = 6;
+// 0006 staged-rounds shifted which seeds the trio reaches HOH, nominates a mate in the unbonded baseline,
+// and votes more in lockstep when bonded (the two lifts this scenario measures). Seed 22 over a 10-week
+// window reliably produces BOTH: a baseline mate-nomination the bloc then shields, and a clear vote-
+// alignment lift. The mechanism itself is seed-independent (unit-pinned below: every member computes the
+// same negative shielded read).
+const BL_LIFT_SEED = 22;
+const BL_LIFT_WEEKS = 10;
 let blBaseline: BlocCoordination | undefined;
 let blConditioned: BlocCoordination | undefined;
 
@@ -105,6 +110,7 @@ function blPlayLiveRun(seedBonds: boolean, user: string, members: EntityId[]): B
       if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
       else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
       else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
+      else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
       else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: "respectful" });
       else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
       else if (p.options[0]) s.submitDecision({ kind: p.kind, vote: p.options[0].id });

@@ -735,7 +735,7 @@ def setup_orwell_routes() -> APIRouter:
         confirmed: Optional[bool] = None
 
     _DECISION_KINDS = {
-        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",

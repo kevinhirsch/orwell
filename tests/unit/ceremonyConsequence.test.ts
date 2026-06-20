@@ -14,10 +14,21 @@ function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pendi
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
   else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
   else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
   else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
   else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
+}
+
+/** Drive the live loop until the opening HOH is crowned (0006 staged-rounds: many elimination rounds). */
+function crownHoh(s: GameSessionAdapter): void {
+  for (let g = 0; g < 200; g++) {
+    if (s.gameStatus().hoh) return;
+    const adv = s.advanceGame();
+    if (adv.pending) resolveLegally(s, adv.pending);
+    if (adv.finished) return;
+  }
 }
 
 describe("B38 — ceremony acts fold hidden consequence", () => {
@@ -31,10 +42,12 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
     for (let seed = 1; seed <= 1200 && !pending; seed++) {
       const r = new GameSessionRegistry();
       const s = r.sandboxFor("u");
-      s.session.createCharacter({ playerName: "P", seed });
+      // 0006 staged-rounds favors the stronger player in a big endurance field, so a MEDIAN player almost
+      // never wins the 16-way opening HOH — cast the player as a comp-beast so they reliably reach their
+      // OWN nomination ceremony (the act under test). The fold math is identical regardless of archetype.
+      s.session.createCharacter({ playerName: "P", archetype: "comp-beast", seed });
       if (s.session.runCompetition({}).winner!.id !== PLAYER) continue; // player must win HOH
-      s.session.advanceGame();                       // B46: comp-intent pause
-      s.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // resolve the HOH comp (player wins)
+      crownHoh(s.session); // 0006 staged-rounds: drive the comp to the crown (player wins)
       const adv = s.session.advanceGame();           // reach the player's nomination decision
       if (adv.pending?.kind !== "nominations") continue;
       // Pick a nominee whose hidden edge toward the player still has headroom (the HOH-win fold already
@@ -87,9 +100,8 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
     const onlooker = sb.session.getGameState().house.find((h) => h.id !== winner)!.id;
     const before = rel.edge(onlooker, winner).threat;
 
-    sb.session.advanceGame(); // B46: comp-intent pause
-    const adv = sb.session.submitDecision({ kind: "comp-intent", intent: "compete" }); // resolve the HOH comp
-    expect(adv.event!.beat).toBe("hoh-competition");
+    crownHoh(sb.session); // 0006 staged-rounds: drive the comp to the crown
+    expect(sb.session.gameStatus().hoh!.id).toBe(winner);
     expect(rel.edge(onlooker, winner).threat).toBeGreaterThan(before); // they read the new HOH as dangerous
   });
 

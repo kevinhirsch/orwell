@@ -110,3 +110,32 @@ export function resolveCompetition(
   intents.lock(); // the result is now given — intents can no longer change
   return { winner, scores, temperature };
 }
+
+/**
+ * One ELIMINATION round of an endurance-style staged competition (the 0006 staged-rounds
+ * evolution). The SAME stat-vs-type + bounded temperature + soul emotional-modifier + intent math
+ * as `resolveCompetition` — applied to the still-in field to decide who DROPS this round (the
+ * lowest score steps out), not who wins. The cumulative survival across rounds is the comp's
+ * outcome: the last houseguest standing is the winner.
+ *
+ * Anti-sycophancy holds per round exactly as for the single-shot resolve: the `intents` are read
+ * (never prose), and the player's declared per-round approach (compete/play-safe/throw) carries the
+ * SAME 0028 penalties — a throw is the deepest survival cut, so a dropped/thrown round steps the
+ * player out. Deterministic under a fixed seed (one bounded temperature draw per competitor, in
+ * array order). Locks the intents once the round is given — the round's approach can't change after.
+ */
+export function resolveElimination(
+  competitors: Competitor[],
+  type: CompetitionType,
+  intents: CompetitionIntents,
+  rng: RandomnessSource,
+  constants: TemperatureConstants = TEMPERATURE_CONSTANTS,
+): { eliminated: EntityId; scores: Record<EntityId, number> } {
+  if (competitors.length < 2) throw new Error("resolveElimination: needs at least two competitors");
+  // `resolveCompetition` already validates the field, draws bounded temperature, and applies the
+  // intent penalties — we reuse it verbatim and read the SAME scores to pick the LOWEST (the drop).
+  const { scores } = resolveCompetition(competitors, type, intents, rng, constants);
+  let eliminated = competitors[0]!.id;
+  for (const c of competitors) if (scores[c.id]! < scores[eliminated]!) eliminated = c.id;
+  return { eliminated, scores };
+}

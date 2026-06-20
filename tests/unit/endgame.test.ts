@@ -51,9 +51,14 @@ describe("0045 — Final 3 is a final-HOH personal eviction", () => {
     const s = newLiveSeason([PLAYER, npc(1), npc(2)]); // three active ⇒ opens on the final HOH comp
     const ctx = ctxOf(new RelationshipModel(0.5));
     const rng = new SeededRandom(1);
-    advance(s, ctx, rng); // B46: the player plays the final HOH comp ⇒ declares intent first
-    const ev = applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
-    expect(ev.beat).toBe("hoh-competition");
+    // 0006 staged-rounds: the final HOH comp plays out its elimination rounds; the player declares a
+    // per-round approach each round they're in. Drive to the crown.
+    let ev: ReturnType<typeof advance> = null;
+    for (let g = 0; g < 20 && s.beat === "hoh-competition"; g++) {
+      if (s.pending?.kind === "comp-round") ev = applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
+      else ev = advance(s, ctx, rng);
+    }
+    expect(ev!.beat).toBe("hoh-competition"); // the crowning beat
     expect(s.beat).toBe("final-eviction"); // straight to the eviction — no nominations/veto
   });
 

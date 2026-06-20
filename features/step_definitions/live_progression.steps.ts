@@ -18,6 +18,7 @@ async function resolveLegally(p: Player, d: NonNullable<AdvanceView["pending"]>)
   if (d.kind === "nominations") await p.callTool("submitDecision", { kind: "nominations", choice: [d.options[0]!.id, d.options[1]!.id] });
   else if (d.kind === "veto-decision") await p.callTool("submitDecision", { kind: "veto-decision", use: false });
   else if (d.kind === "replacement") await p.callTool("submitDecision", { kind: "replacement", replacement: d.options[0]!.id });
+  else if (d.kind === "comp-intent" || d.kind === "comp-round") await p.callTool("submitDecision", { kind: d.kind, intent: "compete" }); // 0006 staged-rounds
   else await p.callTool("submitDecision", { kind: d.kind, vote: d.options[0]!.id });
 }
 
@@ -26,10 +27,11 @@ async function driveToPending(p: Player): Promise<{ view: AdvanceView; beats: nu
   let beats = 0;
   for (let i = 0; i < 3000; i++) {
     const view = await adv(p);
-    // B46: a competition-intent declaration auto-resolves to compete and counts as an auto beat — it is
-    // not the "first binding decision" the scenario means (that's a nomination / vote / etc.).
-    if (view.pending?.kind === "comp-intent") {
-      await p.callTool("submitDecision", { kind: "comp-intent", intent: "compete" });
+    // B46 / 0006 staged-rounds: a competition-approach declaration (the single comp-intent or a per-round
+    // comp-round) auto-resolves to compete and counts as an auto beat — it is not the "first binding
+    // decision" the scenario means (that's a nomination / vote / etc.).
+    if (view.pending?.kind === "comp-intent" || view.pending?.kind === "comp-round") {
+      await p.callTool("submitDecision", { kind: view.pending.kind, intent: "compete" });
       beats++;
       continue;
     }

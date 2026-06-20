@@ -111,6 +111,7 @@ function autoResolve(p: Pending): Record<string, unknown> {
     case "nominations": return { kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] };
     case "veto-decision": return { kind: "veto-decision", use: false };
     case "comp-intent": return { kind: "comp-intent", intent: "compete" };
+    case "comp-round": return { kind: "comp-round", intent: "compete" }; // 0006 staged-rounds
     case "houseguests-choice": return { kind: "houseguests-choice", vote: p.options[0]!.id };
     case "replacement": return { kind: "replacement", replacement: p.options[0]!.id };
     case "eviction-vote": return { kind: "eviction-vote", vote: p.options[0]!.id };

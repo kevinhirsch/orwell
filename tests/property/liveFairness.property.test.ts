@@ -117,6 +117,7 @@ describe("live-GENERATED hidden content never reaches a player surface (C6)", ()
           if (p.kind === "nominations") sb.session.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
           else if (p.kind === "veto-decision") sb.session.submitDecision({ kind: "veto-decision", use: false });
           else if (p.kind === "comp-intent") sb.session.submitDecision({ kind: "comp-intent", intent: "compete" });
+          else if (p.kind === "comp-round") sb.session.submitDecision({ kind: "comp-round", intent: "compete" }); // 0006 staged-rounds
           else if (p.options[0]) sb.session.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
         }
       }

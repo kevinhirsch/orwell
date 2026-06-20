@@ -1,7 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
-import { resolveCompetition, CompetitionIntents } from "../domain/competitionOutcome";
+import { resolveCompetition, resolveElimination, CompetitionIntents } from "../domain/competitionOutcome";
 import type { CompetitionType, Intent } from "../domain/competitionOutcome";
 
 /** The competition intents the player may declare (Bible: compete / throw / play-safe), 0006/0034. */
@@ -45,6 +45,10 @@ export type Beat =
   // the witnessed veto chip-draw ceremony (E35) — emitted on BeatEvent only; the structural
   // beat stays `veto-competition` (the draw is its first stage, the comp its second).
   | "veto-draw"
+  // a single STAGED elimination round (0006 staged-rounds evolution) — emitted on BeatEvent only; the
+  // structural beat stays `hoh-competition`/`veto-competition`. The CROWN event keeps the comp beat key
+  // (so the HOH/veto win still folds its consequence); only the per-round drops carry this distinct key.
+  | "comp-elimination"
   // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
   | "twist-reveal"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
@@ -61,6 +65,10 @@ export type PendingDecision =
   | { kind: "veto-decision"; by: EntityId; nominees: [EntityId, EntityId]; saveable: EntityId[] }
   // --- competition intent (B46/audit B5): the player declares compete/throw/play-safe before a comp ---
   | { kind: "comp-intent"; by: EntityId; comp: "hoh-competition" | "veto-competition" }
+  // --- STAGED competition round (0006 staged-rounds evolution): the player declares their approach for
+  // THIS elimination round, seeing who is still in. Committed BEFORE the round resolves (anti-sycophancy);
+  // once the round resolves it is locked — adaptation happens forward (the next round), never backward. ---
+  | { kind: "comp-round"; by: EntityId; comp: "hoh-competition" | "veto-competition"; round: number; stillIn: EntityId[] }
   // --- "Houseguest's Choice" (0046/B45): the player drew the chip and picks the sixth veto player ---
   | { kind: "houseguests-choice"; by: EntityId; options: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
@@ -135,6 +143,33 @@ export interface EvictionProgress {
   goodbyeIx: number;
 }
 
+/**
+ * The live STAGED competition sub-state machine (0006 staged-rounds evolution). An endurance-style
+ * comp is a sequence of ELIMINATION rounds over the still-in field until one remains (the winner).
+ * Each round, if the player is still in, the loop PAUSES for their per-round approach
+ * (compete/play-safe/throw) — committed BEFORE the round resolves, then locked (anti-sycophancy:
+ * adaptation is forward-only, never a retroactive re-label). The engine resolves each round from the
+ * structured selection (never prose), eliminates the lowest-scoring houseguest, and re-asks as the
+ * field narrows. NPCs choose their per-round approach by soul motivation (relationship-driven, as
+ * comp decisions already are; for now: always compete). Persisted + restart-safe (0030). Vault-free
+ * by construction (ids only; no score, lean, or hidden number is ever stored here).
+ */
+export interface CompetitionProgress {
+  /** Which competition this stages — for the resume after a per-round pause + the right beat transition. */
+  comp: "hoh-competition" | "veto-competition";
+  /** The competition type (0006/0042) — the resolution math's governing aptitude. */
+  type: CompetitionType;
+  /** The FULL original field that began the comp — surfaced on the crown event so the existing
+   *  comp-loss inflection (the contested field) is preserved (engine bookkeeping; public ceremony fact). */
+  field: EntityId[];
+  /** Who is STILL IN (the field this round competes over). Shrinks by one each resolved round. */
+  stillIn: EntityId[];
+  /** 1-based round counter — drives the per-round seeded rng fork (restart-stable) + the decision surfaced. */
+  round: number;
+  /** The houseguests eliminated so far, in drop order (engine bookkeeping; never crosses the wall). */
+  eliminated: EntityId[];
+}
+
 export interface LiveSeasonState {
   week: number;                 // 1-based HOH reign
   beat: Beat;                   // the next beat to resolve
@@ -180,6 +215,11 @@ export interface LiveSeasonState {
    * the season lives; the attribution surfaces only through the post-season retrospective.
    */
   voteRecord?: Array<{ week: number; evictee: EntityId; voteOf: Record<EntityId, EntityId> }>;
+  /**
+   * The in-progress STAGED competition sub-loop (0006 staged-rounds evolution); set while an
+   * endurance-style HOH/veto comp plays out its elimination rounds, cleared when a winner remains.
+   */
+  competition?: CompetitionProgress;
   /** The in-progress live finale sub-loop (0037); set when the finale begins. */
   finale?: FinaleProgress;
   /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
@@ -253,6 +293,8 @@ export type DecisionInput =
   | { kind: "nominations"; choice: [EntityId, EntityId] }
   | { kind: "veto-decision"; use: boolean; save?: EntityId }
   | { kind: "comp-intent"; intent: Intent }
+  // --- STAGED competition round (0006 staged-rounds evolution): the player's approach for THIS round ---
+  | { kind: "comp-round"; intent: Intent }
   | { kind: "houseguests-choice"; pick: EntityId }
   | { kind: "replacement"; replacement: EntityId }
   | { kind: "eviction-vote"; vote: EntityId }
@@ -289,23 +331,112 @@ function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): 
   // Final 3 (0045): the final-HOH competition lifts the outgoing-HOH restriction — everyone plays.
   const finalThree = s.active.length === 3;
   const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
-  return { def, field, winner: winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete") };
+  // The staged (endurance-style) WINNER — the elimination ladder played out with the player competing
+  // every round (the preview/default). `advance` crowns the SAME houseguest when the player competes;
+  // a different per-round approach changes the live outcome forward, never this default preview.
+  return { def, field, winner: stagedWinner(field, def.type, ctx, rng) };
 }
 
-/** Resolve the HOH competition beat (used by `advance` and the comp-intent resume); consumes the intent. */
-function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+/**
+ * Begin (or resume) the staged competition sub-loop for the HOH beat. The elimination ladder runs
+ * over the eligible field (Final 3 lifts the outgoing-HOH restriction). The library def is drawn ONCE
+ * up front and recorded into history on the FIRST round so a restart resumes the same comp (0042/0030).
+ */
+function beginHohCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionProgress {
+  const def = drawFor(s, "hoh", rng);
   const finalThree = s.active.length === 3;
-  const { def, winner: hoh } = resolveHoh(s, ctx, rng);
-  recordDraw(s, "hoh", def); // the comp resolved — the next hoh draw avoids it (0042)
-  s.compIntent = undefined; // declared intent consumed (locks: it can't be re-declared after the result)
-  s.hoh = hoh;
-  creditResume(s, hoh); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
-  s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
+  const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
+  recordDraw(s, "hoh", def); // the comp is committed for the week — the next hoh draw avoids it (0042)
+  s.vetoComp = undefined;
+  return { comp: "hoh-competition", type: def.type, field: [...field], stillIn: [...field], round: 1, eliminated: [] };
+}
+
+/** Begin (or resume) the staged competition sub-loop for the veto beat over the COMPLETED drawn field. */
+function beginVetoCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionProgress {
+  const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
+  recordDraw(s, "veto", def); // committed for the week — the next veto draw avoids it (0042)
+  return { comp: "veto-competition", type: def.type, field: [...s.vetoField!], stillIn: [...s.vetoField!], round: 1, eliminated: [] };
+}
+
+/**
+ * Resolve the HOH competition beat — now a STAGED elimination (0006 staged-rounds evolution). Drives the
+ * shared sub-loop (`advanceCompetition`); it pauses for the player's per-round approach when they are
+ * still in, eliminates the lowest each round, and crowns the last standing as HOH. The `comp-intent`
+ * resume path still calls this (the first per-round approach has already been declared into the loop).
+ */
+function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
+  if (!s.competition) s.competition = beginHohCompetition(s, ctx, rng);
+  return advanceCompetition(s, ctx, rng);
+}
+
+/**
+ * Resolve the veto competition beat — STAGED, exactly like the HOH beat (the draw ceremony, E35, still
+ * precedes it). Drives the shared sub-loop; crowns the last standing as the Power of Veto holder.
+ */
+function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
+  if (!s.competition) s.competition = beginVetoCompetition(s, ctx, rng);
+  return advanceCompetition(s, ctx, rng);
+}
+
+/**
+ * Advance the staged competition ONE step (0006 staged-rounds evolution). Each step:
+ *   1. If the player is still in the field and has NOT committed an approach for this round, PAUSE —
+ *      surface the `comp-round` pending (the still-in field is in it) and return null. The approach is
+ *      committed BEFORE the round resolves; once the round resolves it is LOCKED (anti-sycophancy).
+ *   2. Otherwise resolve the round from the STRUCTURED per-round approach (never prose): eliminate the
+ *      lowest-scoring houseguest, emit a witnessed round event ("…is eliminated"), and re-ask as the
+ *      field narrows. When one houseguest remains, crown them (HOH / veto holder) and transition the beat.
+ * Pure + seed-deterministic (per-round forked rng); restart-safe (the sub-state persists, 0030).
+ */
+function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent | null {
+  const c = s.competition!;
+  // A trivial field (one eligible competitor) crowns immediately — no round to stage.
+  if (c.stillIn.length <= 1) return crownCompetition(s, ctx);
+  // The player declares their approach for THIS round BEFORE it resolves (anti-sycophancy). The
+  // committed `compIntent` carries it (the comp-intent / comp-round decision sets it); if the player
+  // is still in and has not committed one, pause and surface the still-in field.
+  if (c.stillIn.includes(ctx.player) && s.compIntent === undefined) {
+    s.pending = { kind: "comp-round", by: ctx.player, comp: c.comp, round: c.round, stillIn: [...c.stillIn] };
+    return null;
+  }
+  const playerApproach = c.stillIn.includes(ctx.player) ? (s.compIntent ?? "compete") : "compete";
+  const dropped = eliminateRound(c.stillIn, c.type, ctx, roundRng(rng, c.round), playerApproach);
+  c.stillIn = c.stillIn.filter((id) => id !== dropped);
+  c.eliminated.push(dropped);
+  c.round += 1;
+  s.compIntent = undefined; // the round's approach is consumed + LOCKED — the next round re-asks
+  if (c.stillIn.length === 1) return crownCompetition(s, ctx);
   return {
-    beat: "hoh-competition",
-    content: `${hoh} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
-    participants: [hoh],
+    // A per-round DROP — NOT the crown (which keeps the comp beat key so its consequence still folds).
+    beat: "comp-elimination",
+    content: `${dropped} is eliminated; ${c.stillIn.length} remain`,
+    participants: [dropped, ...c.stillIn],
   };
+}
+
+/** The last houseguest standing is crowned (HOH / veto holder); the beat transitions + the draw is recorded. */
+function crownCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent {
+  const c = s.competition!;
+  const winner = c.stillIn[0]!;
+  s.competition = undefined;
+  s.compIntent = undefined;
+  creditResume(s, winner); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
+  if (c.comp === "hoh-competition") {
+    const finalThree = s.active.length === 3;
+    s.hoh = winner;
+    s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
+    return {
+      beat: "hoh-competition",
+      content: `${winner} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
+      participants: [winner],
+    };
+  }
+  s.vetoHolder = winner; s.beat = "veto-ceremony";
+  // The crown event carries the FULL field in its ORIGINAL draw order (the participants) so the
+  // contested-loss soul inflection (evolveFromBeat's veto case) fires for the whole six, byte-identically
+  // to the single-shot model (whose event was `participants: field`). Order matters: the inflect/fold
+  // paths must consume identically to keep the diversity-isolation golden stream byte-stable.
+  return { beat: "veto-competition", content: `${winner} wins the Power of Veto`, participants: [...c.field] };
 }
 
 /**
@@ -348,19 +479,6 @@ function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
   };
 }
 
-/** Stage B of the veto beat (E35): resolve the drawn competition over the COMPLETED field;
- *  consumes the declared intent. The draw (`resolveVetoDraw`) always precedes this. */
-function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
-  const field = s.vetoField!;
-  // The SAME comp drawn at stage A (0042) — looked up, never re-drawn (restart-safe, 0030).
-  const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
-  const holder = winnerOf(field, def.type, ctx, rng, s.compIntent ?? "compete");
-  recordDraw(s, "veto", def); // the comp resolved — the next veto draw avoids it (0042)
-  s.compIntent = undefined; // consumed
-  s.vetoHolder = holder; s.beat = "veto-ceremony";
-  creditResume(s, holder); // a broadcast win — counts toward the jury's gameRespect read
-  return { beat: "veto-competition", content: `${holder} wins the Power of Veto`, participants: field };
-}
 
 /** The current competition beat's deterministic outcome (single authority, B37) — or null if the
  *  loop is not at a competition beat. PURE: it does not advance the loop; `advance` crowns the same
@@ -375,18 +493,39 @@ export interface CompetitionPeek {
 }
 export function peekCompetition(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): CompetitionPeek | null {
   if (s.pending || s.finished) return null;
+  // If the staged comp is ALREADY in progress, the preview continues the elimination from the live
+  // still-in field + current round (the committed approach this round, then compete) — so a poll mid-comp
+  // previews the SAME houseguest the loop will crown when the player competes the rest of the way.
+  if (s.competition) {
+    const c = s.competition;
+    const def = competitionDefFor(s, c);
+    if (!def) return null;
+    const approach = (round: number): Intent => (round === c.round ? (s.compIntent ?? "compete") : "compete");
+    const winner = stagedWinner(c.stillIn, c.type, ctx, rng, c.round, approach);
+    return { beat: c.comp, type: c.type, def, field: [...c.stillIn], winner };
+  }
   if (s.beat === "hoh-competition") { const { def, field, winner } = resolveHoh(s, ctx, rng); return { beat: s.beat, type: def.type, def, field, winner }; }
   if (s.beat === "veto-competition") {
     // E35: before the chips are drawn there IS no field — nothing to preview (the draw is a
-    // witnessed ceremony of its own). Once drawn, the preview replays stage B exactly: the same
+    // witnessed ceremony of its own). Once drawn, the preview replays the staged comp exactly: the same
     // stored comp over the same completed field with the same per-beat rng from position zero.
     if (!s.vetoField || !s.vetoComp) return null;
     const def = competitionById(s.vetoComp);
     if (!def) return null;
-    const winner = winnerOf(s.vetoField, def.type, ctx, rng, s.compIntent ?? "compete");
+    // The staged preview (player competing every round) — `advance` crowns the same holder when the
+    // player competes; per-round approach changes the live outcome forward, not this default preview.
+    const winner = stagedWinner(s.vetoField, def.type, ctx, rng);
     return { beat: s.beat, type: def.type, def, field: s.vetoField, winner };
   }
   return null;
+}
+
+/** The library def backing an in-progress staged competition — the LAST recorded draw for its phase. */
+function competitionDefFor(s: LiveSeasonState, c: CompetitionProgress): CompetitionDef | undefined {
+  const phase: CompetitionPhase = c.comp === "hoh-competition" ? "hoh" : "veto";
+  const recent = s.compHistory?.[phase] ?? [];
+  const last = recent[recent.length - 1];
+  return last ? competitionById(last) : undefined;
 }
 
 export function newLiveSeason(active: EntityId[]): LiveSeasonState {
@@ -405,6 +544,62 @@ function winnerOf(ids: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: R
   const intents = new CompetitionIntents();
   intents.declare(ctx.player, playerIntent);
   return resolveCompetition(competitors, type, intents, rng).winner;
+}
+
+// --- Staged (endurance-style) competition: visible elimination rounds (0006 staged-rounds evolution) ---
+
+/**
+ * Build the competitor list for ONE staged elimination round, applying the player's per-round
+ * approach. The math is verbatim 0006/0028: stat-vs-type + bounded temperature + the LIVE soul
+ * emotional modifier (0041) + the declared intent penalties (0028). NPCs compete (their per-round
+ * approach is soul-motivated; for now they always compete, matching the single-shot model's NPC path).
+ */
+function roundIntents(field: readonly EntityId[], ctx: SeasonCtx, playerApproach: Intent): CompetitionIntents {
+  const intents = new CompetitionIntents();
+  // The player's per-round approach carries the 0028 penalties; everyone else competes (the default).
+  if (field.includes(ctx.player)) intents.declare(ctx.player, playerApproach);
+  return intents;
+}
+
+/**
+ * A per-round seeded rng derived from the beat rng + the round index (restart-stable, 0030): round k
+ * forks the SAME child stream every time it is reached, regardless of how many advances/pauses
+ * happened — so the staged comp reproduces identically across a restart, and the preview
+ * (`stagedWinner`) replays each round exactly as `advance` resolves it.
+ */
+function roundRng(beatRng: RandomnessSource, round: number): RandomnessSource {
+  return beatRng.fork(`comp-round:${round}`);
+}
+
+/**
+ * Resolve ONE staged elimination round over the still-in field with the player's committed approach:
+ * the lowest-scoring houseguest drops. Pure; the SAME 0006/0028 math as the single-shot resolve.
+ */
+function eliminateRound(field: EntityId[], type: CompetitionType, ctx: SeasonCtx, rng: RandomnessSource, playerApproach: Intent): EntityId {
+  const competitors = field.map((id) => ({ id, stats: ctx.statsOf(id), emotionalState: ctx.emotionalOf?.(id) ?? 0.5 }));
+  const intents = roundIntents(field, ctx, playerApproach);
+  return resolveElimination(competitors, type, intents, rng).eliminated;
+}
+
+/**
+ * The endurance-style staged WINNER, computed by playing out every elimination round with a given
+ * per-round player approach (default: compete every round) — the deterministic preview authority
+ * (`peekCompetition` runs this so the preview equals what `advance` crowns when the player competes).
+ * Pure: forks a per-round child stream from `beatRng`, eliminates the lowest each round until one
+ * remains. NPC fields (no player) reduce to the same elimination ladder.
+ */
+function stagedWinner(
+  field: EntityId[], type: CompetitionType, ctx: SeasonCtx, beatRng: RandomnessSource,
+  startRound = 1, playerApproach: (round: number) => Intent = () => "compete",
+): EntityId {
+  let live = [...field];
+  let round = startRound;
+  while (live.length > 1) {
+    const dropped = eliminateRound(live, type, ctx, roundRng(beatRng, round), playerApproach(round));
+    live = live.filter((id) => id !== dropped);
+    round += 1;
+  }
+  return live[0]!;
 }
 
 /** A throwaway WeekState for the legality helpers (they only read the fields they need). */
@@ -939,16 +1134,11 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
   if (s.pending || s.finished || s.beat === "complete") return null;
 
   switch (s.beat) {
-    case "hoh-competition": {
-      // B46: if the player plays this comp and hasn't declared intent, pause for compete/throw/play-safe.
-      const finalThree = s.active.length === 3;
-      const field = eligibleForHOH(weekState(s, ctx), finalThree ? { specialAllowsOutgoingHoh: true } : undefined);
-      if (s.compIntent === undefined && field.includes(ctx.player)) {
-        s.pending = { kind: "comp-intent", by: ctx.player, comp: "hoh-competition" };
-        return null;
-      }
+    case "hoh-competition":
+      // STAGED (0006 staged-rounds evolution): the comp plays out in visible elimination rounds. The
+      // sub-loop pauses for the player's PER-ROUND approach (`comp-round`) when they are still in —
+      // committed before each round resolves, locked after (anti-sycophancy). No up-front binding popup.
       return resolveHohBeat(s, ctx, rng);
-    }
     case "final-eviction": {
       // Final 3 (0045): the final HOH evicts one of the other two; the survivor + HOH are the Final 2.
       const rivals = s.active.filter((h) => h !== s.hoh) as EntityId[];
@@ -981,12 +1171,9 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     case "veto-competition": {
       // E35 stage A: the chip draw is a witnessed ceremony of its own — it precedes any winner.
       if (!s.vetoField) return resolveVetoDraw(s, ctx, rng);
-      // E35 + B46: ANY player in the drawn field — puller (HOH/nominee) or chip-drawn — declares
-      // the canonical compete/throw/play-safe intent before the comp resolves.
-      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
-        s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
-        return null;
-      }
+      // STAGED (0006 staged-rounds evolution): the veto comp plays out in elimination rounds exactly
+      // like the HOH comp — the sub-loop pauses for the player's PER-ROUND approach when they are in
+      // the drawn field. The draw (above) always precedes the rounds.
       return resolveVetoComp(s, ctx, rng);
     }
     case "veto-ceremony": {
@@ -1085,6 +1272,10 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
   switch (p.kind) {
     case "comp-intent":
       return { kind: "comp-intent", intent: "compete" };
+    case "comp-round":
+      // The staged per-round approach (0006 staged-rounds): an NPC in the player's seat competes
+      // every round (the same default the loop's NPC competitors use — no second rulebook).
+      return { kind: "comp-round", intent: "compete" };
     case "nominations": {
       // The same strategic read the loop's own NPC HOHs use (no second rulebook).
       const [a, b] = nominationStrategy(p.by, s.active, ctx.rel, {
@@ -1141,7 +1332,11 @@ export function applyDecision(
   // the live adapter passes the beat-deterministic rng, so the same seed reproduces the same outcome.
   rng: RandomnessSource = new SeededRandom(1),
 ): BeatEvent {
-  if (!s.pending || s.pending.kind !== input.kind) {
+  // `comp-intent` and `comp-round` are interchangeable aliases for the staged per-round approach (the
+  // live pending is `comp-round`; the legacy/alias input may arrive as either). Every other kind must match.
+  const compApproach = (k: string): boolean => k === "comp-intent" || k === "comp-round";
+  const matches = s.pending && (s.pending.kind === input.kind || (compApproach(s.pending.kind) && compApproach(input.kind)));
+  if (!matches) {
     throw new Error(`no pending ${input.kind} decision`);
   }
   switch (input.kind) {
@@ -1174,13 +1369,20 @@ export function applyDecision(
       const ev = resolveReplacement(s, ctx);
       return ev ?? { beat: "veto-ceremony", content: `${ctx.player} uses the veto on ${ctx.player === save ? "themselves" : save}`, participants: [ctx.player, save!] };
     }
-    case "comp-intent": {
-      // B46/audit B5: the player declares compete/throw/play-safe; the comp then resolves with it.
+    case "comp-intent":
+    case "comp-round": {
+      // 0006 staged-rounds evolution: the player commits their approach for the CURRENT elimination
+      // round (compete / throw / play-safe), seeing who is still in. STRUCTURED selection only — never
+      // parsed from prose. It is committed BEFORE the round resolves; resolving locks it (the round can
+      // not be re-labeled after). Adaptation is forward-only: the NEXT round re-asks over the still-in field.
+      // (`comp-intent` is the legacy alias the FE/tests may still send — same per-round semantics.)
       s.compIntent = input.intent;
       s.pending = undefined;
-      if (s.beat === "hoh-competition") return resolveHohBeat(s, ctx, rng);
-      // E35: at the veto the field is already drawn (the draw ceremony precedes intent) — resolve it.
-      return resolveVetoComp(s, ctx, rng);
+      // Resume the staged sub-loop: it resolves exactly THIS round (eliminate the lowest), then either
+      // pauses again for the next round or crowns the last standing.
+      if (s.beat === "hoh-competition") return resolveHohBeat(s, ctx, rng)!;
+      // E35: at the veto the field is already drawn (the draw ceremony precedes the rounds) — resolve.
+      return resolveVetoComp(s, ctx, rng)!;
     }
     case "houseguests-choice": {
       // The player drew Houseguest's Choice and picks the sixth veto player (B45/audit B4).
@@ -1192,11 +1394,8 @@ export function applyDecision(
       }
       s.pending = undefined;
       s.vetoField = [...s.vetoField!, input.pick]; // the player's pick completes the field
-      // E35: the completed field is the witnessed beat; the comp resolves on the NEXT advance —
-      // after the player (always in the field here: they drew the chip as a puller) declares intent.
-      if (s.compIntent === undefined && s.vetoField.includes(ctx.player)) {
-        s.pending = { kind: "comp-intent", by: ctx.player, comp: "veto-competition" };
-      }
+      // E35: the completed field is the witnessed beat; the STAGED comp resolves on the NEXT advance,
+      // pausing for the player's per-round approach (`comp-round`) inside the sub-loop (0006 staged-rounds).
       return {
         beat: "veto-draw",
         content: `${ctx.player} names ${input.pick} to fill the final veto spot`,

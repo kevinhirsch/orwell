@@ -16,6 +16,21 @@ const ctxOf = (rel: RelationshipModel): SeasonCtx => ({
   player: PLAYER, statsOf: () => ({ physical: 0.5, mental: 0.5, social: 0.5 }), rel,
 });
 
+/**
+ * Drive the STAGED veto comp (0006 staged-rounds) from the just-drawn field to its crown, declaring
+ * `approach` for every round the player is in. Returns the final "X wins the Power of Veto" beat.
+ */
+function resolveStagedVeto(
+  s: LiveSeasonState, ctx: SeasonCtx, rng: SeededRandom, approach: "compete" | "throw" | "play-safe" = "compete",
+): BeatEvent | null {
+  let last: BeatEvent | null = null;
+  for (let g = 0; g < 50 && !s.vetoHolder; g++) {
+    if (s.pending?.kind === "comp-round") last = applyDecision(s, { kind: "comp-round", intent: approach }, ctx, rng);
+    else last = advance(s, ctx, rng);
+  }
+  return last;
+}
+
 describe("E35 — the veto chip draw is a witnessed beat preceding any winner", () => {
   it("emits a veto-draw beat naming the field (and any Houseguest's Choice holder + pick) before the comp", () => {
     const ctx = ctxOf(new RelationshipModel(0.5));
@@ -32,12 +47,8 @@ describe("E35 — the veto chip draw is a witnessed beat preceding any winner", 
       expect(s.vetoField).toBeDefined();
       for (const id of s.vetoField!) expect(draw!.participants).toContain(id);
       if (/Houseguest's Choice/.test(draw!.content)) sawHcInContent = true;
-      // Stage B: the comp resolves on a later advance (after any player intent declaration).
-      let comp: BeatEvent | null = null;
-      for (let g = 0; g < 5 && !comp; g++) {
-        if (s.pending?.kind === "comp-intent") { comp = applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng); break; }
-        comp = advance(s, ctx, rng);
-      }
+      // Stage B: the STAGED comp resolves over later advances (after any player per-round approach).
+      const comp = resolveStagedVeto(s, ctx, rng);
       expect(comp?.beat).toBe("veto-competition");
       expect(s.vetoHolder).toBeDefined();
       expect(s.vetoField).toContain(s.vetoHolder);
@@ -46,7 +57,7 @@ describe("E35 — the veto chip draw is a witnessed beat preceding any winner", 
     expect(sawHcInContent).toBe(true);
   });
 
-  it("a player drawn into the field BY CHIP declares the canonical compete/throw/play-safe intent", () => {
+  it("a player drawn into the field BY CHIP declares the canonical per-round approach (0006 staged-rounds)", () => {
     const ctx = ctxOf(new RelationshipModel(0.5));
     let chipDrawnIntents = 0;
     for (let seed = 1; seed <= 80; seed++) {
@@ -55,19 +66,25 @@ describe("E35 — the veto chip draw is a witnessed beat preceding any winner", 
       const rng = new SeededRandom(seed);
       advance(s, ctx, rng); // the witnessed draw
       if (!s.vetoField!.includes(PLAYER)) {
-        // Not drawn: the comp resolves with NO player intent pause.
-        const comp = advance(s, ctx, rng);
+        // Not drawn: the STAGED comp resolves with NO player per-round pause (every round auto-NPC).
+        const comp = resolveStagedVeto(s, ctx, rng);
         expect(s.pending).toBeUndefined();
         expect(comp?.beat).toBe("veto-competition");
         continue;
       }
-      // Chip-drawn: the loop pauses for the player's declaration before the comp runs (E35).
+      // Chip-drawn: the loop pauses for the player's PER-ROUND approach before each round runs (E35 + staged).
       expect(advance(s, ctx, rng)).toBeNull();
-      expect(s.pending?.kind).toBe("comp-intent");
+      expect(s.pending?.kind).toBe("comp-round");
+      expect((s.pending as { stillIn: EntityId[] }).stillIn).toContain(PLAYER);
       chipDrawnIntents++;
-      const comp = applyDecision(s, { kind: "comp-intent", intent: "throw" }, ctx, rng);
-      expect(comp.beat).toBe("veto-competition");
-      expect(s.compIntent).toBeUndefined(); // consumed by the resolution (immutability holds)
+      // Throw the FIRST round: a structured per-round approach, locked once the round resolves. The
+      // round's event is a per-round DROP (comp-elimination) — the crown comes when one remains.
+      const r1 = applyDecision(s, { kind: "comp-round", intent: "throw" }, ctx, rng);
+      expect(["comp-elimination", "veto-competition"]).toContain(r1.beat);
+      expect(s.compIntent).toBeUndefined(); // consumed by the round's resolution (immutability holds)
+      // The comp finishes its remaining rounds (the player is likely dropped after a throw).
+      resolveStagedVeto(s, ctx, rng);
+      expect(s.vetoHolder).toBeDefined();
     }
     expect(chipDrawnIntents).toBeGreaterThan(0); // the chip-drawn path was genuinely exercised
   });
@@ -84,12 +101,9 @@ describe("E35 — the veto chip draw is a witnessed beat preceding any winner", 
       if (pendingKind() !== undefined) continue; // a player pause — previews stay null while pending
       const peek = peekCompetition(s, ctx, new SeededRandom(seed));
       expect(peek).not.toBeNull();
-      // The loop crowns the SAME winner the preview reported (single authority, B37).
-      let comp: BeatEvent | null = null;
-      for (let g = 0; g < 5 && !comp; g++) {
-        if (pendingKind() === "comp-intent") { comp = applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, new SeededRandom(seed)); break; }
-        comp = advance(s, ctx, new SeededRandom(seed));
-      }
+      // The loop crowns the SAME winner the preview reported (single authority, B37). The preview
+      // runs the player competing every round, so the staged crown matches when we do the same.
+      resolveStagedVeto(s, ctx, new SeededRandom(seed), "compete");
       expect(s.vetoHolder).toBe(peek!.winner);
     }
   });

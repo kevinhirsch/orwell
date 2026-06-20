@@ -51,6 +51,8 @@ function passiveAnswer(p: PendingView): Record<string, unknown> {
         : { kind: "veto-decision", use: false };
     case "comp-intent":
       return { kind: "comp-intent", intent: "compete" };
+    case "comp-round":
+      return { kind: "comp-round", intent: "compete" }; // 0006 staged-rounds
     case "houseguests-choice":
       return { kind: "houseguests-choice", vote: p.options[0]!.id };
     case "replacement":

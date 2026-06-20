@@ -2,6 +2,8 @@
 
 > **Status:** Built (see the [README status index](./README.md#index)). **Build priority:** #6.
 > **Executable spec:** [`0006-outcomes-by-stats-and-temperature.feature`](./0006-outcomes-by-stats-and-temperature.feature)
+> **Amendment (staged rounds):** competitions now play out in **visible elimination ROUNDS** — see
+> [§8 — Staged-rounds evolution](#8-staged-rounds-evolution-the-per-round-approach) below.
 
 ## 1. Summary
 
@@ -70,3 +72,54 @@ TemperatureRoll:
 `bb-sim-spec.md` §8, §12 (Randomness and temperature; archetype/temperature outcome scenario),
 §5; `docs/legacy/BB_GameBible.md` §5 (stats Physical/Mental/Social/Luck; intent);
 `CLAUDE_CODE_INSTRUCTIONS.md` §6, §8.
+
+## 8. Staged-rounds evolution (the per-round approach)
+
+**Owner decision (this amendment).** The single, up-front, irrevocable approach declaration
+(compete / throw / play-safe) was too rigid: the player committed once, blind to how the field
+would narrow. Competitions are now **endurance-style, played out in visible ELIMINATION ROUNDS**.
+
+### 8.1 The round model
+
+- A competition is a sequence of rounds over the **still-in field**. Each round resolves with the
+  SAME 0006/0028 math — stat-vs-type weighting **+** a bounded per-moment temperature roll **+** the
+  soul emotional modifier **+** the declared approach penalties — applied **round by round** to decide
+  **who DROPS** (the lowest score steps out), not who wins. The last houseguest standing is the winner.
+  No new outcome system: `resolveElimination` reuses `resolveCompetition` verbatim and reads the SAME
+  scores to pick the lowest (`src/domain/competitionOutcome.ts`); the staged sub-loop lives in
+  `src/engine/liveSeason.ts` (`CompetitionProgress` / `advanceCompetition`), the sibling of the staged
+  eviction (0047) and finale (0037) sub-loops.
+- **The player picks their approach for THAT round, seeing who remains** — adapting to the narrowing
+  field (everyone left is an ally → throw; a threat is still in → keep competing). The per-round
+  approach modulates **only the player's** survival that round (compete = full; play-safe = the
+  middling 0028 penalty; throw = the deep penalty, i.e. drop / step out). NPCs choose by soul
+  motivation (relationship-driven, as comp decisions already are — for now they compete).
+- Seeded + reproducible: each round forks a child stream from the per-beat rng (`fork("comp-round:N")`),
+  restart-stable (0030). The decision seam surfaces a per-round `comp-round` pending carrying the
+  **still-in field** + the round number; `peekCompetition` continues the elimination from the live
+  still-in field, so the single-authority preview (B37) still equals what the loop crowns when the
+  player competes the rest of the way.
+
+### 8.2 Anti-sycophancy, preserved PER ROUND (the non-negotiable)
+
+The old popup was binding for one reason — **mandate #3**: the player must commit BEFORE seeing a
+result, so a loss can never be retroactively re-labeled a "throw." That guarantee is preserved
+**per round**:
+
+- Each round's approach is **committed BEFORE that round resolves**; the engine uses the **structured
+  selection only — never parsed from prose** (the FE posts it engine-direct via `submitDecision`,
+  exactly as the single declaration did).
+- Once a round (and the comp) resolves, it is **LOCKED** — no retroactive change. Submitting an
+  approach for a round that already resolved is refused; a late submit after the crown is a no-op.
+- **Adaptation happens forward** (the next round, over the narrowed field), **never backward**. There
+  is no door to re-label a finished round.
+
+### 8.3 Calibration holds
+
+The END distribution over the staged comp stays within the 0006 band: a clear stat favorite wins a
+**strong majority** (≈73% across field sizes — squarely inside the 65–80% target) but loses a real
+minority; equal-stat houseguests each win their fair share (symmetry → no hidden favor, the player
+unprotected); a per-round throw measurably lowers the player's win rate. Pinned by
+`tests/unit/stagedCompetition.test.ts` (favorite band, symmetry, reproducibility, the per-round
+throw penalty, and the preview↔crown single-authority match) and held on the live loop by the
+existing `tests/property/liveFairness.property.test.ts`.

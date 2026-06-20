@@ -30,6 +30,7 @@ _DECISION_KINDS = [
     "nominations",
     "veto-decision",
     "comp-intent",
+    "comp-round",  # 0006 staged-rounds: the per-round competition approach
     "houseguests-choice",
     "replacement",
     "eviction-vote",
