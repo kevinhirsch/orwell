@@ -384,6 +384,31 @@ def _parse_ollama_response(data: dict) -> str:
     return message.get("content") or data.get("response") or ""
 
 
+def _openai_message_text(msg: dict) -> str:
+    """Pull the usable text out of an OpenAI-compatible chat `message`.
+
+    Reasoning models (DeepSeek-R1 / -V*, Qwen3, Nemotron, …) frequently return an
+    EMPTY ``content`` and put their tokens in a reasoning field — and providers do
+    NOT agree on its name: vLLM/NIM emit ``reasoning``, DeepSeek's own API emits
+    ``reasoning_content``, some Ollama-compatible builds emit ``thinking``. The
+    non-streaming helper used to read only ``content or reasoning_content``, so a
+    provider that uses ``reasoning`` (or ``thinking``) returned ``""`` — which broke
+    the game's auto-record extraction (``auto-record: no parseable JSON (len=0)``):
+    the constrained JSON the model produced lived in a field we never read, so the
+    consequence loop never fired. Read every variant so the answer is recoverable
+    regardless of provider. (Mirrors the streaming path's reasoning-field handling.)
+    """
+    if not isinstance(msg, dict):
+        return ""
+    return (
+        msg.get("content")
+        or msg.get("reasoning_content")
+        or msg.get("reasoning")
+        or msg.get("thinking")
+        or ""
+    )
+
+
 def _host_match(url: str, *domains: str) -> bool:
     """Return True if url's hostname equals any of `domains` or is a subdomain of one.
 
@@ -1063,7 +1088,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             response = _parse_ollama_response(data)
         else:
             msg = data["choices"][0]["message"]
-            response = msg.get("content") or msg.get("reasoning_content") or ""
+            response = _openai_message_text(msg)
         _set_cached_response(cache_key, response)
         return response
     except Exception:
@@ -1232,7 +1257,7 @@ async def llm_call_async(
                     response = _parse_ollama_response(data)
                 else:
                     msg = data["choices"][0]["message"]
-                    response = msg.get("content") or msg.get("reasoning_content") or ""
+                    response = _openai_message_text(msg)
                 _set_cached_response(cache_key, response)
                 return response
             except Exception:
