@@ -8,6 +8,7 @@ import { FakeClock } from "../../src/adapters/time/FakeClock";
 import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
 import { PLAYER, npc } from "../../src/domain/ids";
+import { buildWorldSnapshot } from "../../src/engine/zeitgeist";
 import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
 
 /**
@@ -107,6 +108,55 @@ describe("R3 cache — the cached export equals a full recompute (correctness)",
     // Season 2 is a clean sandbox — its event log is the new season's, never the dead one's accumulation.
     expect(fresh.events.length).toBeLessThan(deadSeason.events.length);
     expect(fresh).not.toBe(deadSeason);
+  });
+});
+
+describe("R3 cache — the integrity checkpoint never re-baselines from a stale cached export", () => {
+  // The 0062 regression: a NON-EVENT live-session mutation (here a `session.restore` that swaps the
+  // frozen world snapshot to `absent`) bumps NEITHER the registry's snapshot rev NOR the O(1) event
+  // count — so the cache key alone cannot tell the live state changed. `seedBaseline` re-baselines
+  // precisely in that situation (resume-from-disk, or a deliberate state set), so it MUST read the
+  // current live truth, not a point-in-time capture from before the swap. If it trusts the cache, the
+  // baseline holds the OLD world snapshot while the candidate holds the new one, and the 0007 freeze
+  // guard refuses the very next turn as "degradation" (state unchanged). The fix invalidates first.
+  it("a re-baseline after a non-event live mutation captures current state, not the pre-mutation cache", () => {
+    const { reg, orch, U } = liveRig(0x0062);
+    const sb = reg.sandboxFor(U);
+    // Prime the cache: an export at the post-createCharacter state (with the model-framed world snapshot).
+    const primed = reg.snapshot(U);
+    expect((primed.worldSnapshot as { source?: string } | undefined)?.source).toBe("model-framed");
+
+    // A direct, non-event live-session mutation that bypasses commit/restore/invalidate seams entirely:
+    // swap the frozen world snapshot to the ABSENT tier via session.restore (the field changes; no event
+    // is appended, so the cache's rev + event-count key are BOTH unchanged from the primed capture).
+    const core = sb.session.snapshot();
+    core.worldSnapshot = buildWorldSnapshot({ seed: 1, capturedFor: "move-in day", source: "absent" });
+    sb.session.restore(core);
+    expect(sb.session.worldSnapshotView()).toBeNull(); // live state IS now absent
+
+    // Re-baseline: the orchestrator must NOT pin the stale model-framed capture. (Asserted via the
+    // public commit behavior below — the baseline is private.) Without the fix, snapshot(U) here would
+    // hand back the primed cache (rev + events unchanged), seeding a stale baseline.
+    orch.seedBaseline(U);
+    const afterSeed = reg.snapshot(U);
+    // The fresh export reflects the absent live state — not the stale model-framed capture.
+    expect((afterSeed.worldSnapshot as { source?: string } | undefined)?.source).toBe("absent");
+
+    // And the next player turn commits CLEANLY — it is not wrongly refused as degradation against a
+    // stale (model-framed) baseline. A real beat advances the live loop and persists.
+    expect(() => {
+      for (let i = 0; i < 4; i++) {
+        const adv = sb.session.advanceGame();
+        if (adv.pending) {
+          const p = adv.pending;
+          if (p.kind === "nominations") sb.session.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+          else if (p.kind === "veto-decision") sb.session.submitDecision({ kind: "veto-decision", use: false });
+          else if (p.kind === "replacement") sb.session.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+          else sb.session.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
+        }
+        if (adv.finished) break;
+      }
+    }).not.toThrow();
   });
 });
 

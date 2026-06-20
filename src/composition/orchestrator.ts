@@ -144,8 +144,18 @@ export class Orchestrator {
    * Called by the runtime's boot preload: without it, the first commit after an engine restart was
    * checkpoint-blind — the guard had a hole exactly at resume-from-disk, where the historical
    * memory-thinning bug lived.
+   *
+   * R3 (incremental-snapshot cache): a re-baseline runs precisely BECAUSE the live session state was
+   * just set/replaced from OUTSIDE the `commit` seam — a resume-from-disk, or a `session.restore` that
+   * swaps a field (e.g. the 0062 world snapshot) WITHOUT appending an event. Such a mutation bumps
+   * neither the registry's snapshot rev nor the event count, so a cached export can be STALE relative to
+   * the live truth. The baseline must be the current state, never a point-in-time capture from before the
+   * external mutation — so invalidate the cache first and read fresh (the same `invalidateSnapshot`
+   * discipline `advance` uses after its off-screen `applyFn`). Without this the checkpoint compares a
+   * stale baseline to the freshly-mutated candidate and wrongly refuses the next turn as degradation.
    */
   seedBaseline(user: string): void {
+    this.registry.invalidateSnapshot(user);
     this.baselines.set(user, this.registry.snapshot(user));
   }
 
