@@ -20,10 +20,22 @@ BRANCH="${BRANCH:-main}"
 # A4/ruling #17 — private-repo token (one-time setup / annual rotation for an EXISTING install):
 #   orwell-update.sh --set-token  prompt for (or take GIT_TOKEN=) the deploy PAT, persist it into
 #                                 data/.env, and wire the git credential helper — then exit.
+#   orwell-update.sh --no-restart do the full update but SKIP the final `systemctl restart` — used
+#                                 by the composed Update + Reset tier (orwell-update-reset.sh) so the
+#                                 OOBE reset that follows owns the single final restart.
 REF="${REF:-}"
-ROLLBACK=0; SET_TOKEN=0
-[[ "${1:-}" == "--rollback" ]] && ROLLBACK=1
-[[ "${1:-}" == "--set-token" ]] && SET_TOKEN=1
+ROLLBACK=0; SET_TOKEN=0; NO_RESTART=0
+# --no-restart: do the full update (pull → rebuild → refresh deps → reconcile units) but SKIP the
+# final `systemctl restart`. Added for the composed Update + Reset tier (orwell-update-reset.sh),
+# which runs the update with restart suppressed and lets the OOBE reset perform the SINGLE final
+# restart. Additive guard only — it never changes what the update builds. Accepted in any position.
+for __a in "$@"; do
+  case "$__a" in
+    --rollback)   ROLLBACK=1 ;;
+    --set-token)  SET_TOKEN=1 ;;
+    --no-restart) NO_RESTART=1 ;;
+  esac
+done
 CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"   # explicit override disables the legacy-name fallback
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
@@ -101,6 +113,7 @@ if command -v pct >/dev/null 2>&1 && ! find_app >/dev/null 2>&1; then
   # (BASH_EXECUTION_STRING); otherwise run the container's own checked-out copy (its first act
   # is `git pull`, so the staleness window is one update cycle — the E84 integrity shape).
   FWD_FLAG=""; [[ $ROLLBACK -eq 1 ]] && FWD_FLAG="--rollback"; [[ $SET_TOKEN -eq 1 ]] && FWD_FLAG="--set-token"
+  [[ $NO_RESTART -eq 1 ]] && FWD_FLAG="${FWD_FLAG:+$FWD_FLAG }--no-restart"
   FWD_ENV="export ${APP_DIR_EXPLICIT:+APP_DIR='${APP_DIR_EXPLICIT}' }BRANCH='${BRANCH}' REF='${REF}';"
   if [[ -n "${BASH_SOURCE[0]:-}" && -r "${BASH_SOURCE[0]:-}" ]]; then
     TMP_UPDATE="$(mktemp /tmp/orwell-update-XXXXXX.sh)"
@@ -323,6 +336,20 @@ if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-up
   chmod 644 "${APP_DIR}/data/ops-update.log"
   OPS_UNITS_READY=1
 fi
+# Combined Update + Reset trigger (admin "Update + Reset" button): reconcile its units too so a box
+# installed before this tier gains the seam on its next update. Same G19b shape — the web tier
+# drops data/ops/update-reset-requested, the root path unit runs orwell-update-reset.sh --yes,
+# output appended to data/ops-update-reset.log (the status page tails it live).
+OPS_UPDATE_RESET_READY=0
+if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.path" ]]; then
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.path"    /etc/systemd/system/orwell-ops-update-reset.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.service" /etc/systemd/system/orwell-ops-update-reset.service
+  install -d -m 750 "${APP_DIR}/data/ops"
+  if id -u orwell >/dev/null 2>&1; then chown orwell:orwell "${APP_DIR}/data/ops"; fi
+  touch "${APP_DIR}/data/ops-update-reset.log"
+  chmod 644 "${APP_DIR}/data/ops-update-reset.log"
+  OPS_UPDATE_RESET_READY=1
+fi
 systemctl daemon-reload
 if [[ "$OPS_UNITS_READY" -eq 1 ]]; then
   # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
@@ -331,7 +358,15 @@ if [[ "$OPS_UNITS_READY" -eq 1 ]]; then
   systemctl enable --now orwell-ops-update.path
   systemctl restart orwell-ops-update.path
 fi
+if [[ "$OPS_UPDATE_RESET_READY" -eq 1 ]]; then
+  systemctl enable --now orwell-ops-update-reset.path
+  systemctl restart orwell-ops-update-reset.path
+fi
 
-echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
-systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
+if [[ "$NO_RESTART" -eq 1 ]]; then
+  echo "==> --no-restart: build is in place but services were NOT restarted (the caller restarts)."
+else
+  echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
+  systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
+fi
 echo "==> update complete ($(git -C "$APP_DIR" rev-parse --short HEAD)); previous build kept for --rollback."

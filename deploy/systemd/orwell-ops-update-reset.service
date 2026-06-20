@@ -1,0 +1,38 @@
+[Unit]
+Description=orwell ops — web-requested Update + Reset runner (pull+rebuild THEN OOBE, keep API keys)
+# Started by orwell-ops-update-reset.path when the web tier drops
+# data/ops/update-reset-requested. No [Install] section: this unit is only ever started by its
+# path unit, never enabled directly.
+#
+# DELIBERATELY ROOT + MINIMAL SANDBOX — the same rationale as orwell-ops-update.service /
+# orwell-ops-factory-reset.service: the combined action must git pull + rebuild, stop/restart both
+# services, and remove user data under /opt/orwell. An E85-style sandbox (User=orwell, empty
+# capability set, ProtectSystem=strict) would forbid every one of those steps — which is exactly
+# why the hardened web tier cannot do this itself and hands off through the flag. Containment is by
+# DESIGN instead of by sandbox: only the one FIXED script path below ever runs; the trigger flag is
+# existence-only (its content is never read, parsed, or executed — nothing the web tier writes is
+# interpolated into any command); overlapping triggers no-op on the lock.
+#
+# Boot replay: if the box rebooted with a flag pending, the path unit fires at boot.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# oneshot, and deliberately WITHOUT RemainAfterExit: the unit must fall back to "inactive" after
+# each run so the path unit can trigger the next one.
+Type=oneshot
+# Live output: stdout+stderr of every Exec line APPENDS to the run log the admin status page tails
+# (the viewer reads any data/*.log).
+StandardOutput=append:/opt/orwell/data/ops-update-reset.log
+StandardError=append:/opt/orwell/data/ops-update-reset.log
+# Remove the flag BEFORE the run, never after: with PathExists= a flag that survived a run would
+# re-trigger this service the moment it deactivates — an infinite loop. The flag is dropped unread
+# (the existence-only contract; see the path unit).
+ExecStartPre=/bin/rm -f /opt/orwell/data/ops/update-reset-requested
+# flock: overlapping triggers NO-OP (exit 0) instead of stacking a second run. $$ is systemd's
+# escape for a literal $. The combined script runs NON-INTERACTIVELY (--yes) — the type-"RESET"
+# confirmation already happened in the browser before the flag was ever written. It is FAIL-CLOSED:
+# orwell-update-reset.sh runs the update (restart suppressed) and only proceeds to the OOBE reset
+# (single final restart, API keys preserved) if the update succeeded. Only this one fixed script
+# path runs; the web tier chose WHEN, never WHAT.
+ExecStart=/bin/bash -c 'exec 9>>/run/orwell-ops-update-reset.lock; flock -n 9 || { echo "ops-update-reset: another run holds the lock — no-op"; exit 0; }; echo ""; echo "── orwell ops Update + Reset run: $$(date -Is) (web-triggered, keep API keys) ──"; exec bash /opt/orwell/deploy/orwell-update-reset.sh --yes'

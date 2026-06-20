@@ -591,6 +591,15 @@ app.include_router(setup_admin_update_routes())
 from routes.admin_reset_routes import setup_admin_reset_routes
 app.include_router(setup_admin_reset_routes())
 
+# Admin Update + Reset (keep API keys) — the combined middle tier of the three maintenance
+# controls (Update · Update + Reset · Reset). Pull latest + rebuild, THEN reset to first-run OOBE
+# while PRESERVING the API-key/LLM provider config (never touches data/.env). Behind require_admin;
+# FIXED argv (no user input); the destructive run demands a type-"RESET" confirmation in the
+# browser and prefers the privilege-safe root flag trigger (orwell-ops-update-reset.path) when
+# installed. Fail-closed: a failed update never proceeds to the wipe (see orwell-update-reset.sh).
+from routes.admin_update_reset_routes import setup_admin_update_reset_routes
+app.include_router(setup_admin_update_reset_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.
