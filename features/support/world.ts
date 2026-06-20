@@ -503,6 +503,18 @@ export class BbWorld extends World {
   stStaticA?: string;
   stStaticB?: string;
 
+  // Feature 0062 — the move-in zeitgeist snapshot scratch state.
+  wsFix?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
+  wsFixB?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
+  wsView?: import("../../src/ports/GameSession").WorldSnapshotView | null;
+  wsPrompt?: string;
+  wsOffscreen?: string;
+  wsOutcomeA?: string;
+  wsOutcomeB?: string;
+  wsPairA?: import("../../src/ports/GameSession").HouseguestCard;
+  wsPairB?: import("../../src/ports/GameSession").HouseguestCard;
+  wsWeek?: number;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

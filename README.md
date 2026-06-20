@@ -555,7 +555,9 @@ whole-process fallback when the model is unavailable.
 - **[`docs/features/`](docs/features/)** — the numbered feature specs (design note +
   executable Gherkin) with the live status index.
 - **[`docs/decisions/`](docs/decisions/)** — ADRs, including
-  [0003 "the conversation is the game"](docs/decisions/0003-conversation-is-the-game.md).
+  [0003 "the conversation is the game"](docs/decisions/0003-conversation-is-the-game.md) and
+  [0005 "split authority by openness"](docs/decisions/0005-split-authority-by-openness.md) (the
+  engine records the open set of social play, never normalizes it — built in PR #355).
 - **[`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md)** — the live work queue.
 - **[`docs/audits/`](docs/audits/)** — the 2026-06-09 product and experience audits.
 - **[`docs/INSTALL.md`](docs/INSTALL.md)** — install and operations.

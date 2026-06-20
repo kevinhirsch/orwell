@@ -1,6 +1,20 @@
 # 0062 — Move-in zeitgeist snapshot (a frozen, shared world the whole cast moved in with)
 
-> **Status:** 📝 **SPEC ONLY — not built.** Authored 2026-06-19. Extends the shipped **C32** in-fiction
+> **Status:** ✅ **BUILT — BDD-gated** (2026-06-20). The engine module `src/engine/zeitgeist.ts`
+> captures ONE frozen, seeded `WorldSnapshot` at season creation (off the same season-seed hinge as the
+> cast), persists it byte-stable on `SessionCore`/`GameState` (recalled, never re-searched — guarded by
+> the 0007 superset/byte-compare), and renders the Vault-free "world you all moved in with" block into
+> BOTH the player moment prompt AND the off-screen/`social` moment prompt (the C32-beyond reach), scaling
+> the out-of-the-loop drift by the live week. It is FLAVOR ONLY — a seeded game advanced WITH vs. WITHOUT
+> the snapshot is byte-identical in every competition result, vote, nomination, and relationship/soul fold
+> (the §6/§10 headline guard, proven structurally). The owner's recommendations were taken: the one-time
+> 7-day lag offset (§11 #1), capture-once-persist-forever with the deterministic `model-framed` fallback
+> for tests/replays (§11 #2/#9), small-and-bounded slices (§11 #3), and an engine-side outward field on
+> `GameState` (§11 #4 — for the 0007 guard). The FE-owned `web_search` capture lands via the
+> `recordWorldSnapshot` write-back seam (FE provider wiring is its own lane, like the 0051 image port).
+> Feature file `0062-world-snapshot-zeitgeist.feature` (in `cucumber.cjs`); unit `tests/unit/zeitgeist.test.ts`.
+>
+> *(Original spec status, retained:)* 📝 **SPEC ONLY — not built.** Authored 2026-06-19. Extends the shipped **C32** in-fiction
 > `web_search` capability (the "THE REAL WORLD." clause in `src/engine/momentPrompts.ts`, the keep-set
 > wiring in `frontend/src/settings.py` / `agent_tools.py` / `builtin_mcp.py`). C32 searches per-reference,
 > voices it, and forgets; 0062 promotes that to **durable, shared, frozen state** — one snapshot of the

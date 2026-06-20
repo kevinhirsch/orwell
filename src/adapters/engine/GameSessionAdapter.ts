@@ -6,6 +6,7 @@ import type {
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
+  WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds } from "./humanize";
@@ -67,6 +68,7 @@ import {
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
+import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
@@ -118,6 +120,16 @@ const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
  */
 function entropySeed(): number {
   return randomBytes(4).readUInt32LE(0);
+}
+
+/**
+ * Flatten untrusted FE text before it rides into a SYSTEM prompt (the C8 pattern): collapse ALL
+ * whitespace (newlines/tabs/control chars that could forge a prompt line) into single spaces and cap the
+ * length. Used by the 0062 zeitgeist write-back (`recordWorldSnapshot`) — the snapshot is non-secret
+ * public flavor, but it is still player/FE-sourced text woven into the moment prompt.
+ */
+function sanitizeFlavor(s: string, max = 160): string {
+  return s.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 /** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
@@ -217,6 +229,14 @@ export class GameSessionAdapter implements GameSession {
   private gameSeed: number | null = null;
   /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
   private portraitStyleAnchor: string | null = null;
+  /**
+   * The move-in zeitgeist snapshot (feature 0062): the ONE frozen, shared real-world flavor the cast
+   * moved in WITH — captured once at season creation, FROZEN, persisted, and recalled all season. It
+   * colors BOTH the player's moment prompts AND the off-screen society/gossip prompts (§5) and goes
+   * stale as the weeks pass (§7). OUTWARD-SAFE public flavor (§6) — never a Vault handle, never a game
+   * input. Null pre-game / when no snapshot was captured (the §8 fail-soft skip).
+   */
+  private worldSnapshot: WorldSnapshot | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -832,6 +852,9 @@ export class GameSessionAdapter implements GameSession {
       ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
+      // 0062 — the FROZEN move-in zeitgeist snapshot persists so it is RECALLED (never re-searched) all
+      // season and survives a restart byte-identical (§3/§9). Outward-safe public flavor (§6).
+      ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
       // 0058: the engine-only HIDDEN deep layer — persisted so an ACTIVATED thread stays activated and
@@ -942,6 +965,15 @@ export class GameSessionAdapter implements GameSession {
           : STYLE_ANCHOR_VARIANTS[0])
         : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
+    // 0062 — restore the FROZEN move-in zeitgeist snapshot (recalled, never re-searched, §9). Persisted on
+    // 0062+ saves; on a pre-0062 save WITH a seed, re-derive the deterministic `model-framed` snapshot off
+    // the SAME seed hinge (seed-stable & player-independent, so it returns identically). Without a seed
+    // (pre-B60 legacy) or a house, it stays absent — the game degrades to C32's per-reference behavior (§8).
+    this.worldSnapshot = core.worldSnapshot
+      ? cloneSession(core.worldSnapshot)
+      : (core.house && core.seed !== undefined
+        ? buildWorldSnapshot({ seed: core.seed, capturedFor: "move-in day" })
+        : null);
     // 0058: restore the engine-only HIDDEN deep layer (secrets/goals/weakness/perception + thread
     // status). Persisted on 0058+ saves; on a pre-0058 (or twist-less legacy) save it is re-derived
     // deterministically from the seed + cast below — seed-stable & player-independent, so the floor
@@ -1402,6 +1434,13 @@ export class GameSessionAdapter implements GameSession {
     this.portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
       new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
     ];
+    // 0062 — capture the move-in zeitgeist snapshot ONCE, here, off the SAME season-seed hinge as the
+    // cast, then FREEZE it (§3/§9). This is the deterministic `model-framed` fallback (the no-provider
+    // path, §8) — reproducible-by-seed and byte-stable across every turn/restart; the FE may REPLACE it
+    // with a real `web_search` capture via `recordWorldSnapshot` (FE-owned provider, like the 0051 image
+    // port). It NEVER reaches the deterministic core — pure outward flavor (§6). `capturedFor` is the
+    // in-fiction move-in marker; the snapshot freezes the house there for the whole season.
+    this.worldSnapshot = buildWorldSnapshot({ seed, capturedFor: "move-in day" });
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
@@ -2809,7 +2848,83 @@ export class GameSessionAdapter implements GameSession {
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
     const view = this.view();
     const moment = req.moment ?? view.moment;
-    return { moment, systemPrompt: buildSystemPrompt(moment, view, this.storyFacts(moment)) };
+    return { moment, systemPrompt: buildSystemPrompt(moment, view, this.storyFacts(moment), this.worldContext(moment)) };
+  }
+
+  /**
+   * The Vault-free "world you all moved in with" block (feature 0062, §5/§7) woven into the moment
+   * prompt — built from the FROZEN persisted snapshot, scaled by the live week (the longer the season,
+   * the more dated the house, §7). `social` (and any off-screen) moment gets the off-screen framing (the
+   * C32-beyond delta — NPC-to-NPC life shares the same world); every other live moment gets the player
+   * framing. Pre-game / no-snapshot ⇒ "" (the §8 fail-soft path; the prompt is unchanged). Public flavor
+   * by construction — it reads ONLY the public snapshot, never a hidden number.
+   */
+  private worldContext(moment: string): string | undefined {
+    if (!this.worldSnapshot || !this.house) return undefined;
+    const channel = moment === "social" || moment === "diary-room" ? "offscreen" : "player";
+    const block = renderZeitgeist(this.worldSnapshot, { week: this.week, channel });
+    return block.length > 0 ? block : undefined;
+  }
+
+  /**
+   * The Vault-free projection of the move-in zeitgeist snapshot (feature 0062) — the FROZEN shared
+   * real-world flavor the cast moved in WITH, plus the off-screen-channel "world you moved in with"
+   * BLOCK an NPC-to-NPC society/gossip scene is colored by (§5, the C32-beyond delta). `null` pre-game
+   * or when no snapshot was captured (the §8 fail-soft skip). Public, shared flavor — never Vault, never
+   * a game input (§6): it carries no secret and no number, and reading it changes no outcome.
+   */
+  worldSnapshotView(): WorldSnapshotView | null {
+    // The §8 ABSENT tier reads as "no snapshot present" — an absent snapshot has no voiceable content,
+    // so the public view is null (it round-trips as absent). `hasZeitgeist` gates present-and-non-empty.
+    if (!this.house || !hasZeitgeist(this.worldSnapshot)) return null;
+    const snap = this.worldSnapshot;
+    return {
+      capturedFor: snap.capturedFor,
+      source: snap.source,
+      // PUBLIC slices only — `capturedAt`/`lagDays` are operational provenance, never surfaced.
+      slices: cloneSession(snap.slices),
+      offscreenPrompt: renderZeitgeist(snap, { week: this.week, channel: "offscreen" }),
+    };
+  }
+
+  /**
+   * The FE-owned write-back seam (feature 0062, §8) — the front-end (which owns the concrete `web_search`
+   * provider, like the 0051 image port) captures a REAL move-in zeitgeist at season creation and writes
+   * it back here so the ENGINE persists it as the single frozen artifact (it then RECALLS it, never
+   * re-searches, §9). REPLACES the deterministic `model-framed` fallback for this season (idempotent),
+   * freezing it byte-stable thereafter. Outward-safe by construction: the payload is PUBLIC real-world
+   * flavor (§6) — no Vault handle, no secret, no game input. A no-op before a game starts (nothing to
+   * freeze onto). The slices are bounded to the budget (§11 #3); empty slices keep the fallback's value
+   * so a partial capture never thins the snapshot (non-degradation).
+   */
+  recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult {
+    if (!this.house || !this.worldSnapshot) return { accepted: false, source: "absent" };
+    const base = this.worldSnapshot;
+    const cap = ZEITGEIST.itemsPerSlice;
+    const merge = (key: ZeitgeistSlice): string[] => {
+      const incoming = req.slices?.[key];
+      // Sanitize untrusted FE text (flatten control chars that could forge a prompt line; cap length +
+      // count). An empty/absent slice keeps the fallback's value (non-degradation — never thin it).
+      if (!Array.isArray(incoming) || incoming.length === 0) return [...base.slices[key]];
+      return incoming
+        .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+        .slice(0, cap)
+        .map((s) => sanitizeFlavor(s));
+    };
+    const moodIn = typeof req.slices?.mood === "string" ? req.slices.mood : undefined;
+    this.worldSnapshot = {
+      capturedFor: typeof req.capturedFor === "string" && req.capturedFor.trim() ? sanitizeFlavor(req.capturedFor, 80) : base.capturedFor,
+      capturedAt: typeof req.capturedAt === "string" ? sanitizeFlavor(req.capturedAt, 80) : base.capturedAt,
+      lagDays: base.lagDays,
+      source: "web_search",
+      slices: {
+        screen: merge("screen"), music: merge("music"), sports: merge("sports"),
+        news: merge("news"), internet: merge("internet"),
+        mood: moodIn && moodIn.trim() ? sanitizeFlavor(moodIn) : base.slices.mood,
+      },
+    };
+    this.persist(); // durable (0030): the captured snapshot must survive a restart, frozen
+    return { accepted: true, source: "web_search" };
   }
 
   /** How many recorded witnessed events ground a server-initiated lifecycle beat (B62). */

@@ -120,6 +120,52 @@ export interface PortraitPromptEntry {
   prompt: string;
 }
 
+/** The shared, frozen real-world slices the cast moved in with (0062) — public flavor only. */
+export interface WorldSnapshotSlices {
+  screen: string[];
+  music: string[];
+  sports: string[];
+  news: string[];
+  internet: string[];
+  /** One line reading the cultural moment at move-in. */
+  mood: string;
+}
+
+/**
+ * The Vault-free projection of the move-in zeitgeist snapshot (0062). PUBLIC, shared real-world flavor —
+ * never Vault, never a game input (§6). Carries the in-fiction move-in marker, how it was seeded, the
+ * voiceable slices, and the off-screen-channel "world you moved in with" prompt block (the C32-beyond
+ * reach, §5). Provenance fields (the real capture timestamp / lag) NEVER cross.
+ */
+export interface WorldSnapshotView {
+  /** The in-fiction move-in date the house is frozen at. */
+  capturedFor: string;
+  /** How it was seeded: "web_search" | "model-framed" | "absent" (the fail-soft tier). */
+  source: string;
+  /** The voiceable slices (the FROZEN shared world). */
+  slices: WorldSnapshotSlices;
+  /** The rendered off-screen-channel prompt block (so an NPC-to-NPC scene shares the same world). */
+  offscreenPrompt: string;
+}
+
+/** The FE write-back of a real captured zeitgeist (0062, §8) — public flavor; any subset of slices. */
+export interface RecordWorldSnapshotReq {
+  /** Optionally override the in-fiction move-in marker. */
+  capturedFor?: string;
+  /** Optional provenance (the real capture timestamp) — stored, never voiced. */
+  capturedAt?: string;
+  /** Any subset of the public slices (each bounded to the budget; empty keeps the fallback's value). */
+  slices?: Partial<WorldSnapshotSlices>;
+}
+
+/** Whether the zeitgeist write-back was accepted, and the resulting source tier (0062). */
+export interface RecordWorldSnapshotResult {
+  /** True iff a game is started and the snapshot could be frozen onto it. */
+  accepted: boolean;
+  /** The resulting source: "web_search" once a real capture lands; "absent" when there was no game. */
+  source: string;
+}
+
 /** The Vault-free projection of the running game the front-end may render. */
 export interface GameStateView {
   started: boolean;
@@ -783,6 +829,27 @@ export interface GameSession {
 
   /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
+
+  /**
+   * The Vault-free projection of the move-in zeitgeist snapshot (feature 0062) — the FROZEN, shared
+   * real-world flavor the whole cast moved in WITH (public slices + the off-screen-channel "world you
+   * moved in with" block an NPC-to-NPC society/gossip scene is colored by). A THIRD state category:
+   * PUBLIC shared flavor — never Vault, never game truth (§6). `null` pre-game or when no snapshot was
+   * captured (the §8 fail-soft skip). Provenance fields (`capturedAt`/`lagDays`) never cross — only the
+   * voiceable slices + the rendered block do.
+   */
+  worldSnapshotView(): WorldSnapshotView | null;
+
+  /**
+   * The FE-owned write-back seam (feature 0062, §8) — the front-end (which owns the concrete `web_search`
+   * provider, like the 0051 image port) captures a REAL move-in zeitgeist at season creation and writes
+   * it back here so the ENGINE persists it as the single FROZEN artifact and RECALLS it (never
+   * re-searches) all season (§9). Replaces the deterministic `model-framed` fallback for this season
+   * (idempotent); freezes it byte-stable thereafter. Outward-safe by construction — the payload is PUBLIC
+   * flavor (no Vault handle, no secret, no game input). A no-op before a game starts; empty slices keep
+   * the fallback's value (a partial capture never thins the snapshot — non-degradation).
+   */
+  recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult;
 
   /**
    * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded

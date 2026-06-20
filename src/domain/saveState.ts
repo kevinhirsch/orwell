@@ -81,6 +81,15 @@ export interface GameState {
   suspicions?: Array<{ entity: EntityId; suspicion: PersistedSuspicion }>;
   /** Vault record ids (audit C4) — ids only: this projection feeds the checkpoint, never a surface. */
   vaultIds?: string[];
+  /**
+   * The move-in zeitgeist snapshot (feature 0062) — the FROZEN, shared real-world flavor the cast moved
+   * in with. A byte-stable static artifact (like the `CHARACTER` baseline): captured once at season
+   * creation and never regenerated, so the superset/byte-compare check below guards it against drift /
+   * regeneration exactly as it guards a character. Plain JSON; optional so pre-0062 saves stay loadable
+   * (an absent snapshot stays absent — never trips a spurious superset failure). It is PUBLIC flavor,
+   * never a hidden number: it carries no secret and never informs the deterministic core.
+   */
+  worldSnapshot?: Record<string, unknown>;
 }
 
 export function serialize(state: GameState): string {
@@ -203,6 +212,20 @@ export function isSuperset(later: GameState, earlier: GameState, opts: { trustEv
   for (const [id, early] of Object.entries(earlier.characters)) {
     const late = later.characters[id];
     if (!late || !sameJson(late, early)) return false;
+  }
+
+  // 0062 — the move-in zeitgeist snapshot is a FROZEN artifact: once captured it must never regenerate
+  // or drift (it is the world the cast moved in WITH). Byte-compare it like a static character, with ONE
+  // sanctioned exception: the FE's one-time `web_search` REPLACEMENT of the deterministic fallback at
+  // season creation (§8) is a legitimate UPGRADE, not degradation. So a `model-framed`/`absent` earlier
+  // snapshot may be replaced by a `web_search` one; a `web_search` snapshot is then frozen forever, and a
+  // fallback may never drift to a DIFFERENT fallback. An earlier save WITHOUT one may also gain one later
+  // (a capture after a pre-0062 resume) — accretion, not degradation. Everything else is a frozen byte-compare.
+  if (earlier.worldSnapshot !== undefined && !sameJson(later.worldSnapshot, earlier.worldSnapshot)) {
+    const earlierSrc = (earlier.worldSnapshot as { source?: string }).source;
+    const laterSrc = (later.worldSnapshot as { source?: string } | undefined)?.source;
+    const upgradeToCapture = earlierSrc !== "web_search" && laterSrc === "web_search";
+    if (!upgradeToCapture) return false;
   }
 
   // Soul memory / emotionalHistory — the OTHER dominant append-only accumulator (every off-screen scene
