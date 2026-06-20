@@ -56,6 +56,9 @@
       #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .55; font-size: 1rem; }
       #${CARD_ID} .odec-x:hover { opacity: .9; }
       #${CARD_ID} .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
+      /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
+      #${CARD_ID} .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
+      #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       #${CARD_ID} .odec-opt {
         cursor: pointer; border-radius: 999px; padding: .3rem .8rem;
@@ -99,6 +102,9 @@
     }
     if (kind === "finale-answer") return sel.length === 1 ? { kind, appeal: sel[0] } : null;
     if (kind === "comp-intent") return sel.length === 1 ? { kind, intent: sel[0] } : null;
+    // 0006 staged-rounds: the per-round approach rides `intent` exactly like comp-intent (committed for
+    // THIS round only). Structured selection only — never read from prose.
+    if (kind === "comp-round") return sel.length === 1 ? { kind, intent: sel[0] } : null;
     // 0061 — a confirmed self-eviction needs no pick; ONLY the explicit confirm flag binds it.
     if (kind === "self-evict") return { kind, confirmed: true };
     if (kind === "veto-decision") {
@@ -115,6 +121,7 @@
       "nominations": "Nomination ceremony — your nominations",
       "veto-decision": "Power of Veto — your call",
       "comp-intent": "Competition — set your approach",
+      "comp-round": "Competition round — your approach this round",
       "houseguests-choice": "Houseguest's Choice — pick the sixth player",
       "replacement": "Veto ceremony — name the replacement",
       "eviction-vote": "Eviction — cast your vote",
@@ -179,6 +186,17 @@
       card.appendChild(p);
     }
 
+    // 0006 staged-rounds: show WHO IS STILL IN this elimination round so the player adapts their
+    // approach to the narrowed field (e.g. everyone left is an ally → throw; a threat still in → compete).
+    if (kind === "comp-round" && Array.isArray(pending.stillIn) && pending.stillIn.length) {
+      const still = document.createElement("div");
+      still.className = "odec-stillin";
+      const names = pending.stillIn.map((r) => esc(r.name || String(r.id))).join(", ");
+      const r = (typeof pending.round === "number" && pending.round > 0) ? `Round ${pending.round} — ` : "";
+      still.innerHTML = `<strong>${r}Still in:</strong> ${names}`;
+      card.appendChild(still);
+    }
+
     const opts = document.createElement("div");
     opts.className = "odec-opts";
     card.appendChild(opts);
@@ -186,7 +204,9 @@
     let textarea = null;
     const confirm = document.createElement("button");
     confirm.className = "odec-confirm"; confirm.type = "button";
-    confirm.textContent = "Confirm — this is binding";
+    // 0006 staged-rounds: a comp-round commit binds THIS round only (locked once it resolves), not the
+    // whole comp — phrase it so the per-round model is clear, while still an explicit commitment.
+    confirm.textContent = kind === "comp-round" ? "Lock in this round" : "Confirm — this is binding";
     confirm.disabled = true;
 
     const sync = () => { confirm.disabled = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto) == null; };
@@ -239,7 +259,8 @@
       card.appendChild(textarea);
     } else if (kind === "finale-answer") {
       (Array.isArray(pending.appeals) && pending.appeals.length ? pending.appeals : []).forEach((a) => addChip(String(a), String(a)));
-    } else if (kind === "comp-intent") {
+    } else if (kind === "comp-intent" || kind === "comp-round") {
+      // 0006 staged-rounds: the same compete/throw/play-safe approaches, but per-round for comp-round.
       COMP_INTENTS.forEach((i) => addChip(i, i));
     } else if (kind === "self-evict") {
       // 0061: no options to pick — an explicit Confirm IS the irreversible decision (a Cancel
@@ -273,6 +294,10 @@
     note.className = "odec-note";
     if (kind === "self-evict") {
       note.textContent = "This ends and forfeits your game — it cannot be undone.";
+    } else if (kind === "comp-round") {
+      // 0006 staged-rounds: make clear this locks for THIS round only — adaptation is forward, never a
+      // single irrevocable popup. Still "your selection only — never read from prose" (anti-sycophancy).
+      note.textContent = "This round only — you'll choose again as the field narrows. Your selection only — never read from prose.";
     } else {
       note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
     }
@@ -326,7 +351,7 @@
       } catch (_) {
         if (window.OrwellReport) window.OrwellReport.fail("decision", "submit-post", _); // G11: fail open, never silent
         confirm.disabled = false;
-        confirm.textContent = "Confirm — this is binding";
+        confirm.textContent = kind === "comp-round" ? "Lock in this round" : "Confirm — this is binding";
         let err = card.querySelector(".odec-err");
         if (!err) {
           err = document.createElement("div");

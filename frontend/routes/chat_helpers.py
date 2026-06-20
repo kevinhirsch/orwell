@@ -276,6 +276,14 @@ _PENDING_KIND_HINTS = {
         "ceremony in the fiction and take their two explicit picks from the legal options, then "
         "submit them via submitDecision."
     ),
+    "comp-round": (
+        "The competition is playing out in ELIMINATION ROUNDS (0006 staged-rounds). Voice WHO IS "
+        "STILL IN this round (the engine supplies the still-in field), then take the player's "
+        "approach for THIS ROUND ONLY — compete (keep going), throw (drop out), or play it safe — "
+        "and submit it via submitDecision (kind 'comp-round', intent=...). Their pick is committed "
+        "BEFORE the round resolves and is locked once it does; they will choose again as the field "
+        "narrows. Never resolve a winner yourself and never re-label a finished round."
+    ),
 }
 
 # The general fallback hint for every other player pending (votes, veto decision, replacement,

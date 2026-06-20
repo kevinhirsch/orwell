@@ -175,12 +175,24 @@ When("further off-screen ticks run", function (this: BbWorld) {
 
 When("the season is simulated until a thread surfaces toward the player", function (this: BbWorld) {
   const sb = this.stSandbox!;
-  for (let i = 0; i < 600; i++) {
+  // A surfaced-to-player thread leaves a BELIEF (or, if unanchored, a SUSPICION) keyed by ANY of the
+  // paraphrase glosses (the same set the Then asserts) — check all of them, not just one, so the rare
+  // to-player surfacing is caught whichever gloss it rode. 0006 staged-rounds added many per-round beats
+  // per week (so each `stepLoop` covers a smaller slice of game-time), so we give the bounded, rare
+  // surfacing a larger iteration budget to land reliably regardless of suite-ordering effects.
+  const gloss = (c: string): boolean => /feeling around the house|carrying something|blind spot|bigger game/.test(c);
+  const surfaced = (): boolean =>
+    sb.engine.knowledge.knownTo(PLAYER).some((k) => gloss(k.content)) ||
+    sb.engine.knowledge.suspicionsOf(PLAYER).some((s) => gloss(s.content));
+  for (let i = 0; i < 3000; i++) {
     const { finished } = stepLoop(sb);
-    this.stOrch!.advance(this.stUser!, "offscreen-tick");
-    // A surfaced-to-player thread leaves a BELIEF in the player's knowledge keyed by the paraphrase gloss.
-    const known = sb.engine.knowledge.knownTo(PLAYER).some((k) => /feeling around the house/.test(k.content));
-    if (known) return;
+    // Several off-screen ticks per live beat: the thread surfacing rides the off-screen diffusion, so
+    // giving the bounded, rare to-player pathway more diffusion chances per week makes it land reliably
+    // (0006 staged-rounds slowed game-time per live beat; more ticks restore the surfacing density).
+    for (let t = 0; t < 3; t++) {
+      this.stOrch!.advance(this.stUser!, "offscreen-tick");
+      if (surfaced()) return;
+    }
     if (finished) break;
   }
   // If the rare to-player surfacing didn't land this seed, the scenario is still meaningful via the

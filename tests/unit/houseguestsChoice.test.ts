@@ -74,10 +74,14 @@ describe("B45 — the live loop pauses for the player's Houseguest's Choice", ()
     throw new Error("no seed produced a player Houseguest's Choice draw");
   }
 
-  /** Resolve the post-pick stages: declare intent (the player is a puller), then the comp runs. */
+  /** Resolve the post-pick stages: declare a per-round approach each round (the player is a puller),
+   *  then the STAGED comp runs to its crown (0006 staged-rounds). */
   function finishVeto(s: LiveSeasonState, ctx: SeasonCtx, rng: SeededRandom): void {
-    if (s.pending?.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
-    while (!s.pending && s.beat === "veto-competition") advance(s, ctx, rng);
+    for (let g = 0; g < 50 && !s.vetoHolder; g++) {
+      if (s.pending?.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
+      else if (!s.pending && s.beat === "veto-competition") advance(s, ctx, rng);
+      else break;
+    }
   }
 
   it("pauses on a houseguests-choice decision; refuses an illegal pick; a legal pick completes the field", () => {
@@ -93,8 +97,11 @@ describe("B45 — the live loop pauses for the player's Houseguest's Choice", ()
     expect(s.vetoField).toContain(options[0]); // the player's pick is in the field
     expect(s.vetoField).toHaveLength(6);
     expect(new Set(s.vetoField).size).toBe(6);  // C1: six DISTINCT competitors — never a duplicate
-    // E35: the player (a puller — they drew the chip) now declares intent; then the comp resolves.
-    expect(s.pending?.kind).toBe("comp-intent");
+    // E35 + 0006 staged-rounds: the completed field is the witnessed beat; the STAGED comp begins on
+    // the next advance, pausing for the player's per-round approach (the player is a puller).
+    expect(s.pending).toBeUndefined();
+    advance(s, ctx, new SeededRandom(1));
+    expect(s.pending?.kind).toBe("comp-round");
     finishVeto(s, ctx, new SeededRandom(1));
     expect(s.vetoHolder).toBeTruthy();          // the veto winner resolved over the completed field
     expect(s.beat).toBe("veto-ceremony");

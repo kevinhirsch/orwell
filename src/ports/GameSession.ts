@@ -440,7 +440,7 @@ export interface BeatEventView {
 
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
-  kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
     | "self-evict";
@@ -463,6 +463,14 @@ export interface PendingDecisionView {
   finalist?: NamedRef;
   /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
   evictee?: NamedRef;
+  /**
+   * STAGED competition (0006 staged-rounds evolution) — for a `comp-round` decision: which round this is
+   * (1-based) and WHO IS STILL IN this round, so the player picks their approach based on the narrowed
+   * field (e.g. everyone left is an ally → throw; a threat is still in → keep competing). Absent for every
+   * other kind. Vault-free: the still-in field is a public ceremony fact (the houseguests still standing).
+   */
+  round?: number;
+  stillIn?: NamedRef[];
   /** How many to pick (nominations = 2; others = 1; finale-statement / juror-question = 0). */
   pick: number;
 }
@@ -715,7 +723,7 @@ export interface FinaleFastForwardView {
 
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
-  kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
+  kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
     | "self-evict";
@@ -743,7 +751,8 @@ export interface SubmitDecisionReq {
   statement?: string;
   /** finale-answer: the structured appeal the player makes (engine-scored; never the prose). */
   appeal?: string;
-  /** comp-intent: the player's declared approach — "compete" | "throw" | "play-safe" (B46). */
+  /** comp-intent / comp-round: the player's declared approach — "compete" | "throw" | "play-safe" (B46;
+   *  0006 staged-rounds: `comp-round` carries the approach for THAT elimination round). */
   intent?: string;
 }
 

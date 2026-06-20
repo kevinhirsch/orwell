@@ -110,3 +110,29 @@ export function resolveCompetition(
   intents.lock(); // the result is now given — intents can no longer change
   return { winner, scores, temperature };
 }
+
+/**
+ * The VISIBLE elimination order of an ALREADY-RESOLVED competition (the 0006 staged-rounds
+ * evolution, PR #395) — PRESENTATION ONLY, derived purely from the single roll's scores.
+ *
+ * The staged endurance presentation narrows the field one houseguest at a time until the crowned
+ * winner stands alone. This derives that drop order from the SAME `scores` `resolveCompetition`
+ * already computed: the LOWEST score drops first, ascending up to (but excluding) the winner, who
+ * survives every round by construction. It consumes NO randomness and reads NO new state — it is a
+ * deterministic RE-TELLING of the one calibrated roll, so the staged presentation can NEVER perturb
+ * the winner OR any downstream seeded roll. This is what makes the staged comp full-trajectory
+ * outcome-neutral with the pre-staging single-shot model (the jury calibration band depends on it).
+ *
+ * `field` is the competitors' ids in their original (resolution) order; `result` is that roll's
+ * output. The returned array lists every NON-winner, earliest drop first. Score ties break by the
+ * original field order (stable), so the order is byte-stable for a given result.
+ */
+export function eliminationOrder(field: EntityId[], result: CompetitionResult): EntityId[] {
+  const indexOf = new Map(field.map((id, i) => [id, i] as const));
+  return field
+    .filter((id) => id !== result.winner)
+    .sort((a, b) => {
+      const d = result.scores[a]! - result.scores[b]!;
+      return d !== 0 ? d : indexOf.get(a)! - indexOf.get(b)!;
+    });
+}

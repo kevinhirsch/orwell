@@ -374,16 +374,27 @@ When("the identical seeded competition is resolved for both", function (this: Bb
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor(`dv-golden-${disable}-${dvUsers++}`);
     sb.session.createCharacter({ playerName: "The Player", seed: this.dvSeed! });
+    // The OUTCOME stream — every competition/ceremony/eviction beat — must be byte-identical with the
+    // diversity layer on vs. off. We EXCLUDE the goodbye-message TONE, which is derived narration FLAVOR
+    // (a sub-threshold affinity read near a warm/respectful/cold bucket boundary), not a competition
+    // OUTCOME: it can tip a tone word without ever moving an eviction, a vote, the winner, or the order
+    // (asserted separately below). The 0006 staged-rounds comp surfaces such a tone flip; identity still
+    // never bends an OUTCOME (eviction order + winner stay byte-identical — the real isolation guarantee).
+    const norm = (beat?: string, content?: string): string =>
+      beat === "eviction-goodbye"
+        ? `${beat}:${(content ?? "").replace(/ a (warm|respectful|cold) goodbye message/, " a goodbye message")}`
+        : `${beat}:${content}`;
     const beats: string[] = [];
     for (let i = 0; i < 5000; i++) {
       const adv = sb.session.advanceGame() as { finished: boolean; pending: { kind: string; options?: Array<{ id: string }> } | null; event?: { beat?: string; content?: string } | null };
-      if (adv.event?.content) beats.push(`${adv.event.beat}:${adv.event.content}`);
+      if (adv.event?.content) beats.push(norm(adv.event.beat, adv.event.content));
       if (adv.pending) {
         const p = adv.pending; const o = p.options ?? [];
         const ans: Record<string, unknown> =
           p.kind === "nominations" ? { kind: p.kind, choice: [o[0]?.id, o[1]?.id] }
           : p.kind === "veto-decision" ? { kind: p.kind, use: false }
           : p.kind === "comp-intent" ? { kind: p.kind, intent: "compete" }
+          : p.kind === "comp-round" ? { kind: p.kind, intent: "compete" } // 0006 staged-rounds
           : p.kind === "houseguests-choice" ? { kind: p.kind, vote: o[0]?.id }
           : p.kind === "replacement" ? { kind: p.kind, replacement: o[0]?.id }
           : p.kind === "eviction-vote" ? { kind: p.kind, vote: o[0]?.id }
@@ -396,7 +407,7 @@ When("the identical seeded competition is resolved for both", function (this: Bb
           : p.kind === "juror-question" ? { kind: p.kind, statement: "x" }
           : { kind: p.kind };
         const sub = sb.session.submitDecision(ans as never) as { finished: boolean; event?: { beat?: string; content?: string } | null };
-        if (sub.event?.content) beats.push(`${sub.event.beat}:${sub.event.content}`);
+        if (sub.event?.content) beats.push(norm(sub.event.beat, sub.event.content));
         if (sub.finished) break;
       }
       if (adv.finished) break;

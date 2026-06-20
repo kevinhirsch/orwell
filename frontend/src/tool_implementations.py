@@ -4775,7 +4775,7 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
     # Mirror the engine's SubmitDecisionReq kinds (src/ports/GameSession.ts) exactly — the engine
     # validates legality; the relay must never be the thing that makes a pending kind unplayable.
     _DECISION_KINDS = {
-        "nominations", "veto-decision", "comp-intent", "houseguests-choice",
+        "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",

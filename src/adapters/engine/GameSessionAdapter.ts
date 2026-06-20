@@ -872,6 +872,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "veto-decision", use: input.use, ...(input.save ? { save: input.save } : {}) };
       case "comp-intent":
         return { kind: "comp-intent", intent: input.intent };
+      case "comp-round":
+        return { kind: "comp-round", intent: input.intent };
       case "houseguests-choice":
         return { kind: "houseguests-choice", vote: input.pick };
       case "replacement":
@@ -2548,8 +2550,12 @@ export class GameSessionAdapter implements GameSession {
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
     if (req.kind === "self-evict") return this.resolveSelfEviction(req.confirmed === true);
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
-    // to malformed calls — the boundary must never throw an unhandled error).
-    if (!this.live.pending || this.live.pending.kind !== req.kind) return this.advanceView(null);
+    // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
+    // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
+    const compApproach = (k: string): boolean => k === "comp-intent" || k === "comp-round";
+    const pendingKind = this.live.pending?.kind;
+    const kindMatches = !!pendingKind && (pendingKind === req.kind || (compApproach(pendingKind) && compApproach(req.kind)));
+    if (!kindMatches) return this.advanceView(null);
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
     return this.inOneCommit(() => {
@@ -2856,13 +2862,14 @@ export class GameSessionAdapter implements GameSession {
       }
       case "veto-decision":
         return { kind: "veto-decision", use: !!req.use, ...(req.save ? { save: req.save } : {}) };
-      case "comp-intent": { // B46: the player declares compete/throw/play-safe.
+      case "comp-intent":
+      case "comp-round": { // B46 / 0006 staged-rounds: the player declares compete/throw/play-safe.
         // The pending presents this as a generic options/pick decision (id = the intent value), so a
         // caller may submit it as `intent`, `vote`, OR `choice` like every other options/pick decision.
         // `singlePickId` covers `vote`/`choice`; `intent` stays first (R4-02 — `choice` was rejected).
         const intent = (req.intent ?? singlePickId(req)) as Intent | undefined;
-        if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition intent is required");
-        return { kind: "comp-intent", intent };
+        if (!intent || !(COMP_INTENTS as readonly string[]).includes(intent)) throw new Error("a legal competition approach is required");
+        return { kind: req.kind, intent };
       }
       case "houseguests-choice": { // B45: the player picks the sixth veto player (A10: `vote` or `choice`).
         const pick = singlePickId(req);
@@ -2953,6 +2960,20 @@ export class GameSessionAdapter implements GameSession {
         // The "options" ARE the three intents (id = the intent value), so the generic decision path
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
         return { kind: p.kind, by, prompt: "Declare your approach to this competition: compete, throw, or play it safe.", options: COMP_INTENTS.map((i) => ({ id: i, name: i })), pick: 1 };
+      case "comp-round": {
+        // 0006 staged-rounds: the player picks their approach for THIS elimination round, seeing who is
+        // STILL IN. Options are the three approaches (compete first = default); `stillIn` carries the
+        // narrowed field so they can adapt (everyone left an ally → throw; a threat still in → compete).
+        const stillIn = refs(p.stillIn);
+        const others = stillIn.filter((r) => r.id !== PLAYER).map((r) => r.name);
+        const fieldLine = others.length ? ` Still in with you: ${others.join(", ")}.` : " You are the last one in.";
+        return {
+          kind: p.kind, by,
+          prompt: `Round ${p.round} — set your approach for THIS round: compete, throw (drop out), or play it safe.${fieldLine} Your choice locks for this round only; you'll choose again as the field narrows.`,
+          options: COMP_INTENTS.map((i) => ({ id: i, name: i })),
+          round: p.round, stillIn, pick: 1,
+        };
+      }
       case "houseguests-choice":
         return { kind: p.kind, by, prompt: "You drew Houseguest's Choice — pick the sixth houseguest to play in the veto competition.", options: refs(p.options), pick: 1 };
       case "replacement":
