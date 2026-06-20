@@ -48,6 +48,44 @@ describe("the casting-interview moment prompt (0050)", () => {
     expect(prompt).toMatch(/cast photo|profile pic/i);
     expect(prompt).toMatch(/NOT required|never block/i);
   });
+
+  // The producer persona is PROFESSIONAL, not jokey: a real casting producer running a tight
+  // session — no schtick, no narrated body language, no gushing. (Playtest fix.)
+  it("pins a professional, non-jokey producer voice", () => {
+    expect(prompt).toMatch(/PRODUCER VOICE/);
+    expect(prompt).toMatch(/professional/i);
+    expect(prompt).toMatch(/not a comedian/i);
+    // the specific schtick the playtest flagged is named so the model knows what to avoid
+    expect(prompt).toMatch(/NO schtick/i);
+    expect(prompt).toMatch(/NO stage directions/i); // no "I lean back with a grin" narration
+    expect(prompt).toMatch(/NO gushing/i); // no "that's a hell of a tagline"
+    expect(prompt).toMatch(/realistic over playful/i);
+  });
+
+  // The interview goes DEEP and probing — strategy, what they want, who they think they are —
+  // and VARIES per session (no fixed script), still facts-to-voice not a recited question list.
+  it("guides deep, probing, varied questions (no fixed script)", () => {
+    expect(prompt).toMatch(/go DEEP, not wide/i);
+    expect(prompt).toMatch(/probes who this person actually is/i);
+    // the three probe themes the playtest asked for
+    expect(prompt).toMatch(/STRATEGY/);
+    expect(prompt).toMatch(/WHAT THEY WANT/i);
+    expect(prompt).toMatch(/WHO THEY THINK THEY ARE IN THE HOUSE/i);
+    // seeded/varied feel: no fixed order, steered by the player's answers, never a rote checklist
+    expect(prompt).toMatch(/VARY YOUR ANGLE/i);
+    expect(prompt).toMatch(/NO fixed script/i);
+    expect(prompt).toMatch(/no two interviews feel the same/i);
+    expect(prompt).toMatch(/never a rote checklist/i);
+  });
+
+  // De-jokeyfication is a real removal: the old playful framing must be gone, not merely
+  // counterbalanced. These exact strings were the jokey persona the playtest flagged.
+  it("dropped the old jokey framing", () => {
+    expect(prompt).not.toMatch(/a little wicked/i);
+    expect(prompt).not.toMatch(/react with delight/i);
+    expect(prompt).not.toMatch(/Let them ramble/i);
+    expect(prompt).not.toMatch(/smells good\s+TV/i);
+  });
 });
 
 describe("strength tiers (words, never numbers)", () => {
