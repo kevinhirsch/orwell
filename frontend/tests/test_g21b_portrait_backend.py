@@ -85,6 +85,107 @@ def test_available_true_via_autodetect_when_unset(monkeypatch):
     assert orwell_portraits.image_generation_available("u") is True
 
 
+# ── the false-negative fix: a transient catalog probe must not report "no model" ─
+# Live bug: image model on auto-detect, the player presses Generate, gets "no image model
+# configured", presses again after manually selecting one — same error — then the photos load
+# on their own after a delay. Root cause: `_resolve_model` network-probes the provider catalog
+# (5s, swallows every error into not-found), so a cold/blipping catalog made every candidate
+# raise and we false-negatived, only to succeed on a retry once the catalog was warm. The gate
+# now falls back to "is an image-capable endpoint even configured?" (a pure DB read, no probe),
+# so a configured endpoint is allowed to TRY on the FIRST press.
+
+def test_available_true_when_catalog_probe_fails_but_endpoint_exists(monkeypatch):
+    # A real image model is SELECTED, but the catalog probe fails for everything this instant
+    # (transient: cold provider / blip / first-press-before-warm).
+    monkeypatch.setattr(orwell_portraits, "_image_settings",
+                        lambda user: (True, "black-forest-labs/flux.1.1-pro", "medium"))
+    _patch_resolver(monkeypatch, resolves=[])  # nothing resolves via the catalog right now
+    # …but an image-capable endpoint IS configured (the pure-DB resilient signal).
+    monkeypatch.setattr(ai_interaction, "has_image_capable_endpoint", lambda owner=None: True)
+    # No false negative: the gate lets generation TRY on the first press.
+    assert orwell_portraits.image_generation_available("u") is True
+
+
+def test_available_true_on_autodetect_when_probe_blips_but_endpoint_exists(monkeypatch):
+    # Auto-detect (no model selected), the candidate probes all transiently fail — but an
+    # image-capable endpoint exists, so the FIRST Generate press must not false-negative.
+    monkeypatch.setattr(orwell_portraits, "_image_settings",
+                        lambda user: (True, "", "medium"))
+    _patch_resolver(monkeypatch, resolves=[])
+    monkeypatch.setattr(ai_interaction, "has_image_capable_endpoint", lambda owner=None: True)
+    assert orwell_portraits.image_generation_available("u") is True
+
+
+def test_available_false_when_genuinely_no_endpoint(monkeypatch):
+    # The honest absence: nothing resolves AND no image-capable endpoint is configured at all.
+    monkeypatch.setattr(orwell_portraits, "_image_settings",
+                        lambda user: (True, "", "medium"))
+    _patch_resolver(monkeypatch, resolves=[])
+    monkeypatch.setattr(ai_interaction, "has_image_capable_endpoint", lambda owner=None: False)
+    assert orwell_portraits.image_generation_available("u") is False
+
+
+def test_available_false_when_disabled_even_with_endpoint(monkeypatch):
+    # The enable toggle still wins — a disabled setting is never "available".
+    monkeypatch.setattr(orwell_portraits, "_image_settings",
+                        lambda user: (False, "black-forest-labs/flux.1.1-pro", "medium"))
+    monkeypatch.setattr(ai_interaction, "has_image_capable_endpoint", lambda owner=None: True)
+    assert orwell_portraits.image_generation_available("u") is False
+
+
+@pytest.mark.parametrize("provider,base_url,expected", [
+    ("openai", "https://api.openai.com/v1", True),
+    ("openrouter", "https://openrouter.ai/api/v1", True),
+    ("groq", "https://api.groq.com/openai/v1", True),
+    ("anthropic", "https://api.anthropic.com", False),  # no image transport
+])
+def test_has_image_capable_endpoint_provider_logic(monkeypatch, provider, base_url, expected):
+    # A pure-DB, no-network read: a single enabled endpoint of the given provider family.
+    class _Ep:
+        def __init__(self, url):
+            self.base_url = url
+    class _Query:
+        def __init__(self, rows):
+            self._rows = rows
+        def filter(self, *a, **k):
+            return self
+        def all(self):
+            return self._rows
+    class _Session:
+        def __init__(self, rows):
+            self._rows = rows
+        def query(self, *a, **k):
+            return _Query(self._rows)
+        def close(self):
+            pass
+    import src.database as database
+    monkeypatch.setattr(database, "SessionLocal", lambda: _Session([_Ep(base_url)]))
+    # ModelEndpoint is referenced only for the .filter column — a stub attribute is enough.
+    monkeypatch.setattr(database, "ModelEndpoint",
+                        type("ME", (), {"is_enabled": True, "owner": None}))
+    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o: q)
+    assert ai_interaction.has_image_capable_endpoint("u") is expected
+
+
+def test_has_image_capable_endpoint_false_when_none(monkeypatch):
+    class _Query:
+        def filter(self, *a, **k):
+            return self
+        def all(self):
+            return []
+    class _Session:
+        def query(self, *a, **k):
+            return _Query()
+        def close(self):
+            pass
+    import src.database as database
+    monkeypatch.setattr(database, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(database, "ModelEndpoint",
+                        type("ME", (), {"is_enabled": True, "owner": None}))
+    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o: q)
+    assert ai_interaction.has_image_capable_endpoint("u") is False
+
+
 # ── _generate_one never POSTs a chat model (no 400-loop) ───────────────────────
 
 def test_generate_one_skips_chat_model_no_http(monkeypatch):
