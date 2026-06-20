@@ -42,6 +42,17 @@ export interface CeremonyState {
 /** The live-session core the `GameSessionAdapter` snapshots/restores. */
 export interface SessionCore {
   started: boolean;
+  /**
+   * The monotonic per-sandbox beat counter (feature 0065 Part A) — increments by one on every
+   * committed state mutation; stable on a no-op. Persisted here so the compare-and-swap stale-write
+   * token is RESTART-SAFE and co-versioned with the save (0007/0030): after a resume the counter
+   * resumes at the saved value, so a queued/in-flight write computed against the pre-restart board is
+   * still correctly refused. NOT secret (a counter carries no Vault content), and it lives on the
+   * 0007 GameState projection only as a scalar (never a `counts()` dimension), so it cannot trip a
+   * non-degradation false positive. Absent on a pre-0065 save ⇒ 0 (a resumed game continues from 0;
+   * the next commit bumps it — benign, since the FE's last-seen token resets across a restart too).
+   */
+  beatSeq?: number;
   week: number;
   phase: string;
   ceremony: CeremonyState;
@@ -93,6 +104,22 @@ export interface SessionCore {
    */
   deepProfiles?: Record<EntityId, DeepProfile>;
   storyThreads?: StoryThread[];
+  /**
+   * 0065 — a PRE-WARMED but not-yet-finalized cast: the player-INDEPENDENT cast `preSeedCast` generates
+   * during the casting interview (before `createCharacter`), possibly already FE-authored deeply. Persisted
+   * so a half-warmed cast survives a restart and resumes (0030) rather than re-warming from scratch.
+   * ENGINE-ONLY (it carries the hidden deep layer + private orientations). Absent once the season starts
+   * (the cast is adopted onto the live house and the holding store is cleared). Absent on all prior saves.
+   */
+  prewarm?: {
+    seed: number;
+    npcs: GameHouse["npcs"];
+    deepProfiles: Record<EntityId, DeepProfile>;
+    storyThreads: StoryThread[];
+    privateOrientations: Record<EntityId, import("./diversityConstants").Orientation>;
+    groundedSkinTones: Record<EntityId, string>;
+    portraitStyleAnchor: string;
+  };
   /**
    * Feature 0060 — the story-thread scheduler's engine-only, HIDDEN bookkeeping: the distinct weeks each
    * houseguest has been nominated (drives the `nominated-twice` trigger) and the count of threads that

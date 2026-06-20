@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { McpServer } from "./McpServer";
 import { toolsFor } from "../../surfaces/tools/registry";
-import { EngineRefusal, TurnRefusedError, PersistFailureError } from "../../domain/errors";
+import { EngineRefusal, TurnRefusedError, PersistFailureError, StaleBeatError } from "../../domain/errors";
 import { HealthMetrics, errorClassOf } from "./healthMetrics";
 import { handleRpcPayload, rpcIdOf, RPC } from "./jsonRpc";
 import type { ToolGateway } from "./jsonRpc";
@@ -91,7 +91,10 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // 0050: the casting interview happens BEFORE a game exists, so its tools must be able to mint the
 // user's sandbox — updateCasting records the first answers; getMomentPrompt serves the interview
 // manual to a brand-new user (the front-end frames the pre-game chat with it).
-const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt"]);
+const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt",
+  // 0065: pre-warming the cast happens pre-game (it mints + persists the season seed into a fresh
+  // sandbox during casting), so it legitimately runs BEFORE a game exists — like updateCasting.
+  "preSeedCast"]);
 
 function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
   return typeof (d as HttpMcpResolver).resolve === "function";
@@ -274,6 +277,12 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
               // integrity checkpoint FAILS THE REQUEST — 409, state unchanged, never a 200 whose
               // view narrates a rolled-back beat. A durable-save failure is a 500 with a sanitized
               // message (its own class — never misread as the caller's fault, no data-dir path).
+              // 0065 Part A — a stale compare-and-swap write is ALSO a 409, but with a stable machine
+              // `code: "stale-beat"`, the CURRENT beatSeq, and the Vault-free board so the caller can
+              // re-ground immediately (no state changed — nothing was applied to roll back).
+              if (e instanceof StaleBeatError) {
+                return send(409, { error: e.message, code: e.code, beatSeq: e.beatSeq, board: e.board });
+              }
               if (e instanceof TurnRefusedError) return send(409, { error: e.message });
               if (e instanceof PersistFailureError) return send(500, { error: e.message });
               // E9/E7: a DELIBERATE refusal — `EngineRefusal`, or (back-compat) a plain Error

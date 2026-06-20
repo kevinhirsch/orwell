@@ -1,25 +1,19 @@
-// orwellChatGate.js — the OOBE "secure your cast photo first" HARD GATE (P1 onboarding).
+// orwellChatGate.js — RETIRED hard gate (OOBE re-sequence, 2026-06-20). Now a fail-open no-op.
 //
-// The redesigned onboarding makes the houseguest IMAGE the player's FIRST interaction: pre-game,
-// before a single chat message can be sent, the player must secure SOME cast photo (upload one or
-// generate one). Until they do, the chat input + send affordance are LOCKED and the composer says
-// why ("Add your cast photo to begin"). The image step is intentionally first; only once it is
-// secured do the producers reach out and the casting interview begins.
+// HISTORY: this module used to HARD-LOCK the composer pre-game until the player secured a cast
+// photo (the photo-FIRST onboarding). The OOBE re-sequence reversed that: the WELCOME opens the
+// casting interview, the producers ask about the photo, and the photo box appears MID-interview as
+// an OPTIONAL/skippable step (orwellHeadshot.js). The photo no longer gates the chat or
+// createCharacter, so there is nothing left for this gate to lock.
 //
-// P1 OOBE overhaul: this module no longer mounts an inline "add your cast photo" banner above the
-// composer — that was a THIRD copy of the same prompt (banner + card + placeholder). The ONE clear
-// instruction now lives in the cast-photo WINDOW (orwellHeadshot.js); the gate keeps only the
-// minimal disabled-state placeholder so the prompt appears exactly once in the window.
+// We KEEP the module loading (it's referenced from chat.js / app.js / orwellOnboarding.js via the
+// public `window._orwellChatGate` surface — blocked()/recompute()/notePhotoSecured()) but make it
+// INERT: `recompute()` never raises the photo lock (it's a no-op), `blocked()` always returns false,
+// and the visual-lock machinery (applyLock / the MutationObserver re-assert) is no longer driven.
+// Retiring the lock here — rather than ripping the module out — keeps every caller working unchanged
+// and leaves the interview usable the instant the welcome is dismissed.
 //
-// This module owns ONE thing: the gate STATE + the visual lock. It is the single source of truth
-// `chat.js` consults (`window._orwellChatGate.blocked()`) so every send path — the send button,
-// Enter-to-send, and any programmatic submit — is covered by one guard. It is intentionally
-// permissive by DEFAULT (fails OPEN): it only ever blocks when it has POSITIVELY confirmed a
-// pre-game, game-build, image-not-yet-secured state. An unreachable engine, a non-game build, a
-// started season, or any probe error all leave the chat fully usable.
-//
-// The producers' auto-open (orwellHeadshot → _orwellOpenGameAfterCasting) fires only AFTER the
-// image is finalized, so by then the gate is already open — the hidden kickoff is never blocked.
+// Everything is fail-open by construction: the chat is NEVER blocked by this module again.
 (function () {
   "use strict";
 
@@ -128,18 +122,13 @@
     if (sb) { sb.disabled = false; sb.removeAttribute("aria-disabled"); }
   }
 
-  // Positively (re)compute the gate from the live state. Conservative: only blocks on a confirmed
-  // pre-game game-build with no image secured yet. Everything else — non-game build, engine down,
-  // started season, probe error — OPENS the gate.
+  // OOBE re-sequence (2026-06-20): the photo lock is RETIRED. recompute() is now a fail-open no-op —
+  // it NEVER raises the lock. It always releases (setBlocked(false)) so that if any prior state had
+  // the lock up (e.g. a cached page mid-migration), it is cleared, and the chat is usable the
+  // instant the welcome is dismissed. The cast photo is now an optional MID-interview step, so there
+  // is no pre-game window to block. Kept async with the same signature for every existing caller.
   async function recompute() {
-    if (!isGameBuild()) { setBlocked(false); return; }
-    const st = await jget("/api/orwell/state");
-    // Pre-game is the ONLY gated window. A null/unreadable state ⇒ don't block (fail open).
-    const preGame = !!(st && st.started === false);
-    if (!preGame) { setBlocked(false); return; }
-    const intake = await jget("/api/orwell/portrait/intake");
-    const secured = !!(intake && intake.finalized === true);
-    setBlocked(!secured);
+    setBlocked(false);
   }
 
   function setBlocked(v) {

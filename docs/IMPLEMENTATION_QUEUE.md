@@ -28,6 +28,12 @@ tests** (roles only); keep `npm test` green; commit on a feature branch and **op
 > *(The 0004 appearance-fields and 0023 durability rows there are **satisfied — implemented**;
 > check the table for any newer, still-open amendments before starting work.)*
 
+> 📸 **2026-06-20 — 0065 photo-first OOBE (engine ✅ done):** the cast photo is now casting **step #1**
+> — `castPhoto` (`"uploaded"`/`"skipped"`) is the FIRST `CASTING_COVERAGE` entry, engine-driven and
+> OPTIONAL (never gates casting `ready`; `createCharacter` finalizes either way). See the 0050
+> [Amendment (0065)](features/0050-casting-interview.md#amendment-0065--the-cast-photo-is-the-first-casting-step-photo-first-oobe).
+> The FE Python relay + in-chat photo box build to the same `castPhoto` contract (sibling work).
+
 ## Dispatch strategy — HISTORICAL (2026-06-08; complete — dispatch from the audit batches at the bottom)
 
 **State as of 2026-06-08 (since superseded — C8/0032 shipped):**

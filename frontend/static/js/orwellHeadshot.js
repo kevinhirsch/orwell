@@ -117,6 +117,11 @@
     // Returns true when the host took over, so we skip painting the "finalized" state that
     // would keep covering the logo. Settings → Account passes nothing and stays in place.
     const handoff = () => { try { return !!(opts.onFinalized && opts.onFinalized()); } catch (_) { return false; } };
+    // OOBE re-sequence (2026-06-20): on the pre-game casting box ONLY, the photo is OPTIONAL — the
+    // host wires onSkip to record {status:"skipped"} + resume the interview. Settings → Account
+    // passes nothing, so no skip affordance renders there (the avatar is a real, kept choice there).
+    const canSkip = typeof opts.onSkip === "function";
+    const skip = () => { try { opts.onSkip && opts.onSkip(); } catch (_) {} };
     function avatarChanged() { try { window.dispatchEvent(new CustomEvent("orwell:avatarchanged")); } catch (_) {} }
 
     async function upload(mode) {
@@ -288,6 +293,7 @@
             <div class="hs-actions">
               <button type="button" class="hs-btn" id="hs-studio" ${st.file ? "" : "disabled"}>Make AI studio portraits</button>
               <button type="button" class="hs-btn hs-btn-ghost" id="hs-exact" ${st.file ? "" : "disabled"}>Use photo as-is</button>
+              ${canSkip ? `<button type="button" class="hs-btn hs-btn-ghost" id="hs-skip">Skip for now</button>` : ""}
             </div>
             <div class="hs-msg" id="hs-msg2">${esc(_msg)}</div>
           </div></div>`;
@@ -300,6 +306,9 @@
       });
       body.querySelector("#hs-studio").addEventListener("click", studioGenerate);
       body.querySelector("#hs-exact").addEventListener("click", useExact);
+      // OOBE re-sequence: the optional "Skip for now" — only on the pre-game casting box (onSkip set).
+      const skipBtn = body.querySelector("#hs-skip");
+      if (skipBtn) skipBtn.addEventListener("click", skip);
       wireLibrary();
     }
 
@@ -311,12 +320,13 @@
   window.OrwellHeadshotStudio = { mount: buildStudio };
 
   // ── the pre-game casting WINDOW (composes the .ow-* kit) ─────────────────────
-  // P1 OOBE overhaul: the image step is a PROPER OrwellWindow, not a collapsible
-  // inline card. Because it GATES the chat (orwellChatGate.js locks send until a photo
-  // is secured), it is mounted NON-DISMISSABLE — no close/minimize control, no collapse
-  // affordance — so the mandatory step can never be hidden away. It is draggable +
-  // resizable (the player can move it off something), but it stays present until the
-  // photo lands and the window hands off into the game.
+  // OOBE re-sequence (2026-06-20): the cast-photo box is a PROPER OrwellWindow that pops up
+  // MID-interview, right after the producers ask about the photo (route() gates on
+  // state.casting.missing including "castPhoto" + a rendered producer turn). It is OPTIONAL:
+  // the player uploads/generates a photo OR clicks "Skip for now"; either way it records the
+  // step, the box disappears, and the interview resumes. The chat is NOT locked behind it
+  // (orwellChatGate.js no longer hard-locks for the photo). The window keeps no close/minimize
+  // chrome (the in-body "Skip for now" + finalize are the two exits) and stays centered.
   const CAST_ICON =
     "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' " +
     "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
@@ -327,15 +337,14 @@
 
   function buildBody() {
     const body = document.createElement("div");
-    // The ONE clear instruction — consolidated here, in the window. The chat gate's
-    // banner is gone and the composer keeps only a minimal disabled-state placeholder,
-    // so the "add your cast photo" prompt appears exactly once.
+    // The ONE clear instruction — consolidated here, in the window. OOBE re-sequence: the photo
+    // is OPTIONAL and the producers just asked about it, so the copy frames it as a quick,
+    // skippable step rather than a hard prerequisite.
     const lead = document.createElement("p");
     lead.className = "hs-lead";
     lead.innerHTML =
-      "<b>This is your cast photo.</b> Every houseguest needs one before the season can " +
-      "start. Upload a photo of yourself or generate one with AI — the chat opens the " +
-      "moment it's set, and the producers will reach out.";
+      "<b>Your cast photo.</b> Upload a photo of yourself or generate one with AI — or skip " +
+      "for now and add one later. Either way the interview picks right back up.";
     const studioHost = document.createElement("div");
     body.appendChild(lead);
     body.appendChild(studioHost);
@@ -351,10 +360,10 @@
     // lift so the composer docks normally (never hangs mid-screen) and the splash tips
     // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
     try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
-    // Compose the kit. NON-DISMISSABLE (no close/minimize) because it gates the chat. It is
-    // a centered, mandatory dialog-style gate (CSS pins it horizontally-centered), so it is
-    // NOT draggable/resizable — there is nothing to move it off (the splash is hidden while
-    // it's up). The kit still owns the chrome, titlebar, focus, and the .ow-* family.
+    // Compose the kit. No close/minimize chrome — the two EXITS are in the body (finalize a photo
+    // or "Skip for now"), so there is no half-open dead state. It is a centered dialog-style box
+    // (CSS pins it horizontally-centered), not draggable/resizable. The kit owns the chrome,
+    // titlebar, focus, and the .ow-* family.
     _win = window.OrwellWindowKit.create({
       id: ID, title: "Your Cast Photo", icon: CAST_ICON,
       slot: "top-right", slotKey: "castphoto", role: "dialog",
@@ -365,30 +374,57 @@
     _win.open();
     // Mount the reusable studio into the window body.
     buildStudio(studioHost, {
-      // No persistent "set ✓" chip in the casting window (item 5) — the titlebar carries
-      // the title and the window hands off on finalize, so nothing lingers above the
-      // composer. The summary callback is intentionally a no-op here.
+      // No persistent "set ✓" chip in the casting window — the titlebar carries the title and the
+      // window hands off on finalize/skip, so nothing lingers above the composer.
       onSummary: function () {},
       ensureOpen: function () {},        // a window is always "open" — nothing to expand
-      onFinalized: onCastingHeadshotChosen, // L4/L5: dismiss + hand off into the game
+      onFinalized: onCastingHeadshotChosen, // record {uploaded} + resume the interview
+      onSkip: onCastingPhotoSkipped,        // OOBE re-sequence: record {skipped} + resume (pre-game box only)
     });
   }
 
-  // L4/L5: the player has secured their casting headshot — the last pre-game step. Tear
-  // down the window and let the PRODUCERS open the game with the first message, so the
-  // player never has to type the opening word. Returns true so the studio stops repainting
-  // its own "finalized" state behind the teardown.
-  //
-  // item 6 (no composer jump): destroy the WINDOW immediately, but KEEP the composer-lift
-  // drop (.ow-casting-headshot-open) through the handoff — otherwise the welcome-active 30vh
-  // lift would snap the composer up mid-screen for the ~beat between teardown and the
-  // producers' first message clearing the welcome state. The flag is cleared by the next
-  // route()/unmount() once the game is underway (the composer is no longer welcome-active).
+  // OOBE re-sequence (2026-06-20): the player finalized their cast photo MID-interview. The photo is
+  // OPTIONAL and does NOT gate the chat or createCharacter — so this no longer "opens the game".
+  // Instead: record the photo step with the engine (POST /api/orwell/casting/photo {status:"uploaded"}
+  // — idempotent; a sibling lane builds the route), tear the box down, then fire the RESUME cue so
+  // the producers acknowledge and continue the interview. Returns true so the studio stops
+  // repainting its own "finalized" state behind the teardown.
   function onCastingHeadshotChosen() {
     teardownWindow();
+    recordPhotoStep("uploaded");
     try {
-      if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting();
+      if (window._orwellResumeAfterPhoto) window._orwellResumeAfterPhoto();
     } catch (_) { /* fail open — the chat composer is still the way in */ }
+    return true;
+  }
+
+  // Record the cast-photo step with the engine so it leaves state.casting.missing on every device.
+  // Idempotent + fail-open: the photo is optional, so a failed POST must never wedge the interview —
+  // the engine also drops "castPhoto" from `missing` once the portrait intake is finalized, so an
+  // uploaded photo still clears even if this call hiccups. The resume cue fires regardless.
+  function recordPhotoStep(status) {
+    try {
+      fetch("/api/orwell/casting/photo", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: status }),
+      }).then(() => {
+        // Nudge every surface to re-read state.casting (the box closes everywhere on the next route).
+        try { if (window.orwellGameChanged) window.orwellGameChanged("casting-photo:" + status); } catch (_) {}
+      }).catch(function () {});
+    } catch (_) { /* fail open */ }
+  }
+
+  // OOBE re-sequence: the player chose to SKIP the cast photo. Same shape as the finalize path but
+  // records {status:"skipped"} — the engine drops "castPhoto" from `missing`, so the box closes and
+  // never re-prompts. Then resume the interview. (No portrait was set; the player can still add one
+  // later via Settings → Account.)
+  function onCastingPhotoSkipped() {
+    teardownWindow();
+    recordPhotoStep("skipped");
+    try {
+      if (window._orwellResumeAfterPhoto) window._orwellResumeAfterPhoto();
+    } catch (_) { /* fail open */ }
     return true;
   }
 
@@ -403,26 +439,55 @@
     try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
   }
 
+  // OOBE re-sequence (2026-06-20): is there a rendered producer turn yet? The photo box must follow
+  // the producers' question, never precede it — so we only reveal it once an assistant turn is on
+  // screen (chatRenderer uses .msg.msg-ai). Mirrors orwellOnboarding._conversationHasAssistantTurn.
+  function _conversationHasAssistantTurn() {
+    try {
+      const hist = document.getElementById("chat-history");
+      if (hist && hist.querySelector(".msg.msg-ai")) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  // OOBE re-sequence: the box reveals MID-interview, so route() must be able to fire even when the
+  // box is NOT yet mounted (the opener has to render first). This flag keeps the background poll
+  // alive through the whole pre-game window (set true while pre-game, false once a season starts),
+  // so the box pops the moment the producer turn lands even if no event reaches this tab.
+  let _maybePregame = true;
+
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
-    if (!gameBuild) return;
+    if (!gameBuild) { _maybePregame = false; return; }
     const st = await jget("/api/orwell/state");
-    // 0064: the gate is pre-game ONLY. But "pre-game" alone is not enough to keep it OPEN — the
-    // cast photo is a per-user, server-authoritative bit (intake.finalized). Once ANY device sets
-    // it, every device must reflect that and CLOSE (a second device must not re-prompt for a photo
-    // that's already set). Drive the gate from the SYNCED canonical state, not per-tab local state.
+    // Track the pre-game window for the background poll: keep polling while pre-game (so a not-yet-
+    // mounted box can still appear after the opener), stop once the game is underway. A null/
+    // unreadable state keeps polling (fail toward checking again), but never blocks anything.
+    _maybePregame = !(st && st.started === true);
+    // OOBE re-sequence: the photo box is pre-game ONLY, and it is no longer the FIRST step / a hard
+    // gate — it is a mid-interview, OPTIONAL box. Reveal it only when ALL hold:
+    //   • pre-game (started === false), AND
+    //   • the engine still wants the cast-photo step — state.casting.missing includes "castPhoto"
+    //     (the engine is the authority; once the FE POSTs uploaded/skipped, the step leaves
+    //     `missing` and every device closes the box), AND
+    //   • a producer turn has already rendered (.msg.msg-ai) so the box FOLLOWS the producers'
+    //     question and never auto-mounts at page load before the interview opens.
+    // Anything else (started season, no casting object, castPhoto handled, no producer turn yet)
+    // ⇒ the box is closed. Drive it from the SYNCED canonical state, not per-tab local state.
     if (!(st && st.started === false)) { unmount(); return; }
-    const intake = await jget("/api/orwell/portrait/intake");
-    const secured = !!(intake && intake.finalized === true);
-    if (secured) {
-      // The headshot is set (here or on another device) — close the gate and let the chat (the
-      // canonical session, with the synced producer message) take over. Don't re-fire the kickoff:
-      // _orwellOpenGameAfterCasting is once-per-game guarded, so a second device just unmounts.
-      const wasOpen = !!(_win || document.getElementById(ID));
+    const casting = st && st.casting;
+    const missing = (casting && Array.isArray(casting.missing)) ? casting.missing : [];
+    const photoWanted = missing.indexOf("castPhoto") !== -1;
+    if (!photoWanted) {
+      // The cast-photo step is handled (uploaded or skipped, here or on another device) — close the
+      // box everywhere. Don't re-fire any cue: the resume cue fires once at finalize/skip time.
       unmount();
-      if (wasOpen) {
-        try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
-      }
+      return;
+    }
+    if (!_conversationHasAssistantTurn()) {
+      // The producers haven't reached out yet — don't pop the box before the question. We'll
+      // re-route on orwell:gamechanged (and the light poll) once the opener renders.
+      unmount();
       return;
     }
     mount();
@@ -434,11 +499,13 @@
   // canonical-session sync re-dispatching `orwell:gamechanged` on a `game-updated` ping, plus the
   // light poll below catches the case where no event reaches this tab.
   window.addEventListener("orwell:avatarchanged", route);
-  // A bounded background re-check so a second device closes the gate within a few seconds even with
-  // no event (e.g. the photo was set on a device that never pinged this one). Cheap reads; only does
-  // work while the gate is actually mounted (pre-game) — a no-op once the game is underway.
+  // A bounded background re-check. It must do two jobs now: (1) close the box everywhere within a
+  // few seconds when the photo step is handled on another device (the old job), AND (2) OPEN the box
+  // once the producer turn renders during the pre-game interview, even if no event reaches this tab
+  // (the new mid-interview reveal). So it re-routes while the box is mounted OR while we're still in
+  // the pre-game window. Cheap state reads; a no-op once the season is underway (_maybePregame false).
   setInterval(function () {
-    if (_win || document.getElementById(ID)) { route(); }
+    if (_win || document.getElementById(ID) || _maybePregame) { route(); }
   }, 4000);
   ready(route);
 })();

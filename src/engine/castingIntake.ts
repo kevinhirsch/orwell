@@ -53,6 +53,14 @@ export function emptyIntake(): CastingIntake {
  * the next step; the scalar fields echo back in `known` so a resumed interview never re-asks.
  */
 export const CASTING_COVERAGE: ReadonlyArray<{ field: keyof CastingIntake; ask: string }> = [
+  // Casting step #1 — "what do you look like?" (the photo-first OOBE re-sequence): the producers
+  // open the interview here, BEFORE any other question, so `next` on a fresh interview points at the
+  // cast photo first. It is an ORDINARY scalar (it flows through merge/overwrite/capture/status like
+  // every other field), but it is OPTIONAL by design — `ready` stays name-only (below), so an
+  // unanswered/"skipped" photo never blocks finalization. The FE sets it to "uploaded" (a photo was
+  // finalized) or "skipped" (the player declined) when the in-chat photo box closes; any non-empty
+  // string marks the step handled. Vault-free: it is the player's own metadata, never secret.
+  { field: "castPhoto", ask: "their cast photo — what they look like (the in-chat photo box opens for this; it's optional)" },
   { field: "playerName", ask: "their name — what the feeds should call them" },
   { field: "backstory", ask: "their life outside the house, in their words" },
   { field: "motivation", ask: "why they came to play / what they're playing for" },

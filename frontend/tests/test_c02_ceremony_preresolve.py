@@ -33,7 +33,8 @@ def _wire(monkeypatch, *, phase, pending, calls):
         calls.append("status")
         return {"phase": phase, "pending": pending}
 
-    async def fake_advance(user=None):
+    async def fake_advance(expected_beat_seq=None, idempotency_key=None, user=None):
+        # 0065 Part A/B: the FE-issued pre-resolve now threads the optional sync-spine fields.
         calls.append("advance")
         return {"event": {"content": "HOH nominates A and B"}}
 
@@ -113,7 +114,8 @@ def _wire_veto(monkeypatch, *, players, pending, calls):
         calls.append("status")
         return {"phase": "veto-competition", "pending": pending, "veto": {"holder": None, "used": False, "players": players}}
 
-    async def fake_advance(user=None):
+    async def fake_advance(expected_beat_seq=None, idempotency_key=None, user=None):
+        # 0065 Part A/B: the FE-issued pre-resolve now threads the optional sync-spine fields.
         calls.append("advance")
         return {"event": {"content": "the veto players are drawn: A, B, C, D, E, F"}}
 

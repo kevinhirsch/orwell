@@ -50,17 +50,17 @@ def test_c18_polling_pauses_hidden_and_backs_off():
         assert "setInterval(refresh" not in js, f
 
 
-def test_c22_producers_reach_out_first_after_the_image_step():
-    # P1 onboarding evolved C22: the houseguest IMAGE is the player's first interaction, and once
-    # it's secured the PRODUCERS reach out FIRST — the player never types the opening word. The old
-    # "one keypress away" composer pre-prompt is gone; the kickoff auto-sends with the user bubble
-    # HIDDEN so the first visible message is the producers'. The premiere then flows from the
-    # conversation (the engine's interview prompt rolls the producer straight into the premiere).
+def test_c22_producers_reach_out_first_on_welcome_dismiss():
+    # OOBE re-sequence (2026-06-20): the PRODUCERS reach out FIRST — now triggered when the WELCOME is
+    # dismissed (route's onProceed), not after a photo. The player never types the opening word; the
+    # kickoff auto-sends with the user bubble HIDDEN (via the synchronous hidden-cue seam) so the
+    # first visible message is the producers'. The premiere then flows from the conversation.
     js = _read("static", "js", "orwellOnboarding.js")
     assert "I take my seat for the casting interview." not in js   # the pre-prompt is removed
     seg = js[js.index("window._orwellOpenGameAfterCasting"):]
     seg = seg[: seg.index("\n  };")]
-    assert "setHideUserBubble" in seg                              # producers appear to reach out first
+    assert "sendHiddenCue" in seg                                  # hidden-cue seam (no flash)
+    assert "setHideUserBubble" in seg                              # producers appear to reach out first (fallback)
     assert "handleChatSubmit" in seg                               # auto-sent (this single cutover)
     assert "_openSent" in seg                                      # fired once
     # The engine-side casting->premiere transition wording is verified by ENGINE tests
