@@ -4701,7 +4701,7 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
             cast = res.get("house") if isinstance(res, dict) else None
-            player_name = (res.get("player") or {}).get("name") if isinstance(res, dict) else None
+            # (the player's name is intentionally NOT read here — cast authoring is player-independent)
 
             if prompts:
                 from src import orwell_portraits
@@ -4710,7 +4710,9 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
 
             # (b) author the cast's rich backstories in the background; when it finishes, top up
             #     any portrait that hasn't landed yet, refetching the now-authored facet (idempotent).
-            if cast and player_name:
+            #     NPC storylines are authored player-INDEPENDENT (anti-sycophancy): the player's name
+            #     is never threaded into authoring — each houseguest's life is fleshed out on its own.
+            if cast:
                 from src import orwell_cast_authoring
                 from src import orwell_portraits
 
@@ -4731,7 +4733,7 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         pass
 
                 orwell_cast_authoring.kickoff_authoring(
-                    cast, player_name, owner, then=_refresh_authored_portraits)
+                    cast, owner, then=_refresh_authored_portraits)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}

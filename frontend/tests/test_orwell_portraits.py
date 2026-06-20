@@ -116,8 +116,11 @@ def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits,
 
     captured = {}
 
-    def fake_kickoff_authoring(cast, player_name, owner, then=None):
-        order.append(("authoring", player_name))
+    # ANTI-SYCOPHANCY: kickoff_authoring no longer takes the player's name — NPC storylines are
+    # authored player-independent, so the call carries only the cast + owner (+ the top-up callback).
+    def fake_kickoff_authoring(cast, owner, then=None):
+        order.append(("authoring", owner))
+        captured["cast"] = cast
         captured["then"] = then  # the top-up callback must be wired (not None)
     monkeypatch.setattr(cast_authoring, "kickoff_authoring", fake_kickoff_authoring)
 
@@ -128,9 +131,11 @@ def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits,
     assert order.index(("portraits", ("player", "npc:1", "npc:2"))) < \
         next(i for i, c in enumerate(order) if c[0] == "authoring")
     # Authoring still runs, with a top-up callback to fill any not-yet-landed face from the
-    # authored facet (idempotent).
-    assert ("authoring", "The Player") in order
+    # authored facet (idempotent). It is keyed by the OWNER, never the player's identity.
+    assert ("authoring", "bob") in order
     assert callable(captured.get("then"))
+    # and the player's name is never threaded into authoring (storylines are player-independent)
+    assert "player_name" not in str(captured.get("cast"))
 
 
 # --- graceful absence: skip silently when generation is unavailable ---------------------

@@ -89,6 +89,27 @@
       if (t && t.font) {
         var fm = {mono:"'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif"};
         if (fm[t.font]) { s.setProperty('--font-family', fm[t.font]); }
+        else if (t.font.indexOf('gf:') === 0) {
+          // A Google font (gf:Family). Inject the single CSS2 stylesheet link now
+          // so the first frame already paints it — with a system fallback baked
+          // into the stack so an offline / failed load never leaves the UI
+          // fontless (display=swap handles the swap-in). Keep in sync with
+          // theme.js (_googleFontHref / _googleFontStack).
+          var _gfam = t.font.slice(3).trim();
+          if (_gfam) {
+            s.setProperty('--font-family', "'" + _gfam.replace(/'/g,'') + "', system-ui, -apple-system, 'Segoe UI', sans-serif");
+            var _ghref = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(_gfam).replace(/%20/g,'+') + ':wght@300;400;500;600;700&display=swap';
+            var _glink = document.getElementById('orwell-google-font-link');
+            if (!_glink) {
+              _glink = document.createElement('link');
+              _glink.id = 'orwell-google-font-link';
+              _glink.rel = 'stylesheet';
+              _glink.href = _ghref;
+              _glink.addEventListener('error', function(){ var c = document.getElementById('orwell-google-font-link'); if (c) c.remove(); });
+              document.head.appendChild(_glink);
+            }
+          }
+        }
         else { s.setProperty('--font-family', "'" + t.font.replace(/'/g,'') + "', sans-serif"); }
       }
       // Apply density class on html
@@ -626,6 +647,20 @@
               <input type="checkbox" id="theme-frosted-toggle">
               <span class="admin-slider"></span>
             </label>
+          </div>
+        </div>
+        <div class="theme-fd-row" id="theme-google-font-row">
+          <div class="theme-fd-group" style="flex:1 1 0;min-width:0;">
+            <label class="theme-fd-label" for="theme-google-font-input">Google font
+              <span id="theme-google-font-note" class="theme-fd-label" style="display:inline;opacity:0.45;font-weight:normal;" title="Loading a Google font fetches it from Google's CDN (fonts.googleapis.com), which sends your browser's IP address to Google. The four built-in fonts above stay fully offline.">&#9432; privacy</span>
+            </label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="theme-google-font-input" class="theme-fd-select" list="theme-google-font-list" type="text" autocomplete="off" spellcheck="false" placeholder="Search or type a font name&hellip;" aria-label="Google font family" style="flex:1 1 0;min-width:0;" />
+              <datalist id="theme-google-font-list"></datalist>
+              <button type="button" id="theme-google-font-apply" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Apply this Google font">Apply</button>
+              <button type="button" id="theme-google-font-clear" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Use a built-in font instead">Clear</button>
+            </div>
+            <div class="theme-fd-label" style="opacity:0.4;font-weight:normal;">Pick (almost) any font from <code>fonts.google.com</code> — search the list or type any family name. Loaded on demand; falls back to a built-in font when offline.</div>
           </div>
         </div>
         <div class="theme-fd-row">

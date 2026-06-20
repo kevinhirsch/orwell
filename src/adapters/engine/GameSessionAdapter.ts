@@ -9,7 +9,7 @@ import type {
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
-import { humanizeIds } from "./humanize";
+import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
@@ -90,12 +90,14 @@ import { loadReserveTwists } from "../../engine/reserveTwists";
 import {
   generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
   defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
+  storyThreadToRetrospectiveProse,
   type SeasonPosition,
 } from "../../engine/deepProfile";
 import { THREAD } from "../../engine/threadConstants";
 import {
   loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
   DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
+  preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
@@ -112,6 +114,29 @@ import { cloneSession, fastClone } from "../../engine/sessionSnapshot";
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
 ]);
+
+/**
+ * A READABLE category label for a hidden record's machine kind/type, for the post-season retrospective
+ * (0048). The FE renders each unsealed row as "[type] content", so a raw slug (`hidden-thread`,
+ * `seeded-relationship`, `offscreen-event`) becomes a debug tag; this maps it to plain words instead.
+ * Pure / Vault-free (a category name reveals nothing). Unknown kinds fall back to a de-slugged title.
+ */
+const RETROSPECTIVE_LABELS: Readonly<Record<string, string>> = {
+  "hidden-thread": "Secret thread",
+  "seeded-relationship": "Hidden tie",
+  "hidden-attribute": "Hidden side",
+  confessional: "Confessional",
+  "offscreen-event": "Off-screen",
+  gossip: "Whisper",
+  conversation: "Off-screen",
+  scheme: "Off-screen",
+};
+function retrospectiveLabel(kind: string): string {
+  if (RETROSPECTIVE_LABELS[kind]) return RETROSPECTIVE_LABELS[kind]!;
+  // Fallback: de-slug an unmapped kind ("some-kind" → "Some kind") so no raw machine slug ever shows.
+  const words = kind.replace(/[:_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Hidden";
+}
 
 /**
  * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
@@ -627,11 +652,20 @@ export class GameSessionAdapter implements GameSession {
     const target = this.house.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
 
-    // Validate — non-player-mirroring (L28): the cast is independent of the player, so the authored
-    // PUBLIC material must not echo the player's name. Refuse a mirror (Vault-safe: no value echoed).
+    // Validate — non-player-mirroring (L28 + the anti-sycophancy mandate #3): the cast is INDEPENDENT
+    // of the player, so NEITHER the authored PUBLIC material NOR the hidden STORYLINE material (secrets,
+    // true goals, weakness) may be built around the player — an NPC's drama must not echo the player's
+    // name. This is the airtight guard: even if an authoring model ignores the prompt and weaves the
+    // player into an NPC's secret/goal/weakness, the engine refuses it here so no player-centric story
+    // material is ever sealed. The Day-1 read of the player is the ONE legitimately player-facing field
+    // and is excluded from this check (the engine owns its seeded value regardless). Vault-safe: the
+    // refusal echoes no authored value. (A short player name is ignored to avoid false positives.)
     const playerName = (this.house.player.name ?? "").trim();
-    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`.toLowerCase();
-    if (playerName.length >= 3 && publicText.includes(playerName.toLowerCase())) {
+    const mentionsPlayer = (text: string): boolean =>
+      playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
+    const storylineText = `${(req.secrets ?? []).join(" ")} ${(req.trueGoals ?? []).join(" ")} ${req.weakness ?? ""}`;
+    if (mentionsPlayer(publicText) || mentionsPlayer(storylineText)) {
       return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
     }
 
@@ -718,13 +752,31 @@ export class GameSessionAdapter implements GameSession {
    */
   seasonRetrospective(): RetrospectiveView | null {
     if (!this.live?.finished) return null; // the structural gate: no finished season, no unsealing
+    const nameOf = (id: EntityId): string => this.nameOf(id);
     const events = this.record?.events() ?? [];
+    // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
+    // slug) and `content` clean, name-resolved prose — this is the Wall's ONE sanctioned reveal, shown
+    // readably (audit: the live dump leaked "[hidden-thread] story-thread thread:npc:8:0 …").
     const hiddenStory = events
       .filter((e) => e.hidden)
-      .map((e) => ({ type: e.type, content: this.humanize(e.content) }));
+      .map((e) => ({ type: retrospectiveLabel(e.type), content: this.retroScrub(e.content) }));
+    // The structured hidden layers (threads + seeded relationships) render from the IN-MEMORY objects,
+    // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
+    // are therefore SKIPPED below when iterating the Vault records (rendered here once, readably, instead).
+    for (const t of this.storyThreads) {
+      hiddenStory.push({ type: "Secret thread", content: storyThreadToRetrospectiveProse(t, nameOf) });
+    }
+    for (const tie of this.seededRels.ties) {
+      hiddenStory.push({ type: "Hidden tie", content: preGameTieToRetrospectiveProse(tie, nameOf) });
+    }
+    for (const s of this.seededRels.showmances) {
+      hiddenStory.push({ type: "Hidden tie", content: showmanceToRetrospectiveProse(s, nameOf) });
+    }
     for (const r of this.record?.hidden() ?? []) {
-      if (r.kind === "reserved-twist") continue; // surfaced structurally via `twists` below
-      hiddenStory.push({ type: r.kind, content: this.humanize(r.content) });
+      // Rendered structurally elsewhere: twists via `twists` below; threads + seeded relationships from
+      // the structured objects above (their raw Vault strings carry ids/slugs we must not echo).
+      if (r.kind === "reserved-twist" || r.kind === "hidden-thread" || r.kind === "seeded-relationship") continue;
+      hiddenStory.push({ type: retrospectiveLabel(r.kind), content: this.retroScrub(r.content) });
     }
     const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
     const twists = (this.live.reserve ?? []).map((t) => ({
@@ -2881,6 +2933,18 @@ export class GameSessionAdapter implements GameSession {
   private humanize(content: string): string {
     const all = this.house ? [this.house.player, ...this.house.npcs] : [];
     return humanizeIds(content, all);
+  }
+
+  /**
+   * The POST-SEASON retrospective scrub (0048 — the Wall's ONE sanctioned reveal). Stronger than the
+   * everyday `humanize`: it also resolves ids embedded in COMPOUND machine tokens (`thread:npc:8:0`),
+   * drops the bare `thread:…` identifier, and translates the thread audit slugs (`[dormant]`, `surfaces
+   * via:`, …) into readable prose — so the unsealed story reads like prose, not a debug dump. Used ONLY
+   * here, behind the terminal-state gate.
+   */
+  private retroScrub(content: string): string {
+    const all = this.house ? [this.house.player, ...this.house.npcs] : [];
+    return humanizeForRetrospective(content, all);
   }
 
   getGameState(): GameStateView {

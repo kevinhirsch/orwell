@@ -426,11 +426,153 @@ function _injectFontFace(familyName, variants) {
   _injectedFonts.add(familyName);
 }
 
+// ── Google Fonts (lazy, single-link load) ─────────────────────────────────────
+// A chosen Google font is persisted in the SAME `font` field as the built-ins,
+// tagged with a `gf:` prefix (e.g. "gf:Roboto Slab"). This keeps the whole
+// save/sync/early-paint round-trip intact — built-ins, the custom-folder fonts,
+// and Google fonts all live in one string. Built-ins stay 100% offline-safe:
+// nothing here runs unless a `gf:` value is selected.
+export const GOOGLE_FONT_PREFIX = 'gf:';
+// The catalog asset is shipped statically (no Google Fonts Developer API key) and
+// fetched once, lazily, the first time the picker is opened.
+const GOOGLE_FONTS_ASSET = '/static/fonts/google-fonts.json';
+// Only ever ONE dynamic <link> at a time — id lets us find + replace it cleanly.
+const GOOGLE_FONT_LINK_ID = 'orwell-google-font-link';
+// A weight range broad enough for body + bold UI; display=swap means the UI never
+// blocks on the network — it paints the fallback immediately and swaps when ready.
+const GOOGLE_FONT_WEIGHTS = 'wght@300;400;500;600;700';
+
+function _googleFamilyFromFont(f) {
+  if (typeof f !== 'string' || !f.startsWith(GOOGLE_FONT_PREFIX)) return null;
+  const fam = f.slice(GOOGLE_FONT_PREFIX.length).trim();
+  return fam || null;
+}
+
+// Build the CSS2 URL. The family is URL-encoded; CSS2 wants spaces as '+'.
+function _googleFontHref(family) {
+  const fam = encodeURIComponent(family).replace(/%20/g, '+');
+  return `https://fonts.googleapis.com/css2?family=${fam}:${GOOGLE_FONT_WEIGHTS}&display=swap`;
+}
+
+// Inject (or replace) the single dynamic Google-font stylesheet link. Returns the
+// quoted family token to drop at the head of the font stack.
+function _loadGoogleFont(family) {
+  const href = _googleFontHref(family);
+  let link = document.getElementById(GOOGLE_FONT_LINK_ID);
+  // Swap cleanly: if a DIFFERENT family is selected, remove the prior link first
+  // so we never bulk-accumulate stylesheets.
+  if (link && link.getAttribute('href') !== href) {
+    link.remove();
+    link = null;
+  }
+  if (!link) {
+    link = document.createElement('link');
+    link.id = GOOGLE_FONT_LINK_ID;
+    link.rel = 'stylesheet';
+    link.href = href;
+    // Graceful fallback: if the stylesheet fails to load (offline / blocked /
+    // typo'd family), drop the dynamic link so the family stack falls through to
+    // the system fallback. display=swap already prevents a fontless / hung UI.
+    link.addEventListener('error', () => {
+      const cur = document.getElementById(GOOGLE_FONT_LINK_ID);
+      if (cur) cur.remove();
+    });
+    document.head.appendChild(link);
+  }
+  return family;
+}
+
+// A Google font's family stack always carries a generic system fallback so an
+// offline / failed load never leaves the UI fontless.
+function _googleFontStack(family) {
+  return `'${family.replace(/'/g, '')}', system-ui, -apple-system, 'Segoe UI', sans-serif`;
+}
+
+// Reflect an active Google font (gf:Family) into the built-in <select> as a
+// synthetic, removable option so the select round-trips and shows the family.
+// No-op for built-in / custom-folder fonts.
+function _reflectGoogleFontOption(selectEl, fontValue) {
+  if (!selectEl) return;
+  selectEl.querySelectorAll('option[data-google-font]').forEach(o => o.remove());
+  const fam = _googleFamilyFromFont(fontValue);
+  if (!fam) return;
+  const opt = document.createElement('option');
+  opt.value = fontValue;
+  opt.textContent = fam + ' (Google)';
+  opt.dataset.googleFont = '1';
+  selectEl.appendChild(opt);
+}
+
+// Keep the Google font text input mirroring the active font: shows the family
+// when a Google font is active, blank otherwise.
+function _syncGoogleFontInput(fontValue) {
+  const input = document.getElementById('theme-google-font-input');
+  if (!input) return;
+  input.value = _googleFamilyFromFont(fontValue) || '';
+}
+
+// Lazily fetch + cache the vendored Google Fonts catalog (names + category).
+// No API key — it's a static asset. Failure is non-fatal: free-text still works.
+let _googleFontCatalog = null;
+let _googleFontCatalogPromise = null;
+function _loadGoogleFontCatalog() {
+  if (_googleFontCatalog) return Promise.resolve(_googleFontCatalog);
+  if (_googleFontCatalogPromise) return _googleFontCatalogPromise;
+  _googleFontCatalogPromise = fetch(GOOGLE_FONTS_ASSET, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(data => {
+      _googleFontCatalog = (data && Array.isArray(data.families)) ? data.families : [];
+      return _googleFontCatalog;
+    })
+    .catch(e => { console.warn('Google fonts catalog fetch failed:', e); _googleFontCatalog = []; return []; });
+  return _googleFontCatalogPromise;
+}
+
+// Wire the searchable Google-font combobox: populate the datalist from the
+// vendored catalog, mirror the active family, and bind Apply / Clear / Enter.
+function _wireGoogleFontPicker(initFont, applyFont, clearFont) {
+  const input = document.getElementById('theme-google-font-input');
+  const applyBtn = document.getElementById('theme-google-font-apply');
+  const clearBtn = document.getElementById('theme-google-font-clear');
+  if (!input || input.dataset.gfBound === '1') return;
+  input.dataset.gfBound = '1';
+  _syncGoogleFontInput(initFont);
+  // Populate the datalist from the vendored static list (no network catalog).
+  _loadGoogleFontCatalog().then(families => {
+    const list = document.getElementById('theme-google-font-list');
+    if (!list) return;
+    list.innerHTML = families.map(f => {
+      const fam = (f && f.family) || '';
+      const cat = (f && f.category) ? f.category : '';
+      return `<option value="${fam.replace(/"/g, '&quot;')}">${cat}</option>`;
+    }).join('');
+  });
+  const apply = () => { const v = input.value.trim(); if (v) applyFont(v); };
+  if (applyBtn && applyBtn.dataset.gfBound !== '1') {
+    applyBtn.dataset.gfBound = '1';
+    applyBtn.addEventListener('click', apply);
+  }
+  if (clearBtn && clearBtn.dataset.gfBound !== '1') {
+    clearBtn.dataset.gfBound = '1';
+    clearBtn.addEventListener('click', () => { input.value = ''; clearFont(); });
+  }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+  // Selecting straight from the datalist (a "change" with a known value) applies
+  // immediately — feels like a picker, not a form field.
+  input.addEventListener('change', () => { if (input.value.trim()) apply(); });
+}
+
 export function applyFontDensity(font, density) {
   const f = font || DEFAULT_FONT;
   const d = density || DEFAULT_DENSITY;
   let family = FONT_MAP[f];
-  if (!family && _customFonts[f]) {
+  const gf = _googleFamilyFromFont(f);
+  if (!family && gf) {
+    // A Google font — lazily load ONLY this family, then point the CSS var at it
+    // with a system fallback baked into the stack.
+    _loadGoogleFont(gf);
+    family = _googleFontStack(gf);
+  } else if (!family && _customFonts[f]) {
     // It's a custom font from the local folder
     _injectFontFace(f, _customFonts[f]);
     family = "'" + f + "', sans-serif";
@@ -797,7 +939,8 @@ export function initThemeUI() {
         const eis = document.getElementById('theme-bg-intensity');
         const szs = document.getElementById('theme-bg-size');
         const frs = document.getElementById('theme-frosted-toggle');
-        if (fs) fs.value = f;
+        if (fs) { _reflectGoogleFontOption(fs, f); fs.value = f; }
+        _syncGoogleFontInput(f);
         if (ds) ds.value = d;
         if (ps) ps.value = p;
         if (ecs) ecs.value = ec || colors.fg || '#9cdef2';
@@ -1006,10 +1149,14 @@ export function initThemeUI() {
       syncPickers(colors);
       applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
       applyBgPattern('none');
+      // Drop any active Google font (synthetic option + the dynamic <link>).
+      const _gl = document.getElementById(GOOGLE_FONT_LINK_ID);
+      if (_gl) _gl.remove();
+      _syncGoogleFontInput(DEFAULT_FONT);
       const fs = document.getElementById('theme-font-select');
       const ds = document.getElementById('theme-density-select');
       const ps = document.getElementById('theme-bg-pattern-select');
-      if (fs) fs.value = DEFAULT_FONT;
+      if (fs) { fs.querySelectorAll('option[data-google-font]').forEach(o => o.remove()); fs.value = DEFAULT_FONT; }
       if (ds) ds.value = DEFAULT_DENSITY;
       if (ps) ps.value = 'none';
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
@@ -1182,10 +1329,16 @@ export function initThemeUI() {
 
   if (fontSelect) {
     const nf = fontSelect.cloneNode(true); fontSelect.parentNode.replaceChild(nf, fontSelect);
+    // If the saved font is a Google font (gf:Family), it has no built-in <option>.
+    // Add a synthetic option so the select round-trips + shows the active family.
+    _reflectGoogleFontOption(nf, _initFont);
     nf.value = _initFont;
     nf.addEventListener('change', () => {
       applyFontDensity(nf.value, document.getElementById('theme-density-select').value);
       const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+      // Picking a built-in / custom font from the select drops the Google font;
+      // keep the Google input mirror in sync.
+      _syncGoogleFontInput(nf.value);
     });
     // Fetch custom fonts from local folder and populate dropdown
     fetch('/api/fonts/custom', { credentials: 'same-origin' })
@@ -1202,10 +1355,42 @@ export function initThemeUI() {
           nf.appendChild(opt);
         }
         // Restore saved value after options are populated
+        _reflectGoogleFontOption(nf, _initFont);
         nf.value = _initFont;
       })
       .catch(e => console.warn('Custom fonts fetch failed:', e));
   }
+
+  // ── Google Fonts picker (searchable + free-text) ──
+  // Apply a Google family: tag it gf:, apply live, reflect it in the <select>,
+  // and persist through the existing save path so it survives reload (per-user).
+  function _applyGoogleFont(family) {
+    const fam = (family || '').trim();
+    if (!fam) return;
+    const value = GOOGLE_FONT_PREFIX + fam;
+    const ds = document.getElementById('theme-density-select');
+    applyFontDensity(value, ds ? ds.value : DEFAULT_DENSITY);
+    const sel = document.getElementById('theme-font-select');
+    if (sel) { _reflectGoogleFontOption(sel, value); sel.value = value; }
+    const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    _syncGoogleFontInput(value);
+  }
+  // Clear back to the default built-in font (offline-safe).
+  function _clearGoogleFont() {
+    const ds = document.getElementById('theme-density-select');
+    applyFontDensity(DEFAULT_FONT, ds ? ds.value : DEFAULT_DENSITY);
+    const sel = document.getElementById('theme-font-select');
+    if (sel) {
+      // Drop any synthetic gf option, then select the default built-in.
+      sel.querySelectorAll('option[data-google-font]').forEach(o => o.remove());
+      sel.value = DEFAULT_FONT;
+    }
+    const link = document.getElementById(GOOGLE_FONT_LINK_ID);
+    if (link) link.remove();
+    const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    _syncGoogleFontInput(DEFAULT_FONT);
+  }
+  _wireGoogleFontPicker(_initFont, _applyGoogleFont, _clearGoogleFont);
   if (densitySelect) {
     const nd = densitySelect.cloneNode(true); densitySelect.parentNode.replaceChild(nd, densitySelect);
     nd.value = _initDensity;

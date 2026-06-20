@@ -1,0 +1,22 @@
+[Unit]
+Description=orwell ops trigger — web-requested Update + Reset (pull+rebuild THEN OOBE, keep API keys; flag watch)
+# The seam that lets the admin status page trigger the combined Update + Reset: the front-end runs
+# inside the E85-hardened orwell-frontend.service (User=orwell, empty CapabilityBoundingSet=) and
+# structurally CANNOT git pull, rebuild, stop/restart services, or remove /opt files itself. The
+# sanctioned pattern (identical to orwell-ops-update.path / orwell-ops-factory-reset.path, G19b):
+# the web tier writes a FLAG FILE under data/ops/ (the one tree it already owns) and this root-side
+# path unit reacts by starting the oneshot runner, which appends its output to
+# data/ops-update-reset.log — the same data/*.log surface the status page already tails live.
+# Click → confirm "RESET" → update, then reset.
+
+[Path]
+# EXISTENCE-only trigger: the flag's CONTENT is deliberately ignored — never read, parsed, or
+# executed — so the web tier can request "an update + reset", never "a command". Only the one fixed
+# script wired into orwell-ops-update-reset.service ever runs. The runner removes the flag FIRST;
+# PathExists= re-evaluates when the service deactivates, so a clean run does not re-trigger, while a
+# request landing DURING a run earns exactly one follow-up run.
+PathExists=/opt/orwell/data/ops/update-reset-requested
+Unit=orwell-ops-update-reset.service
+
+[Install]
+WantedBy=multi-user.target
