@@ -4683,26 +4683,55 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 orwell_seasons.increment_season(owner)
             except Exception:
                 pass  # the counter is best-effort meta-progression; never fail the restart over it
-        # L28b → 0051 pipeline: author the cast's rich backstories FIRST (the LLM writes each
-        # houseguest's §3 profile back to the engine, the airtight source of truth), THEN the
-        # move-in portraits (the authored physical facet feeds the prompt; engine returns Vault-free
-        # prompts on season start). Both run in the BACKGROUND so game start NEVER blocks, and a
-        # missing model (chat OR image) is a silent no-op — the seeded floor stays authoritative.
+        # L28b → 0051 pipeline. The cast is KNOWN the instant createCharacter returns — which,
+        # in the chat-driven flow, is DURING the casting interview (the player still picks their
+        # own headshot before house entry). So portraits must start generating in the BACKGROUND
+        # right here, so the faces are ready BY MOVE-IN rather than trickling in after it.
+        #
+        # Timing fix: portraits used to be CHAINED behind full-cast authoring (`then=_portraits`).
+        # Authoring is 15 sequential LLM calls; chaining behind it pushed the pictures to land
+        # around/after house entry. We now (a) kick portrait generation off IMMEDIATELY from the
+        # engine's seeded §3-depth facets (0058 Phase 1 — already concrete & distinctive, no LLM
+        # needed), running in parallel with authoring; and (b) still run authoring in the
+        # background and, once it lands its richer physical facets, refresh-generate any face not
+        # yet on disk via the backfill (idempotent — a portrait already generated from the seeded
+        # facet is never re-shot, so the immediate pass wins for the fast ones and the authored
+        # facet only fills the slower ones). Both paths are best-effort: a missing model (chat OR
+        # image) is a silent no-op and the game start NEVER blocks on either.
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
             cast = res.get("house") if isinstance(res, dict) else None
             player_name = (res.get("player") or {}).get("name") if isinstance(res, dict) else None
 
-            def _portraits():
-                if prompts:
-                    from src import orwell_portraits
-                    orwell_portraits.kickoff_generation(prompts, owner)
+            if prompts:
+                from src import orwell_portraits
+                # (a) start the move-in portraits NOW, from the seeded facets — ready by move-in.
+                orwell_portraits.kickoff_generation(prompts, owner)
 
+            # (b) author the cast's rich backstories in the background; when it finishes, top up
+            #     any portrait that hasn't landed yet, refetching the now-authored facet (idempotent).
             if cast and player_name:
                 from src import orwell_cast_authoring
-                orwell_cast_authoring.kickoff_authoring(cast, player_name, owner, then=_portraits)
-            else:
-                _portraits()
+                from src import orwell_portraits
+
+                def _refresh_authored_portraits():
+                    # The ids whose portrait is still missing after the immediate pass — refetch
+                    # their (now possibly authored) prompt and generate. Skips any already on disk.
+                    try:
+                        ids = []
+                        for entry in (prompts or []):
+                            if not isinstance(entry, dict):
+                                continue
+                            hid = entry.get("houseguestId") or entry.get("id")
+                            if hid and orwell_portraits.portrait_file(owner, hid) is None:
+                                ids.append(str(hid))
+                        if ids:
+                            orwell_portraits.kickoff_backfill(ids, owner, force=True)
+                    except Exception:
+                        pass
+
+                orwell_cast_authoring.kickoff_authoring(
+                    cast, player_name, owner, then=_refresh_authored_portraits)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}

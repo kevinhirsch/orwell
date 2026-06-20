@@ -140,6 +140,51 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
         db.close()
 
 
+def has_image_capable_endpoint(owner: Optional[str] = None) -> bool:
+    """True when at least one enabled, image-capable endpoint is configured for `owner`.
+
+    This is the RESILIENT availability signal the portrait pipeline gates on. Unlike
+    `_resolve_model`, it does NOT depend on a live `/models` catalog probe — that probe is a
+    slow (5s), network-bound optimization whose transient failure (a cold provider, a momentary
+    blip, the very first call before any catalog is warm) made `_resolve_model` raise and the
+    pipeline falsely report "no image model configured", only to succeed on a retry once the
+    catalog was reachable (the observed false-negative-then-race-to-success).
+
+    The real test of generation is the actual `/images/generations` or `/chat/completions` POST,
+    which the pipeline already performs best-effort. So the GATE only needs to know an
+    image-capable endpoint EXISTS: any enabled OpenAI-compatible / OpenRouter endpoint can serve
+    an image model (the engine sends the configured/auto-detected image model id to it). Anthropic
+    and native-Ollama endpoints can't generate images, so they don't count on their own.
+
+    Vault-free + side-effect-free: a pure DB read, no network. Returns False only when there is
+    GENUINELY no usable endpoint."""
+    from src.database import SessionLocal, ModelEndpoint
+    from src.llm_core import _detect_provider
+    from src.auth_helpers import owner_filter
+
+    db = SessionLocal()
+    try:
+        query = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
+        if owner:
+            query = owner_filter(query, ModelEndpoint, owner)
+        for ep in query.all():
+            try:
+                provider = _detect_provider(_normalize_base(ep.base_url))
+            except Exception:
+                provider = "openai"
+            # Anthropic + native Ollama have no image-generation transport; every other
+            # provider family (openai, openrouter, groq, copilot, opencode, unknown→openai)
+            # implements an OpenAI-compatible images path or OpenRouter chat image-output.
+            if provider in ("anthropic", "ollama"):
+                continue
+            return True
+        return False
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------

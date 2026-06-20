@@ -462,12 +462,27 @@ def _image_settings(user: Optional[str]) -> tuple:
 
 
 def image_generation_available(user: Optional[str]) -> bool:
-    """True only if image generation is enabled AND a usable image model resolves.
+    """True only if image generation is enabled AND a usable image endpoint is configured.
 
     The roster + onboarding use this to know whether to expect portraits at all (graceful
     absence): when it's False the game proceeds with no portraits and no error surface.
+
+    FALSE-NEGATIVE FIX: the gate is now resilient to a transient `/models` catalog probe.
+    `_resolve_model` confirms a model by network-probing the provider's catalog (a 5s,
+    blocking call that swallows every error into "not found"). When that probe is slow or
+    momentarily fails — a cold provider, a blip, or simply the FIRST Generate press before any
+    catalog is warm — `_resolve_model` raised and we reported "no image model configured",
+    only to succeed seconds later on a retry (the observed false-negative → race-to-success).
+
+    So: a successful catalog resolve still returns True immediately (the fast, certain path),
+    but a resolve that DIDN'T confirm falls back to `has_image_capable_endpoint` — a pure DB
+    read (no network) that answers "is there an enabled image-capable endpoint at all?". The
+    real test of generation is the actual generate POST, which the pipeline runs best-effort;
+    a configured endpoint is enough to TRY, so a transient catalog hiccup never false-negatives.
+    We only report unavailable when generation is disabled or there is genuinely no usable
+    endpoint.
     """
-    from src.ai_interaction import _resolve_model
+    from src.ai_interaction import _resolve_model, has_image_capable_endpoint
 
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
@@ -487,7 +502,13 @@ def image_generation_available(user: Optional[str]) -> bool:
             return True
         except Exception:
             continue
-    return False
+    # No candidate confirmed via the catalog probe. Before reporting "no image model", check
+    # whether an image-capable endpoint is even configured — if one is, the catalog probe was
+    # the transient failure (not a genuine absence) and generation should be allowed to TRY.
+    try:
+        return bool(has_image_capable_endpoint(user or None))
+    except Exception:
+        return False
 
 
 def _extract_chat_image_url(data: dict) -> Optional[str]:
