@@ -539,3 +539,46 @@ now fixed. The DSML/tool-call markup is halted server-side (`tool_parsing.py` /
 turns chain via `prev_task` and never stomp; **optimistic UI** — the FE never renders a user
 bubble before the server confirms (a failed send leaves the text in the composer).
 
+### ★ F8 — [BLOCK] Multi-second realtime flash of per-round reasoning on the PRIMARY chat path
+
+**This is the real, pervasive "text flashes up then vanishes" bug** — bigger than F1 (which fixed
+only the reply-after-thinking sub-path). Detected with a **DOM MutationObserver frame-log** (the
+reliable method — a pixel screenshot is scroll/timing-dependent and misses transient text) plus a
+timed innerText burst, both run live on the fixed code.
+
+**Evidence (one turn, "give me a strategic breakdown"):** the visible message body painted the
+model's raw scratchpad **for seconds**, then the final render replaced it with clean narration:
+- t≈6–10.5s: *"The player wants a complete strategic breakdown of every houseguest. I have the
+  game state…"* (~4.5s visible, then gone)
+- t≈21–36s: *"I now have NPC voice data for all 15 houseguests. Let me combine…"* + **the entire
+  cast with raw engine IDs** — "Wendy Mueller (npc:14)… Zara Morrow (npc:2)…" through npc:15, each
+  with its disposition — painted and growing for ~15s, then gone.
+
+Both waves are **absent from the final body** (clean in-character narration) and were in the
+**body**, not the collapsed accordion (`acc=false`).
+
+**Root cause:** the agent loop streams **intermediate-round** planning text as *visible* deltas
+(`thinking:false`); the client streaming renderer **freezes leading blocks** before the
+leading-only `scrubReasoningPreamble` can recognize the whole preamble, so the reasoning stays
+painted; only the **final** full render (a fresh `processWithThinking`, where the contiguous
+`npc:<id>` run is finally recognized) scrubs it. The server's game-build scrub (`_scrub_active`)
+is not catching these per-round openers ("The player wants…", "I now have … Let me combine…").
+
+**Proposed fix (cleanest layer = server):** do not stream **intermediate agent-round** reasoning/
+planning to the visible bubble at all — only the final narration round is player-visible (route
+intermediate-round content to the reasoning channel or suppress it). That removes the bytes at the
+source, so no client render (frozen or not) can paint them. Belt-and-suspenders on the client:
+hold the leading region "live" (un-frozen) until the reasoning-preamble boundary resolves, and
+extend the scrub openers to include "the player…", "I now have…", "I have the game state…".
+**Verify** by re-running the MutationObserver flash-detector (`.audit-telemetry/flash_analyze.mjs`)
+— `leakFlashes` must be empty across the whole turn.
+
+### Detection methodology (answering "can you tell if text flashes?")
+- **MutationObserver frame-log** (`flash_report.mjs` / `flash_analyze.mjs`): records every painted
+  state of the streaming message with timestamps → deterministically catches text written then
+  removed, even a 1-frame flash. The authoritative method for transient *text*.
+- **Timed innerText burst** (`flash_shots.mjs`): samples the body + screenshots every ~1.5s — a
+  good cross-check and the way to get a *visual* of the flash (but screenshots alone are
+  scroll/timing-dependent and can miss/ misframe it).
+- (Pixel-level flashes — canvas/CSS — would want Playwright video or a CDP screencast.)
+
