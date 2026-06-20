@@ -109,9 +109,29 @@
     }
   }
 
+  // Clamp a left/top pair into the viewport (S11/E91): a stacked window can NEVER
+  // be positioned off-screen — top above the viewport, or left/right/bottom out of
+  // view — no matter how many panels share a slot or how big the saved offset is.
+  // When the panel FITS, the WHOLE of it is kept on-screen (pull left/top back so the
+  // right/bottom edges land inside too) — so a viewport shrink re-anchors a dragged
+  // panel fully into view. Only when the panel is itself bigger than the viewport do
+  // we fall back to the sliver guarantee (≥200px of a tall panel's top, 4px margin).
+  function clampPos(left, top, w, h) {
+    const maxLeft = window.innerWidth - w - 4;
+    const maxTop = window.innerHeight - h - 4;
+    return {
+      left: maxLeft >= 4 ? Math.max(4, Math.min(maxLeft, left))
+        : Math.max(4, Math.min(window.innerWidth - 60 - 4, left)),       // wider than viewport
+      top: maxTop >= 4 ? Math.max(4, Math.min(maxTop, top))
+        : Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, top)),  // taller than viewport
+    };
+  }
+
   // Stack one slot: measured heights, gap, safe-area; the final position —
-  // slot base PLUS the persisted drag offset, clamped (S11/E91) — is computed
-  // arithmetically and written ONCE, never via an intermediate base write.
+  // slot base PLUS any persisted drag offset, always clamped to the viewport — is
+  // computed arithmetically and written ONCE as left/top, never via an intermediate
+  // base write. EVERY placement (base stack or dragged) runs through clampPos so the
+  // stacking cursor can never strand a panel off-screen (the D2/S11 collision rule).
   function restackSlot(name) {
     if (NARROW.matches) { restackNarrowSheets(); return; } // F3: the sheet host owns narrow
     if (dragInProgress()) return; // F2: the gesture owns the position until drop
@@ -128,28 +148,20 @@
       else { bottom = cursor; cursor += h + GAP; }
 
       setStyle(el, "position", "fixed");
+      // Derive the slot's anchor coordinates numerically — no intermediate writes.
+      const baseLeft = name.endsWith("right") ? (window.innerWidth - 14 - w)
+        : name.endsWith("left") ? 14
+        : (window.innerWidth - w) / 2;
+      const baseTop = top !== null ? top : (window.innerHeight - bottom - h);
       const off = entry.key ? loadOffset(entry.key) : null;
-      if (off && (off.dx || off.dy)) {
-        // Derive the base coordinates numerically — no intermediate writes.
-        const baseLeft = name.endsWith("right") ? (window.innerWidth - 14 - w)
-          : name.endsWith("left") ? 14
-          : (window.innerWidth - w) / 2;
-        const baseTop = top !== null ? top : (window.innerHeight - bottom - h);
-        const left = Math.max(4, Math.min(window.innerWidth - w - 4, baseLeft + off.dx));
-        const topPx = Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, baseTop + off.dy));
-        setStyle(el, "left", left + "px");
-        setStyle(el, "top", topPx + "px");
-        setStyle(el, "right", "auto");
-        setStyle(el, "bottom", "auto");
-        setStyle(el, "transform", "none");
-      } else {
-        // base position (the slot's anchor)
-        setStyle(el, "top", top !== null ? top + "px" : "auto");
-        setStyle(el, "bottom", bottom !== null ? bottom + "px" : "auto");
-        if (name.endsWith("right")) { setStyle(el, "right", "14px"); setStyle(el, "left", "auto"); setStyle(el, "transform", ""); }
-        else if (name.endsWith("left")) { setStyle(el, "left", "14px"); setStyle(el, "right", "auto"); setStyle(el, "transform", ""); }
-        else { setStyle(el, "left", "50%"); setStyle(el, "right", "auto"); setStyle(el, "transform", "translateX(-50%)"); }
-      }
+      const dx = off && Number.isFinite(off.dx) ? off.dx : 0;
+      const dy = off && Number.isFinite(off.dy) ? off.dy : 0;
+      const pos = clampPos(baseLeft + dx, baseTop + dy, w, h);
+      setStyle(el, "left", pos.left + "px");
+      setStyle(el, "top", pos.top + "px");
+      setStyle(el, "right", "auto");
+      setStyle(el, "bottom", "auto");
+      setStyle(el, "transform", "none");
     }
   }
 

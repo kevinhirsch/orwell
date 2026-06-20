@@ -13,6 +13,15 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
    data: /opt/orwell/data       .env (secrets) + the save (SQLite + souls); preserved across updates
 ```
 
+## Recommended specs
+
+**Baseline: 4 vCPU / 8 GB RAM** (12 GB disk) — the installer defaults (overridable via `CORES`,
+`RAM_MB`, `DISK_GB`). The LLM is **remote**, so CPU is spent on the front-end + engine + **local
+embeddings** (fastembed / ONNX, warmed at boot). Give it **more RAM** if you also run in-character
+**image generation**, or run several concurrent games. A 2 vCPU / 2 GB box (the old default) is
+enough to boot but tends to stall under the embedding warm-up + a live turn — symptoms are a
+hung-feeling turn and a brief front-end 502 while the engine catches up.
+
 ## Usage
 
 The repo is **private** (ruling #17, 2026-06-10). You authenticate **once, ever**: the
@@ -22,8 +31,12 @@ file every reset preserves) and wires a git **credential helper** that reads it 
 updates and resets never re-prompt and the token never lands in a remote URL or `.git/config`.
 
 ```bash
-# install — on the Proxmox host shell (THE one authenticated moment)
-GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+# install — on the Proxmox host shell (THE one authenticated moment).
+# EXPORT the token (in `VAR=x bash -c "$(curl …$VAR…)"` the substitution runs in the OUTER shell
+# before VAR= applies, so curl gets an EMPTY token → 404/401). Fetch via the contents API, not
+# raw.githubusercontent.com (which 404s for fine-grained PATs). Works with fine-grained OR classic.
+export GIT_TOKEN=github_pat_xxx
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 
 # update — host or inside the container: run the LOCAL checked-out copy (no GitHub fetch)
 bash /opt/orwell/deploy/orwell-update.sh
@@ -59,8 +72,10 @@ untouched.
 
 After install, **`orwell`** (a launcher for `orwell-menu.sh`, installed to `/usr/local/bin/orwell`)
 opens a **whiptail** menu over every task below — update, doctor, backup, restore, the two reset
-tiers, and the readiness check — so you don't have to remember script paths or flags. The login
-health panel advertises it.
+tiers, and the readiness check — so you don't have to remember script paths or flags. It opens on an
+ASCII **ORWELL** banner and runs each action with sectioned, step-by-step status lines (`▸` working,
+`✓` done, `✗` failed); the installer and the login health panel share the same banner + glyphs. The
+login health panel advertises it.
 
 ```bash
 orwell                      # the interactive menu (inside the container)
@@ -75,8 +90,10 @@ when run directly on a terminal (the updater's action menu + token box, the doct
 the resets' confirm) and remain **fully non-interactive** for automation, CI, and the
 host→container `pct exec` bridge (which has no PTY) — exactly today's flags/env. `whiptail` is
 installed by `orwell-install.sh`; without it (or off a TTY) every prompt falls back to plain text.
-Shared dialog helpers live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh`
-(the curl-bootstrapped installer) keeps its own inline whiptail copies — it must stay one
+Shared dialog helpers — and the matching presentation helpers (`ow_logo` / `ow_section` /
+`ow_step` / `ow_ok` / `ow_warn` / `ow_fail`, colour auto-disabled off a TTY or under `NO_COLOR`) —
+live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh` (the curl-bootstrapped
+installer) and `orwell-install.sh` keep their own inline copies — they must each stay one
 standalone file.
 
 ### Factory reset (back to OOBE)
@@ -113,6 +130,79 @@ one script that deliberately **does**.
 > `.env` and handles both layouts** — an earlier version only scrubbed `data/` and so left the
 > game intact on default installs.
 
+### OOBE reset (back to first-run, **keep the API-key / LLM config**)
+
+The "clear everything but my LLM setup" tier — and the one the admin status page's **Factory
+Reset (OOBE)** button runs. It wipes **exactly** what a factory reset does (every game sandbox
+*and* the whole front-end store — all accounts, chats, sessions, memory, MCP server configs,
+uploads, portraits, and every user setting) **except** it preserves the configuration an
+operator should never have to re-enter:
+
+* the configured **LLM / image providers** (the `model_endpoints` table in the FE `app.db`),
+* the **LLM-selection settings** (which endpoint/model is the default for chat / utility /
+  research / vision / image),
+* the **encryption keys** that decrypt them (`frontend/data/.app_key`, `.key`) and the legacy
+  `frontend/data/api_keys.json`,
+* and — like every reset — the engine config **`data/.env`** (ports, tokens, the deploy
+  `GIT_TOKEN`, LLM keys), which is **never touched**.
+
+So after the reset the app sits at first-run onboarding (account creation / casting) **with an
+LLM already configured**. Same host-aware bridge and flags as the other resets:
+
+```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash deploy/orwell-oobe-reset.sh
+bash deploy/orwell-oobe-reset.sh --dry-run
+bash deploy/orwell-oobe-reset.sh --yes
+
+# or directly inside the container
+bash /opt/orwell/deploy/orwell-oobe-reset.sh             # prompts: type RESET
+bash /opt/orwell/deploy/orwell-oobe-reset.sh --dry-run   # preview what would be removed
+
+# or from the control panel
+orwell reset-oobe --yes
+```
+
+The selective FE-store surgery (export the `model_endpoints` rows + the LLM-selection settings,
+wipe the rest, rebuild a fresh `app.db` / `settings.json`) is done by the quarantined Python
+helper `frontend/scripts/oobe_reset.py`; the shell script orchestrates the service stop, the
+file keep-list, the engine-save scrub, and the restart. The encrypted provider keys are carried
+**verbatim** (no re-encryption, no plaintext ever materialized) so they still decrypt under the
+preserved `.app_key`. Use the **factory reset** (below) when you want the LLM config gone too.
+
+### Update + Reset (update first, then OOBE — **keep the API-key / LLM config**)
+
+The combined **middle** tier of the three maintenance controls — **Update · Update + Reset ·
+Reset** — for when you want a freshly-pulled build **and** a clean first-run box in one action. It
+**composes** the two existing scripts (it re-implements neither): it runs the update with restart
+suppressed (`orwell-update.sh --no-restart` — pull → rebuild engine → refresh FE deps) and **only
+if that succeeds** proceeds to the OOBE reset (`orwell-oobe-reset.sh --yes` — wipe to first-run,
+preserving the LLM/provider config, never touching `data/.env`), ending in the **single** final
+restart.
+
+**Fail-closed** (the safety contract of a destructive combo): if the **update** fails, the wipe
+does **not** run (the box stays on its previous build and nothing is removed); if the reset helper
+is missing it refuses up front, removing nothing — so your **API keys are never at risk**. Same
+host-aware bridge and flags as the other resets:
+
+```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash deploy/orwell-update-reset.sh
+bash deploy/orwell-update-reset.sh --dry-run   # preview both phases; change nothing
+bash deploy/orwell-update-reset.sh --yes
+
+# or directly inside the container
+bash /opt/orwell/deploy/orwell-update-reset.sh             # prompts: type RESET
+bash /opt/orwell/deploy/orwell-update-reset.sh --no-restart # update + scrub, leave services down
+
+# or from the control panel
+orwell update-reset --yes
+```
+
+This is the script the admin **Update + Reset (OOBE, keep API keys)** button runs. Destructive —
+prompts for `RESET` unless `--yes`; `--dry-run` previews. Use the plain **Update** when you only
+want the new build (no wipe), or the plain **OOBE reset** when you only want a clean box (no pull).
+
 ### Game reset (new season, keep accounts + LLM config)
 
 The lighter sibling of the factory reset: it removes **only game progression** — every per-user
@@ -148,8 +238,56 @@ fixed script** (`deploy/orwell-update.sh`) via a oneshot root service, appending
 to `data/ops-update.log` — the same `data/*.log` surface the status page already tails (G1b).
 The runner removes the flag *before* the run (a finished run never re-triggers; a request that
 lands mid-run earns exactly one follow-up run) and holds a `flock` so overlapping triggers
-no-op. The web tier chooses *when*, never *what*. Factory reset is deliberately **not**
-web-triggerable (pending an explicit product go).
+no-op. The web tier chooses *when*, never *what*.
+
+The **OOBE reset** (keep-API-keys, above) is web-triggerable through the **same pattern**: the
+admin status page's **Factory Reset (OOBE)** button (`POST /api/admin/factory-reset`,
+admin-gated, demanding a typed **`RESET`** in the browser first) drops the existence-only flag
+`data/ops/factory-reset-requested`, and the root-side path unit `orwell-ops-factory-reset.path`
+runs the **one fixed script** `deploy/orwell-oobe-reset.sh --yes` via its oneshot root service,
+appending output to `data/ops-factory-reset.log`. The full-wipe **factory reset**
+(`orwell-factory-reset.sh`, which also drops the LLM config) is deliberately **not**
+web-triggerable — only via the shell / control panel.
+
+The combined **Update + Reset** button (`POST /api/admin/update-reset`, admin-gated, demanding a
+typed **`RESET`** first) is web-triggerable through the **same pattern**: it drops the
+existence-only flag `data/ops/update-reset-requested`, and the root-side path unit
+`orwell-ops-update-reset.path` runs the **one fixed script** `deploy/orwell-update-reset.sh --yes`
+via its oneshot root service, appending output to `data/ops-update-reset.log`. The script is
+fail-closed (a failed update never proceeds to the wipe), so the button is safe to expose. On the
+status page the three controls render as a set — **Update Orwell · Update + Reset · Factory Reset
+(OOBE)** — and the combined button shows an "Updating + resetting… returning to OOBE" state, then
+polls `/api/admin/health` and reloads once both services answer again (the same reconnect path as
+the Update button).
+
+The status page also carries a prominent **"Update Orwell (pull + rebuild + restart)"** button
+(`POST /api/admin/update`, admin-gated, fixed command — no user input). It confirms first, then
+shows an "Updating… reconnecting" state and polls `/api/admin/health`, reloading once both
+services answer again. The endpoint runs the update through one of two privilege doors, in
+priority order — and never silently 403s on `systemctl`:
+
+1. **The flag trigger (default, recommended).** When `data/ops/` exists (the installer creates
+   it), the endpoint just drops the existence-only flag above and the root path unit runs the
+   script. **The web tier holds zero privilege; nothing extra is required.**
+2. **The detached direct run (opt-in).** Set `ORWELL_UPDATE_DIRECT=1` to force, and
+   `ORWELL_UPDATE_SUDO=1` to wrap the run as `sudo -n bash orwell-update.sh`. This path runs the
+   fixed script with `subprocess.Popen(start_new_session=True)` (its own session, so the restart
+   of `orwell-frontend` can't kill it) and returns `{started:true}` immediately. **Operator
+   prerequisites for this path** — because the FE user is non-root and `systemctl`/`git
+   pull`/`/etc/systemd` are otherwise denied:
+   * Install the scoped sudoers drop-in: re-run `orwell-install.sh` with `ORWELL_UPDATE_SUDO=1`
+     (writes `/etc/sudoers.d/orwell-update`, validated with `visudo -c`; grants the `orwell`
+     user NOPASSWD for **exactly** `bash orwell-update.sh`, nothing else — see
+     `deploy/sudoers/orwell-update`).
+   * Clear `NoNewPrivileges=yes` for the FE unit (it blocks setuid `sudo`): add a drop-in
+     `/etc/systemd/system/orwell-frontend.service.d/20-update-sudo.conf` with
+     `[Service]\nNoNewPrivileges=no`, then `systemctl daemon-reload && systemctl restart
+     orwell-frontend`. This relaxes one hardening knob for the FE unit, which is why the
+     **flag-trigger door (1) is preferred** — it needs none of this.
+
+Path/log are overridable for tests/dev via `ORWELL_UPDATE_SCRIPT` (default
+`/opt/orwell/deploy/orwell-update.sh`) and `ORWELL_UPDATE_LOG` (default
+`/opt/orwell/data/update.log`); the command itself is always fixed.
 
 ### The login health panel
 
@@ -188,6 +326,22 @@ doesn't cure it. Exit `0` means healthy. It also reads `systemd-analyze security
 and warns when a unit's exposure score drifts above the hardening floor (audit E85; override with
 `ORWELL_SECURITY_FLOOR=<score>`).
 
+### Known harmless log noise (A11)
+
+The engine's semantic-recall provider (fastembed / onnxruntime) logs, **twice at boot/prefetch**:
+
+```
+pthread_setaffinity_np ... error code: 22
+```
+
+This is **harmless and expected inside an LXC** whose cgroup cpuset doesn't grant the host CPU
+indexes onnxruntime tries to pin its thread pool to. The threads simply run **unpinned** —
+inference is unaffected, and it appears **once** (one session, one thread pool, created once),
+never per inference. `fastembed-js` doesn't expose ORT's `intraOpNumThreads` to silence it, and
+widening the container's cpuset is a worse trade, so there is **nothing to fix** — ignore it.
+`orwell-doctor.sh` already filters this exact line out of the failing-unit journal tail (and
+notes how many lines it hid) so it can never be mistaken for the actual crash reason.
+
 ## Config UX (community-scripts style)
 
 On a TTY the installer shows a **whiptail menu** with every field pre-populated:
@@ -210,7 +364,7 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 |---|---|---|
 | `CTID` | next free id | container id |
 | `CT_HOSTNAME` | `orwell` | hostname |
-| `CORES` / `RAM_MB` / `DISK_GB` | `2` / `2048` / `8` | resources |
+| `CORES` / `RAM_MB` / `DISK_GB` | `4` / `8192` / `12` | resources (recommended baseline 4 vCPU / 8 GB — see **Recommended specs**) |
 | `STORAGE` | first `rootdir` storage → `local-lvm` | CT rootfs |
 | `TEMPLATE_STORAGE` | first `vztmpl` storage → `local` | where the template is stored |
 | `TEMPLATE_NAME` / `TEMPLATE` | newest `debian-12-standard` | pin a specific template |
@@ -222,9 +376,10 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
 
 ```bash
-# fully non-interactive example
-GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
-  bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
+# fully non-interactive example (the 4 vCPU / 8 GB baseline is the default — shown here explicitly)
+export GIT_TOKEN=github_pat_xxx
+CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
+  bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")" --default
 ```
 
 ## Layout
@@ -235,10 +390,17 @@ GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 NET=dhcp ORWELL
 | `orwell-install.sh` | apt + Node 22 (apt-signed repo, no `curl \| bash`) + Python; checkout; verify + `npm run build`; front-end deps from the **pinned `requirements.lock.txt`** (E83); write `.env` (engine token, multi-user mode); register + start services. Also installs **`qemu-guest-agent`** (Proxmox guest tools). |
 | `orwell-update.sh` | `git pull` → `npm run build` → restart — **never touches `data/`** (the save). Host-aware: on a Proxmox host it bridges into the LXC (`pct`) via its **local copy** (or the in-container copy — never a GitHub fetch); inside the container it runs directly. `--set-token` persists/rotates the deploy PAT. Auto-detects the app dir (`/opt/orwell`, or legacy `/opt/bbai`) and the matching service names. |
 | `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
+| `orwell-oobe-reset.sh` | **Wipe back to OOBE, but KEEP the API-key / LLM config.** Same scrub as the factory reset (all accounts, chats, memory, MCP configs, settings, uploads, and every game) **except** it preserves the configured LLM/image providers (`model_endpoints`), the LLM-selection settings, and the keys that decrypt them (`.app_key`, `.key`, `api_keys.json`) — so an LLM is still configured at OOBE. Never touches `data/.env`. Delegates the FE-store surgery to `frontend/scripts/oobe_reset.py`. This is the script the admin **Factory Reset (OOBE)** button runs. Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
+| `orwell-update-reset.sh` | **Update, THEN OOBE reset — the combined middle tier (keep the API-key / LLM config).** Composes the two scripts above (re-implements neither): runs `orwell-update.sh --no-restart` (pull → rebuild → refresh FE deps), and **only if it succeeds** runs `orwell-oobe-reset.sh --yes` (wipe to first-run, preserve the LLM config, single final restart). **Fail-closed** — a failed update never wipes; a missing reset helper refuses up front. Never touches `data/.env`. This is the script the admin **Update + Reset** button runs. Host-aware bridge + `--yes` / `--dry-run` / `--no-restart`; prompts for `RESET` unless `--yes`. |
+| `frontend/scripts/oobe_reset.py` | The keep-API-keys FE-store surgery: export `model_endpoints` + the LLM-selection settings, rebuild a fresh `app.db` / `settings.json` carrying ONLY those, so no other table survives. Stdlib-`sqlite3` only (no SQLAlchemy/`core`); idempotent; honors `DATA_DIR` / `DATABASE_URL`. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
 | `systemd/orwell-ops-update.path` | Root-side watcher (G19b): `PathExists=` on `data/ops/update-requested` (written by the sandboxed FE) → starts the runner. Existence-only — flag content is never parsed or executed. |
 | `systemd/orwell-ops-update.service` | Oneshot **root** runner (G19b — deliberately unsandboxed; the unit documents why): removes the flag first, takes a `flock`, runs **only** `deploy/orwell-update.sh`, output appended to `data/ops-update.log` (tailed live by the status page). |
+| `systemd/orwell-ops-factory-reset.path` | Root-side watcher for the admin **Factory Reset (OOBE)** button: `PathExists=` on `data/ops/factory-reset-requested` → starts the reset runner. Existence-only, same contract as the update watcher. |
+| `systemd/orwell-ops-factory-reset.service` | Oneshot **root** runner: removes the flag first, takes a `flock`, runs **only** `deploy/orwell-oobe-reset.sh --yes` (the browser already confirmed `RESET`), output appended to `data/ops-factory-reset.log`. |
+| `systemd/orwell-ops-update-reset.path` | Root-side watcher for the admin **Update + Reset** button: `PathExists=` on `data/ops/update-reset-requested` → starts the combined runner. Existence-only, same contract as the other watchers. |
+| `systemd/orwell-ops-update-reset.service` | Oneshot **root** runner: removes the flag first, takes a `flock`, runs **only** `deploy/orwell-update-reset.sh --yes` (update with restart suppressed, then OOBE reset with the single final restart; fail-closed), output appended to `data/ops-update-reset.log`. |
 
 ## Proxmox guest tools
 

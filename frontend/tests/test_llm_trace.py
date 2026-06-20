@@ -1,0 +1,275 @@
+"""Full LLM I/O trace + log retention (src/llm_trace.py + the /admin/status controls).
+
+The owner commission: "log everything in/out of the llm, add it to the logfile viewer,
+archive it off after a period — a universal retention setting on the health page:
+trim logfiles, a selectable horizon, and a live total-size readout."
+
+Proves: the recorder captures the full request + reconstructed response to both the
+live ring and the durable archive; it is a no-op when disabled; secrets are scrubbed;
+the streaming accumulator reconstructs text/reasoning/tool-calls/usage/error; retention
+trims JSONL by entry age and stale .log files by mtime, with "keep everything" a no-op;
+and the admin endpoints + status-page controls are wired and admin-gated.
+"""
+
+import importlib
+import json
+import os
+import time
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+llm_trace = importlib.import_module("src.llm_trace")
+log_rings = importlib.import_module("src.log_rings")
+ahr = importlib.import_module("routes.admin_health_routes")
+settings = importlib.import_module("src.settings")
+
+
+def _app():
+    app = FastAPI()
+    app.include_router(ahr.setup_admin_health_routes())
+    app.include_router(ahr.setup_admin_status_page())
+    return app
+
+
+@pytest.fixture
+def data_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    return tmp_path
+
+
+def _enable(monkeypatch, on=True):
+    monkeypatch.setattr(llm_trace, "enabled", lambda: on)
+
+
+# ── the recorder: full I/O to ring + durable archive ───────────────────────────
+
+def test_record_writes_full_io_to_file_and_ring(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="stream", model="m1", requested_model="m1",
+        messages=[{"role": "system", "content": "the system prompt"},
+                  {"role": "user", "content": "hi there"}],
+        tools=[{"name": "advanceGame"}], temperature=0.7, max_tokens=2048,
+        response={"text": "hello", "reasoning": "let me think…",
+                  "toolCalls": [{"name": "foo"}], "usage": {"input_tokens": 3}},
+        ok=True, duration_ms=42)
+
+    # durable archive: the FULL request (incl the system prompt + tool schemas) + response
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["model"] == "m1" and rec["ok"] is True and rec["durationMs"] == 42
+    assert rec["request"]["messages"][0]["content"] == "the system prompt"
+    assert rec["request"]["messages"][1]["content"] == "hi there"
+    assert rec["request"]["tools"] == [{"name": "advanceGame"}]
+    assert rec["response"]["text"] == "hello"
+    assert rec["response"]["reasoning"] == "let me think…"
+    assert rec["response"]["toolCalls"] == [{"name": "foo"}]
+
+    # live ring: a glanceable summary the viewer follows
+    _, lines = log_rings.LLMIO.since(0)
+    last = [l for l in lines if "m1" in l["msg"]][-1]
+    assert "stream" in last["msg"] and "ok" in last["msg"]
+    assert "the system prompt" in last["args"]
+
+
+def test_record_is_noop_when_disabled(data_dir, monkeypatch):
+    _enable(monkeypatch, on=False)
+    llm_trace.record_llm_call(kind="call", model="x",
+                              messages=[{"role": "user", "content": "y"}], response={"text": "z"})
+    assert not os.path.exists(llm_trace.trace_path())
+
+
+def test_record_scrubs_secrets(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="call", model="m",
+        messages=[{"role": "user", "content": "my key is sk-ABCDEF0123456789 and Bearer abcdef0123456"}],
+        response={"text": "ok"})
+    txt = open(llm_trace.trace_path()).read()
+    assert "sk-ABCDEF0123456789" not in txt
+    assert "abcdef0123456" not in txt
+    assert "REDACTED" in txt
+
+
+def test_record_redacts_secret_shaped_keys(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="call", model="m", messages=[{"role": "user", "content": "hi", "authorization": "Bearer zzzzzzzz"}],
+        response={"text": "ok"})
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["request"]["messages"][0]["authorization"] == llm_trace._REDACTED
+
+
+# ── the streaming accumulator: reconstruct the response from SSE chunks ─────────
+
+def test_stream_accumulator_reconstructs_response():
+    acc = llm_trace.StreamAccumulator()
+    acc.observe('data: {"delta": "Hel"}\n\n')
+    acc.observe('data: {"delta": "lo"}\n\n')
+    acc.observe('data: {"delta": "reasoning bit", "thinking": true}\n\n')
+    acc.observe('data: {"type": "tool_calls", "calls": [{"name": "foo"}]}\n\n')
+    acc.observe('data: {"type": "usage", "data": {"input_tokens": 5, "output_tokens": 2}}\n\n')
+    acc.observe('data: [DONE]\n\n')
+    r = acc.response()
+    assert r["text"] == "Hello"
+    assert r["reasoning"] == "reasoning bit"
+    assert r["toolCalls"] == [{"name": "foo"}]
+    assert r["usage"] == {"input_tokens": 5, "output_tokens": 2}
+    assert r["error"] is None
+
+
+def test_stream_accumulator_captures_error():
+    acc = llm_trace.StreamAccumulator()
+    acc.observe('event: error\ndata: {"error": "boom", "status": 503}\n\n')
+    r = acc.response()
+    assert r["error"] and r["error"].get("error") == "boom"
+
+
+def test_stream_accumulator_notes_fallback_answerer():
+    acc = llm_trace.StreamAccumulator()
+    acc.observe('data: {"type": "fallback", "selected_model": "a", "answered_by": "b"}\n\n')
+    acc.observe('data: {"delta": "hi"}\n\n')
+    assert acc.response()["answeredBy"] == "b"
+
+
+# ── retention: trim by age, total-size, human formatting ───────────────────────
+
+def test_trim_drops_old_jsonl_entries_keeps_new(data_dir):
+    p = llm_trace.trace_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    now_ms = int(time.time() * 1000)
+    old_ms = now_ms - 10 * 86400 * 1000
+    with open(p, "w") as f:
+        f.write(json.dumps({"ts": old_ms, "model": "old"}) + "\n")
+        f.write(json.dumps({"ts": now_ms, "model": "new"}) + "\n")
+    res = llm_trace.trim_logs(7)
+    kept = open(p).read()
+    assert "new" in kept and "old" not in kept
+    assert res["removedBytes"] > 0 and res["afterBytes"] < res["beforeBytes"]
+
+
+def test_trim_keep_everything_is_a_noop(data_dir):
+    p = llm_trace.trace_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    old_ms = int(time.time() * 1000) - 100 * 86400 * 1000
+    with open(p, "w") as f:
+        f.write(json.dumps({"ts": old_ms, "model": "old"}) + "\n")
+    res = llm_trace.trim_logs(0)   # 0 = keep everything
+    assert "old" in open(p).read()
+    assert res["removedBytes"] == 0
+
+
+def test_trim_truncates_stale_log_files(data_dir):
+    logp = os.path.join(str(data_dir), "stale.log")
+    with open(logp, "w") as f:
+        f.write("old content\n")
+    old = time.time() - 30 * 86400
+    os.utime(logp, (old, old))
+    llm_trace.trim_logs(7)
+    assert os.path.getsize(logp) == 0   # whole file older than the horizon → cleared
+
+
+def test_trim_keeps_fresh_log_files(data_dir):
+    logp = os.path.join(str(data_dir), "fresh.log")
+    with open(logp, "w") as f:
+        f.write("recent content\n")
+    llm_trace.trim_logs(7)
+    assert "recent content" in open(logp).read()
+
+
+def test_total_log_bytes_counts_data_and_logs_subdir(data_dir):
+    (data_dir / "a.jsonl").write_text("x" * 100)
+    sub = data_dir / "logs"
+    sub.mkdir()
+    (sub / "b.log").write_text("y" * 50)
+    assert llm_trace.total_log_bytes() == 150
+
+
+def test_human_bytes():
+    assert llm_trace.human_bytes(0) == "0 B"
+    assert llm_trace.human_bytes(512) == "512 B"
+    assert llm_trace.human_bytes(1536).endswith("KB")
+    assert "MB" in llm_trace.human_bytes(5 * 1024 * 1024)
+
+
+# ── the admin endpoints + the live source ──────────────────────────────────────
+
+def test_llmio_is_a_selectable_live_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    client = TestClient(_app(), raise_server_exceptions=False)
+    ids = [s["id"] for s in client.get("/api/admin/logs/sources").json()["sources"]]
+    assert "llmio" in ids
+
+
+def test_llmio_source_serves_the_ring(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    log_rings.LLMIO.push({"ts": 1, "level": "INFO", "logger": "llm-io", "msg": "llmio smoke line",
+                          "args": "→", "result": "←"})
+    client = TestClient(_app(), raise_server_exceptions=False)
+    body = client.get("/api/admin/logs?source=llmio&since=0").json()
+    assert any("llmio smoke line" in l["msg"] for l in body["lines"])
+
+
+def test_retention_endpoint_is_admin_gated(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    assert client.get("/api/admin/logs/retention").status_code == 403
+    assert client.post("/api/admin/logs/trim").status_code == 403
+
+
+def test_retention_get_reports_size_and_choices(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    (tmp_path / "llm-io.jsonl").write_text("z" * 321)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    d = client.get("/api/admin/logs/retention").json()
+    assert isinstance(d["traceEnabled"], bool)
+    assert isinstance(d["retentionDays"], int) and d["retentionDays"] >= 0
+    assert d["totalBytes"] >= 321 and d["totalHuman"]
+    assert any(c["days"] == 0 for c in d["choices"])   # "keep everything" offered
+    assert any(f["name"] == "llm-io.jsonl" for f in d["files"])
+
+
+def test_trim_endpoint_frees_space(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    p = tmp_path / "llm-io.jsonl"
+    now_ms = int(time.time() * 1000)
+    p.write_text(json.dumps({"ts": now_ms - 10 * 86400 * 1000, "model": "old"}) + "\n" +
+                 json.dumps({"ts": now_ms, "model": "new"}) + "\n")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    d = client.post("/api/admin/logs/trim", json={"days": 7}).json()
+    assert d["removedBytes"] > 0 and "removedHuman" in d
+    assert "old" not in p.read_text() and "new" in p.read_text()
+
+
+def test_retention_set_persists_setting(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Redirect the settings file into the tmp dir so the real config is untouched.
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(tmp_path / "settings.json"))
+    settings._invalidate_caches()
+    client = TestClient(_app(), raise_server_exceptions=False)
+    d = client.post("/api/admin/logs/retention", json={"traceEnabled": False, "retentionDays": 30}).json()
+    assert d["traceEnabled"] is False and d["retentionDays"] == 30
+    saved = json.loads((tmp_path / "settings.json").read_text())
+    assert saved["llm_trace_enabled"] is False and saved["log_retention_days"] == 30
+
+
+def test_status_page_carries_the_retention_controls(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    body = client.get("/admin/status").text
+    assert "LOG RETENTION" in body
+    assert 'id="trace-toggle"' in body
+    assert 'id="ret-days"' in body
+    assert 'id="trim-now"' in body
+    assert "/api/admin/logs/retention" in body
+    assert "/api/admin/logs/trim" in body
+
+
+def test_default_settings_carry_trace_and_retention():
+    assert settings.DEFAULT_SETTINGS["llm_trace_enabled"] is True
+    assert settings.DEFAULT_SETTINGS["log_retention_days"] == 7

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { SoulStore } from "../../src/adapters/engine/SoulStore";
 import { npc } from "../../src/domain/ids";
@@ -65,18 +65,28 @@ function memorySaveStore(): UserSaveStore & { snaps: Map<string, SessionSnapshot
 }
 
 describe("G12 — dropping/replacing a sandbox discards its queued soul-index work", () => {
-  // The breathing lane is process-wide (G12): leave it empty for whoever runs next.
-  afterEach(async () => {
+  // The breathing lane is process-wide (G12). Drain it BEFORE each test too: an EARLIER describe
+  // block (with no lane hygiene) now leaves a creation-time backlog on the shared lane (0058 seeds
+  // each NPC's deep-profile recall index at createCharacter), so the absolute pendingTotal() checks
+  // below must start from a known-empty lane regardless of what ran first.
+  const drain = async (): Promise<void> => {
     for (let i = 0; i < 5_000 && SoulStore.pendingTotal() > 0; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     expect(SoulStore.pendingTotal()).toBe(0);
-  });
+  };
+  beforeEach(drain);
+  // The breathing lane is process-wide (G12): leave it empty for whoever runs next.
+  afterEach(drain);
 
   /** Put a live (queued, not-yet-embedded) backlog on the sandbox's soul store — the state any
-   *  burst site (fold, confessional, off-screen scene) leaves behind mid-drain (G8). */
+   *  burst site (fold, confessional, off-screen scene) leaves behind mid-drain (G8). 0058 now seeds
+   *  each NPC's deep-profile authored detail into the soul at createCharacter (full-fidelity recall,
+   *  L27b), so the store ALREADY carries a creation-time backlog; discard it first so this helper
+   *  measures exactly the `n` it deliberately seeds (the same lane-hygiene the afterEach performs). */
   function seedBacklog(reg: GameSessionRegistry, user: string, n: number): SoulStore {
     const soul = reg.sandboxFor(user).engine.soul as SoulStore;
+    soul.discardPending(); // drop the 0058 creation-time deep-profile index backlog
     for (let i = 0; i < n; i++) soul.recordToSoul(npc(1), `a consequential beat ${i}`);
     expect(soul.pendingCount()).toBe(n); // queued on the breathing lane, never inline
     return soul;
@@ -125,6 +135,9 @@ describe("G12 — dropping/replacing a sandbox discards its queued soul-index wo
     const store = memorySaveStore();
     const reg = new GameSessionRegistry(store);
     reg.sandboxFor("A").session.createCharacter({ playerName: "Player A", seed: 7 });
+    // 0058 seeds the deep-profile recall index at createCharacter; discard that creation backlog so
+    // this test measures ONLY the corrupt-resume flood it sets up below (the global lane is shared).
+    (reg.sandboxFor("A").engine.soul as SoulStore).discardPending();
     const saved = store.snaps.get("A")!;
     // The save genuinely carries soul memories — the resume's rebuildSoulIndex WILL flood the lane —
     // and is corrupted PAST the session-restore step, so the import throws AFTER the flood.

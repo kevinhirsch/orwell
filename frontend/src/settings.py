@@ -104,13 +104,15 @@ DEFAULT_SETTINGS = {
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
     "agent_input_token_budget": 6000,
     # Ceiling on the *auto-derived* input budget that #1230 introduced. Has
-    # no effect when `agent_input_token_budget` is explicitly set (the user's
-    # value is honoured regardless). Default matches
-    # `src.context_budget.DEFAULT_HARD_MAX`; lower this for cost-paranoid
-    # setups, raise it on premium APIs with very large windows that you
-    # want to actually use (e.g. 900_000 to fill a 1M-context model). See
-    # `compute_input_token_budget` in src/context_budget.py.
-    "agent_input_token_hard_max": 200_000,
+    # no effect when `agent_input_token_budget` is explicitly changed off its
+    # default (the user's value is honoured regardless). Default matches
+    # `src.context_budget.DEFAULT_HARD_MAX` (48k — a cost-bounded fraction of a
+    # long-context window that still fits the whole narrative conversation, so
+    # NPCs stay consistent turn to turn); lower this for cost-paranoid setups,
+    # raise it on premium APIs with very large windows that you want to actually
+    # use (e.g. 900_000 to fill a 1M-context model). See `compute_input_token_budget`
+    # in src/context_budget.py.
+    "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
@@ -163,6 +165,13 @@ DEFAULT_SETTINGS = {
         "Newsletters, marketing, automated digests, and FYI-only updates are "
         "NOT urgent."
     ),
+    # Diagnostics — the full LLM I/O trace + log retention (admin /status page).
+    # llm_trace_enabled: capture every model call (full prompt + response +
+    #   reasoning) to the live viewer + data/llm-io.jsonl. On by default.
+    # log_retention_days: trim ALL managed logfiles older than this to save disk
+    #   (auto + the manual "Trim now" button). 0 = keep everything (no auto-trim).
+    "llm_trace_enabled": True,
+    "log_retention_days": 7,
     # Keyboard shortcuts (action: key combination)
     "keybinds": {
         "search": "ctrl+k",

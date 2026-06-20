@@ -10,7 +10,8 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
-import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
+import { detectOocAside } from './orwellOocAside.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
@@ -1924,7 +1925,21 @@ export function addMessage(role, content, modelName, metadata) {
         const roundNum = r + 1;
         const txt = (roundTexts[r] || '').trim();
 
-        if (txt) {
+        // Check if this is the last text round — sources go on top of final response.
+        // (Hoisted: L6b also gates the whole bubble on it in the game build.)
+        var isLastTextRound = true;
+        for (let rr = r + 1; rr < maxRound; rr++) {
+          if ((roundTexts[rr] || '').trim()) { isLastTextRound = false; break; }
+        }
+
+        // L6b (game build): only the FINAL narration round renders on reload. An
+        // intermediate text round (one with a later text round still to come) is
+        // the model's planning preamble ("Looking at the roster… npc:1 … Let me
+        // stay in character"), not narration — skip its bubble entirely. The tool
+        // rounds below still render as production beats. Non-game build is UNCHANGED.
+        const _gbSkipIntermediateText = isGameBuild() && !isLastTextRound;
+
+        if (txt && !_gbSkipIntermediateText) {
           const wrap = document.createElement('div');
           wrap.className = 'msg msg-ai' + (r > 0 ? ' msg-continuation' : '');
           const roleEl = document.createElement('div');
@@ -1944,12 +1959,8 @@ export function addMessage(role, content, modelName, metadata) {
           wrap.appendChild(roleEl);
           const body = document.createElement('div');
           body.className = 'body';
-          // Check if this is the last text round — sources go on top of final response
+          // Sources go on top of the final response.
           var agentSourcesPrefix = '';
-          var isLastTextRound = true;
-          for (let rr = r + 1; rr < maxRound; rr++) {
-            if ((roundTexts[rr] || '').trim()) { isLastTextRound = false; break; }
-          }
           var agentFindingsSuffix = '';
           if (isLastTextRound && metadata?.web_sources?.length) {
             agentSourcesPrefix = buildSourcesBox(metadata.web_sources, 'web');
@@ -1973,17 +1984,21 @@ export function addMessage(role, content, modelName, metadata) {
           lastMsgAi = wrap;
         }
 
+        // Whether a TEXT bubble was actually rendered above this round's tools.
+        // In the game build an intermediate text round is skipped, so the thread
+        // must merge/connect as if there were no text bubble (no dangling has-top).
+        const _renderedTxt = txt && !_gbSkipIntermediateText;
         const roundTools = toolsByRound[roundNum] || [];
         if (roundTools.length > 0) {
           // Reuse previous thread if no text separated us (merge consecutive tool rounds)
           let threadWrap = null;
-          if (!txt && lastWrap && lastWrap.classList.contains('agent-thread')) {
+          if (!_renderedTxt && lastWrap && lastWrap.classList.contains('agent-thread')) {
             threadWrap = lastWrap;
           } else {
             threadWrap = document.createElement('div');
             threadWrap.className = 'agent-thread';
             // Extend line up if there's a chat bubble above
-            if (txt) threadWrap.classList.add('has-top');
+            if (_renderedTxt) threadWrap.classList.add('has-top');
             box.appendChild(threadWrap);
           }
           const _gbBeat = isGameBuild();
@@ -2026,16 +2041,39 @@ export function addMessage(role, content, modelName, metadata) {
               evDiffHtml = `<details class="agent-tool-output agent-tool-diff"><summary><span class="diff-file">${esc(d.file || 'diff')}</span> <span class="diff-summary-stats">${stat}</span></summary><pre class="diff-pre">${rows}</pre></details>`;
             }
             const node = document.createElement('div');
-            node.className = 'agent-thread-node' + (ok ? '' : ' error');
             // Hide the raw JSON command when a diff says it better (same as live);
             // production beats never show raw args at all.
             const evCmdHtml = (!_beat && ev.command && !(ev.diff && ev.diff.text)) ? `<pre class="agent-thread-cmd">${esc(ev.command)}</pre>` : '';
-            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beat || ev.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${evCmdHtml}${outHtml}${evDiffHtml}</div>`;
+            // L7 (mirror of the live path): render the chevron + collapsible content
+            // ONLY when there's real content to expand (command, output, or diff).
+            // A production beat / empty tool result is a flat label, not an
+            // expand/collapse affordance with nothing behind it.
+            const _evExpandHtml = `${evCmdHtml}${outHtml}${evDiffHtml}`;
+            const _evHasExpand = !!_evExpandHtml.trim();
+            node.className = 'agent-thread-node' + (ok ? '' : ' error') + (_evHasExpand ? '' : ' agent-thread-node--flat');
+            const _evChevron = _evHasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
+            const _evContentDiv = _evHasExpand ? `<div class="agent-thread-content">${_evExpandHtml}</div>` : '';
+            // L42: render the PUBLIC outcome (Vault-free, from the persisted tool result) on reload too,
+            // so the re-opened transcript reads as what happened, not a stack of identical beat rows.
+            const _evOutcome = (_beat && ok) ? orwellBeatOutcome(ev.tool, ev.output) : null;
+            const _evToolText = _evOutcome || _beat || ev.tool;
+            const _evStatusHtml = _evOutcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }
-          // Check if next round has text — extend line down to connect
-          const nextTxt = (roundTexts[r + 1] || '').trim();
+          // Check if next round has text — extend line down to connect. In the
+          // game build, an intermediate next-round text bubble is skipped (L6b),
+          // so only connect down when that next text bubble will actually render
+          // (i.e. it is the final text round).
+          let nextTxt = (roundTexts[r + 1] || '').trim();
+          if (nextTxt && isGameBuild()) {
+            let nextIsLastText = true;
+            for (let rr = r + 2; rr < maxRound; rr++) {
+              if ((roundTexts[rr] || '').trim()) { nextIsLastText = false; break; }
+            }
+            if (!nextIsLastText) nextTxt = '';
+          }
           if (nextTxt) threadWrap.classList.add('has-bottom');
           lastWrap = threadWrap;
 
@@ -2123,6 +2161,22 @@ export function addMessage(role, content, modelName, metadata) {
         .trim();
     }
 
+    // L36 (game build): an OUT-OF-CHARACTER aside is a quiet word to/from production,
+    // NOT a line the room hears. Style the bubble distinctly and strip the markers so it
+    // reads cleanly. PLAYER side: a message the player wrapped in `((...))` or prefixed
+    // `ooc:`. MODEL side (L36 follow-on): the GM marks its OWN OOC answers by wrapping the
+    // ENTIRE reply in `((...))` (the engine prompt contract — not a heuristic guess), so a
+    // fully-wrapped assistant message renders as a producer/HUD aside, never a spoken line.
+    // Full build is UNCHANGED.
+    if ((role === 'user' || role === 'assistant') && isGameBuild()) {
+      const _ooc = detectOocAside(text);
+      if (_ooc.ooc) {
+        wrap.classList.add('msg-ooc');
+        if (role === 'assistant') wrap.classList.add('msg-ooc-producer');
+        text = _ooc.text;
+      }
+    }
+
     wrap.dataset.raw = text;
     if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
     // Prepend sources box if saved in metadata
@@ -2141,6 +2195,12 @@ export function addMessage(role, content, modelName, metadata) {
       findingsSuffix += buildRagSourcesBox(metadata.rag_sources);
     }
     // If thinking is stored in metadata (not in text), reconstruct the full display
+    // so processWithThinking can render the reasoning in its (default-collapsed)
+    // "Thinking" accordion. GAME BUILD (2026-06-20 owner ruling): the accordion is
+    // shown by default but COLLAPSED, separate from the clean public bubble — so we
+    // reconstruct here in every build and let processWithThinking decide (it renders
+    // the collapsed accordion in the game build, or drops it when an operator set
+    // `body.hide-thinking`; either way the reply text is scrubbed clean).
     if (role === 'assistant' && metadata?.thinking) {
       const thinkTime = metadata.thinking_time || null;
       const thinkHtml = markdownModule.processWithThinking(

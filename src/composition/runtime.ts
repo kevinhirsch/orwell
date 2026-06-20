@@ -3,6 +3,7 @@ import { Orchestrator } from "./orchestrator";
 import { GameWatcher, type WatcherConfig } from "./gameWatcher";
 import { SystemClock } from "../adapters/time/SystemClock";
 import { FileSaveStore } from "../adapters/engine/FileSaveStore";
+import { SqliteSaveStore } from "../adapters/sqlite/SqliteSaveStore";
 import type { Clock, Scheduler } from "../ports/Clock";
 import type { UserSaveStore } from "../ports/UserSaveStore";
 
@@ -34,6 +35,13 @@ export interface RuntimeOptions {
   seed?: number;
   /** Resident-sandbox LRU cap (audit R4); env `ORWELL_MAX_RESIDENT_SANDBOXES` otherwise. */
   maxResidentSandboxes?: number;
+  /**
+   * Skip the eager boot-time resume of saved users (default: resume eagerly, as always). The
+   * entrypoint sets this so it can bind the HTTP server + warm the embedder FIRST, then call
+   * `resumeSaved()` — so a cold/blocked embedding model can never delay `/health`, and resumed
+   * souls still capture the real embedder once it is warm (prod incident 2026-06-19).
+   */
+  deferResume?: boolean;
 }
 
 export interface Runtime {
@@ -43,6 +51,9 @@ export interface Runtime {
   clock: Clock & Scheduler;
   /** Is this a KNOWN user (live sandbox or durable save)? The network boundary's gate (B34). */
   knownUser(user: string): boolean;
+  /** Resume saved users from disk (the boot preload). Called automatically unless `deferResume`
+   *  was set, in which case the entrypoint calls it after binding HTTP + warming the embedder. */
+  resumeSaved(): void;
   /** Start the background watcher (no-op when cadence is 0). */
   start(): void;
   /** Tear the watcher down (cancels its timer). */
@@ -78,9 +89,21 @@ export function watcherConfigFromEnv(env: Record<string, string | undefined> = p
   };
 }
 
+/**
+ * The durable save store the entrypoint composes when `durable` is set (B59/audit E7: the composition
+ * layer constructs the engine-only adapter, so `main.ts` never imports one). E63: `ORWELL_STORE=sqlite`
+ * selects the relational `SqliteSaveStore` (same versioned-blob, never-overwrite, lossless semantics);
+ * DEFAULT unset ⇒ the file-backed `FileSaveStore` (today's behavior — unchanged).
+ */
+function buildDurableStore(env: Record<string, string | undefined> = process.env): UserSaveStore {
+  return (env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite"
+    ? new SqliteSaveStore()
+    : new FileSaveStore();
+}
+
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
-  const saveStore = opts.saveStore ?? (opts.durable ? new FileSaveStore() : undefined);
+  const saveStore = opts.saveStore ?? (opts.durable ? buildDurableStore() : undefined);
   const envResident = parseInt((process.env.ORWELL_MAX_RESIDENT_SANDBOXES ?? "").trim(), 10);
   const maxResident = opts.maxResidentSandboxes
     ?? (Number.isFinite(envResident) && envResident > 0 ? envResident : undefined);
@@ -106,12 +129,17 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // A user whose save fails to resolve is skipped (B35's tolerant-load handles the quarantine).
   // Each resumed game also SEEDS the non-degradation baseline (audit E6): the first commit after an
   // engine restart used to be checkpoint-blind — the guard's hole sat exactly at resume-from-disk.
-  for (const user of saveStore?.listUsers?.() ?? []) {
-    try {
-      registry.sandboxFor(user);
-      orchestrator.seedBaseline(user);
-    } catch { /* skip an unresumable save; the rest still boot */ }
-  }
+  const resumeSaved = (): void => {
+    for (const user of saveStore?.listUsers?.() ?? []) {
+      try {
+        registry.sandboxFor(user);
+        orchestrator.seedBaseline(user);
+      } catch { /* skip an unresumable save; the rest still boot */ }
+    }
+  };
+  // Default: resume eagerly (tests + every non-entrypoint caller keep the original behavior). The
+  // entrypoint passes deferResume so it can bind /health + warm the embedder before resuming.
+  if (!opts.deferResume) resumeSaved();
   const watcher = new GameWatcher(registry, orchestrator, clock, clock, cfg);
   return {
     registry,
@@ -119,6 +147,7 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
     watcher,
     clock,
     knownUser: (user) => registry.usernames().includes(user) || (saveStore?.hasSave(user) ?? false),
+    resumeSaved,
     start: () => watcher.start(),
     stop: () => watcher.stop(),
   };

@@ -4,6 +4,7 @@ The front-end consumes ONLY what these Vault-free player-channel tools return; i
 never reaches the engine's Vault (the Vault Wall is enforced structurally on the
 engine side, not here). Endpoint comes from ``ORWELL_ENGINE_MCP_URL``.
 """
+import asyncio
 import os
 import time
 
@@ -65,12 +66,15 @@ class EngineToolError(RuntimeError):
     transport outage (connection refused / timeout / proxy 5xx), which propagates as httpx's own
     ``RequestError``/``HTTPStatusError`` so callers can tell "the engine said no" apart from "the
     engine is down". ``no_game`` flags the engine's intentional "no active game for this user" reply
-    (the knownUser guard) — a NORMAL pre-game state the caller should treat as ``started: False``."""
+    (the knownUser guard) — a NORMAL pre-game state the caller should treat as ``started: False``.
+    ``transient`` flags an EMPTY 200 body (no ``result`` and no structured ``error``) — the engine
+    answered oddly mid-restart, so the retry loop SHOULD give it another try (Issue 1)."""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, transient: bool = False):
         super().__init__(message)
         self.status = status
         self.no_game = "no active game" in (message or "").lower()
+        self.transient = transient
 
 
 # --- last-error tracking: VISIBLE error reporting for "engine up but erroring" -----------------
@@ -102,6 +106,49 @@ def last_engine_error() -> dict | None:
     return None
 
 
+# --- transient-failure retry + a brief "reconnecting" state (Issue 1) ----------------------------
+# The engine is occasionally MOMENTARILY unreachable (a gateway 502/503 while it bounces, a refused
+# connection mid-restart, a read timeout). Rather than surface that to the player as a hard outage on
+# the first miss, a call retries a couple of times with short backoff. While a call is mid-retry the
+# front-end is in a "reconnecting" state — the health banner can render a soft "reconnecting…" line
+# instead of a red "engine unavailable", and clears it the moment a call succeeds.
+_RETRY_ATTEMPTS = 2          # extra attempts after the first (so up to 3 tries total)
+_RETRY_BACKOFF_S = 0.25      # base backoff; doubles each attempt (0.25s, 0.5s)
+# Gateway/proxy statuses that mean "the engine is momentarily unreachable behind the proxy", NOT a
+# real per-tool error (those carry a structured {"error": ...} body and become an EngineToolError).
+_TRANSIENT_STATUSES = frozenset({502, 503, 504})
+_RECONNECTING_UNTIL = 0.0    # monotonic deadline; while now < this, a call is mid-retry
+_RECONNECTING_FOR_S = 8.0    # how long the soft state lingers after the last retry began
+
+
+def _mark_reconnecting() -> None:
+    global _RECONNECTING_UNTIL
+    _RECONNECTING_UNTIL = time.monotonic() + _RECONNECTING_FOR_S
+
+
+def _clear_reconnecting() -> None:
+    global _RECONNECTING_UNTIL
+    _RECONNECTING_UNTIL = 0.0
+
+
+def reconnecting() -> bool:
+    """True while the client is retrying a momentarily-unreachable engine — a soft, brief state the
+    health banner renders as "reconnecting…" instead of a hard outage. A success clears it."""
+    return time.monotonic() < _RECONNECTING_UNTIL
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether a failed attempt is worth retrying: a transport-level outage (connection refused, DNS,
+    read/connect timeout), a gateway 5xx with no structured engine body, or an EMPTY 200 body. A
+    structured EngineToolError is the engine ANSWERING (bad args, no active game) — never retried."""
+    if isinstance(exc, EngineToolError):
+        return bool(getattr(exc, "transient", False))  # only an empty/odd body retries
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _TRANSIENT_STATUSES
+    # httpx.TransportError covers ConnectError / ConnectTimeout / ReadTimeout / RemoteProtocolError…
+    return isinstance(exc, (httpx.TransportError, httpx.TimeoutException))
+
+
 # C18/audit F8: one shared AsyncClient (connection pooling) instead of a new client per call.
 # Rebuilt if the constructor identity changes (tests monkeypatch httpx.AsyncClient) or the
 # client was closed.
@@ -118,48 +165,89 @@ def _shared_client():
     return _client
 
 
+async def _post_tool_once(path: str, name: str, args: dict | None, user: str | None, timeout: float | None) -> dict:
+    """ONE attempt at a tool call. Raises :class:`EngineToolError` for a structured engine answer
+    (bad args / no active game), or httpx's own transport/HTTPStatus error for a genuine outage —
+    exactly the distinctions :func:`_post_tool`'s retry loop and the framing layer rely on. This is
+    the inner attempt; it does NOT record the visible health banner (the caller does, on the FINAL
+    outcome) so a recovered transient blip never lingers as a recorded error."""
+    url = ENGINE_URL.rstrip("/") + path
+    client = _shared_client()
+    r = await client.post(url, json={"name": name, "args": args or {}},
+                          headers=_user_headers(user, admin=path.startswith("/admin")),
+                          timeout=timeout if timeout is not None else _TIMEOUT)
+    if r.status_code >= 400:
+        err = None
+        try:
+            err = r.json().get("error")
+        except Exception:
+            err = None
+        if err is not None:
+            exc = EngineToolError(err, status=r.status_code)  # engine answered with a reason
+            raise exc
+        r.raise_for_status()  # no structured body → a transport/proxy failure (engine down)
+    data = r.json()
+    if "result" not in data:
+        # A structured `error` is the engine ANSWERING (never retried); a body with NEITHER `result`
+        # nor `error` is an EMPTY/odd reply (engine answered oddly mid-restart) → flag it transient so
+        # the retry loop gives it another go.
+        empty = "error" not in data
+        raise EngineToolError(str(data.get("error", "engine call failed")), transient=empty)
+    return data["result"]
+
+
 async def _post_tool(path: str, name: str, args: dict | None, user: str | None, timeout: float | None = None) -> dict:
     """POST one tool call to the engine; shared by the player and admin channels.
 
     Raises :class:`EngineToolError` when the engine answers with a structured ``{"error": ...}`` body
     (it is UP — e.g. bad args, or no active game). A genuine outage (no JSON error body, refused
-    connection, timeout) propagates as httpx's own exception, so the framing layer can fail CLOSED
-    on outages while treating "no active game" as an ordinary pre-game state. Failures are recorded
-    for the visible health banner (`last_engine_error`); a success clears the record."""
-    url = ENGINE_URL.rstrip("/") + path
-    try:
-        client = _shared_client()
-        if True:
-            r = await client.post(url, json={"name": name, "args": args or {}},
-                                  headers=_user_headers(user, admin=path.startswith("/admin")),
-                                  timeout=timeout if timeout is not None else _TIMEOUT)
-            if r.status_code >= 400:
-                err = None
-                try:
-                    err = r.json().get("error")
-                except Exception:
-                    err = None
-                if err is not None:
-                    exc = EngineToolError(err, status=r.status_code)  # engine answered with a reason
-                    if not exc.no_game:  # the pre-game refusal is a normal state, not a problem
-                        _record_error(name, "tool-error", f"{err} (HTTP {r.status_code})")
-                    raise exc
-                r.raise_for_status()  # no structured body → a transport/proxy failure (engine down)
-            data = r.json()
-    except EngineToolError:
-        raise
-    except httpx.HTTPStatusError as e:
-        _record_error(name, "unreachable", f"engine returned HTTP {e.response.status_code} with no error detail")
-        raise
-    except Exception as e:
-        _record_error(name, "unreachable", f"{type(e).__name__}: {e}")
-        raise
-    if "result" not in data:
-        msg = str(data.get("error", "engine call failed"))
-        _record_error(name, "tool-error", msg)
-        raise EngineToolError(msg)
-    _clear_error()
-    return data["result"]
+    connection, timeout, gateway 5xx) propagates as httpx's own exception, so the framing layer can
+    fail CLOSED on outages while treating "no active game" as an ordinary pre-game state.
+
+    Issue 1 — RESILIENCE: a TRANSIENT outage (connection refused mid-restart, a gateway 502/503/504,
+    a read timeout, an empty body) is RETRIED a couple of times with short backoff before it surfaces;
+    while retrying, the client is in a brief "reconnecting" state (see :func:`reconnecting`). A
+    structured EngineToolError (incl. the benign "no active game") is the engine answering and is
+    NEVER retried. Failures are recorded for the visible health banner only on the FINAL outcome; a
+    success clears both the recorded error and the reconnecting state.
+
+    Latency guard (C18): a TIGHT-timeout framing call (the chat-blocking get_game_state /
+    get_moment_prompt path, ≤ _FRAMING_TIMEOUT) must fail in seconds — so a *timeout* there is NOT
+    retried (it would double an already-bounded wait). Fast-failing blips (refused connection, gateway
+    5xx, empty body) still retry cheaply; the pollers (wider timeouts) retry every transient kind."""
+    tight = timeout is not None and timeout <= _FRAMING_TIMEOUT
+    last_exc: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS + 1):
+        try:
+            data = await _post_tool_once(path, name, args, user, timeout)
+        except Exception as e:
+            last_exc = e
+            # A read/connect TIMEOUT on a tight framing call already waited its full budget — don't
+            # retry it (the framing layer's fallback prompt takes over fast). Other transient kinds
+            # (refused, 5xx, empty body) fail fast and are cheap to retry even on the framing path.
+            timed_out = isinstance(e, httpx.TimeoutException)
+            retryable = _is_transient(e) and not (tight and timed_out)
+            if attempt < _RETRY_ATTEMPTS and retryable:
+                # Momentary blip — note the soft reconnecting state and back off briefly before retry.
+                _mark_reconnecting()
+                await asyncio.sleep(_RETRY_BACKOFF_S * (2 ** attempt))
+                continue
+            # Out of retries (or a non-transient failure): record the banner error and re-raise.
+            if isinstance(e, EngineToolError):
+                if not e.no_game:  # the pre-game refusal is a normal state, not a problem
+                    _record_error(name, "tool-error", f"{e} (HTTP {e.status})" if e.status else str(e))
+                raise
+            if isinstance(e, httpx.HTTPStatusError):
+                _record_error(name, "unreachable", f"engine returned HTTP {e.response.status_code} with no error detail")
+                raise
+            _record_error(name, "unreachable", f"{type(e).__name__}: {e}")
+            raise
+        else:
+            _clear_error()
+            _clear_reconnecting()  # a success ends any reconnecting state
+            return data
+    # Unreachable (the loop either returns or raises), but keep the type-checker honest.
+    raise last_exc if last_exc else EngineToolError("engine call failed")
 
 
 
@@ -281,6 +369,16 @@ async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> di
     return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
 
 
+async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
+    """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
+    becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the
+    PUBLIC fields (``biography``, ``physicalCharacteristics``) and HIDDEN fields (``secrets``,
+    ``trueGoals``, ``weakness``, ``dayOnePerception``). The engine validates (non-player-mirroring),
+    splits across the Vault Wall, re-derives threads, and re-seals — returning field NAMES only
+    (never a hidden value). Vault-free response by construction."""
+    return await _call("recordCastProfile", profile, user=user)
+
+
 async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
     """Feature 0051: record that a generated portrait was SHOWN to the player — a
     player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored
@@ -321,15 +419,20 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
-    knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023)."""
+    knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
+    an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
+    houseguests' feelings move, in which direction, with what relative emphasis — the engine still
+    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path."""
     witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
     if "player" not in witness:
         witness.append("player")
     req: dict = {"initiator": initiator, "witnessSet": witness, "content": content}
     if kind:
         req["kind"] = kind
+    if consequence:
+        req["consequence"] = consequence
     return await _call("recordInteraction", req, user=user)
 
 
@@ -392,8 +495,22 @@ async def advance_game(user: str | None = None) -> dict:
 
 async def submit_decision(decision: dict, user: str | None = None) -> dict:
     """Resolve the player's pending decision (nominations / use veto / replacement /
-    eviction vote) and continue the loop. `decision` is the validated payload."""
+    eviction vote) and continue the loop. `decision` is the validated payload.
+    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}."""
     return await _call("submitDecision", decision or {}, user=user)
+
+
+async def request_self_eviction(user: str | None = None) -> dict:
+    """Self-eviction step 1 (0061): the player expressed an OOC intent to LEAVE/quit — raise the
+    confirmation (names the irreversible stakes) and change NO state. The house never hears it; nothing
+    evicts until the player explicitly confirms via submit_decision({"kind":"self-evict","confirmed":True})."""
+    return await _call("requestSelfEviction", {}, user=user)
+
+
+async def cancel_self_eviction(user: str | None = None) -> dict:
+    """Self-eviction cancel (0061): the player decided to stay — clear the confirmation; they remain
+    ACTIVE and in the house, unchanged."""
+    return await _call("cancelSelfEviction", {}, user=user)
 
 
 async def player_tagline(user: str | None = None) -> dict:
@@ -435,6 +552,26 @@ async def whereabouts(user: str | None = None):
     """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
     ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""
     return await _call("whereabouts", {}, user=user)
+
+
+async def move_to(room: str, user: str | None = None):
+    """L21/L24: the player walks to a room they named — the engine moves them (it never auto-relocates
+    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game."""
+    return await _call("moveTo", {"room": room}, user=user)
+
+
+async def premiere_intros(user: str | None = None):
+    """PREMIERE ONLY (#380): the meet-everyone progress — who's met + who's STILL to introduce before
+    the first HOH, each with their OBSERVABLE public persona (Vault-free; no soul/number). ``None``
+    outside the premiere."""
+    return await _call("premiereIntros", {}, user=user)
+
+
+async def mark_houseguest_met(houseguest_id: str, user: str | None = None):
+    """PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they've introduced their
+    public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH.
+    Returns the updated meet-everyone progress (``None`` outside the premiere)."""
+    return await _call("markHouseguestMet", {"id": houseguest_id}, user=user)
 
 
 async def finale_view(user: str | None = None):
@@ -506,29 +643,63 @@ async def sandbox_health(user: str | None = None) -> dict:
     return await _admin_call("sandboxHealth", {}, user=user)
 
 
+async def advance_to_finale(user: str | None = None) -> dict:
+    """God Mode debug (L38): fast-forward THIS user's live season to a crowned winner — the engine
+    drives the deterministic loop, auto-resolving the player's pending decisions with legal defaults,
+    so the post-season retrospective (0048) unseals legitimately. Reads NO Vault and reveals nothing
+    hidden — returns only the Vault-free summary ``{finished, winnerName, weeks, playerPlacement,
+    started}``. The retrospective still opens ONLY post-finale through its own code-gated path; this
+    just makes the season FINISH."""
+    return await _admin_call("advanceToFinale", {}, user=user)
+
+
+async def _probe_health_once() -> dict:
+    """ONE /health probe. ``{"ok": True}`` when the engine answers 200, else ``{"ok": False, "error": …}``.
+    Raises on a transport outage so the retry loop can give a momentary blip another try."""
+    r = await _shared_client().get(ENGINE_URL.rstrip("/") + "/health", timeout=5.0)
+    if r.status_code == 200:
+        return {"ok": True, "engineUrl": ENGINE_URL}
+    if r.status_code in _TRANSIENT_STATUSES:
+        # A gateway 502/503/504 on /health is a momentary blip — raise so we retry, not surface red.
+        r.raise_for_status()
+    return {"ok": False, "engineUrl": ENGINE_URL, "error": f"engine returned HTTP {r.status_code}"}
+
+
 async def engine_health_detail() -> dict:
     """Engine reachability plus a human-readable reason when something is wrong — for VISIBLE
     front-end error reporting. ``{"ok": bool, "engineUrl": str, "error"?: str, "lastError"?: dict}``.
     ``ok`` reflects the engine process answering /health; ``lastError`` additionally reports a RECENT
     failed tool call (a technical problem while the engine is up — e.g. a corrupt-save 500), with
-    ``{tool, kind, error, ageSeconds}``. Never raises."""
+    ``{tool, kind, error, ageSeconds}``. ``reconnecting`` is true while a recent transient outage is
+    being retried (the banner renders a soft "reconnecting…" rather than a hard red). Never raises."""
     detail: dict
-    try:
-        r = await _shared_client().get(ENGINE_URL.rstrip("/") + "/health", timeout=5.0)
-        if r.status_code == 200:
-            detail = {"ok": True, "engineUrl": ENGINE_URL}
-        else:
-            detail = {"ok": False, "engineUrl": ENGINE_URL, "error": f"engine returned HTTP {r.status_code}"}
-    except Exception as e:
-        # Connection refused / DNS / timeout: the most common real failure (engine not running, or a
-        # wrong ORWELL_ENGINE_MCP_URL). Report the concrete reason so the operator can act on it.
-        detail = {"ok": False, "engineUrl": ENGINE_URL, "error": f"{type(e).__name__}: {e}"}
+    last_exc: Exception | None = None
+    for attempt in range(_RETRY_ATTEMPTS + 1):
+        try:
+            detail = await _probe_health_once()
+            break
+        except Exception as e:
+            last_exc = e
+            if attempt < _RETRY_ATTEMPTS and _is_transient(e):
+                _mark_reconnecting()
+                await asyncio.sleep(_RETRY_BACKOFF_S * (2 ** attempt))
+                continue
+            # Connection refused / DNS / timeout after retries: the most common real failure
+            # (engine not running, or a wrong ORWELL_ENGINE_MCP_URL). Report the concrete reason.
+            detail = {"ok": False, "engineUrl": ENGINE_URL, "error": f"{type(e).__name__}: {e}"}
+            break
+    if detail.get("ok"):
+        _clear_reconnecting()  # the engine answered — any reconnecting state is over
     le = last_engine_error()
     if le:
         detail["lastError"] = {
             "tool": le["tool"], "kind": le["kind"], "error": le["error"],
             "ageSeconds": int(time.time() - le["ts"]),
         }
+    # A momentary outage being retried: a SOFT state, distinct from a hard red. The banner can show
+    # "reconnecting…" and recover quietly when the engine answers again.
+    if reconnecting():
+        detail["reconnecting"] = True
     # G8: while createCharacter is in flight, a slow/timed-out probe is casting being finalized,
     # not an outage — the banner renders an in-fiction holding line instead of red.
     if creating_in_flight():

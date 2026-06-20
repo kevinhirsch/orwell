@@ -384,6 +384,31 @@ def _parse_ollama_response(data: dict) -> str:
     return message.get("content") or data.get("response") or ""
 
 
+def _openai_message_text(msg: dict) -> str:
+    """Pull the usable text out of an OpenAI-compatible chat `message`.
+
+    Reasoning models (DeepSeek-R1 / -V*, Qwen3, Nemotron, …) frequently return an
+    EMPTY ``content`` and put their tokens in a reasoning field — and providers do
+    NOT agree on its name: vLLM/NIM emit ``reasoning``, DeepSeek's own API emits
+    ``reasoning_content``, some Ollama-compatible builds emit ``thinking``. The
+    non-streaming helper used to read only ``content or reasoning_content``, so a
+    provider that uses ``reasoning`` (or ``thinking``) returned ``""`` — which broke
+    the game's auto-record extraction (``auto-record: no parseable JSON (len=0)``):
+    the constrained JSON the model produced lived in a field we never read, so the
+    consequence loop never fired. Read every variant so the answer is recoverable
+    regardless of provider. (Mirrors the streaming path's reasoning-field handling.)
+    """
+    if not isinstance(msg, dict):
+        return ""
+    return (
+        msg.get("content")
+        or msg.get("reasoning_content")
+        or msg.get("reasoning")
+        or msg.get("thinking")
+        or ""
+    )
+
+
 def _host_match(url: str, *domains: str) -> bool:
     """Return True if url's hostname equals any of `domains` or is a subdomain of one.
 
@@ -1063,7 +1088,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             response = _parse_ollama_response(data)
         else:
             msg = data["choices"][0]["message"]
-            response = msg.get("content") or msg.get("reasoning_content") or ""
+            response = _openai_message_text(msg)
         _set_cached_response(cache_key, response)
         return response
     except Exception:
@@ -1136,6 +1161,43 @@ async def llm_call_async_with_fallback(candidates, messages, **kwargs) -> str:
 
 
 async def llm_call_async(
+    url: str,
+    model: str,
+    messages: List[Dict],
+    temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
+    max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS,
+    headers: Optional[Dict] = None,
+    timeout: int = LLMConfig.STREAM_TIMEOUT,
+    max_retries: int = LLMConfig.MAX_RETRIES,
+    prompt_type: Optional[str] = None
+) -> str:
+    """Tracing wrapper over the non-streaming utility call (src/llm_trace.py) — records
+    the full request + response (or error) for the /admin/status LLM I/O trace, then
+    returns the impl's result unchanged. Best-effort; disabled ⇒ near-zero passthrough."""
+    from src import llm_trace
+    if not llm_trace.enabled():
+        return await _llm_call_async_impl(
+            url, model, messages, temperature=temperature, max_tokens=max_tokens,
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+    started = time.time()
+    try:
+        text = await _llm_call_async_impl(
+            url, model, messages, temperature=temperature, max_tokens=max_tokens,
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+        llm_trace.record_llm_call(
+            kind="call", model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, response={"text": text}, ok=True,
+            duration_ms=int((time.time() - started) * 1000))
+        return text
+    except Exception as e:
+        llm_trace.record_llm_call(
+            kind="call", model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
+            response={"error": {"type": type(e).__name__, "message": str(e)[:500]}})
+        raise
+
+
+async def _llm_call_async_impl(
     url: str,
     model: str,
     messages: List[Dict],
@@ -1232,7 +1294,7 @@ async def llm_call_async(
                     response = _parse_ollama_response(data)
                 else:
                     msg = data["choices"][0]["message"]
-                    response = msg.get("content") or msg.get("reasoning_content") or ""
+                    response = _openai_message_text(msg)
                 _set_cached_response(cache_key, response)
                 return response
             except Exception:
@@ -1780,6 +1842,38 @@ def _summarize_stream_error(err_chunk: Optional[str]) -> str:
 
 
 async def stream_llm_with_fallback(candidates, messages, **kwargs):
+    """Tracing wrapper over the fallback chain (src/llm_trace.py).
+
+    Captures the full request (system prompt + messages + tool schemas + sampling
+    params) and the reconstructed response (text + reasoning + tool calls + usage,
+    or the error) for the /admin/status LLM I/O trace, then forwards the streamed
+    bytes UNCHANGED. The trace is best-effort and never alters the stream; when the
+    trace is disabled this is a near-zero passthrough."""
+    from src import llm_trace
+    if not llm_trace.enabled():
+        async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
+            yield chunk
+        return
+    cands = _dedupe_candidates(candidates)
+    requested = cands[0][1] if cands else "(none)"
+    acc = llm_trace.StreamAccumulator()
+    started = time.time()
+    try:
+        async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
+            acc.observe(chunk)
+            yield chunk
+    finally:
+        resp = acc.response()
+        llm_trace.record_llm_call(
+            kind="stream", model=resp.get("answeredBy") or requested, requested_model=requested,
+            messages=messages, tools=kwargs.get("tools"),
+            temperature=kwargs.get("temperature"), max_tokens=kwargs.get("max_tokens"),
+            response=resp, ok=resp.get("error") is None,
+            duration_ms=int((time.time() - started) * 1000),
+        )
+
+
+async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
     """Wrap stream_llm with an ordered fallback chain.
 
     `candidates` is a list of (url, model, headers). Each is tried in order,

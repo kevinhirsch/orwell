@@ -7,6 +7,19 @@ export class InMemoryEventStore implements EventStore {
   private readonly ids = new Set<string>();
   /** The sandbox's ONE monotonic tick (B60/audit E12): event `ts` always sorts coherently. */
   private lastTs = 0;
+  /**
+   * R3 (incremental snapshot) — a cached IMMUTABLE copy of the unfiltered log. The log is append-only
+   * (record/restoreRecord only ever `push`; nothing mutates or removes a past event), so a snapshot's
+   * full copy stays a faithful clone until the NEXT append. The dominant per-commit cost was the O(events)
+   * `.slice()` that `exportSnapshot` paid on every mutation — many of which append NO event (a knowledge
+   * surfacing, a deal, a DR entry), yet each still re-sliced the whole, ever-growing log. Here that re-slice
+   * happens at most ONCE per appended event; an export with no new event reuses the frozen copy by reference,
+   * so the events portion of the snapshot is O(1) between appends instead of O(total history) every commit.
+   * `Object.freeze` makes the contract enforced, not just documented: a caller that tried to sort/splice the
+   * result would throw — and no caller does (the projection treats `events` as read-only; the few callers
+   * that need to mutate go through the filtered branch below, which always returns a fresh array).
+   */
+  private fullQueryCache: readonly GameEvent[] | null = null;
 
   record(event: GameEvent): void {
     validateEvent(event); // reject any mislabeled (e.g. player-witnessed-but-hidden) event
@@ -21,6 +34,7 @@ export class InMemoryEventStore implements EventStore {
     const ts = event.ts > this.lastTs ? event.ts : this.lastTs + 1;
     this.lastTs = ts;
     this.events.push({ ...event, ts });
+    this.fullQueryCache = null; // a new append invalidates the cached immutable copy
   }
 
   /** Restore a persisted event EXACTLY (id/ts/hidden byte-identical) — the 0030 resume path. */
@@ -30,14 +44,29 @@ export class InMemoryEventStore implements EventStore {
     this.ids.add(event.id);
     this.lastTs = Math.max(this.lastTs, event.ts);
     this.events.push(event);
+    this.fullQueryCache = null; // a restored append invalidates the cached immutable copy
   }
 
   query(filter: EventQuery = {}): GameEvent[] {
+    // Fast path for the dominant call: no filter ⇒ an IMMUTABLE shared copy, rebuilt only when the log
+    // grew (R3). Append-only means the frozen copy is byte-identical to the live log between appends, so
+    // the snapshot export reuses it by reference instead of re-`.slice()`ing the whole history every commit.
+    if (filter.witnessedBy === undefined && filter.hidden === undefined && filter.type === undefined) {
+      if (this.fullQueryCache === null || this.fullQueryCache.length !== this.events.length) {
+        this.fullQueryCache = Object.freeze(this.events.slice());
+      }
+      return this.fullQueryCache as GameEvent[];
+    }
     return this.events.filter((e) => {
       if (filter.witnessedBy !== undefined && classify(e, filter.witnessedBy) !== "VISIBLE") return false;
       if (filter.hidden !== undefined && e.hidden !== filter.hidden) return false;
       if (filter.type !== undefined && e.type !== filter.type) return false;
       return true;
     });
+  }
+
+  /** O(1) count of the unfiltered log — no array allocation (the hot-path id/ts/count seam). */
+  count(): number {
+    return this.events.length;
   }
 }

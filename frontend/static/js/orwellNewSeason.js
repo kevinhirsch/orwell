@@ -132,7 +132,10 @@
       // season's transcript never rides as narrator context — E65), and let every surface refresh
       // through THE one shared dispatcher (platform.js orwellGameChanged — G15: never an ad-hoc
       // CustomEvent). The avatar refresh rides the same wave (the cast/portrait surfaces re-read).
+      // This is a genuine season RESTART — arm the fresh-session split (the initial first-season
+      // onboarding never reaches here, so it stays ONE continuous conversation).
       destroy();
+      try { window._orwellMarkRestart && window._orwellMarkRestart(); } catch (_) {}
       try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
       try { window.orwellGameChanged && window.orwellGameChanged("next-season"); } catch (_) {}
     } catch (e) {
@@ -149,7 +152,10 @@
     _open = true;
     _win = window.OrwellWindowKit.create({
       id: WIN_ID,
-      title: "A new season",
+      // Cohesive window-title contract: emoji + a single space + a Title-Case name
+      // (matches the Cast 🎬 / Finale 🏆 / Retrospective 📼 windows). ✨ = a fresh
+      // start (distinct from the Cast clapperboard, which the dock chip keeps below).
+      title: "✨ A New Season",
       icon: "🎬",
       slot: "bottom-right",
       slotKey: "new-season",

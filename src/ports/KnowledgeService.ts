@@ -1,5 +1,5 @@
 import type { EntityId } from "../domain/ids";
-import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
+import type { KnowledgeFact, Suspicion, KnowledgeSnapshot } from "../domain/knowledge";
 
 /** A belief as it travels NPC-to-NPC: lineage + provenance + confidence + drift. */
 export interface BeliefInput {
@@ -55,4 +55,16 @@ export interface KnowledgeService {
    * in the listener's knowledge with its provenance and confidence.
    */
   transmitGossip(from: EntityId, to: EntityId, fact: BeliefInput, pathway: string): KnowledgeFact;
+
+  /**
+   * Serialize the whole knowledge layer (B40/audit C2): per-entity knowledge + suspicions PLUS the
+   * id/ts counters, so a restart resumes it (no lost facts, no duplicate ids). Part of the port (E63)
+   * so the durable-snapshot export goes THROUGH the seam — the composition root never hard-casts a
+   * concrete adapter to reach it. ENGINE-ONLY in effect: only the composition root (snapshot) calls
+   * it. Plain JSON — part of the durable `SessionSnapshot` contract.
+   */
+  serialize(): KnowledgeSnapshot;
+
+  /** Rebuild the knowledge layer from a snapshot (B40) — resume, don't reset. The 0030 resume path. */
+  load(snap: KnowledgeSnapshot): void;
 }

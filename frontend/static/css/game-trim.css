@@ -73,9 +73,53 @@ body[data-game-build].is-admin #model-select { display: initial; }
       build doesn't surface. (chat.js also removes the node outright.) ── */
 body[data-game-build] #export-doc-btn { display: none !important; }
 
-/* ── D7: game turns always act — the Agent|Chat mode toggle invites the
-      broken tool-less mode while a game is live. ── */
-body[data-game-build][data-game-active="1"] .mode-toggle { display: none !important; }
+/* ── P1 OOBE overhaul (items 2, 3, 6): the cast-photo step is now a PROPER
+      OrwellWindow (orwellHeadshot.js), position:fixed and OUT of the composer
+      flow — so the old "card-above-the-composer" overlap is gone. Two cleanups:
+
+   item 6 (composer placement): the welcome-active state lifts the composer ~30vh
+      up the page so the EMPTY chat reads centred. During the image step that left
+      the composer hanging mid-screen with a big bottom margin. While the cast-photo
+      window is up (.ow-casting-headshot-open) drop the lift so the composer DOCKS at
+      its normal bottom position through the whole transition (no mid-screen hang,
+      no jump when the window hands off).
+
+   items 2 + 3 (overlap + tip suppression): the welcome splash ("Orwell" / "The
+      house is waiting") and its rotating gameplay tip used to stack and bleed through
+      behind the card. While ANY onboarding surface is up (the welcome modal sets
+      .ow-onboarding; the cast-photo window sets .ow-casting-headshot-open) hide the
+      splash's tagline + tip so only the clean "Orwell" brand mark remains and nothing
+      overlaps the surface. ── */
+body[data-game-build].ow-casting-headshot-open .chat-container.welcome-active .chat-input-bar {
+  margin-bottom: 12px;
+}
+body[data-game-build].ow-onboarding #welcome-screen .welcome-tip,
+body[data-game-build].ow-onboarding #welcome-screen .welcome-sub,
+body[data-game-build].ow-casting-headshot-open #welcome-screen .welcome-tip,
+body[data-game-build].ow-casting-headshot-open #welcome-screen .welcome-sub {
+  opacity: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  pointer-events: none;
+}
+/* item 2 (no overlap): during the cast-photo step the WINDOW is the single focal
+   surface. The centered splash brand mark ("Orwell") would sit under it, so fade the
+   whole splash out while the cast-photo window is up — one clean container, nothing
+   stacked. (The welcome MODAL covers the splash on its own z-layer, so this only needs
+   to fire for the image-step window.) It returns the instant the window hands off. */
+body[data-game-build].ow-casting-headshot-open #welcome-screen {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+/* ── D7 / L9: game turns always act — the Agent|Chat mode toggle invites the
+      broken tool-less mode. Play here is ALWAYS hybrid (the player can chat OOC,
+      role-play in character, and the agent runs the engine tools every turn), so
+      the switch is meaningless. D7 hid it only while a game was live; L9 widens
+      that to the whole game build (casting + reunion + free chat included) so the
+      dead control never appears. The full inherited workspace (no data-game-build)
+      keeps the toggle. ── */
+body[data-game-build] .mode-toggle { display: none !important; }
 
 /* C31/S5: the game build has no memory/skills/notes/tasks/documents/gallery/calendar —
    their Danger-Zone wipe rows are dead surface. Scoped on the server-injected body flag,

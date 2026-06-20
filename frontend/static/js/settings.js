@@ -2050,6 +2050,21 @@ function initAccount() {
       }
     }).catch(() => {});
 
+  // Visible post-login build version (mirrors the login-screen footer). Derived
+  // from the deployed checkout's highest merged PR number, rendered v{PR/100}.
+  const verEl = el('settings-app-version');
+  if (verEl) {
+    const cached = window._appVersion;
+    if (cached) {
+      verEl.textContent = 'v' + cached;
+    } else {
+      fetch('/api/version', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => { if (d && d.version) { window._appVersion = d.version; verEl.textContent = 'v' + d.version; } })
+        .catch(() => {});
+    }
+  }
+
   // G28: the profile-picture studio — the SAME upload + 3-option AI flow as casting, here in
   // the user area so you can change your pic anytime. The avatar circle updates on finalize.
   try {
@@ -2090,6 +2105,10 @@ function initAccount() {
             });
             if (!r.ok) throw new Error('reset failed');
             if (rpMsg) { rpMsg.textContent = 'Done — casting begins again.'; rpMsg.style.color = 'var(--green)'; }
+            // This is a genuine season RESTART (a game was already running) — arm the fresh-session
+            // split so the dead season's transcript never rides along as narrator context (E65).
+            // The initial first-season onboarding never reaches here, so it stays ONE conversation.
+            try { window._orwellMarkRestart && window._orwellMarkRestart(); } catch (_) {}
             try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
             // G15: refresh every surface through THE one shared dispatcher (never an ad-hoc CustomEvent).
             try { window.orwellGameChanged && window.orwellGameChanged('reset-progress'); } catch (_) {}

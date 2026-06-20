@@ -78,8 +78,14 @@
     if (!btn) return;
     try {
       const r = await fetch("/api/orwell/state", { credentials: "same-origin" });
-      const st = r.ok ? await r.json() : null;
-      const live = !!(st && st.started);
+      // L15: a 5xx/non-ok is a TRANSIENT engine hiccup (e.g. the per-user queue is busy
+      // committing portraits) — leave the button as it is. Only a definitive, parseable
+      // state answers the live/not-live question; an unreadable one never hides the cast or
+      // closes an open panel (which is what made generation look like a dropped connection).
+      if (!r.ok) return;
+      const st = await r.json();
+      if (!st || typeof st.started !== "boolean") return; // ambiguous → leave as-is
+      const live = !!st.started;
       btn.style.display = live ? "" : "none";
       if (!live && _open) togglePanel(false);
     } catch (_) { /* engine hiccup: leave the button as it was (fail-open) */ }
@@ -101,13 +107,16 @@
     const content = document.createElement("div");
     content.innerHTML = `
       <style>
+        /* L11: a smaller, sensible default so the cast window doesn't dominate
+           the screen — it is resizeable from any edge/corner (kit), and the
+           chosen size persists under winsize-orwell-cast. */
         #orwell-cast {
-          width: min(560px, 92vw);
+          width: min(360px, 92vw);
           font-family: 'Fira Code', ui-monospace, monospace;
         }
         #orwell-cast .oc-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-          gap: .7rem;
+          display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+          gap: .6rem;
         }
         #orwell-cast .oc-hg { text-align: center; }
         #orwell-cast .oc-portrait {
@@ -130,8 +139,20 @@
           margin-top: .15rem; font-size: .66rem; letter-spacing: .04em; opacity: .65; text-transform: uppercase;
         }
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
-        #orwell-cast .oc-hg.oc-out .oc-portrait img { filter: grayscale(1); }
+        /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest
+           keeps full-color portrait; an evicted one renders grayscale/monotone.
+           (Jury is still dimmed via oc-out, just not desaturated.) */
+        #orwell-cast .oc-hg.oc-evicted .oc-portrait img { filter: grayscale(1); }
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
+        /* L12: pin/un-pin the cast window into the right-side gadget rail. */
+        #orwell-cast .oc-toolbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
+        #orwell-cast .oc-pin {
+          cursor: pointer; font: inherit; font-size: .72rem; letter-spacing: .02em;
+          color: inherit; background: rgba(255,255,255,.06);
+          border: 1px solid var(--border, #355a66); border-radius: 8px;
+          padding: .3rem .55rem; min-height: 28px; display: inline-flex; align-items: center; gap: .35rem;
+        }
+        #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.12); }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
           cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
@@ -147,6 +168,9 @@
           #orwell-cast { width: auto !important; max-width: none !important; }
         }
       </style>
+      <div class="oc-toolbar">
+        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail">📌 Compact pin</button>
+      </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
       <div class="oc-actions" id="oc-actions" style="display:none">
@@ -158,16 +182,36 @@
       icon: "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='9' cy='7' r='4'/><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/></svg>",
       slot: "top-left", slotKey: "cast", role: "complementary",
       minimizable: true, closable: true, draggable: true,
+      // 0054 Phase 2: the FULL roster docks into the control-room rail (the kit's
+      // ⇲ titlebar toggle). This is the full-content docked window; the L12 "compact
+      // pin" (two portraits) below stays a separate, lighter affordance. Default
+      // floating; the poll keeps running across a dock re-home (onClose is suppressed).
+      dockable: true, defaultDocked: false,
       content,
       onClose: () => {
         _win = null; _open = false;
         if (_timer) { clearTimeout(_timer); _timer = null; }
         _cards.clear(); // the kit tore the panel DOM down — drop the detached card nodes
       },
+      onDock: () => {
+        // A re-home keeps the SAME instance AND the same content node (with its grid,
+        // cards, and the #oc-pin/#oc-backfill listeners intact — they're plain
+        // listeners on nodes the kit re-appends, not kit-AbortController ones). Just
+        // refresh so the (now-docked or now-floating) panel shows live content.
+        if (_open) refreshRoster().then(scheduleNextPoll);
+      },
     });
     _win.open(document.getElementById(BTN_ID) || undefined);
     const el2 = document.getElementById(PANEL_ID);
     el2.querySelector("#oc-backfill").addEventListener("click", requestBackfill);
+    // L12: pin the cast window into the gadget rail (the rail gadget owns the
+    // pinned state + render; this just toggles it and the window dismisses itself).
+    const pinBtn = el2.querySelector("#oc-pin");
+    if (pinBtn) {
+      pinBtn.addEventListener("click", () => {
+        if (window.OrwellCastPin) window.OrwellCastPin.setPinned(true);
+      });
+    }
     return el2;
   }
 
@@ -256,8 +300,9 @@
 
   function makeCard(hg) {
     const out = hg.status && hg.status !== "active";
+    const evicted = hg.status === "evicted"; // L16: grayscale only on eviction
     const card = document.createElement("div");
-    card.className = "oc-hg" + (out ? " oc-out" : "");
+    card.className = "oc-hg" + (out ? " oc-out" : "") + (evicted ? " oc-evicted" : "");
     const holder = document.createElement("div");
     holder.className = "oc-portrait";
     const nameEl = document.createElement("div");
@@ -289,6 +334,7 @@
     if (status !== entry.status) {
       entry.status = status;
       entry.el.classList.toggle("oc-out", !!(hg.status && hg.status !== "active"));
+      entry.el.classList.toggle("oc-evicted", hg.status === "evicted"); // L16
       entry.statusEl.textContent = statusLabel(hg.status);
     }
     const name = hg.name == null ? "" : String(hg.name);
@@ -298,24 +344,38 @@
   }
 
   function render(data) {
+    // A roster fetch begun while the panel was OPEN can resolve AFTER the player closed it (the
+    // close stops the poll, but an in-flight request still settles). render() must NOT resurrect a
+    // closed window — ensurePanel() would re-mount #orwell-cast, leaving a slotted, focused panel
+    // overlapping the sidebar (it intercepted #session-sort-btn in CI). If we're closed, drop the
+    // stale result; the next open re-fetches fresh.
+    if (!_open) return;
     const el = ensurePanel();
     const grid = el.querySelector("#oc-grid");
     const empty = el.querySelector("#oc-empty");
     const roster = (data && Array.isArray(data.roster)) ? data.roster : [];
     _imagesAvailable = !!(data && data.imagesAvailable);
 
-    // G22: the adaptive cadence reads the G20 counters — while a generation run is
-    // still landing portraits (provider configured + total > present), the next poll
-    // comes fast so each face shows up within a few seconds of being written.
+    // G22 + L15: the adaptive cadence. The server reports a LIVE generation record
+    // (`generation: {total, done, active}`) while a run is in flight — when present it is
+    // authoritative (poll fast while `active`). Otherwise fall back to the G20 portrait
+    // counters (provider configured + total > present). Either way each face shows up within a
+    // few seconds. A `stale` payload (the route served the last-good roster because a state read
+    // timed out during heavy generation) NEVER blanks the cast — the keyed upsert keeps the
+    // existing faces and we keep polling fast so the real set lands.
     const total = (data && typeof data.portraitsTotal === "number") ? data.portraitsTotal : null;
     const present = (data && typeof data.portraitsPresent === "number") ? data.portraitsPresent : null;
-    const generating = _imagesAvailable && total != null && present != null && total > present;
-    _pollDelay = generating ? FAST_POLL_MS : POLL_MS;
+    const gen = data && data.generation && typeof data.generation === "object" ? data.generation : null;
+    const runActive = !!(gen && gen.active);
+    const generating = runActive ||
+      (_imagesAvailable && total != null && present != null && total > present);
+    _pollDelay = (generating || data.stale) ? FAST_POLL_MS : POLL_MS;
 
     const actions = el.querySelector("#oc-actions");
     if (!roster.length) {
       // The empty state (pre-season / a reset) — the ONLY path that empties the
-      // grid; a populated roster only ever upserts cards in place.
+      // grid; a populated roster only ever upserts cards in place. A `stale` payload
+      // always carries the last good cards, so it never reaches here.
       for (const entry of _cards.values()) entry.el.remove();
       _cards.clear();
       empty.style.display = "";
@@ -332,13 +392,20 @@
     );
     if (actions) {
       actions.style.display = (_imagesAvailable && missing.length) ? "" : "none";
-      // G20: standing completeness copy — the background reconciler verifies and
-      // retries the set; this row reports the live remainder (server counters when
-      // present, the rendered roster otherwise).
+      // G20 + L15: standing completeness copy — the background reconciler verifies and
+      // retries the set; this row reports the live remainder. Prefer the live run record
+      // ("Generating N of M…") when a run is active, else the rendered-roster remainder.
       if (_imagesAvailable && missing.length) {
         const note = el.querySelector("#oc-backfill-note");
-        if (note) note.textContent = "Generating " + missing.length + " remaining…" +
-          (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
+        if (note) {
+          if (gen && gen.active && gen.total) {
+            note.textContent = "Generating " + Math.min(gen.done, gen.total) + " of " +
+              gen.total + " portrait" + (gen.total === 1 ? "" : "s") + "…";
+          } else {
+            note.textContent = "Generating " + missing.length + " remaining…" +
+              (total != null && present != null ? " (" + present + "/" + total + " done)" : "");
+          }
+        }
       }
     }
 
@@ -373,18 +440,30 @@
     }
   }
 
+  // Poll backoff (perf/resilience): consecutive failures widen the cadence so a slow/502-ing engine
+  // late-game is not hammered every 30s — the keyed upsert keeps the last-good cast on screen meanwhile.
+  let _failures = 0;
+  const BACKOFF_CEIL_MS = 120000;
+
   async function refreshRoster() {
+    // Non-blocking loading affordance: the window already shows its last-good cast (keyed upsert) —
+    // this just signals a refresh is in flight, so a slow fill never reads as a frozen/blank window.
+    if (_win && _win.setLoading) _win.setLoading(true);
     try {
       const data = await getJSON("/api/orwell/roster");
       render(data);
+      _failures = 0; // recovered: the next render() restores the adaptive cadence
     } catch (_) {
       // Fail open: keep whatever's shown; an empty first load shows the empty-state copy.
       if (window.OrwellReport) window.OrwellReport.fail("cast", "roster-fetch", _); // G11: fail open, never silent
+      _failures++;
       const el = document.getElementById(PANEL_ID);
       if (el && !el.querySelector("#oc-grid").children.length) {
         el.querySelector("#oc-empty").style.display = "";
         el.querySelector("#oc-empty").textContent = "The cast list is offline right now.";
       }
+    } finally {
+      if (_win && _win.setLoading) _win.setLoading(false);
     }
   }
 
@@ -398,11 +477,16 @@
   function scheduleNextPoll() {
     if (_timer) { clearTimeout(_timer); _timer = null; }
     if (!_open) return;
+    // Under a run of failures, back off exponentially (capped) on TOP of the adaptive cadence — a
+    // late-game engine that 502s a roster read should not be re-hit every 30s. A success resets it.
+    const delay = _failures > 0
+      ? Math.min(Math.max(_pollDelay, POLL_MS) * Math.pow(2, _failures), BACKOFF_CEIL_MS)
+      : _pollDelay;
     _timer = setTimeout(async () => {
       _timer = null;
       if (_open && !document.hidden) await refreshRoster();
       scheduleNextPoll();
-    }, _pollDelay);
+    }, delay);
   }
 
   function togglePanel(open) {
@@ -419,8 +503,15 @@
       // minimized window as a restore, which would silently un-park it.)
       const bootParked = !existed && _win && _win.isMinimized && _win.isMinimized();
       if (!bootParked) {
-        el.style.display = "block";
-        if (_win) { _win.restore(); _win.raise(); }
+        // Docked: clear the inline display so the .ow-docked flex-column rule applies
+        // (an inline `block` would break the kit's docked layout); the rail shows it.
+        // Floating: un-hide + restore/raise as before.
+        if (_win && _win.isDocked && _win.isDocked()) {
+          el.style.display = "";
+        } else {
+          el.style.display = "block";
+          if (_win) { _win.restore(); _win.raise(); }
+        }
       }
       // G22: refresh now, then poll on the adaptive cadence that refresh computed.
       refreshRoster().then(scheduleNextPoll);
@@ -431,6 +522,8 @@
 
   // Seam for the headless gate (mirrors the other panels).
   window._orwellCastEnsure = () => { togglePanel(true); return true; };
+  // L12: the pin gadget closes the floating window when the player docks the cast.
+  window._orwellCastClose = () => { if (_win) togglePanel(false); };
 
   // Public hooks (mirrors the other orwell panels): refresh on a game change — and
   // re-arm the poll so a cadence change (say, a fresh season that is generating its

@@ -2,9 +2,15 @@
 #
 # orwell — one-liner Proxmox LXC installer.
 #
-# On the Proxmox host shell (the repo is PRIVATE — this is the ONE authenticated moment, ever;
-# the fine-grained PAT needs only Contents: Read-only on kevinhirsch/orwell — A4/ruling #17):
-#   GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+# On the Proxmox host shell (the repo is PRIVATE — this is the ONE authenticated moment, ever).
+# Use a fine-grained PAT (Contents: Read-only on kevinhirsch/orwell) OR a classic PAT (repo scope)
+# — A4/ruling #17. Two non-obvious requirements, both baked into the command below:
+#   1. EXPORT the token. In `VAR=x bash -c "$(curl …$VAR…)"` the command substitution is expanded
+#      by the OUTER shell BEFORE the `VAR=` prefix applies, so curl would get an EMPTY token
+#      (→ 404 from raw / 401 from the API). `export` puts it in scope at substitution time.
+#   2. Fetch via the GitHub CONTENTS API, not raw.githubusercontent.com (which 404s for fine-grained PATs).
+#   export GIT_TOKEN=github_pat_xxx
+#   bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 #
 # The token is persisted ONCE into the container's data/.env (the file every reset preserves)
 # and git reads it through a credential helper at use time — no later command ever re-prompts,
@@ -16,14 +22,32 @@
 # UX: a community-scripts-style config menu (Use Defaults vs Advanced) with every field
 # pre-populated, shown when run on a TTY; otherwise it runs non-interactively with defaults.
 # Every setting can also be supplied / overridden via env, e.g.:
-#   CTID=104 CORES=4 RAM_MB=4096 DISK_GB=12 STORAGE=local-lvm BRANCH=main \
-#     bash -c "$(curl -fsSL .../deploy/orwell.sh)"
+#   export GIT_TOKEN=github_pat_xxx
+#   CTID=104 CORES=6 RAM_MB=12288 DISK_GB=16 STORAGE=local-lvm BRANCH=main \
+#     bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 # Pass --default (or set USE_DEFAULTS=1 / ORWELL_NONINTERACTIVE=1) to skip the menu.
 set -euo pipefail
 
 TITLE="orwell installer"
-msg()  { echo -e "==> $*"; }
+# Inline presentation (this file is the curl-bootstrapped one-liner — it must stay standalone, so
+# no sourcing the TUI lib). Colour auto-disables off a TTY / under NO_COLOR / TERM=dumb. Pure echo.
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'; C_GRN=$'\e[32m'; C_CYN=$'\e[36m'; C_OFF=$'\e[0m'
+else
+  C_BOLD=""; C_DIM=""; C_GRN=""; C_CYN=""; C_OFF=""
+fi
+msg()  { echo -e "${C_CYN}▸${C_OFF} $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
+banner() {
+  printf '%s\n' \
+"${C_CYN} _____ _____ _ _ _ _____ __    __    ${C_OFF}" \
+"${C_CYN}|     |  _  | | | |   __|  |  |  |   ${C_OFF}" \
+"${C_CYN}|  |  |    -| | | |   __|  |__|  |__ ${C_OFF}" \
+"${C_CYN}|_____|__|__|_____|_____|_____|_____|${C_OFF}" \
+"${C_BOLD}            O R W E L L${C_OFF}" \
+"   ${C_DIM}${1:-}${C_OFF}"
+  printf '\n'
+}
 
 case "${1:-}" in
   -h|--help)
@@ -35,6 +59,7 @@ esac
 [[ "$(id -u)" -eq 0 ]] || die "run this on the Proxmox host as root."
 command -v pct   >/dev/null 2>&1 || die "this must run on a Proxmox VE host (pct not found)."
 command -v pveam >/dev/null 2>&1 || die "this must run on a Proxmox VE host (pveam not found)."
+banner "Proxmox LXC installer"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────────────────
 # First active storage that supports a content type (rootdir for the CT rootfs, vztmpl for the
@@ -105,9 +130,12 @@ wt_pick_llm() {  # writes the LLM provider into the container's data/.env (never
 # ── Defaults (env overrides everything; auto-detected where it matters) ────────────────────────
 CTID="${CTID:-$(pvesh get /cluster/nextid 2>/dev/null || echo 900)}"
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
-CORES="${CORES:-2}"
-RAM_MB="${RAM_MB:-2048}"
-DISK_GB="${DISK_GB:-8}"
+# Recommended baseline (approved 2026-06-19): 4 vCPU / 8 GB RAM. The LLM is REMOTE, so CPU is for
+# the front-end + engine + local embeddings (fastembed/ONNX); allow more RAM if also running image
+# generation. Every value is overridable via env (CORES=… RAM_MB=… DISK_GB=…).
+CORES="${CORES:-4}"
+RAM_MB="${RAM_MB:-8192}"
+DISK_GB="${DISK_GB:-12}"
 BRIDGE="${BRIDGE:-vmbr0}"
 NET="${NET:-dhcp}"                 # "dhcp" or a static CIDR, e.g. 192.168.1.50/24
 GATEWAY="${GATEWAY:-}"             # required only for a static NET
@@ -258,10 +286,15 @@ pct exec "$CTID" -- bash -c \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
    bash '${APP_DIR}/deploy/orwell-install.sh'"
 
-msg "done. orwell UI: http://${IP}:${ORWELL_PORT}"
+echo
+echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
+echo "  ${C_BOLD}${C_GRN}orwell is deployed in LXC ${CTID}.${C_OFF}"
+echo "  ${C_BOLD}play:${C_OFF}    http://${IP}:${ORWELL_PORT}"
+echo "  ${C_DIM}enter:${C_OFF}   pct enter ${CTID}    ${C_DIM}then:${C_OFF} ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}"
 if [[ -n "$CT_ROOT_PASSWORD" ]]; then
-  msg "console login: root + the password you set (or 'pct enter ${CTID}' from this host)."
+  echo "  ${C_DIM}console:${C_OFF} root + the password you set (or 'pct enter ${CTID}' from this host)"
 else
-  msg "no container root password was set — console login is disabled. Use 'pct enter ${CTID}'"
-  msg "from this host, or set one later: pct exec ${CTID} -- passwd"
+  echo "  ${C_DIM}console:${C_OFF} disabled (no root password). Use 'pct enter ${CTID}', or set one:"
+  echo "           pct exec ${CTID} -- passwd"
 fi
+echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"

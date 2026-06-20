@@ -462,6 +462,59 @@ export class BbWorld extends World {
   castResumed?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
   castError?: Error;
 
+  // Deep character profiles (0058) scratch state.
+  dpRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  dpSandbox?: import("../../src/composition/registry").UserSandbox;
+  dpSandboxB?: import("../../src/composition/registry").UserSandbox;
+  dpSentinel?: string;
+  dpWriteResult?: import("../../src/ports/GameSession").RecordCastProfileResult;
+
+  // Casting diversity floor (0063) scratch state.
+  dvRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  dvSandbox?: import("../../src/composition/registry").UserSandbox;
+  dvSeed?: number;
+  dvSentinel?: string;
+  dvSurfacedBefore?: boolean;
+
+  // Player self-eviction (0061) scratch state.
+  svRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  svUser?: string;
+  svSandbox?: import("../../src/composition/registry").UserSandbox;
+  svView?: import("../../src/ports/GameSession").AdvanceView;
+  svGameState?: import("../../src/ports/GameSession").GameStateView;
+  svEventsBefore?: number;
+  svWitnessedBefore?: number;
+  svStateBefore?: string;
+  svSentinel?: string;
+  svPresent?: Eid[];
+
+  // Story-thread scheduler (0060) scratch state.
+  stRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  stSandbox?: import("../../src/composition/registry").UserSandbox;
+  stSandboxB?: import("../../src/composition/registry").UserSandbox;
+  stOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  stOrchB?: import("../../src/composition/orchestrator").Orchestrator;
+  stUser?: string;
+  stUserB?: string;
+  stSentinel?: string;
+  stThreadSourceId?: import("../../src/domain/ids").EntityId;
+  stTransitionsA?: string;
+  stTransitionsB?: string;
+  stStaticA?: string;
+  stStaticB?: string;
+
+  // Feature 0062 — the move-in zeitgeist snapshot scratch state.
+  wsFix?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
+  wsFixB?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
+  wsView?: import("../../src/ports/GameSession").WorldSnapshotView | null;
+  wsPrompt?: string;
+  wsOffscreen?: string;
+  wsOutcomeA?: string;
+  wsOutcomeB?: string;
+  wsPairA?: import("../../src/ports/GameSession").HouseguestCard;
+  wsPairB?: import("../../src/ports/GameSession").HouseguestCard;
+  wsWeek?: number;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

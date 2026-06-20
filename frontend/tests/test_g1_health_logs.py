@@ -231,11 +231,15 @@ def test_surface_is_read_only():
     # update flag, and the G25 portrait-regenerate lever (which touches ONLY the
     # regenerable portrait cache, refuse-before-discard; pinned in
     # test_g25_portrait_regen.py) — pinned separately in test_g19a_ops_page.py.
-    # No route here may ever mutate game or store state.
+    # No route here may ever mutate game or store state. The ops subtree plus the
+    # log-management controls (the retention horizon setting + the "Trim now" trim)
+    # add POSTs by design — operational only (settings + on-disk logfiles), never
+    # game/store/Vault state.
+    _OPS_WRITE = {"/api/admin/logs/retention", "/api/admin/logs/trim"}
     router = ahr.setup_admin_health_routes()
     for r in router.routes:
         methods = getattr(r, "methods", set()) or set()
-        if r.path.startswith("/api/admin/ops"):
+        if r.path.startswith("/api/admin/ops") or r.path in _OPS_WRITE:
             assert methods <= {"GET", "POST", "HEAD"}, r.path
         else:
             assert methods <= {"GET", "HEAD"}, f"{r.path} must stay read-only"

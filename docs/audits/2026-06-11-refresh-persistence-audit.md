@@ -1,5 +1,7 @@
 # 2026-06-11 — Refresh-persistence audit (Lane G5): every transient UI state × reload
 
+> 📋 **Audit record** · 2026-06-11 · Refresh-persistence (Lane G5, DOC-ONLY) · **Status:** Historical record
+
 **Commission (verbatim).** *"it seems like sometimes text will prefill, I will refresh, and the
 text will not persist. it seems like sometimes there will be some alert that comes through or
 some window that pops up, I refresh, and it doesn't persist. we need audits for this."*

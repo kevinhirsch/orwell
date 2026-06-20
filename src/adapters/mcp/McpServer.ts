@@ -47,6 +47,25 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
       if (args["kind"] !== undefined && typeof args["kind"] !== "string") refuse("kind", "a string when present");
       if (args["toward"] !== undefined && !isStrArray(args["toward"])) refuse("toward", "an array of houseguest ids when present");
+      // 0005: the optional generative-consequence descriptor. Shape-guard only (R6 class: a string
+      // where an array/object is expected dies deep in the fold) — the engine owns the magnitude and
+      // degrades gracefully on an unknown direction, so domain validation stays there, not here.
+      if (args["consequence"] !== undefined) {
+        const c = args["consequence"];
+        if (typeof c !== "object" || c === null || Array.isArray(c)) refuse("consequence", "an object when present");
+        const cons = c as Record<string, unknown>;
+        if (cons["edges"] !== undefined) {
+          if (!Array.isArray(cons["edges"])) refuse("consequence.edges", "an array when present");
+          for (const e of cons["edges"] as unknown[]) {
+            if (typeof e !== "object" || e === null || Array.isArray(e)) refuse("consequence.edges[]", "objects with a toward + direction");
+            const edge = e as Record<string, unknown>;
+            if (!isStr(edge["toward"])) refuse("consequence.edges[].toward", "a houseguest id (string)");
+            if (!isStr(edge["direction"])) refuse("consequence.edges[].direction", "a direction (string)");
+            if (edge["emphasis"] !== undefined && typeof edge["emphasis"] !== "string") refuse("consequence.edges[].emphasis", "a string when present");
+          }
+        }
+        if (cons["rationale"] !== undefined && typeof cons["rationale"] !== "string") refuse("consequence.rationale", "a string when present");
+      }
       return;
     case "surfaceInformationTo": {
       if (!isStr(args["entity"])) refuse("entity", "an entity id (string)");
@@ -77,6 +96,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       return;
     case "npcVoice":
     case "getPortraitPrompt":
+    case "markHouseguestMet": // PREMIERE meet-everyone (#380) — takes a houseguest id
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
       return;
     case "recordImageBeat":
@@ -125,6 +145,12 @@ export class McpServer {
         return this.deps.session.advanceGame();
       case "submitDecision":
         return this.deps.session.submitDecision(args as unknown as SubmitDecisionReq);
+      case "requestSelfEviction":
+        // 0061 step 1: raise the OOC self-evict confirmation (no state change; the house never hears it).
+        return this.deps.session.requestSelfEviction();
+      case "cancelSelfEviction":
+        // 0061: decline the confirmation — the player plays on, ACTIVE and unchanged.
+        return this.deps.session.cancelSelfEviction();
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
       case "getVisibleStateFor":
@@ -137,6 +163,13 @@ export class McpServer {
         return this.deps.session.socialInitiatives();
       case "whereabouts":
         return this.deps.session.whereabouts();
+      case "moveTo":
+        return this.deps.session.movePlayer(String(args["room"] ?? ""));
+      // PREMIERE meet-everyone (feature #380 follow-on): read who's still to introduce / mark a meeting.
+      case "premiereIntros":
+        return this.deps.session.premiereIntros();
+      case "markHouseguestMet":
+        return this.deps.session.markHouseguestMet(args["id"] as EntityId);
       case "seasonRecap":
         return this.deps.session.seasonRecap();
       case "seasonRetrospective":
@@ -171,6 +204,10 @@ export class McpServer {
         return this.deps.admin.manageSandbox(args["op"] as "create" | "reset" | "save" | "load" | undefined);
       case "sandboxHealth":
         return this.deps.admin.health();
+      case "advanceToFinale":
+        // L38 (admin/God-Mode only — gated by `allows()` above): drive the season to a crowned
+        // winner so the post-season retrospective can unseal. Vault-free summary out; reads no Vault.
+        return this.deps.admin.advanceToFinale();
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

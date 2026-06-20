@@ -148,6 +148,102 @@ def test_game_tool_nodes_suppress_raw_payloads():
     assert "_beatOut || json.tool" in js
 
 
+def test_chatjs_imports_every_helper_it_calls():
+    # REGRESSION GUARD (critical): #314 added isGameBuild() CALLS to chat.js but never imported
+    # it, so handleChatSubmit threw `ReferenceError: isGameBuild is not defined` in the send path
+    # — the player could not send ANY message in the game build (the chat POST never fired). The
+    # source-string immersion tests asserted the CALLS but not the IMPORT, and the browser smoke
+    # only checks page errors at LOAD time, never after a send. Every isGameBuild() user must
+    # import it. (See test_send_path_has_no_undefined_refs in the browser smoke for the runtime guard.)
+    chat = _read("static", "js", "chat.js")
+    if "isGameBuild(" in chat:
+        assert "isGameBuild" in chat[:chat.index("isGameBuild(")] and "from './orwellToolBeats.js'" in chat
+        # specifically: isGameBuild rides the existing orwellToolBeats import
+        import re
+        imp = re.search(r"import\s*\{[^}]*\bisGameBuild\b[^}]*\}\s*from\s*'\./orwellToolBeats\.js'", chat)
+        assert imp, "chat.js calls isGameBuild() but does not import it from orwellToolBeats.js"
+
+
+# --- 4. reasoning is SEPARATED from the public bubble (default-collapsed accordion) ------
+# Owner ruling 2026-06-20: the public bubble must carry ONLY the in-character narration; the
+# model's reasoning/drafts/"rewind" must NOT mix into it — instead it streams into a condensed,
+# default-COLLAPSED "Thinking" accordion (debug-viewable, expandable). See the thinking/public
+# split tests in test_thinking_public_split.py for the routing + default-collapsed assertions.
+
+
+def test_markdown_separates_reasoning_from_the_public_bubble_in_the_game_build():
+    # markdown.js is the chokepoint every reload + final-render path funnels through. In the
+    # game build the reply text is always SCRUBBED clean of reasoning, and the reasoning is
+    # routed to its own (default-collapsed) accordion via gameBuildShowsThinkingAccordion().
+    md = _read("static", "js", "markdown.js")
+    assert "export function gameBuildSuppressesThinking()" in md
+    assert "export function gameBuildShowsThinkingAccordion()" in md
+    # the game-build markers + the admin/operator gates
+    assert "data-game-build" in md
+    assert "data-show-thinking" in md  # admin-only: legacy inline render off the game path
+    assert "hide-thinking" in md       # operator opt-out fully hides the accordion
+    # fail direction: a thrown suppress check still SCRUBS the reply (return true in the catch)
+    cap = md[md.index("export function gameBuildSuppressesThinking()"):]
+    cap = cap[:cap.index("export function gameBuildShowsThinkingAccordion")]
+    assert "catch" in cap and "return true;" in cap
+    # processWithThinking gates on the helpers: scrub the reply, render the accordion collapsed
+    pwt = md[md.index("export function processWithThinking"):]
+    assert "if (gameBuildSuppressesThinking())" in pwt
+    gated = pwt[pwt.index("if (gameBuildSuppressesThinking())"):]
+    gated = gated[:gated.index("let html = ''")]
+    # the reply is still scrubbed (no reasoning preamble bleeds into the public bubble) ...
+    assert "scrubReasoningPreamble(" in gated
+    # ... and the reasoning now renders in its own accordion (gated on the show-accordion helper)
+    assert "gameBuildShowsThinkingAccordion()" in gated
+    assert "createThinkingSection(" in gated
+
+
+def test_live_streaming_thinking_box_is_a_collapsed_accordion_in_the_game_build():
+    # The LIVE stream path (chat.js): reasoning streams into the shared live-think box (a
+    # collapsed accordion). The game build no longer suppresses it wholesale — only an operator
+    # `body.hide-thinking` holds the bubble empty. The reply still renders scrubbed on close.
+    chat = _read("static", "js", "chat.js")
+    # the wholesale game-build suppression (`isGameBuild() && (hasUnclosedThink || isThinking)`)
+    # is gone — the only game-build hold is gated on the operator hide-thinking opt-out.
+    assert "if (isGameBuild() && (hasUnclosedThink || isThinking)) {" not in chat
+    assert "isGameBuild() && document.body.classList.contains('hide-thinking')" in chat
+    # the shared live-think box is built (the same collapsed accordion for game + non-game)
+    assert "Create a live thinking box" in chat
+    assert "live-think" in chat
+
+
+def test_reload_path_reconstructs_collapsed_accordion_in_the_game_build():
+    # The history-RELOAD path (chatRenderer.js) reconstructs thinking from metadata.thinking.
+    # The game build now reconstructs too (no `!isGameBuild()` guard) and lets processWithThinking
+    # render the default-collapsed accordion (or drop it under an operator hide-thinking opt-out).
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert "metadata?.thinking && !isGameBuild()" not in renderer  # the old game-build skip is gone
+    assert "role === 'assistant' && metadata?.thinking" in renderer
+    assert "'<think' + (thinkTime ? ` time=\"${thinkTime}\"` : '') + '>' + metadata.thinking" in renderer
+
+
+def test_non_game_build_still_renders_the_collapsible_thinking():
+    # NON-game build is UNCHANGED: processWithThinking still builds the collapsible thinking
+    # section, and the reload path still reconstructs from metadata.thinking.
+    md = _read("static", "js", "markdown.js")
+    # the normal (non-game) branch still calls createThinkingSection
+    assert "thinkingBlocks.forEach((block, index) => {" in md
+    assert "html += createThinkingSection(block, index, thinkingTime);" in md
+    # the reload reconstruction preserves its full <think>-reconstruction form
+    renderer = _read("static", "js", "chatRenderer.js")
+    assert "markdownModule.processWithThinking(" in renderer
+    assert "'<think' + (thinkTime ? ` time=\"${thinkTime}\"` : '') + '>' + metadata.thinking" in renderer
+
+
+def test_streaming_tts_flag_is_function_scoped():
+    # REGRESSION GUARD: streamingTTS was a `const` inside the stream-read block but READ in the
+    # error/abort cleanup branch — a `ReferenceError` on any early submit error that masked the real
+    # failure. It must be declared at the handleChatSubmit function scope (a hoisted `let`).
+    chat = _read("static", "js", "chat.js")
+    assert "let streamingTTS = false;" in chat
+    assert "const streamingTTS =" not in chat  # never re-shadow it in an inner block
+
+
 def test_game_build_never_labels_messages_with_the_model_name():
     # Immersion (visual audit): every AI message was labelled with the raw LLM model name
     # ("deepseek-v4-pro → …") — the narrator is the show, not a model. The game build uses a
@@ -204,7 +300,8 @@ def test_reload_path_applies_production_beats():
     # the live stream did — so re-opening a session leaked raw camelCase tool names and raw
     # engine JSON output on every reload (a Vault-Wall / refresh-persistence break).
     js = _read("static", "js", "chatRenderer.js")
-    assert "import { ORWELL_TOOL_BEATS, isGameBuild } from './orwellToolBeats.js';" in js
+    # L42: the import now also pulls orwellBeatOutcome (the Vault-free public-outcome deriver).
+    assert "import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';" in js
     assert "const _gbBeat = isGameBuild();" in js
     assert "const _beat = _gbBeat ? ORWELL_TOOL_BEATS[ev.tool] : null;" in js
     # a production beat suppresses output, screenshot, diff, and raw args, and relabels the pill
@@ -212,4 +309,7 @@ def test_reload_path_applies_production_beats():
     assert "_beat ? null : safeToolScreenshotSrc(ev.screenshot)" in js
     assert "if (!_beat && ev.diff && ev.diff.text)" in js
     assert "!_beat && ev.command" in js
-    assert "esc(_beat || ev.tool)" in js
+    # L42: the beat row renders the PUBLIC OUTCOME when present (else the plain beat label).
+    assert "orwellBeatOutcome(ev.tool, ev.output)" in js
+    assert "_evOutcome || _beat || ev.tool" in js
+    assert "esc(_evToolText)" in js

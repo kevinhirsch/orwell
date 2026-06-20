@@ -1,5 +1,7 @@
 # Orwell front-end & experience audit — 2026-06-09
 
+> 📋 **Audit record** · 2026-06-09 · Front-end & experience (round-3 companion) · **Status:** Historical record
+
 The experience-focused companion to `2026-06-09-product-audit.md` (which covered architecture,
 wiring, game design, and the engine). Scope here: the **player-facing tier** — the first-run and
 lifecycle journey, the moment-to-moment play surface and its information design, narration /

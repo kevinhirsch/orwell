@@ -1,4 +1,5 @@
 import type { EntityId } from "../domain/ids";
+import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -65,8 +66,46 @@ export interface HouseguestCard {
   strategyStyle?: string;
   background?: string;
   age?: number;
+  /**
+   * The prose appearance blurb (the older 0004 facet). PRE-0058 FALLBACK ONLY: a card carries EITHER the
+   * structured `physicalCharacteristics` (0058 — the single source of truth narration AND the portrait
+   * read) OR this prose line, NEVER both — they were independently generated and could otherwise
+   * contradict on build/skin/hair (L29). New 0058 casts ship `physicalCharacteristics`; only a pre-0058
+   * save (or the player, who has no structured facet) falls back to this.
+   */
   appearance?: string;
   presentation?: string;
+  /**
+   * The concrete, diverse backstory facets (L28): the houseguest's vocation and hometown — public,
+   * Vault-free origin facts the narrator voices instead of inventing (and mirroring the player).
+   */
+  vocation?: string;
+  hometown?: string;
+  /**
+   * The observable public DEMEANOR / voice register (L28) — how this houseguest comes across in the
+   * room (blunt, deadpan, anxious, grandiose…). Public, Vault-free: the narrator voices THIS stored
+   * register so each person sounds distinct, instead of defaulting everyone to warm-and-witty.
+   */
+  demeanor?: string;
+  /**
+   * The PUBLIC deep-profile facets (feature 0058): a multi-sentence `biography` (the presentable
+   * backstory) and the STRUCTURED `physicalCharacteristics` facet (the single source of truth the
+   * narration AND the portrait prompt both read, L29/L23). Public, Vault-free, byte-stable. The
+   * HIDDEN half (secrets, true goals, weakness, Day-1 perception) NEVER appears on this card.
+   */
+  biography?: string;
+  physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * The PUBLIC diversity-identity facets (feature 0063): `ethnicity` is a first-class heritage / cultural
+   * identity (an authentic facet of a full character that grounds the skin tone so text and portrait
+   * agree); `genderPresentation` is how the houseguest presents; `outOrientation` is present ONLY when the
+   * houseguest is PUBLICLY OUT (a public facet the house knows). A PRIVATELY-held orientation is NEVER on
+   * this card — it is Vault-sealed and surfaces only via a 0002 pathway. Public, Vault-free, byte-stable.
+   * Descriptive only — never a competition input, never a defining single word.
+   */
+  ethnicity?: string;
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  outOrientation?: string;
 }
 
 /**
@@ -86,6 +125,52 @@ export interface PortraitPromptEntry {
   houseguestId: string;
   name: string;
   prompt: string;
+}
+
+/** The shared, frozen real-world slices the cast moved in with (0062) — public flavor only. */
+export interface WorldSnapshotSlices {
+  screen: string[];
+  music: string[];
+  sports: string[];
+  news: string[];
+  internet: string[];
+  /** One line reading the cultural moment at move-in. */
+  mood: string;
+}
+
+/**
+ * The Vault-free projection of the move-in zeitgeist snapshot (0062). PUBLIC, shared real-world flavor —
+ * never Vault, never a game input (§6). Carries the in-fiction move-in marker, how it was seeded, the
+ * voiceable slices, and the off-screen-channel "world you moved in with" prompt block (the C32-beyond
+ * reach, §5). Provenance fields (the real capture timestamp / lag) NEVER cross.
+ */
+export interface WorldSnapshotView {
+  /** The in-fiction move-in date the house is frozen at. */
+  capturedFor: string;
+  /** How it was seeded: "web_search" | "model-framed" | "absent" (the fail-soft tier). */
+  source: string;
+  /** The voiceable slices (the FROZEN shared world). */
+  slices: WorldSnapshotSlices;
+  /** The rendered off-screen-channel prompt block (so an NPC-to-NPC scene shares the same world). */
+  offscreenPrompt: string;
+}
+
+/** The FE write-back of a real captured zeitgeist (0062, §8) — public flavor; any subset of slices. */
+export interface RecordWorldSnapshotReq {
+  /** Optionally override the in-fiction move-in marker. */
+  capturedFor?: string;
+  /** Optional provenance (the real capture timestamp) — stored, never voiced. */
+  capturedAt?: string;
+  /** Any subset of the public slices (each bounded to the budget; empty keeps the fallback's value). */
+  slices?: Partial<WorldSnapshotSlices>;
+}
+
+/** Whether the zeitgeist write-back was accepted, and the resulting source tier (0062). */
+export interface RecordWorldSnapshotResult {
+  /** True iff a game is started and the snapshot could be frozen onto it. */
+  accepted: boolean;
+  /** The resulting source: "web_search" once a real capture lands; "absent" when there was no game. */
+  source: string;
 }
 
 /** The Vault-free projection of the running game the front-end may render. */
@@ -120,12 +205,37 @@ export interface GameStateView {
      */
     veto: { holder: { id: EntityId; name: string } | null; used: boolean; players: Array<{ id: EntityId; name: string }> };
   };
+  /**
+   * WHERE THE PLAYER IS — their room, who is with them, and each ADJACENT room with its occupants
+   * (the player's own scoped view, Vault-free: only what they could see or hear themselves; non-
+   * adjacent rooms never appear). Surfaced into the model's persistent GAME CONTEXT (L21/L24) so the
+   * narrator voices the REAL occupancy instead of inventing positions or "still to arrive" houseguests
+   * (the engine seats everyone at premiere — there are no arrivals). Null pre-game / when the player
+   * is out of the house. Also feeds the "Where you are" gadget (L26).
+   */
+  whereabouts?: WhereaboutsView | null;
   player: PlayerCard | null;
   house: HouseguestCard[];
   /** Deals the player is party to (0039) — fact + status only, never the hidden opinion numbers. */
   deals?: DealView[];
+  /**
+   * The PUBLIC showmances (0059/L40) — the houseguest pairs whose romance has become VISIBLE to the
+   * whole house (stage `visible`). A public fact at that point (not a Vault leak), surfaced so the
+   * narrator may voice romance for THESE pairs only — never for ordinary high-affinity friendships.
+   * Pre-visible (sealed) showmances and the pre-game ties NEVER appear here. Absent when there are none.
+   */
+  showmances?: Array<{ a: string; b: string }>;
   /** Pre-game only (0050): where the casting interview stands — what's captured, what's next. */
   casting?: CastingStatusView;
+  /**
+   * PREMIERE only (feature #380 follow-on): the engine-tracked meet-everyone progress — who the
+   * player has met so far and who is STILL to introduce before the first HOH, each with their
+   * OBSERVABLE public persona. Surfaced into the premiere moment prompt so the producer always
+   * knows the next unmet houseguest (it never relies on the model to REMEMBER, the real bug), and
+   * exposed for a player-facing "first impressions" surface. Present ONLY during the premiere
+   * moment; absent once the first HOH begins. Vault-free — public facets only (see PremiereIntrosView).
+   */
+  premiere?: PremiereIntrosView;
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
   /**
@@ -331,7 +441,9 @@ export interface BeatEventView {
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
 export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
+    | "self-evict";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -422,6 +534,53 @@ export interface PlayerTaglineView {
 }
 
 /**
+ * PREMIERE — "meet everyone before the first HOH" (feature #380 follow-on). The player's OBSERVABLE
+ * early read of one houseguest: their PUBLIC persona facets ONLY — the archetype / strategy style /
+ * background / age / presentation any houseguest can clock across the room on move-in day. This lets
+ * the player "clock people a bit earlier as their personality/archetype" BEFORE the first HOH.
+ *
+ * VAULT WALL + ANTI-SYCOPHANCY: every field here is a PUBLIC facet the engine already mints onto the
+ * roster card — NEVER the soul, hidden elements, or a trust/threat/affinity NUMBER, and NEVER an
+ * engine assertion of how the player feels ("you trust them"). The player INFERS; this is observable
+ * persona, not relationship math. `met` flips once the producer has introduced this houseguest.
+ */
+export interface FirstImpressionView {
+  houseguest: NamedRef;
+  /** True once this houseguest has been introduced/met during the premiere. */
+  met: boolean;
+  /** The OBSERVABLE public persona (the same Vault-free facets on the roster card). */
+  archetype?: string;
+  strategyStyle?: string;
+  background?: string;
+  age?: number;
+  presentation?: string;
+  /** The observable voice register / demeanor (L28) — how they come across in the room. */
+  demeanor?: string;
+}
+
+/**
+ * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
+ * answer to "who has the player met, and who is still to introduce, before the first HOH?". The
+ * narrator is HANDED this so it never has to REMEMBER who's been introduced (the real bug: the
+ * model under-tracked and skipped people). `complete` is the structural gate — true once the player
+ * has met all 15 NPCs (the player counts themselves); the first HOH should not begin until then.
+ *
+ * Public by construction: it carries only names + the same observable persona facets the roster
+ * already exposes. No Vault data, no numbers, no hidden state.
+ */
+export interface PremiereIntrosView {
+  /** True iff every active houseguest has been introduced/met (the meet-everyone gate). */
+  complete: boolean;
+  /** How many of the cast (player + NPCs) have been met so far, and the total to meet. */
+  metCount: number;
+  total: number;
+  /** The houseguests STILL to introduce (the producer drives the next one) — name + observable persona. */
+  remaining: FirstImpressionView[];
+  /** Everyone met so far — the player's early observable reads, for a "first impressions" surface. */
+  met: FirstImpressionView[];
+}
+
+/**
  * Where the player stands in the house RIGHT NOW (0049) — the Vault-free presence read. Who is in
  * the player's room and who is one room over: facts a houseguest could see or hear themselves.
  * NEVER motives, numbers, hidden state, or the occupancy of non-adjacent rooms (you can't see
@@ -434,6 +593,15 @@ export interface WhereaboutsView {
   present: NamedRef[];
   /** Each ADJACENT room and who is in it (names only). Non-adjacent rooms never appear. */
   nearby: Array<{ room: string; present: NamedRef[] }>;
+  /**
+   * DURATION — how many consecutive player-turns the player has been in this room (0 = just
+   * arrived this turn). Grounds scene continuity so the narrator voices persistence ("you've held
+   * the kitchen a while") instead of resetting the scene each turn (L21/L24). `companions` carries
+   * the same tenure for each houseguest currently with the player, so the model knows who has been
+   * lingering with them vs. who just walked in.
+   */
+  turnsHere: number;
+  companions: Array<{ id: EntityId; name: string; turnsHere: number }>;
 }
 
 /**
@@ -453,7 +621,27 @@ export interface NpcVoiceView {
   /** The stable public persona facets (B61) — byte-stable across the whole season. */
   persona: {
     archetype?: string; strategyStyle?: string; background?: string;
-    age?: number; appearance?: string; presentation?: string;
+    age?: number; presentation?: string;
+    /**
+     * Prose appearance (the older 0004 facet). PRE-0058 FALLBACK ONLY — a houseguest is voiced through
+     * EITHER the structured `physicalCharacteristics` OR this prose, never both (independently generated,
+     * they could contradict, L29). A 0058 houseguest is voiced via `physicalCharacteristics`.
+     */
+    appearance?: string;
+    /** The observable voice register (L28) — voice this houseguest in THEIR demeanor, not a default. */
+    demeanor?: string;
+    /**
+     * The PUBLIC deep-profile facets (0058) — voice the houseguest's STORED biography + physical
+     * characteristics, never invent (and drift) them. Both are Vault-free public facets; the HIDDEN
+     * profile (secrets/goals/weakness/perception) is NEVER on this projection.
+     */
+    biography?: string; physicalCharacteristics?: PhysicalCharacteristics;
+    /**
+     * The PUBLIC identity facets (0063) — heritage, gender presentation, and a PUBLICLY-OUT orientation
+     * only. A PRIVATELY-held orientation is NEVER here (Vault-sealed; surfaces only via a 0002 pathway).
+     * One true facet of a full character, never a reductive label.
+     */
+    ethnicity?: string; genderPresentation?: "man" | "woman" | "nonbinary"; outOrientation?: string;
   };
   /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
   whereabouts: { room: string; present: NamedRef[] } | null;
@@ -505,10 +693,38 @@ export interface RetrospectiveView {
   }>;
 }
 
+/**
+ * The Vault-free result of an ADMIN fast-forward to the finale (L38). The dev-only "finish my
+ * season so the post-season retrospective unseals" lever DRIVES the deterministic engine — it
+ * reads NO Vault and reveals nothing hidden: it carries only PUBLIC ceremony facts (the crowned
+ * winner's NAME, weeks played, the player's final placement). The retrospective (0048) still
+ * unseals through its OWN code-gated post-finale path — this only makes the season FINISH.
+ */
+export interface FinaleFastForwardView {
+  /** True once the season is over — a winner is crowned (or it was already finished). */
+  finished: boolean;
+  /** The crowned winner's NAME (Vault-free public fact), or null if the season did not finish. */
+  winnerName: string | null;
+  /** Weeks played to the crown (the public week count). */
+  weeks: number;
+  /** Where the PLAYER finished — `winner`, `runner-up`, `jury`, or `evicted` (public seat facts). */
+  playerPlacement: "winner" | "runner-up" | "jury" | "evicted" | "unknown";
+  /** No game was started, so there was nothing to fast-forward (Vault-free; never raises). */
+  started: boolean;
+}
+
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
-    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote";
+    | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
+    | "self-evict";
+  /**
+   * self-evict (0061): the EXPLICIT confirmation. ONLY `confirmed:true` executes the irreversible
+   * walk-out (record the event + fold its impact + flip status through the 0046 door). Anything else
+   * (false/absent/cancel) leaves the player ACTIVE and in the house — the anti-accident gate.
+   */
+  confirmed?: boolean;
   /** nominations: exactly two houseguest ids. For houseguests-choice / tie-break / final-eviction
    *  a single pick may ride here as a 1-element array (the FE tool schema's convention) — the
    *  engine accepts it interchangeably with `vote` (audit A10). */
@@ -529,6 +745,52 @@ export interface SubmitDecisionReq {
   appeal?: string;
   /** comp-intent: the player's declared approach — "compete" | "throw" | "play-safe" (B46). */
   intent?: string;
+}
+
+/**
+ * The write-back seam (feature 0058 / ledger L28b) — the FE producer-LLM authors a houseguest's rich
+ * §3 profile (endless variety) and writes it BACK here so the ENGINE becomes the source of truth
+ * (mirrors the 0051 portrait-prompt handshake). The engine validates / repairs (diversity + non-
+ * player-mirroring), SPLITS it across the Vault Wall (public facets onto the byte-stable Character;
+ * secrets/goals/weakness/perception sealed into the Vault), INDEXES it for full-fidelity recall
+ * (L27b), and re-derives the story threads from it.
+ *
+ * NOW LIVE (Phase 2, commit 852f2db): the write-back validates / splits / seals / re-derives / re-indexes
+ * for real, REPLACING the seeded floor for that houseguest (idempotent). The deterministic seeded floor
+ * remains the offline fallback / pre-write source. Anti-sycophancy: the engine KEEPS its calibrated
+ * seeded NPC→player leans (the LLM authors the Day-1 read TEXT only, never the hidden weights — so the
+ * net-zero perception balance the juryReach calibration gate depends on is preserved). Everything PUBLIC
+ * here may cross to the player; everything HIDDEN is sealed and never projected.
+ */
+export interface RecordCastProfileReq {
+  /** Which houseguest this authored profile is for. */
+  houseguestId: EntityId;
+  // --- PUBLIC (crosses to the player; folded onto the byte-stable Character) ---
+  /** A real multi-sentence backstory (the presentable parts). */
+  biography?: string;
+  /** The structured physical-characteristics facet (text↔image single source of truth). */
+  physicalCharacteristics?: PhysicalCharacteristics;
+  // --- HIDDEN (Vault-sealed; NEVER projected to player or admin) ---
+  /** 2–3 secrets. */
+  secrets?: string[];
+  /** The true strategic goals. */
+  trueGoals?: string[];
+  /** The named weakness / blind spot. */
+  weakness?: string;
+  /** The Day-1 perception-of-the-player read (seeds the NPC→player edge). */
+  dayOnePerception?: string;
+}
+
+/** Whether the write-back was accepted (and which fields, Vault-free — never echoes a secret). */
+export interface RecordCastProfileResult {
+  /** True iff the houseguest exists and a profile could be recorded. */
+  accepted: boolean;
+  /** The PUBLIC field NAMES that were accepted (never their hidden values). */
+  publicFields: string[];
+  /** The HIDDEN field NAMES that were accepted (names only — the values are sealed, never echoed). */
+  hiddenFields: string[];
+  /** Set when not accepted (unknown houseguest / no game / phase-2-deferred path). */
+  reason?: string;
 }
 
 export interface GameSession {
@@ -562,6 +824,19 @@ export interface GameSession {
   /** Resolve the current pending decision and continue the loop (validated; 0011). */
   submitDecision(req: SubmitDecisionReq): AdvanceView;
   /**
+   * Self-eviction step 1 (0061 §4.2) — the player expresses an OOC intent to leave: surface the
+   * `self-evict` CONFIRMATION pending and change NO state (the house never hears it; the L36/L39a
+   * gate holds). It does NOT evict — only an explicit `submitDecision({ kind: "self-evict",
+   * confirmed: true })` does (step 2). Idempotent; a no-op before a game starts or once the player
+   * is already out. Returns the Vault-free view carrying the confirmation pending.
+   */
+  requestSelfEviction(): AdvanceView;
+  /**
+   * Self-eviction cancel (0061 §4.2) — the player declines the confirmation: clear the `self-evict`
+   * pending and leave them ACTIVE and in the house, state unchanged. A no-op when nothing is pending.
+   */
+  cancelSelfEviction(): AdvanceView;
+  /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding
    * actions and makes a broken promise hurt. Returns the new deal's Vault-free projection.
@@ -582,6 +857,23 @@ export interface GameSession {
   playerTagline(): PlayerTaglineView;
 
   /**
+   * PREMIERE — the meet-everyone progress (feature #380 follow-on). The engine-tracked, Vault-free
+   * answer to "who has the player met, who is still to introduce before the first HOH?" — so the
+   * narrator never has to REMEMBER who's been introduced (the real skipped-introductions bug). Carries
+   * each houseguest's OBSERVABLE public persona for the player's early reads. `null` outside the
+   * premiere moment (once the first HOH begins there is nothing left to meet).
+   */
+  premiereIntros(): PremiereIntrosView | null;
+
+  /**
+   * Mark a houseguest as INTRODUCED/met during the premiere (feature #380 follow-on) — the structural
+   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for
+   * an unknown houseguest, the player (auto-met), or once the premiere is over. Returns the resulting
+   * meet-everyone progress (or `null` outside the premiere) so the caller can voice who is left.
+   */
+  markHouseguestMet(id: EntityId): PremiereIntrosView | null;
+
+  /**
    * The Vault-free projection of an in-progress finale (0037 §8.1) for a polling finale panel — the
    * SAME projection already proven on `AdvanceView.finale`: names + the current stage + the reveals SO
    * FAR only. `null` unless a finale is actively staging. No lean, tally, manner, or pre-reveal winner.
@@ -595,6 +887,14 @@ export interface GameSession {
    * narrator queries instead of inventing. `null` before a game starts (or once the player is out).
    */
   whereabouts(): WhereaboutsView | null;
+
+  /**
+   * The player walks to a room (L21/L24) — the player is a person, so THEY direct their movement;
+   * the engine never auto-relocates them, only holds them where they chose (NPCs drive around them).
+   * Sets the player's room + resets their tenure and returns the resulting whereabouts. No-op for an
+   * unknown room / before a game starts (returns the current whereabouts unchanged). Vault-free.
+   */
+  movePlayer(room: string): WhereaboutsView | null;
 
   /** The season's public arc from the event record (0048) — Vault-free, reproducible, any time. */
   seasonRecap(): SeasonRecapView;
@@ -615,4 +915,35 @@ export interface GameSession {
 
   /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
+
+  /**
+   * The Vault-free projection of the move-in zeitgeist snapshot (feature 0062) — the FROZEN, shared
+   * real-world flavor the whole cast moved in WITH (public slices + the off-screen-channel "world you
+   * moved in with" block an NPC-to-NPC society/gossip scene is colored by). A THIRD state category:
+   * PUBLIC shared flavor — never Vault, never game truth (§6). `null` pre-game or when no snapshot was
+   * captured (the §8 fail-soft skip). Provenance fields (`capturedAt`/`lagDays`) never cross — only the
+   * voiceable slices + the rendered block do.
+   */
+  worldSnapshotView(): WorldSnapshotView | null;
+
+  /**
+   * The FE-owned write-back seam (feature 0062, §8) — the front-end (which owns the concrete `web_search`
+   * provider, like the 0051 image port) captures a REAL move-in zeitgeist at season creation and writes
+   * it back here so the ENGINE persists it as the single FROZEN artifact and RECALLS it (never
+   * re-searches) all season (§9). Replaces the deterministic `model-framed` fallback for this season
+   * (idempotent); freezes it byte-stable thereafter. Outward-safe by construction — the payload is PUBLIC
+   * flavor (no Vault handle, no secret, no game input). A no-op before a game starts; empty slices keep
+   * the fallback's value (a partial capture never thins the snapshot — non-degradation).
+   */
+  recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult;
+
+  /**
+   * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded
+   * here so the ENGINE is the source of truth: PUBLIC facets fold onto the byte-stable Character;
+   * HIDDEN facets are sealed into the Vault and NEVER projected. NOW LIVE (Phase 2): it validates the
+   * target (non-player-mirroring), splits PUBLIC↔HIDDEN across the wall, seals + re-indexes the hidden
+   * half for full-fidelity recall, and re-derives the story threads — replacing the seeded floor for
+   * that houseguest (idempotent). The result never echoes a hidden value (it reports field NAMES only).
+   */
+  recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
 }

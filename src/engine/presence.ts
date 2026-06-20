@@ -9,13 +9,68 @@ import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { KnowledgeService } from "../ports/KnowledgeService";
-import { PRESENCE } from "./presenceConstants";
+import { PRESENCE, MOVEMENT_PERSONALITY } from "./presenceConstants";
+
+/**
+ * A houseguest's movement personality (L21/L24) — WHO they are, read off the static CHARACTER +
+ * dynamic SOUL: `social` is their social aptitude (`stats.social`, ~0–1), `volatility` their current
+ * emotional turbulence (`soul.volatility`, ~0–1; `0.5` is settled). The caller supplies these so the
+ * pure presence module never reaches into the engine's character/soul state directly. ABSENT ⇒ the
+ * base (pre-L21/L24) behavior — every term defaults to its no-op center, so old call sites are
+ * byte-for-byte unchanged.
+ */
+export interface MovementProfile {
+  /** Social aptitude (static `stats.social`, ~0–1). High ⇒ roams + seeks company; low ⇒ holds a room. */
+  social: number;
+  /** Current emotional turbulence (dynamic `soul.volatility`, ~0–1; `0.5` settled). High ⇒ restless. */
+  volatility: number;
+}
 
 export interface PresenceDeps {
   rng: RandomnessSource;
   /** Directed affinity read (0017/0026) — how much `a` wants to be around `b`. */
   affinity: (a: EntityId, b: EntityId) => number;
   hoh?: EntityId | null;
+  /**
+   * Per-NPC movement personality (L21/L24). Optional: when absent (or returns null for an id), that
+   * houseguest moves on the base 0049 behavior — so this is a pure additive nudge, no behavior change
+   * for callers that don't supply it. The profile DRAWS NO rng of its own; it only re-weights the
+   * move-gate threshold and the affinity pull. The L21/L24 isolation comes from the CALLER routing this
+   * `rng` to a dedicated movement stream (`presenceTick`) — separate from the shared competition/vote
+   * stream — and from the off-screen society pairing on a calibration-neutral, un-weighted base occupancy.
+   */
+  movement?: (id: EntityId) => MovementProfile | null;
+}
+
+/** The signed social deviation from center, used by both the move-rate and seek-pull nudges. */
+function socialDeviation(p: MovementProfile | null | undefined): number {
+  return p ? p.social - MOVEMENT_PERSONALITY.socialCenter : 0;
+}
+
+/**
+ * A houseguest's personality-adjusted MOVE probability for this tick (L21/L24). High social aptitude
+ * and a churning (high-volatility) soul both raise it; low social aptitude lowers it. Clamped into a
+ * hard [floor, ceiling] so nobody ever fully freezes or always-teleports. With no profile this returns
+ * the base `PRESENCE.moveProb` exactly (no behavior change). Reads personality data, draws NO rng.
+ */
+function moveProbFor(p: MovementProfile | null | undefined): number {
+  if (!p) return PRESENCE.moveProb;
+  const M = MOVEMENT_PERSONALITY;
+  const fromSocial = socialDeviation(p) * M.moveAptitudeWeight;
+  const fromVolatility = (p.volatility - 0.5) * M.volatilityWeight;
+  const adjusted = PRESENCE.moveProb + fromSocial + fromVolatility;
+  return Math.max(M.moveProbFloor, Math.min(M.moveProbCeil, adjusted));
+}
+
+/**
+ * A houseguest's personality-adjusted AFFINITY PULL toward occupied rooms (L21/L24): high-social
+ * houseguests seek company more strongly, low-social ones less. Floored at 0 (never repulsion). With
+ * no profile this returns the base `PRESENCE.affinityPull` exactly. Reads personality data, draws NO rng.
+ */
+function seekPullFor(p: MovementProfile | null | undefined): number {
+  if (!p) return PRESENCE.affinityPull;
+  const M = MOVEMENT_PERSONALITY;
+  return Math.max(M.seekPullFloor, PRESENCE.affinityPull + socialDeviation(p) * M.seekAptitudeWeight);
 }
 
 /**
@@ -28,25 +83,39 @@ export function assignRooms(
   active: readonly EntityId[],
   previous: Occupancy | null,
   deps: PresenceDeps,
+  // PINNED houseguests are seated FIRST and never moved — the engine drives only `active`, but the
+  // pinned still pull the movers (affinity clustering reads them). Used to hold the PLAYER in place
+  // (a person, not engine-relocated — L21/L24) while NPCs may still gravitate to the player's room.
+  pinned?: Occupancy | null,
 ): Map<EntityId, Room> {
-  const next = new Map<EntityId, Room>();
+  const next = new Map<EntityId, Room>(pinned ?? undefined);
   for (const id of active) {
     const here = previous?.get(id);
+    // L21/L24: who this houseguest IS bends HOW they move — read once per houseguest (no rng draw),
+    // so the per-NPC `rng` draw count is identical with or without a profile (the isolation guarantee).
+    const profile = deps.movement?.(id) ?? null;
     // Candidate rooms: anywhere on first assignment; stay-or-adjacent afterwards. The diary
     // room is never a hangout (it is a booth, not a lounge).
     const candidates: readonly Room[] = (here
       ? [here, ...(HOUSE_ADJACENCY.get(here) ?? [])]
       : HOUSE_ROOMS
     ).filter((r) => r !== "diary-room");
-    if (here && deps.rng.next() >= PRESENCE.moveProb) {
+    // The stay-vs-move gate, bent by personality (L21/L24): a high-social/restless houseguest roams
+    // more, a low-social/settled one holds their room. ONE `rng.next()` draw, exactly as before — the
+    // personality only moves the THRESHOLD it is compared against (no extra draw). This `rng` is the
+    // DEDICATED movement stream (`presenceTick`), never the shared competition/vote stream, so however
+    // the threshold shifts which branch is taken it cannot perturb calibration (the L21/L24 isolation).
+    if (here && deps.rng.next() >= moveProbFor(profile)) {
       next.set(id, here); // most ticks, most people stay where they are
       continue;
     }
-    // Weight each candidate by who is already there (affinity pull) + the HOH-room pull.
+    // Weight each candidate by who is already there (affinity pull, bent by how much THIS houseguest
+    // seeks company — L21/L24) + the HOH-room pull.
+    const seekPull = seekPullFor(profile);
     const weights = candidates.map((room) => {
       let w = 1;
       for (const [other, theirRoom] of next) {
-        if (theirRoom === room) w += PRESENCE.affinityPull * deps.affinity(id, other);
+        if (theirRoom === room) w += seekPull * deps.affinity(id, other);
       }
       if (room === "hoh-room") w = id === deps.hoh ? w + PRESENCE.hohRoomPull * 4 : w * PRESENCE.hohRoomPull;
       return w;

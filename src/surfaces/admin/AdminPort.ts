@@ -1,6 +1,7 @@
 import type {
   GameStateRepository, AdminVisibleState, OverrideChange, SandboxOp,
 } from "../../ports/GameStateRepository";
+import type { FinaleFastForwardView } from "../../ports/GameSession";
 
 /**
  * Administrator / God Mode (0016). Inspects, overrides non-Vault mechanics,
@@ -37,6 +38,31 @@ export class AdminPort {
   /** Vault-free health metadata (week/phase/integrity/faults) — never game content. */
   health(): unknown {
     return this.healthProvider?.() ?? null;
+  }
+
+  /**
+   * The fast-forward-to-finale lever (L38): the composition layer wires this to the live session's
+   * `advanceToFinale`, which DRIVES the deterministic engine to a crowned winner (auto-resolving the
+   * player's pendings with legal defaults). It is VAULT-FREE BY CONSTRUCTION — the delegate returns
+   * only PUBLIC ceremony facts (winner NAME, weeks, the player's placement), reads no Vault, and does
+   * NOT touch the `seasonRetrospective` gate (that still opens ONLY post-finale, through its own code
+   * path). Returns a not-started summary when no orchestrator/session is composed.
+   */
+  private fastForwardProvider?: () => FinaleFastForwardView;
+
+  setFastForwardProvider(fn: () => FinaleFastForwardView): void {
+    this.fastForwardProvider = fn;
+  }
+
+  /**
+   * God-Mode "fast-forward to finale (debug)" (L38): finish the season legitimately so the
+   * post-season Vault retrospective (0048) unseals. It REVEALS nothing — only the Vault-free
+   * public summary crosses (winner NAME, weeks played, the player's final placement).
+   */
+  advanceToFinale(): FinaleFastForwardView {
+    return this.fastForwardProvider?.() ?? {
+      finished: false, winnerName: null, weeks: 0, playerPlacement: "unknown", started: false,
+    };
   }
 
   /** Inspect non-Vault state (week, phase, public roster, config). */

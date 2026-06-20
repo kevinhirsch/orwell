@@ -99,8 +99,8 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
       expect(Object.keys(impact).length).toBeGreaterThan(0);
       for (const v of Object.values(impact)) expect(typeof v).toBe("number");
     }
-    // The acts cover the loop's consequential moves.
-    expect(Object.keys(CEREMONY_IMPACTS).sort()).toEqual(["comp-won", "evicted", "nominated", "replaced", "veto-saved"]);
+    // The acts cover the loop's consequential moves (incl. the 0061 voluntary self-eviction fold).
+    expect(Object.keys(CEREMONY_IMPACTS).sort()).toEqual(["comp-won", "evicted", "nominated", "replaced", "self-evicted", "veto-saved"]);
   });
 
   it("a comp win is a THREAT read only (audit E47) — the house does not stop liking its winner", () => {

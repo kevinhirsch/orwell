@@ -1,22 +1,33 @@
-// Orwell presence strip (feature 0049 / C28) — the AMBIENT ground for lingering play.
+// Orwell "Where you are" gadget (feature 0049 / C28 / L26+L14) — the AMBIENT ground for
+// lingering play.
 //
-// Renders the engine's Vault-free whereabouts() — the player's room, who is in it, and who is
-// one room over — as a light, dismissible strip. It AUGMENTS the chat and never replaces it
-// (ADR 0003 §4/§7): there is no click-to-move, no button that starts a scene or advances the
-// game — the player still mills, asks "who's here?", and talks in PROSE, and the engine grounds
-// the narration. Fail-open everywhere: no strip on empty/error/pre-game.
+// Renders the engine's Vault-free whereabouts() — the player's room + who's with them, and the
+// VISIBLE adjacent rooms (the engine only ever returns the player's room + rooms one step away,
+// so this is fog-of-war by construction). It AUGMENTS the chat and never replaces it
+// (ADR 0003 §4/§7): no click-to-move, no button that starts a scene or advances the game — the
+// player still mills, asks "who's here?", and talks in PROSE; the engine grounds the narration.
 //
 //   • GET /api/orwell/state        → gate on an active game (started)
-//   • GET /api/orwell/whereabouts  → { room, present[], nearby[{room, present[]}] } | null
+//   • GET /api/orwell/whereabouts  → { whereabouts: { room, present[], nearby[{room, present[]}] } } | null
 //
-// Dismissing hides the strip until the player's ROOM changes (new ground re-surfaces it) —
-// ambient information, never a nag.
+// L26 redesign:
+//   HEADER = the room you're in + who's with you, FIRST NAMES — "Kitchen — Keith, John, Joe"
+//            (or "Kitchen — alone" when no one is present).
+//   BODY   = the VISIBLE nearby rooms from your perspective — each room that HAS people, with its
+//            houseguests' first names — "Living Room: Mary, Sam". Empty/out-of-view rooms are
+//            omitted entirely; "No one nearby." when nothing adjacent has anyone.
+//
+// L14 (subsumed): FIRST names only, disambiguated as "First L." when two distinct people across
+// the WHOLE current view share a first name (so the same person reads consistently everywhere).
+// See _displayNames — the single name-formatting helper (node-unit-tested in
+// test_l26_whereabouts.py).
+//
+// Fail-open everywhere: no gadget on empty/error/pre-game.
 (function () {
   "use strict";
 
   const POLL_MS = 25000;
   const ID = "orwell-presence";
-  const DISMISS_KEY = "orwell-presence-dismissed-room";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -33,20 +44,69 @@
   }
 
   function roomLabel(room) {
-    // "living-room" → "Living room" (the engine's ids are kebab-case room names).
+    // "living-room" → "Living Room" (the engine's ids are kebab-case room names).
     // A lone trailing letter is a room identifier, not a word ("bedroom-b"), so it
-    // must read "Bedroom B", not "Bedroom b" — sentence case otherwise.
+    // must read "Bedroom B", not "Bedroom b" — title case otherwise.
     const s = String(room || "").replace(/-/g, " ").trim();
     if (!s) return s;
     return s
       .split(" ")
-      .map((w, i) =>
+      .map((w) =>
         w.length === 1
           ? w.toUpperCase()
-          : i === 0
-            ? w.charAt(0).toUpperCase() + w.slice(1)
-            : w)
+          : w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
+  }
+
+  // ── the single name-formatting helper (L14, unit-tested) ───────────────────
+  // Given the WHOLE current whereabouts view (the present list plus every nearby room's present
+  // list), format a person's display name as a FIRST name only — disambiguating any first name
+  // shared by 2+ DISTINCT people anywhere in the view as "First L." (the last name's initial),
+  // so the same person reads consistently everywhere. Self-contained — only String/Array/Map
+  // primitives — so a node harness can extract and exercise it directly.
+  //
+  //   people: array of { id?, name } from every visible list (present + all nearby).
+  //   returns: { format(person) → string }.
+  function _displayNames(people) {
+    const list = Array.isArray(people) ? people : [];
+    const firstOf = (full) => String(full || "").trim().split(/\s+/)[0] || "";
+    const initialOf = (full) => {
+      const parts = String(full || "").trim().split(/\s+/).filter(Boolean);
+      return parts.length > 1 ? parts[parts.length - 1].charAt(0).toUpperCase() : "";
+    };
+    // identity key: prefer a stable id; else the full name (so one person listed in two rooms
+    // is counted ONCE, while two same-named strangers with no id are still two people).
+    const idOf = (p) =>
+      (p && p.id != null && p.id !== "" ? "id:" + p.id : "nm:" + String((p && p.name) || ""));
+
+    // Count DISTINCT people per first name across the whole view.
+    const peopleByFirst = new Map();   // first → Set<identity key>
+    for (const p of list) {
+      const f = firstOf(p && p.name);
+      if (!f) continue;
+      if (!peopleByFirst.has(f)) peopleByFirst.set(f, new Set());
+      peopleByFirst.get(f).add(idOf(p));
+    }
+
+    function format(p) {
+      const f = firstOf(p && p.name);
+      if (!f) return String((p && p.name) || "").trim();
+      const distinct = peopleByFirst.get(f);
+      if (distinct && distinct.size > 1) {
+        const init = initialOf(p && p.name);
+        return init ? f + " " + init : f;  // no last name to split on ⇒ bare first name
+      }
+      return f;
+    }
+    return { format };
+  }
+
+  // Flatten every visible person (present + all nearby) into one list — the dedup scope.
+  function _allPeople(w) {
+    const out = [];
+    ((w && w.present) || []).forEach((p) => out.push(p));
+    ((w && w.nearby) || []).forEach((n) => ((n && n.present) || []).forEach((p) => out.push(p)));
+    return out;
   }
 
   function ensureEl() {
@@ -73,16 +133,22 @@
         #orwell-presence .opres-hd {
           color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
           margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
+          overflow-wrap: anywhere;
         }
-        #orwell-presence .opres-body { overflow-wrap: anywhere; }`;
+        #orwell-presence .opres-body { overflow-wrap: anywhere; }
+        #orwell-presence .opres-room { display: block; }
+        #orwell-presence .opres-room .opres-r {
+          color: color-mix(in srgb, var(--fg, #9cdef2) 70%, var(--panel, #111));
+        }
+        #orwell-presence .opres-quiet { opacity: .6; font-style: italic; }`;
       document.head.appendChild(st);
     }
     el = document.createElement("section");
     el.id = ID;
     el.setAttribute("role", "status");
     el.setAttribute("aria-live", "polite");
-    el.innerHTML = `<div class="opres-hd">Where you are</div>` +
-      `<div class="opres-body" data-role="text"></div>`;
+    el.innerHTML = `<div class="opres-hd" data-role="head"></div>` +
+      `<div class="opres-body" data-role="body"></div>`;
     // Mount inside the sidebar, beside the other game gadgets (the status HUD /
     // "Wants a word"). Fall back to the session list, then the sidebar, then body.
     // 0054: prefer the control-room gadget rail (under the other gadgets when present).
@@ -97,19 +163,39 @@
     return el;
   }
 
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
   function render(w) {
     const el = ensureEl();
     if (!w || !w.room) { el.style.display = "none"; return; }
     el.dataset.room = w.room;
 
-    const names = (list) => list.map((p) => p.name).join(", ");
-    const here = w.present && w.present.length ? "with " + names(w.present) : "alone";
-    const nearby = (w.nearby || [])
-      .filter((n) => n.present && n.present.length)
-      .map((n) => roomLabel(n.room) + " (" + names(n.present) + ")")
-      .join(" · ");
-    el.querySelector("[data-role='text']").textContent =
-      "📍 " + roomLabel(w.room) + " — " + here + (nearby ? "  ·  nearby: " + nearby : "");
+    // One dedup scope across the whole visible view (present + every nearby room).
+    const names = _displayNames(_allPeople(w));
+    const join = (list) => (list || []).map((p) => names.format(p)).filter(Boolean).join(", ");
+
+    // HEADER: the room you're in + who's with you (first names) — or "alone".
+    const present = Array.isArray(w.present) ? w.present : [];
+    const here = present.length ? join(present) : "alone";
+    el.querySelector("[data-role='head']").textContent =
+      roomLabel(w.room) + " — " + here;
+
+    // BODY: the VISIBLE nearby rooms that HAVE people, each with first names.
+    const rooms = (Array.isArray(w.nearby) ? w.nearby : [])
+      .filter((n) => n && n.present && n.present.length);
+    const body = el.querySelector("[data-role='body']");
+    if (!rooms.length) {
+      body.innerHTML = '<span class="opres-quiet">No one nearby.</span>';
+    } else {
+      body.innerHTML = rooms
+        .map((n) =>
+          '<span class="opres-room"><span class="opres-r">' + esc(roomLabel(n.room)) +
+          ':</span> ' + esc(join(n.present)) + "</span>")
+        .join("");
+    }
     el.style.display = "block";
   }
 
@@ -124,16 +210,26 @@
     } catch (_) {
       _failures += 1;
       if (window.OrwellReport) window.OrwellReport.fail("presence", "whereabouts-poll", _); // G11: fail open, never silent
-      render(null); // fail OPEN: the strip simply isn't there
+      render(null); // fail OPEN: the gadget simply isn't there
     } finally {
+      if (timer) clearTimeout(timer);
       timer = setTimeout(tick, _pollDelay());
     }
   }
 
+  // An immediate refresh that resets the poll cadence — driven by the shared game-changed signal.
+  function refreshNow() {
+    _failures = 0;
+    tick();
+  }
+
   ready(() => {
-    // Only under the game build (the reduced surface) — the full workspace skips the strip.
+    // Only under the game build (the reduced surface) — the full workspace skips the gadget.
     if (document.body && document.body.dataset.gameBuild !== "1") return;
     tick();
+    // Refresh on the shared game-changed signal (platform.js dispatches it after every
+    // engine-mutating turn) so the room/co-presence updates the moment the player moves.
+    window.addEventListener("orwell:gamechanged", refreshNow);
     window.addEventListener("beforeunload", () => timer && clearTimeout(timer));
   });
 })();

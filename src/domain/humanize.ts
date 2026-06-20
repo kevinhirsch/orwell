@@ -28,14 +28,34 @@
  * `npc:15`) — redundant with the token boundary, kept as defence in depth.
  */
 export function humanizeIds(content: string, entities: ReadonlyArray<{ id: string; name: string }>): string {
-  let out = content;
-  for (const e of [...entities].sort((a, b) => b.id.length - a.id.length)) {
-    const escaped = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // (?<![\w:]) / (?![\w:]) : the id must stand alone, not be a fragment of a longer token
-    // (so the word "players" survives, and "npc:1" never matches inside "npc:15").
-    out = out.replace(new RegExp(`(?<![\\w:])${escaped}(?![\\w:])`, "g"), e.name);
-  }
-  return out;
+  return makeIdHumanizer(entities)(content);
+}
+
+/**
+ * Build a REUSABLE id→name substituter for a fixed roster. The matcher compiles ONCE (a single
+ * alternation regex over all ids) and then applies to many strings — the hot player-projection path
+ * cleans the whole growing event log per commit, so re-compiling 16 per-id regexes per event was a
+ * dominant per-season cost (CPU-profiled). The output is byte-identical to the prior per-id loop:
+ *
+ *   - longest id first in the alternation ⇒ a short id can never match inside a longer one
+ *     (`npc:1` never clobbers `npc:15`) — the same guarantee the prior longest-first sort gave;
+ *   - the same `(?<![\w:]) … (?![\w:])` whole-token boundary, so the word "players" is never touched;
+ *   - one left-to-right scan with non-overlapping matches reproduces the sequential `replace` result —
+ *     names carry no id tokens, so an earlier substitution can never create a new match (same as before).
+ */
+export function makeIdHumanizer(
+  entities: ReadonlyArray<{ id: string; name: string }>,
+): (content: string) => string {
+  if (entities.length === 0) return (content) => content;
+  const byId = new Map<string, string>();
+  for (const e of entities) byId.set(e.id, e.name);
+  // Longest id first so the alternation prefers the longer token at any position (matches the prior sort).
+  const alternation = [...entities]
+    .sort((a, b) => b.id.length - a.id.length)
+    .map((e) => e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const re = new RegExp(`(?<![\\w:])(?:${alternation})(?![\\w:])`, "g");
+  return (content) => content.replace(re, (m) => byId.get(m) ?? m);
 }
 
 /**
@@ -68,7 +88,97 @@ export function humanizeForPlayer(
   content: string,
   entities: ReadonlyArray<{ id: string; name: string }>,
 ): string {
-  return tidyPathwaySlugs(humanizeIds(content, entities));
+  return makeForPlayerScrub(entities)(content);
+}
+
+/**
+ * A REUSABLE player-facing content scrub for a fixed roster (`humanizeIds` then `tidyPathwaySlugs`).
+ * Compile once, apply to many strings — the visible-state projection scrubs the whole event log per
+ * read, so the id matcher must not recompile per event. Byte-identical to `humanizeForPlayer` per call.
+ */
+export function makeForPlayerScrub(
+  entities: ReadonlyArray<{ id: string; name: string }>,
+): (content: string) => string {
+  const humanize = makeIdHumanizer(entities);
+  return (content) => tidyPathwaySlugs(humanize(content));
+}
+
+/**
+ * The post-season retrospective scrub (0048 — the Wall's ONE sanctioned reveal). The unsealed hidden
+ * story may carry content the everyday player-facing scrub never has to handle: a COMPOUND machine id
+ * (`thread:npc:8:0`) that hides an `npc:N` inside it (the whole-token `humanizeIds` deliberately skips
+ * it — `npc:8` is not a whole token there), a bare `thread:…` identifier, and the thread machine slugs
+ * (`[dormant]`, `surfaces via: gossip-diffused`, `goal-demands-move`, …). This scrub is for THAT surface
+ * only: it resolves every id even inside a compound token, then drops/translates the remaining machine
+ * scaffolding. Pure / Vault-free (names are public roster facts; slugs are internal plumbing). Idempotent.
+ */
+export function humanizeForRetrospective(
+  content: string,
+  entities: ReadonlyArray<{ id: string; name: string }>,
+): string {
+  let out = content;
+  // 1) TRANSLATE the machine scaffolding (audit slugs + serializer labels) into readable prose FIRST —
+  //    before any id resolution. Doing the labels first matters: a label like `day-1 read of player:`
+  //    contains the bare word `player`, and resolving that id first would corrupt the label so it could
+  //    never be matched. Each `…:` label becomes a natural clause; lifecycle/trigger/pathway slugs go.
+  out = out
+    // story-thread serialization
+    .replace(/\bstory-thread\s*/g, "")
+    .replace(/\[dormant\]/g, "(never surfaced)")
+    .replace(/\[active\]/g, "(in play)")
+    .replace(/\[surfaced\]/g, "(came out)")
+    .replace(/\[resolved\]/g, "(played out)")
+    .replace(/\[expired\]/g, "(passed)")
+    .replace(/\bpremise:\s*/g, "")
+    .replace(/\bsecret\s*—\s*/g, "secretly ")
+    .replace(/\bweakness\s*—\s*/g, "a blind spot — ")
+    .replace(/\btrue goal\s*—\s*/g, "their real game — ")
+    .replace(/\btrigger:\s*/g, "")
+    .replace(/\((?:on-block|nominated-twice|cornered-socially|house-tightens|goal-demands-move)\)/g, "")
+    .replace(/\bsurfaces via:[^\n]*/g, "")
+    .replace(/\b(?:gossip-diffused|told-by-confidant|overheard|witnessed)\b/g, "")
+    // deep-profile serialization (`deep-profile <id> | secrets: … | true-goals: … | weakness: … |
+    // day-1 read of player: …`). The `day-1 read of player:` label is translated BEFORE the `player`
+    // id is resolved, and the leading `deep-profile` tag is dropped (the resolved NAME leads the line).
+    .replace(/\bday-1 read of player:\s*/g, "their day-one read of you — ")
+    .replace(/\bdeep-profile\s+/g, "")
+    .replace(/\bsecrets:\s*/g, "secretly — ")
+    .replace(/\btrue-goals:\s*/g, "their real game — ")
+    .replace(/\bweakness:\s*/g, "their blind spot — ")
+    .replace(/\s*\|\s*/g, "; ");
+  // 2) RESOLVE every entity id to a name.
+  if (entities.length > 0) {
+    const byId = new Map(entities.map((e) => [e.id, e.name] as const));
+    // The AGGRESSIVE (non-whole-token) passes resolve ids EMBEDDED in machine tokens. Restrict them to
+    // COLON-BEARING ids (`npc:3`, a compound `thread:npc:3:0`) — those never collide with an ordinary
+    // English word. A bare-word id like the player's `player` is deliberately EXCLUDED from them:
+    // resolving it non-whole-token would mangle the word "players" (audit A8). The whole-token pass
+    // below handles `player` safely.
+    const structuredAlt = entities
+      .filter((e) => e.id.includes(":"))
+      .sort((a, b) => b.id.length - a.id.length)
+      .map((e) => e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|");
+    out = humanizeIds(out, entities); // safe whole-token pass (a clean `npc:3` / `player`; protects "players")
+    if (structuredAlt) {
+      // The COMPOUND machine thread identifier `thread:<npc>:<index>` is not player-readable, but it NAMES
+      // a houseguest — RESOLVE the embedded id to that name and DROP the rest of the id.
+      const idRe = new RegExp(`(?:${structuredAlt})`);
+      out = out.replace(/\bthread:[\w:-]+/g, (tok) => {
+        const m = idRe.exec(tok);
+        return m ? (byId.get(m[0]) ?? "") : "";
+      });
+      // Any structured id still embedded in another machine token (e.g. a `deep-profile npc:3` lead).
+      out = out.replace(new RegExp(`(?:${structuredAlt})`, "g"), (m) => byId.get(m) ?? m);
+    }
+  } else {
+    // No roster to resolve against — still strip the un-player-readable bare thread identifier.
+    out = out.replace(/\bthread:[\w:-]+/g, "");
+  }
+  // 3) The everyday pathway-slug tidy (gossip drift suffix, leaked colon-pathways), then collapse the
+  //    whitespace the drops left behind.
+  out = tidyPathwaySlugs(out);
+  return out.replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, " — ").replace(/\s+([.,])/g, "$1").trim();
 }
 
 /**

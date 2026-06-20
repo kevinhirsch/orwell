@@ -8,7 +8,7 @@ import type { EntityId } from "../../domain/ids";
 import { PLAYER } from "../../domain/ids";
 import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
-import { foldHiddenImpact } from "../../engine/consequence";
+import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import type { Occupancy } from "../../domain/house";
 
@@ -46,6 +46,12 @@ export class EngineCommandsAdapter implements EngineCommands {
   private livingProvider?: () => Iterable<EntityId>;
   /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
   private presenceProvider?: () => Occupancy | null;
+  /**
+   * L27: index a recorded social scene into a houseguest's SEMANTIC recall memory (0024). Every
+   * houseguest who was in a scene remembers its SUMMARY, so later narrative is built from the STORE
+   * recalled (ADR 0003), never the chat window. Unset = standalone (no recall index — prior behavior).
+   */
+  private soulMemo?: (hg: EntityId, content: string) => void;
   /** E21: the beat window the fold budget counts within, plus the per-edge tallies inside it. */
   private foldBeatKey = "";
   private readonly foldCounts = new Map<string, number>();
@@ -70,6 +76,11 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** Wire the house occupancy (0049) so recorded scenes gain co-present witnesses + adjacent overhears. */
   setPresenceProvider(fn: () => Occupancy | null): void {
     this.presenceProvider = fn;
+  }
+
+  /** Wire the semantic-recall index (L27/0024) so a recorded social scene becomes recallable later. */
+  setSoulMemo(fn: (hg: EntityId, content: string) => void): void {
+    this.soulMemo = fn;
   }
 
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
@@ -104,7 +115,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // Derive the id + ts from the store's current size (B40/audit C2): monotonic and restart-safe —
     // after a restore the count resumes high, so a post-restart interaction never collides with a
     // pre-restart one (the old `++this.seq` restarted at 0, minting duplicate ids).
-    const n = this.events.query().length;
+    const n = this.events.count();
     const eventId = `evt:mcp:${n}`;
     this.events.record({
       id: eventId, ts: n, type: "conversation",
@@ -124,20 +135,69 @@ export class EngineCommandsAdapter implements EngineCommands {
     // recorded, HIDDEN shift (the engine owns the magnitude; the player never sees the numbers).
     // ONE fold implementation (B59): shared with the 0023 ConsequenceEngine; bounded per call (B39)
     // AND per beat per edge (E21) — repeating an identical call can't pump an edge without bound.
-    if (this.rel && req.kind && INTERACTION_KINDS.has(req.kind)) {
+    //
+    // Two paths, both engine-owned magnitude (anti-sycophancy #3):
+    //  • The generative path (ADR 0005): when a `consequence` descriptor names per-edge directions,
+    //    those PARTNER edges fold by their scene-chosen direction/emphasis (the LLM reads the scene;
+    //    the engine still sets the amount). A novel move that fits NO enum still folds here — it must
+    //    never evaporate (ADR 0005 principle #4). Any `kind` then runs the bystander pass over the
+    //    witnesses the descriptor did NOT name, so the 7-way tag stays the FLOOR, never the ceiling.
+    //  • The `kind`-only floor: with NO descriptor, this is BYTE-IDENTICAL to the prior behavior.
+    const genEdges = req.consequence?.edges;
+    if (this.rel && (genEdges?.length || (req.kind && INTERACTION_KINDS.has(req.kind)))) {
       this.rollBeatWindow();
-      // PARTNERS — only those the initiator actually ENGAGED (the caller-named witnesses, or an
-      // explicit `toward`) take the full directed fold. Presence-grounding adds co-present
-      // bystanders to the witness set, but a private bond must never bond the whole room (audit
-      // 2026-06-18): bystanders only OBSERVE, reacting by their own beliefs (foldHiddenImpact).
-      const named = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
-      const namedSet = new Set(named);
-      const partners = named.filter((o) => o !== req.initiator && this.spendFoldBudget(o, req.initiator));
-      const bystanders = witnessSet.filter(
-        (w) => w !== req.initiator && !namedSet.has(w) && this.spendFoldBudget(w, req.initiator),
-      );
-      foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
-        partners, MAX_FOLDS_PER_INTERACTION, bystanders);
+      let named: Set<EntityId>;
+      if (genEdges?.length) {
+        // The descriptor drives the partner folds — each named edge spends one unit of the per-beat
+        // per-edge budget (E21) exactly as a `kind` partner would.
+        named = foldGenerativeConsequence(
+          this.rel, this.rng, req.initiator, genEdges,
+          (toward) => toward !== req.initiator && this.spendFoldBudget(toward, req.initiator),
+        );
+        // If a `kind` ALSO rides along, it observes the room MINUS the descriptor's named edges (the
+        // tag is the floor): co-present witnesses not named by the descriptor react by their own
+        // beliefs. A private generative bond must never bond the whole room (audit 2026-06-18).
+        if (req.kind && INTERACTION_KINDS.has(req.kind)) {
+          const bystanders = witnessSet.filter(
+            (w) => w !== req.initiator && !named.has(w) && this.spendFoldBudget(w, req.initiator),
+          );
+          foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
+            [], MAX_FOLDS_PER_INTERACTION, bystanders);
+        }
+      } else {
+        // PARTNERS — only those the initiator actually ENGAGED (the caller-named witnesses, or an
+        // explicit `toward`) take the full directed fold. Presence-grounding adds co-present
+        // bystanders to the witness set, but a private bond must never bond the whole room (audit
+        // 2026-06-18): bystanders only OBSERVE, reacting by their own beliefs (foldHiddenImpact).
+        const partnerNames = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
+        const namedSet = new Set(partnerNames);
+        const partners = partnerNames.filter((o) => o !== req.initiator && this.spendFoldBudget(o, req.initiator));
+        const bystanders = witnessSet.filter(
+          (w) => w !== req.initiator && !namedSet.has(w) && this.spendFoldBudget(w, req.initiator),
+        );
+        foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
+          partners, MAX_FOLDS_PER_INTERACTION, bystanders);
+      }
+    }
+    // L27: index the scene's SUMMARY into each houseguest's semantic recall memory (0024) — every
+    // houseguest who was in it remembers it, so later story/narrative is built from the STORE recalled
+    // (ADR 0003), never the chat window. The player's own knowledge already lives in the event record.
+    if (this.soulMemo) {
+      for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, req.content);
+    }
+    // ADR 0005: the descriptor's `rationale` is OPEN-SET content (the LLM's reading of WHY the scene
+    // mattered). It is RECORDED — a separate player-witnessed event so the scene's own `content` stays
+    // byte-equal (lossless) — and NEVER scored into any magnitude (no fold reads it). Recording it
+    // makes the generative reasoning recallable; it just never moves a hidden number.
+    const rationale = req.consequence?.rationale;
+    if (rationale && rationale.length) {
+      const rn = this.events.count();
+      this.events.record({
+        id: `evt:mcp:${rn}`, ts: rn, type: "consequence-rationale",
+        initiator: req.initiator, witnessSet: [...witnessSet],
+        hidden: !witnessSet.includes(PLAYER), content: rationale,
+      });
+      if (this.soulMemo) for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, rationale);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };
@@ -199,7 +259,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image
     // is built only from the player's visible state, so showing it is the player's own knowledge.
     // Monotonic, restart-safe id off the store size (same discipline as recordInteraction, B40).
-    const n = this.events.query().length;
+    const n = this.events.count();
     const eventId = `evt:image:${n}`;
     this.events.record({
       id: eventId, ts: n, type: "image-shown",

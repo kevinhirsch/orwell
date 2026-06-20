@@ -86,6 +86,16 @@ Then("the engine rejects it", function (this: BbWorld) {
 });
 
 Then("the game state is unchanged", function (this: BbWorld) {
+  // 0061 (self-eviction cancel): the season state is byte-identical apart from the cleared
+  // confirmation flag — the cancel folded nothing and evicted no one.
+  if (this.svSandbox && this.svStateBefore !== undefined) {
+    const live = this.svSandbox.session.snapshot().live;
+    const after = JSON.stringify({ ...live, selfEvictPending: undefined });
+    const before = JSON.stringify({ ...JSON.parse(this.svStateBefore), selfEvictPending: undefined });
+    assert.equal(after, before, "the game state is otherwise unchanged");
+    assert.ok(!live?.selfEvictPending, "the confirmation was cleared");
+    return;
+  }
   assert.equal(this.decisionResult, undefined); // nothing was executed
 });
 

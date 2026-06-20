@@ -40,6 +40,43 @@ describe("0051 — portrait prompts (Vault-free builder)", () => {
     for (const p of prompts) expect(p.prompt).toContain(styleAnchor);
   });
 
+  it("L29 — the structured physical facet AUTHORS the appearance line (distinct faces, one source of truth)", () => {
+    const facetA = {
+      heightBuild: "tall and broad-shouldered", skinTone: "deep brown skin", hair: "a close-cropped fade",
+      facialFeatures: "a square jaw and deep-set eyes", distinguishingMark: "a half-sleeve tattoo",
+      ageLook: "settled, thirties presence", style: "streetwear and bold sneakers",
+    };
+    const facetB = {
+      heightBuild: "petite and slight", skinTone: "fair freckled skin", hair: "a platinum-blond bob",
+      facialFeatures: "round soft features", distinguishingMark: "none notable",
+      ageLook: "youthful, early-twenties energy", style: "preppy and buttoned-up",
+    };
+    const a = buildPortraitPrompt("hg:1", "One", { appearance: "ignored prose", age: 34, presentation: "warm", physicalCharacteristics: facetA }, styleAnchor);
+    const b = buildPortraitPrompt("hg:2", "Two", { appearance: "ignored prose", age: 22, presentation: "shy", physicalCharacteristics: facetB }, styleAnchor);
+    // The facet, not the prose, drives the physical line.
+    expect(a.prompt).toContain("deep brown skin");
+    expect(a.prompt).toContain("a close-cropped fade");
+    expect(a.prompt).not.toContain("ignored prose");
+    // The facet's style folds into the presentation line.
+    expect(a.prompt).toContain("streetwear and bold sneakers");
+    // A "none notable" mark is omitted (never a literal instruction to the model).
+    expect(b.prompt).not.toContain("none notable");
+    // Two different people read as materially different physical descriptions.
+    const physOf = (p: string) => p.split("Physical appearance: ")[1]!.split(". Presentation")[0]!;
+    expect(physOf(a.prompt)).not.toBe(physOf(b.prompt));
+  });
+
+  it("L29 — the live cast portrait prompts consume the seeded physical facet", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 31 });
+    const npc = view.house.find((h) => h.physicalCharacteristics)!;
+    expect(npc).toBeTruthy();
+    const pp = adapter.getPortraitPrompt(npc.id as EntityId)!;
+    // the seeded facet's skin tone (a public field on the card) appears in the prompt's physical line
+    expect(pp.prompt).toContain(npc.physicalCharacteristics!.skinTone);
+    expect(pp.prompt).toContain(npc.physicalCharacteristics!.hair);
+  });
+
   it("IMAGE_BUDGET bounds generation: per-turn cap < per-week cap, move-in exempt", () => {
     expect(IMAGE_BUDGET.perTurnCap).toBeGreaterThan(0);
     expect(IMAGE_BUDGET.perWeekCap).toBeGreaterThan(IMAGE_BUDGET.perTurnCap);

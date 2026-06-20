@@ -24,6 +24,7 @@ from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.agent_tools import (
     parse_tool_blocks,
     strip_tool_blocks,
+    tool_call_opener_index,
     execute_tool_block,
     format_tool_result,
     set_active_document,
@@ -1438,6 +1439,41 @@ _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptiv
 # (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
 _ADVANCE_GRACE_TURNS = 2
 
+# P1 onboarding — the LIGHT-TOUCH guided FIRST WEEK. A brand-new player's premiere week should
+# move briskly through its first HOH → eviction so the loop "clicks" before the open-ended middle
+# game; the producers/narrator nudge a little more actively. This is PACING ONLY (no scripted rails,
+# no engine-authored content — the owner's ruling): in week 1 the staleness grace before the lull
+# advance-nudge is shorter, so a lull on a settled beat seizes the moment sooner. Engaging play
+# still never nudges (the lull gate is unchanged); only the lull→advance latency shrinks. Tunable.
+_FIRST_WEEK_GRACE_TURNS = 1
+# Per-game "is the live season in its FIRST WEEK?" hint, refreshed from the state read the nudge
+# block already performs (zero extra fetches — it lags by at most one turn, immaterial for pacing).
+# Absent ⇒ the standard grace, so the brisker cadence only ever applies once week 1 is confirmed.
+_FIRST_WEEK_HINT: Dict[str, bool] = {}
+
+
+def _effective_advance_grace(owner) -> int:
+    """The staleness grace before the lull advance-nudge — shorter in the guided first week (P1),
+    the standard grace otherwise. Pure pacing; never changes WHAT gets nudged, only the latency."""
+    return _FIRST_WEEK_GRACE_TURNS if _FIRST_WEEK_HINT.get(owner or "") else _ADVANCE_GRACE_TURNS
+
+# L39(b) — the SAFETY NET for a model that ignores every escalating nudge. The graduated text nudges
+# above rely entirely on the model eventually calling advanceGame; the 2026-06-19 God-Mode transcript
+# showed a model that NEVER did ("not a single beat advanced", then hit step limits speed-running). So
+# once the persisted stall level has climbed past every text rung AND this many turns (the model has
+# now been nudged through all three rungs and STILL won't move), the FE calls advanceGame ITSELF — the
+# SAME engine lever the model was asked to pull, one beat, deterministically resolved by the engine.
+# This is NOT engine-authored content (the model still voices the real returned beat); it is the same
+# "error-correct the omission" guardrail as _auto_record_scene, applied to progression. Bounded: at
+# most one forced advance per finishing turn, only past the threshold, and a pending PLAYER decision is
+# never auto-resolved (the engine returns the pending unchanged — the model surfaces it as a choice).
+_ADVANCE_FORCE_LEVEL = len(_ADVANCE_NUDGES)  # past the last text rung (levels are 0-indexed)
+_FORCED_ADVANCE_NUDGE = (
+    "(Production note, not for the player.) The beat was stuck for several turns, so the game has been "
+    "advanced for you. Call gameStatus / getGameState NOW to read the REAL new beat the engine just "
+    "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
+    "now pending, present its options and wait for their choice.")
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -1480,12 +1516,195 @@ _MAX_RECORD_NUDGES_PER_TURN = 1  # at most one auto-record per finishing turn
 
 _RECORD_KINDS = {"bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"}
 
+# ADR 0005: the closed directed-edge signal space the model MAY propose per houseguest. The model
+# proposes shape (which edges move, which way, relative emphasis) — open-set reading-comprehension of
+# the scene — while the engine still owns the magnitude (anti-sycophancy). emphasis is RELATIVE weight
+# only and never an absolute amount, so widening what the model proposes never widens what it magnitudes.
+_CONSEQUENCE_DIRECTIONS = {
+    "warmer", "cooler", "more-trust", "less-trust",
+    "more-threatened", "less-threatened", "more-aligned", "less-aligned",
+}
+_CONSEQUENCE_EMPHASES = {"slight", "notable", "strong"}
+
+
+def _last_json_object_with_key(raw: str, key: str):
+    """Pull the LAST brace-balanced JSON object that carries `"<key>"` out of a free-text model reply
+    (reasoning models emit the answer last). Handles a NESTED object (e.g. a `consequence` block) that
+    a flat `[^{}]` regex could never match, while still tolerating a draft-then-final emission. Returns
+    the parsed dict, or None when nothing parses — so the caller fails closed exactly as before."""
+    if not raw:
+        return None
+    needle = '"' + key + '"'
+    found = None
+    for m in re.finditer(re.escape(needle), raw):
+        # Walk left to the opening brace of the object this key belongs to, then scan a balanced span.
+        start = raw.rfind("{", 0, m.start())
+        if start < 0:
+            continue
+        depth, end, in_str, esc = 0, -1, False, False
+        for i in range(start, len(raw)):
+            c = raw[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end < 0:
+            continue
+        try:
+            cand = json.loads(raw[start:end + 1])
+        except Exception:
+            continue
+        if isinstance(cand, dict) and key in cand:
+            found = cand  # keep going; we want the LAST valid one
+    return found
+
+
+def _validate_consequence(raw, valid_ids) -> dict | None:
+    """ADR 0005 — defensively validate a model-proposed consequence descriptor against the active
+    roster. Keep only edges whose `toward` is a living houseguest id AND whose `direction` is one of
+    the 8; carry `emphasis` only when it is one of the 3 (else drop the field — it is optional). Carry
+    `rationale` only when it is a string. Return the cleaned descriptor, or None when nothing valid
+    remains — so a None return means the call falls back to exactly the kind-only path (no regression)."""
+    if not isinstance(raw, dict):
+        return None
+    edges = []
+    for e in (raw.get("edges") or []):
+        if not isinstance(e, dict):
+            continue
+        toward = e.get("toward")
+        direction = e.get("direction")
+        if toward not in valid_ids or direction not in _CONSEQUENCE_DIRECTIONS:
+            continue
+        edge: dict = {"toward": toward, "direction": direction}
+        if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
+            edge["emphasis"] = e.get("emphasis")
+        edges.append(edge)
+    if not edges:
+        return None
+    out: dict = {"edges": edges}
+    rationale = raw.get("rationale")
+    if isinstance(rationale, str) and rationale.strip():
+        out["rationale"] = rationale.strip()[:400]
+    return out
+
+
+# ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
+# Owner ledger (L21/L24 — "the single biggest immersion-killer"): turn to turn the world resets
+# because the model invents positions instead of grounding to the engine. The engine grounding
+# shipped (whereabouts() in the per-turn context; the player is PINNED and only an explicit
+# `moveTo` relocates them). But just like recordInteraction/advanceGame, the model reliably
+# UNDER-calls `moveTo`: the player says "I head to the kitchen", the narrator voices the kitchen,
+# but never moves the engine — so next turn whereabouts still reports the OLD room and the picture
+# snaps back ("you're still in the kitchen" after you moved to the living room). So when the
+# player's turn clearly walked them somewhere and the model did NOT call moveTo, the FE GUARANTEES
+# the move: a constrained extraction proposes the destination room and we call move_to ourselves,
+# PERSISTING the player's room so the whereabouts picture stays consistent turn-to-turn.
+# Model-driven moveTo always takes precedence. Vault-free (whereabouts is a Vault-free projection),
+# fail-closed (any hiccup just skips), and it never invents a move the player did not make.
+_MOVE_TOOLS = {"moveTo"}
+_MAX_MOVE_NUDGES_PER_TURN = 1  # at most one auto-move per finishing turn
+# The canonical house floor plan (mirrors src/domain/house.ts HOUSE_ROOMS). The engine no-ops an
+# unknown room; matching here keeps the extraction honest and the pre-filter cheap.
+_HOUSE_ROOMS = (
+    "kitchen", "living-room", "backyard", "bedroom-a", "bedroom-b",
+    "hoh-room", "bathroom", "storage-room", "diary-room",
+)
+# A deliberately BROAD pre-filter — movement language is varied ("I head to the kitchen", "let's go
+# out back", "I wander into the living room", "walk over to the bedroom", "step into the bathroom").
+# A missed signal means a lost move (the immersion bug); a false hit only costs a rare extraction
+# call that returns room:null. So we err wide and let the extraction be the gatekeeper. The room
+# words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
+# go/head/walk/move/wander/step/slip/stroll verbs.
+_MOVE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"go|going|head(?:ing)?|walk(?:ing)?|moves?|moving|wander(?:ing)?|stroll(?:ing)?|"
+    r"drift(?:ing)?|slip(?:ping)?|steps?|stepping|"
+    r"kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
+    r"hoh[\s-]?room|head of household|storage[\s-]?room|diary[\s-]?room"
+    r")\b", re.I)
+
+
+async def _auto_move_player(narration, last_user, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE whereabouts cohesion (L21/L24). When the player's turn walked them to a room but the
+    model never called moveTo, a constrained extraction proposes the destination room and we call
+    move_to ourselves — so the engine persists the player's new room and next turn's whereabouts
+    stays consistent (no snap-back). The engine OWNS the move (it no-ops an unknown room and pins the
+    player otherwise); we only relay a room the player clearly named. Fail-closed: any hiccup just
+    skips (the prompt nudge + the engine grounding still apply). Whereabouts is a Vault-free
+    projection, so nothing secret is touched."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        rooms = ", ".join(_HOUSE_ROOMS)
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the PLAYER walked to a new room in this Big Brother scene, and if so "
+                "which one. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no thinking, no "
+                "prose, no code fence:\n"
+                '{"room":"<one of the room ids below, or null>"}\n'
+                f"Room ids: {rooms}.\n"
+                "Pick the room the player ENDED UP IN if they clearly moved there themselves "
+                "(\"I head to the kitchen\", \"let's go out back\", \"I wander into the living room\"). "
+                'If the player did NOT move (they stayed put, only spoke, or only an NPC moved), reply '
+                '{"room":null}. Map loose names to the closest id (\"out back\"/\"yard\" → backyard, '
+                "\"lounge\"/\"couch\" → living-room, \"bedroom\" → bedroom-a, \"HOH\" → hoh-room)."},
+            {"role": "user", "content":
+                f"THE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
+                f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        # Room for a reasoning model to think THEN emit the tiny room JSON (see _auto_record_scene).
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1200, timeout=45)
+        raw = raw or ""
+        # The JSON may sit after a reasoning block — scan the WHOLE response, take the LAST object
+        # carrying a "room" key (reasoning models emit the answer last).
+        obj = None
+        for cand in reversed(re.findall(r"\{[^{}]*\"room\"[^{}]*\}", raw, re.DOTALL)):
+            try:
+                obj = json.loads(cand); break
+            except Exception:
+                continue
+        if obj is None:
+            logger.info(f"[orwell] auto-move: no parseable JSON (len={len(raw)})")
+            return False
+        room = obj.get("room")
+        if not isinstance(room, str) or room not in _HOUSE_ROOMS:
+            return False  # null / no move / unknown room → nothing to do
+        await _oe.move_to(room, user=owner)
+        logger.info(f"[orwell] auto-moved player → {room} user={owner}")
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-move failed: {_e}")
+        return False
+
 
 async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
     """GUARANTEE the consequence loop fires (0055). When the model narrated a player↔houseguest
     scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
     and we call recordInteraction ourselves — so the hidden trust/affinity/threat weights actually
     move. The model OWNS the magnitude; we only supply a direction-correct kind it proposed.
+
+    ADR 0005 — the extraction MAY ALSO propose a richer `consequence` descriptor (which edges move,
+    which way, relative emphasis only, and why) for a scene that moves houseguests in DIFFERENT
+    directions. It is the generative-mapping payoff for this error-correction path. The descriptor is
+    validated against the roster and the closed direction/emphasis enums (`_validate_consequence`);
+    only direction/emphasis/targeting + rationale ever come from the model — NEVER a number, so the
+    engine keeps the magnitude. When the model proposes no (or no valid) descriptor, the call is
+    exactly today's kind-only behavior — the 0055 guarantee is unchanged.
+
     Fail-closed: any hiccup just skips (the prompt nudge + E22 fallback still apply). The recording
     is invisible to the player (hidden consequence), exactly as the Vault Wall requires."""
     try:
@@ -1502,24 +1721,35 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 "thinking, no prose, no code fence:\n"
                 '{"withIds":[<ids of houseguests the player actually interacted WITH, from the roster>],'
                 '"kind":"<one of: bonding, betrayal, conflict, strategy, alliance, gossip, showmance>",'
-                '"content":"<one concise past-tense sentence of what passed between them>"}\n'
-                "Pick the kind matching the emotional/strategic direction. If no houseguest was genuinely "
+                '"content":"<one concise past-tense sentence of what passed between them>",'
+                '"consequence":{"edges":[{"toward":"<houseguest id>",'
+                '"direction":"<one of: warmer, cooler, more-trust, less-trust, more-threatened, '
+                'less-threatened, more-aligned, less-aligned>","emphasis":"<slight|notable|strong>"}],'
+                '"rationale":"<why, grounded in the scene>"}}\n'
+                "Pick the kind matching the emotional/strategic direction. Add `consequence` ONLY when "
+                "the scene moves different houseguests DIFFERENTLY (e.g. it warms one and threatens "
+                "another); otherwise omit it. Propose only direction and relative emphasis — NEVER any "
+                "number or magnitude (the engine decides how far). If no houseguest was genuinely "
                 'engaged (a solo/internal beat), reply {"withIds":[]}.'},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
         ]
+        # A heavy REASONING model (deepseek-v*, qwen3, …) spends tokens THINKING before it emits the
+        # JSON answer. With a tiny cap it burns the whole budget on reasoning and gets truncated BEFORE
+        # the object — so `raw` carried no parseable JSON (the `len=0` auto-record failure that left
+        # social play with zero consequence). Give it room to finish thinking AND answer; the JSON is
+        # tiny, so the extra budget only matters for the reasoning preamble. (llm_call_async now also
+        # reads the `reasoning`/`thinking` field, so the answer is recoverable even when the model
+        # routes everything there.)
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.2, max_tokens=700, timeout=45)
+                                   temperature=0.2, max_tokens=1500, timeout=45)
         raw = raw or ""
-        # The JSON may sit after a reasoning block OR inside it — scan the WHOLE response and take
-        # the LAST object carrying withIds (reasoning models emit the answer last).
-        obj = None
-        for cand in reversed(re.findall(r"\{[^{}]*\"withIds\"[^{}]*\}", raw, re.DOTALL)):
-            try:
-                obj = json.loads(cand); break
-            except Exception:
-                continue
+        # The JSON may sit after a reasoning block OR inside it — take the LAST object carrying
+        # withIds (reasoning models emit the answer last). The object may now NEST a `consequence`
+        # with inner braces, which the old flat `[^{}]` regex could never match — so scan for every
+        # `{"withIds"...}` start and pull a brace-balanced object from each, newest first.
+        obj = _last_json_object_with_key(raw, "withIds")
         if obj is None:
             logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
             return False
@@ -1529,8 +1759,13 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         kind = obj.get("kind") if obj.get("kind") in _RECORD_KINDS else "strategy"
         content = (obj.get("content") or "").strip() or "The player and a houseguest had a private exchange."
-        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind, user=owner)
-        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}) user={owner}")
+        # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
+        # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
+        consequence = _validate_consequence(obj.get("consequence"), valid)
+        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind,
+                                     consequence=consequence, user=owner)
+        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
+                    f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-record failed: {_e}")
@@ -1598,8 +1833,9 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{scene}\n\nJSON:"},
         ]
+        # Room for a reasoning model to think THEN emit the deal JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=500, timeout=45) or ""
+                                   temperature=0.1, max_tokens=1200, timeout=45) or ""
         obj = None
         for cand in reversed(re.findall(r"\{[^{}]*\"struck\"[^{}]*\}", raw, re.DOTALL)):
             try:
@@ -2341,6 +2577,7 @@ async def stream_agent_loop(
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
+    _turn_move_nudges = 0  # L21/L24 auto-move belt: at most one auto-move per finishing turn
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
@@ -2378,6 +2615,12 @@ async def stream_agent_loop(
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
+        # Once a tool-call OPENER appears in the visible text (e.g. deepseek's DSML pipe markup
+        # `<｜DSML｜tool_calls>` emitted as text), stop streaming visible deltas for the rest of
+        # this round — the raw markup must never reach the client. The actual tool call is still
+        # parsed post-round from round_response; this only governs what the player SEES mid-stream.
+        _visible_halted = False
+        _visible_emitted_len = 0  # length of round_response already streamed as visible content
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
         _doc_acc = ""
@@ -2548,7 +2791,16 @@ async def stream_agent_loop(
                             # CLEANED narration. Buffer to a sentence boundary so we judge whole
                             # sentences, then emit the clean part.
                             round_response += data["delta"]
-                            _game_buf += data["delta"]
+                            # DSML/tool-call OPENER guard: once raw tool markup begins in the visible
+                            # stream, stop emitting visible content for the round (the post-round
+                            # strip still parses the call). round_response keeps the raw text.
+                            if not _visible_halted and tool_call_opener_index(round_response) >= 0:
+                                _visible_halted = True
+                                _flush = round_response[:tool_call_opener_index(round_response)]
+                                _game_buf = _flush[_visible_emitted_len:]  # only the not-yet-flushed tail
+                            if not _visible_halted:
+                                _game_buf += data["delta"]
+                                _visible_emitted_len = len(round_response)
                             _complete, _game_buf = _split_complete_sentences(_game_buf)
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
@@ -2557,13 +2809,32 @@ async def stream_agent_loop(
                                     if _clean.strip():
                                         _emitted_visible = True
                                     yield f'data: {json.dumps({"delta": _clean})}\n\n'
+                            if _visible_halted:
+                                _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
                         else:
                             round_response += data["delta"]
-                            full_response += data["delta"]
-                            if data["delta"].strip():
-                                _emitted_visible = True
-                            yield chunk  # Stream all rounds
+                            # DSML/tool-call OPENER guard (non-scrub path): truncate the visible
+                            # stream at the first tool-call opener and stop emitting further visible
+                            # deltas this round, so raw markup (e.g. `<｜DSML｜tool_calls>`) never
+                            # reaches the client. round_response still holds the raw text for the
+                            # post-round parser.
+                            if not _visible_halted:
+                                _op = tool_call_opener_index(round_response)
+                                if _op >= 0:
+                                    _visible_halted = True
+                                    _visible_part = round_response[_visible_emitted_len:_op]
+                                    if _visible_part:
+                                        full_response += _visible_part
+                                        if _visible_part.strip():
+                                            _emitted_visible = True
+                                        yield f'data: {json.dumps({"delta": _visible_part})}\n\n'
+                                else:
+                                    full_response += data["delta"]
+                                    _visible_emitted_len = len(round_response)
+                                    if data["delta"].strip():
+                                        _emitted_visible = True
+                                    yield chunk  # Stream all rounds
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
                         if (
@@ -2809,13 +3080,29 @@ async def stream_agent_loop(
                 _tool_names = {(ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
+                _moved = bool(_tool_names & _MOVE_TOOLS)  # L21/L24: did the model call moveTo itself?
+                # SOCIAL RUNWAY (the never-fast-forward fix): the framing layer may be DELIBERATELY
+                # holding a social runway for this user — a ceremony just resolved and the next is
+                # held a few turns so the player can scheme. Those turns are intentional lingering,
+                # NOT a stall: read the flag once here so the staleness clock and the advance-nudge
+                # both respect it.
+                try:
+                    from routes import chat_helpers as _ch
+                    _runway_holding = _ch._RUNWAY_LEFT.get(owner or "", 0) > 0
+                except Exception:
+                    _runway_holding = False
                 # Track staleness: this finishing block runs once per player turn. A turn that
-                # advanced resets the clock; otherwise the beat has sat one more turn. The lull-nudge
-                # waits until the night has genuinely stopped moving (>= grace), so engaging play and
-                # a just-started beat are never shoved (owner ruling 2026-06-18).
+                # advanced — or that the runway is intentionally holding — resets the clock; otherwise
+                # the beat has sat one more turn. The lull-nudge waits until the night has genuinely
+                # stopped moving (>= grace), so engaging play, a just-started beat, AND a deliberately
+                # held social runway are never shoved (owner ruling 2026-06-18 + the runway fix).
                 if owner:
-                    _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
-                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
+                    _TURNS_SINCE_PROGRESS[owner] = (
+                        0 if (_progressed or _runway_holding)
+                        else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1)
+                # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
+                # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
+                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _effective_advance_grace(owner)
                 _is_lull = _player_turn_is_lull(messages)
                 # The ORDER of the turn's beat-tools decides whether it left an uncommitted/undelivered
                 # OUTCOME the model may have narrated ahead of the engine (#1 + 1b). The LAST beat-tool:
@@ -2829,10 +3116,17 @@ async def stream_agent_loop(
                              if t in _BEAT_TOOLS]
                 _previewed_uncommitted = bool(_beat_seq) and _beat_seq[-1] == "runCompetition"
                 _decision_undelivered = bool(_beat_seq) and _beat_seq[-1] == "submitDecision"
+                # SOCIAL RUNWAY precedence (the never-fast-forward fix): when the framing layer is
+                # DELIBERATELY holding a social runway for this user (`_runway_holding`, read above), the
+                # plain-stall advance-nudge must NOT fire — that would force-march straight past the
+                # social play the runway is protecting (the L6/L7 FORCED advanceGame the playtest
+                # caught). It does NOT suppress a genuine desync (a previewed-but-uncommitted outcome /
+                # an undelivered decision result): the model narrated an outcome ahead of the engine
+                # and still owes the commit.
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
-                    or ((not _progressed) and _is_lull and _stale)))
+                    or ((not _progressed) and _is_lull and _stale and not _runway_holding)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
                 _want_record = ((not _recorded) and (not _is_lull) and (not _progressed)
@@ -2848,6 +3142,19 @@ async def stream_agent_loop(
                 _turn_narration = "\n".join(t for t in round_texts if t)
                 _want_deal = (_turn_deal_nudges < 1
                               and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
+                # L21/L24 auto-move belt: the player walked somewhere this turn but the model never
+                # called moveTo, so the engine still has them in the OLD room and next turn's
+                # whereabouts will snap back. Gated on a cheap movement-language pre-filter over the
+                # player's OWN last message (the player is the only one whose move we relay — the
+                # engine pins them and drives the NPCs) and the per-turn cap. Deliberately NOT gated on
+                # `_progressed`/`_is_lull`: a player can walk to a room AND advance a beat in the same
+                # turn, and a short "I head out back" lull is exactly when a move happens. The
+                # constrained extraction (room:null when the player didn't actually move) is the real
+                # gatekeeper. Model-driven moveTo always wins (`_moved` short-circuits).
+                _last_user_for_move = _extract_last_user_message(messages) or ""
+                _want_move = ((not _moved)
+                              and _turn_move_nudges < _MAX_MOVE_NUDGES_PER_TURN
+                              and bool(_MOVE_SIGNAL_RE.search(_last_user_for_move)))
                 # NPC-approach nudge (0036/0049): the house lives between the player's beats — NPCs play
                 # THEIR game and come to the player, not only the other way around. With the "Wants a
                 # word" notification panel removed (owner ruling 2026-06-18 — that intent must never reach
@@ -2863,19 +3170,41 @@ async def stream_agent_loop(
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_deal or _want_approach or _want_reapproach:
+                if _want_advance or _want_record or _want_deal or _want_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
                         _moment = (_gs or {}).get("moment")
+                        # P1: refresh the first-week pacing hint from the same read (no extra fetch).
+                        # The guided premiere window = week 1 of a live season, NOT post-season; this
+                        # feeds _effective_advance_grace on the NEXT turn (a one-turn lag is fine).
+                        if owner is not None:
+                            _wk = (_gs or {}).get("week")
+                            _FIRST_WEEK_HINT[owner] = (_wk == 1 and _moment != "post-season")
                         _house = [{"id": h.get("id"), "name": h.get("name")}
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
                     except Exception as _e:
-                        logger.warning(f"[orwell] error-correction state fetch failed: {_e}")
+                        logger.warning(
+                            f"[orwell] error-correction state fetch failed: "
+                            f"{type(_e).__name__}: {_e}".rstrip(': '))
+                    # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
+                    # The player walked to a room this turn but the model never called moveTo, so the
+                    # engine still has them in the OLD room and next turn's whereabouts would snap back.
+                    # A constrained extraction proposes the destination and we call move_to ourselves,
+                    # PERSISTING the player's new room. Runs BEFORE the post-season/advance/approach
+                    # branches (each of which can break/continue) so the move always lands even on a
+                    # turn that also advances a beat — the player can both walk somewhere and trigger a
+                    # ceremony. It never re-prompts the model or ends the turn; the narration the player
+                    # already saw stands and we just make the engine agree with it. Model-driven moveTo
+                    # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
+                    if _want_move:
+                        _turn_move_nudges += 1  # once per turn
+                        await _auto_move_player(_turn_narration, _last_user_for_move,
+                                                endpoint_url, model, headers, owner)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
                     # off into free chat. Count their off-finale turns; once they've taken a couple,
                     # have the producer re-invite OUT OF FICTION to the next season (escalating,
@@ -2904,12 +3233,82 @@ async def stream_agent_loop(
                         # forget the per-user re-approach state so the NEXT post-season starts clean.
                         _POSTSEASON_OFFTOPIC_TURNS.pop(owner or "", None)
                         _REAPPROACH_LEVEL.pop(owner or "", None)
-                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1)
+                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1).
+                    #
+                    # ONE-NARRATION-PER-TURN invariant (fixes the "rewind"/double-scene bug): a nudge
+                    # that re-prompts the model makes it narrate AGAIN, and that second narration is
+                    # appended to the SAME message bubble — the player sees two contradictory scenes
+                    # concatenated. So once the model has ALREADY shown the player a visible scene this
+                    # turn (`_emitted_visible`), we NEVER re-prompt for a second narration: we progress
+                    # STATE silently (commit the previewed/undelivered beat, or pull the forced advance)
+                    # and END the turn. The engine resolves to the SAME outcome the model already
+                    # previewed, so the board now AGREES with the one scene the player saw, and the real
+                    # next beat surfaces on the player's next turn. We re-prompt (the historical text
+                    # nudge → another narration) ONLY when nothing visible has been shown yet, where a
+                    # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
+                    # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
                     if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
+
+                        async def _commit_advance_silently(_why: str) -> bool:
+                            """Progress the beat in the engine WITHOUT re-prompting the model — so a
+                            turn that already narrated a scene does not get a second one. Resets the
+                            staleness clock on success. Fail-open: any hiccup just returns False so the
+                            caller can fall back to the (re-prompting) text nudge."""
+                            try:
+                                from src import orwell_engine as _oe3
+                                await _oe3.advance_game(owner)
+                                if owner:
+                                    # The beat moved — reset the staleness clock AND clear the
+                                    # persisted escalation so the next stall (if any) starts gentle,
+                                    # mirroring the model-driven progression cleanup below.
+                                    _TURNS_SINCE_PROGRESS[owner] = 0
+                                    _ADVANCE_STALL_LEVEL.pop(owner, None)
+                                logger.info(f"[orwell] committed advanceGame silently ({_why}, "
+                                            f"phase={_phase}) round {round_num} user={owner}")
+                                return True
+                            except Exception as _e:
+                                # Diagnosable detail (#393 advance-path): str(_e) is empty for several
+                                # transient engine errors (a read timeout, a connection dropped mid-
+                                # response) — name the TYPE so the line is never a bare "failed: ".
+                                logger.warning(
+                                    f"[orwell] silent advanceGame failed ({_why}): "
+                                    f"{type(_e).__name__}: {_e}".rstrip(': '))
+                                return False
+
+                        # If the player has already seen a scene this turn, NEVER narrate a second one.
+                        # Commit the outcome the model previewed/left undelivered (or pull the forced
+                        # advance) silently and end the turn — the board catches up to the scene shown,
+                        # and the next real beat is voiced on the player's next turn. Falls through to
+                        # the text-nudge path only when the silent commit could not run.
+                        if _emitted_visible:
+                            if await _commit_advance_silently(
+                                    "preview-commit" if _previewed_uncommitted
+                                    else "decision-deliver" if _decision_undelivered
+                                    else f"stall L{_level}"):
+                                break  # one scene shown, state committed — done this turn
+                            # else: silent commit failed — fall through to the re-prompt below.
+
+                        # L39(b) SAFETY NET: the model has been nudged through every text rung across
+                        # several turns and STILL won't advance (the "not a single beat advanced" stall).
+                        # Pull the engine lever ourselves — one beat, deterministically resolved — then
+                        # tell the model to re-read and voice the REAL result. Only for a plain stall (a
+                        # previewed/undelivered outcome still gets its targeted text nudge, since the model
+                        # is one call away). A pending player decision is returned unchanged by the engine.
+                        # (Only reached when NOTHING visible was shown yet — so this single narration is
+                        # the turn's first and only scene, no double-narration.)
+                        if (_level >= _ADVANCE_FORCE_LEVEL
+                                and not _previewed_uncommitted and not _decision_undelivered):
+                            if await _commit_advance_silently(f"forced stall L{_level}"):
+                                logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
+                                            f"round {round_num} user={owner}")
+                                messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
+                                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                continue
+                            # else: forced advance failed — fall through to the text nudge below.
                         # A previewed-but-uncommitted outcome (or an undelivered decision result) gets
                         # the FORCEFUL nudge straight away (it is not a gentle "lingering beat").
                         if _previewed_uncommitted:
@@ -3388,6 +3787,20 @@ async def stream_agent_loop(
     if _exhausted_rounds:
         logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
         yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
+
+    # BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): now the live-game turn has
+    # finished, compare its FULL narration against the engine board's before→after delta. If the
+    # GM narrated an outcome the engine never committed (an eviction/winner/HOH/tally a beat
+    # early), the check stashes a re-ground directive that apply_game_framing injects NEXT turn.
+    # The pending-barrier catches narrating past an open PLAYER decision; this catches narrating
+    # past an advanceGame beat with no pending. Once per turn, fail-open — never breaks the turn.
+    if _is_live_game and owner:
+        try:
+            from routes.chat_helpers import record_post_turn_desync_check
+            _turn_narration_full = "\n".join(t for t in round_texts if t)
+            await record_post_turn_desync_check(owner, _turn_narration_full)
+        except Exception as _desync_err:
+            logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

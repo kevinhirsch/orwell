@@ -78,6 +78,72 @@ describe("C8-04 — the ceremony state is in the model's persistent context", ()
     for (const p of field) expect(prompt).toContain(p.name); // every drawn player, by name
   });
 
+  it("renders WHERE YOU ARE from the engine whereabouts so the model never invents positions (L21/L24)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 81000 });
+    const wa = s.getGameState().whereabouts;
+    expect(wa).not.toBeNull(); // presence is seeded at premiere — everyone is placed, no "arrivals"
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("WHERE YOU ARE");
+    expect(prompt).toContain(`the ${wa!.room.replace(/-/g, " ")}`); // the player's REAL room
+    for (const c of wa!.present) expect(prompt).toContain(c.name); // everyone actually with them, by name
+  });
+
+  // ── L-LOC (location continuity) — the narrator's room occupancy must match the player-visible
+  //    whereabouts projection (the SAME one the FE "The House" panel renders), current room AND every
+  //    observable adjacent room. The live-playtest bug: the panel placed houseguests in a room the
+  //    narrator described as empty (and bent it to the player's wish for "a room to themselves").
+  //    Helper: slice out the "WHERE YOU ARE" block so the roster (which names the whole cast) can't
+  //    falsely satisfy a per-room occupancy assertion.
+  const whereBlock = (prompt: string): string => {
+    const start = prompt.indexOf("- WHERE YOU ARE");
+    expect(start).toBeGreaterThanOrEqual(0);
+    // The block runs until the next top-level "- " context line after it.
+    const rest = prompt.slice(start + 1);
+    const end = rest.indexOf("\n- ");
+    return end >= 0 ? prompt.slice(start, start + 1 + end) : prompt.slice(start);
+  };
+
+  it("the WHERE YOU ARE block names EXACTLY the occupants the whereabouts projection reports for the player's room and every observable adjacent room", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 81000 });
+    const wa = s.getGameState().whereabouts!;
+    expect(wa).not.toBeNull();
+    const block = whereBlock(s.getMomentPrompt({}).systemPrompt);
+
+    // Current room: everyone actually with the player appears.
+    for (const c of wa.present) expect(block).toContain(c.name);
+    // EVERY adjacent room is rendered (occupied AND empty), labelled by its room name, with its exact
+    // occupancy — so a room the player "checks" has an authoritative answer and never gets improvised.
+    for (const room of wa.nearby) {
+      expect(block).toContain(room.room.replace(/-/g, " "));
+      for (const p of room.present) expect(block).toContain(p.name);
+    }
+  });
+
+  it("no NON-observable houseguest leaks into the WHERE YOU ARE block (Vault Wall — fog of war is real)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "P", seed: 81000 });
+    const gs = s.getGameState();
+    const wa = gs.whereabouts!;
+    expect(wa).not.toBeNull();
+    const block = whereBlock(s.getMomentPrompt({}).systemPrompt);
+
+    // The names the player CAN legitimately see/hear: their own room + every adjacent room.
+    const observable = new Set<string>([
+      ...wa.present.map((p) => p.name),
+      ...wa.nearby.flatMap((n) => n.present.map((p) => p.name)),
+    ]);
+    // Every OTHER active houseguest is somewhere non-adjacent — none of them may appear in the block.
+    const elsewhere = gs.house
+      .filter((h) => h.status === "active" && !observable.has(h.name))
+      .map((h) => h.name);
+    // There must be at least one houseguest the player cannot see (the house is bigger than one
+    // room + its neighbours) — otherwise the sentinel proves nothing this seed.
+    expect(elsewhere.length).toBeGreaterThan(0);
+    for (const name of elsewhere) expect(block).not.toContain(name);
+  });
+
   it("pre-game and pre-ceremony carry an empty ceremony (no invented marks)", () => {
     const s = new GameSessionAdapter();
     expect(s.getGameState().ceremony).toEqual({ hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } });

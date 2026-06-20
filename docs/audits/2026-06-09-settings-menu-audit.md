@@ -1,5 +1,7 @@
 # Orwell Settings-menu audit — 2026-06-09
 
+> 📋 **Audit record** · 2026-06-09 · Settings menu (round-3 supplement) · **Status:** Historical record
+
 A focused supplement to the round-3 audit: the Settings modal, **tab by tab, control by
 control** — is each wired (button → `settings.js` handler → server route), does it persist and
 take effect, is it correct under the game build, and is authZ enforced server-side. Sources:

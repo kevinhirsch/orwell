@@ -158,7 +158,10 @@ def test_sourcepin_f2_dock_restore_always_yields_a_visible_window():
 
 def test_sourcepin_f2_kit_exposes_isminimized_for_consumer_gates():
     js = _read("static", "js", "orwellWindow.js")
-    assert "isMinimized() { return Modals.isMinimized(this.o.id); }" in js, \
+    # Consumers gate their open/poll flows on the kit's own minimized read. (0054
+    # Phase 2 added a docked guard — a docked window lives in the rail, never the
+    # chip dock — so the body now ANDs !this._docked with the modalManager read.)
+    assert "isMinimized() { return !this._docked && Modals.isMinimized(this.o.id); }" in js, \
         "consumers gate their open/poll flows on the kit's own minimized read"
 
 
@@ -168,11 +171,18 @@ def test_sourcepin_f2_kit_exposes_isminimized_for_consumer_gates():
 def test_sourcepin_f2_finale_poll_loop_respects_the_parked_state():
     # The kit-level fix works BECAUSE the finale's poll loop already gates its
     # re-show on modalManager.isMinimized — pin that contract so a panel
-    # rewrite can't quietly re-open a parked window from its poll loop.
+    # rewrite can't quietly re-open a parked window from its poll loop. (0054
+    # Phase 2 added a docked branch FIRST — docked clears the inline display so the
+    # rail's content-driven visibility owns it — but the FLOATING path still gates
+    # the re-show on !isMinimized() in both render and the ensure seam.)
     js = _read("static", "js", "orwellFinale.js")
     render_body = _method_body(js, "function render(finale) {", "async function refresh()")
-    assert 'if (!isMinimized()) el.style.display = "block"' in render_body
-    assert 'window._orwellFinaleEnsure = () => { const el = ensureUI(); if (!isMinimized())' in js
+    assert 'else if (!isMinimized()) el.style.display = "block"' in render_body
+    # the docked branch precedes the parked gate (the rail owns docked visibility)
+    assert "_win.isDocked && _win.isDocked()" in render_body
+    # the ensure seam keeps the same gating contract (floating: !isMinimized re-show)
+    assert "window._orwellFinaleEnsure" in js
+    assert 'else if (!isMinimized()) el.style.display = "block"' in js
     # The finale window has no close (it exists while one is staging): when the
     # finale ENDS, hidePanel un-parks through the real restore path — so no
     # stale parked flag outlives the window it described.

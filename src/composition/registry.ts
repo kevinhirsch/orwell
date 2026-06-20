@@ -4,12 +4,19 @@ import { buildOutwardChannels } from "./outwardRoot";
 import { InMemoryGameStateRepository } from "../adapters/inmemory/InMemoryGameStateRepository";
 import { EngineCommandsAdapter } from "../adapters/engine/EngineCommandsAdapter";
 import { GameSessionAdapter } from "../adapters/engine/GameSessionAdapter";
-import { InMemoryKnowledgeService } from "../adapters/inmemory/InMemoryKnowledgeService";
-import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { McpServer } from "../adapters/mcp/McpServer";
 import { PLAYER } from "../domain/ids";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
+import {
+  DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
+} from "../engine/deepProfile";
+import { preGameTieToVaultContent, showmanceToVaultContent } from "../engine/seededRelationships";
+import {
+  PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
+} from "../engine/diversity";
+import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
+import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
@@ -68,6 +75,14 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // L27/L27b/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall
+  // memory, so later story/narrative is built from the store recalled (ADR 0003), never the chat
+  // window. Routed through the session's `recordSceneMemory` — NOT engine.soul.recordToSoul directly —
+  // so the summary lands in the houseguest's PERSISTED `soul.memory` mirror too (L27b): the vector
+  // index is derived state that `rebuildSoulIndex` re-derives ONLY from the persisted mirror, so a
+  // scene recorded N turns ago stays recall-able IN FULL across a restart (it used to vanish on
+  // restore — the event record survived but the NPC could no longer recall the scene).
+  commands.setSoulMemo((hg, content) => session.recordSceneMemory(hg, content));
   // Per-NPC voicing (B65 / ADR 0003 §8): the session projects ONE houseguest's legitimate
   // knowledge + hunches so the narrator can voice them without inventing or omnisciently leaking.
   session.setNpcKnowledgeProviders({
@@ -91,11 +106,127 @@ function buildUserSandbox(user = "default"): UserSandbox {
       });
     }
   });
+  // Deep character profiles (feature 0058): SEAL each NPC's HIDDEN profile + story threads into the
+  // Vault — the audit copy no player OR admin surface can reach (0001), and the 0048 unsealing payoff.
+  // This is the SAME hidden-seal seam the reserve twists use — engine-only by construction. The
+  // SOUL indexing (full-fidelity recall, L27b) is done by the adapter's seedDeepProfiles into each
+  // NPC's authoritative soul.memory (so it persists + re-indexes on restore); the PUBLIC facets fold
+  // onto the byte-stable Character separately (they cross to the player).
+  session.setOnSealProfiles((profiles, threads) => {
+    for (const { id, profile } of profiles) {
+      engine.vault.writeHidden({
+        id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id, content: deepProfileToVaultContent(id, profile),
+      });
+    }
+    for (const t of threads) {
+      engine.vault.writeHidden({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) });
+    }
+  });
+  // L28b — the AUTHORED write-back re-seals ONE houseguest: REPLACE that subject's prior profile +
+  // thread records (idempotent, no stale/duplicated records) via the engine-only Vault upsert.
+  session.setOnResealProfile((id, profile, threads) => {
+    engine.vault.replaceHidden({ kind: DEEP_PROFILE_KIND, subject: id }, [
+      { id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id, content: deepProfileToVaultContent(id, profile) },
+    ]);
+    engine.vault.replaceHidden(
+      { kind: STORY_THREAD_KIND, subject: id },
+      threads.map((t) => ({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) })),
+    );
+  });
+  // 0059 — SEAL the hidden seeded relationship layer (pre-game ties + showmances) into the Vault: the
+  // engine-only audit copy no player OR admin surface can reach (0001), like the reserve twists (0025).
+  session.setOnSealSeededRels((rels) => {
+    for (let i = 0; i < rels.ties.length; i++) {
+      const t = rels.ties[i]!;
+      engine.vault.writeHidden({ id: `seeded-tie:${i}`, kind: "seeded-relationship", subject: t.a, content: preGameTieToVaultContent(t) });
+    }
+    for (let i = 0; i < rels.showmances.length; i++) {
+      const s = rels.showmances[i]!;
+      engine.vault.writeHidden({ id: `seeded-showmance:${i}`, kind: "seeded-relationship", subject: s.a, content: showmanceToVaultContent(s) });
+    }
+  });
+  // 0063 — SEAL each HIDDEN private orientation (closeted / not-yet-out) into the Vault: the engine-only
+  // audit copy no player OR admin surface can reach (0001), exactly like the seeded relationships above.
+  // A publicly-out orientation is NEVER sealed here — it rides on the byte-stable Character (public facet).
+  session.setOnSealPrivateOrientations((entries) => {
+    for (const { id, orientation } of entries) {
+      engine.vault.writeHidden({
+        id: privateOrientationVaultId(id), kind: PRIVATE_ORIENTATION_KIND, subject: id,
+        content: privateOrientationToVaultContent(id, orientation),
+      });
+    }
+  });
+  // 0059/L40 — a showmance that becomes VISIBLE is a PUBLIC house fact: record it as a player-witnessed
+  // (non-hidden) event so it enters the player's knowledge and the narrator may voice the romance.
+  session.setOnShowmanceSurfaced((sm) => engine.events.record({
+    id: `showmance:${sm.a}:${sm.b}:${engine.events.count()}`,
+    ts: engine.events.count(),
+    type: "house-event",
+    initiator: sm.a,
+    witnessSet: [PLAYER, sm.a, sm.b],
+    hidden: false,
+    content: `${sm.aName} and ${sm.bName} have grown close — the house is starting to notice a showmance`,
+  }));
+  // 0060 — the story-thread scheduler's SURFACING seams. The session holds no events/knowledge handle;
+  // it hands a Vault-SAFE class-keyed paraphrase (never the premise — `threadRumor`) and the registry
+  // runs the in-game pathway. This is the SAME hidden→pathway machinery gossip/overhears already use,
+  // so nothing crosses but a belief with source + confidence (§7).
+  //  (a) NPC↔NPC (the common case): diffuse the paraphrase along the affinity graph (0038) — most of
+  //      the time it stays among the NPCs; the player catches it only if a chain terminates at them.
+  session.setOnThreadGossip((origin, rumor, subject) => {
+    const core = session.snapshot();
+    if (!core.house) return;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    // Diffuse NPC↔NPC along the affinity graph — NPC nodes ONLY (the player is never a node here; the
+    // rare to-player pathway is the separate anchored seam below). `diffuseGossip` seeds the ORIGIN's
+    // belief first, so even on a cold graph this NPC-directed surfacing leaves a real NPC-side belief
+    // (the rumor exists in the house), then it spreads with the normal low transmit/decay/drift. This
+    // is the engine-only hidden layer; nothing crosses to the player here.
+    const npcIds: EntityId[] = core.house.npcs.map((n) => n.id).filter((id) => !evicted.has(id));
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < npcIds.length; i++) {
+      for (let j = i + 1; j < npcIds.length; j++) {
+        if (engine.relationships.edge(npcIds[i]!, npcIds[j]!).affinity > GOSSIP.affinityEdge) {
+          edges.push([npcIds[i]!, npcIds[j]!] as const);
+        }
+      }
+    }
+    // Always diffuse: `diffuseGossip` seeds the ORIGIN's belief unconditionally (independent of the
+    // graph), so even a cold graph leaves the origin holding the rumor — the NPC-side surfacing never
+    // silently vanishes; it just doesn't spread far this tick.
+    diffuseGossip({
+      knowledge: engine.knowledge,
+      graph: makeSocialGraph(edges),
+      rng: new SeededRandom(hashSeed(`${core.seed ?? user}:thread-gossip:${subject}:${core.week}`)),
+      origin,
+      fact: { content: rumor },
+      rounds: GOSSIP.rounds,
+      transmitProb: GOSSIP.transmitProb,
+      decay: GOSSIP.decay,
+    });
+  });
+  //  (b) TO the player (rare): seed the paraphrase onto an NPC confidant, then surface it `told-by:<npc>`
+  //      so the E9 content-lineage check accepts it as a BELIEF (source + confidence) — never an invented
+  //      fact. An unanchored attempt is correctly downgraded to a suspicion by 0002. Returns whether the
+  //      player actually came to hold the belief (the scheduler counts it once against the season cap).
+  session.setOnThreadSurfaceToPlayer((subject, rumor) => {
+    const core = session.snapshot();
+    if (!core.house) return false;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    // A living NPC confidant who is NOT the subject relays it (someone with a real pathway to the player).
+    const confidant = core.house.npcs.map((n) => n.id).find((id) => id !== subject && !evicted.has(id));
+    if (!confidant) return false;
+    const factId = `thread-belief:${subject}:${engine.events.count()}`;
+    // The confidant first HOLDS the rumor (an origin belief), so the told-by pathway is content-anchored.
+    engine.knowledge.seedBelief(confidant, { content: rumor, originalContent: rumor, factId, confidence: 0.6, hops: 1, distortion: 1, source: confidant }, "origin");
+    const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: rumor, subject, confidence: 0.5 }, `told-by:${confidant}`);
+    return fact !== null;
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
-    id: `season:${engine.events.query().length}`,
-    ts: engine.events.query().length,
+    id: `season:${engine.events.count()}`,
+    ts: engine.events.count(),
     type: "house-event",
     initiator: ev.participants[0] ?? PLAYER,
     witnessSet: [PLAYER, ...ev.participants.filter((p) => p !== PLAYER)],
@@ -105,9 +236,9 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // One-off witnessed events (a deal made / a promise broken, 0039). Hidden iff the player is NOT
   // a witness — so a player-party deal is their knowledge, never the Vault.
   session.setOnPlayerEvent((content, witnessSet, type = "deal") => {
-    const id = `deal:${engine.events.query().length}`;
+    const id = `deal:${engine.events.count()}`;
     engine.events.record({
-      id, ts: engine.events.query().length, type,
+      id, ts: engine.events.count(), type,
       initiator: witnessSet[0] ?? PLAYER, witnessSet: [...witnessSet],
       hidden: !witnessSet.includes(PLAYER), content,
     });
@@ -152,10 +283,40 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
     events: sb.engine.events.query(),
     relationships: sb.engine.relationships.serialize().edges,
     // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
-    knowledge: (sb.engine.knowledge as InMemoryKnowledgeService).serialize(),
+    // Through the port seam (E63): `serialize`/`load` are on `KnowledgeService`, no concrete cast.
+    knowledge: sb.engine.knowledge.serialize(),
     // The Vault's hidden records (B53/audit I7) — sealed twists et al. survive a restart too.
     vault: sb.engine.vault.readHidden(),
   };
+}
+
+/**
+ * R3 (incremental snapshot) — a per-user cache of the last exported `SessionSnapshot`, keyed on a
+ * monotonic `rev` the registry bumps on EVERY mutation (the single `commit` seam) and on every
+ * sandbox replacement (restore/reset/resume). The integrity spine exports the snapshot repeatedly —
+ * the candidate of a commit, the baseline of the next, the supplementary off-screen tick's baseline,
+ * and again on each `getGameState` poll — and most of those exports observe the SAME underlying state.
+ * Returning the SAME object when the state hasn't changed since the last export means:
+ *   (a) the O(events)/O(edges)/O(facts) serialization runs once per actual state change, not per call;
+ *   (b) `toGameState`'s WeakMap memo (keyed on snapshot identity) hits, so the projection that feeds
+ *       the checkpoint's isSuperset/counts/playerSweep is computed once, not re-derived per export.
+ * Correctness: the cached snapshot is an IMMUTABLE point-in-time capture (its `events` array is the
+ * frozen log copy; its other fields are freshly serialized plain data). It is only ever READ. The rev
+ * is bumped BEFORE any mutation's commit re-exports, so a cache entry can never outlive the state it
+ * captured. On any doubt (a path that didn't bump the rev) the worst case is a fresh export — never a
+ * stale one — because the rev only ever advances and a miss recomputes from live state.
+ */
+interface SnapshotCacheEntry {
+  /** The mutation rev (commit + explicit invalidation + sandbox replacement) at capture time. */
+  rev: number;
+  /**
+   * The EventStore length at capture time — a cheap O(1) SECOND key that catches a direct event append
+   * that did NOT route through `commit`/`invalidateSnapshot` (the only production paths that mutate events
+   * are commit-wired or inside the orchestrator's invalidated `applyFn`; this guards a direct
+   * `engine.events.record` — e.g. a test or a future seam — from ever reading back a pre-append capture).
+   */
+  events: number;
+  snap: SessionSnapshot;
 }
 
 /**
@@ -166,9 +327,11 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
 function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   if (!snapshotCompatible(snap)) throw new Error(`incompatible snapshot version: ${snap.snapshotVersion}`);
   sb.session.restore(snap);
-  for (const e of snap.events) (sb.engine.events as InMemoryEventStore).restoreRecord(e); // ids/ts/hidden preserved exactly
+  // Through the port seam (E63): `restoreRecord`/`load` are on the EventStore/KnowledgeService ports,
+  // no concrete `as InMemory*` cast — a relational adapter (SQLite) satisfies the same resume path.
+  for (const e of snap.events) sb.engine.events.restoreRecord(e); // ids/ts/hidden preserved exactly
   sb.engine.relationships.load(snap.relationships);
-  if (snap.knowledge) (sb.engine.knowledge as InMemoryKnowledgeService).load(snap.knowledge);
+  if (snap.knowledge) sb.engine.knowledge.load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
 }
 
@@ -179,6 +342,11 @@ export class GameSessionRegistry {
   private readonly sandboxes = new Map<string, UserSandbox>();
   private readonly maxResident: number;
 
+  /** R3 — per-user mutation revision; bumped on every commit and every sandbox replacement. */
+  private readonly rev = new Map<string, number>();
+  /** R3 — per-user last-export cache (`{ rev, snap }`); reused while the rev is unchanged. */
+  private readonly snapshotCache = new Map<string, SnapshotCacheEntry>();
+
   /**
    * An optional durable store (0030) makes the live game survive an engine restart:
    * `sandboxFor` recalls the user's saved game on first build, and every mutation
@@ -186,6 +354,23 @@ export class GameSessionRegistry {
    */
   constructor(private readonly saveStore?: UserSaveStore, opts: { maxResident?: number } = {}) {
     this.maxResident = Math.max(1, opts.maxResident ?? GameSessionRegistry.DEFAULT_MAX_RESIDENT);
+  }
+
+  /** R3 — invalidate the user's cached snapshot: advance the rev so the next export recomputes. */
+  private bumpRev(user: string): void {
+    this.rev.set(user, (this.rev.get(user) ?? 0) + 1);
+  }
+
+  /**
+   * R3 — PUBLIC cache invalidation for mutations that bypass the `commit` seam. The orchestrator's
+   * off-screen tick (`applyFn`) mutates the sandbox directly (records scenes, moves relationships,
+   * deepens souls) WITHOUT firing `onPersist`, then asks for the candidate snapshot — so it must
+   * invalidate first, or `snapshot` would hand back the pre-tick capture. Bumping the rev guarantees
+   * the next `snapshot` re-exports from live state (a miss is always correct; only a false HIT would
+   * be a bug, and the rev can only move forward).
+   */
+  invalidateSnapshot(user: string): void {
+    this.bumpRev(user);
   }
 
   /**
@@ -212,6 +397,12 @@ export class GameSessionRegistry {
       return fresh.session.createCharacter(req);
     });
     sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
+    // L38: the God-Mode "fast-forward to finale (debug)" lever DRIVES the live session to a crowned
+    // winner (auto-resolving the player's pendings with legal defaults) so the post-season Vault
+    // retrospective (0048) opens through its own gate. Vault-free by construction — the session
+    // returns only the public summary (winner NAME, weeks, placement); it reads no Vault, and each
+    // driven beat commits through the SAME checkpointed `onPersist` a live decision does.
+    sb.admin.setFastForwardProvider(() => sb.session.advanceToFinale());
     sb.syncAdmin();
   }
 
@@ -238,6 +429,7 @@ export class GameSessionRegistry {
       }
       this.wireHooks(user, sb);
       this.sandboxes.set(user, sb);
+      this.bumpRev(user); // R3 — a freshly built/resumed object graph; never reuse a prior life's cache
     } else {
       // LRU touch (R4): Map iteration is insertion-ordered — re-inserting keeps the oldest first.
       this.sandboxes.delete(user);
@@ -265,6 +457,10 @@ export class GameSessionRegistry {
       // garbage (the resume re-derives them) — drop it from the shared breathing lane.
       next[1].engine.soul.discardPending();
       this.sandboxes.delete(next[0]);
+      // R3 — release the unloaded user's cached export (it pins the whole event log in RAM) and its
+      // rev; a later resume rebuilds the sandbox (rev bumps) and re-exports fresh.
+      this.snapshotCache.delete(next[0]);
+      this.rev.delete(next[0]);
     }
   }
 
@@ -282,6 +478,10 @@ export class GameSessionRegistry {
 
   /** Invoked after every mutation (the wired `onPersist`): the orchestrator's commit, or a blind save. */
   private commit(user: string): void {
+    // R3 — a mutation just landed: the cached export (if any) is now stale. Bump BEFORE the delegate
+    // re-exports the candidate, so this commit's candidate caches at the new rev and the cache can
+    // never hand back a snapshot older than the live state.
+    this.bumpRev(user);
     if (this.commitDelegate) this.commitDelegate(user);
     else this.saveUser(user);
   }
@@ -293,9 +493,23 @@ export class GameSessionRegistry {
     if (sb && this.saveStore) this.saveStore.saveFor(user, snap ?? exportSnapshot(sb));
   }
 
-  /** The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031. */
+  /**
+   * The user's full in-memory snapshot (session core + engine detail). Orchestrator/0031.
+   * R3 — reuse the last export while no mutation has landed (same `rev`): the candidate/baseline/
+   * off-screen-tick/poll exports of a quiet stretch all return ONE immutable object, so the O(events)
+   * serialization runs once per real change and `toGameState`'s identity memo hits. The cached object
+   * is a point-in-time capture, only ever read — a stale entry is impossible (the rev advances ahead
+   * of any re-export). `sandboxFor` runs first (it may resume/replace the sandbox, which resets rev).
+   */
   snapshot(user: string): SessionSnapshot {
-    return exportSnapshot(this.sandboxFor(user));
+    const sb = this.sandboxFor(user);
+    const rev = this.rev.get(user) ?? 0;
+    const events = sb.engine.events.count();
+    const cached = this.snapshotCache.get(user);
+    if (cached && cached.rev === rev && cached.events === events) return cached.snap;
+    const snap = exportSnapshot(sb);
+    this.snapshotCache.set(user, { rev, events, snap });
+    return snap;
   }
 
   /**
@@ -311,6 +525,7 @@ export class GameSessionRegistry {
     importSnapshot(sb, snap);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
+    this.bumpRev(user); // R3 — the sandbox object graph was replaced; any cached export is stale
     return sb;
   }
 
@@ -341,6 +556,8 @@ export class GameSessionRegistry {
     const sb = buildUserSandbox(user);
     this.wireHooks(user, sb);
     this.sandboxes.set(user, sb);
+    this.snapshotCache.delete(user); // R3 — free the dead season's pinned export before season 2
+    this.bumpRev(user); // R3 — a fresh season's clean sandbox; any cached export is dead-season state
     return sb;
   }
 

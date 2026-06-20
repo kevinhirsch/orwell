@@ -27,7 +27,8 @@ every later update/reset reads it from there via a git credential helper (no re-
 in a URL or `.git/config`):
 
 ```bash
-GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+export GIT_TOKEN=github_pat_xxx   # fine-grained (Contents: Read-only) OR classic (repo scope)
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 ```
 
 This creates a Debian LXC and installs everything. Override defaults via env before the command:
@@ -63,7 +64,7 @@ Inside the container, **`orwell`** opens a whiptail menu over every maintenance 
 remember script paths or flags:
 
 ```bash
-orwell            # menu: update · doctor · backup · restore · reset (game/factory) · readiness
+orwell            # menu: update · doctor · backup · restore · reset (game/oobe/factory) · readiness
 ```
 
 It dispatches to the scripts below, collecting input through dialogs (a deploy-token password box,
@@ -72,10 +73,23 @@ the menu — handy over SSH or in scripts:
 
 ```bash
 orwell update             # = orwell-update.sh        orwell doctor --status
+orwell update-reset --yes # update, THEN OOBE reset — KEEP the API-key / LLM config (fail-closed)
 orwell backup             # orwell restore [FILE]     orwell ready
 orwell reset-game --yes   # destructive: --yes required off the menu
+orwell reset-oobe --yes   # back to OOBE, KEEP the API-key / LLM config
 orwell reset-factory --yes
 ```
+
+The three reset tiers, narrowest to widest: **`reset-game`** clears only the games (keeps
+accounts + the LLM config); **`reset-oobe`** wipes everything back to first-run **but keeps the
+API-key / LLM-provider config** (so an LLM is still configured — also the admin status page's
+**Factory Reset (OOBE)** button); **`reset-factory`** is the full wipe (drops the LLM config too).
+All three preserve `data/.env`.
+
+**`update-reset`** is the combined middle tier — the maintenance controls read as a set **Update ·
+Update + Reset · Reset**. It runs the update (pull + rebuild) **and then** the OOBE reset (keeping
+the API-key / LLM config) in one action, and is **fail-closed**: if the update fails, the wipe does
+not run and nothing is removed. It is the admin status page's **Update + Reset** button.
 
 The individual scripts (`deploy/orwell-*.sh`) also show these dialogs when run directly on a
 terminal, and stay fully non-interactive (today's flags/env) for automation, CI, and the

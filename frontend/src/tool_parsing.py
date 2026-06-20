@@ -85,6 +85,46 @@ def _normalize_dsml(text: str) -> str:
     t = re.sub(rf"<\s*/\s*{_DSML_PIPES}\s*DSML\s*{_DSML_PIPES}\s*parameter\s*>", "</parameter>", t, flags=re.IGNORECASE)
     return t
 
+
+# Stream-time tool-call OPENER detection. The post-round _normalize_dsml /
+# strip_tool_blocks above clean tool markup out of the SAVED message, but the
+# STREAMING deltas already showed the raw markup mid-flight — most visibly the
+# DSML pipe-variant (`<｜DSML｜tool_calls>` …) deepseek emits as text when it
+# can't produce structured tool_calls. This predicate lets the stream loop halt
+# visible content the moment a tool-call opener appears, so the raw markup never
+# reaches the client. Covers the DSML pipe opener (`<｜DSML` / `<|DSML`, any
+# whitespace/pipe run) AND the standard openers the post-round parser handles.
+# Alternatives:
+#   <｜DSML / <|DSML…            — DSML pipe opener (any whitespace/pipe run)
+#   <｜ / <| (a bare pipe-bracket run, the DSML preamble before "DSML" arrives)
+#   <tool_call> / <function_call>, bare <invoke …>, <tool_code> (MiniMax), [TOOL_CALL]
+_TOOL_CALL_OPENER_RE = re.compile(
+    r"<\s*" + _DSML_PIPES + r"\s*DSML"
+    + r"|<\s*" + _DSML_PIPES
+    + r"|<\s*/?\s*(?:[\w]+:)?(?:tool_call|function_call)\b"
+    + r"|<\s*invoke\b"
+    + r"|<\s*tool_code\b"
+    + r"|\[TOOL_CALL\]",
+    re.IGNORECASE,
+)
+
+
+def tool_call_opener_index(text: str) -> int:
+    """Index of the FIRST tool-call opener in `text`, or -1 if none. Used at stream time to
+    truncate visible content at the opener so raw tool/DSML markup never streams to the client.
+    The actual tool call is still parsed post-round from the full (raw) round response — this
+    only governs what the player SEES mid-stream."""
+    if not text:
+        return -1
+    m = _TOOL_CALL_OPENER_RE.search(text)
+    return m.start() if m else -1
+
+
+def starts_tool_call_markup(text: str) -> bool:
+    """True when `text` contains the start of tool-call markup (DSML or standard openers).
+    Convenience wrapper over tool_call_opener_index for stream-time gating + tests."""
+    return tool_call_opener_index(text) >= 0
+
 # Map model tool names to our tool types
 _TOOL_NAME_MAP = {
     "shell": "bash",

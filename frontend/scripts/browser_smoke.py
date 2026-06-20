@@ -40,6 +40,32 @@ def check(cond: bool, label: str) -> None:
         _fails.append(label)
 
 
+# L33/L34: `frosted` is now ON by default for every theme, which paints
+# backdrop-filter glass on every panel/modal/window. That heavy GPU effect makes
+# headless-chromium report stacked window chrome (e.g. a modal's minimize button)
+# as not-visible/not-stable, destabilizing the z-order / focus / restore suites
+# (G14/F8/G2) that are about WINDOW MECHANICS, not the cosmetic frost. So the
+# smoke seeds an EXPLICIT frosted-off theme preference before the first paint —
+# the L33 contract is "an explicit saved choice wins" — to keep those mechanics
+# deterministic. The frosted DEFAULT itself is covered by the pytest source gate
+# (tests/test_l32_l33_l34_theme_defaults.py).
+_SEED_NO_FROST_THEME = (
+    "try { localStorage.setItem('orwell-theme', JSON.stringify("
+    "{ name: 'dark', frosted: false, colors: "
+    "{ bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' } }"
+    ")); } catch (e) {}"
+)
+
+
+def new_page(browser, **kw):
+    """A page with a deterministic, frosted-OFF theme seeded before first paint
+    (see _SEED_NO_FROST_THEME) so the window-mechanics suites are stable under
+    headless backdrop-filter rendering."""
+    page = browser.new_page(**kw)
+    page.add_init_script(_SEED_NO_FROST_THEME)
+    return page
+
+
 def boot():
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
     env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
@@ -65,7 +91,7 @@ def main() -> int:
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            page = browser.new_page()
+            page = new_page(browser)
             page_errors: list[str] = []
             bad_js: list[tuple] = []
             ok_js: list[str] = []
@@ -161,6 +187,138 @@ def main() -> int:
             })""")
             check(btn_out.get("gone") is True, "dismiss button removes the holding card")
             check(btn_out.get("inertLeft") == 0, "no inert residue after button dismissal")
+
+            # SEND-PATH RUNTIME GUARD (regression: #314 broke sending — chat.js called isGameBuild()
+            # without importing it, so handleChatSubmit threw `ReferenceError: isGameBuild is not
+            # defined` while building the optimistic placeholder bubble — BEFORE the chat POST fired;
+            # the player could not send ANY message in the game build. Load-time error capture missed
+            # it because the throw is in the SUBMIT path, never exercised by the smoke before.) We now
+            # actually SUBMIT and assert the handler ran CLEAN: no new uncaught ReferenceError. (We do
+            # NOT assert a chat POST fires — the smoke configures no LLM endpoint, so the handler
+            # legitimately stops short of the fetch; the throw, if present, lands BEFORE that point.)
+            errs_before = len(page_errors)
+            page.fill("#message", "Smoke send-path check — does this submit cleanly?")
+            page.wait_for_timeout(250)
+            page.click(".send-btn")
+            page.wait_for_timeout(1500)
+            new_ref_errs = [e for e in page_errors[errs_before:] if "is not defined" in e or "ReferenceError" in e]
+            check(not new_ref_errs, f"send path: submit runs with no ReferenceError ({new_ref_errs[:3]})")
+
+            # THINKING / PUBLIC SPLIT (P1, owner ruling 2026-06-20): the model's reasoning must be
+            # CLEANLY SEPARATED from the public bubble — never mixed in. Reasoning renders in a
+            # condensed, DEFAULT-COLLAPSED "Thinking" accordion (debug-viewable, expandable); the
+            # PUBLIC reply carries ONLY the in-character narration (no reasoning/draft/"rewind", no
+            # engine lever names). Drive the real render chokepoint (markdown.js processWithThinking
+            # — every reload + final-render path funnels through it) with a reply that carries a
+            # <think> block naming engine levers, then assert at the DOM level. No LLM needed.
+            think_probe = page.evaluate(
+                """async () => {
+                  const m = await import('/static/js/markdown.js');
+                  const raw = '<think>Let me rewind that. I should call whereabouts and npcVoice, then a '
+                    + 'social read via getGameState before narrating.</think>\\n\\nThe living room hums with tension.';
+                  const host = document.createElement('div');
+                  host.innerHTML = m.processWithThinking(raw);
+                  document.body.appendChild(host);
+                  // The PUBLIC reply = everything OUTSIDE the thinking accordion.
+                  const accordions = [...host.querySelectorAll('.thinking-section')];
+                  const accordionTxt = accordions.map(a => a.textContent || '').join(' ');
+                  const clone = host.cloneNode(true);
+                  clone.querySelectorAll('.thinking-section').forEach(a => a.remove());
+                  const publicTxt = (clone.textContent || '');
+                  // collapsed-by-default = no `.thinking-content.expanded` at render time.
+                  const contents = [...host.querySelectorAll('.thinking-content')];
+                  const out = {
+                    showsAccordion: !!(m.gameBuildShowsThinkingAccordion && m.gameBuildShowsThinkingAccordion()),
+                    scrubsReply: !!(m.gameBuildSuppressesThinking && m.gameBuildSuppressesThinking()),
+                    accordions: accordions.length,
+                    accordionHoldsReasoning: /whereabouts|npcVoice|getGameState/i.test(accordionTxt),
+                    leversInPublicBubble: /whereabouts|npcVoice|getGameState|rewind/i.test(publicTxt),
+                    replyKept: /living room/i.test(publicTxt),
+                    expandedByDefault: contents.some(c => c.classList.contains('expanded')),
+                  };
+                  host.remove();
+                  return out;
+                }"""
+            )
+            check(think_probe.get("showsAccordion") is True,
+                  f"game build shows the reasoning accordion by default ({think_probe})")
+            check(think_probe.get("scrubsReply") is True,
+                  f"game build scrubs reasoning out of the public reply ({think_probe})")
+            check(think_probe.get("accordions") == 1,
+                  f"game build: reasoning renders in exactly one accordion ({think_probe})")
+            check(think_probe.get("accordionHoldsReasoning") is True,
+                  f"game build: the accordion holds the reasoning ({think_probe})")
+            check(think_probe.get("leversInPublicBubble") is False,
+                  f"game build: NO reasoning/lever/'rewind' text in the public bubble ({think_probe})")
+            check(think_probe.get("replyKept") is True,
+                  f"game build: the in-character reply still renders in the bubble ({think_probe})")
+            check(think_probe.get("expandedByDefault") is False,
+                  f"game build: the thinking accordion is collapsed by default ({think_probe})")
+
+            # L36 — the player's OUT-OF-CHARACTER aside channel. Drive the real bubble
+            # renderer (chatRenderer.addMessage, the same path the live send + reload
+            # both funnel through) with an OOC line, a normal line, and an `ooc:`-prefixed
+            # line, then assert the produced DOM: the OOC bubbles carry the distinct
+            # .msg-ooc class with the markers STRIPPED from the display text; the normal
+            # bubble does NOT. No engine/LLM needed — pure render.
+            ooc_probe = page.evaluate(
+                """async () => {
+                  const cr = await import('/static/js/chatRenderer.js');
+                  const host = document.getElementById('chat-history');
+                  const before = host.querySelectorAll('.msg-user').length;
+                  cr.addMessage('user', '((what time is it in-game?))');
+                  cr.addMessage('user', 'Hey, want to work together this week?');
+                  cr.addMessage('user', 'ooc: what are my options?');
+                  const bubbles = Array.prototype.slice.call(
+                    host.querySelectorAll('.msg-user')).slice(before);
+                  const rows = bubbles.map(b => ({
+                    ooc: b.classList.contains('msg-ooc'),
+                    text: (b.querySelector('.body') || {}).textContent || '',
+                  }));
+                  // the distinct production badge shows on an OOC bubble's role line
+                  const badged = bubbles[0] &&
+                    getComputedStyle(bubbles[0].querySelector('.role'), '::after')
+                      .content.indexOf('production') !== -1;
+                  return { rows: rows, badged: badged };
+                }"""
+            )
+            _rows = ooc_probe.get("rows") or []
+            check(len(_rows) == 3, f"L36: three user bubbles rendered ({ooc_probe})")
+            check(_rows and _rows[0]["ooc"] is True and "(((" not in _rows[0]["text"]
+                  and "what time is it in-game?" in _rows[0]["text"],
+                  f"L36: ((...)) aside is .msg-ooc with markers stripped ({_rows[:1]})")
+            check(len(_rows) > 1 and _rows[1]["ooc"] is False,
+                  f"L36: a normal in-character line is NOT styled as an aside ({_rows[1:2]})")
+            check(len(_rows) > 2 and _rows[2]["ooc"] is True
+                  and _rows[2]["text"].strip().startswith("what are my options"),
+                  f"L36: an `ooc:` aside is .msg-ooc with the prefix stripped ({_rows[2:3]})")
+            check(ooc_probe.get("badged") is True,
+                  f"L36: the OOC bubble carries the 'to production' badge ({ooc_probe})")
+            # The old one-time OOC composer TIP is GONE. The reusable chat-bar hint
+            # surface (orwellChatHint.js) is present but ships with ZERO active tips,
+            # so nothing renders by default — and register()+show() is the one-entry
+            # enable path. (The ((...))/ooc: INPUT detection above is unchanged.)
+            hint_state = page.evaluate(
+                """() => {
+                  const old = document.getElementById('orwell-ooc-hint');
+                  const api = window.OrwellChatHint;
+                  const nothingUp = !document.getElementById('orwell-chat-hint');
+                  // an unknown key never renders (the empty registry)
+                  const unknownNoop = !!api && api.show('does-not-exist') === false;
+                  return {
+                    oldTipGone: !old,
+                    apiPresent: !!(api && api.register && api.show && api.hide),
+                    nothingUp: nothingUp,
+                    unknownNoop: unknownNoop,
+                  };
+                }"""
+            )
+            check(hint_state.get("oldTipGone") is True,
+                  f"the old OOC composer tip is removed ({hint_state})")
+            check(hint_state.get("apiPresent") is True,
+                  f"the shared chat-hint API is wired ({hint_state})")
+            check(hint_state.get("nothingUp") is True and hint_state.get("unknownNoop") is True,
+                  f"the chat-hint system ships with no active tips ({hint_state})")
 
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
@@ -407,6 +565,43 @@ def main() -> int:
             page.wait_for_timeout(150)
             kmoved = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
             check(abs(kmoved["x"] - kb["x"]) > 60, f"kit: trusted drag moves the window (x {kb['x']:.0f}->{kmoved['x']:.0f})")
+
+            # L11: every kit window resizes from the SIDE and the CORNER on
+            # desktop (edge-proximity grips), and the size persists under the
+            # kit's one winsize-<id> key. Grab the bottom-right corner and drag
+            # it out — width AND height must grow, and the chosen size sticks.
+            rbefore = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            cx = rbefore["x"] + rbefore["width"] - 2
+            cy = rbefore["y"] + rbefore["height"] - 2
+            page.mouse.move(cx, cy)
+            page.mouse.down()
+            for i in range(1, 7):
+                page.mouse.move(cx + 120 * i / 6, cy + 90 * i / 6)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            rcorner = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            check(rcorner["width"] - rbefore["width"] > 60 and rcorner["height"] - rbefore["height"] > 40,
+                  f"L11: corner-drag resizes the window (w {rbefore['width']:.0f}->{rcorner['width']:.0f}, "
+                  f"h {rbefore['height']:.0f}->{rcorner['height']:.0f})")
+            # the right EDGE alone resizes width only (a true side grip)
+            rmid = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
+            ex = rmid["x"] + rmid["width"] - 2
+            ey = rmid["y"] + rmid["height"] / 2
+            page.mouse.move(ex, ey)
+            page.mouse.down()
+            for i in range(1, 5):
+                page.mouse.move(ex + 80 * i / 4, ey)
+            page.mouse.up()
+            page.wait_for_timeout(120)
+            redge = page.evaluate("""() => ({
+              w: Math.round(document.getElementById('ow-smoke-window').getBoundingClientRect().width),
+              saved: localStorage.getItem('winsize-ow-smoke-window'),
+            })""")
+            check(redge["w"] - round(rmid["width"]) > 40,
+                  f"L11: right-edge drag widens the window (w {rmid['width']:.0f}->{redge['w']})")
+            check(bool(redge["saved"]) and '"w"' in (redge["saved"] or ""),
+                  f"L11: the resized geometry persists under winsize-ow-smoke-window ({redge['saved']!r})")
+
             page.mouse.move(640, 500)  # neutral ground: the arbiter's hovered-window pass must not fire
             page.evaluate("document.body.focus()")
             page.keyboard.press("Escape")
@@ -429,6 +624,188 @@ def main() -> int:
             })""")
             check(closed.get("gone") is True, f"kit: close tears the window down ({closed})")
             check(closed.get("focusBack") is True, f"kit: focus returns to the opener (F8) ({closed})")
+
+            # Slot stacking is viewport-clamped (the vault/new-season collision fix):
+            # two TALL windows in ONE slot must BOTH stay on-screen — never shoved
+            # above the top (the original bug pushed the second window off-screen).
+            stack = page.evaluate("""() => {
+              const tall = '<div style="height:420px;width:340px">tall</div>';
+              const a = window.OrwellWindowKit.create({ id: 'ow-stack-a', title: 'Stack A',
+                slot: 'bottom-right', slotKey: 'owstacka', content: tall, icon: '' });
+              const b = window.OrwellWindowKit.create({ id: 'ow-stack-b', title: 'Stack B',
+                slot: 'bottom-right', slotKey: 'owstackb', content: tall, icon: '' });
+              a.open(); b.open();
+              window._owStackA = a; window._owStackB = b;
+              if (window.OrwellSlots && window.OrwellSlots.restackAll) window.OrwellSlots.restackAll();
+              const rect = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
+              return { a: rect('ow-stack-a'), b: rect('ow-stack-b'),
+                       vw: window.innerWidth, vh: window.innerHeight };
+            }""")
+            for nm in ("a", "b"):
+                r = stack[nm]
+                check(r["top"] >= -1 and r["left"] >= -1
+                      and r["left"] <= stack["vw"] and r["top"] <= stack["vh"],
+                      f"slot: stacked window '{nm}' stays in viewport "
+                      f"(top={r['top']:.0f} left={r['left']:.0f} vw={stack['vw']} vh={stack['vh']})")
+            page.evaluate("window._owStackA && window._owStackA.destroy(); "
+                          "window._owStackB && window._owStackB.destroy();")
+            page.wait_for_timeout(120)
+
+            # VIEWPORT RE-CLAMP ON BROWSER RESIZE (the DWE windowing tail): a FLOATING
+            # window dragged near an edge must re-clamp into a SHRUNKEN viewport when the
+            # browser window resizes — the kit clamps on open/drag/resize but had no path
+            # to react to a viewport shrink, so a window could strand partially off-screen
+            # until touched. Open a window, shove it to the bottom-right corner, then shrink
+            # window.innerWidth/innerHeight (real shim) + dispatch 'resize', and assert its
+            # bounding rect stays inside the new viewport. The original innerWidth/Height are
+            # restored after so later checks see the true viewport.
+            reclamp = page.evaluate("""async () => {
+              const realW = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+              const realH = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+              const trueW = window.innerWidth, trueH = window.innerHeight;
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-reclamp-smoke', title: 'Reclamp Test', slot: 'bottom-right',
+                slotKey: 'owreclamp', content: '<div style="width:300px;height:240px">x</div>',
+                icon: '' });
+              w.open();
+              window._owReclamp = w;
+              const el = document.getElementById('ow-reclamp-smoke');
+              // Drag it (via the real slot drag-drop API) to the far bottom-right corner
+              // of the CURRENT (large) viewport — the genuine "dragged near an edge" case.
+              const r0 = el.getBoundingClientRect();
+              if (w._slot) w._slot.saveDragOffset({
+                left: trueW - r0.width - 6, top: trueH - r0.height - 6,
+                width: r0.width, height: r0.height });
+              const before = el.getBoundingClientRect().toJSON();
+              // Shrink the viewport hard, then fire the real resize event.
+              const newW = 520, newH = 420;
+              Object.defineProperty(window, 'innerWidth', { value: newW, configurable: true });
+              Object.defineProperty(window, 'innerHeight', { value: newH, configurable: true });
+              window.dispatchEvent(new Event('resize'));
+              await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+              await new Promise(r => setTimeout(r, 200));  // let the slot observer settle
+              const after = el.getBoundingClientRect().toJSON();
+              // restore the true viewport so downstream checks are unaffected — and
+              // re-fire resize so any width-driven listeners recompute at the real size.
+              if (realW) Object.defineProperty(window, 'innerWidth', realW);
+              if (realH) Object.defineProperty(window, 'innerHeight', realH);
+              window._owReclamp.close();
+              window.dispatchEvent(new Event('resize'));
+              await new Promise(r => requestAnimationFrame(r));
+              return { before, after, newW, newH };
+            }""")
+            a = reclamp["after"]
+            check(a["right"] <= reclamp["newW"] + 1 and a["bottom"] <= reclamp["newH"] + 1
+                  and a["left"] >= -1 and a["top"] >= -1,
+                  f"resize re-clamp: a floating window re-anchors INTO the shrunken viewport "
+                  f"(right={a['right']:.0f}<= {reclamp['newW']}, bottom={a['bottom']:.0f}<= {reclamp['newH']})")
+            check(a["width"] <= reclamp["newW"] - 7 and a["height"] <= reclamp["newH"] - 7,
+                  f"resize re-clamp: an over-sized window shrinks to fit the viewport "
+                  f"(w={a['width']:.0f}, h={a['height']:.0f} <= viewport-8)")
+            page.wait_for_timeout(120)
+
+            # 0054 Phase 2 — DOCKED kit mode: a dockable window can render its full
+            # body INTO #gadget-rail-body (opting OUT of position:fixed + the slot
+            # geometry — ONE position system), the docked flag persists per-window,
+            # and undocking floats it back. (Engine is down, so we drive the kit seam
+            # directly; the rail body exists in the game build.)
+            dock = page.evaluate("""() => {
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-dock-smoke', title: 'Dock Test', slot: 'top-left', slotKey: 'owdocksmoke',
+                content: '<p>docked body</p>', icon: '', dockable: true, defaultDocked: false });
+              w.open();
+              window._owDock = w;
+              const el = document.getElementById('ow-dock-smoke');
+              const beforeFixed = getComputedStyle(el).position;  // floating: fixed
+              const hasToggle = !!el.querySelector('.ow-controls .ow-dock');
+              w.toggleDock();  // float -> dock
+              const d = document.getElementById('ow-dock-smoke');
+              const railBody = document.getElementById('gadget-rail-body');
+              const user = (document.body && document.body.dataset.user) || '';
+              return {
+                hasToggle,
+                beforeFixed,
+                inRail: !!railBody && railBody.contains(d),
+                dockedClass: d.classList.contains('ow-docked'),
+                dockedPos: getComputedStyle(d).position,   // docked: static
+                kitWindow: d.hasAttribute('data-ow-window'),
+                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+                noChip: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-dock-smoke"]'),
+              };
+            }""")
+            check(dock.get("hasToggle") is True and dock.get("beforeFixed") == "fixed",
+                  f"0054 P2: a dockable window has the dock toggle and floats first ({dock})")
+            check(dock.get("inRail") is True and dock.get("dockedClass") is True
+                  and dock.get("dockedPos") == "static" and dock.get("kitWindow") is True,
+                  f"0054 P2: docking mounts the FULL window into the rail, static (no slot geometry) ({dock})")
+            check(dock.get("flag") == "1" and dock.get("noChip") is True,
+                  f"0054 P2: the docked flag persists and no chip dock is used ({dock})")
+            undock = page.evaluate("""() => {
+              window._owDock.toggleDock();  // dock -> float
+              const d = document.getElementById('ow-dock-smoke');
+              const user = (document.body && document.body.dataset.user) || '';
+              const railBody = document.getElementById('gadget-rail-body');
+              const out = {
+                floats: getComputedStyle(d).position === 'fixed',
+                notDocked: !d.classList.contains('ow-docked'),
+                notInRail: !(railBody && railBody.contains(d)),
+                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+              };
+              window._owDock.close();
+              return out;
+            }""")
+            check(undock.get("floats") is True and undock.get("notDocked") is True
+                  and undock.get("notInRail") is True and undock.get("flag") == "0",
+                  f"0054 P2: undocking floats it back and persists the float choice ({undock})")
+
+            # A7 [ruling #19]: the Win7 fly-out — minimize applies the DISTINCT
+            # ow-anim-minimize keyframe with a real fly vector toward the dock; close
+            # applies the DISTINCT ow-anim-close keyframe. (Reduced-motion stripping is
+            # source-pinned in pytest; here we prove the two motions are wired + named.)
+            fly = page.evaluate("""() => {
+              const w = window.OrwellWindowKit.create({
+                id: 'ow-fly-smoke', title: 'Fly Test', slot: 'top-left', slotKey: 'owflysmoke',
+                content: '<p>fly</p>', icon: '' });
+              w.open();
+              window._owFly = w;
+              const el = document.getElementById('ow-fly-smoke');
+              w.minimize();
+              return { minClass: el.classList.contains('ow-anim-minimize'),
+                       flyX: el.style.getPropertyValue('--ow-fly-x') };
+            }""")
+            check(fly.get("minClass") is True and fly.get("flyX") not in (None, ""),
+                  f"A7: minimize applies the ow-anim-minimize fly-out with a fly vector ({fly})")
+            page.wait_for_timeout(320)  # let the minimize settle (chip lands), then restore + close
+            page.evaluate("""() => {
+              const dock = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-fly-smoke"]');
+              if (dock) dock.click();
+            }""")
+            page.wait_for_timeout(150)
+            flyc = page.evaluate("""() => {
+              const el = document.getElementById('ow-fly-smoke');
+              if (!el) return { closeClass: false };
+              // drive close via the × button to exercise the distinct close keyframe
+              const btn = el.querySelector('.ow-close');
+              if (btn) btn.click();
+              return { closeClass: el.classList.contains('ow-anim-close') };
+            }""")
+            check(flyc.get("closeClass") is True,
+                  f"A7: close applies the distinct ow-anim-close keyframe ({flyc})")
+            page.wait_for_timeout(260)  # let the close fly-away finish + tear down
+            # Belt-and-suspenders cleanup: ensure no smoke window/chip lingers in the
+            # kit stack or the dock before the G14/F8 .modal-family checks run.
+            page.evaluate("""() => {
+              ['_owDock', '_owFly', '_owSmoke'].forEach(k => {
+                try { if (window[k] && window[k].destroy) window[k].destroy(); } catch (_) {}
+                window[k] = null;
+              });
+              ['ow-dock-smoke', 'ow-fly-smoke', 'ow-smoke-window'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.remove();
+                const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="' + id + '"]');
+                if (chip) chip.remove();
+              });
+            }""")
+            page.wait_for_timeout(120)
 
             # G14 (DWE audit F9b): ONE z-authority for the .modal family —
             # modalManager's _bringToFront defers to ui.js's counter instead of
@@ -604,7 +981,7 @@ def main() -> int:
             #   F1: collapse the status HUD (trusted click) → RELOAD → still
             #       collapsed, restored from the SAME per-user+game key the
             #       header click writes (E71).
-            g16 = browser.new_page()
+            g16 = new_page(browser)
             g16_state = (
                 '{"started": true, "week": 1, "phase": "nominations",'
                 ' "player": {"id": "player", "name": "The Player", "status": "active"},'
@@ -662,6 +1039,32 @@ def main() -> int:
                          "G16: the cast seam + the kit mount")
             g16.evaluate("window._orwellCastEnsure()")
             g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
+
+            # L16: a cast portrait is full COLOR while active/jury and grayscale ONLY
+            # once EVICTED. Inject the three roster states into the real grid and read
+            # the computed filter off each card's portrait img — the eviction state is
+            # the one and only monochrome treatment.
+            l16 = g16.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              if (!grid) return { ok: false, why: 'no-grid' };
+              const mk = (cls) => {
+                const card = document.createElement('div');
+                card.className = 'oc-hg ' + cls;
+                const holder = document.createElement('div'); holder.className = 'oc-portrait';
+                const img = document.createElement('img');
+                img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+                holder.appendChild(img); card.appendChild(holder); grid.appendChild(card);
+                return getComputedStyle(img).filter;
+              };
+              return { ok: true,
+                       active: mk(''), jury: mk('oc-out'),
+                       evicted: mk('oc-out oc-evicted') };
+            }""")
+            gray = lambda f: bool(f) and "grayscale" in f and "grayscale(0" not in f.replace(" ", "")
+            check(l16.get("ok") is True and not gray(l16.get("active", ""))
+                  and not gray(l16.get("jury", "")) and gray(l16.get("evicted", "")),
+                  f"L16: cast portraits are color until EVICTED, then grayscale ({l16})")
+
             g16.click("#orwell-cast .ow-min")
             g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
                 "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
@@ -729,6 +1132,177 @@ def main() -> int:
                   f"G16/F2: after restore + reload the cast window comes back OPEN, no stale chip ({after2})")
             g16.close()
 
+            # 0051 — IN-CHARACTER IMAGES render (the owed browser-render validation): with a
+            # provider configured (roster.imagesAvailable:true) and a real portrait URL on a
+            # card, the cast grid must render an actual <img> that is PRESENT, has the served
+            # src, and is SIZED on screen (non-zero, ~square holder) — not a zero-box or a
+            # bare placeholder glyph. Driven for REAL through the live fetch→render path
+            # (_orwellCastEnsure → /api/orwell/roster) on an isolated routed page, so this is
+            # the same code that paints the player's actual cast portraits. Vault-free: the
+            # roster projection carries only public id/name/status + the portrait URL.
+            por = new_page(browser)
+            # a 1x1 transparent GIF data-URI stands in for a generated portrait file (no engine,
+            # no network) — the renderer treats it like any portrait src.
+            _PORTRAIT_URI = ("data:image/gif;base64,"
+                             "R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==")
+            por_roster = (
+                '{"imagesAvailable": true, "portraitsTotal": 2, "portraitsPresent": 2, "roster": ['
+                '{"id": "player", "name": "The Player", "status": "active", "isPlayer": true,'
+                ' "portrait": "' + _PORTRAIT_URI + '"},'
+                '{"id": "npc:1", "name": "A Houseguest", "status": "active",'
+                ' "portrait": "' + _PORTRAIT_URI + '"}]}'
+            )
+            por.route("**/api/orwell/roster", _g16_json(por_roster))
+            por.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            por.goto(base + "/", wait_until="load", timeout=30000)
+            _por_ok = False
+            for _ in range(75):  # CSP blocks string-predicate wait_for_function; poll via evaluate
+                if por.evaluate("typeof window._orwellCastEnsure === 'function'"):
+                    _por_ok = True
+                    break
+                por.wait_for_timeout(200)
+            check(_por_ok, "0051: the cast seam mounts (portrait render page)")
+            por.evaluate("window._orwellCastEnsure()")
+            por.wait_for_selector("#orwell-cast #oc-grid img", timeout=8000)
+            por.wait_for_timeout(400)  # let the kit open animation settle before measuring geometry
+            por_img = por.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              const imgs = grid ? [...grid.querySelectorAll('.oc-portrait img')] : [];
+              if (!imgs.length) return { count: 0 };
+              const r = imgs[0].getBoundingClientRect();
+              const holder = imgs[0].closest('.oc-portrait').getBoundingClientRect();
+              return {
+                count: imgs.length,
+                hasSrc: !!imgs[0].getAttribute('src'),
+                w: Math.round(r.width), h: Math.round(r.height),
+                hw: Math.round(holder.width), hh: Math.round(holder.height),
+                // a placeholder glyph (the person silhouette) renders instead of an <img>
+                // when no portrait — assert these cards are NOT falling back to placeholders.
+                placeholders: grid.querySelectorAll('.oc-portrait .oc-ph').length,
+              };
+            }""")
+            check(por_img.get("count", 0) >= 2 and por_img.get("hasSrc") is True,
+                  f"0051: a real portrait <img> renders per cast card ({por_img})")
+            check(por_img.get("w", 0) >= 40 and por_img.get("h", 0) >= 40,
+                  f"0051: the portrait img is SIZED on screen (non-zero box) ({por_img})")
+            # the holder is the square (aspect-ratio 1/1) frame — width and height track each
+            # other (a collapsed/overflowing card would show a wildly non-square holder).
+            _hw, _hh = por_img.get("hw", 0), por_img.get("hh", 0)
+            check(_hw >= 40 and _hh >= 40 and abs(_hw - _hh) <= max(6, round(_hw * 0.12)),
+                  f"0051: the portrait holder is a sized ~1:1 frame, no overflow ({por_img})")
+            check(por_img.get("placeholders", 1) == 0,
+                  f"0051: provider-on cards render the image, not the placeholder glyph ({por_img})")
+            por.close()
+
+            # 0057 — SEASONS-AS-LEVELS render (the owed browser-render validation): the season
+            # progress bar, the "Season N" chip, and the persistent post-season "New season"
+            # surface must actually render — bar present & ≤5px & no horizontal overflow; chip
+            # reads "Season N" past season 1; the post-season window MOUNTS. Driven for REAL
+            # through each module's live refresh against routed Vault-free projections
+            # (/season, /status, /state) on an isolated page. The terminal state
+            # (moment:"post-season") forces the bar to 100% AND triggers the new-season panel.
+            sea = new_page(browser)
+            sea.route("**/api/orwell/season", _g16_json('{"season": 3}'))  # past season 1 → chip
+            sea.route("**/api/orwell/status",
+                      _g16_json('{"started": true, "week": 9, "phase": "finale"}'))
+            sea.route("**/api/orwell/state", _g16_json(
+                '{"started": true, "week": 9, "phase": "finale", "moment": "post-season",'
+                ' "player": {"id": "player", "name": "The Player", "status": "active"},'
+                ' "house": [{"id": "npc:1", "name": "A Houseguest", "status": "active"},'
+                ' {"id": "npc:2", "name": "Another Houseguest", "status": "active"}]}'))
+            sea.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            sea.route("**/api/orwell/finale", _g16_json('{"finale": null}'))
+            sea.goto(base + "/", wait_until="load", timeout=30000)
+            _sea_ok = False
+            for _ in range(75):
+                if sea.evaluate("typeof window._orwellSeasonProgressEnsure === 'function'"
+                                " && typeof window.orwellRefreshSeasonProgress === 'function'"):
+                    _sea_ok = True
+                    break
+                sea.wait_for_timeout(200)
+            check(_sea_ok, "0057: the season-progress seam + refresh mount")
+            sea.evaluate("window.orwellRefreshSeasonProgress()")  # real refresh against the routes
+            sea.wait_for_selector("#orwell-season-progress", timeout=8000)
+            sea.wait_for_timeout(700)  # the .5s fill transition + the chip's settle reflow
+            sea_bar = sea.evaluate("""() => {
+              const bar = document.getElementById('orwell-season-progress');
+              if (!bar) return { present: false };
+              const r = bar.getBoundingClientRect();
+              const fill = bar.querySelector('.osp-fill');
+              const fr = fill ? fill.getBoundingClientRect() : null;
+              return {
+                present: true,
+                visible: getComputedStyle(bar).display !== 'none',
+                h: Math.round(r.height),
+                w: Math.round(r.width),
+                vw: window.innerWidth,
+                role: bar.getAttribute('role'),
+                valuenow: parseInt(bar.getAttribute('aria-valuenow') || '-1', 10),
+                // post-season ⇒ fill at 100%, so the fill width tracks the bar width.
+                fullFill: !!fr && r.width > 0 && fr.width >= r.width - 2,
+                // the page itself must not scroll horizontally because of the bar.
+                pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+              };
+            }""")
+            check(sea_bar.get("present") is True and sea_bar.get("visible") is True
+                  and sea_bar.get("role") == "progressbar",
+                  f"0057: the season progress bar renders (a progressbar) ({sea_bar})")
+            check(0 < sea_bar.get("h", 0) <= 5,
+                  f"0057: the progress bar is a thin (<=5px) bar ({sea_bar})")
+            check(sea_bar.get("w", 0) >= sea_bar.get("vw", 0) - 2 and sea_bar.get("pageOverflow", 99) <= 1,
+                  f"0057: the bar spans the viewport WITHOUT adding a horizontal scrollbar ({sea_bar})")
+            check(sea_bar.get("valuenow", -1) == 100 and sea_bar.get("fullFill") is True,
+                  f"0057: post-season forces the fill to 100% ({sea_bar})")
+            sea_chip = sea.evaluate("""() => {
+              const chip = document.getElementById('orwell-season-chip');
+              if (!chip) return { present: false };
+              const r = chip.getBoundingClientRect();
+              return { present: true, visible: getComputedStyle(chip).display !== 'none',
+                       text: (chip.textContent || '').trim(),
+                       right: Math.round(r.right), vw: window.innerWidth, top: Math.round(r.top) };
+            }""")
+            check(sea_chip.get("present") is True and sea_chip.get("visible") is True
+                  and sea_chip.get("text") == "Season 3",
+                  f"0057: the 'Season N' chip renders past season 1 ({sea_chip})")
+            check(sea_chip.get("right", 99999) <= sea_chip.get("vw", 0) + 1 and sea_chip.get("top", -1) >= 0,
+                  f"0057: the season chip sits inside the viewport (no overflow/overlap) ({sea_chip})")
+            # the persistent post-season "New season" surface MOUNTS on the terminal state.
+            _ns_ok = False
+            for _ in range(75):
+                if sea.evaluate("typeof window._orwellNewSeasonRefresh === 'function'"
+                                " && !!window.OrwellWindowKit"):
+                    _ns_ok = True
+                    break
+                sea.wait_for_timeout(200)
+            check(_ns_ok, "0057: the new-season seam + the window kit mount")
+            sea.evaluate("window._orwellNewSeasonRefresh()")  # real post-season gate + show()
+            sea.wait_for_selector("#orwell-new-season", state="visible", timeout=8000)
+            sea.wait_for_timeout(300)  # kit open animation
+            sea_ns = sea.evaluate("""() => {
+              const el = document.getElementById('orwell-new-season');
+              if (!el) return { mounted: false };
+              const r = el.getBoundingClientRect();
+              return {
+                mounted: true,
+                visible: getComputedStyle(el).display !== 'none',
+                kit: el.hasAttribute('data-ow-window'),
+                keep: !!el.querySelector('[data-keep="1"]'),
+                recast: !!el.querySelector('[data-keep="0"]'),
+                w: Math.round(r.width), h: Math.round(r.height),
+                // inside the viewport (the vault/new-season slot-collision fix) — never stranded.
+                inView: r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1
+                        && r.left >= -1 && r.top >= -1,
+              };
+            }""")
+            check(sea_ns.get("mounted") is True and sea_ns.get("visible") is True
+                  and sea_ns.get("kit") is True,
+                  f"0057: the post-season 'New season' surface mounts (kit window) ({sea_ns})")
+            check(sea_ns.get("keep") is True and sea_ns.get("recast") is True,
+                  f"0057: it offers keep + recast ({sea_ns})")
+            check(sea_ns.get("w", 0) >= 40 and sea_ns.get("h", 0) >= 40 and sea_ns.get("inView") is True,
+                  f"0057: the new-season window is sized and inside the viewport (no overflow) ({sea_ns})")
+            sea.close()
+
             # F6 tail (wave 3): the engine-down banner's dismiss is the shared
             # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
@@ -760,6 +1334,108 @@ def main() -> int:
             check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
+
+            # L12: the cast roster can be PINNED into the control-room gadget rail as a
+            # compact gadget — it mounts INTO #gadget-rail-body, the pinned state
+            # persists, and un-pinning hides it. (Engine is down here, so we inject a
+            # synthetic roster face to prove the gadget renders + reveals the rail.)
+            l12 = page.evaluate("""() => {
+              if (!window.OrwellCastPin) return { ok: false, why: 'no-seam' };
+              window.OrwellCastPin.setPinned(true);
+              const el = document.getElementById('orwell-cast-pin');
+              if (!el) return { ok: false, why: 'no-gadget' };
+              const railBody = document.getElementById('gadget-rail-body');
+              const inRail = !!railBody && railBody.contains(el);
+              // simulate a render landing (the live path fetches /api/orwell/roster)
+              el.style.display = 'block';
+              el.querySelector('[data-role="portraits"]').innerHTML =
+                '<div class="ocp-face"><span class="ocp-ph">x</span></div>' +
+                '<div class="ocp-face ocp-evicted"><span class="ocp-ph">x</span></div>';
+              const user = (document.body && document.body.dataset.user) || '';
+              const flag = localStorage.getItem('orwell-cast-pinned:' + user);
+              const faces = el.querySelectorAll('.ocp-face').length;
+              return { ok: true, inRail, flag, faces,
+                       hasUnpin: !!el.querySelector('[data-act="unpin"]') };
+            }""")
+            check(l12.get("ok") is True and l12.get("inRail") is True
+                  and l12.get("flag") == "1" and l12.get("faces") == 2
+                  and l12.get("hasUnpin") is True,
+                  f"L12: the cast pins into the gadget rail as a compact 2-portrait gadget ({l12})")
+            l12b = page.evaluate("""() => {
+              window.OrwellCastPin.setPinned(false);
+              const el = document.getElementById('orwell-cast-pin');
+              const user = (document.body && document.body.dataset.user) || '';
+              return { hidden: getComputedStyle(el).display === 'none',
+                       flag: localStorage.getItem('orwell-cast-pinned:' + user) };
+            }""")
+            check(l12b.get("hidden") is True and l12b.get("flag") is None,
+                  f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
+
+            # L13: the rail gadgets are drag-reorderable and the order PERSISTS. Each
+            # gadget carries a keyboard-focusable drag handle; the controller's reorder
+            # seam (the live path is HTML5 drag-and-drop) persists the sequence per-user
+            # and lays the gadgets out by inline `order`.
+            l13 = page.evaluate("""() => {
+              const body = document.getElementById('gadget-rail-body');
+              if (!body) return { ok: false, why: 'no-body' };
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              // a synthetic second gadget so there's something to reorder past
+              let probe = document.getElementById('orwell-l13-probe');
+              if (!probe) {
+                probe = document.createElement('section');
+                probe.id = 'orwell-l13-probe';
+                probe.style.display = 'block';
+                probe.textContent = 'probe';
+                body.appendChild(probe);
+              }
+              if (!window.OrwellGadgetRail || !window.OrwellGadgetRail.reorder)
+                return { ok: false, why: 'no-reorder-seam' };
+              const before = window.OrwellGadgetRail.currentOrder();
+              window.OrwellGadgetRail.reorder(before.slice().reverse());
+              const after = window.OrwellGadgetRail.currentOrder();
+              const user = (document.body && document.body.dataset.user) || '';
+              const saved = localStorage.getItem('orwell-gadget-order:' + user);
+              return { ok: true, reversed: after.join() === before.slice().reverse().join(),
+                       saved: !!saved, savedHasProbe: !!saved && saved.indexOf('orwell-l13-probe') !== -1,
+                       handles: body.querySelectorAll('.grail-drag[draggable="true"]').length,
+                       handleHasLabel: !!(body.querySelector('.grail-drag') &&
+                         body.querySelector('.grail-drag').getAttribute('aria-label')) };
+            }""")
+            check(l13.get("ok") is True and l13.get("reversed") is True
+                  and l13.get("saved") is True and l13.get("savedHasProbe") is True,
+                  f"L13: rail gadgets drag-reorder and the order persists ({l13})")
+            check((l13.get("handles") or 0) >= 1 and l13.get("handleHasLabel") is True,
+                  f"L13: every gadget has a labeled, draggable, keyboard-focusable handle ({l13})")
+            # clean up the synthetic probe so it can't bleed into later assertions
+            page.evaluate("""() => {
+              const p = document.getElementById('orwell-l13-probe'); if (p) p.remove();
+              const u = (document.body && document.body.dataset.user) || '';
+              localStorage.removeItem('orwell-gadget-order:' + u);
+            }""")
+
+            # 0054 strip refactor: the COLLAPSED icon strip is derived from the gadget
+            # registry, filtered to the gadgets actually mounted-and-visible, in the rail's
+            # current order. Collapse the rail and assert the strip maps 1:1 (same ids, same
+            # order) to the active gadget set, and that each icon carries its gadget id so a
+            # click acts on THAT gadget (not a blanket expand).
+            strip11 = page.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const api = window.OrwellGadgetRail;
+              if (!api || !api.activeGadgets) return { ok: false, why: 'no-api' };
+              const rail = document.getElementById('gadget-rail');
+              const wasCollapsed = rail.getAttribute('data-collapsed') === 'true';
+              const toggle = document.getElementById('gadget-rail-toggle');
+              if (!wasCollapsed && toggle) toggle.click();   // enter the icon-strip mode
+              const active = api.activeGadgets();
+              const strip = api.stripGadgets();
+              const allReg = strip.every(id => api.registry.some(g => g.id === id));
+              if (!wasCollapsed && toggle) toggle.click();   // restore expanded
+              return { ok: true, active: active, strip: strip,
+                       match: active.join() === strip.join(), allReg: allReg };
+            }""")
+            check(strip11.get("ok") is True and strip11.get("match") is True
+                  and strip11.get("allReg") is True and len(strip11.get("strip") or []) >= 1,
+                  f"0054: collapsed strip maps 1:1 to active gadgets, in order ({strip11})")
 
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
@@ -899,7 +1575,7 @@ def main() -> int:
             # Hamburger / sidebar alignment: on a phone viewport the hamburger must sit on
             # the SAME side as the sidebar, whichever side that is. A stale CSS rule used to
             # hard-pin the hamburger right on mobile, so a left sidebar left them mismatched.
-            mob = browser.new_page(viewport={"width": 390, "height": 844})
+            mob = new_page(browser, viewport={"width": 390, "height": 844})
             mob.goto(base + "/", wait_until="load", timeout=30000)
             mob.wait_for_timeout(2500)
 
@@ -1230,7 +1906,7 @@ def main() -> int:
             # lands (F5 — a restored confessional must never be sendable to the house);
             # an approach prefill keeps its pending chip; and the casting seat re-arms.
             # Driven for REAL on fresh pages: real typing, real reloads, real clicks.
-            g17 = browser.new_page()
+            g17 = new_page(browser)
             # A STARTED game is staged with the sanctioned route-mock pattern (the G15
             # decision fake above; the G5 audit drove its DR cell against a real game):
             # the Diary-Room gate legitimately EXITS DR mode when no game is running, so
@@ -1299,35 +1975,117 @@ def main() -> int:
                   "G17/F5: the confessional text itself is restored")
             g17.close()
 
-            # F4: the casting-seat prefill re-arms after a refresh (the marker used to
-            # one-shot at prefill time, stranding an empty composer forever). Pre-game is
-            # staged with routed fakes — the sanctioned G5-audit pattern, same as the G15
-            # decision route above: state says started:false, models says one is live.
-            f4 = browser.new_page()
+            # P1 OOBE: the houseguest IMAGE is the player's FIRST interaction. Pre-game with a model
+            # configured but NO cast photo secured, the chat is LOCKED (gate up, composer NOT
+            # prefilled — the old seat-line pre-prompt is gone) and the WELCOME MODAL greets the
+            # player. Securing a photo releases the gate. Pre-game is staged with routed fakes — the
+            # sanctioned G5-audit pattern: state started:false, models live, intake NOT finalized.
+            f4 = new_page(browser)
             f4.route("**/api/orwell/state",
                      lambda r: r.fulfill(status=200, content_type="application/json",
                                          body='{"started": false}'))
             f4.route("**/api/models",
                      lambda r: r.fulfill(status=200, content_type="application/json",
                                          body='{"items": [{"models": ["m"], "offline": false}]}'))
+            # the gate's "is a photo secured?" probe — NOT finalized yet, so the chat must lock
+            _intake_finalized = {"v": False}
+            f4.route("**/api/orwell/portrait/intake",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body=('{"present": true, "mode": "reference", "finalized": '
+                                               + ("true" if _intake_finalized["v"] else "false")
+                                               + ', "candidates": 0}')))
             f4.goto(base + "/", wait_until="load", timeout=30000)
-            f4.wait_for_timeout(3000)  # route() probes + the fresh-session click + the prefill
+            f4.wait_for_timeout(3000)  # route() probes + the gate recompute + the welcome modal
+            # the composer is NOT prefilled — the pre-prompt is removed; the image step comes first
             f4_seat0 = f4.input_value("#message")
-            check(f4_seat0.startswith("I take my seat"),
-                  f"G17/F4 setup: pre-game boot prefills the casting-seat line ({f4_seat0!r})")
+            check(not f4_seat0.strip(),
+                  f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
+            # the welcome modal is its own modal (greets, points at the cast photo)
+            f4_welcome = f4.evaluate(
+                "() => { const c = document.querySelector('#orwell-onboarding .ob-card');"
+                "  return c ? c.textContent : ''; }")
+            check("cast photo" in (f4_welcome or "").lower(),
+                  f"P1: the welcome modal greets and points at the cast photo ({(f4_welcome or '')[:60]!r})")
+            # dismiss the welcome (its own modal) to reach the locked chat underneath
+            if f4.query_selector("#orwell-onboarding [data-ob-welcome-go]"):
+                f4.click("#orwell-onboarding [data-ob-welcome-go]")
+                f4.wait_for_timeout(400)
+            # HARD GATE: the chat input + send are LOCKED until a photo is secured, and the page
+            # says why ("Add your cast photo to begin").
+            check(f4.evaluate("!!document.getElementById('message').disabled") is True,
+                  "P1: the chat input is LOCKED pre-image (disabled)")
+            check(f4.evaluate("() => { const s = document.querySelector('.send-btn'); return !!(s && s.disabled); }") is True,
+                  "P1: the send affordance is LOCKED pre-image (disabled)")
+            # P1 OOBE overhaul: the cast-photo step is a PROPER OrwellWindow (composes the kit),
+            # title-cased, and — because it GATES the chat — NON-DISMISSABLE (no close/minimize
+            # control). The single instruction lives in the window.
+            f4.wait_for_timeout(400)  # let the headshot window's route() mount it
+            cast_win = f4.evaluate("""() => {
+              const el = document.getElementById('orwell-headshot');
+              if (!el) return { mounted: false };
+              return {
+                mounted: true,
+                kit: el.classList.contains('ow-window') && el.hasAttribute('data-ow-window'),
+                title: (el.querySelector('.ow-title') || {}).textContent || '',
+                hasBody: !!el.querySelector('.ow-body'),
+                close: !!el.querySelector('.ow-close'),
+                min: !!el.querySelector('.ow-min'),
+                lead: !!el.querySelector('.hs-lead'),
+              };
+            }""")
+            check(cast_win.get("mounted") is True and cast_win.get("kit") is True,
+                  f"P1: the cast-photo step is a kit OrwellWindow ({cast_win})")
+            check(cast_win.get("title", "").strip().lower() == "your cast photo",
+                  f"P1: the cast-photo window is title-cased ({cast_win})")
+            check(cast_win.get("close") is False and cast_win.get("min") is False,
+                  f"P1: the gating cast-photo window is NON-DISMISSABLE (no close/minimize) ({cast_win})")
+            check(cast_win.get("lead") is True,
+                  f"P1: the ONE cast-photo instruction lives in the window body ({cast_win})")
+            # the redundant inline banner note is GONE (no banner-vs-card-vs-placeholder dupes)
+            check(f4.evaluate("!document.getElementById('orwell-chat-gate-note')") is True,
+                  "P1: the redundant inline gate banner is removed (consolidated to the window)")
+            check(f4.evaluate("(document.getElementById('message').getAttribute('placeholder') || '')")
+                  == "Add your cast photo to begin",
+                  "P1: the composer placeholder states the gate reason (the minimal hint)")
+            # DE-OVERLAP (item 2): the splash tagline + rotating tip are SUPPRESSED during the
+            # cast-photo step (ow-onboarding / ow-casting-headshot-open), and the cast-photo
+            # window does not intersect the visible welcome brand mark.
+            overlap = f4.evaluate("""() => {
+              const onb = document.body.classList.contains('ow-onboarding')
+                       || document.body.classList.contains('ow-casting-headshot-open');
+              const tip = document.getElementById('welcome-tip');
+              const sub = document.getElementById('welcome-sub');
+              const vis = (e) => { if (!e) return false; const cs = getComputedStyle(e);
+                return cs.display !== 'none' && parseFloat(cs.opacity) > 0.01 && e.getBoundingClientRect().height > 1; };
+              const win = document.getElementById('orwell-headshot');
+              const splash = document.getElementById('welcome-screen');
+              const name = document.querySelector('#welcome-screen .welcome-name');
+              const inter = (a, b) => !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+              // The splash is faded out while the window is up — a non-visible brand mark
+              // is not a visual overlap. Only a VISIBLE splash that geometrically intersects
+              // the window counts.
+              const splashVisible = vis(splash);
+              let nameOverlap = false;
+              if (win && name && splashVisible) {
+                const wr = win.getBoundingClientRect(), nr = name.getBoundingClientRect();
+                if (nr.height > 1 && wr.height > 1) nameOverlap = inter(wr, nr);
+              }
+              return { onb, tipVisible: vis(tip), subVisible: vis(sub), splashVisible, nameOverlap };
+            }""")
+            check(overlap.get("onb") is True,
+                  f"P1: an onboarding body flag is set during the cast-photo step ({overlap})")
+            check(overlap.get("tipVisible") is False and overlap.get("subVisible") is False,
+                  f"P1: the splash tip + tagline are suppressed during onboarding ({overlap})")
+            check(overlap.get("nameOverlap") is False,
+                  f"P1: the cast-photo window does not overlap the welcome brand mark ({overlap})")
+            # securing a photo releases the gate (intake now finalized + the avatarchanged signal)
+            _intake_finalized["v"] = True
+            f4.evaluate("window.dispatchEvent(new CustomEvent('orwell:avatarchanged'))")
+            f4.wait_for_timeout(600)  # the gate re-derives from the finalized intake
+            check(f4.evaluate("!document.getElementById('message').disabled") is True,
+                  "P1: securing a cast photo UNLOCKS the chat input")
             check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
-                  "G17/F4 setup: the seat marker is set (the F7 one-session fence)")
-            # The exact F4 trap: no draft left (composer emptied for real) AND the marker
-            # claiming "interview underway" — a refresh used to strand this forever.
-            f4.click("#message")
-            f4.keyboard.press("Control+a")
-            f4.keyboard.press("Delete")
-            f4.wait_for_timeout(300)  # the empty write lands (drops the F3 record)
-            f4.reload(wait_until="load")
-            f4.wait_for_timeout(3000)  # route() + the re-arm's settle delay
-            f4_seat1 = f4.input_value("#message")
-            check(f4_seat1.startswith("I take my seat"),
-                  f"G17/F4: with the marker set and no draft, the seat prefill RE-ARMS after reload ({f4_seat1!r})")
+                  "P1: the fresh-session fence is still set once per interview (F7)")
             f4.close()
 
             # S1+S2 / F1 (2026-06-11 settings-wiring audit): the Shortcuts
@@ -1337,7 +2095,7 @@ def main() -> int:
             # every custom shortcut silently reverted on reload while the tab
             # still rendered it as saved. Pin: rebind → reload → the new combo
             # is loaded AND fires; the old default no longer does.
-            s1 = browser.new_page()
+            s1 = new_page(browser)
             s1.goto(base + "/", wait_until="load", timeout=30000)
             g17_settle(s1)
             s1.click("#user-bar-settings")

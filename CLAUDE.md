@@ -10,8 +10,8 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: feature-complete through the drafted spec set (BDD/TDD-first; 2026-06-11).** Every
-feature **0001–0050 is built and green except 0022 / MVP-2 (the one deferral)** — plus **0053**
+**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Every
+feature **0001–0063 is built and green except 0022 (MVP-2, deferred) and 0062 (zeitgeist snapshot, spec only)** — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
 including the **living, persisted consequence loop (0023)** (act → hidden impact → persist →
@@ -40,7 +40,8 @@ the game-build provider gating (OpenRouter image models via `/chat/completions`)
 item** — the remaining known deferrals are listed under [Current status](#current-status); the
 governing design rulings are `docs/audits/2026-06-09-product-audit.md` ("Remediation
 principles"), the **product-owner rulings #1–#21** in `docs/audits/2026-06-10-full-product-audit.md`,
-and ADR `docs/decisions/0003`.
+and ADRs `docs/decisions/0003` (the conversation is the game) and `docs/decisions/0005` (split
+authority by openness — the engine records the open set of social play, never normalizes it).
 
 ## Source of truth — read these first
 
@@ -188,6 +189,18 @@ constrained extraction call (`{withIds, kind, content}`, model-proposed directio
 recording always takes precedence. When debugging "the game won't advance" or "social play has no
 consequence," look here, not only at the engine.
 
+**Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
+*openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
+the Vault) is engine-dictated — *no dynamism to lose* — while the **open set** (the meaning/texture
+of social play) is recorded faithfully and **never normalized** into a closed bucket in a way that
+changes what can be narrated or played next. Concretely (PR #355): `recordInteraction` / the 0023
+`ConsequenceEngine` take an optional, Vault-free `consequence` descriptor — the model proposes the
+*shape* (which edge moves, which direction, relative `emphasis`); the engine keeps the bounded,
+seeded *magnitude* (no raw number crosses; `kind` is the floor, so no descriptor ⇒ byte-identical
+fold). `tests/unit/expressiveNonCollapse.test.ts` + `frontend/tests/test_expressive_non_collapse.py`
+are the permanent gate, and the FE desync guard may fire only on closed-set board claims, never on
+creative prose.
+
 ## Characters, souls & per-moment temperature
 
 - **Only the player's profile is human-authored** (first-run OOBE). **All NPC profiles are
@@ -296,9 +309,9 @@ Stack: **TypeScript / Node 22**, hexagonal, pure domain core. Test lanes: **Vite
 selectively — most "property" suites are seeded fixed-loop distribution tests, which is
 adequate for their claims; audit T18), and **dependency-cruiser** (the *structural* Vault-Wall
 test — proves no outward module imports `VaultStore`/`VectorIndex`, type-only imports
-included). Datastore is
-**in-memory** today; **SQLite (`better-sqlite3`) → Postgres** and **sqlite-vec → pgvector**
-(the latter engine-only) land behind their ports with the persistence/soul features.
+included). Datastore: the default runtime is **in-memory + file**; a **SQLite (`better-sqlite3`) +
+sqlite-vec** save store is **built and opt-in** (`ORWELL_STORE=sqlite`, engine-only, #330). **Postgres
++ pgvector** are the next tier behind the same ports (still deferred).
 
 | Command | What it does |
 |---|---|
@@ -307,21 +320,24 @@ included). Datastore is
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run build` | Bundle the engine to `dist/main.js` + the embedding worker to `dist/embedWorker.js` (esbuild; `fastembed` stays external). |
 | `npm start` | Run the built engine — the HTTP MCP server: the REST-ish tool API (`/:channel/{tools,call}`) **plus** an additive MCP/JSON-RPC 2.0 envelope (`POST /:channel/rpc` — `initialize`/`tools/list`/`tools/call`, notifications + batch; same auth/isolation guardrails). The SSE server-push stream is unimplemented and unneeded (no server-initiated messages). `ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks. |
-| `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test. |
+| `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test (the WHOLE suite, incl. the heavy sims). |
+| `npm run test:unit:fast` | Vitest minus the two heavy simulation files (`tests/uat/**` + `juryReach`); what CI's `test` job runs via `test:ci`. |
+| `npm run test:heavy` | Just the heavy simulation files (the full-game UAT — now three split files — + the juryReach and calibration-gradient gates); CI's parallel `heavy-sims` matrix runs them one-file-per-runner via `test:heavy:{uat-12seed,uat-5seed,uat-decisions,jury,gradient}`. |
 | `npm run test:bdd` | Cucumber.js over the **implemented** `.feature` files. |
 | `npm run test:arch` | dependency-cruiser CLI (forbidden-edge report). |
-| `npm run test:cov` | Vitest with v8 coverage (excludes `src/ports/**` and `src/main.ts`). |
+| `npm run test:cov` | Vitest with v8 coverage (excludes `src/ports/**`, `src/main.ts`, and the heavy sims — the v8-instrumented re-run of which added no gated-dir branch coverage). |
+| `npm run test:ci` | The `test`-job composite: `typecheck` → `build` → `test:unit:fast` → `test:bdd` (the heavy sims run in the parallel `heavy-sims` job). |
 | `npm run test:watch` | Vitest watch mode. |
 
 - Single unit file: `npx vitest run tests/unit/visibility.test.ts`.
 - Single BDD scenario: `NODE_OPTIONS='--import tsx' npx cucumber-js docs/features/0001-vault-wall-isolation.feature:LINE`.
 - `cucumber.cjs` `paths` lists only the **implemented** features; add the next `.feature` there as each is built to green (priority order). It is the canonical list of what is wired into the BDD gate.
 - **Test setup:** `tests/support/sandbox.ts` is the canonical test-environment factory — use it (not manual wiring) when adding new unit or integration tests. BDD step definitions use `features/support/world.ts`.
-- **UAT lane:** `tests/uat/fullGameUat.test.ts` plays a full game to completion (bypasses HTTP to avoid CI stale-loop flakes); it runs as part of `vitest run`.
-- **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it). **Pure turn-driven is the DEFAULT** (`ORWELL_WATCHER_TICK_MS=0` — ruling 2026-06-10: the game clock is the player's play-clock; the house lives between the player's own turns via one bounded off-screen tick per turn and does **not** exist while the player is away — NPCs can't leave the house, the player can, so background advances during an absence are a structural disadvantage). `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` opt in to the wall-clock watcher — never the default. HTTP edge: `ORWELL_ENGINE_HOST` (default loopback), `ORWELL_ENGINE_TOKEN` (shared secret on every tool route), `ORWELL_ENGINE_ADMIN_TOKEN` (a **separate** secret for `/admin/*` — player ⊉ admin, audit E27), `ORWELL_ENGINE_MULTIUSER` (reject a missing `x-orwell-user` instead of routing to "default"). Semantic recall: `ORWELL_EMBEDDINGS=fastembed` (the deploy default; unset ⇒ deterministic fake), `ORWELL_EMBED_CACHE` (model cache dir), `ORWELL_TEST_FASTEMBED=1` (opt-in real-model integration test — tests never depend on real embeddings otherwise).
+- **UAT lane:** the full-game UAT plays full games to completion; it is split across `tests/uat/fullGameUat.{12seed,5seed,decisions}.test.ts` (shared driver in `tests/uat/fullGameUatHarness.ts`) so its independent blocks fan out across separate CI heavy-sims runners. The 12-seed and 5-seed blocks bypass HTTP (direct callTool) to avoid CI stale-loop flakes; the decisions block drives real HTTP. All run as part of `vitest run`.
+- **Runtime env:** `ORWELL_DATA_DIR` is the per-user save dir (default `.orwell-data` — the factory-reset script must scrub it). `ORWELL_STORE=sqlite` selects the built SQLite + sqlite-vec save store (engine-only, #330); unset ⇒ the default in-memory + file path. **Pure turn-driven is the DEFAULT** (`ORWELL_WATCHER_TICK_MS=0` — ruling 2026-06-10: the game clock is the player's play-clock; the house lives between the player's own turns via one bounded off-screen tick per turn and does **not** exist while the player is away — NPCs can't leave the house, the player can, so background advances during an absence are a structural disadvantage). `ORWELL_WATCHER_TICK_MS` / `ORWELL_WATCHER_IDLE_MS` / `ORWELL_WATCHER_MAX_TICKS` opt in to the wall-clock watcher — never the default. HTTP edge: `ORWELL_ENGINE_HOST` (default loopback), `ORWELL_ENGINE_TOKEN` (shared secret on every tool route), `ORWELL_ENGINE_ADMIN_TOKEN` (a **separate** secret for `/admin/*` — player ⊉ admin, audit E27), `ORWELL_ENGINE_MULTIUSER` (reject a missing `x-orwell-user` instead of routing to "default"). Semantic recall: `ORWELL_EMBEDDINGS=fastembed` (the deploy default; unset ⇒ deterministic fake), `ORWELL_EMBED_CACHE` (model cache dir), `ORWELL_TEST_FASTEMBED=1` (opt-in real-model integration test — tests never depend on real embeddings otherwise).
 - **Front-end tests:** `cd frontend && python3 -m pytest tests/` (its own pytest gate, quarantined — never touches `cucumber.cjs` / `npm test`); `frontend/scripts/boot_smoke.py` boots the real app and proves the game-build gating server-side; `frontend/scripts/browser_smoke.py` is the headless-browser keep-set gate; `frontend/scripts/responsive_matrix.py` is the viewport×surface matrix gate (Stream S, ruling #16 — overflow/overlap/tap-target checks with an XFAIL registry). The reduced game surface is controlled by `ORWELL_GAME_BUILD` (default **on**; `=0` restores the full inherited workspace).
 - **Running locally (two processes):** the engine and front-end are **separate services**. Engine — `npm run build && npm start` (HTTP MCP on `ORWELL_ENGINE_PORT`, default 8765). Front-end — `cd frontend && python3 -m uvicorn app:app --host 127.0.0.1 --port 7000`, pointed at the engine via `ORWELL_ENGINE_MCP_URL` (default `http://127.0.0.1:8765`); it consumes **only** Vault-free projections (handshake in `frontend/INTEGRATION.md`). `deploy/smoke.sh` boots both and drives a full turn end-to-end (the same path CI's deploy-smoke job runs).
-- **CI** (`.github/workflows/ci.yml`): four jobs — the full engine gate (`npm test`), the coverage gate (`npm run test:cov` against per-directory **branch thresholds** in `vitest.config.ts`: engine 90 / composition 88 / adapters-engine 82 — ratchet up only), the deploy smoke (`bash -n` every script + `deploy/smoke.sh`, which boots the real engine **and** front-end and drives a full turn), and the front-end job (py_compile → pytest → boot smoke → browser smoke → responsive matrix).
+- **CI** (`.github/workflows/ci.yml`, #351): **per-job path-filtering** + **sharded heavy lanes** under a single required check. A `changes` job emits booleans; each job gates on the relevant paths (a docs-only/FE-only PR skips the engine + heavy lanes) and a unified **`ci-gate`** (always-runs, `success`/`skipped` ⇒ pass) is the one required check — deadlock-free on an all-skip. Jobs: the engine gate (`npm run test:ci`: typecheck → build → unit/property/arch minus the heavy sims → BDD), the **heavy-sims** lane **sharded** for wall-clock (UAT 12→3 `uat-12seed-{a,b,c}`, `uat-5seed`, `uat-decisions`; **jury** 20→5 `jury-shard` + `jury-aggregate`; **gradient** 6→2 `gradient-shard` + `gradient-aggregate` — each shard plays a disjoint seed slice, the aggregate recombines and asserts the full band; every heavy lane now < ~3 min), the coverage gate (`npm run test:cov`, per-directory **branch thresholds** in `vitest.config.ts`: engine 90 / composition 88 / adapters-engine 82 — ratchet up only; heavy sims **and** the calibration data instrument `tests/calibration/**` excluded), the deploy smoke (`bash -n` every script + `deploy/smoke.sh`, which boots the real engine **and** front-end and drives a full turn), and the front-end job (py_compile → pytest → boot smoke → browser smoke (Playwright chromium cached) → responsive matrix).
 - **Deploy** (`deploy/`): the repo is **private** (ruling #17) — `orwell.sh` (run on the Proxmox host) creates the LXC, persists the one-time `GIT_TOKEN` PAT into `data/.env` with a git credential helper, and runs `orwell-install.sh` (apt + Node 22 + Python, pinned `requirements.lock.txt`, systemd units from `deploy/systemd/`, hardened per E85; UI ports <1024 get a `CAP_NET_BIND_SERVICE` drop-in; optional `CT_ROOT_PASSWORD` for console login). Maintenance scripts are host-aware (bridge into the LXC via `pct`), run from the **local checkout** (never a GitHub fetch of branch tips), and fall back to a legacy container named `bbai` (ruling #6): `orwell-update.sh` (also `--set-token` for PAT rotation) · `orwell-doctor.sh` (diagnose/bounce) · `orwell-backup.sh` / `orwell-restore.sh` · **two reset tiers** — `orwell-game-reset.sh` (new season: clears every engine sandbox, **preserves** accounts/sessions/LLM config/`data/.env`, ruling #2) vs `orwell-factory-reset.sh` (back to OOBE: also wipes the front-end store; preserves only `data/.env`) · `orwell-login-panel.sh` (the interactive-shell health panel, ruling #21 — never blocks a login) · the **`orwell` control panel** (`orwell-menu.sh` + the shared whiptail helpers `orwell-tui.sh`, installed as `/usr/local/bin/orwell`) — a TUI menu wrapping update/doctor/backup/restore/resets/ready; the maintenance scripts also show inline whiptail dialogs (token password box, type-`RESET` confirm, doctor mode picker) on a TTY and stay fully non-interactive (flags/env) for automation/CI/the `pct` bridge — `whiptail` is apt-installed, absent ⇒ plain-prompt fallback · `orwell-ready.sh` · `deploy/smoke.sh` + `smoke_turn.py` (post-deploy checks). Front-end (`frontend/`, Python/FastAPI) is its own quarantined app — see `frontend/INTEGRATION.md`.
 
 **Source layout:** `src/domain` (pure core, no I/O) · `src/ports` (interfaces — `VaultStore`,
@@ -493,30 +509,34 @@ real fastembed `EmbeddingProvider`; and **0053** admin transcripts (FE pytest la
 the authoritative open-items list going forward.
 
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
-`cucumber.cjs` `paths` is the live list of BDD-gated features, and `git log --oneline` shows which
+the **per-feature status index** in `docs/features/README.md` is reconciled against the source
+(audited 2026-06-20 — no orphaned/untracked unbuilt specs; only 0022 deferred + 0062 spec-only);
+`cucumber.cjs` `paths` is the live list of BDD-gated features; and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
 **Remaining work** (the queue is drained; new work starts as a new spec/queue item — and the
 **close-out ledger** in `docs/audits/2026-06-10-full-product-audit.md` is the authoritative
 open-items list): **0022** MVP-2 (the one deferred feature); 0010's container smoke on a real Proxmox host — which is also the
 real-host verification the A4 single-PAT deploy design still needs (do it during the
-private-repo flip); the deferred real relational adapters (SQLite/Postgres, sqlite-vec/pgvector
-— souls/vectors run in-memory + file today); the MCP/JSON-RPC envelope is **now built** (an
+private-repo flip); the **Postgres + pgvector** relational tier — **reclassified under the MVP-002
+post-launch scale-out milestone** (SQLite + sqlite-vec shipped opt-in, #330; only matters past a
+single-host deploy — see the close-out ledger's MVP-002 section); the MCP/JSON-RPC envelope is **now built** (an
 additive `POST /:channel/rpc` doing `initialize`/`tools/list`/`tools/call` + notifications/batch
 over the same guardrails — `src/adapters/mcp/jsonRpc.ts`; only the SSE server-push stream is left,
 and it is **unneeded** here — the engine emits no server-initiated messages);
-the **playtest-gated calibration revisit** (passive players coast to Final 2 in ~half of seasons
-and lose there — ruled emergent realism for now; the largest open game-feel question); the
-post-campaign UI follow-ups **A5–A7** (per-theme particles backgrounds, the frosted-top fix, the
-fly-out minimize/close animation); the low-priority sweep defects **A8–A10** are **now closed
+the **calibration tuning** lane (passive players coast to Final 2 in ~half of seasons
+and lose there — now **instrumented + data-gathered**, #354 / `docs/audits/2026-06-19-calibration-data.md`;
+the next step lowers `JURY_WEIGHTS.gameRespect` ~0.9→0.6–0.7 and re-runs the instrument + the juryReach
+`EARNED_WINS` guard — **the largest open game-feel lever**); the post-campaign UI follow-ups **A5–A7**
+are **done** (#353 theme particles + frosted-top + the L45 punctuation guard; #335 fly-out); the low-priority sweep defects **A8–A10** are **now closed
 (PR #292)** — `humanizeIds` substitutes entity ids as whole tokens (no more mangled "player(s)"
 in beat prose), a turn-driven *supplementary* off-screen tick no longer faults on an empty society,
 and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; and the R3
 partial (late-season latency still grows with the O(events) snapshot export — improved, not
-eliminated; an incremental-snapshot item if play feels it); and **0054 Phase 2** — docking the
-finale / cast / retrospective windows INTO the control-room gadget rail (Phase 1 — the right-side
-HUD rail — shipped 2026-06-18; those panels still float via the Lane-F kit). *(The ADR 0004
-fastembed adapter is now BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
+eliminated; an incremental-snapshot item if play feels it); and **0062** (the move-in zeitgeist
+snapshot — the one remaining net-new spec, not built). **0054 Phase 2** (docking finale / cast /
+retrospective into the control-room gadget rail) is **DONE** (#335). *(The ADR 0004
+fastembed adapter is BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
 narrator is `EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
 `playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
 
@@ -527,6 +547,36 @@ content-driven visibility, persisted layout — `frontend/static/js/orwellGadget
 (**social play moves the weights** — the FE `_auto_record_scene` guarantee documented in the
 consequence-loop section above; *Big Brother is politics*, so ongoing role-play must move other
 houseguests' hidden perceptions, and it now structurally does).
+
+**Session 2026-06-19 — the returning-player / deep-profile arc (specs 0056–0059):** the
+"seasons as levels" lane shipped and the cast got materially deeper. **0056** (season-to-season
+character continuity) — engine carry-over **built**, unit-gated (`tests/unit/seasonContinuity.test.ts`):
+starting a new season offers a **soft re-run of casting** — *keep* the same houseguest into a
+brand-new cast or *recreate* via the interview — reusing the **one sanctioned restart door**
+(D1/R1); the FE relay threads `keepCharacter` through `/new-game` + `create_character`. **0057**
+(seasons as levels) — SPEC + **chunks 1–4 built FE-side**: the per-user season store
+(`frontend/src/orwell_seasons.py`), `GET /api/orwell/season` + `POST /api/orwell/next-season`
+(finished-season-gated, increments) + `POST /api/orwell/reset-progress` (both through the one
+sanctioned reset); the ≤5px season **progress bar** + "Season N" chip HUD
+(`orwellSeasonProgress.js`); the persistent post-season **"New season" surface**
+(`orwellNewSeason.js`, which **subsumes the 0056 FE keep/recreate UX** + the per-season portrait
+studio); and the engagement-driven post-season **producers re-approach** agent-loop nudge.
+**0058** (deep character profiles — *born deep, persist, play out*) — ✅ **Phase 1 + Phase 2 built**,
+**BDD-gated** (`0058-deep-character-profiles.feature`, in `cucumber.cjs`): the seeded floor
+spawns §3-depth profiles split across the Vault Wall (byte-stable baseline), seeds & seals story
+threads, seeds the Day-1 NPC→player edge, and recalls authored detail in full. **Phase 2 is now LIVE:**
+the LLM-authored write-back (`recordCastProfile`, commit `852f2db` — validate/split-across-the-wall/
+seal/re-derive/re-index, idempotent; FE producer-LLM authoring in `frontend/src/orwell_cast_authoring.py`
+kicked off pre-portraits), the portrait consumption of the physical facet (L29 — feeds
+`castPortraitPrompts`), the premiere voicing (L31 — the public biography voiced via the `premiere`
+moment prompt), and the thread trigger/resolution scheduler (shipped as feature **0060**,
+`scheduleStoryThreads` wired into the off-screen tick). *By design (anti-sycophancy), the write-back
+keeps the engine's calibrated seeded NPC→player leans — the LLM authors the Day-1 read TEXT only.*
+**0059** (hidden seeded relationships) — 📝 **SPEC only**: consolidates ledger **L35** (pre-game
+ties) + **L40** (showmance overload — the narrator currently reads every high-affinity edge as
+romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances that surface only
+organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
+pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
 
 ## Open decisions (remaining)
 

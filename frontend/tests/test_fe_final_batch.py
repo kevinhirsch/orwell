@@ -50,19 +50,19 @@ def test_c18_polling_pauses_hidden_and_backs_off():
         assert "setInterval(refresh" not in js, f
 
 
-def test_c22_premiere_is_one_keypress_away_never_auto_sent():
-    # 0050 evolved C22: creation runs IN the chat, so the one-keypress hand-off is the
-    # casting-interview opener (prefilled, never auto-sent); the premiere then flows from
-    # the conversation itself (the engine's interview prompt rolls the producer straight
-    # into the premiere after the casting-card reveal).
+def test_c22_producers_reach_out_first_after_the_image_step():
+    # P1 onboarding evolved C22: the houseguest IMAGE is the player's first interaction, and once
+    # it's secured the PRODUCERS reach out FIRST — the player never types the opening word. The old
+    # "one keypress away" composer pre-prompt is gone; the kickoff auto-sends with the user bubble
+    # HIDDEN so the first visible message is the producers'. The premiere then flows from the
+    # conversation (the engine's interview prompt rolls the producer straight into the premiere).
     js = _read("static", "js", "orwellOnboarding.js")
-    assert "I take my seat for the casting interview." in js
-    block = js[js.index("function takeASeat"): js.index("function takeASeat") + 900]
-    assert "box.focus()" in block
-    assert ".click()" not in block.split("box.focus()")[0].replace("nb.click()", "")  # no send click
-    import os
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    repo = os.path.dirname(repo)
-    with open(os.path.join(repo, "src", "engine", "momentPrompts.ts"), encoding="utf-8") as f:
-        prompt = f.read()
-    assert "roll straight into the premiere" in prompt
+    assert "I take my seat for the casting interview." not in js   # the pre-prompt is removed
+    seg = js[js.index("window._orwellOpenGameAfterCasting"):]
+    seg = seg[: seg.index("\n  };")]
+    assert "setHideUserBubble" in seg                              # producers appear to reach out first
+    assert "handleChatSubmit" in seg                               # auto-sent (this single cutover)
+    assert "_openSent" in seg                                      # fired once
+    # The engine-side casting->premiere transition wording is verified by ENGINE tests
+    # (lifecycleMoments / premiereDay1) — an FE test must not assert engine-prompt text, since
+    # engine-only PRs skip the FE job and such a cross-layer assertion then breaks latently on main.

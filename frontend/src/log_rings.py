@@ -47,6 +47,13 @@ class Ring:
 
 LIVE = Ring()
 IO = Ring()
+# LLMIO — the full LLM I/O trace tap (src/llm_trace.py): one entry per model call,
+# carrying a glanceable summary in `msg` + the (clipped) request/response in
+# args/result for the live viewer. The full-fidelity record is persisted to
+# data/llm-io.jsonl (durable, retention-governed); this ring is the live tail.
+# Vault-free by construction — the FE only ever holds visible projections, and the
+# recorder never receives auth headers / api keys.
+LLMIO = Ring()
 
 
 class _RingHandler(logging.Handler):

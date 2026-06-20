@@ -127,7 +127,9 @@ def test_sourcepin_wave3_shared_dismiss_affordance():
     assert "DOMContentLoaded\", ensureCss" in kit or "ensureCss();" in kit  # injected at load
     # orwellPresence.js no longer adopts it: the presence strip was relocated from a floating
     # banner to docked sidebar chrome ("Where you are"), which has no dismiss affordance.
-    for f in ("orwellRetrospective.js", "orwellEngineStatus.js"):
+    # orwellRetrospective.js MIGRATED onto the kit (0054 Phase 2) — it carries the kit's own
+    # close button now, not a bespoke ow-dismiss banner.
+    for f in ("orwellEngineStatus.js",):
         js = _read("static", "js", f)
         assert "ow-dismiss" in js, f                 # the dismissable banner surfaces adopt it
 
@@ -163,3 +165,133 @@ def test_sourcepin_g10_cast_composes_the_kit():
     assert "oc-close" not in js                      # bespoke close deleted (it never worked)
     assert 'el.hidden' not in js                     # the [hidden]-vs-display:flex bug class is gone
     assert '"Escape"' not in js                      # the kit arbiter owns Escape now
+
+
+# ── viewport re-clamp on browser resize (the DWE windowing tail) ───────────
+# The kit clamps on open/drag/resize and the slot engine re-clamps on its own
+# 'resize' listener (post-#345); the remaining gap was a FLOATING window that had
+# no path to re-clamp when the browser viewport shrinks. ONE global, rAF-debounced
+# window 'resize' listener over the open-window stack closes it. (Live behavior —
+# a near-edge window re-clamping into a shrunken viewport — is exercised for real
+# in browser_smoke.py; these source-pin the wiring.)
+
+
+def test_sourcepin_kit_reclamps_open_windows_on_viewport_resize():
+    js = _read("static", "js", "orwellWindow.js")
+    # a single global window resize listener (not per-instance) is wired
+    assert "window.addEventListener('resize'" in js
+    # it is debounced (rAF, falling back to a ~120ms timer) — never a layout thrash
+    assert "requestAnimationFrame" in js
+    # the per-window re-clamp method exists and is driven over the open-window stack
+    assert "_reclamp()" in js
+    assert "reclampOpenWindows" in js
+    # it skips docked + minimized windows (the rail owns docked; minimized are hidden)
+    reclamp = js[js.index("_reclamp() {"):js.index("_reclamp() {") + 1600]
+    assert "this._docked" in reclamp and "isMinimized()" in reclamp
+    # all three jobs: slot re-clamp (restack), position clamp into the viewport (full
+    # containment when it fits), and shrink-to-fit respecting the window's own minimums.
+    assert "this._slot.restack()" in reclamp
+    assert "window.innerWidth - r.width" in reclamp and "window.innerHeight - r.height" in reclamp
+    assert "this.o.minWidth" in reclamp and "this.o.minHeight" in reclamp
+
+
+def test_smoke_exercises_resize_reclamp_for_real():
+    smoke = _read("scripts", "browser_smoke.py")
+    assert "resize re-clamp: a floating window re-anchors INTO the shrunken viewport" in smoke
+    assert "ow-reclamp-smoke" in smoke
+    assert "new Event('resize')" in smoke
+
+
+# ── A7 [ruling #19 / E97 follow-up] — the Windows-7 fly-out ────────────────
+# The shared animation CONTRACT exposes DISTINCT minimize vs. close keyframes;
+# prefers-reduced-motion removes them. (The live motion is exercised in
+# browser_smoke.py; these source-pin the contract the audit asks for.)
+
+
+def test_sourcepin_a7_distinct_minimize_and_close_keyframes():
+    js = _read("static", "js", "orwellWindow.js")
+    # two NAMED, distinct keyframes — minimize is the fly-out (translate+scale toward
+    # the dock), close is the scale+fade fly-away — plus the surviving open keyframe.
+    assert "@keyframes ow-minimize" in js
+    assert "@keyframes ow-close" in js
+    assert "@keyframes ow-open" in js
+    assert ".ow-anim-minimize" in js and ".ow-anim-close" in js
+    # the minimize keyframe is the fly-out (a translate along the path to the dock)
+    assert "translate(var(--ow-fly-x" in js
+    # the JS hands the keyframe its fly vector + applies the distinct classes
+    assert "setProperty('--ow-fly-x'" in js
+    assert "classList.add('ow-anim-minimize')" in js
+    assert "classList.add('ow-anim-close')" in js
+    # the old single shared transition (ow-anim-fly) is fully retired
+    assert "ow-anim-fly" not in js
+
+
+def test_sourcepin_a7_reduced_motion_strips_the_flyout():
+    js = _read("static", "js", "orwellWindow.js")
+    # the @media (prefers-reduced-motion: reduce) block disables ALL of
+    # open/minimize/close under reduced motion (the rule names all three + none).
+    marker = "@media (prefers-reduced-motion: reduce) {"
+    assert marker in js
+    block = js[js.index(marker): js.index(marker) + 200]
+    assert ".ow-anim-open" in block and ".ow-anim-minimize" in block and ".ow-anim-close" in block
+    assert "animation: none" in block
+    # and the JS short-circuits the fly when REDUCED() (no class, straight to done)
+    assert "if (REDUCED()) { done(); return; }" in js
+
+
+# ── 0054 Phase 2 — DOCKED kit mode ─────────────────────────────────────────
+# A `dockable` window can render its full body INTO #gadget-rail-body, opting OUT
+# of the slot geometry (F5 stays one position system) and the chip dock; the flag
+# persists per-window/per-user, mirroring the L12 cast-pin key pattern.
+
+DOCKABLE_WINDOWS = ("orwellFinale.js", "orwellCast.js", "orwellRetrospective.js")
+
+
+def test_kit_has_a_docked_render_mode():
+    js = _read("static", "js", "orwellWindow.js")
+    assert "dockable" in js and "defaultDocked" in js
+    assert "toggleDock" in js                         # the dock/undock seam
+    assert "isDocked" in js                           # consumers can read the mode
+    assert "ow-docked" in js                          # the docked CSS class
+    # docked = mounts into the rail body, opts out of slot + chip
+    assert 'getElementById(\'gadget-rail-body\')' in js or 'getElementById("gadget-rail-body")' in js
+    # the per-window docked flag persists, mirroring castPin's key pattern
+    assert "-docked:" in js
+    # docked windows DON'T register a slot or a dock chip (the early return in open)
+    assert "if (this._docked) {" in js
+
+
+def test_kit_docked_css_opts_out_of_geometry():
+    js = _read("static", "js", "orwellWindow.js")
+    # the docked rule neutralises fixed position + the slot-offset geometry, so the
+    # rail owns placement (ONE position system — docked = NO geometry).
+    assert ".ow-window.ow-docked" in js
+    assert "position: static" in js
+
+
+def test_three_windows_are_dockable():
+    for f in DOCKABLE_WINDOWS:
+        js = _read("static", "js", f)
+        assert "dockable: true" in js, f
+        # default FLOATING (the documented owner-flippable choice) — a one-line flip
+        assert "defaultDocked: false" in js, f
+
+
+def test_docked_windows_have_canonical_rail_order():
+    css = _read("static", "style.css")
+    # docked windows slot in after the always-on HUD gadgets (scroll handles tall ones)
+    assert ".gadget-rail-body > #orwell-finale { order:" in css
+    assert ".gadget-rail-body > #orwell-cast { order:" in css
+    assert ".gadget-rail-body > #orwell-retro { order:" in css
+
+
+def test_retrospective_migrated_onto_the_kit():
+    js = _read("static", "js", "orwellRetrospective.js")
+    # the plainer panel now COMPOSES the kit (the migration that 0054 Phase 2 asked
+    # for first) — bespoke fixed-position banner + direct slot register are gone.
+    assert "OrwellWindowKit.create(" in js
+    assert "OrwellSlots.register" not in js
+    # the panel no longer sets its own fixed geometry (the kit's slot owns it now);
+    # the only 'fixed' left is in prose, so check for the CSS declaration form.
+    assert "position:fixed" not in js.replace(" ", "")  # no inline/css fixed-position rule
+    assert "dockable: true" in js

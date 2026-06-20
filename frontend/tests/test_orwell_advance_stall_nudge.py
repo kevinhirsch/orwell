@@ -102,6 +102,35 @@ def test_undelivered_decision_result_is_a_hard_stall():
     assert "elif _decision_undelivered:" in js
 
 
+def test_l39b_safety_net_forces_an_advance_past_the_last_rung():
+    # L39(b): a model that ignores every escalating TEXT nudge across turns leaves the season frozen
+    # ("not a single beat advanced"). Past the last rung the FE pulls the engine lever ITSELF — the
+    # same advanceGame the model was asked to call, one beat, deterministically resolved — then has
+    # the model re-read and voice the REAL returned beat. NOT engine-authored content (the model still
+    # narrates); the same "error-correct the omission" guardrail as _auto_record_scene, for progression.
+    js = _read("src", "agent_loop.py")
+    assert "_ADVANCE_FORCE_LEVEL" in js
+    assert "_FORCED_ADVANCE_NUDGE" in js
+    # fires only once the persisted level passes every text rung, and only for a PLAIN stall (a
+    # previewed/undelivered outcome still gets its targeted text nudge — the model is one call away)
+    assert "_level >= _ADVANCE_FORCE_LEVEL" in js
+    assert "and not _previewed_uncommitted and not _decision_undelivered" in js
+    # it pulls the engine lever directly (via the shared silent-commit helper) and resets the clock
+    assert "_oe3.advance_game(owner)" in js
+    assert "FORCED advanceGame" in js
+    # fail-open: a forced advance that errors falls through to the text nudge, never crashes the turn
+    assert "silent advanceGame failed" in js
+
+
+def test_l39b_force_level_is_past_the_last_text_rung():
+    # The force threshold must sit strictly ABOVE the graduated text rungs, so the model always gets
+    # the full escalation (gentle → firmer → forceful) BEFORE the FE ever pulls the lever for it.
+    import importlib
+    al = importlib.import_module("src.agent_loop")
+    assert al._ADVANCE_FORCE_LEVEL == len(al._ADVANCE_NUDGES)
+    assert al._ADVANCE_FORCE_LEVEL >= 3  # three graduated rungs come first
+
+
 def test_consequence_loop_auto_records_engaged_scenes():
     # Feature 0055: substantive social play MUST fold into the hidden weights. The model under-calls
     # recordInteraction even when nudged, so when an ENGAGED turn touched a houseguest and recorded

@@ -3,7 +3,7 @@ import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { EntityId } from "../domain/ids";
 import type { GameEvent } from "../domain/event";
 import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
-import { humanizeForPlayer } from "../domain/humanize";
+import { makeForPlayerScrub } from "../domain/humanize";
 
 export interface VisibleState {
   forEntity: EntityId;
@@ -49,18 +49,23 @@ export class VisibleStateService {
 
   /** The player-facing content scrub: ids → names + slug-noise neutralized (Vault-free, pure). */
   private clean(content: string): string {
-    return humanizeForPlayer(content, this.roster());
+    return makeForPlayerScrub(this.roster())(content);
   }
 
   getVisibleStateFor(entity: EntityId): VisibleState {
+    // Build the scrub ONCE for this read (the id matcher compiles once), then apply it across the whole
+    // visible log + knowledge — instead of recompiling 16 per-id regexes for every event/fact. The
+    // projection cleans the entire growing log per commit (the checkpoint's vault-leak sweep), so this
+    // batch reuse was the dominant per-season cost (CPU-profiled). Byte-identical to per-item cleaning.
+    const scrub = makeForPlayerScrub(this.roster());
     return {
       forEntity: entity,
       visibleEvents: this.events
         .query({ witnessedBy: entity })
-        .map((e) => ({ ...e, content: this.clean(e.content) })),
+        .map((e) => ({ ...e, content: scrub(e.content) })),
       knowledge: this.knowledge
         .knownTo(entity)
-        .map((k) => ({ ...k, content: this.clean(k.content) })),
+        .map((k) => ({ ...k, content: scrub(k.content) })),
     };
   }
 

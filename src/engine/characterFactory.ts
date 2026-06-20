@@ -1,9 +1,14 @@
 import { PLAYER, npc } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
+import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
+import { physicalFacetToAppearance } from "./portraitPrompts";
 import { GIVEN_NAMES } from "./data/givenNames";
 import { SURNAMES } from "./data/surnames";
+import { VOCATIONS } from "./data/vocations";
+import { HOMETOWNS } from "./data/hometowns";
+import type { Hometown } from "./data/hometowns";
 
 /**
  * CharacterFactory + OOBE (feature 0004). Generates a curated, randomly-named
@@ -83,6 +88,54 @@ export interface Character {
   appearance: string;
   age: number;
   presentation: string;
+  /**
+   * Concrete, DIVERSE backstory facets (L28, 2026-06-19) — generated at cast time so the cast is a
+   * producer-filtered crew (varied jobs & geography) that NEVER mirrors the player, and so the
+   * narrator voices the STORED origin instead of re-inventing (and drifting) it. Public, Vault-free:
+   * the kind of thing any houseguest shares across the kitchen counter. Seed-stable & byte-persisted
+   * like the rest of the static Character (0007/0030). `vocation` is a noun phrase ("ER nurse");
+   * `hometown` is a concrete "City, ST". Optional only for back-compat with pre-L28 saves (which
+   * load without them and re-derive nothing — the field simply stays as persisted).
+   */
+  vocation?: string;
+  hometown?: string;
+  /**
+   * The houseguest's OBSERVABLE public DEMEANOR / speaking register (L28, 2026-06-19) — how they come
+   * across to anyone in the room. PUBLIC and Vault-free, exactly like `archetype`/`strategyStyle`: it is
+   * the surface vibe a stranger reads across the kitchen counter, NOT hidden strategic intent, stats, or
+   * soul state (those stay in `hiddenElements`/the Soul). Its job is to break the "every houseguest is a
+   * warm, witty, emotionally-available professional" homogeneity — the cast is FORCED to spread across a
+   * diverse register pool (blunt, deadpan, anxious, grandiose, terse, quiet…), capped so no single vibe
+   * dominates. The narrator voices the STORED register so each person sounds distinct and consistent all
+   * season. Seed-stable & byte-persisted like the rest of the static Character; player-INDEPENDENT.
+   * Optional only for back-compat with pre-demeanor saves (which load without it and re-derive nothing).
+   */
+  demeanor?: string;
+  /**
+   * Deep character profile — PUBLIC facets (feature 0058). A real multi-sentence `biography` (not a
+   * one-liner) and a STRUCTURED `physicalCharacteristics` facet (the single source of truth shared by
+   * the portrait prompt AND the text narration, L29/L23). Part of the byte-stable static baseline, so
+   * the 0007/0031 superset check guards them against regeneration/drift — exactly like the rest of the
+   * Character. Public & Vault-free (the §3 presentable parts). The HIDDEN half (secrets, true goals,
+   * weakness, Day-1 perception) lives in the Vault, NEVER here (it would project out). Optional only
+   * for back-compat with pre-0058 saves (which load without them and re-derive nothing).
+   */
+  biography?: string;
+  physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * PUBLIC diversity-identity facets (feature 0063) — the cast's engine-guaranteed authentic diversity.
+   * `ethnicity` is a FIRST-CLASS heritage/cultural-identity facet (an authentic facet of a full
+   * character, never a stereotype kit) that GROUNDS `physicalCharacteristics.skinTone` so text and
+   * portrait agree; `genderPresentation` is how the houseguest presents (descriptive, never a
+   * competition input); `outOrientation` is present ONLY when the houseguest is PUBLICLY out (the house
+   * knows it — a public facet like hometown). A PRIVATELY-held orientation is NEVER here — it is
+   * Vault-sealed (engine-only) and surfaces only via a 0002 pathway. Public, Vault-free, byte-stable
+   * (0007/0031). DESCRIPTIVE ONLY — these never bend any competition/vote/outcome. Optional for
+   * back-compat with pre-0063 saves (which load without them and re-derive nothing).
+   */
+  ethnicity?: string;
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  outOrientation?: string;
   /**
    * Seeded, typed HIDDEN elements (B50) — engine-side secrets the public persona may match or wildly
    * diverge from. NEVER projected to the player (the NPC card carries name + status only); they surface
@@ -194,7 +247,147 @@ function jittered(bias: { physical: number; mental: number; social: number }, rn
   return { physical: j(bias.physical), mental: j(bias.mental), social: j(bias.social) };
 }
 
+// The legacy archetype-flavored background line's job pool (RETAINED for main-stream byte-stability;
+// the CONCRETE diverse vocation now lives on `vocation`, dealt cast-wide off a side stream — see L28).
 const OCCUPATIONS = ["nurse", "bartender", "teacher", "athlete", "marketer", "chef", "engineer", "stylist", "realtor", "musician", "firefighter", "student", "barista", "trainer"];
+
+// --- Diverse backstory facets (L28): producer-filtered vocation + hometown, spread across the cast ---
+// The whole point of L28: a real BB cast is DIVERSE and NEVER mirrors the player. The factory draws
+// a concrete vocation + hometown for every NPC from large vendored corpora, capped so no job and no
+// region piles up implausibly across the 15-cast. The assignment is computed CAST-WIDE (so the caps
+// can apply across everyone) off a SIDE rng derived only from the SEED — never the player's profile —
+// so the same seed yields the same 15 backstories regardless of who the player is.
+
+/** No single vocation may appear more than this many times across the 15-cast (L28 diversity cap). */
+export const MAX_PER_VOCATION = 2;
+/** No single hometown region may exceed this share of the cast (keeps geography spread, L28). */
+export const MAX_PER_REGION = 5;
+
+export interface BackstoryFacets {
+  vocation: string;
+  hometown: string;
+}
+
+/**
+ * Deal `count` DIVERSE (vocation, hometown) pairs off a seeded rng (L28). Vocations are unique up to
+ * `MAX_PER_VOCATION`; hometowns spread across regions up to `MAX_PER_REGION` each, and no exact city
+ * repeats. Player-INDEPENDENT by construction (the rng is seed-derived; no player field is read), and
+ * deterministic per seed. The corpora are large enough that the caps are comfortably satisfiable for a
+ * 15-cast; if a draw can't satisfy a cap within a guard budget it relaxes that one pick rather than
+ * looping forever (never silently re-mirrors — it simply takes the next legal-ish draw).
+ */
+export function generateBackstoryFacets(rng: RandomnessSource, count: number): BackstoryFacets[] {
+  const out: BackstoryFacets[] = [];
+  const vocationUses = new Map<string, number>();
+  const regionUses = new Map<Hometown["region"], number>();
+  const usedCities = new Set<string>();
+
+  const pickVocation = (): string => {
+    for (let g = 0; g < 400; g++) {
+      const v = rng.pick(VOCATIONS);
+      if ((vocationUses.get(v) ?? 0) < MAX_PER_VOCATION) {
+        vocationUses.set(v, (vocationUses.get(v) ?? 0) + 1);
+        return v;
+      }
+    }
+    const v = rng.pick(VOCATIONS); // budget exhausted — take the draw rather than loop forever
+    vocationUses.set(v, (vocationUses.get(v) ?? 0) + 1);
+    return v;
+  };
+  const pickHometown = (): string => {
+    for (let g = 0; g < 400; g++) {
+      const h = rng.pick(HOMETOWNS);
+      if (!usedCities.has(h.city) && (regionUses.get(h.region) ?? 0) < MAX_PER_REGION) {
+        usedCities.add(h.city);
+        regionUses.set(h.region, (regionUses.get(h.region) ?? 0) + 1);
+        return h.city;
+      }
+    }
+    const h = rng.pick(HOMETOWNS); // budget exhausted — take the draw rather than loop forever
+    usedCities.add(h.city);
+    regionUses.set(h.region, (regionUses.get(h.region) ?? 0) + 1);
+    return h.city;
+  };
+
+  for (let i = 0; i < count; i++) out.push({ vocation: pickVocation(), hometown: pickHometown() });
+  return out;
+}
+
+// --- Observable DEMEANOR / voice register (L28): a FORCED SPREAD so the house is not all warm bonders ---
+// The deeper half of L28: even with varied jobs, every houseguest was voiced in the SAME warm, witty,
+// emotionally-available register. A real producer-cast crew is a SPREAD of vibes — a villain grates, a
+// hothead flares, a quiet one stays quiet, a deadpan one underplays. This is a PUBLIC observable facet
+// (how someone comes across in the room), like archetype/strategyStyle — NOT hidden intent, stats, or
+// soul (those live in `hiddenElements`/Soul). Drawn cast-wide off a SEED-derived side rng (never the
+// player's profile), capped so no single register piles up. CRITICAL: every word is a plain adjective
+// that does NOT contain the stat-key substrings "physical"/"mental"/"social" (so it can never serialize
+// into a `"physical":`-style leak the Vault scans hunt for) and carries no hidden-layer vocabulary.
+export const DEMEANORS = [
+  "warm and bubbly",
+  "abrasive and blunt",
+  "deadpan and dry",
+  "anxious and eager",
+  "grandiose and theatrical",
+  "terse and guarded",
+  "cynical and sarcastic",
+  "sweet and earnest",
+  "intense and competitive",
+  "goofy and chaotic",
+  "quiet and watchful",
+  "steady and maternal",
+  "cocky and brash",
+  "bubbly but cutting",
+  "stoic and unbothered",
+  "loud and confrontational",
+  "shy and awkward",
+  "smooth and charming",
+  "scrappy and defiant",
+  "no-nonsense and matter-of-fact",
+] as const;
+
+/** The demeanor pool, exported for the L28 voice-spread tests (same precedent as APPEARANCE_POOLS). */
+export const DEMEANOR_POOL = DEMEANORS;
+
+/**
+ * No single demeanor/register may appear more than this many times across the 15-cast (L28 voice-spread
+ * cap) — the linchpin that stops the house from collapsing back into a room of identical warm bonders.
+ * The pool is large enough (20) that ≤2 per register easily covers 15 with plenty of distinct voices.
+ */
+export const MAX_PER_DEMEANOR = 2;
+
+/**
+ * Deal `count` picks from `pool` off a seeded rng, each used at most `maxEach` times — a generic capped
+ * spread (L28). Player-INDEPENDENT (reads only its rng) and deterministic per seed. Relaxes a pick
+ * rather than looping forever if a cap can't be met within the guard budget (the pools comfortably
+ * satisfy a 15-cast, so the relaxation path is unreachable in practice — but never spins).
+ */
+export function spreadFacet(rng: RandomnessSource, pool: readonly string[], count: number, maxEach: number): string[] {
+  const out: string[] = [];
+  const uses = new Map<string, number>();
+  const pick = (): string => {
+    for (let g = 0; g < 400; g++) {
+      const v = rng.pick(pool);
+      if ((uses.get(v) ?? 0) < maxEach) {
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+        return v;
+      }
+    }
+    const v = rng.pick(pool); // budget exhausted — take the draw rather than loop forever
+    uses.set(v, (uses.get(v) ?? 0) + 1);
+    return v;
+  };
+  for (let i = 0; i < count; i++) out.push(pick());
+  return out;
+}
+
+/**
+ * Deal `count` DIVERSE demeanors/registers off a seeded rng (L28), each used at most `MAX_PER_DEMEANOR`
+ * times so the house reads as a genuinely mixed crew (not all warm). Player-INDEPENDENT & deterministic
+ * per seed — a thin wrapper over `spreadFacet` over the `DEMEANORS` pool.
+ */
+export function generateDemeanors(rng: RandomnessSource, count: number): string[] {
+  return spreadFacet(rng, DEMEANORS, count, MAX_PER_DEMEANOR);
+}
 
 // --- Public appearance generation (0004 amendment): seed-stable, Vault-free facets ---
 // G24: the pools were 7×7×6 short phrases that said nothing about complexion, hair color,
@@ -238,6 +431,24 @@ const PRESENTATION = [
 
 /** The facet pools, exported for the G24 variety tests (same precedent as NAME_CORPORA). */
 export const APPEARANCE_POOLS = { BUILDS, COMPLEXIONS, HAIR, FEATURES, LOOKS, PRESENTATION } as const;
+
+/**
+ * No single body type/build may exceed this many across the 15-cast (L28 — "no real spread of body
+ * type"). The per-NPC appearance side rng draws builds INDEPENDENTLY and can cluster; a cast-wide
+ * capped deal forces the spread. 12 builds / ≤2 each comfortably covers 15.
+ */
+export const MAX_PER_BUILD = 2;
+
+/**
+ * Replace the BUILD slot (the first comma-separated segment) of a generated appearance string with
+ * `build`, leaving complexion/hair/features/look intact. The appearance is built as
+ * "<build>, <complexion>, <hair>, <features>, <look>" (see generateAppearance), so swapping the head
+ * segment re-targets only body type. Falls back to a prefix if the shape is unexpected (never throws).
+ */
+function withBuild(appearance: string, build: string): string {
+  const rest = appearance.split(", ").slice(1);
+  return rest.length ? [build, ...rest].join(", ") : `${build}, ${appearance}`;
+}
 
 function generateAppearance(rng: RandomnessSource): { appearance: string; age: number; presentation: string } {
   // 21–52, skewed young (min of two draws): real casts cluster in the 20s–30s with a
@@ -357,6 +568,10 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
     const name = uniqueName(rng, used, usedGiven);
     const strategyStyle = rng.pick(spec.styles);
     const stats = jittered(spec.bias, rng);
+    // The legacy archetype-flavored background line is RETAINED (byte-stable: it still consumes the
+    // same OCCUPATIONS main-stream pick so stats/volatility/names downstream never shift, E38/G24
+    // precedent). The CONCRETE diverse facets (vocation + hometown, L28) are dealt below off a side
+    // stream and never perturb the main one.
     const background = `a ${rng.pick(OCCUPATIONS)} who plays as a ${spec.archetype}`;
     const volatility = rng.next();
     return {
@@ -378,6 +593,28 @@ export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
       },
       soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, emotionalHistory: [], memory: [] },
     };
+  });
+
+  // L28: deal the DIVERSE, capped (vocation, hometown) facets in a SECOND pass — off a side rng keyed
+  // off the cast's drawn names (seed-deterministic & player-INDEPENDENT, since the names are; the
+  // player's profile is never read here). Cast-wide so the caps (≤2 per vocation, region-spread)
+  // apply across everyone. It touches no main-stream draw, so stats/names/volatility stay byte-stable.
+  const facetRng = new SeededRandom(hashSeed(`backstory:${npcs.map((n) => n.name).join("|")}`));
+  const facets = generateBackstoryFacets(facetRng, npcs.length);
+  // L28 (the deeper half): deal a SPREAD of observable DEMEANORS/registers the same way — cast-wide off
+  // a seed-derived side rng, capped (≤MAX_PER_DEMEANOR each) so the house is NOT all warm bonders. And
+  // deal BUILDS cast-wide too (the per-NPC appearance side rng draws builds INDEPENDENTLY, so it can
+  // cluster into a generation of near-twins — L28's "no real spread of body type"): a forced ≤2-per-build
+  // deal overwrites just the build slot of `appearance`, leaving every other appearance facet untouched.
+  const demeanorRng = new SeededRandom(hashSeed(`demeanor:${npcs.map((n) => n.name).join("|")}`));
+  const demeanors = generateDemeanors(demeanorRng, npcs.length);
+  const buildRng = new SeededRandom(hashSeed(`build:${npcs.map((n) => n.name).join("|")}`));
+  const builds = spreadFacet(buildRng, BUILDS, npcs.length, MAX_PER_BUILD);
+  npcs.forEach((n, i) => {
+    n.character.vocation = facets[i]!.vocation;
+    n.character.hometown = facets[i]!.hometown;
+    n.character.demeanor = demeanors[i]!;
+    n.character.appearance = withBuild(n.character.appearance, builds[i]!);
   });
   return { npcs };
 }
@@ -566,7 +803,10 @@ export function portraitDescriptorFor(hg: { name: string; character: Character }
   return {
     name: hg.name,
     age: c.age,
-    appearance: c.appearance,
+    // L29 single source of truth: when the structured 0058 facet exists it AUTHORS the look (through the
+    // SAME builder the portrait prompt uses), so this descriptor can never diverge from the cast photo;
+    // the prose `appearance` is the pre-0058 fallback only.
+    appearance: c.physicalCharacteristics ? physicalFacetToAppearance(c.physicalCharacteristics) : c.appearance,
     presentation: c.presentation,
     vibe: `${c.archetype} energy, a ${c.strategyStyle} presence`,
   };

@@ -149,6 +149,42 @@ export function startsWithReasoningPrefix(text) {
   return /^\s*(?:thinking(?:\s+process)?\s*:|the user |i need |i should |i will |they are |the question |i can )/i.test(text || '');
 }
 
+// L6b — plain-content reasoning leak (game build only). The model emits its
+// planning as NORMAL assistant text (not a <think> block, so the think-strip
+// passes miss it): operator/planning openers ("Let me…", "Looking at the
+// roster", "The game state shows…", "I need to…", "I should…") and raw engine
+// ids ("npc:1 - Faith Willis"). These leak engine machinery + the cast roster.
+//
+// A line is a reasoning/planning line when it opens with one of those operator
+// phrases OR contains a raw `npc:<digits>` id (the engine's entity handle — it
+// must never reach the player verbatim; the narration uses the houseguest's
+// name). We drop a CONTIGUOUS run of such lines from the START of the content
+// (the planning preamble), then return whatever narration follows. If the whole
+// block is preamble, we return '' so the leak renders as nothing — fail-open to
+// hiding (immersion is the priority). Operates on raw text BEFORE markdown.
+const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b)/i;
+const _RAW_NPC_ID_RE = /\bnpc:\d+\b/i;
+
+export function scrubReasoningPreamble(text) {
+  if (!text) return text;
+  const lines = String(text).split('\n');
+  let start = 0;
+  // Skip a contiguous leading run of reasoning/planning lines (blank lines
+  // inside the run are tolerated so a paragraph break doesn't end the scrub).
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) { start = i + 1; continue; }
+    if (_REASONING_LINE_RE.test(line) || _RAW_NPC_ID_RE.test(line)) {
+      start = i + 1;
+      continue;
+    }
+    break;
+  }
+  if (start === 0) return text;            // nothing scrubbed
+  const rest = lines.slice(start).join('\n').replace(/^\s+/, '');
+  return rest;
+}
+
 export function normalizeThinkingMarkup(text) {
   if (!text) return text;
   let normalized = text;
@@ -418,8 +454,96 @@ export function createCollapsible(contentMarkdown, label = 'details') {
     </div>`;
 }
 
+/**
+ * Game build — the player-facing bubble must carry ONLY the in-character
+ * narration: never the model's reasoning, drafts, or self-corrections ("let me
+ * rewind that"). Historically the game build dropped reasoning entirely; the
+ * owner ruling (2026-06-20) is to bring it BACK as a condensed, default-collapsed
+ * "Thinking" accordion — debug-viewable now, hidden by default — while the public
+ * bubble stays clean. Reasoning carries no Vault/secret state (the model only
+ * ever receives Vault-free context), so showing it collapsed for debug is safe.
+ *
+ * Two gates:
+ *   - gameBuildShowsThinkingAccordion() — render the collapsed accordion (the
+ *     default in the game build). The legacy `body.hide-thinking` /
+ *     `data-hide-thinking` operator opt-out fully suppresses it (CSS also hides
+ *     `body.hide-thinking .thinking-section`).
+ *   - gameBuildSuppressesThinking() — whether to SCRUB reasoning OUT of the
+ *     public reply text. This stays TRUE for the game build regardless of the
+ *     accordion: reasoning that bled into plain content is routed to the
+ *     accordion / dropped, never rendered as narration. `data-show-thinking`
+ *     (admin) keeps the old "show everything inline" behavior off the game path.
+ */
+function _inGameBuild() {
+  try {
+    return typeof document !== 'undefined' && !!document.body &&
+      document.body.hasAttribute('data-game-build');
+  } catch (_) {
+    return false;
+  }
+}
+
+export function gameBuildSuppressesThinking() {
+  try {
+    if (!_inGameBuild()) return false;
+    // Admin-only escape hatch: explicitly opt back in to seeing reasoning inline
+    // (the legacy non-game render path, reasoning interleaved with the reply).
+    if (document.body.hasAttribute('data-show-thinking')) return false;
+    return true;
+  } catch (_) {
+    // Fail closed (to scrubbing) — never leak reasoning because a check threw.
+    return true;
+  }
+}
+
+/**
+ * Should the game build render the model's reasoning in a collapsed "Thinking"
+ * accordion (separate from the clean public bubble)? Default ON in the game
+ * build; an operator may hide it with `body.hide-thinking` /
+ * `data-hide-thinking`. Fail-closed to HIDING the accordion if a check throws.
+ */
+export function gameBuildShowsThinkingAccordion() {
+  try {
+    if (!_inGameBuild()) return false;
+    if (document.body.classList.contains('hide-thinking')) return false;
+    if (document.body.hasAttribute('data-hide-thinking')) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function processWithThinking(text) {
   const { thinkingBlocks, content, thinkingTime } = extractThinkingBlocks(text);
+
+  // Game build: the public bubble shows ONLY the clean reply; the reasoning goes
+  // to a separate, default-collapsed accordion (or is dropped if the operator
+  // hid it). Either way, scrub any reasoning that bled into plain CONTENT so no
+  // reasoning/draft/"rewind" text ever reaches the public bubble.
+  if (gameBuildSuppressesThinking()) {
+    let reply = content;
+    if (reply) {
+      const stripped = normalizePlainThinking(reply);
+      if (/<think/i.test(stripped)) {
+        reply = (extractThinkingBlocks(stripped).content || '').trim();
+      }
+      // L6b belt-and-suspenders: even a FINAL narration round can carry a
+      // plain-content reasoning preamble (operator openers / raw npc:<id> ids)
+      // that never got tagged as thinking — scrub it before render so engine
+      // machinery + the cast roster never reach the player.
+      reply = (scrubReasoningPreamble(reply) || '').trim();
+    }
+    // Prepend the reasoning accordion (collapsed by default), then the clean
+    // reply. The accordion is debug-only chrome; it never touches the reply text.
+    let gbHtml = '';
+    if (gameBuildShowsThinkingAccordion()) {
+      thinkingBlocks.forEach((block, index) => {
+        if (block && block.trim()) gbHtml += createThinkingSection(block, index, thinkingTime);
+      });
+    }
+    if (reply) gbHtml += mdToHtml(reply);
+    return _useSvgEmoji() ? svgifyEmoji(gbHtml) : gbHtml;
+  }
 
   let html = '';
 
@@ -789,11 +913,14 @@ const markdownModule = {
   squashOutsideCode,
   renderContent,
   processWithThinking,
+  gameBuildSuppressesThinking,
+  gameBuildShowsThinkingAccordion,
   createCollapsible,
   hasUnclosedThinkTag,
   extractThinkingBlocks,
   normalizeThinkingMarkup,
   startsWithReasoningPrefix,
+  scrubReasoningPreamble,
   renderMermaid
 };
 

@@ -19,6 +19,9 @@ export function newGameState(rng: RandomnessSource): GameState {
       strategyStyle: hg.character.strategyStyle,
       stats: hg.character.stats,
       background: hg.character.background,
+      // L28: the diverse backstory facets are part of the static baseline (byte-stable, never re-derived).
+      ...(hg.character.vocation !== undefined ? { vocation: hg.character.vocation } : {}),
+      ...(hg.character.hometown !== undefined ? { hometown: hg.character.hometown } : {}),
     };
     souls[hg.id] = { emotionalState: 0.5, volatility: hg.soul.volatility, emotionalHistory: [], memory: [], relationshipBeliefs: [] };
   }

@@ -107,3 +107,29 @@ describe("B40 — an unknown snapshot version is rejected, not crashed on", () =
     expect(resumed.started).toBe(true); // legacy migrates, the game resumes
   });
 });
+
+describe("R3 — toGameState is memoized by snapshot identity (safe, pure)", () => {
+  it("returns the SAME object on an unchanged poll (R3 cache hit), a fresh one after a mutation, and stays correct", () => {
+    const dir = freshDir();
+    const reg = startedGame(dir);
+    const sb = reg.sandboxFor("u");
+    sb.engine.knowledge.seedBelief(npc(1), { content: "a fact", factId: "f" }, "witnessed");
+
+    const snap = reg.snapshot("u");
+    const a = toGameState(snap);
+    expect(toGameState(snap)).toBe(a); // identity memo hit — the redundant re-projection is skipped
+
+    // R3 incremental cache: re-exporting an UNCHANGED game returns the SAME frozen snapshot by
+    // reference, so a between-turn poll recomputes nothing and the projection memo still hits.
+    const snap2 = reg.snapshot("u");
+    expect(snap2).toBe(snap);
+    expect(toGameState(snap2)).toBe(a);
+
+    // A real mutation (a direct event append → the O(1) event-count cache key) invalidates it:
+    // a FRESH snapshot object, projected fresh.
+    sb.engine.events.record({ id: "direct:mut", ts: 1, type: "house-event", initiator: npc(1), witnessSet: [npc(1)], hidden: true, content: "a mutation" });
+    const snap3 = reg.snapshot("u");
+    expect(snap3).not.toBe(snap);
+    expect(toGameState(snap3)).not.toBe(a);
+  });
+});

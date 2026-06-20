@@ -29,17 +29,29 @@
     const s = document.createElement("style");
     s.id = "orwell-headshot-css";
     s.textContent = `
-      #${ID} { margin: 0 auto 8px; max-width: 760px; width: 100%;
-        border: 1px solid var(--border, #355a66); border-radius: 10px;
-        background: color-mix(in srgb, var(--panel, #1b1f27) 92%, transparent);
-        font-size: 13px; overflow: hidden; }
-      #${ID} .hs-head { display: flex; align-items: center; gap: 8px; cursor: pointer;
-        padding: 8px 12px; user-select: none; color: var(--fg, #cfd8e3); }
-      #${ID} .hs-head .hs-chev { margin-left: auto; opacity: .6; transition: transform .15s; }
-      #${ID}.hs-open .hs-head .hs-chev { transform: rotate(90deg); }
-      #${ID} .hs-body { display: none; padding: 4px 12px 12px; }
-      #${ID}.hs-open .hs-body { display: block; }
-      /* the studio body — shared by the casting card AND Settings (scoped to the class) */
+      /* P1 OOBE overhaul: the pre-game casting headshot is a PROPER OrwellWindow (composes the
+         .ow-* kit). It GATES the chat, so it is mounted non-dismissable (no close/minimize) and
+         stays put until a photo is secured.
+         0064 placement fix: it is the FOCUSED onboarding gate, so it docks as a centered dialog,
+         NOT floating at the top-right slot anchor. The slot system writes inline
+         left/top/right/bottom/transform to stack panels; we override every one with !important
+         (inline non-important loses to important CSS) so the window pins viewport-centered
+         regardless of the slot math. The old rule pinned only the left edge (left:50% with no
+         important transform), which the slot stomped to transform:none and dropped the recenter —
+         that floated it mid-screen at the wrong place. The full transform now centers it. */
+      #${ID} {
+        width: 480px; max-width: min(92vw, 480px);
+        left: 50% !important; right: auto !important;
+        top: max(12vh, var(--ow-headshot-top-clear, 88px)) !important; bottom: auto !important;
+        transform: translateX(-50%) !important;
+        z-index: 1000;  /* above the welcome splash + slotted HUD, below true modals */
+      }
+      #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px))); }
+      /* the ONE instruction lives in the window body — no duplicate banner/placeholder copy */
+      #${ID} .hs-lead { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5;
+        color: color-mix(in srgb, var(--fg, #cfd8e3) 88%, transparent); }
+      #${ID} .hs-lead b { font-weight: 700; }
+      /* the studio body — shared by the casting window AND Settings (scoped to the class) */
       .ow-headshot-studio { font-size: 13px; }
       .ow-headshot-studio .hs-msg { opacity: .75; font-size: 12px; }
       .ow-headshot-studio .hs-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
@@ -67,7 +79,7 @@
         border-radius: 50%; border: none; cursor: pointer; font-size: 12px; padding: 0;
         background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .12s; }
       .ow-headshot-studio .hs-libitem:hover .hs-libdel { opacity: 1; }
-      @media (prefers-reduced-motion: reduce) { #${ID} .hs-head .hs-chev, .ow-headshot-studio .hs-libdel { transition: none; } }`;
+      @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }`;
     document.head.appendChild(s);
   }
 
@@ -86,6 +98,14 @@
     const msg = (m) => { _msg = m || ""; };
     const setBusy = (b) => { st.busy = b; render(); };
     const summary = (t) => { try { opts.onSummary && opts.onSummary(t); } catch (_) {} };
+    // L3: the host card must stay open while options/results are showing — generated
+    // photos should never collapse out of view. The host passes this; Settings doesn't.
+    const ensureOpen = () => { try { opts.ensureOpen && opts.ensureOpen(); } catch (_) {} };
+    // L4: on the pre-game casting card, picking a headshot DISMISSES the picker and hands
+    // off into the game (the host unmounts the card + opens the producers' first turn).
+    // Returns true when the host took over, so we skip painting the "finalized" state that
+    // would keep covering the logo. Settings → Account passes nothing and stays in place.
+    const handoff = () => { try { return !!(opts.onFinalized && opts.onFinalized()); } catch (_) { return false; } };
     function avatarChanged() { try { window.dispatchEvent(new CustomEvent("orwell:avatarchanged")); } catch (_) {} }
 
     async function upload(mode) {
@@ -116,7 +136,7 @@
         const r = await fetch("/api/orwell/portrait/studio/generate", { method: "POST", credentials: "same-origin" });
         const d = r.ok ? await r.json() : null;
         st.busy = false;
-        if (d && d.generated > 0) { st.candidates = d.candidates; st.selected = null; msg("Pick your favorite — or generate 3 more."); }
+        if (d && d.generated > 0) { st.candidates = d.candidates; st.selected = null; msg("Pick your favorite — or generate 3 more."); ensureOpen(); }
         else { msg((d && d.reason) || "Couldn't generate options — check the image model in Settings."); }
       } catch (e) {
         if (window.OrwellReport) window.OrwellReport.fail("headshot", "studio", e);
@@ -134,8 +154,11 @@
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: st.selected }) });
         const d = r.ok ? await r.json() : null;
         st.busy = false;
-        if (d && d.ok) { avatarChanged(); st.candidates = []; st.selected = null; await refreshStatus(); }
-        else { msg("Couldn't set that option — try again."); render(); }
+        if (d && d.ok) {
+          avatarChanged(); st.candidates = []; st.selected = null;
+          if (handoff()) return; // L4: picker dismissed, game taking over — don't repaint
+          await refreshStatus();
+        } else { msg("Couldn't set that option — try again."); render(); }
       } catch (e) { st.busy = false; msg("The photo service is offline right now."); render(); }
     }
 
@@ -155,6 +178,7 @@
       if (!status.finalized && (status.candidates || 0) > 0 && !st.candidates.length) {
         st.candidates = Array.from({ length: status.candidates },
           (_, i) => ({ index: i, ref: "/api/orwell/portrait/studio/candidate/" + i }));
+        ensureOpen(); // L3: restored options reappear expanded, never tucked away
       }
       render();
     }
@@ -167,8 +191,11 @@
           method: "POST", credentials: "same-origin",
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
         st.busy = false;
-        if (r.ok) { avatarChanged(); status.finalized = true; await refreshStatus(); }
-        else { msg("Couldn't use that one — try again."); render(); }
+        if (r.ok) {
+          avatarChanged(); status.finalized = true;
+          if (handoff()) return; // L4: picking a cached headshot hands off into the game too
+          await refreshStatus();
+        } else { msg("Couldn't use that one — try again."); render(); }
       } catch (e) { st.busy = false; msg("The photo service is offline right now."); render(); }
     }
     async function deleteFromLibrary(id) {
@@ -200,6 +227,13 @@
       const lib = libraryHtml();
 
       if (status.finalized) {
+        // Auto-hand-off: if the gate ever renders an ALREADY-finalized headshot — set on this
+        // device, set on another device/tab, or already set on a reload — dismiss the picker and
+        // open the game, instead of leaving the "set" card stuck open over the chat. (A fresh set
+        // via finalizeSelected/selectFromLibrary already hands off; this also covers the
+        // mount/refresh-with-already-set path, which is what left it stuck.) In Settings → Account
+        // no onFinalized is wired, so handoff() is a no-op and the set card stays put to manage it.
+        if (handoff()) return;
         body.innerHTML = lib + `
           <div class="hs-row">
             <div class="hs-preview" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
@@ -265,47 +299,135 @@
   // expose the reusable studio for Settings → Account (G28)
   window.OrwellHeadshotStudio = { mount: buildStudio };
 
-  // ── the pre-game casting card (collapsible host for the studio) ─────────────
-  function build() {
-    const el = document.createElement("div");
-    el.id = ID;
-    el.innerHTML = `
-      <div class="hs-head" role="button" tabindex="0" aria-expanded="false">
-        <span>📷</span><b>Casting headshot</b><span class="hs-msg" id="hs-summary">make your portrait</span>
-        <span class="hs-chev">▶</span>
-      </div>
-      <div class="hs-body" id="hs-body"></div>`;
-    return el;
-  }
+  // ── the pre-game casting WINDOW (composes the .ow-* kit) ─────────────────────
+  // P1 OOBE overhaul: the image step is a PROPER OrwellWindow, not a collapsible
+  // inline card. Because it GATES the chat (orwellChatGate.js locks send until a photo
+  // is secured), it is mounted NON-DISMISSABLE — no close/minimize control, no collapse
+  // affordance — so the mandatory step can never be hidden away. It is draggable +
+  // resizable (the player can move it off something), but it stays present until the
+  // photo lands and the window hands off into the game.
+  const CAST_ICON =
+    "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' " +
+    "stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>" +
+    "<path d='M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z'/>" +
+    "<circle cx='12' cy='13' r='3.5'/></svg>";
 
-  function wire(el, openByDefault) {
-    const head = el.querySelector(".hs-head");
-    const summary = el.querySelector("#hs-summary");
-    const toggle = () => { const o = el.classList.toggle("hs-open"); head.setAttribute("aria-expanded", o ? "true" : "false"); };
-    head.addEventListener("click", toggle);
-    head.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
-    if (openByDefault) { el.classList.add("hs-open"); head.setAttribute("aria-expanded", "true"); }
-    buildStudio(el.querySelector("#hs-body"), { onSummary: (t) => { summary.textContent = t; } });
+  let _win = null; // the kit window instance (one at a time)
+
+  function buildBody() {
+    const body = document.createElement("div");
+    // The ONE clear instruction — consolidated here, in the window. The chat gate's
+    // banner is gone and the composer keeps only a minimal disabled-state placeholder,
+    // so the "add your cast photo" prompt appears exactly once.
+    const lead = document.createElement("p");
+    lead.className = "hs-lead";
+    lead.innerHTML =
+      "<b>This is your cast photo.</b> Every houseguest needs one before the season can " +
+      "start. Upload a photo of yourself or generate one with AI — the chat opens the " +
+      "moment it's set, and the producers will reach out.";
+    const studioHost = document.createElement("div");
+    body.appendChild(lead);
+    body.appendChild(studioHost);
+    return { body, studioHost };
   }
 
   function mount() {
-    if (document.getElementById(ID)) return;
-    const bar = document.querySelector(".chat-input-bar");
-    if (!bar || !bar.parentNode) return;
+    if (_win || document.getElementById(ID)) return;
+    if (!window.OrwellWindowKit || !window.OrwellWindowKit.create) return; // kit not ready → fail open
     ensureCss();
-    const el = build();
-    bar.parentNode.insertBefore(el, bar);
-    wire(el, true); // G29: producers push it — the casting card opens expanded, not tucked away
+    const { body, studioHost } = buildBody();
+    // L1: while the casting window is mounted, drop the welcome-screen's 30vh composer
+    // lift so the composer docks normally (never hangs mid-screen) and the splash tips
+    // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
+    try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
+    // Compose the kit. NON-DISMISSABLE (no close/minimize) because it gates the chat. It is
+    // a centered, mandatory dialog-style gate (CSS pins it horizontally-centered), so it is
+    // NOT draggable/resizable — there is nothing to move it off (the splash is hidden while
+    // it's up). The kit still owns the chrome, titlebar, focus, and the .ow-* family.
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "Your Cast Photo", icon: CAST_ICON,
+      slot: "top-right", slotKey: "castphoto", role: "dialog",
+      minimizable: false, closable: false, draggable: false, resizable: false,
+      minWidth: 320, minHeight: 240,
+      content: body, focus: true,
+    });
+    _win.open();
+    // Mount the reusable studio into the window body.
+    buildStudio(studioHost, {
+      // No persistent "set ✓" chip in the casting window (item 5) — the titlebar carries
+      // the title and the window hands off on finalize, so nothing lingers above the
+      // composer. The summary callback is intentionally a no-op here.
+      onSummary: function () {},
+      ensureOpen: function () {},        // a window is always "open" — nothing to expand
+      onFinalized: onCastingHeadshotChosen, // L4/L5: dismiss + hand off into the game
+    });
   }
-  function unmount() { const el = document.getElementById(ID); if (el) el.remove(); }
+
+  // L4/L5: the player has secured their casting headshot — the last pre-game step. Tear
+  // down the window and let the PRODUCERS open the game with the first message, so the
+  // player never has to type the opening word. Returns true so the studio stops repainting
+  // its own "finalized" state behind the teardown.
+  //
+  // item 6 (no composer jump): destroy the WINDOW immediately, but KEEP the composer-lift
+  // drop (.ow-casting-headshot-open) through the handoff — otherwise the welcome-active 30vh
+  // lift would snap the composer up mid-screen for the ~beat between teardown and the
+  // producers' first message clearing the welcome state. The flag is cleared by the next
+  // route()/unmount() once the game is underway (the composer is no longer welcome-active).
+  function onCastingHeadshotChosen() {
+    teardownWindow();
+    try {
+      if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting();
+    } catch (_) { /* fail open — the chat composer is still the way in */ }
+    return true;
+  }
+
+  function teardownWindow() {
+    if (_win) { try { _win.destroy(); } catch (_) {} _win = null; }
+    const el = document.getElementById(ID);
+    if (el) el.remove();
+  }
+
+  function unmount() {
+    teardownWindow();
+    try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
+  }
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild) return;
     const st = await jget("/api/orwell/state");
-    if (st && st.started === false) mount(); else unmount();
+    // 0064: the gate is pre-game ONLY. But "pre-game" alone is not enough to keep it OPEN — the
+    // cast photo is a per-user, server-authoritative bit (intake.finalized). Once ANY device sets
+    // it, every device must reflect that and CLOSE (a second device must not re-prompt for a photo
+    // that's already set). Drive the gate from the SYNCED canonical state, not per-tab local state.
+    if (!(st && st.started === false)) { unmount(); return; }
+    const intake = await jget("/api/orwell/portrait/intake");
+    const secured = !!(intake && intake.finalized === true);
+    if (secured) {
+      // The headshot is set (here or on another device) — close the gate and let the chat (the
+      // canonical session, with the synced producer message) take over. Don't re-fire the kickoff:
+      // _orwellOpenGameAfterCasting is once-per-game guarded, so a second device just unmounts.
+      const wasOpen = !!(_win || document.getElementById(ID));
+      unmount();
+      if (wasOpen) {
+        try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
+      }
+      return;
+    }
+    mount();
   }
 
   window.addEventListener("orwell:gamechanged", route);
+  // 0064: a photo finalized on THIS or ANOTHER device flips intake.finalized — re-route so the gate
+  // closes everywhere. `avatarchanged` fires locally on finalize; the cross-device path is the
+  // canonical-session sync re-dispatching `orwell:gamechanged` on a `game-updated` ping, plus the
+  // light poll below catches the case where no event reaches this tab.
+  window.addEventListener("orwell:avatarchanged", route);
+  // A bounded background re-check so a second device closes the gate within a few seconds even with
+  // no event (e.g. the photo was set on a device that never pinged this one). Cheap reads; only does
+  // work while the gate is actually mounted (pre-game) — a no-op once the game is underway.
+  setInterval(function () {
+    if (_win || document.getElementById(ID)) { route(); }
+  }, 4000);
   ready(route);
 })();

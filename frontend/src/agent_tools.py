@@ -60,7 +60,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # Big Brother game engine (Vault-free): the model drives the game by
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
-             "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts",
+             "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts", "moveTo",
+             "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
@@ -68,6 +69,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
              # Weekly loop (0011): advance beats and resolve player decisions.
              "createCharacter", "updateCasting", "advanceGame", "submitDecision",
+             # 0061: raise the self-eviction confirmation on a clear OOC intent to leave (no state change).
+             "requestSelfEviction",
              # Generic loopback to any UI-button endpoint (cookbook,
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.
@@ -95,6 +98,11 @@ GAME_TOOL_KEEP = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
+    # L21/L24: the player walks where they choose; the engine never auto-relocates a person.
+    "moveTo",
+    # PREMIERE meet-everyone (#380): the premiere-only meet-everyone tracker — the read + the mark
+    # (the engine guarantees all 15 NPCs are met before the first HOH; the model drives it from here).
+    "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.
@@ -102,6 +110,8 @@ GAME_TOOL_KEEP = frozenset({
     "renderScene", "endOfSessionSummary",
     # Weekly loop (0011).
     "createCharacter", "updateCasting", "advanceGame", "submitDecision",
+    # 0061: raise the self-eviction confirmation on a clear OOC intent to leave (no state change).
+    "requestSelfEviction",
     # God Mode (0016): admin-gated non-Vault levers.
     "inspectNonVaultState", "overrideMechanic", "configureGame", "manageSandbox", "sandboxHealth",
     # In-fiction real-world lookups (C32, amends 0032): the model quietly searches when the
@@ -179,6 +189,7 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 from src.tool_parsing import (  # noqa: E402, F401
     parse_tool_blocks,
     strip_tool_blocks,
+    tool_call_opener_index,
     _TOOL_NAME_MAP,
     _TOOL_BLOCK_RE,
     _TOOL_CALL_RE,

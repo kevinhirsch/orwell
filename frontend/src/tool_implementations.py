@@ -4514,9 +4514,16 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     text = (args.get("content") or args.get("text") or "").strip()
     if not text:
         return {"error": "content is required (what happened in the scene)", "exit_code": 1}
+    # ADR 0005: an OPTIONAL Vault-free consequence descriptor (which edges move, which way, with what
+    # relative emphasis) rides alongside `kind`. Forward it ONLY when it is actually a dict — a
+    # malformed shape is ignored silently (the engine also guards, but we never forward junk).
+    _consequence = args.get("consequence")
+    if not isinstance(_consequence, dict):
+        _consequence = None
     try:
         res = await orwell_engine.record_interaction(
-            text, with_ids=args.get("withIds"), kind=args.get("kind"), user=owner,
+            text, with_ids=args.get("withIds"), kind=args.get("kind"),
+            consequence=_consequence, user=owner,
         )
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
@@ -4676,16 +4683,59 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 orwell_seasons.increment_season(owner)
             except Exception:
                 pass  # the counter is best-effort meta-progression; never fail the restart over it
-        # 0051: move-in cast portraits. The engine returns Vault-free portrait prompts on
-        # season start; kick off generation in the background so game start NEVER blocks on
-        # images, and so a missing image model is a silent no-op (graceful absence).
+        # L28b → 0051 pipeline. The cast is KNOWN the instant createCharacter returns — which,
+        # in the chat-driven flow, is DURING the casting interview (the player still picks their
+        # own headshot before house entry). So portraits must start generating in the BACKGROUND
+        # right here, so the faces are ready BY MOVE-IN rather than trickling in after it.
+        #
+        # Timing fix: portraits used to be CHAINED behind full-cast authoring (`then=_portraits`).
+        # Authoring is 15 sequential LLM calls; chaining behind it pushed the pictures to land
+        # around/after house entry. We now (a) kick portrait generation off IMMEDIATELY from the
+        # engine's seeded §3-depth facets (0058 Phase 1 — already concrete & distinctive, no LLM
+        # needed), running in parallel with authoring; and (b) still run authoring in the
+        # background and, once it lands its richer physical facets, refresh-generate any face not
+        # yet on disk via the backfill (idempotent — a portrait already generated from the seeded
+        # facet is never re-shot, so the immediate pass wins for the fast ones and the authored
+        # facet only fills the slower ones). Both paths are best-effort: a missing model (chat OR
+        # image) is a silent no-op and the game start NEVER blocks on either.
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
+            cast = res.get("house") if isinstance(res, dict) else None
+            # (the player's name is intentionally NOT read here — cast authoring is player-independent)
+
             if prompts:
                 from src import orwell_portraits
+                # (a) start the move-in portraits NOW, from the seeded facets — ready by move-in.
                 orwell_portraits.kickoff_generation(prompts, owner)
+
+            # (b) author the cast's rich backstories in the background; when it finishes, top up
+            #     any portrait that hasn't landed yet, refetching the now-authored facet (idempotent).
+            #     NPC storylines are authored player-INDEPENDENT (anti-sycophancy): the player's name
+            #     is never threaded into authoring — each houseguest's life is fleshed out on its own.
+            if cast:
+                from src import orwell_cast_authoring
+                from src import orwell_portraits
+
+                def _refresh_authored_portraits():
+                    # The ids whose portrait is still missing after the immediate pass — refetch
+                    # their (now possibly authored) prompt and generate. Skips any already on disk.
+                    try:
+                        ids = []
+                        for entry in (prompts or []):
+                            if not isinstance(entry, dict):
+                                continue
+                            hid = entry.get("houseguestId") or entry.get("id")
+                            if hid and orwell_portraits.portrait_file(owner, hid) is None:
+                                ids.append(str(hid))
+                        if ids:
+                            orwell_portraits.kickoff_backfill(ids, owner, force=True)
+                    except Exception:
+                        pass
+
+                orwell_cast_authoring.kickoff_authoring(
+                    cast, owner, then=_refresh_authored_portraits)
         except Exception:
-            pass  # portraits are augmentation — never let them affect game start
+            pass  # authoring + portraits are augmentation — never let them affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4729,16 +4779,30 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
+        # 0061: the confirmed self-eviction rides the same validated decision seam.
+        "self-evict",
     }
     if kind not in _DECISION_KINDS:
         return {"error": f"kind must be one of: {', '.join(sorted(_DECISION_KINDS))}", "exit_code": 1}
     decision: dict = {"kind": kind}
-    for k in ("choice", "use", "save", "replacement", "vote", "statement", "appeal", "intent"):
+    for k in ("choice", "use", "save", "replacement", "vote", "statement", "appeal", "intent", "confirmed"):
         if args.get(k) is not None:
             decision[k] = args[k]
     try:
         res = await orwell_engine.submit_decision(decision, user=owner)
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_request_self_eviction(content: str, owner: Optional[str] = None) -> Dict:
+    # 0061 step 1: a clear OOC intent to leave raises the confirmation (no state change; the house
+    # never hears it). The player's own explicit confirm (the card → submitDecision) is what binds.
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.request_self_eviction(user=owner)
+        orwell_engine.remember_pending(res, user=owner)  # surface the confirm card on reload too
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -4849,6 +4913,54 @@ async def do_whereabouts(content: str, owner: Optional[str] = None) -> Dict:
         res = await orwell_engine.whereabouts(user=owner)
         if res is None:
             return {"output": "No game is running yet — the house is empty until a game starts.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_move_to(content: str, owner: Optional[str] = None) -> Dict:
+    """L21/L24: the player walks to a room they named. `content` is the tool args JSON ({room})."""
+    from src import orwell_engine
+    try:
+        room = ""
+        try:
+            room = (json.loads(content) or {}).get("room", "") if content else ""
+        except Exception:
+            room = (content or "").strip()
+        res = await orwell_engine.move_to(str(room), user=owner)
+        if res is None:
+            return {"output": "No game is running yet.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_premiere_intros(content: str, owner: Optional[str] = None) -> Dict:
+    """PREMIERE ONLY (#380): the meet-everyone progress — who's met + who's STILL to introduce."""
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.premiere_intros(user=owner)
+        if res is None:
+            return {"output": "Not in the premiere — everyone has already been met.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_mark_houseguest_met(content: str, owner: Optional[str] = None) -> Dict:
+    """PREMIERE ONLY (#380): mark a houseguest met. `content` is the tool args JSON ({id})."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    hg_id = (args.get("id") or "").strip()
+    if not hg_id:
+        return {"error": "id is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.mark_houseguest_met(hg_id, user=owner)
+        if res is None:
+            return {"output": "Not in the premiere — there is nobody left to meet.", "exit_code": 0}
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

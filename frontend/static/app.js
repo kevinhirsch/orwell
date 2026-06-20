@@ -3832,6 +3832,10 @@ function startOrwellApp() {
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
+        // OOBE image gate (P1): pre-game, Enter must not send (or open a new chat) until a cast
+        // photo is secured — the image step is the player's first interaction. Fail-open guard
+        // (only a confirmed pre-game game-build with no image blocks); a no-op otherwise.
+        try { if (window._orwellChatGate && window._orwellChatGate.blocked()) return; } catch (_) {}
         // Flush the debounced icon update so dataset.mode reflects the current
         // text state. Without this, a fast type-and-Enter would still see the
         // stale 'newchat' mode and open a new chat instead of sending.

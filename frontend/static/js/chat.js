@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -224,6 +224,18 @@ import { isNarrow } from './platform.js';
     API_BASE = apiBase;
     initSlashCommands({ apiBase, isStreaming: () => isStreaming });
     if (emailInbox) emailInbox.init(documentModule);
+    // L9 (composer): the Agent|Chat mode toggle is meaningless in the game build —
+    // play is always hybrid (OOC chat + in-character role-play + the engine tools
+    // run every turn). game-trim.css hides it; this is the belt-and-suspenders JS
+    // gate so the dead control stays gone even if the visibility system (app.js
+    // applyUIVis) clears the inline display. The full inherited workspace is
+    // unchanged. Fail-safe: wrapped so a missing node never throws in init.
+    try {
+      if (isGameBuild()) {
+        const _modeToggle = document.querySelector('.mode-toggle');
+        if (_modeToggle) _modeToggle.style.display = 'none';
+      }
+    } catch (_) {}
     // Wire the slash-command autocomplete popup on the chat composer. The
     // dispatcher already handles the typed command — this just surfaces the
     // registry as a discoverable menu when the user starts a message with /.
@@ -313,7 +325,12 @@ import { isNarrow } from './platform.js';
     const session = sessionModule.getSessions().find(s => s.id === sessionId);
     
     const submitBtn = document.querySelector('.send-btn');
-    
+    // Streaming-TTS flag, hoisted to the function scope: it is SET when the stream starts (below)
+    // but also READ in the error/abort cleanup branch — a block-scoped `const` there threw
+    // "streamingTTS is not defined" on ANY early submit error, masking the real failure and
+    // blowing up the whole submit (no chat POST ever fired). Declare once here so both see it.
+    let streamingTTS = false;
+
     // If compare is active, stop all compare streams
     if (window.compareModule && window.compareModule.isActive()) {
       window.compareModule.handleCompareSubmit();
@@ -443,6 +460,19 @@ import { isNarrow } from './platform.js';
 
       return;
     }
+
+    // --- OOBE image gate (P1 onboarding): the houseguest photo is the player's FIRST
+    // interaction. Pre-game, until a cast photo is secured, NO chat message may be sent — this
+    // covers every send path (button, Enter, programmatic) at one chokepoint. The gate module
+    // fails OPEN (only ever blocks a confirmed pre-game game-build with no image yet), so this is
+    // a no-op for normal play, a non-game build, an engine outage, or a started season. The
+    // producers' auto-open fires only AFTER the photo is finalized, so it is never blocked here.
+    try {
+      if (window._orwellChatGate && window._orwellChatGate.blocked()) {
+        if (window._orwellChatGate.recompute) window._orwellChatGate.recompute();
+        return;
+      }
+    } catch (_) { /* gate unavailable → never block the chat */ }
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
     if (_sendInFlight) return;
@@ -584,6 +614,9 @@ import { isNarrow } from './platform.js';
 
     // Declare accumulated outside try block so it's accessible in catch
     let accumulated = '';
+    // P1 (OOBE cutover): set when createCharacter paints the inline "finalizing" indicator this
+    // turn, so the first house-entry narration token can clear it (and the finally can safety-net).
+    let _orwellFinalizingActive = false;
     // Are we currently inside an unclosed <think> block? Toggled per think/answer
     // cycle so a multi-round agent response (one reasoning phase PER round) wraps each
     // round's reasoning in its own <think>…</think> instead of leaking rounds 2+ as text.
@@ -1090,8 +1123,8 @@ import { isNarrow } from './platform.js';
       let metrics = null;
       let isThinking = false;
       let thinkingStartTime = null;
-      // Streaming TTS: synthesize sentence-by-sentence during streaming
-      const streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
+      // Streaming TTS: synthesize sentence-by-sentence during streaming (assigns the hoisted flag).
+      streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)
@@ -1286,6 +1319,15 @@ import { isNarrow } from './platform.js';
 
         // If thinking is still streaming (unclosed <think>), show indicator instead of raw text
         if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
+          // GAME BUILD: the live-think accordion (built in the main stream loop) owns the
+          // reasoning display; this secondary render path is reached only AFTER reasoning
+          // closes, so it should never see an open <think> here. If an operator fully hid
+          // the accordion (`body.hide-thinking`), hold the bubble empty while reasoning is
+          // open; the clean reply-only render lands when it closes.
+          if (isGameBuild() && document.body.classList.contains('hide-thinking')) {
+            uiModule.scrollHistory();
+            return;
+          }
           const thinkStart = dt.search(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought/i);
           const thinkContent = dt.substring(Math.max(thinkStart, 0))
             .replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought\s*\n?/i, '')
@@ -1448,6 +1490,12 @@ import { isNarrow } from './platform.js';
               if (json.delta) {
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
+                // P1 (OOBE cutover): the house-entry narration is now streaming — clear the inline
+                // "finalizing" indicator so it gives way to the actual move-in prose.
+                if (_orwellFinalizingActive) {
+                  _orwellFinalizingActive = false;
+                  try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
+                }
                 // Text arrived after tools — connect thread line to this bubble
                 const _threadAbove = roundHolder?.previousElementSibling;
                 if (_threadAbove && _threadAbove.classList.contains('agent-thread') && !_threadAbove.classList.contains('has-bottom')) {
@@ -1559,6 +1607,37 @@ import { isNarrow } from './platform.js';
                       hasUnclosedThink = true; // keep waiting for real </think>
                     }
                   }
+                }
+
+                // GAME BUILD (2026-06-20 owner ruling): the model's reasoning must be
+                // CLEANLY SEPARATED from the public bubble — never mixed in. Reasoning
+                // streams into a condensed, DEFAULT-COLLAPSED "Thinking" accordion
+                // (debug-viewable, expandable) while the public bubble carries ONLY the
+                // in-character narration. The reasoning is Vault-free (the model receives
+                // no secret state) so showing it collapsed for debug is safe; the reply
+                // render below still scrubs any reasoning/draft that bled into content.
+                // The shared live-think path (immediately below) already builds a
+                // collapsed accordion — both the game build and the non-game build use it.
+                // An operator may fully hide the accordion via `body.hide-thinking`.
+                if (isGameBuild() && document.body.classList.contains('hide-thinking') &&
+                    (hasUnclosedThink || isThinking)) {
+                  if (hasUnclosedThink) {
+                    if (!isThinking) {
+                      isThinking = true;
+                      thinkingStartTime = Date.now();
+                      if (spinner && spinner.element) spinner.destroy();
+                    }
+                    // Operator hid the accordion — render nothing, just wait.
+                    uiModule.scrollHistory();
+                    continue;
+                  }
+                  // Reasoning just closed — drop back to normal streaming for the reply.
+                  isThinking = false;
+                  if (spinner && spinner.element) spinner.destroy();
+                  _renderStream();
+                  _scheduleThinkingSpinner();
+                  if (streamingTTS) window.aiTTSManager.streamingUpdate(roundText);
+                  continue;
                 }
 
                 if (hasUnclosedThink && !isThinking) {
@@ -2068,7 +2147,15 @@ import { isNarrow } from './platform.js';
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
                   const dt = stripToolBlocks(roundText);
-                  if (dt.trim()) {
+                  // L6b (game build): a tool now follows this round's text, so it
+                  // is an INTERMEDIATE agent round — its free text is the model's
+                  // planning ("Looking at the roster… npc:1 … Let me stay in
+                  // character"), NOT narration. Suppress the whole bubble; only the
+                  // FINAL round (the final-render block) shows the player narration.
+                  // Fail-open to hiding. Non-game build is UNCHANGED.
+                  if (isGameBuild()) {
+                    roundHolder.style.display = 'none';
+                  } else if (dt.trim()) {
                     var _body3 = roundHolder.querySelector('.body');
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
@@ -2247,18 +2334,40 @@ import { isNarrow } from './platform.js';
                   if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter',
                              'updateCasting', 'manageSandbox', 'runCompetition'].includes(json.tool)) {
                     if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
-                    // E65: a new season (createCharacter success mid-session) opens a FRESH chat.
-                    if (json.tool === 'createCharacter' && window._orwellFreshSession) window._orwellFreshSession();
+                    if (json.tool === 'createCharacter') {
+                      // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
+                      // next-season); NO-OP for the initial onboarding — it stays ONE conversation.
+                      if (window._orwellFreshSession) window._orwellFreshSession();
+                      // P1 (OOBE cutover): paint the inline "finalizing" indicator — createCharacter
+                      // → house-entry is a heavy beat that must never read as frozen (cleared by the
+                      // first narration token in the json.delta path, with a finally-block safety net).
+                      try { if (window._orwellFinalizing) { _orwellFinalizingActive = true; window._orwellFinalizing.begin(); } } catch (_) {}
+                    }
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
+                  // L7: a node is only EXPANDABLE when it has real content (command,
+                  // output, or diff). A production beat (and any tool that returned
+                  // nothing) has an empty content area, so rendering a chevron +
+                  // collapsible affordance is a worthless click target. Render the
+                  // chevron + content div ONLY when there is something to expand;
+                  // otherwise mark the node --flat (a plain label, no expander).
+                  const _expandHtml = `${cmdHtml2}${outHtml}${diffHtml}`;
+                  const _hasExpand = !!_expandHtml.trim();
+                  const _chevron2 = _hasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
+                  const _contentDiv2 = _hasExpand ? `<div class="agent-thread-content">${_expandHtml}</div>` : '';
                   // Preserve the user's .open choice across the innerHTML
                   // rewrite \u2014 otherwise expanding a running tool collapses
                   // it as soon as the result lands, forcing the user to
                   // click again. Click handling is delegated (see init at
                   // bottom of file) so no per-node listener needed.
-                  const _wasOpen = currentToolBubble.classList.contains('open');
-                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_wasOpen ? ' open' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_beatOut || json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${cmdHtml2}${outHtml}${diffHtml}</div>`;
+                  const _wasOpen = _hasExpand && currentToolBubble.classList.contains('open');
+                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '');
+                  // L42: in the game build, show the beat's PUBLIC OUTCOME (Vault-free, from the tool
+                  // result) instead of a generic "done" \u2014 "\ud83d\uddf3\ufe0f Troy is evicted (7-1)", "\ud83c\udfc6 Maya wins HOH".
+                  const _outcome = (_beatOut && ok) ? orwellBeatOutcome(json.tool, json.output) : null;
+                  const _toolText = _outcome || _beatOut || json.tool;
+                  const _statusHtml = _outcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();
@@ -2520,6 +2629,15 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
+                // L6b (game build): a NEW agent round is starting, so whatever the
+                // PREVIOUS round rendered is an INTERMEDIATE round — followed by
+                // another assistant round — i.e. the model's planning, not the
+                // final narration. Suppress that bubble (the live render may have
+                // already painted its text). The FINAL round's narration is shown
+                // by the final-render block. Non-game build is UNCHANGED.
+                if (isGameBuild() && roundHolder) {
+                  roundHolder.style.display = 'none';
+                }
                 // Mark thread as connected to bubble below
                 const _activeThread = document.querySelector('.agent-thread.streaming');
                 if (_activeThread) {
@@ -2744,8 +2862,13 @@ import { isNarrow } from './platform.js';
             }
           }
           if (_liveReplyEl && _finalReply) {
-            // Render reply into the live-reply container (thinking bar already showing)
-            var _replyHtml = markdownModule.mdToHtml(markdownModule.squashOutsideCode(_finalReply));
+            // Render reply into the live-reply container (thinking bar already showing).
+            // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs —
+            // the public bubble must never carry a reasoning preamble that bled into the
+            // reply text (the thinking accordion already holds the reasoning separately).
+            var _replyHtml = isGameBuild()
+              ? markdownModule.processWithThinking(markdownModule.squashOutsideCode(_finalReply))
+              : markdownModule.mdToHtml(markdownModule.squashOutsideCode(_finalReply));
             _liveReplyEl.innerHTML = _replyHtml;
             _liveReplyEl.classList.remove('live-reply-content');
             if (_sourcesData) {
@@ -3129,6 +3252,12 @@ import { isNarrow } from './platform.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
+      // ended (or errored) without any narration token to clear it.
+      if (_orwellFinalizingActive) {
+        _orwellFinalizingActive = false;
+        try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
+      }
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
       if (_chatLogDone) _chatLogDone.setAttribute('aria-busy', 'false');
@@ -5157,6 +5286,8 @@ import { isNarrow } from './platform.js';
       if (!header) return;
       const node = header.closest('.agent-thread-node');
       if (!node) return;
+      // L7: flat nodes (no expandable content) are plain labels — never toggle.
+      if (node.classList.contains('agent-thread-node--flat')) return;
       node.classList.toggle('open');
     });
     window.__orwell_thread_click_bound = true;

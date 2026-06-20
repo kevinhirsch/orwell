@@ -29,7 +29,7 @@ export interface JuryWeights {
   reliability: number;
 }
 
-export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.9, reliability: 0.4 };
+export const JURY_WEIGHTS: JuryWeights = { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.7, reliability: 0.4 };
 
 /**
  * How the MANNER of a finalist's eviction move shifts a juror's lean toward them (signed; `juryLean`).

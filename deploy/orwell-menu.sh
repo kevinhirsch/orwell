@@ -13,6 +13,7 @@
 # block on a dialog. Direct subcommands bypass the menu entirely (handy for scripting / tests):
 #
 #   orwell update | doctor | backup | restore | ready
+#   orwell update-reset --yes                          (update, THEN OOBE reset; --yes required off the menu)
 #   orwell reset-game --yes | reset-factory --yes      (destructive: --yes required off the menu)
 #
 # This panel is container-oriented (it runs the scripts in place). On a Proxmox HOST it prints
@@ -25,6 +26,16 @@ for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bba
   if [[ -r "$__lib" ]]; then . "$__lib"; break; fi
 done
 type tui_active >/dev/null 2>&1 || tui_active() { return 1; }   # fallback: no TUI ⇒ plain paths
+# Presentation-helper fallbacks: a box updated before this change runs an installed orwell-tui.sh
+# that predates the ow_* helpers — define minimal no-frills versions so the panel never errors on
+# a missing function (the helpers only print; they never change behaviour or exit codes).
+type ow_logo    >/dev/null 2>&1 || ow_logo()    { :; }
+type ow_section >/dev/null 2>&1 || ow_section() { echo "── $1 ──"; }
+type ow_rule    >/dev/null 2>&1 || ow_rule()    { [[ -n "${1:-}" ]] && echo "── $1 ──" || echo "──"; }
+type ow_step    >/dev/null 2>&1 || ow_step()    { echo "  > $*"; }
+type ow_ok      >/dev/null 2>&1 || ow_ok()      { echo "  + $*"; }
+type ow_fail    >/dev/null 2>&1 || ow_fail()    { echo "  x $*"; }
+type ow_info    >/dev/null 2>&1 || ow_info()    { echo "  $*"; }
 ORWELL_TUI_TITLE="Orwell — control panel"
 
 msg() { echo -e "==> $*"; }
@@ -43,8 +54,10 @@ Non-interactive subcommands:
   orwell backup                  snapshot engine + front-end data to <app>/backups
   orwell restore [FILE]          restore a backup (newest if FILE is omitted)
   orwell ready                   readiness check (engine + front-end + an LLM)
+  orwell update-reset --yes      update (pull + rebuild) THEN OOBE reset, KEEP the API-key/LLM config
   orwell reset-game --yes        new season — clears games, keeps accounts + config
-  orwell reset-factory --yes     factory reset — back to first-run OOBE
+  orwell reset-oobe --yes        OOBE reset — back to first-run, KEEP the API-key/LLM config
+  orwell reset-factory --yes     factory reset — back to first-run OOBE (wipes the FE store)
   orwell --help                  this help
 EOF
 }
@@ -85,11 +98,11 @@ DEPLOY_DIR="$__here"
 run() {
   local title="$1"; shift
   tui_active && { command -v clear >/dev/null 2>&1 && clear || true; }
-  echo "── ${title} ──────────────────────────────────────────────"
-  echo "▶ $*"; echo
+  ow_section "$title"
+  ow_step "$*"; echo
   "$@"; local rc=$?
   echo
-  [[ $rc -eq 0 ]] && echo "✓ ${title}: done." || echo "✗ ${title}: exited ${rc}."
+  [[ $rc -eq 0 ]] && ow_ok "${title}: done." || ow_fail "${title}: exited ${rc} (see output above)."
   tui_active && { read -rsn1 -p "Press any key to return to the menu… " _ || true; echo; }
   return $rc
 }
@@ -115,6 +128,19 @@ do_update() {
               [[ -n "$tok" ]] || { wt_msgbox "No token entered — unchanged."; return 0; }
               run "Set deploy token" env GIT_TOKEN="$tok" bash "${DEPLOY_DIR}/orwell-update.sh" --set-token ;;
   esac
+}
+
+do_update_reset() {
+  # The combined middle tier: update (pull + rebuild) THEN OOBE reset, keeping the API-key/LLM
+  # config. Dispatches to orwell-update-reset.sh (which composes the two existing scripts and is
+  # fail-closed); nothing here re-implements its logic.
+  if ! tui_active; then
+    [[ "${1:-}" == "--yes" ]] || die "update-reset is destructive — pass --yes to run it non-interactively."
+    run "Update + Reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-update-reset.sh" --yes; return $?
+  fi
+  wt_confirm_phrase "RESET" "UPDATE + RESET — pull latest, rebuild, THEN reset to first-run OOBE, KEEPING your API keys.\n\nPhase 1 UPDATES: git pull → rebuild the engine → refresh front-end deps (no restart yet).\nPhase 2 RESETS to OOBE: PERMANENTLY DELETES all games AND the front-end store (accounts, sessions, settings, MCP configs, uploads).\n\nPRESERVED: your LLM / image provider config + the keys that decrypt them, and data/.env.\n\nIf the update fails, the reset does NOT run — nothing is wiped. The next visit starts at first-run OOBE on the freshly-pulled build, with an LLM already configured." \
+    || { wt_msgbox "Cancelled — nothing was changed."; return 0; }
+  run "Update + Reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-update-reset.sh" --yes
 }
 
 do_doctor() {
@@ -157,6 +183,16 @@ do_reset_game() {
   run "Game reset" bash "${DEPLOY_DIR}/orwell-game-reset.sh" --yes
 }
 
+do_reset_oobe() {
+  if ! tui_active; then
+    [[ "${1:-}" == "--yes" ]] || die "reset-oobe is destructive — pass --yes to run it non-interactively."
+    run "OOBE reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-oobe-reset.sh" --yes; return $?
+  fi
+  wt_confirm_phrase "RESET" "OOBE RESET — back to first-run onboarding, KEEPING your API keys.\n\nPERMANENTLY DELETES all games AND the front-end store (accounts, sessions, settings, MCP configs, uploads).\n\nPRESERVED: your LLM / image provider config + the keys that decrypt them, and data/.env.\n\nThe next visit starts at first-run OOBE — with an LLM already configured." \
+    || { wt_msgbox "Cancelled — nothing was changed."; return 0; }
+  run "OOBE reset (keep API keys)" bash "${DEPLOY_DIR}/orwell-oobe-reset.sh" --yes
+}
+
 do_reset_factory() {
   if ! tui_active; then
     [[ "${1:-}" == "--yes" ]] || die "reset-factory is destructive — pass --yes to run it non-interactively."
@@ -170,37 +206,50 @@ do_reset_factory() {
 # ── Direct subcommands (bypass the menu) ────────────────────────────────────────────────────────
 case "${1:-}" in
   update)        shift; do_update "$@";        exit $? ;;
+  update-reset)  shift; do_update_reset "$@";  exit $? ;;
   doctor)        shift; do_doctor "$@";        exit $? ;;
   backup)               do_backup;             exit $? ;;
   restore)       shift; do_restore "$@";       exit $? ;;
   ready)                do_ready;              exit $? ;;
   reset-game)    shift; do_reset_game "$@";    exit $? ;;
+  reset-oobe)    shift; do_reset_oobe "$@";    exit $? ;;
   reset-factory) shift; do_reset_factory "$@"; exit $? ;;
   "")            : ;;  # no subcommand → fall through to the interactive menu
   *)             usage; die "unknown command: $1" ;;
 esac
 
 # ── Interactive menu loop ───────────────────────────────────────────────────────────────────────
+# A one-time logo splash on the terminal before the first dialog draws (whiptail's boxed widgets
+# can't render the wordmark themselves). Cleared away by the menu; cheap and TTY-only.
+if [[ -t 1 ]]; then
+  command -v clear >/dev/null 2>&1 && clear || true
+  ow_logo "control panel  ·  ${APP_DIR}@$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  sleep 1 2>/dev/null || true
+fi
 while :; do
   choice=""
   wt_menu choice "$(printf 'Orwell @ %s  (%s)\n\nChoose an action:' \
         "$APP_DIR" "$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')")" \
     update        "Update / rollback / deploy token" \
+    update-reset  "Update + Reset (update, then OOBE; KEEP API keys)" \
     doctor        "Diagnose & repair the services" \
     ready         "Readiness check (engine + FE + LLM)" \
     backup        "Back up game + user data" \
     restore       "Restore from a backup" \
     reset-game    "New season (keeps accounts + config)" \
-    reset-factory "Factory reset (back to OOBE)" \
+    reset-oobe    "OOBE reset (back to OOBE, KEEP API keys)" \
+    reset-factory "Factory reset (back to OOBE, wipe everything)" \
     quit          "Quit" \
     || break
   case "$choice" in
     update)        do_update ;;
+    update-reset)  do_update_reset ;;
     doctor)        do_doctor ;;
     ready)         do_ready ;;
     backup)        do_backup ;;
     restore)       do_restore ;;
     reset-game)    do_reset_game ;;
+    reset-oobe)    do_reset_oobe ;;
     reset-factory) do_reset_factory ;;
     quit|"")       break ;;
   esac

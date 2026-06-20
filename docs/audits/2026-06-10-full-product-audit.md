@@ -1,5 +1,7 @@
 # 2026-06-10 — Full product audit (round 5): architecture, wiring, FE/UI, game design & player experience
 
+> 📋 **Audit record** · 2026-06-10 · Full product audit (round 5) · **Status:** **ACTIVE — authoritative open-items ledger** (product-owner rulings #1–#21 + the campaign close-out + the 2026-06-19 reconciliation)
+
 **Scope.** A complete sweep of the repo at `main` (87687c0): the engine's ports/composition/
 adapters/surfaces, the pure core and every `src/engine` system against the canonical mechanics
 (CLAUDE.md, `bb-sim-spec.md`, ADRs 0001–0004, the legacy Bible rulings), the vendored front-end
@@ -1574,6 +1576,20 @@ cheap to do so. This section is the authoritative open-items list going forward.
   `FastembedEmbedding` + `fastembedWorker` behind the synchronous `EmbeddingProvider` seam, loud
   permanent degrade to the deterministic fake on failure. (Was: open — ADR 0004 had been amended
   to "Accepted — adapter not yet built." See the "E86a — BUILT" section below.)
+- ✅ **Calibration instrumentation (the playtest-revisit enabler)** — the owner chose "instrument
+  & gather data first" over tuning the calibration weights for the open E33-ceiling question
+  ("passive players coast to Final 2 and lose there — emergent realism, or a degenerate plateau?",
+  section C below). Two measurement pieces, **NO weight change**: (1) an append-only per-user
+  **season-outcome log** (`frontend/src/orwell_outcomes.py`) that durably records the PUBLIC,
+  post-finale facts the question needs — final placement, the player's recorded social-scene
+  count, their public competition wins, and the final jury-vote margin — captured idempotently
+  when a season finishes and surfaced on the admin surface (`/api/admin/calibration/outcomes`,
+  the 0053 `require_admin` read pattern), so real playtest data accrues to review; and (2) an
+  engine **gradient gate** (`tests/property/calibrationGradient.property.test.ts`, heavy-sims lane)
+  that proves a minimal-active seeded policy reaches the jury and wins **at least as often** as the
+  fully-passive policy `juryReach` already gates — measuring that *playing the game is never a
+  disadvantage*, the monotonic property any future calibration must preserve. (Was: only the
+  passive extreme was gated, and no public playtest data was captured.)
 
 ## B — Cross-lane tails that fell through (each verified absent on main)
 **✅ All five DONE — one "cross-lane tails" PR (PR #224, Lane A), each with its proving test.**
@@ -1710,14 +1726,19 @@ itself; a future incremental-snapshot item if play feels it.
   choice-shaped decisions but `submitDecision` expects the pick on `vote` — any non-FE
   client trips. Align the field or document it on the pending view.
 
-- **A11 [LOW · Noise · prod-observed 2026-06-11]** onnxruntime inside an LXC logs
+- **A11 [LOW · Noise · prod-observed 2026-06-11] ✅ DONE (ops-render-checks lane) — documentation +
+  the doctor ignores it.** onnxruntime inside an LXC logs
   `pthread_setaffinity_np … error code: 22` (twice, at thread-pool creation) when the
   container's cgroup cpuset doesn't grant the host CPU indexes ORT tries to pin — harmless
   (threads run unpinned; inference unaffected), appears at prefetch and once at boot
   warm-up. Mitigation is documentation only (deploy README + the doctor ignores it):
   fastembed-js doesn't expose ORT's `intraOpNumThreads`, and widening the LXC cpuset is a
   worse trade. Upgrades to a real finding only if it ever spams per-inference (it
-  shouldn't — one session, one pool, created once).
+  shouldn't — one session, one pool, created once). *Fix:* a new **"Known harmless log noise (A11)"**
+  section in `deploy/README.md` documents it as expected-and-ignorable, and
+  `orwell-doctor.sh`'s `journal_tail` now drops exactly that benign ORT line from a failing
+  unit's journal tail (reporting how many lines it hid) so it can never masquerade as the crash
+  reason — every genuine diagnostic line still passes through.
 
 ## A12 [Ruling #21 · 2026-06-11 — SHIPPED same day] The container shell greets with a live health panel
 **Ruling:** entering the container must never feel hung — interactive shells get a terminal
@@ -1728,3 +1749,130 @@ tiers (and whether the tiers agree), recall provider + model-cache state, save c
 load/mem, the play URL, and the doctor/update one-liners. Design rule: NEVER blocks a
 login — every probe `curl -m 1`, everything `|| true`, measured 96ms worst-case render with
 all probes failing, exit 0 always. Legacy bbai-aware.
+
+---
+
+## 2026-06-19 (PM) — session reconciliation (authoritative current state)
+
+This entry is the single authoritative snapshot for the 2026-06-19 PM work session. It is
+grounded in the **merged git history** (`origin/main` @ `38a3381`), not the drift-prone
+feature-README / CLAUDE.md status prose — where those disagree with the merged code, the code
+wins and the drift is called out under *Ledger corrections* below.
+
+### Merged to main this session
+- **#348** — engine-sim perf: killed the per-season O(events²) integrity-checkpoint hotspot
+  (passive season ~26.6s→4.8s, byte-identical outcomes by golden hash; every heavy CI lane now <3 min).
+- **#347** — windowing kit airtight: re-clamp open kit windows into the viewport on browser resize.
+- **#345** — vault/new-season window collision fix (distinct slots + clamped base-anchor stacking) — **closes L43**.
+- **#344** — live-debug verification pass: L1–L20 confirmed fixed in code (running instance was a stale deploy); logged L43/L44/L45.
+- **#342 / #341** — CI: jury path-filter + UAT fan-out (split matrix, one file per runner).
+- **#340** — **0061 player self-eviction — BUILT, BDD-gated** (forfeit-on-quit, skippable parting message, any-beat-resolved; NPC self-eviction out of scope).
+- **0062 move-in zeitgeist snapshot — BUILT, BDD-gated** (2026-06-20). `src/engine/zeitgeist.ts` captures
+  ONE frozen, seeded `WorldSnapshot` at season creation (same seed hinge as the cast), persists it byte-
+  stable on `SessionCore`/`GameState` (recalled never re-searched; 0007 superset/byte-compare guards the
+  freeze), and renders the Vault-free "world you all moved in with" block into BOTH the player moment
+  prompt AND the off-screen/`social` prompt (the C32-beyond reach), scaling the out-of-the-loop drift by
+  the live week. FLAVOR ONLY — a seeded game advanced WITH vs. WITHOUT the snapshot is byte-identical in
+  every comp result, vote, nomination, and relationship/soul fold (the §6/§10 headline guard, proven
+  structurally). Owner recs taken: one-time 7-day lag offset (§11 #1), capture-once-persist + deterministic
+  `model-framed` fallback for tests/replays (§11 #2/#9), small-and-bounded slices (§11 #3), engine-side
+  outward `GameState` field (§11 #4). FE `web_search` capture lands via the `recordWorldSnapshot` write-back
+  seam (FE provider wiring is its own lane, like 0051). `0062-*.feature` in `cucumber.cjs`; unit `tests/unit/zeitgeist.test.ts`.
+- **#339** — **0062 move-in zeitgeist snapshot — SPEC** (superseded by the BUILT entry above).
+- **#338** — NPC movement weighting, RNG- & calibration-isolated (juryReach green).
+- **#337** — calibration instrumentation + gradient gate (no weight changes).
+- **#336** — **0060 story-thread trigger/resolution scheduler — BUILT** (`src/engine/threadConstants.ts`; `0060-*.feature` in `cucumber.cjs`).
+- **#335** — **0054 Phase 2 dock windows + A7 fly-out — DONE** (finale/cast/retro dock into the gadget rail; Win7 fly-out).
+- **#334** — CI speedup (parallelize heavy sims; drop coverage double-run).
+- **#332** — L27b recall fidelity + L39 God-Mode/finale + L37 ops-log hygiene.
+- **#331** — L32/L34 frosted themes + whereabouts cohesion (L21/L24).
+- **#330** — **E63 + SQLite relational adapters — DONE** (opt-in `ORWELL_STORE=sqlite`, sqlite-vec engine-only, Vault-walled).
+- **#329** — L15/L17 cast-gen responsiveness + look-alike dedup pass.
+- **#328** — 0058 Phase 2 thread-scheduler SPEC (built as 0060 in #336).
+- **#327** — R3 incremental O(Δ) checkpoint (the `eloquent-hamilton` lane).
+
+### The five dispatched lanes — ALL MERGED (a mid-session container restart killed the agent
+*processes*; all work survived as on-disk worktrees, was committed + pushed as WIP checkpoints,
+and finisher agents drove each to green — fast-gate only, **no heavy sims locally**, the real OOM cause):
+- **#352** (`claude/0063-build`) — 0063 casting diversity floor (BIPOC/LGBTQ+/gender/age floors; ethnicity facet; **Vault-sealed private orientation**) + **orientation-aware 0059 showmance eligibility** + portrait enrichment. **Supersedes the #346 spec.**
+- **#351** (`claude/ci-targeted-and-sharded`) — per-job path-filtering + shard heavy lanes (UAT 12→3, jury 20→5, gradient 6→2) under a unified deadlock-free `ci-gate`. **Supersedes #343.** Proved itself green end-to-end; every heavy lane <3 min.
+- **#349** (`claude/portrait-image-config`) — square (1:1) aspect + pinned 1024² size + reference-image-on-regen (identity preservation for B&W eviction shots + L17 re-shoots).
+- **#353** (`claude/fe-polish-…`) — **A5 (theme particles) + A6 (frosted-top, the kit titlebar's own backdrop-filter re-blurring the glass) + L45 (punctuation guard ?→!/./…)**. *0054 P2 dropped — already merged in #335.*
+- **#354** (`claude/calibration-data-instrument`) — season-outcome instrument + the data report (`docs/audits/2026-06-19-calibration-data.md`). Instrument excluded from the fast gate/coverage (60-season run, on-demand only).
+
+### Now in flight
+- **0058 Phase 2 remainder** (`claude/0058-phase2-build`) — `recordCastProfile` LLM write-back + premiere voicing (the portrait physical-facet consumption is largely covered by the 0063 enrichment; the thread scheduler shipped as 0060/#336). **Kicked off now that 0063 merged** off the shared `GameSessionAdapter.ts`.
+
+### Closed as superseded
+- **#346** (0063 SPEC) → folded into #352. · **#343** (jury shard only) → folded into #351.
+
+### Ledger corrections (drift fixed this pass)
+- **0054 Phase 2 + A7 = DONE** (#335). **0060 = BUILT + BDD-gated** (#336). **Relational adapters (SQLite) = DONE** (#330). **A6 frosted-top = DONE** (#353).
+- **live-debug ledger:** L43 fixed (#345); L15/L17 shipped (#329); L45 guard extended (#353).
+
+### Still genuinely open (forward backlog, after this session)
+1. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
+2. ✅ **0062** — move-in zeitgeist snapshot **— BUILT, BDD-gated** (2026-06-20; see the ledger entry above).
+   *Forward FE follow-on (its own lane, not blocking):* wire the FE `web_search` capture into
+   `recordWorldSnapshot` at season creation (the engine seam is built; the FE owns the provider, like 0051).
+3. **0022** — MVP-2 rich game UI (the long-standing deliberate deferral; the chat *is* the UI per ADR 0003).
+4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
+5. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
+6. ✅ **Browser-render validations owed — DONE (ops-render-checks lane).** `browser_smoke.py`
+   now drives the real FE headless and asserts both surfaces actually render: **0051** — a real
+   cast-portrait `<img>` is present, has its src, and is SIZED (~1:1 holder, no placeholder
+   fallback); **0057** — the season progress bar is present & ≤5px & spans the viewport without
+   horizontal overflow, the "Season N" chip reads past season 1 inside the viewport, and the
+   post-season "New season" kit window mounts in-view (keep + recast). Vault-free routed
+   projections only; whole suite green locally + CI.
+7. ✅ **A11 — DONE (ops-render-checks lane).** onnxruntime cpuset log noise: documented in
+   `deploy/README.md` as expected-and-ignorable, and `orwell-doctor.sh` filters the exact benign
+   line out of its failing-unit journal tail (see the A11 entry above).
+8. **Postgres + pgvector** → reclassified under **MVP-002** (see below).
+
+### MVP-002 — post-launch scale-out (milestone)
+
+A deliberate **second-wave** milestone for infrastructure that only earns its keep *beyond* the
+single-container deploy — not blocking launch, filed here so it's a planned wave rather than a vague
+"someday". (2026-06-20.)
+
+- **Postgres + pgvector** — the relational/vector storage tier behind the existing `UserSaveStore`
+  and engine-only `VectorIndex` ports. A clean adapter swap (no domain/engine change; Vault-walled by
+  dependency-cruiser exactly like the SQLite adapter). SQLite + sqlite-vec already shipped **opt-in**
+  (#330, `ORWELL_STORE=sqlite`) and are sufficient for *one container per host, one game per user*.
+  Postgres buys what SQLite does not: **multi-instance shared state, a managed cloud database, heavier
+  concurrent write throughput, and replication / point-in-time recovery** — i.e. it matters only when
+  Orwell scales past a single host. No gameplay impact.
+
+## 2026-06-20 — ADR 0005: split authority by openness (the dynamism guard) — MERGED
+
+**#355 — ADR 0005 + the generative-consequence path + the expressive-non-collapse gate.** A new
+design principle and its first implementation, shipped end to end. Captures the constraint that
+keeps the growing LLM↔engine **sync spine** from flattening creative play: **authority is split by
+*openness*, not by *layer*.** The **closed set** (outcomes, eligibility, state truth, persistence,
+the Vault) is engine-dictated and may be as strict as it likes — there is *no dynamism to lose*.
+The **open set** (the meaning/texture/consequence of social play) is recorded faithfully and never
+*normalized* — the engine may not collapse an open-ended utterance into a closed bucket in a way
+that changes what can be narrated or played next.
+
+- **Built, not just stated** — `recordInteraction` / the 0023 `ConsequenceEngine` now take an
+  optional, Vault-free `consequence` descriptor (`{ toward, direction, emphasis? }` + `rationale`):
+  the model proposes the *shape*; the engine still owns the bounded, seeded *magnitude*
+  (`emphasis`→a clamped 0.6/1.0/1.4 multiplier — no raw number crosses; mandate #3 holds). `kind`
+  stays the floor (no descriptor ⇒ byte-identical fold). The MCP boundary shape-guards a malformed
+  descriptor (clean 400, E31/D10/R6 pattern); the FE schema/client forward it and the 0055
+  `_auto_record_scene` can propose one.
+- **A new permanent regression gate** joins richness + the Vault sentinel:
+  `tests/unit/expressiveNonCollapse.test.ts` (lossless record / consequenced-not-dropped /
+  recalled-in-full / distinguishable-downstream) + `frontend/tests/test_expressive_non_collapse.py`
+  (no rail-correction of creative prose). The desync guard's WINNER/NEW-HOH branches were
+  phase-scoped so a creative claim can't trip a board-outcome rail-correction.
+- Documented in **[ADR 0005](../decisions/0005-split-authority-by-openness.md)** (now *Accepted —
+  BUILT*) and folded into the `docs/decisions/` index + the `docs/features/README.md` amendments
+  table (under 0023/0055).
+
+This **does not** close any item in the forward backlog above (calibration tuning, 0062, 0022,
+the real-host smoke, R3, the browser-render validations, A11, MVP-002 remain exactly as listed) —
+it is a *new* refinement record plus its implementation. Its standing claim is the **litmus test**
+in the ADR: any future sync or consequence change must keep the open set recordable,
+consequenceable, recallable, and narratable in full while only ever constraining the closed set.

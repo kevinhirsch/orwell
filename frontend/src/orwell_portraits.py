@@ -14,6 +14,16 @@ Discipline (from the spec, non-negotiable):
   • Generate once per season — on restart the stored portrait is served from disk; a portrait
     that already exists is never regenerated (ADR 0003: augment, never replace; bounded cost).
 
+Image config (the request SHAPE, all Vault-free — see the "Portrait image config" block):
+  • Square (1:1) framing is asked of BOTH transports (OpenAI `size`, OpenRouter
+    `image_config.aspect_ratio`), with per-model graceful degradation and a prompt-text cue
+    as a belt-and-suspenders backstop.
+  • One pinned square resolution (default 1024x1024) is sent on every provider path so the
+    roster grid stays uniform and per-image cost is bounded.
+  • Reference-image-on-regen — re-shooting an EXISTING portrait (the L17 look-alike re-roll)
+    feeds the current portrait back through the img2img edit path so the houseguest stays the
+    SAME person; first-generation stays text-to-image.
+
 Storage: ``{frontend}/data/portraits/{user}/{houseguestId}.png`` plus a small
 ``manifest.json`` (houseguestId → filename + name). The whole tree lives under the
 front-end data dir, so ``orwell-factory-reset.sh`` (which scrubs the FE store) already
@@ -57,6 +67,128 @@ HEADSHOT_LIBRARY_MAX = 24  # keep the most recent N (oldest non-current evicted)
 # (served admin-gated via GET /api/orwell/portraits/log, picked up by the admin Health card).
 PORTRAIT_LOG_PATH = Path(DATA_DIR) / "portrait-log.jsonl"
 PORTRAIT_LOG_MAX_ENTRIES = 100
+
+# ── L15 generation progress: a per-user LIVE record of a run in flight ─────────────────────
+# Root cause of "all photos vanished + FE lost the backend": cast generation floods the engine's
+# PER-USER serial queue (recordCastProfile ×15 + recordImageBeat ×16, each paying the O(events)
+# commit), so the cast panel's getGameState poll stacks behind them and times out → the roster
+# route used to fail open to an EMPTY roster (every face gone) and /state 502'd (the cast button
+# vanished, looking like a dropped connection). The fix is threefold and all process-local:
+#   (1) this progress record — generate_and_store stamps {total, done, active, startedAt, updatedAt}
+#       as each face lands, so the roster route reports HONEST progress (driven by truth, not a
+#       total>present heuristic) and the FE shows a live "Generating N of M…" instead of going dark;
+#   (2) the engine writes the run makes (record_image_beat) are SPACED, not fired back-to-back, so
+#       the per-user queue keeps draining the panel's polls between beats (PROGRESS, never starve);
+#   (3) the roster route keeps a LAST-GOOD roster and serves it on a transient state-read timeout
+#       (see routes/orwell_routes.py) so a busy engine never blanks the cast.
+# Process-local on purpose (like the other portrait trackers): it describes THIS front-end's
+# in-flight work and is never game state.
+_GEN_PROGRESS: dict = {}
+
+# The minimum gap between the engine writes a generation run fires (record_image_beat), so a long
+# cast run leaves the per-user engine queue free to answer the panel's polls between beats instead
+# of starving them. Small — it only has to interleave one poll, not pace the whole run.
+IMAGE_BEAT_SPACING_S = 0.25
+
+# ── L17 distinctness: detect look-alike faces and regenerate the offenders ─────────────────
+# After the full cast generates, an automated pass scores how SIMILAR each houseguest's portrait
+# PROMPT is to every other (the deterministic, Vault-free signal the engine already exposes —
+# built from the structured `physicalCharacteristics` facet via portraitPrompts.ts). Two prompts
+# whose physical-feature token sets overlap past LOOKALIKE_THRESHOLD read as "the same person";
+# the higher-id offender of each clashing pair is re-prompted with an injected variety directive
+# and regenerated, bounded by LOOKALIKE_MAX_REGENS so a flaky model can never loop. Pixel diffing
+# is deliberately avoided (no extra deps / no decode cost): the structured facets ARE the cast's
+# intended diversity signal, so a collision THERE is the right thing to correct.
+LOOKALIKE_THRESHOLD = 0.62  # Jaccard over physical-feature tokens at/above this ⇒ a look-alike
+LOOKALIKE_MAX_REGENS = 6     # cap on regenerations per pass (a bad model never loops the cast)
+# Injected at the FRONT of an offender's prompt to force a visibly different face on re-roll. The
+# image model reads it as a hard variety instruction; it carries no hidden state (pure styling).
+_VARIETY_DIRECTIVE = (
+    "IMPORTANT: make this person look CLEARLY DISTINCT from the rest of the cast — a different "
+    "face shape, hairstyle, and overall look, unmistakably their own individual. "
+)
+
+# ── Portrait image config — square 1:1 framing at a pinned resolution ──────────────────────
+# Every cast portrait is requested as a SQUARE headshot at ONE consistent resolution, so the
+# roster grid is uniform and per-image cost is bounded (no surprise wide/tall renders). Both
+# provider transports (OpenAI /images/{generations,edits} via `size`, OpenRouter
+# /chat/completions via `image_config.aspect_ratio`) are asked for square; the prompt also
+# carries a "square headshot framing" belt-and-suspenders cue. All of this is per-model with
+# graceful degradation — a provider that ignores or rejects the hint never blocks generation.
+PORTRAIT_ASPECT_RATIO = "1:1"
+PORTRAIT_SIZE_DEFAULT = "1024x1024"
+# The `image_quality` setting maps to a square OpenAI `size` string. We keep ONE square family
+# (the grid stays uniform); quality only nudges the pixel budget / cost. Unknown values fall
+# back to the default. dall-e-3 accepts only 1024x1024, so that is the safe shared square size
+# across every provider — a single pinned resolution keeps the grid uniform and cost bounded.
+_QUALITY_SIZE = {
+    "low": "1024x1024",
+    "medium": "1024x1024",
+    "high": "1024x1024",
+    "auto": "1024x1024",
+}
+# A short, Vault-free framing cue appended to a portrait prompt so a provider that ignores the
+# structured size/aspect param still tends toward a square crop. Pure styling — no hidden state.
+_SQUARE_FRAMING_CUE = " Square headshot framing, 1:1 aspect ratio, centered subject."
+
+
+def _portrait_size(quality: Optional[str]) -> str:
+    """The pinned SQUARE OpenAI `size` string for a quality setting (default 1024x1024)."""
+    return _QUALITY_SIZE.get(str(quality or "").lower(), PORTRAIT_SIZE_DEFAULT)
+
+
+def _progress_start(user: Optional[str], total: int) -> None:
+    """Mark a generation run as STARTED for this user (idempotent per run)."""
+    try:
+        _GEN_PROGRESS[_safe_user(user)] = {
+            "total": int(total), "done": 0, "active": True,
+            "startedAt": time.time(), "updatedAt": time.time(),
+        }
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def _progress_tick(user: Optional[str], done_delta: int = 1) -> None:
+    """One more face landed — bump the done count + the heartbeat."""
+    rec = _GEN_PROGRESS.get(_safe_user(user))
+    if not rec:
+        return
+    try:
+        rec["done"] = int(rec.get("done", 0)) + int(done_delta)
+        rec["updatedAt"] = time.time()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def _progress_finish(user: Optional[str]) -> None:
+    """Mark the run complete — the panel can drop to the idle cadence."""
+    rec = _GEN_PROGRESS.get(_safe_user(user))
+    if not rec:
+        return
+    try:
+        rec["active"] = False
+        rec["updatedAt"] = time.time()
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+# A run whose heartbeat is older than this is considered dead (the process crashed / the task was
+# GC'd mid-flight) — `generation_progress` reports it as inactive so the panel never spins forever.
+_GEN_PROGRESS_STALE_S = 120.0
+
+
+def generation_progress(user: Optional[str]) -> Optional[dict]:
+    """The live generation-progress record for this user, or None when nothing is/was running.
+
+    Shape: ``{total, done, active}``. ``active`` is True only while a run is genuinely in flight
+    (its heartbeat is fresh) — a stale heartbeat (crash / GC) reads inactive so the panel stops
+    polling fast. Vault-free: counts only, never a name or any game content."""
+    rec = _GEN_PROGRESS.get(_safe_user(user))
+    if not isinstance(rec, dict):
+        return None
+    active = bool(rec.get("active")) and (time.time() - float(rec.get("updatedAt", 0))) <= _GEN_PROGRESS_STALE_S
+    return {"total": int(rec.get("total", 0)), "done": int(rec.get("done", 0)), "active": active}
+
 
 # ── G9 backfill debounce: at most ONE backfill attempt per user per process per window ────
 # (a failing image provider must not be hammered by every roster poll / button mash).
@@ -330,12 +462,27 @@ def _image_settings(user: Optional[str]) -> tuple:
 
 
 def image_generation_available(user: Optional[str]) -> bool:
-    """True only if image generation is enabled AND a usable image model resolves.
+    """True only if image generation is enabled AND a usable image endpoint is configured.
 
     The roster + onboarding use this to know whether to expect portraits at all (graceful
     absence): when it's False the game proceeds with no portraits and no error surface.
+
+    FALSE-NEGATIVE FIX: the gate is now resilient to a transient `/models` catalog probe.
+    `_resolve_model` confirms a model by network-probing the provider's catalog (a 5s,
+    blocking call that swallows every error into "not found"). When that probe is slow or
+    momentarily fails — a cold provider, a blip, or simply the FIRST Generate press before any
+    catalog is warm — `_resolve_model` raised and we reported "no image model configured",
+    only to succeed seconds later on a retry (the observed false-negative → race-to-success).
+
+    So: a successful catalog resolve still returns True immediately (the fast, certain path),
+    but a resolve that DIDN'T confirm falls back to `has_image_capable_endpoint` — a pure DB
+    read (no network) that answers "is there an enabled image-capable endpoint at all?". The
+    real test of generation is the actual generate POST, which the pipeline runs best-effort;
+    a configured endpoint is enough to TRY, so a transient catalog hiccup never false-negatives.
+    We only report unavailable when generation is disabled or there is genuinely no usable
+    endpoint.
     """
-    from src.ai_interaction import _resolve_model
+    from src.ai_interaction import _resolve_model, has_image_capable_endpoint
 
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
@@ -355,7 +502,13 @@ def image_generation_available(user: Optional[str]) -> bool:
             return True
         except Exception:
             continue
-    return False
+    # No candidate confirmed via the catalog probe. Before reporting "no image model", check
+    # whether an image-capable endpoint is even configured — if one is, the catalog probe was
+    # the transient failure (not a genuine absence) and generation should be allowed to TRY.
+    try:
+        return bool(has_image_capable_endpoint(user or None))
+    except Exception:
+        return False
 
 
 def _extract_chat_image_url(data: dict) -> Optional[str]:
@@ -449,7 +602,9 @@ async def _generate_via_images_edit(client, base_url: str, model_id: str, prompt
     # httpx sets the multipart Content-Type (with boundary) itself — drop any JSON one.
     h = {k: v for k, v in (headers or {}).items() if k.lower() != "content-type"}
     files = {"image": ("headshot.png", reference_png, "image/png")}
-    data = {"model": model_id, "prompt": prompt, "size": "1024x1024"}
+    # Pinned square size (per-quality, default 1024x1024) so the edited result matches the rest
+    # of the cast grid; the prompt also carries the square-framing cue (belt-and-suspenders).
+    data = {"model": model_id, "prompt": prompt, "size": _portrait_size(quality)}
     if quality in ("low", "medium", "high", "auto"):
         data["quality"] = quality
     try:
@@ -496,9 +651,13 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
     else:
         content = prompt
     base_msg = {"model": model_id, "messages": [{"role": "user", "content": content}]}
+    # Request a SQUARE 1:1 portrait via OpenRouter's `image_config` hint. Per-model with graceful
+    # degradation: a model/provider that rejects the param (a 400) is retried once WITHOUT it, so
+    # the square ask never blocks generation. The prompt already carries the framing cue too.
+    square_cfg = {"image_config": {"aspect_ratio": PORTRAIT_ASPECT_RATIO}}
     attempts = (
-        {**base_msg, "modalities": ["image", "text"]},
-        {**base_msg, "tools": [{"type": "openrouter:image_generation"}]},
+        {**base_msg, "modalities": ["image", "text"], **square_cfg},
+        {**base_msg, "tools": [{"type": "openrouter:image_generation"}], **square_cfg},
     )
     last_reason, last_detail = "no-image", None
     for payload in attempts:
@@ -507,6 +666,18 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
         except Exception as e:  # transport error — try the next mechanism
             last_reason, last_detail = type(e).__name__, None
             continue
+        if resp.status_code != 200:
+            # Graceful degradation: a 4xx may be the unrecognized `image_config` — retry the SAME
+            # mechanism once with it stripped before giving up on this attempt.
+            if 400 <= resp.status_code < 500 and "image_config" in payload:
+                logger.info("[portraits] openrouter chat %s with image_config — retrying square-free",
+                            resp.status_code)
+                stripped = {k: v for k, v in payload.items() if k != "image_config"}
+                try:
+                    resp = await client.post(chat_url, json=stripped, headers=headers)
+                except Exception as e:
+                    last_reason, last_detail = type(e).__name__, None
+                    continue
         if resp.status_code != 200:
             logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
             last_reason, last_detail = f"http-{resp.status_code}", _provider_error_reason(resp)
@@ -529,7 +700,8 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
 
 
 async def _generate_one(prompt: str, user: Optional[str],
-                        reference_png: Optional[bytes] = None) -> Optional[bytes]:
+                        reference_png: Optional[bytes] = None,
+                        keep_identity: bool = True) -> Optional[bytes]:
     """Generate a single image from `prompt`; return PNG bytes, or None on any failure.
 
     Best-effort: every failure path returns None (never raises) so a flaky image API can
@@ -542,6 +714,13 @@ async def _generate_one(prompt: str, user: Optional[str],
     provider's image-to-image path — OpenRouter chat with the image part, OpenAI /images/edits.
     A provider with no img2img path falls back to plain text-to-image (logged) so a portrait
     still lands; the likeness is best-effort, never a hard failure.
+
+    L17 re-shoot: when REGENERATING an existing houseguest's portrait, the caller passes the
+    current portrait as `reference_png` so the houseguest stays the SAME person across the
+    re-roll. There the caller supplies its own framing (the variety directive) and sets
+    `keep_identity=False` so the standard "minimal alteration" identity-keep prefix is NOT
+    prepended (it would fight the variety directive) — the reference image alone carries the
+    person, the variety directive carries the differentiation from the rest of the cast.
     """
     import httpx
     from src.ai_interaction import _resolve_model
@@ -549,8 +728,12 @@ async def _generate_one(prompt: str, user: Optional[str],
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
         return None
-    if reference_png:
+    if reference_png and keep_identity:
         prompt = REFERENCE_PROMPT_PREFIX + prompt
+    # Belt-and-suspenders square framing: every portrait carries the 1:1 cue in the prompt text
+    # so a provider that ignores the structured size/aspect param still tends toward a square
+    # crop. The structured params (size / image_config) below remain the primary control.
+    prompt = prompt + _SQUARE_FRAMING_CUE
 
     # Ignore a configured CHAT model (it can't generate — it would 400) and fall back to
     # image auto-detect, mirroring image_generation_available so a stale/mis-set model never
@@ -587,7 +770,9 @@ async def _generate_one(prompt: str, user: Optional[str],
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
     images_url = base_url + "/images/generations"
 
-    size = "1024x1024"
+    # Pinned SQUARE size (per-quality, default 1024x1024) — one consistent resolution so the
+    # roster grid is uniform and per-image cost is bounded.
+    size = _portrait_size(quality)
     payload = {"model": model_id, "prompt": prompt, "n": 1, "size": size}
     if is_gpt_image:
         payload["quality"] = quality if quality in ("low", "medium", "high", "auto") else "medium"
@@ -1034,6 +1219,22 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         total = len(prompts)
         return {"generated": generated, "skipped": total - generated, "total": total}
 
+    # L15: count the faces this run will actually try to generate (provider on, not already on
+    # disk) so the progress record reports honest "done of N" — and mark the run STARTED. The
+    # panel reads this to show live progress and to stay on the fast cadence ONLY while a run is
+    # genuinely in flight, instead of going dark when a state poll times out.
+    to_generate = 0
+    for entry in prompts:
+        if not isinstance(entry, dict):
+            continue
+        hid = entry.get("houseguestId") or entry.get("id")
+        if not hid or not entry.get("prompt"):
+            continue
+        if portrait_file(user, hid) is None:
+            to_generate += 1
+    if to_generate:
+        _progress_start(user, to_generate)
+
     for entry in prompts:
         if not isinstance(entry, dict):
             skipped += 1
@@ -1071,11 +1272,29 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             _write_portrait(user, str(hid), png, str(name), source=source)
             log_attempt(str(hid), True, None, duration_ms)
             generated += 1
+            _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
             newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
         except Exception as e:
             logger.info("[portraits] failed to persist %s: %s", hid, e)
             log_attempt(str(hid), False, "persist-failed", duration_ms)
             skipped += 1
+
+    # L17: before the run is declared complete, run the automated look-alike / mistake pass —
+    # detect near-duplicate faces across the cast (from the structured, Vault-free prompt facets)
+    # and regenerate the offenders with enforced variety, bounded by a retry cap. Best-effort:
+    # any failure leaves the as-generated set intact. Skipped when nothing new generated.
+    if generated:
+        try:
+            dedup = await dedupe_lookalikes(prompts, user)
+            if dedup.get("regenerated"):
+                logger.info("[portraits] L17 distinctness pass for %s: %s", _safe_user(user), dedup)
+                # The regenerated faces are new shows too — record them as beats below.
+                for hid in dedup.get("regeneratedIds", []):
+                    newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
+        except Exception as e:
+            logger.info("[portraits] L17 distinctness pass failed: %s", e)
+
+    _progress_finish(user)  # L15: the run is done — the panel drops to the idle cadence
 
     if record_beats and newly_shown:
         await _record_image_beats(newly_shown, user)
@@ -1084,11 +1303,163 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     return {"generated": generated, "skipped": skipped, "total": len(prompts)}
 
 
+# ── L17: the look-alike / mistake detection + regeneration pass ───────────────────────────────
+
+# Tokens that carry no distinguishing signal (style anchor / framing / generic filler) — stripped
+# before the feature comparison so a shared SEASON ANCHOR never reads as two people looking alike.
+_PHYS_STOPWORDS = frozenset({
+    "and", "a", "an", "the", "with", "of", "in", "on", "to", "very", "quite", "slightly",
+    "photorealistic", "candid", "production", "still", "reality", "tv", "show", "series",
+    "frame", "headshot", "portrait", "subject", "years", "old", "expression", "framing",
+    "setting", "presentation", "style", "physical", "appearance", "looking", "natural",
+    "skin", "texture", "house", "interior", "backdrop", "background", "blurred", "behind",
+    "soft", "light", "lighting", "camera", "head", "shoulders", "chest", "up", "image",
+})
+
+
+def _physical_signature(prompt: str) -> frozenset:
+    """The look-alike feature set for one portrait prompt: the distinguishing word tokens of its
+    "Physical appearance:" clause (and the presentation style), lower-cased, stop-worded.
+
+    The prompt is engine-built (portraitPrompts.ts) from the PUBLIC `physicalCharacteristics`
+    facet, so this signature is Vault-free by construction. Returns the EMPTY set when the prompt
+    has no structured physical clause: the prose fallback is too coarse for a reliable collision
+    call (it would flag two pre-0058 prompts that merely share filler words), so the distinctness
+    pass only ever acts on the structured signal it can trust — an empty signature never collides
+    (see `_similarity`)."""
+    text = str(prompt or "").lower()
+    # The engine joins clauses with ". " and labels them — pull the physical + style clauses.
+    chunks = []
+    for label in ("physical appearance:", "presentation style:"):
+        i = text.find(label)
+        if i != -1:
+            j = text.find(". ", i)
+            chunks.append(text[i + len(label): j if j != -1 else len(text)])
+    if not chunks:
+        return frozenset()  # no structured clause ⇒ no trustworthy look-alike signal
+    tokens = re.findall(r"[a-z]+", " ".join(chunks))
+    return frozenset(t for t in tokens if len(t) > 2 and t not in _PHYS_STOPWORDS)
+
+
+def _similarity(a: frozenset, b: frozenset) -> float:
+    """Jaccard overlap of two feature sets (0..1). Empty-vs-anything is 0 (no signal, no claim)."""
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def find_lookalikes(prompts: list, threshold: float = LOOKALIKE_THRESHOLD) -> list:
+    """The houseguest ids whose portrait reads as a look-alike of an EARLIER one (so each clashing
+    pair contributes exactly ONE offender — the later id — to regenerate). Deterministic in the
+    engine's prompt order. Pure: no I/O, no model — just the structured feature signatures.
+
+    The player is never an offender (their own face is locked / chosen, not engine-varied)."""
+    entries = []
+    for entry in prompts or []:
+        if not isinstance(entry, dict):
+            continue
+        hid = entry.get("houseguestId") or entry.get("id")
+        prompt = entry.get("prompt")
+        if not hid or not prompt or _safe_id(str(hid)) == PLAYER_PORTRAIT_ID:
+            continue
+        entries.append((str(hid), _physical_signature(prompt), entry))
+    offenders = []
+    for i in range(len(entries)):
+        hid_i, sig_i, _ = entries[i]
+        for j in range(i):
+            _, sig_j, _ = entries[j]
+            if _similarity(sig_i, sig_j) >= threshold:
+                offenders.append(hid_i)  # the LATER one yields; the earlier keeps its face
+                break
+    return offenders
+
+
+async def dedupe_lookalikes(prompts: list, user: Optional[str],
+                            max_regens: int = LOOKALIKE_MAX_REGENS) -> dict:
+    """L17: detect look-alike / mistaken faces across the cast and REGENERATE the offenders with
+    enforced variety, bounded by `max_regens`. Returns ``{regenerated, regeneratedIds, offenders}``.
+
+    Drives distinctness from the structured `physicalCharacteristics` portrait prompts (the
+    deterministic, Vault-free signal). Best-effort: a regeneration that fails leaves the original
+    face in place. Idempotent enough to repeat — a successful re-roll changes the on-disk image but
+    not the prompt, so a second pass would re-flag the same pair only if the model ignored the
+    variety directive (the retry cap bounds that)."""
+    offenders = find_lookalikes(prompts, LOOKALIKE_THRESHOLD)
+    if not offenders or not image_generation_available(user):
+        return {"regenerated": 0, "regeneratedIds": [], "offenders": offenders}
+
+    by_id = {}
+    for entry in prompts or []:
+        if isinstance(entry, dict):
+            hid = entry.get("houseguestId") or entry.get("id")
+            if hid:
+                by_id[str(hid)] = entry
+
+    regenerated_ids = []
+    for hid in offenders:
+        if len(regenerated_ids) >= max_regens:
+            break  # the cap — a flaky model never re-rolls the whole cast in a loop
+        entry = by_id.get(hid)
+        if not entry:
+            continue
+        base_prompt = str(entry.get("prompt") or "")
+        name = str(entry.get("name") or "")
+        if not base_prompt:
+            continue
+        # Re-prompt with the variety directive injected up front so the model produces a face
+        # that is clearly distinct from the REST of the cast. Feed the houseguest's CURRENT
+        # portrait back as a reference image (img2img) so they stay the SAME person across the
+        # re-roll — only when a prior portrait exists; first-generation is always text-to-image.
+        # keep_identity=False so the standard "minimal alteration" prefix is NOT prepended (it
+        # would fight the variety directive); the reference image carries the person, the
+        # directive carries the differentiation. A provider with no img2img path degrades to
+        # plain text-to-image inside _generate_one (best-effort, never a hard failure).
+        ref_png = None
+        try:
+            existing = portrait_file(user, str(hid))
+            if existing:
+                ref_png = existing.read_bytes()
+        except Exception:
+            ref_png = None
+        _consume_gen_error(); _consume_gen_detail()
+        t0 = time.monotonic()
+        png = await _generate_one(_VARIETY_DIRECTIVE + base_prompt, user,
+                                  reference_png=ref_png, keep_identity=False)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        if not png:
+            log_attempt(str(hid), False, (_consume_gen_error() or "lookalike-regen-failed"),
+                        duration_ms, detail=_consume_gen_detail())
+            continue
+        try:
+            _write_portrait(user, str(hid), png, name, source="generated")
+            log_attempt(str(hid), True, None, duration_ms)
+            regenerated_ids.append(str(hid))
+        except Exception as e:
+            logger.info("[portraits] L17 regen persist failed for %s: %s", hid, e)
+    return {"regenerated": len(regenerated_ids), "regeneratedIds": regenerated_ids, "offenders": offenders}
+
+
 async def _record_image_beats(shown: list, user: Optional[str]) -> None:
-    """Record each shown portrait as a player-witnessed beat (best-effort)."""
+    """Record each shown portrait as a player-witnessed beat (best-effort).
+
+    L15: the beats are SPACED by IMAGE_BEAT_SPACING_S, not fired back-to-back. Each
+    record_image_beat is an engine WRITE that enqueues into the per-user serial queue and pays
+    the O(events) commit; firing ~16 in a tight loop starved the cast panel's getGameState polls
+    (the panel blanked, the connection looked dropped). A small inter-beat yield lets the queue
+    answer a poll between beats — the run stays responsive."""
     from src import orwell_engine
 
-    for hid, ref in shown:
+    # De-dupe by id (the L17 pass can append an already-shown id) so a face is recorded once.
+    seen: set = set()
+    ordered = [(h, r) for h, r in shown if not (h in seen or seen.add(h))]
+    for i, (hid, ref) in enumerate(ordered):
+        if i and IMAGE_BEAT_SPACING_S > 0:
+            try:
+                await asyncio.sleep(IMAGE_BEAT_SPACING_S)
+            except Exception:  # pragma: no cover - defensive
+                pass
         try:
             await orwell_engine.record_image_beat(hid, ref, user=user)
         except Exception as e:
@@ -1518,6 +1889,8 @@ def scrub_user(user: Optional[str]) -> None:
     _clear_counters(_safe_user(user))
     _PROVIDER_SEEN.pop(_safe_user(user), None)
     _LAST_MISSING.pop(_safe_user(user), None)
+    # L15: a finished/old season's progress record must not linger into the new cast.
+    _GEN_PROGRESS.pop(_safe_user(user), None)
 
 
 def scrub_all() -> None:
@@ -1536,3 +1909,4 @@ def scrub_all() -> None:
         pass
     _PROVIDER_SEEN.clear()
     _LAST_MISSING.clear()
+    _GEN_PROGRESS.clear()  # L15: no run is in flight after a wholesale scrub

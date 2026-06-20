@@ -28,11 +28,30 @@ for _pv in "ORWELL_PORT=${ORWELL_PORT}" "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT
     || { echo "ERROR: ${_pn}='${_pp}' is not a valid port (1-65535)." >&2; exit 1; }
 done
 
+# ── Presentation (inline — this installer is its own standalone file; it does not source the TUI
+# lib, mirroring orwell.sh). Colour auto-disables off a TTY (the install runs over `pct exec` with
+# no PTY, so the tee'd log stays plain ASCII) or when NO_COLOR / TERM=dumb. Pure echo; no input. ─
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'; C_GRN=$'\e[32m'; C_CYN=$'\e[36m'; C_OFF=$'\e[0m'
+else
+  C_BOLD=""; C_DIM=""; C_GRN=""; C_CYN=""; C_OFF=""
+fi
+banner() {
+  printf '%s\n' \
+"${C_CYN} _____ _____ _ _ _ _____ __    __    ${C_OFF}" \
+"${C_CYN}|     |  _  | | | |   __|  |  |  |   ${C_OFF}" \
+"${C_CYN}|  |  |    -| | | |   __|  |__|  |__ ${C_OFF}" \
+"${C_CYN}|_____|__|__|_____|_____|_____|_____|${C_OFF}" \
+"${C_BOLD}            O R W E L L${C_OFF}" \
+"   ${C_DIM}${1:-}${C_OFF}"
+  printf '\n'
+}
+
 # ── Failure observability ──────────────────────────────────────────────────────────────────────
 # Each phase declares itself via step(); the ERR trap reports WHICH step died, where the log is,
 # and that a plain re-run resumes. set -E makes the trap fire inside functions too.
 STEP="startup"
-step() { STEP="$1"; echo "==> $1"; }
+step() { STEP="$1"; echo "${C_CYN}▸${C_OFF} $1"; }
 on_err() {
   local rc=$? line=$1
   {
@@ -51,7 +70,9 @@ trap 'on_err $LINENO' ERR
 mkdir -p "$DATA_DIR"
 INSTALL_LOG="${DATA_DIR}/install.log"
 exec > >(tee -a "$INSTALL_LOG") 2>&1
-echo "── orwell install run: $(date -Is) (branch ${BRANCH}, UI port ${ORWELL_PORT}) ──"
+banner "in-container install"
+echo "${C_DIM}── run $(date -Is) · branch ${BRANCH} · UI port ${ORWELL_PORT} · log ${INSTALL_LOG}${C_OFF}"
+echo
 
 # ── Phases ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -254,8 +275,18 @@ ownership() {
   install -d -m 750 "${DATA_DIR}/ops"
   chown orwell:orwell "${DATA_DIR}/ops"
   rm -f "${DATA_DIR}/ops/update-requested"   # a stale pre-install request must not fire mid-install
+  rm -f "${DATA_DIR}/ops/factory-reset-requested"  # likewise: no stale OOBE-reset request fires mid-install
+  rm -f "${DATA_DIR}/ops/update-reset-requested"   # likewise: no stale Update+Reset request fires mid-install
   touch "${DATA_DIR}/ops-update.log"
   chmod 644 "${DATA_DIR}/ops-update.log"
+  # The OOBE-reset trigger (admin "Factory Reset (OOBE)" button) appends to its own live log,
+  # tailed by the same admin status page viewer. Touched, never `install`ed (keep the history).
+  touch "${DATA_DIR}/ops-factory-reset.log"
+  chmod 644 "${DATA_DIR}/ops-factory-reset.log"
+  # The combined Update + Reset trigger (admin "Update + Reset" button) likewise appends to its own
+  # live log, tailed by the same viewer. Touched, never `install`ed (keep the run history).
+  touch "${DATA_DIR}/ops-update-reset.log"
+  chmod 644 "${DATA_DIR}/ops-update-reset.log"
 }
 
 systemd_services() {
@@ -268,6 +299,17 @@ systemd_services() {
   # page tails it). Root-by-design — the WHY is documented in the unit files themselves.
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.path"    /etc/systemd/system/orwell-ops-update.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.service" /etc/systemd/system/orwell-ops-update.service
+  # Same G19b seam for the admin "Factory Reset (OOBE)" button: the web tier drops the flag
+  # data/ops/factory-reset-requested and this root-side PATH unit runs the one fixed reset
+  # script (orwell-oobe-reset.sh --yes), output appended live to data/ops-factory-reset.log.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.path"    /etc/systemd/system/orwell-ops-factory-reset.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.service" /etc/systemd/system/orwell-ops-factory-reset.service
+  # Same G19b seam for the admin "Update + Reset" button: the web tier drops the flag
+  # data/ops/update-reset-requested and this root-side PATH unit runs the one fixed combined script
+  # (orwell-update-reset.sh --yes — update with restart suppressed, then OOBE reset with the single
+  # final restart), output appended live to data/ops-update-reset.log.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.path"    /etc/systemd/system/orwell-ops-update-reset.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.service" /etc/systemd/system/orwell-ops-update-reset.service
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -291,13 +333,33 @@ EOF
     rm -f "$FRONTEND_DROPIN"
   fi
 
+  # OPTIONAL — the admin "Update" button's DIRECT path (ORWELL_UPDATE_SUDO=1): a tightly-scoped
+  # sudoers drop-in letting the non-root `orwell` FE user run EXACTLY the one fixed update script.
+  # OFF by default: the recommended door is the root-side flag trigger (orwell-ops-update.path,
+  # above), which needs no sudo. Only install this when the operator opts into the detached-Popen
+  # path. The drop-in is validated with `visudo -c` before it is trusted (a bad sudoers file can
+  # lock out sudo entirely). NOTE: NoNewPrivileges=yes in the FE unit blocks setuid sudo — the
+  # operator must also add a drop-in clearing it (deploy/README.md); the flag trigger avoids this.
+  if [[ "${ORWELL_UPDATE_SUDO:-0}" == "1" ]]; then
+    step "admin-update sudoers drop-in (ORWELL_UPDATE_SUDO=1)"
+    local sudoers_tmp="/etc/sudoers.d/.orwell-update.tmp"
+    install -m 0440 "${APP_DIR}/deploy/sudoers/orwell-update" "$sudoers_tmp"
+    if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+      mv -f "$sudoers_tmp" /etc/sudoers.d/orwell-update
+      echo "==> installed /etc/sudoers.d/orwell-update (scoped to orwell-update.sh)"
+    else
+      rm -f "$sudoers_tmp"
+      echo "WARNING: deploy/sudoers/orwell-update failed visudo -c — NOT installed" >&2
+    fi
+  fi
+
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
-  # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
-  systemctl enable --now orwell-ops-update.path
+  # The ops TRIGGERS are path units (their services are started by the watcher, never enabled).
+  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
-  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path
+  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path
 }
 
 login_panel() {
@@ -348,7 +410,7 @@ verify_install() {
     done
     exit 1
   fi
-  echo "==> verified: both services active; engine + UI answering"
+  echo "${C_GRN}✓${C_OFF} verified: both services active; engine + UI answering"
 }
 
 main() {
@@ -370,7 +432,13 @@ main() {
   # message). hostname -I is the container's address; fall back if it's somehow empty.
   local ip
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  echo "==> orwell installed at ${APP_DIR} (data: ${DATA_DIR}). UI: http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  echo
+  echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
+  echo "  ${C_BOLD}${C_GRN}orwell is installed and running.${C_OFF}"
+  echo "  ${C_BOLD}play:${C_OFF}    http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  echo "  ${C_DIM}app:${C_OFF}     ${APP_DIR}   ${C_DIM}data:${C_OFF} ${DATA_DIR}"
+  echo "  ${C_DIM}manage:${C_OFF}  ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}   ${C_DIM}health:${C_OFF} orwell-panel"
+  echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
 }
 
 main "$@"

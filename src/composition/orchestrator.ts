@@ -87,6 +87,10 @@ export class Orchestrator {
   private static readonly MAX_STORED_FAULTS = 20;
   /** Default aux-commit tick debounce (E57/R5): tool calls inside one turn land within seconds. */
   private static readonly AUX_TICK_DEBOUNCE_MS = 10_000;
+  /** R3 — re-run a FULL (untrusted-prefix) event-content re-scan at least this often, per user, as cheap
+   *  belt-and-suspenders; between full checks the immutable append-only event prefix is trusted (O(Δ)).
+   *  Not a standalone integrity guarantee — see `trustEventPrefixFor` for what every commit still proves. */
+  private static readonly R3_FULL_CHECK_EVERY = 32;
 
   private readonly seed: number;
   private readonly offscreenInteractions: number;
@@ -102,6 +106,8 @@ export class Orchestrator {
   private readonly baselines = new Map<string, SessionSnapshot>();
   /** Wall time of the user's last turn-driven off-screen tick (the E57 debounce anchor). */
   private readonly lastTurnTickAt = new Map<string, number>();
+  /** R3 — commits since this user's last FULL (untrusted-prefix) non-degradation verification. */
+  private readonly commitsSinceFullCheck = new Map<string, number>();
   private seq = 0;
 
   constructor(
@@ -138,8 +144,18 @@ export class Orchestrator {
    * Called by the runtime's boot preload: without it, the first commit after an engine restart was
    * checkpoint-blind — the guard had a hole exactly at resume-from-disk, where the historical
    * memory-thinning bug lived.
+   *
+   * R3 (incremental-snapshot cache): a re-baseline runs precisely BECAUSE the live session state was
+   * just set/replaced from OUTSIDE the `commit` seam — a resume-from-disk, or a `session.restore` that
+   * swaps a field (e.g. the 0062 world snapshot) WITHOUT appending an event. Such a mutation bumps
+   * neither the registry's snapshot rev nor the event count, so a cached export can be STALE relative to
+   * the live truth. The baseline must be the current state, never a point-in-time capture from before the
+   * external mutation — so invalidate the cache first and read fresh (the same `invalidateSnapshot`
+   * discipline `advance` uses after its off-screen `applyFn`). Without this the checkpoint compares a
+   * stale baseline to the freshly-mutated candidate and wrongly refuses the next turn as degradation.
    */
   seedBaseline(user: string): void {
+    this.registry.invalidateSnapshot(user);
     this.baselines.set(user, this.registry.snapshot(user));
   }
 
@@ -222,11 +238,17 @@ export class Orchestrator {
     let produced = 0;
     if (trigger !== "audit") {
       produced = this.applyFn(sandbox, trigger, this.rngFor(user), this.clock.now(), this.offscreenInteractions);
+      // R3 — `applyFn` mutated the sandbox OUTSIDE the `commit` seam (it never fires `onPersist`), so the
+      // registry's snapshot cache must be invalidated before we read the candidate, or it would hand back
+      // the pre-tick capture. (An `audit` produces nothing, so its candidate IS the current cache.)
+      this.registry.invalidateSnapshot(user);
     }
 
     const candidate = this.registry.snapshot(user);
+    // R3: audits always full-verify (rare, and never count toward the fast-path window).
+    const trustEventPrefix = trigger !== "audit" && this.trustEventPrefixFor(user);
     const faults = this.checkpoint(baseline, candidate, sandbox, trigger,
-      opts.supplementary ? { requireDailyEvent: false } : {});
+      { ...(opts.supplementary ? { requireDailyEvent: false } : {}), trustEventPrefix });
     const when = this.clock.now();
 
     if (faults.length === 0) {
@@ -270,7 +292,10 @@ export class Orchestrator {
     // baseline; there is nothing to degrade away from. (A season RESTART through the one sanctioned
     // door lands here too: `forgetUser` cleared the dead season's baseline, so week 1 of season 2
     // is a first commit again, not a count regression against a finished season — E1/R1.)
-    const faults = baseline ? this.checkpoint(baseline, candidate, sandbox, "player-turn", { requireDailyEvent: false }) : [];
+    const faults = baseline
+      ? this.checkpoint(baseline, candidate, sandbox, "player-turn",
+          { requireDailyEvent: false, trustEventPrefix: this.trustEventPrefixFor(user) })
+      : [];
 
     if (faults.length === 0) {
       try {
@@ -336,21 +361,43 @@ export class Orchestrator {
     this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
   }
 
+  /**
+   * R3 — whether THIS commit may trust the append-only event prefix (the O(Δ) fast path). The real
+   * per-commit guarantees do NOT depend on this: a net drop of any persisted item is always caught by
+   * countsNonDecreasing, the prefix boundary is always spot-checked, and every non-event dimension is
+   * always fully verified. The fast path only relaxes the full EVENT-content re-scan, which the
+   * append-only contract (events.record only ever APPENDS — never mutates/removes a past event) makes
+   * redundant. We still force a FULL event re-scan on a user's FIRST commit and at least every
+   * `R3_FULL_CHECK_EVERY` commits as cheap belt-and-suspenders. Advances the per-user counter.
+   */
+  private trustEventPrefixFor(user: string): boolean {
+    const n = this.commitsSinceFullCheck.get(user) ?? 0;
+    if (n === 0 || n >= Orchestrator.R3_FULL_CHECK_EVERY) {
+      this.commitsSinceFullCheck.set(user, 1); // full check now; this commit opens the next window
+      return false;
+    }
+    this.commitsSinceFullCheck.set(user, n + 1);
+    return true;
+  }
+
   /** Verify a candidate advance against the baseline — fail-closed (0031 §4.3). */
   checkpoint(
     baseline: SessionSnapshot,
     candidate: SessionSnapshot,
     sandbox: UserSandbox,
     trigger: Trigger = "player-turn",
-    opts: { requireDailyEvent?: boolean } = {},
+    opts: { requireDailyEvent?: boolean; trustEventPrefix?: boolean } = {},
   ): Fault[] {
     const faults: Fault[] = [];
     const when = this.clock.now();
     const gsBase = toGameState(baseline);
     const gsCand = toGameState(candidate);
 
-    // Non-degradation (0007): nothing previously persisted may be dropped.
-    if (!isSuperset(gsCand, gsBase) || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
+    // Non-degradation (0007): nothing previously persisted may be dropped. R3 — the append-only event
+    // PREFIX may be trusted on the fast path (the orchestrator runs a FULL re-verification periodically);
+    // every other dimension is fully verified, and a net DROP is always caught by countsNonDecreasing.
+    if (!isSuperset(gsCand, gsBase, { trustEventPrefix: opts.trustEventPrefix === true })
+        || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
       faults.push({ when, kind: "degradation" });
     }
     // Daily-event (0008): a progression advance must produce ≥1 new event. A player-turn COMMIT
@@ -363,7 +410,22 @@ export class Orchestrator {
     // player legitimately holds it through a real pathway (B27b: gossip/overhears/tellings surface
     // sanctioned, traceable beliefs; flagging those would refuse every legal propagation). The 0001
     // sentinel canary remains the precise guard for content with NO pathway to the player.
-    const hidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
+    // Hidden contents are APPEND-ONLY (a hidden event is never mutated/removed — the same contract
+    // `trustEventPrefix` rests on) and a vault-leak fault is TERMINAL (it rolls back, never commits) —
+    // so a committed baseline holds ZERO unsanctioned hidden content in its view. On the fast path the
+    // baseline's hidden PREFIX was therefore already verified leak-free; we re-scan only the hidden
+    // contents NEW since the baseline against the full current view (O(Δ) rather than O(hidden×view),
+    // the per-season quadratic this guard's `includes` scan was — CPU-profiled as ~88% of checkpoint
+    // time). The full set is re-scanned on the first commit and at least every R3_FULL_CHECK_EVERY
+    // commits (the SAME periodic belt-and-suspenders window `isSuperset`'s prefix trust uses), so the
+    // rare case of an OLD hidden content newly surfacing verbatim in a re-rendered view is bounded
+    // identically to the superset guard the owner sanctioned. The 0001 sentinel canary + the structural
+    // Vault Wall remain the precise guards; this is the orchestrator's defense-in-depth.
+    const allHidden = candidate.events.filter((e) => e.hidden).map((e) => e.content);
+    const baselineHiddenCount = opts.trustEventPrefix === true
+      ? baseline.events.reduce((n, e) => n + (e.hidden ? 1 : 0), 0)
+      : 0;
+    const hidden = baselineHiddenCount > 0 ? allHidden.slice(baselineHiddenCount) : allHidden;
     if (hidden.length > 0) {
       const view = playerSweep(sandbox);
       const playerFacts = (candidate.knowledge?.knowledge?.[PLAYER] ?? [])
@@ -391,7 +453,7 @@ export class Orchestrator {
       phase: core.phase,
       lastAdvanceAt: when,
       lastTrigger: trigger,
-      eventCount: sandbox.engine.events.query().length,
+      eventCount: sandbox.engine.events.count(),
       lastIntegrity: integrity,
       faults,
       circuitOpen: this.circuitOpen(user),
@@ -415,7 +477,7 @@ export class Orchestrator {
       phase: core.phase,
       lastAdvanceAt: null,
       lastTrigger: null,
-      eventCount: this.registry.sandboxFor(user).engine.events.query().length,
+      eventCount: this.registry.sandboxFor(user).engine.events.count(),
       lastIntegrity: "ok",
       faults: [],
       circuitOpen: false,
@@ -434,12 +496,17 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // there is NO ONE to scheme (the tick is gated upstream; this is the belt to that suspender).
   const evicted = new Set(core.live?.evictionOrder ?? []);
   const ids = (core.house?.npcs ?? []).filter((n) => !evicted.has(n.id)).map((n) => n.id);
-  const before = sandbox.engine.events.query().length;
+  const before = sandbox.engine.events.count();
 
   // House presence (0049): the tick re-seats the house FIRST (seeded, affinity-clustered, adjacent
   // moves only), so this stretch's scenes happen somewhere and overhears have ground truth.
   sandbox.session.presenceTick(rng);
-  const occupancy = sandbox.session.occupancy();
+  // L21/L24: the off-screen society pairs CO-PRESENT NPCs, so its occupancy is calibration-load-bearing.
+  // It reads the CALIBRATION-NEUTRAL base occupancy (invariant to the movement-personality constants) so
+  // the seeded competition/vote outcomes stay byte-identical whether or not the weighting is enabled
+  // (proven by tests/property/movementStreamIsolation). The player-facing WEIGHTED positions drive only
+  // `whereabouts`/witnessing — which the player observes — never the hidden society's pairing.
+  const occupancy = sandbox.session.societyOccupancy();
 
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
@@ -531,8 +598,19 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
     });
   }
+  // 0059/L40 — advance the seeded showmances on the affinity the scenes just moved. A showmance that
+  // crosses into `visible` becomes a PUBLIC house fact; the adapter's onShowmanceSurfaced hook (wired
+  // in the registry) records the player-witnessed beat. Pre-visible showmances stay Vault-sealed.
+  sandbox.session.advanceShowmances();
+  // 0060 — the story-thread scheduler rides THIS bounded tick (after society/gossip/confessional, so it
+  // reads the freshly-moved house). It walks each seeded thread's lifecycle — dormant→active (reusing
+  // the 0023 fold), active→surfaced (reusing 0038 gossip / 0002 pathways, capped per §5), and →resolved
+  // / →expired (recorded, never deleted). It AUTHORS nothing; it only decides WHEN each transition
+  // fires, on a seeded SIDE rng so the main beat stream stays byte-stable (0007). Engine-only: nothing
+  // crosses but a class-keyed paraphrase belief (never the premise, never a number — §7).
+  sandbox.session.scheduleStoryThreads(rng);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
-  return sandbox.engine.events.query().length - before;
+  return sandbox.engine.events.count() - before;
 }
 
 function playerSweep(sandbox: UserSandbox): string {

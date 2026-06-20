@@ -1205,7 +1205,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "recordInteraction",
-            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` whenever the scene shifts a relationship — that is what makes the engine fold the HIDDEN consequence into how the houseguests feel about the player (you never see the magnitude; the engine decides it).",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` for the simple case — one coarse direction for the whole scene. Use `consequence` when one scene affects specific houseguests DIFFERENTLY (e.g. it warms one and threatens another): you propose the shape per houseguest, the engine still owns the magnitude (you never see the numbers).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1214,7 +1214,35 @@ FUNCTION_TOOL_SCHEMAS = [
                     "kind": {
                         "type": "string",
                         "enum": ["bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"],
-                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude).",
+                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude). This is the floor/default.",
+                    },
+                    "consequence": {
+                        "type": "object",
+                        "description": "Optional richer consequence shape for when a single scene moves specific houseguests in DIFFERENT directions. You propose which houseguests' feelings move, which way, and the RELATIVE emphasis; the engine owns the magnitude.",
+                        "properties": {
+                            "edges": {
+                                "type": "array",
+                                "description": "Per-houseguest directed shifts this scene should cause.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "toward": {"type": "string", "description": "The houseguest id whose feelings move (same id space as withIds, e.g. 'npc:3')."},
+                                        "direction": {
+                                            "type": "string",
+                                            "enum": ["warmer", "cooler", "more-trust", "less-trust", "more-threatened", "less-threatened", "more-aligned", "less-aligned"],
+                                            "description": "Which way that houseguest's feeling moves.",
+                                        },
+                                        "emphasis": {
+                                            "type": "string",
+                                            "enum": ["slight", "notable", "strong"],
+                                            "description": "Optional RELATIVE weight only — never an absolute amount; the engine sets the magnitude.",
+                                        },
+                                    },
+                                    "required": ["toward", "direction"],
+                                },
+                            },
+                            "rationale": {"type": "string", "description": "Optional free text — why these shifts, grounded in the scene."},
+                        },
                     },
                 },
                 "required": ["content"],
@@ -1322,10 +1350,11 @@ FUNCTION_TOOL_SCHEMAS = [
                             "nominations", "veto-decision", "comp-intent", "houseguests-choice",
                             "replacement", "eviction-vote", "tie-break", "final-eviction",
                             "goodbye-message", "finale-statement", "finale-answer",
-                            "juror-question", "juror-vote",
+                            "juror-question", "juror-vote", "self-evict",
                         ],
                         "description": "The pending decision's kind (mirror the engine's pending.kind exactly).",
                     },
+                    "confirmed": {"type": "boolean", "description": "self-evict (0061): ONLY confirmed=true executes the irreversible walk-out — and ONLY after the player's own explicit confirmation. Never set this off an in-character line."},
                     "choice": {"type": "array", "items": {"type": "string"}, "description": "nominations: exactly two houseguest ids. houseguests-choice / tie-break / final-eviction: one houseguest id."},
                     "use": {"type": "boolean", "description": "veto-decision: whether to use the Power of Veto."},
                     "save": {"type": "string", "description": "veto-decision: the nominee id to save (required when use=true)."},
@@ -1337,6 +1366,14 @@ FUNCTION_TOOL_SCHEMAS = [
                 },
                 "required": ["kind"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "requestSelfEviction",
+            "description": "Raise a SELF-EVICTION confirmation (0061). Call this ONLY when the player clearly, out of character, says they want to LEAVE / quit / walk out of the GAME (not in-fiction venting). It changes NOTHING and the house never hears it — it surfaces a confirm/cancel card naming the irreversible stakes (this ends and forfeits their season). NEVER call submitDecision with a confirmed self-evict off the player's line; only their own explicit confirmation binds it.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -1383,6 +1420,42 @@ FUNCTION_TOOL_SCHEMAS = [
             "name": "whereabouts",
             "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "moveTo",
+            "description": "Move the PLAYER to a room they named (L21/L24): the player is a person and chooses where to go; the engine never relocates them on its own. Call whenever the player heads somewhere (\"I go to the kitchen\"), then voice the new room from what it returns. Until you call this, they are still in their current whereabouts room.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "room": {"type": "string", "description": "The room the player walks to (e.g. kitchen, living-room, backyard, bedroom, storage-room, hoh-room)."},
+                },
+                "required": ["room"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "premiereIntros",
+            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; returns null outside the premiere.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "markHouseguestMet",
+            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "The houseguest id just introduced (from the roster)."},
+                },
+                "required": ["id"],
+            },
         },
     },
     {
@@ -1669,10 +1742,16 @@ ORWELL_GAME_TOOLS = frozenset({
     "getGameState", "gameStatus", "getVisibleStateFor", "runCompetition",
     "recordInteraction", "surfaceInformationTo", "socialRead", "askProducers",
     "renderScene", "endOfSessionSummary", "advanceGame", "submitDecision",
+    # 0061: raise the self-eviction confirmation on a clear OOC intent to leave.
+    "requestSelfEviction",
     # C13: the prompt-advertised levers that were missing from the FE surface.
     "socialInitiatives", "diaryRoom", "makeDeal",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
+    # L21/L24: the player directs their own movement (the engine never auto-relocates a person).
+    "moveTo",
+    # PREMIERE meet-everyone (#380): the premiere-only meet-everyone tracker — the read + the mark.
+    "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.

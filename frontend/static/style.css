@@ -929,7 +929,15 @@ body.bg-pattern-sparkles {
                   inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
     }
     .minimized-dock-chip svg { opacity: 0.7; flex-shrink: 0; }
-    .minimized-dock-label { white-space: nowrap; }
+    /* The label takes the row's remaining width and truncates with an ellipsis so a
+       long window title (e.g. "📼 The Season, Watched Back") never overflows the
+       sidebar slot or shoves the close × off the chip. min-width:0 lets a flex item
+       shrink below its content size; the icon (flex-shrink:0) and × (flex-shrink:0
+       below) keep their full size while the label gives way. */
+    .minimized-dock-label {
+      flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     /* Mobile: chips are icon-only round pills. Tap to restore, drag toward
        the trash zone at top-center to close. touch-action:none lets the
@@ -1110,7 +1118,7 @@ body.bg-pattern-sparkles {
       display: inline-flex; align-items: center; justify-content: center;
       width: 16px; height: 16px; border-radius: 50%;
       font-size: 14px; line-height: 1; opacity: 0.4;
-      margin-left: 3px;
+      margin-left: 3px; flex-shrink: 0;
     }
     .minimized-dock-x:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
     @keyframes dock-chip-in {
@@ -1853,10 +1861,18 @@ body.bg-pattern-sparkles {
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
       display: flex; flex-direction: column; }
-    /* canonical stacking regardless of which gadget mounted first */
+    /* Canonical stacking fallback — these MIRROR the gadget registry in
+       orwellGadgetRail.js (the single source of truth, which also applies these as
+       inline `order`; drag-reorder — L13 — overrides per-user). 0054 Phase 2 docked
+       windows slot in after the always-on HUD gadgets; the rail body scrolls
+       (overflow-y:auto) for tall ones. Keep these in sync with REGISTRY. */
     .gadget-rail-body > #orwell-status { order: 1; }
-    .gadget-rail-body > #orwell-social { order: 2; }
-    .gadget-rail-body > #orwell-presence { order: 3; }
+    .gadget-rail-body > #orwell-deals { order: 2; }     /* 0039: your deals */
+    .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
+    .gadget-rail-body > #orwell-presence { order: 4; }
+    .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
+    .gadget-rail-body > #orwell-cast { order: 6; }      /* 0054 P2: docked full cast roster */
+    .gadget-rail-body > #orwell-retro { order: 7; }     /* 0054 P2: docked retrospective */
     .gadget-rail-strip { display: none; flex-direction: column; align-items: center; gap: .3rem; padding: .5rem 0; }
     .grail-ico { background: transparent; border: none; cursor: pointer; font-size: 1.1rem;
       padding: .35rem; border-radius: 8px; line-height: 1; }
@@ -2181,6 +2197,107 @@ body.bg-pattern-sparkles {
     .msg-ai .body {
       color: var(--fg);
     }
+
+    /* L36 — the player's own OUT-OF-CHARACTER aside to production.
+       A muted, dashed, badged treatment so it reads as a quiet word to the
+       producers, never a line the room heard. All theme-token driven (works
+       across every house theme incl. the frosted ones — no hard-coded colors). */
+    .msg-user.msg-ooc {
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      border-style: dashed;
+      border-color: color-mix(in srgb, var(--fg) 28%, transparent);
+      opacity: 0.92;
+    }
+    .msg-user.msg-ooc .body {
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+    }
+    .msg-user.msg-ooc .role::after {
+      content: 'to production';
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+
+    /* L36 follow-on — the MODEL's OOC answer (a producer/HUD aside): the GM wrapped its whole
+       reply in ((...)), so render it as a quiet aside outside the fiction, not a spoken-in-room
+       line. Mirrors the player-side aside treatment; theme-token driven. */
+    .msg-ooc.msg-ooc-producer {
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      border-style: dashed;
+      border-color: color-mix(in srgb, var(--fg) 28%, transparent);
+      opacity: 0.92;
+    }
+    .msg-ooc.msg-ooc-producer .body {
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+    }
+    .msg-ooc.msg-ooc-producer .role::after {
+      content: 'production';
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+
+    /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
+       width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
+       inset) and shares its visual language — fully theme-token driven (derives from
+       --fg) so the frosted house themes stay readable. SHIPS WITH NO ACTIVE TIPS; the
+       class is ready for any future composer hint via OrwellChatHint.register/show. */
+    .orwell-chat-hint {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 8px 6px;
+      padding: 7px 12px;
+      border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--fg) 5%, transparent);
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+      font-size: 12.5px;
+      line-height: 1.4;
+      animation: msg-enter 0.3s ease-out both;
+    }
+    .orwell-chat-hint-text { flex: 1 1 auto; }
+    .orwell-chat-hint code {
+      font-size: 0.92em;
+      padding: 0 4px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      color: var(--fg);
+    }
+    .orwell-chat-hint-dismiss {
+      flex: 0 0 auto;
+      padding: 3px 10px;
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+      border-radius: 8px;
+      background: transparent;
+      color: color-mix(in srgb, var(--fg) 70%, transparent);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .orwell-chat-hint-dismiss:hover {
+      background: color-mix(in srgb, var(--fg) 8%, transparent);
+      color: var(--fg);
+    }
+    .orwell-chat-hint-out { opacity: 0; transition: opacity 0.2s ease; }
+
     .rag-sources {
       margin-top: 12px;
       border: 1px solid var(--border);
@@ -6420,7 +6537,18 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
        card was removed). The inner .theme-tab-panel keeps overflow:auto, so
        any taller content still scrolls inside. */
     #theme-popup { overflow-y: hidden; max-height: min(85vh, 600px); }
-    #theme-popup .modal-header { flex-shrink: 0; }
+    /* The popup ROOT is var(--bg) (inline) so its inner .admin-cards
+       (themselves var(--panel)) keep a visible contrast in the body. But
+       the base .modal-header is `background-color: inherit`, so the title
+       strip behind the Peek bar inherited that page-background var(--bg)
+       and read as a flat, mismatched gray — unlike every other window's
+       chrome, whose titlebar shows var(--win-bg) (= var(--panel)). Pin the
+       header to the shared window-chrome token so it matches the kit
+       (.ow-titlebar over var(--win-bg)) and the other modals, and tracks
+       theme changes (the house presets + the custom colors set right here
+       move --panel/--win-bg). Scoped to the header only — the body keeps
+       var(--bg) for its card contrast. */
+    #theme-popup .modal-header { flex-shrink: 0; background-color: var(--win-bg); }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 
@@ -9013,6 +9141,15 @@ body.hide-thinking .thinking-section { display: none !important; }
 }
 .agent-thread-header:hover {
   color: var(--fg);
+}
+/* L7: a node with nothing to expand (production beat / empty tool result) is a
+   flat label — no expand affordance. Drop the pointer cursor + hover highlight
+   so it never reads as a clickable accordion that opens nothing. */
+.agent-thread-node--flat > .agent-thread-header {
+  cursor: default;
+}
+.agent-thread-node--flat > .agent-thread-header:hover {
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
 }
 .agent-thread-icon {
   font-size: 0.9em;
@@ -36011,7 +36148,16 @@ body.theme-frosted .doc-tab-dropdown,
 body.theme-frosted .email-reader,
 body.theme-frosted .admin-card,
 body.theme-frosted .gallery-detail-menu,
-body.theme-frosted #theme-popup .modal-content {
+body.theme-frosted #theme-popup .modal-content,
+/* L34: the control-room gadget rail frosts with the rest of the chrome. Its
+   .gadget-rail-head is transparent (border-only), so frosting the rail body
+   carries the header into the same glass — no opaque band at the top. */
+body.theme-frosted .gadget-rail,
+/* L34: the OrwellWindow kit (.ow-window — cast, finale, retrospective, the
+   gadget rail, every Lane-F window) frosts identically to the modal family.
+   Without this the kit window kept its solid --win-bg, so its transparent
+   titlebar + body read as one opaque block (the "big opaque rectangle"). */
+body.theme-frosted .ow-window {
   /* Tinted base color (set separately so the shorthand can't swallow it);
      much more transparent than before so what's behind actually shows
      through. The blur catches whatever pixels are below. */
@@ -36035,9 +36181,10 @@ body.theme-frosted .sidebar-user-bar {
 /* Same problem on tool modals: the sticky .modal-header paints a solid
    var(--panel) bar (so scrolled content doesn't bleed through). Over a
    frosted-glass modal body that solid bar reads as a dark band across the
-   title area (Calendar, Tasks, Cookbook, Memory, Email…). Give the header
-   its own matching frosted glass — translucent tint + blur — so it stays
-   readable while scrolling but blends into the panel instead of a black band. */
+   title area (Calendar, Tasks, Cookbook, Memory, Email…). The .modal-header
+   is `position: sticky` and the modal body scrolls UNDER it, so it keeps its
+   own blur (translucent, no tint) to keep scrolled content legible while
+   blending into the panel instead of a black band. */
 body.theme-frosted .modal-header {
   /* Transparent — NOT another panel tint. The header sits on top of the
      already-frosted modal body, so any added tint stacks and the band
@@ -36047,6 +36194,23 @@ body.theme-frosted .modal-header {
   background-image: none !important;
   backdrop-filter: blur(24px) !important;
   -webkit-backdrop-filter: blur(24px) !important;
+}
+/* A6 [frosted-top fix]: the kit titlebar (.ow-titlebar) is NOT sticky and the
+   kit body does not scroll under it — the bar sits flush at the very top of the
+   panel. Giving it its OWN backdrop-filter (as the modal header above needs) made
+   the titlebar re-sample and re-blur the .ow-window root's ALREADY-frosted glass,
+   so the top strip composited to a sharper, mismatched shade — the visible "frost
+   breaks at the top edge" band. The fix (per the A6 fix spec — the element with
+   backdrop-filter is the panel ROOT, the header is transparent over it): keep the
+   titlebar fully transparent with NO filter of its own, so the single .ow-window
+   root backdrop-filter renders the whole window — header included — as one
+   cohesive glass surface. Fixed at the kit level so every Lane-F window inherits
+   it (cast, finale, retrospective, gadget rail, theme). */
+body.theme-frosted .ow-titlebar {
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 /* Deep Research's header isn't sticky (content doesn't scroll under it) and
    its pane carries extra frosting — saturate + a top gradient highlight +

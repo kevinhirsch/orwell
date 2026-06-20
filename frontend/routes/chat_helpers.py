@@ -23,6 +23,21 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+
+def _exc_detail(exc: Exception) -> str:
+    """A NON-EMPTY, diagnosable failure detail (mirrors orwell_routes._err_detail; kept local to
+    avoid a routes→routes import). The field bug (#393): some exceptions a slow/large engine call
+    raises (a read timeout, a connection dropped mid-response, a 502 with no body) have an empty
+    `str(e)`, so a bare `pre-resolve skipped: ` / `advance failed: ` line named no cause. Always
+    prefix the exception TYPE (and an upstream HTTP status when present) so the line is diagnosable."""
+    msg = str(exc).strip()
+    resp = getattr(exc, "response", None)
+    status = ""
+    if resp is not None and getattr(resp, "status_code", None) is not None:
+        status = f" (HTTP {resp.status_code})"
+    return f"{type(exc).__name__}: {msg}{status}" if msg else f"{type(exc).__name__}{status or ' (no detail)'}"
+
+
 # Users whose sandbox had a STARTED game this process-run. Lets a turn fail CLOSED for game
 # content when the engine goes down mid-season (audit F2 / queue C12): the in-character
 # transcript is still in context, so an unframed turn would keep "narrating" a season the
@@ -40,6 +55,20 @@ _SESSION_GAME_FRAMED: set = set()
 
 # P2: the engine moment whose prompt carries THE RECORD for a resuming context.
 RE_ENTRY_MOMENT = "re-entry"
+
+
+def _bind_canonical_game_session(user, session_id) -> None:
+    """0064: bind the session that is actually driving this user's game/casting as their CANONICAL
+    game session (first-writer-wins), so every other device resolves it via GET /api/orwell/game-session
+    and converges — instead of each device running its own parallel casting interview. Best-effort:
+    a bind failure must never break a turn."""
+    if not session_id:
+        return
+    try:
+        from src import orwell_game_session
+        orwell_game_session.bind_game_session(user, session_id)
+    except Exception:
+        logger.debug("[orwell] canonical game-session bind skipped", exc_info=True)
 
 
 def unmark_session_framed(session_id) -> None:
@@ -121,18 +150,98 @@ async def _fetch_game_state(user, *, retry: bool):
 # and the lull-based stall-nudge misses a ceremony narrated in rich prose (not a lull) AND fires
 # only next turn (it cannot un-narrate). So we RESOLVE the beat for real BEFORE the model's turn and
 # hand it the engine's outcome to voice ("facts to voice, never scripts to recite", ADR 0003).
-# Scope: only the ceremonies with NO player-intent step. The full COMPETITIONS are excluded — their
-# comp-intent and runCompetition flow owns them. The pending gate means we NEVER force the player's
-# own decision.
 _CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"})
 
-# C-03 (same class, found in live play): the veto CHIP DRAW (E35) — WHO plays the Power of Veto
-# (HOH + the two nominees + three by chip draw) — is a witnessed ceremony of its OWN, decided
-# deterministically, with no player-intent step. The GM invents the field ("Selena, Emilio…")
-# because nothing grounds who plays before it narrates. The veto COMPETITION that follows is still
-# the model's to build and resolve (comp-intent + advanceGame). So we pre-resolve EXACTLY the draw —
-# and only when it has not run yet — then hand off; the model voices the real six from gameStatus.
-_VETO_DRAW_PHASE = "veto-competition"
+# OWNER RULING (2026-06-18): "the engine should make ALL game decisions; the LLM can narrate (and
+# propose influencing characteristics for the weights) — but that's it." So the COMPETITIONS are
+# engine-DRIVEN too, not left to the model. Live play (round-9 + a post-#313 probe) reproduced the
+# failure both ways: (a) the week FREEZES at hoh-competition — the model under-calls advanceGame, so
+# the comp-intent decision never surfaces and the season is dead (10+ turns, no card, no progress);
+# and (b) on an NPC-only comp (the player not in the field) the model INVENTS a winner the engine
+# never decided. The earlier C-03 scoping ("the veto competition belongs to the model") is superseded
+# by the ruling. We DRIVE the comp one beat per turn — the engine's advance never auto-decides a
+# player choice, it only SURFACES it: so when the player is in the field the advance sets the
+# comp-intent pending (the pending gate below then waits for the player's card — agency preserved),
+# and when they are not it RESOLVES the NPC comp for real. The veto CHIP DRAW (E35) is just the first
+# beat of veto-competition and is driven the same way (the model then voices the real six).
+_COMP_DRIVE_PHASES = frozenset({"hoh-competition", "veto-competition"})
+
+
+# ── The SOCIAL RUNWAY (critical — the "force-march through ceremonies" defect) ──────────── #
+#
+# The pre-resolve above advances ONE engine beat per turn whenever no player decision is pending.
+# For a spectator player (not HOH, not a nominee) that quietly STEAMROLLS the week: the HOH comp
+# resolves on turn 1, the very next turn pre-resolves the nominations, the next the veto, the next
+# the ceremony… so the chain HOH → noms → veto → eviction marches with ZERO social opportunity
+# between ceremonies. The owner's emphatic playtest verdict: "It should never fast forward… it skips
+# all of the social narrative gameplay… zero social opportunity… a critical failure."
+#
+# The fix is PACING, not authoring (the engine still decides every outcome): after a ceremony lands
+# the player in a NEW spectator beat, we DO NOT immediately drive the next one. We hold a SOCIAL
+# RUNWAY of player turns — the player walks the house, talks, schemes, campaigns — and override the
+# moment to the engine's own `social` beat (a real, Vault-free engine moment: "conversations,
+# bonding, paranoia, off-screen scheming") so the GM plays the lull instead of the ceremony. ONLY
+# when the runway is spent (or the player explicitly signals they're ready to move on) does the
+# pre-resolve drive the next ceremony for real — preserving the C-02 guarantee (the ceremony's real
+# outcome is grounded, never invented) exactly as before, just no longer on the player's heels.
+#
+# Pacing is ENGAGEMENT, never a turn count (owner ruling): the runway is a CEILING on how long we
+# wait — it is cut short the instant the player signals readiness, and a player who keeps engaging
+# simply keeps lingering (the runway counts down only while the beat sits, and the cooldown re-arms
+# on each fresh ceremony). It NEVER delays a beat the player must act on (a pending always advances
+# straight through this gate — their decision card is waiting). Tunable.
+_SOCIAL_RUNWAY_TURNS = 2  # spectator turns of guaranteed lingering after a ceremony, before the next
+
+# Per-user runway state. `_RUNWAY_LEFT` is how many social turns remain before the next ceremony may
+# be driven; `_RUNWAY_SIG` is the `(week:phase)` we armed it for, so a genuinely new beat re-arms a
+# fresh runway and a phase we've already lingered through is not re-held. Process-local (pacing only,
+# no schema change); a front-end restart simply re-arms on the next ceremony, which is harmless.
+_RUNWAY_LEFT: dict = {}
+_RUNWAY_SIG: dict = {}
+
+# The engine's own social beat (a real moment prompt, momentPrompts.ts `social`): a quieter beat of
+# conversations/bonding/scheming. Used as the moment OVERRIDE while a runway holds, so the GM plays
+# the lingering, never the not-yet-resolved ceremony.
+_SOCIAL_MOMENT = "social"
+
+# The player explicitly asks to move the night along — readiness CUTS the runway short (we stop
+# lingering and drive the next ceremony now). Mirrors the agent-loop lull/ready cue; kept local so
+# chat_helpers has no import cycle into the agent loop. Substantive play never matches (it is the
+# opposite of a "skip ahead").
+_RUNWAY_READY_RE = re.compile(
+    r"\b(what'?s next|let'?s (go|move|do this|see it|get on|roll)|move (on|it along|ahead)|"
+    r"i'?m ready|bring it on|get on with it|run it|skip ahead|fast.?forward|next (comp|round|beat|"
+    r"ceremony|one)|nominate|noms?|start the|begin the|hold the|let'?s see (the )?(noms|nominations|"
+    r"veto|comp|competition))\b",
+    re.IGNORECASE,
+)
+
+
+def _player_signals_ready(player_msg) -> bool:
+    """Did the player's own latest message ask to move past the social lull to the next ceremony?
+    Readiness ends the runway early (seize the lull). Anything substantive is engagement — the
+    runway keeps the player lingering until it is spent."""
+    s = (player_msg or "").strip()
+    if not s:
+        return False  # an empty/absent message is not an explicit "move on"
+    return bool(_RUNWAY_READY_RE.search(s))
+
+
+def _arm_runway(user, sig: str) -> None:
+    """Arm a fresh social runway for `user` keyed to the `(week:phase)` we just entered. Called when
+    the pre-resolve drives a ceremony and lands the player in a NEW spectator beat — the NEXT few
+    turns are theirs to socialize before the following ceremony is driven."""
+    if user is None:
+        return
+    _RUNWAY_LEFT[user] = _SOCIAL_RUNWAY_TURNS
+    _RUNWAY_SIG[user] = sig
+
+
+def clear_social_runway(user) -> None:
+    """Drop any held runway for a user — the game reset/ended, so the next ceremony should not be
+    held back by stale lingering state. Pacing only; safe to call when none is armed."""
+    _RUNWAY_LEFT.pop(user, None)
+    _RUNWAY_SIG.pop(user, None)
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -210,41 +319,297 @@ def _pending_barrier_directive(pending) -> Optional[str]:
     )
 
 
-async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool) -> dict:
-    """If the live game sits at an unresolved NPC-driven ceremony with NO player decision pending,
-    resolve that single beat (one advanceGame) so the moment prompt carries the engine's real
-    outcome. Returns the (possibly re-fetched) game state. Best-effort: any hiccup leaves the turn
-    exactly as it was — this never blocks or fails a turn, it only prevents an invented ceremony.
+# ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
+#
+# The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
+# decision. It cannot catch the OTHER class — a desync at an advanceGame-driven beat with NO
+# pending, where the GM narrated an OUTCOME the engine never committed: "X is evicted" or
+# crowning the finale winner a beat early, or misnarrating an eviction tally. Those slip past
+# the barrier (no pending) AND the lull-nudge (rich prose, not a lull). So this is a second,
+# AFTER-the-turn layer: snapshot the engine board before/after the turn, compare the turn's
+# full narration against that delta, and when the narration ASSERTS an outcome the board did
+# not move on, stash a forceful RE-GROUND directive to inject on the NEXT turn — pinning the
+# model back to the engine as the source of truth before it digs the desync deeper.
+#
+# Conservative + field-specific by design: only a narrow set of outcome claims trips it, and
+# each is checked against the exact signature field that would have moved had the outcome been
+# real. The whole thing is best-effort / fail-open — it never breaks or blocks a turn.
 
-    Covers the intent-free ceremonies (nominations, veto ceremony, eviction reveal) AND the veto
-    chip draw (C-03): the draw is an NPC ceremony, but the veto competition after it is the model's,
-    so the draw fires only while it is unrun (no drawn players) and never advances into the comp.
+# Per-user store of the LAST beat signature captured (at the START of the most recent framed
+# turn). The post-turn check diffs the post-turn signature against this. Process-local.
+_LAST_BEAT_SIG: dict = {}
+
+# Per-user store of a pending RE-GROUND directive — set by the post-turn check when it detects a
+# narrated-but-uncommitted outcome, consumed (popped) by apply_game_framing on the NEXT turn.
+_DESYNC_REGROUND: dict = {}
+
+
+def _beat_signature(status: dict, state: dict) -> dict:
+    """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
+    of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
+    phase/hoh/noms/veto/pending) + getGameState (finished + the evicted count). Fail-safe on
+    every field: a missing/odd shape degrades to a neutral value, never raises."""
+    status = status if isinstance(status, dict) else {}
+    state = state if isinstance(state, dict) else {}
+
+    def _id(node):
+        return node.get("id") if isinstance(node, dict) else None
+
+    hoh = _id(status.get("hoh"))
+    noms = sorted(
+        n.get("id") for n in (status.get("nominees") or [])
+        if isinstance(n, dict) and n.get("id")
+    )
+    veto = status.get("veto") if isinstance(status.get("veto"), dict) else {}
+    pending = status.get("pending")
+    pending_kind = pending.get("kind") if isinstance(pending, dict) else None
+    house = state.get("house") if isinstance(state.get("house"), list) else []
+    evicted = sum(
+        1 for h in house
+        if isinstance(h, dict) and (h.get("status") or "active") != "active"
+    )
+    return {
+        "week": status.get("week"),
+        "phase": (status.get("phase") or state.get("phase")),
+        "pending": pending_kind,
+        "hoh": hoh,
+        "noms": noms,
+        "vetoHolder": _id(veto.get("holder")),
+        "vetoUsed": bool(veto.get("used")),
+        "evicted": evicted,
+        "finished": bool(state.get("finished")),
+    }
+
+
+async def _capture_beat_signature(user) -> Optional[dict]:
+    """Fetch gameStatus + getGameState and reduce them to a beat signature. Fail-open: any
+    hiccup (engine blip, odd shape) returns None so the caller simply skips the checkpoint."""
+    from src import orwell_engine
+    try:
+        status = await orwell_engine.game_status(user=user)
+        state = await orwell_engine.get_game_state(user=user)
+        return _beat_signature(status if isinstance(status, dict) else {},
+                               state if isinstance(state, dict) else {})
+    except Exception as e:
+        logger.warning("[orwell] beat-signature capture skipped for user=%s: %s", user, e)
+        return None
+
+
+# Outcome-claim patterns over the FULL turn narration. Each is paired (in
+# _narration_claims_outcome) with the signature field whose movement would confirm it really
+# happened. Deliberately narrow — a false positive nags the model on a clean turn, so every
+# pattern targets unambiguous outcome language, not mere mention ("if you're evicted…").
+_CLAIM_EVICTED_RE = re.compile(r"\b(?:is|been|was)\s+evicted\b|\bevicted\s+from\b", re.IGNORECASE)
+_CLAIM_WINNER_RE = re.compile(
+    r"\b(?:winner of (?:big brother|the season)|wins the season|is crowned|crowned the winner)\b",
+    re.IGNORECASE,
+)
+_CLAIM_NEW_HOH_RE = re.compile(
+    r"\bwins (?:the )?(?:head of household|hoh)\b|\bnew (?:head of household|hoh)\b",
+    re.IGNORECASE,
+)
+_CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.IGNORECASE)
+# Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
+# which we don't police here — the eviction claim does that).
+_FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
+# Phases where "wins HOH" / "the new HOH" reads as a COMMITTED crown (vs. mid-week reflection or
+# flavor). The new-HOH claim is scoped to these the way the tally claim is scoped to the finale —
+# so an HOH-flavored line outside the HOH beat is never rail-corrected (ADR 0005 principle #1).
+_HOH_PHASES = ("hoh",)
+
+
+def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
+    """Compare the turn's narration against the before→after board delta. Return a SPECIFIC
+    re-ground directive when the narration asserts an outcome the engine did NOT commit; else
+    None. Field-specific + conservative — the engine is the source of truth and a false alarm is
+    worse than a missed one, so each claim must contradict its own signature field."""
+    text = narration or ""
+    before = before_sig if isinstance(before_sig, dict) else {}
+    after = after_sig if isinstance(after_sig, dict) else {}
+    if not text.strip() or not after:
+        return None
+
+    desync = None  # the specific outcome the narration claimed that the board never moved on
+
+    # (1) An eviction was narrated, but the evicted count didn't move → no one actually left.
+    if _CLAIM_EVICTED_RE.search(text) and after.get("evicted") == before.get("evicted"):
+        desync = "an EVICTION (a houseguest leaving the house)"
+    # (2) A season winner / crowning was narrated, but the game isn't finished → premature crown.
+    #     Scoped to FINALE phases: mid-season "crowned the winner" language is necessarily
+    #     hypothetical flavor ("you could be crowned the winner someday"), never a committed
+    #     outcome — policing it elsewhere would rail-correct creative prose (ADR 0005 principle #1).
+    elif (_CLAIM_WINNER_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
+          and not after.get("finished")):
+        desync = "the SEASON WINNER being crowned"
+    # (3) A finale vote TALLY was narrated, but the game isn't finished → narrated the count
+    #     before the engine revealed all the jury votes.
+    elif (_CLAIM_TALLY_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
+          and not after.get("finished")):
+        desync = "a FINAL VOTE TALLY (the jury count)"
+    # (4) A new HOH was narrated, but the HOH id didn't change → no new reign was committed.
+    #     `after.hoh` must equal `before.hoh` AND not be a fresh crown (before was empty).
+    #     Scoped to HOH phases (like the tally branch): outside the HOH beat, "the new HOH…" /
+    #     "wins HOH" reads as reflection or flavor, not a committed crown — policing it elsewhere
+    #     would rail-correct creative prose (ADR 0005 principle #1).
+    elif (_CLAIM_NEW_HOH_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_HOH_PHASES)
+          and after.get("hoh") == before.get("hoh")
+          and not (before.get("hoh") is None and after.get("hoh") is not None)):
+        desync = "a NEW HEAD OF HOUSEHOLD being crowned"
+
+    if not desync:
+        return None
+
+    # Describe the REAL board so the model can reconcile to it, then forbid repeating the
+    # un-happened outcome. Forceful, but not panicky — it's a correction, not an alarm.
+    week = after.get("week")
+    phase = after.get("phase")
+    evicted = after.get("evicted")
+    pending = after.get("pending")
+    board = (
+        f"week {week if week is not None else '?'}, "
+        f"phase {phase or '?'}, "
+        f"{evicted if evicted is not None else '?'} houseguest(s) evicted so far, "
+        f"{'the season is FINISHED' if after.get('finished') else 'the season is NOT finished'}"
+        + (f", and the engine is waiting on a `{pending}` decision" if pending else "")
+    )
+    return (
+        "RE-GROUND ON THE BOARD — last turn you narrated " + desync + ", but the engine (the "
+        "source of truth) never committed it. The live board still shows: " + board + ". "
+        "Reconcile your NEXT beat to the board: do NOT repeat or build on that outcome as if it "
+        "happened — it did not. Treat the engine as the source of truth, re-read the live state, "
+        "and pick up from where the game actually is."
+    )
+
+
+async def record_post_turn_desync_check(user, narration: str) -> None:
+    """Post-turn layer of the desync spine: capture the AFTER signature, diff it against the
+    BEFORE signature stored at the start of this turn, and when the narration asserted an outcome
+    the engine never committed, stash a re-ground directive for the next turn. Fail-open — never
+    raises, never blocks the turn that's finishing."""
+    try:
+        after = await _capture_beat_signature(user)
+        before = _LAST_BEAT_SIG.get(user)
+        if not before or not after:
+            return
+        directive = _narration_claims_outcome(narration or "", before, after)
+        if directive:
+            _DESYNC_REGROUND[user] = directive
+            logger.warning(
+                "[orwell] beat-signature desync detected for user=%s — re-grounding next turn", user,
+            )
+    except Exception as e:
+        logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
+
+
+def _runway_sig(game_state: dict) -> str:
+    """The `(week:phase)` signature of the beat the player is currently sitting in. A change in this
+    signature means a ceremony resolved and we entered a new beat — the cue to arm a fresh runway."""
+    return f"{game_state.get('week')}:{(game_state.get('phase') or '').lower()}"
+
+
+def _hold_for_social(game_state: dict) -> dict:
+    """Return the state with its moment overridden to the engine's `social` beat, so the framing
+    builds the social moment prompt (lingering/scheming) instead of the not-yet-resolved ceremony.
+    A copy — never mutate the caller's dict (the original phase/week stay intact for the HUD)."""
+    held = dict(game_state)
+    held["moment"] = _SOCIAL_MOMENT
+    return held
+
+
+async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, player_msg=None) -> dict:
+    """If the live game sits at an unresolved engine-driven beat with NO player decision pending,
+    advance that single beat (one advanceGame) so the moment prompt carries the engine's real
+    outcome — but ONLY after the player has had their SOCIAL RUNWAY in the current beat (the
+    force-march fix above). Returns the (possibly re-fetched / social-overridden) game state.
+    Best-effort: any hiccup leaves the turn exactly as it was — this never blocks or fails a turn,
+    it only prevents an invented/stalled beat OR a fast-forward past the player's social play.
+
+    Covers the intent-free CEREMONIES (nominations, veto ceremony, eviction reveal) AND the
+    COMPETITIONS (hoh-competition, veto-competition incl. the chip draw) — owner ruling 2026-06-18:
+    the engine makes every game decision. A comp advance either SURFACES the player's comp-intent
+    (player in the field) or RESOLVES an NPC-only comp; either way the engine decides, not the model.
 
     Safety: advanceGame auto-resolves NPC beats but only SURFACES a player decision as a pending —
     it never auto-decides one. We still check the pending first and skip when the player is the
-    decider (HOH naming noms, veto holder, an eligible voter, the Houseguest's-Choice picker), so the
-    player keeps their agency and their decision card. One advance per turn preserves the staged
-    eviction-vote reveal (E12)."""
+    decider (HOH naming noms, veto holder, an eligible voter, the Houseguest's-Choice picker, a
+    comp-intent), so the player keeps their agency and their decision card. One advance per turn
+    preserves the staged eviction-vote reveal (E12).
+
+    The SOCIAL RUNWAY (the never-fast-forward fix): when a held runway is still counting down for the
+    current `(week:phase)` AND the player has not signalled readiness, we HOLD — override the moment
+    to `social` and do NOT advance, so the player walks the house and schemes before the next
+    ceremony. When the runway is spent (or the player asks to move on), we resolve the next ceremony
+    for real and, if it landed the player in a NEW spectator beat, arm a fresh runway for it."""
     from src import orwell_engine
     try:
         phase = (game_state.get("phase") or "").lower()
-        is_ceremony = phase in _CEREMONY_RESOLVE_PHASES
-        is_veto_draw = phase == _VETO_DRAW_PHASE
-        if not is_ceremony and not is_veto_draw:
+        if phase not in _CEREMONY_RESOLVE_PHASES and phase not in _COMP_DRIVE_PHASES:
             return game_state
         status = await orwell_engine.game_status(user=user)
         if not isinstance(status, dict) or status.get("pending") is not None:
-            return game_state  # the player is the decider (or status unknown) — wait for them
-        if is_veto_draw:
-            # Only the DRAW, and only once: if the six are already drawn, the comp is the model's.
-            veto = status.get("veto") if isinstance(status.get("veto"), dict) else {}
-            if veto and veto.get("players"):
-                return game_state  # the chip draw already happened — leave the competition to the model
-        await orwell_engine.advance_game(user=user)  # resolve the one NPC ceremony / chip-draw beat, for real
+            # The player is the decider (comp-intent, Houseguest's Choice, nominations, a vote, the
+            # goodbye message…) — never auto-resolve their own decision; their card is waiting. A
+            # pending also means the night is genuinely theirs, so drop any held runway: the next
+            # turn after they decide should drive the result, not linger.
+            clear_social_runway(user)
+            return game_state
+
+        sig = _runway_sig(game_state)
+        ready = _player_signals_ready(player_msg)
+        left = _RUNWAY_LEFT.get(user, 0)
+        # HOLD the social runway: still counting down for THIS beat and the player hasn't asked to
+        # move on. We give them the engine's `social` moment and do not advance — genuine social
+        # opportunity before the next ceremony (the force-march fix). Readiness cuts it short.
+        if _RUNWAY_SIG.get(user) == sig and left > 0 and not ready:
+            if user is not None:
+                _RUNWAY_LEFT[user] = left - 1
+            logger.info("[orwell] social runway holding %s for user=%s (%d left) — lingering before "
+                        "the next ceremony", phase, user, left - 1)
+            return _hold_for_social(game_state)
+
+        adv = await orwell_engine.advance_game(user=user)  # advance ONE beat for real: surface the player's
+        # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
+        # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
+        # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
+        # is indistinguishable from a true stall in the logs. Record the beat we just committed.
+        _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
+        logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         refreshed = await _fetch_game_state(user, retry=retry)
-        return refreshed if isinstance(refreshed, dict) else game_state
+        new_state = refreshed if isinstance(refreshed, dict) else game_state
+
+        # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
+        # beat (a different week:phase, no new pending) — so the NEXT turns are theirs to socialize
+        # before that ceremony is driven. We skip arming when a player decision now pends (their card
+        # leads, not a lull) or when nothing changed (a staged eviction reveal ticking ballots stays
+        # at the same signature — never re-held mid-reveal). Best-effort status read; arm-on-doubt is
+        # the safe default for pacing (a needless runway only adds social turns, never skips them).
+        try:
+            new_sig = _runway_sig(new_state)
+            if new_sig != sig:
+                post = await orwell_engine.game_status(user=user)
+                post_pending = post.get("pending") if isinstance(post, dict) else None
+                new_phase = (new_state.get("phase") or "").lower()
+                if post_pending is None and (
+                        new_phase in _CEREMONY_RESOLVE_PHASES or new_phase in _COMP_DRIVE_PHASES):
+                    _arm_runway(user, new_sig)
+                    logger.info("[orwell] armed social runway for user=%s at %s (%d social turns)",
+                                user, new_phase, _SOCIAL_RUNWAY_TURNS)
+                    # Give the player the social beat THIS turn too — UNLESS they explicitly asked to
+                    # move on: a "let's see the veto" wants the just-resolved beat NARRATED now, not
+                    # another lull, so we return the real moment and let the NEXT turns linger (the
+                    # runway counter is armed either way). Otherwise frame the lingering, not the
+                    # unresolved beat ahead.
+                    return new_state if ready else _hold_for_social(new_state)
+                # The new beat is the player's to decide (or off the ceremony ladder) — no runway.
+                clear_social_runway(user)
+        except Exception as _e:
+            logger.warning("[orwell] social-runway arm skipped for user=%s: %s", user, _exc_detail(_e))
+        return new_state
     except Exception as e:
-        logger.warning("[orwell] C-02/C-03 pre-resolve skipped for user=%s: %s", user, e)
+        logger.warning("[orwell] C-02/C-03 pre-resolve skipped for user=%s: %s", user, _exc_detail(e))
         return game_state
 
 
@@ -288,6 +653,7 @@ async def apply_game_framing(
     session_id=None,
     preset_system_prompt=None,
     has_attachments: bool = False,
+    player_msg=None,
 ):
     """Big Brother game framing for one turn. Vault-free; mutates `preface` in place.
 
@@ -351,8 +717,12 @@ async def apply_game_framing(
         _GAME_WAS_ACTIVE.add(_gkey)
         # C-02: resolve an unresolved NPC-driven ceremony FOR REAL before building the moment prompt,
         # so the model voices the engine's actual nominees/outcome instead of inventing one. No-op
-        # unless the game sits at such a beat with no player decision pending (best-effort).
-        game_state = await _pre_resolve_npc_ceremony(user, game_state, retry=game_build)
+        # unless the game sits at such a beat with no player decision pending (best-effort). The
+        # social-runway gate inside HOLDS the next ceremony for a few social turns (overriding the
+        # moment to `social`) so the player is never fast-forwarded past their scheming; the player's
+        # own message lets a "let's move on" cut the runway short.
+        game_state = await _pre_resolve_npc_ceremony(
+            user, game_state, retry=game_build, player_msg=player_msg)
         # P2: a session this process has never framed is a FRESH CONTEXT — request the
         # re-entry moment so the engine's prompt carries THE RECORD (ADR 0003 §6: long-term
         # memory is the store recalled, never the chat remembered). Subsequent turns in the
@@ -370,6 +740,7 @@ async def apply_game_framing(
             gm_prompt = FALLBACK_GM_PROMPT
         if session_id is not None:
             _SESSION_GAME_FRAMED.add(session_id)
+            _bind_canonical_game_session(user, session_id)  # 0064: converge every device here
         # The pending-decision BARRIER (a chat↔engine desync class): if the engine is BLOCKED on a
         # player decision, HARD-BLOCK the model from narrating past it (no new day/ceremony/week/
         # comp/eviction) and pin it to bringing the player to THAT decision. The engine is the
@@ -382,6 +753,18 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _barrier
         except Exception as e:
             logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
+        # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
+        # re-ground directive the previous turn's post-turn check stashed for this user (the
+        # model narrated an outcome the engine never committed — pin it back to the board), then
+        # snapshot the CURRENT board so the next post-turn check has a baseline to diff against.
+        # Best-effort / fail-open: any hiccup leaves the turn framed exactly as before.
+        try:
+            _reground = _DESYNC_REGROUND.pop(user, None)
+            if _reground:
+                gm_prompt = gm_prompt + "\n\n" + _reground
+            _LAST_BEAT_SIG[user] = await _capture_beat_signature(user)
+        except Exception as e:
+            logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
@@ -396,6 +779,7 @@ async def apply_game_framing(
             preface.insert(0, {"role": "system", "content": gm_prompt})
     else:
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
+        clear_social_runway(user)  # no live season — drop any held runway so a new one starts clean
         if game_build:
             # The game IS the product but this sandbox has no season: pre-game, the chat IS
             # the producer's casting interview (0050). Fetch the engine's interview moment
@@ -413,6 +797,7 @@ async def apply_game_framing(
             # createCharacter in THIS session is the premiere, not a re-entry (P2).
             if session_id is not None:
                 _SESSION_GAME_FRAMED.add(session_id)
+                _bind_canonical_game_session(user, session_id)  # 0064: converge every device here
             # E16 + P8 apply to the framed casting turn as well (same steering hole,
             # same wasted context).
             _drop_preset_persona(preface, preset_system_prompt)
@@ -469,6 +854,18 @@ GAME_TURN_DIGEST_CHARS = 300
 
 _unrecorded_turn_fallbacks = 0
 
+# L18 — per-user single-flight for the E22 fallback write. The guard is fired fire-and-forget at
+# stream `[DONE]` (`asyncio.create_task`), so nothing serialized it: when the model under-calls the
+# engine on several turns in a row, the fallback `recordInteraction` calls STACK and race both each
+# other and the next turn's framing reads through the engine's per-user request queue (the E10
+# serialization). Each fallback commit pays the O(events) snapshot+checkpoint cost, so on a small
+# host the next live turn waits behind the backlog long enough for the front-end to surface a
+# transient 502 ("the game hung"). One in-flight fallback per user fixes the pileup at the source
+# WITHOUT touching game logic or the Vault Wall: a second under-called turn whose fallback would
+# race the first is skipped — the very next real engine write (or the next, now-unblocked fallback)
+# still records the consequence. The under-call is still COUNTED (the diagnostic signal is unchanged).
+_fallback_in_flight: set = set()
+
 
 def unrecorded_turn_fallback_count() -> int:
     """E22's counter: how many game turns this process force-recorded because the model
@@ -476,12 +873,21 @@ def unrecorded_turn_fallback_count() -> int:
     return _unrecorded_turn_fallbacks
 
 
+def fallback_in_flight(user) -> bool:
+    """L18 — is an E22 fallback write already in flight for this user? (test/ops visibility)."""
+    return user in _fallback_in_flight
+
+
 async def ensure_turn_recorded(user, player_message, narration, tools_called) -> bool:
     """E22 — the server-side guard for the cardinal sin. Prompt wording told the model to
     record scenes; nothing ENFORCED it (the GM asking "Record this interaction?" was the
     symptom). On a completed game turn with non-trivial narration and ZERO engine writes,
     fold a bounded digest of the exchange into the record so the beat has consequence and
-    memory. Returns True when a fallback record was made."""
+    memory. Returns True when a fallback record was made.
+
+    L18: single-flight per user — a fallback fired while one is still in flight for the same
+    user is skipped rather than stacked, so the fire-and-forget guard can never pile a backlog
+    of O(events) commits onto the engine's per-user queue and stall the next live turn."""
     text = (narration or "").strip()
     if len(text) < GAME_TURN_RECORD_MIN_CHARS:
         return False
@@ -493,11 +899,20 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
         "[orwell] E22 guard: game turn narrated with no engine write — recording a fallback "
         "digest (process count=%d)", _unrecorded_turn_fallbacks,
     )
+    # L18: don't race a fallback already committing for this user (or pile a backlog behind the
+    # next live turn). The under-call is recorded above; one in-flight digest per user is enough.
+    if user in _fallback_in_flight:
+        logger.warning(
+            "[orwell] E22 guard: a fallback write is already in flight for user=%s — "
+            "skipping this one to avoid stacking engine writes", user,
+        )
+        return False
     digest = (
         "Scene (auto-recorded): the player said: "
         f"{str(player_message or '').strip()[:GAME_TURN_DIGEST_CHARS]!r}. "
         f"What happened: {text[:GAME_TURN_DIGEST_CHARS]}"
     )
+    _fallback_in_flight.add(user)
     try:
         from src import orwell_engine
         await orwell_engine.record_interaction(digest, user=user)
@@ -505,6 +920,28 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
     except Exception as e:
         logger.warning("[orwell] E22 fallback recordInteraction failed for user=%s: %s", user, e)
         return False
+    finally:
+        _fallback_in_flight.discard(user)
+
+
+def mark_message_phase(message, phase: str) -> None:
+    """Vault Wall (casting-leak fix): durably stamp a chat phase onto a persisted message.
+
+    Delegates to the session manager (it owns persistence) so the marker lands on the DB
+    row too — future turns reload it and the in-game context build excludes pre-game/casting
+    turns. Best-effort: a stamp failure must never break the turn."""
+    try:
+        from core.models import _session_manager as _sm
+        if _sm is not None and hasattr(_sm, "mark_message_phase"):
+            _sm.mark_message_phase(message, phase)
+        elif message is not None:
+            # No session manager (e.g. unit harness): stamp in-memory only so the
+            # same-turn context build still excludes it.
+            if getattr(message, "metadata", None) is None:
+                message.metadata = {}
+            message.metadata["phase"] = phase
+    except Exception:
+        logger.warning("Failed to mark message phase=%s", phase, exc_info=True)
 
 
 def discard_last_user_message(sess) -> None:
@@ -1067,12 +1504,27 @@ async def build_chat_context(
         session_id=session_id,                              # P2: re-entry on a fresh context
         preset_system_prompt=preset.system_prompt,          # E16: persona never rides the GM stack
         has_attachments=bool(preprocessed.attachment_meta),  # E94: showing something in the scene
+        player_msg=_ctx_msg,                                # social runway: "let's move on" cuts it short
     )
     # P3: did ANY framing land on this turn? A live game and a feeds-down refusal frame
     # explicitly; the pre-game casting interview frames exactly when the engine answered
     # under the game build (apply_game_framing's own branch condition).
     from src.settings import game_build_enabled as _gb
     framed = bool(game_active or feed_down or (engine_available and _gb()))
+
+    # Vault Wall — casting-leak fix. The pre-game casting interview (0050) is an OOC,
+    # producer-level channel (like the Diary Room): it has NO in-game pathway to any NPC's
+    # knowledge. `game_active` is the engine's authoritative house-entry boundary (a season
+    # is started). When it is FALSE this turn is pre-game/casting, so stamp the just-persisted
+    # user message `phase=casting`; that marker (durably on the DB row) is what the in-game
+    # context build below excludes, so the narrator never receives the player's private
+    # strategy/OOC reads and cannot leak them to the houseguests. The player still SEES the
+    # interview in scrollback — one continuous conversation. (The assistant reply is stamped at
+    # save time in save_assistant_response.)
+    if not game_active and getattr(sess, "history", None):
+        _last = sess.history[-1]
+        if getattr(_last, "role", None) == "user":
+            mark_message_phase(_last, "casting")
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
@@ -1091,8 +1543,13 @@ async def build_chat_context(
     if norm:
         sess.model = norm
 
-    # Build messages
-    messages = preface + sess.get_context_messages()
+    # Build messages. Vault Wall (casting-leak fix): once a season is live, the in-game
+    # narrator must NOT receive the pre-game casting-interview turns (OOC, no NPC pathway —
+    # treated exactly like the Diary Room). They are stamped `phase=casting`; exclude them
+    # here so the model cannot leak the player's private strategy to the houseguests. The model
+    # cannot leak what it never receives. Pre-game/casting turns keep the full transcript.
+    _exclude_phases = {"casting"} if game_active else None
+    messages = preface + sess.get_context_messages(exclude_phases=_exclude_phases)
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
@@ -1330,9 +1787,16 @@ def save_assistant_response(
     do_research: bool = False,
     tool_events: list = None,
     incognito: bool = False,
+    phase: str = None,
 ):
-    """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence."""
+    """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence.
+
+    `phase` (Vault Wall / casting-leak fix): when this reply is part of the OOC pre-game
+    casting interview (game not yet started), stamp `phase=casting` so the in-game narrator's
+    context build excludes it later — the producer interview never becomes house-knowable."""
     md = dict(last_metrics) if last_metrics else {}
+    if phase:
+        md["phase"] = phase
     def _model_value(value) -> str:
         if value is None:
             return ""

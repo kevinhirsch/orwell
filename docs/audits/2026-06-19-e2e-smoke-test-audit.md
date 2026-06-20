@@ -1,5 +1,7 @@
 # 2026-06-19 — E2E Smoke-Test & HCI Audit (pre-launch)
 
+> 📋 **Audit record** · 2026-06-19 · E2E smoke & HCI (pre-launch) · **Status:** Historical record
+
 **Method:** real stack (TS engine on 8765 + Python/FastAPI FE on 7000), real LLM
 (`deepseek/deepseek-v4-pro` via OpenRouter, configured through Settings), driven headless
 under Playwright with **autonomous visual telemetry** (full-page PNGs → vision ingest).

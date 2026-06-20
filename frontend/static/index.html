@@ -18,6 +18,17 @@
   (function(){
     try {
       var t = JSON.parse(localStorage.getItem('orwell-theme'));
+      // L32/L33: with no stored theme (brand-new player / factory reset), the
+      // default is `telescreen` — the on-brand 1984 surveillance look — frosted
+      // ON. Synthesize the saved-theme shape so the existing apply path below
+      // paints it from the very first frame (no flash to the CSS :root before
+      // theme.js boots). An explicit saved choice always wins (t stays as-is).
+      // Keep in sync with theme.js DEFAULT_THEME + the telescreen palette.
+      if (!t || !t.colors) {
+        t = { name: 'telescreen', frosted: true,
+              colors: { bg:'#101418', fg:'#d7e9ee', panel:'#151c22', border:'#2a3e4a', red:'#56c8e8' },
+              house: true };
+      }
       if (t && t.colors) {
         var s = document.documentElement.style;
         var c = t.colors;
@@ -78,6 +89,27 @@
       if (t && t.font) {
         var fm = {mono:"'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif"};
         if (fm[t.font]) { s.setProperty('--font-family', fm[t.font]); }
+        else if (t.font.indexOf('gf:') === 0) {
+          // A Google font (gf:Family). Inject the single CSS2 stylesheet link now
+          // so the first frame already paints it — with a system fallback baked
+          // into the stack so an offline / failed load never leaves the UI
+          // fontless (display=swap handles the swap-in). Keep in sync with
+          // theme.js (_googleFontHref / _googleFontStack).
+          var _gfam = t.font.slice(3).trim();
+          if (_gfam) {
+            s.setProperty('--font-family', "'" + _gfam.replace(/'/g,'') + "', system-ui, -apple-system, 'Segoe UI', sans-serif");
+            var _ghref = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(_gfam).replace(/%20/g,'+') + ':wght@300;400;500;600;700&display=swap';
+            var _glink = document.getElementById('orwell-google-font-link');
+            if (!_glink) {
+              _glink = document.createElement('link');
+              _glink.id = 'orwell-google-font-link';
+              _glink.rel = 'stylesheet';
+              _glink.href = _ghref;
+              _glink.addEventListener('error', function(){ var c = document.getElementById('orwell-google-font-link'); if (c) c.remove(); });
+              document.head.appendChild(_glink);
+            }
+          }
+        }
         else { s.setProperty('--font-family', "'" + t.font.replace(/'/g,'') + "', sans-serif"); }
       }
       // Apply density class on html
@@ -88,6 +120,30 @@
       if (t && t.bgPattern && t.bgPattern !== 'none') {
         document.addEventListener('DOMContentLoaded', function() {
           document.body.classList.add('bg-pattern-' + t.bgPattern);
+        }, {once:true});
+      }
+      // L33/L34 + 0052: paint the frosted-glass + house treatment from the
+      // first frame so a fresh session opens already frosted (no flash to a
+      // solid chrome before theme.js boots). Frosted defaults ON; an explicit
+      // saved `frosted:false` opts out. House presets also tint --panel-frost.
+      if (t) {
+        var _frosted = (t.frosted !== undefined) ? !!t.frosted : true;
+        // House presets (0052) — recognized by name since the saved object
+        // doesn't persist the `house` flag (applyColors re-derives it shortly).
+        var _HOUSE = { 'the-feed':1, 'telescreen':1, 'room-101':1, 'memory-wall':1, 'sequester':1 };
+        var _house = !!t.house || !!(t.name && _HOUSE[t.name]);
+        var _panel = (t.colors && t.colors.panel) || '';
+        document.addEventListener('DOMContentLoaded', function() {
+          if (_frosted) document.body.classList.add('theme-frosted');
+          if (_house) {
+            document.body.classList.add('house-theme');
+            if (t.name) document.body.classList.add('house-theme--' + t.name);
+            var m = /^#?([0-9a-f]{6})$/i.exec(_panel);
+            if (m) {
+              var r = parseInt(m[1].slice(0,2),16), g = parseInt(m[1].slice(2,4),16), b = parseInt(m[1].slice(4,6),16);
+              document.documentElement.style.setProperty('--panel-frost', 'rgba('+r+', '+g+', '+b+', 0.62)');
+            }
+          }
         }, {once:true});
       }
     } catch(e){}
@@ -591,6 +647,20 @@
               <input type="checkbox" id="theme-frosted-toggle">
               <span class="admin-slider"></span>
             </label>
+          </div>
+        </div>
+        <div class="theme-fd-row" id="theme-google-font-row">
+          <div class="theme-fd-group" style="flex:1 1 0;min-width:0;">
+            <label class="theme-fd-label" for="theme-google-font-input">Google font
+              <span id="theme-google-font-note" class="theme-fd-label" style="display:inline;opacity:0.45;font-weight:normal;" title="Loading a Google font fetches it from Google's CDN (fonts.googleapis.com), which sends your browser's IP address to Google. The four built-in fonts above stay fully offline.">&#9432; privacy</span>
+            </label>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="theme-google-font-input" class="theme-fd-select" list="theme-google-font-list" type="text" autocomplete="off" spellcheck="false" placeholder="Search or type a font name&hellip;" aria-label="Google font family" style="flex:1 1 0;min-width:0;" />
+              <datalist id="theme-google-font-list"></datalist>
+              <button type="button" id="theme-google-font-apply" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Apply this Google font">Apply</button>
+              <button type="button" id="theme-google-font-clear" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Use a built-in font instead">Clear</button>
+            </div>
+            <div class="theme-fd-label" style="opacity:0.4;font-weight:normal;">Pick (almost) any font from <code>fonts.google.com</code> — search the list or type any family name. Loaded on demand; falls back to a built-in font when offline.</div>
           </div>
         </div>
         <div class="theme-fd-row">
@@ -1226,18 +1296,17 @@
       <button class="gadget-rail-toggle" id="gadget-rail-toggle" type="button" title="Collapse the control room" aria-label="Collapse the control room" aria-expanded="true">
         <span class="grail-chevron" aria-hidden="true">›</span>
       </button>
-      <span class="gadget-rail-title">The house</span>
+      <span class="gadget-rail-title">The House</span>
       <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side">⇄</button>
       <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
     </div>
     <div class="gadget-rail-body" id="gadget-rail-body"></div>
-    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-hidden="true">
-      <button class="grail-ico" type="button" data-grail-expand title="House status" aria-label="House status">📋</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Wants a word" aria-label="Wants a word">🚪</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Where you are" aria-label="Where you are">🧭</button>
-    </div>
+    <!-- The collapsed icon strip is DERIVED from the gadget registry in orwellGadgetRail.js —
+         one icon per mounted-and-visible gadget, in the rail's current order, each acting on
+         THAT gadget. Built dynamically so an icon can never mismatch or outlive its gadget. -->
+    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-label="Control-room gadgets"></div>
   </aside>
-  <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The house" aria-label="Open the control room" hidden>📋</button>
+  <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden>📋</button>
   <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
   <script nonce="{{CSP_NONCE}}">
   (function(){
@@ -1798,6 +1867,7 @@
                 <div id="settings-account-username" style="font-size:var(--fs-sm);font-weight:600;"></div>
                 <div id="settings-account-role" style="font-size:var(--fs-xs);opacity:0.5;"></div>
               </div>
+              <div id="settings-app-version" title="Orwell build version" style="font-size:var(--fs-xs);opacity:0.45;font-family:inherit;white-space:nowrap;align-self:flex-start;" aria-label="App version"></div>
               <button id="settings-logout-btn" style="background:color-mix(in srgb, var(--color-error) 10%, transparent);border:1px solid var(--color-error);border-radius:6px;padding:6px 12px;color:var(--color-error);font-family:inherit;font-size:var(--fs-sm);font-weight:500;cursor:pointer;transition:opacity 0.15s,background 0.15s;display:inline-flex;align-items:center;gap:6px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Logout
@@ -2263,8 +2333,11 @@
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
+<script defer src="/static/js/orwellLayoutSync.js?v=20260620"></script>  <!-- 0064 Part F: cross-device window/HUD layout sync -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
-<script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: char creation before chat -->
+<script src="/static/js/orwellChatGate.js"></script>  <!-- P1 OOBE: the "secure your cast photo first" HARD GATE — locks chat send pre-game until an image is secured (fails open) -->
+<script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: one guided flow — model gate → welcome modal → image step → producers reach out first -->
+<script src="/static/js/orwellFinalizing.js"></script>  <!-- P1 OOBE: inline "Production is finalizing your casting…" indicator across the createCharacter → house-entry cutover (fails open) -->
 <script src="/static/js/orwellSlots.js"></script>  <!-- BB anchor slots: floaters position by slot, never coordinate (E91/S11) -->
 <script type="module" src="/static/js/orwellWindow.js"></script>  <!-- THE window kit (Lane F): one window class + .ow-* family every surface composes -->
 <script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
@@ -2275,6 +2348,7 @@
 <script src="/static/js/orwellDeals.js"></script>  <!-- BB deals: the player's tracked promises — open/kept/broken (Vault-free, 0039) -->
 <script src="/static/js/orwellDiaryRoom.js"></script>  <!-- BB Diary Room: standing sidebar button + composer mode (E88, ruling #4) -->
 <script src="/static/js/orwellCast.js"></script>  <!-- BB cast roster: portrait + name + status sidebar panel (Vault-free, 0051) -->
+<script src="/static/js/orwellCastPin.js"></script>  <!-- L12: pin the cast roster into the control-room gadget rail as a compact two-portrait gadget -->
 <script src="/static/js/orwellAvatar.js"></script>  <!-- BB account avatar: paints the finalized headshot into the user circle(s) (G27) -->
 <script src="/static/js/orwellHeadshot.js"></script>  <!-- BB casting headshot studio: pre-game portrait upload + 3-option AI flow (G26/G27) -->
 <script src="/static/js/orwellPresence.js"></script>  <!-- BB presence strip: room + co-presence + nearby (Vault-free, 0049/C28; ambient, never click-to-act) -->
@@ -2285,6 +2359,9 @@
 <script type="module" src="/static/js/orwellEngineStatus.js"></script>  <!-- BB engine-down banner: visible OOC error reporting -->
 <script type="module" src="/static/js/orwellDecision.js"></script>  <!-- BB decisions: confirm-on-binding guardrail (Vault-free, C20) -->
 <script src="/static/js/orwellComposerDraft.js"></script>  <!-- BB composer draft: {text, drMode, pendingApproachId} survives refresh; DR mode restores BEFORE text (G17, audit F3/F5/F7) -->
+<script type="module" src="/static/js/orwellChatHint.js"></script>  <!-- The one reusable chat-bar hint surface (OrwellChatHint.register/show); ships with NO active tips -->
+<script type="module" src="/static/js/orwellOocAside.js"></script>  <!-- L36: OOC aside channel — `((...))`/`ooc:` detection drives the player-input bubble style (the old composer tip is gone; hints live in orwellChatHint.js) -->
+<script src="/static/js/orwellPremiereTutorial.js"></script>  <!-- L31 (FE): the premiere is a light, one-time, dismissible tutorial card (week 1) — sets the weekly-rhythm expectation, never replaces the chat -->
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>
 </html>

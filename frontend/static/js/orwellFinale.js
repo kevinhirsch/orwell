@@ -118,6 +118,10 @@ import * as modalManager from "./modalManager.js";
       // An ambient HUD parks (minimize); the finale exists while one is staging,
       // so it carries no close — a capability of the one kit cluster.
       minimizable: true, closable: false, draggable: true,
+      // 0054 Phase 2: dockable into the control-room rail (default floating — a one-
+      // line owner flip to defaultDocked:true). Docked, it rides the rail's single
+      // mobile drawer + content-driven visibility (it self-hides when not staging).
+      dockable: true, defaultDocked: false,
       content,
     });
     _win.open();
@@ -142,7 +146,11 @@ import * as modalManager from "./modalManager.js";
 
   function render(finale) {
     const el = ensureUI();
-    if (!isMinimized()) el.style.display = "block";
+    // 0054 Phase 2: docked, clear the inline display so the .ow-docked flex-column
+    // rule applies (an inline `block` would break the kit's docked layout — the rail
+    // shows it via content-driven visibility). Floating, show as a block as before.
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    else if (!isMinimized()) el.style.display = "block";
 
     const finalists = Array.isArray(finale.finalists) ? finale.finalists : [];
     const reveals = Array.isArray(finale.reveals) ? finale.reveals : [];
@@ -202,7 +210,20 @@ import * as modalManager from "./modalManager.js";
   }
 
   async function refresh() {
+    // Issue 2: GATE the finale poll on a STARTED game. Pre-game there is no finale to stage, and
+    // hitting /finale before casting only logged `[orwell] finale failed: no active game` every
+    // poll. /state is the cheap, always-available game-active read every panel shares.
+    try {
+      const st = await getJSON("/api/orwell/state");
+      if (!st || st.started === false) { _staging = false; _failures = 0; hidePanel(); return; }
+    } catch (_) {
+      // /state itself failed (an engine blip): don't escalate to a finale fetch — back off and hide.
+      _failures += 1;
+      hidePanel();
+      return;
+    }
     let finale = null;
+    if (_win && _win.setLoading) _win.setLoading(true); // non-blocking refresh hint over the last reveals
     try {
       const data = await getJSON("/api/orwell/finale");
       finale = data && data.finale;
@@ -211,6 +232,8 @@ import * as modalManager from "./modalManager.js";
       _failures += 1; // engine down → fail open (hide) + back the poll off (E67)
       if (window.OrwellReport) window.OrwellReport.fail("finale", "finale-poll", _); // G11: fail open, never silent
       finale = null;
+    } finally {
+      if (_win && _win.setLoading) _win.setLoading(false);
     }
     _staging = !!finale;
     if (!finale) { hidePanel(); return; }
@@ -228,7 +251,12 @@ import * as modalManager from "./modalManager.js";
   }
 
   // Seam for the headless gate (F3 and the finale's own F-2 wave): build + show on demand.
-  window._orwellFinaleEnsure = () => { const el = ensureUI(); if (!isMinimized()) el.style.display = "block"; return true; };
+  window._orwellFinaleEnsure = () => {
+    const el = ensureUI();
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    else if (!isMinimized()) el.style.display = "block";
+    return true;
+  };
   window.orwellRefreshFinale = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
   ready(start);

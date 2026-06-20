@@ -29,6 +29,72 @@ from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
+# Throttle recurring poll-failure warnings. The status/state/finale routes are polled every ~2s;
+# when the engine is unreachable EVERY poll failed and logged a WARNING, which firehosed the logs
+# (and ballooned ops-panel.log / the /admin/status viewer — a sustained outage could crash the tab).
+# Log the FIRST failure immediately, then at most once per `_WARN_EVERY` seconds per key, so an
+# outage leaves a readable heartbeat instead of a flood. Recovery clears the key (next failure logs).
+import time as _time
+
+_WARN_EVERY = 30.0
+_LAST_WARN: dict[str, float] = {}
+
+
+def _warn_throttled(key: str, msg: str) -> None:
+    now = _time.monotonic()
+    last = _LAST_WARN.get(key)
+    if last is None or now - last >= _WARN_EVERY:
+        _LAST_WARN[key] = now
+        logger.warning(msg)
+
+
+def _clear_warn(key: str) -> None:
+    """Call on a successful poll so the next failure logs immediately (outage start is never silent)."""
+    _LAST_WARN.pop(key, None)
+
+
+def _err_detail(exc: Exception) -> str:
+    """A NON-EMPTY, diagnosable failure detail. The field bug: the engine log showed bare
+    `state failed:` lines with NO reason — `str(e)` is empty for several exceptions a slow/large
+    /state export can raise (a read timeout, a RemoteProtocolError from a connection dropped mid-
+    response, a 502 with no body). Always prefix the exception TYPE so the line names a cause; for
+    an httpx status error, surface the upstream status too. So a slow export reads as e.g.
+    `ReadTimeout: timed out` / `HTTPStatusError: server error '502 Bad Gateway' …`, never blank."""
+    msg = str(exc).strip()
+    status = ""
+    resp = getattr(exc, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) is not None:
+        status = f" (HTTP {resp.status_code})"
+    return f"{type(exc).__name__}: {msg}{status}" if msg else f"{type(exc).__name__}{status or ' (no detail)'}"
+
+
+# ── L15: a LAST-GOOD roster cache (per user, process-local) ─────────────────────────────────────
+# The cast panel polls /roster FAST (3.5s) while portraits land. During cast generation the engine's
+# per-user serial queue is busy committing the run's writes, so a getGameState poll can time out
+# (the 3s framing timeout) — and the route used to fail open to an EMPTY roster, which made EVERY
+# portrait vanish from the open panel (the reported L15 symptom). Instead, remember the last roster
+# we successfully built for a user and serve it (flagged `stale`) when a transient read fails, so a
+# busy engine never blanks the cast. Cleared when the engine reports the game is over/absent (a real
+# "no cast" state must still empty the panel). Vault-free: it caches only the public roster cards.
+_LAST_ROSTER: dict = {}
+_LAST_ROSTER_TTL_S = 90.0
+
+
+def _remember_roster(user: Optional[str], cards: list) -> None:
+    if cards:
+        _LAST_ROSTER[user or ""] = {"cards": cards, "ts": _time.time()}
+
+
+def _last_good_roster(user: Optional[str]) -> Optional[list]:
+    rec = _LAST_ROSTER.get(user or "")
+    if rec and (_time.time() - rec["ts"]) <= _LAST_ROSTER_TTL_S:
+        return rec["cards"]
+    return None
+
+
+def _forget_roster(user: Optional[str]) -> None:
+    _LAST_ROSTER.pop(user or "", None)
+
 
 def _current_user(request: Request) -> Optional[str]:
     """The authenticated user the front-end asserts to the engine (per-user sandbox, 0021).
@@ -42,6 +108,152 @@ def _current_user(request: Request) -> Optional[str]:
         return effective_user(request)
     except Exception:
         return getattr(getattr(request, "state", None), "current_user", None)
+
+
+def _publish_game_updated(user: Optional[str]) -> None:
+    """0064 §B/D — ping every device viewing the canonical game session that the board changed (a
+    binding decision, a self-evict) so the non-driving device reconciles its HUD INSTANTLY instead of
+    waiting up to ~2s for the next poll. Vault-free: a session id + a change-type string only, no
+    body. Best-effort — a publish failure must never break the player-facing route (polling stays the
+    correctness floor; this is just the latency nicety)."""
+    try:
+        from src import orwell_game_session, session_events
+        sid = orwell_game_session.get_game_session(user)
+        if sid:
+            session_events.publish(sid, "game-updated")
+    except Exception:
+        logger.debug("[orwell] game-updated publish skipped", exc_info=True)
+
+
+# ── Calibration instrumentation: capture the per-season PUBLIC outcome when a season finishes ─────
+# The owner chose "instrument & gather data first" over tuning the calibration weights. This is the
+# data-gathering half: when a season ends, we durably log the public, player-known outcome facts a
+# calibration review needs (placement, social-scene count, public comp wins, final jury margin) into
+# the append-only per-user log (`orwell_outcomes.py`), readable on the admin surface. Vault-FREE: every
+# field comes from the engine's public projections AFTER the season is over (the same facts the player
+# themselves see in the recap / finale reveal / their own Journal). Nothing pre-reveal or hidden.
+
+# `finaleView()` returns null once the season FLIPS to finished, so the jury-vote MARGIN must be
+# captured while the finale is still staging (the `reveal` stage). We cache the last COMPLETE finale
+# tally per user (process-local) as the `/finale` panel polls, then read it back at finish-capture.
+_LAST_FINALE_TALLY: dict = {}
+
+
+def _remember_finale_tally(user: Optional[str], finale: Optional[dict]) -> None:
+    """Cache the jury-vote margin from an in-progress finale's revealed ballots (Vault-free: the
+    reveals are the public finale, ordered). Only stores once EVERY juror's vote is revealed, so the
+    cached tally is the full, final margin — exactly what survives the flip to `finished`."""
+    if not isinstance(finale, dict):
+        return
+    reveals = finale.get("reveals")
+    finalists = finale.get("finalists")
+    if not isinstance(reveals, list) or not reveals or not isinstance(finalists, list):
+        return
+    tally: dict = {}
+    for r in reveals:
+        voted = (r or {}).get("votedFor") if isinstance(r, dict) else None
+        name = (voted or {}).get("name") if isinstance(voted, dict) else None
+        if name:
+            tally[name] = tally.get(name, 0) + 1
+    if not tally:
+        return
+    counts = sorted(tally.values(), reverse=True)
+    top = counts[0]
+    second = counts[1] if len(counts) > 1 else 0
+    _LAST_FINALE_TALLY[user or ""] = {"margin": top - second, "total": sum(counts)}
+
+
+def _last_finale_margin(user: Optional[str]) -> Optional[int]:
+    rec = _LAST_FINALE_TALLY.get(user or "")
+    return rec.get("margin") if isinstance(rec, dict) else None
+
+
+# Public comp-win highlight lines from the recap read "<Name> wins Head of Household" / "wins the
+# Power of Veto" / "wins the final Head of Household" — the player's VISIBLE competition resume.
+def _count_player_comp_wins(highlights: list, player_name: Optional[str]) -> int:
+    if not player_name or not isinstance(highlights, list):
+        return 0
+    needle = player_name.strip().lower()
+    wins = 0
+    for line in highlights:
+        if not isinstance(line, str):
+            continue
+        low = line.lower()
+        if low.startswith(needle + " wins ") and (
+            "head of household" in low or "power of veto" in low
+        ):
+            wins += 1
+    return wins
+
+
+async def _count_player_social_scenes(user: Optional[str]) -> int:
+    """How many social scenes the player recorded — counted from their OWN visible projection
+    (player-witnessed `conversation` events; recordInteraction writes that type). Public, Vault-free
+    by construction (the player witnessed every one). Fail-soft: 0 if the read is unavailable."""
+    try:
+        vis = await orwell_engine.get_visible_state(user=user)
+    except Exception:
+        return 0
+    events = vis.get("visibleEvents") if isinstance(vis, dict) else None
+    if not isinstance(events, list):
+        return 0
+    return sum(1 for e in events if isinstance(e, dict) and e.get("type") == "conversation")
+
+
+def _derive_placement(state: dict, recap: dict, player_name: Optional[str]) -> str:
+    """The player's final placement (winner | runner-up | jury | evicted) from PUBLIC facts only —
+    the recap winner + the player's public 0046 seat. Mirrors the engine's own placement logic."""
+    player = state.get("player") if isinstance(state.get("player"), dict) else {}
+    status = (player or {}).get("status") or "active"
+    winner = recap.get("winner") if isinstance(recap, dict) else None
+    winner_name = (winner or {}).get("name") if isinstance(winner, dict) else None
+    if status == "active":
+        # A finished season with the player still 'active' means they sat in the Final 2.
+        if player_name and winner_name and player_name.strip().lower() == winner_name.strip().lower():
+            return "winner"
+        return "runner-up"
+    if status == "jury":
+        return "jury"
+    return "evicted"
+
+
+async def _capture_season_outcome(user: Optional[str]) -> bool:
+    """If THIS user's season is over, append its public outcome row (idempotent). Returns True on a
+    NEW row. Safe to call from any poll — it self-gates on `finished` and never raises (a capture
+    failure must never break a player-facing route)."""
+    try:
+        from src import orwell_outcomes, orwell_seasons
+
+        state = await orwell_engine.get_game_state(user=user)
+        if not isinstance(state, dict) or not state.get("started"):
+            return False
+        is_over = bool(state.get("finished")) or state.get("moment") == "post-season"
+        if not is_over:
+            return False
+        recap = await orwell_engine.season_recap(user=user)
+        recap = recap if isinstance(recap, dict) else {}
+        player = state.get("player") if isinstance(state.get("player"), dict) else {}
+        player_name = (player or {}).get("name")
+        winner = recap.get("winner") if isinstance(recap.get("winner"), dict) else None
+        winner_name = (winner or {}).get("name") if isinstance(winner, dict) else None
+        placement = _derive_placement(state, recap, player_name)
+        social = await _count_player_social_scenes(user)
+        comp_wins = _count_player_comp_wins(recap.get("highlights") or [], player_name)
+        margin = _last_finale_margin(user)
+        weeks = recap.get("weeksPlayed")
+        return orwell_outcomes.record_outcome(
+            user,
+            season=orwell_seasons.get_season(user),
+            placement=placement,
+            social_scenes=social,
+            competition_wins=comp_wins,
+            jury_margin=margin,
+            winner_name=winner_name,
+            weeks_played=weeks if isinstance(weeks, int) else None,
+        )
+    except Exception as e:  # never let instrumentation break a route
+        logger.info(f"[orwell] outcome capture skipped: {e}")
+        return False
 
 
 def _roster_cards(state: dict, user: Optional[str]) -> list:
@@ -73,6 +285,42 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
             "portrait": orwell_portraits.portrait_ref(user, hid),
         })
     return cards
+
+
+def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
+    """The /roster response body from a set of roster cards: the cards plus the portrait-set
+    counters, whether an image provider is configured, the live generation progress (L15), and a
+    `stale` flag when these cards came from the last-good cache (a transient read failure). Every
+    field is Vault-free (counts + a stale flag only). Fully fail-soft — a sub-helper raising never
+    changes the cards we already have."""
+    counts = {"total": 0, "present": 0, "missing": 0}
+    try:
+        counts = orwell_portraits.completeness(user, cards)
+    except Exception:
+        pass
+    images_available = False
+    try:
+        images_available = orwell_portraits.image_generation_available(user)
+    except Exception:
+        images_available = False
+    # L15: the live run progress (counts only, never a name) so the panel reports honest
+    # "Generating N of M…" and stays on the fast cadence ONLY while a run is genuinely active.
+    progress = None
+    try:
+        progress = orwell_portraits.generation_progress(user)
+    except Exception:
+        progress = None
+    payload = {
+        "roster": cards,
+        "imagesAvailable": images_available,
+        "portraitsPresent": counts["present"],
+        "portraitsTotal": counts["total"],
+    }
+    if progress is not None:
+        payload["generation"] = progress
+    if stale:
+        payload["stale"] = True
+    return payload
 
 
 class NewGameRequest(BaseModel):
@@ -116,6 +364,9 @@ def setup_orwell_routes() -> APIRouter:
             "engineUrl": detail.get("engineUrl"),
             "error": detail.get("error"),
             "lastError": detail.get("lastError"),
+            # Issue 1: a brief, soft "reconnecting…" while a transient outage is being retried —
+            # the banner shows a recover-in-progress line instead of a hard red outage.
+            "reconnecting": bool(detail.get("reconnecting")),
             # G8: "creating" while createCharacter is in flight — the banner holds in-fiction
             # (casting being finalized) instead of flashing a false "engine unavailable".
             "busy": detail.get("busy"),
@@ -124,10 +375,13 @@ def setup_orwell_routes() -> APIRouter:
     @router.get("/state")
     async def orwell_state(request: Request):
         try:
-            return await orwell_engine.get_game_state(user=_current_user(request))
+            st = await orwell_engine.get_game_state(user=_current_user(request))
+            _clear_warn("state")
+            return st
         except Exception as e:
-            logger.warning(f"[orwell] state failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("state", f"[orwell] state failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/moment")
     async def orwell_moment(request: Request, moment: Optional[str] = None):
@@ -140,8 +394,9 @@ def setup_orwell_routes() -> APIRouter:
         try:
             return await orwell_engine.get_moment_prompt(moment, user=_current_user(request))
         except Exception as e:
-            logger.warning(f"[orwell] moment failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("moment", f"[orwell] moment failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/status")
     async def orwell_status(request: Request):
@@ -159,15 +414,18 @@ def setup_orwell_routes() -> APIRouter:
             # never refreshes that cache). A status poll NEVER advances the game (ADR 0003).
             if isinstance(st, dict) and "pending" not in st:
                 st["pending"] = orwell_engine.last_pending(_current_user(request))
+            _clear_warn("status")
             return st
         except orwell_engine.EngineToolError as e:
             if e.no_game:
                 return {"started": False}
-            logger.warning(f"[orwell] status failed: {e}")
-            return JSONResponse(status_code=502, content={"error": str(e)})
+            detail = _err_detail(e)
+            _warn_throttled("status", f"[orwell] status failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": detail})
         except Exception as e:
-            logger.warning(f"[orwell] status failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("status", f"[orwell] status failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
 
     @router.get("/tagline")
     async def orwell_tagline(request: Request):
@@ -193,10 +451,17 @@ def setup_orwell_routes() -> APIRouter:
     async def orwell_recap(request: Request):
         """The season's public arc from the EVENT RECORD (0048/C17) — Vault-free, any time
         (mid-season it is simply the story so far). Fails OPEN: {recap: null} on any error."""
+        user = _current_user(request)
         try:
-            return {"recap": await orwell_engine.season_recap(user=_current_user(request))}
+            recap = await orwell_engine.season_recap(user=user)
+            # Calibration instrumentation: the recap is polled at the finale, so this is a natural
+            # finish-detection point — log the public outcome once the season is over (idempotent).
+            if isinstance(recap, dict) and recap.get("finished"):
+                await _capture_season_outcome(user)
+            _clear_warn("recap")
+            return {"recap": recap}
         except Exception as e:
-            logger.warning(f"[orwell] recap failed: {e}")
+            _warn_throttled("recap", f"[orwell] recap failed: {_err_detail(e)}")
             return {"recap": None}
 
     @router.get("/retrospective")
@@ -211,11 +476,13 @@ def setup_orwell_routes() -> APIRouter:
             # a live season, never a false "engine unreachable" 502 (the engine answered, it refused).
             if e.no_game:
                 return JSONResponse(status_code=404, content={"error": "No season to unseal — there is no active game."})
-            logger.warning(f"[orwell] retrospective failed: {e}")
-            return JSONResponse(status_code=502, content={"error": str(e)})
+            detail = _err_detail(e)
+            _warn_throttled("retrospective", f"[orwell] retrospective failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": detail})
         except Exception as e:
-            logger.warning(f"[orwell] retrospective failed: {e}")
-            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+            detail = _err_detail(e)
+            _warn_throttled("retrospective", f"[orwell] retrospective failed: {detail}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {detail}"})
         if retro is None:
             return JSONResponse(status_code=404, content={"error": "The season is still live — the Vault opens only after a winner is crowned."})
         return {"retrospective": retro}
@@ -237,10 +504,24 @@ def setup_orwell_routes() -> APIRouter:
         """The Vault-free in-progress finale projection for the finale panel (0037 §8.2): finalists,
         stage, and the votes revealed so far — null when no finale is staging. Fails OPEN: {finale: null}
         on any error, so the page never blocks on it."""
+        user = _current_user(request)
         try:
-            return {"finale": await orwell_engine.finale_view(user=_current_user(request))}
+            finale = await orwell_engine.finale_view(user=user)
+            # Calibration instrumentation: cache the full jury margin from the revealed ballots while
+            # the finale is still staging (it vanishes once the season flips to `finished`).
+            _remember_finale_tally(user, finale if isinstance(finale, dict) else None)
+            _clear_warn("finale")
+            return {"finale": finale}
+        except orwell_engine.EngineToolError as e:
+            # Issue 2: pre-game ("no active game") is a NORMAL state, not a finale failure — the
+            # panel just isn't staging yet. Return {finale: null} quietly (no log spam) so polling
+            # before a game exists never floods `[orwell] finale failed: no active game`.
+            if e.no_game:
+                return {"finale": None}
+            _warn_throttled("finale", f"[orwell] finale failed: {_err_detail(e)}")
+            return {"finale": None}
         except Exception as e:
-            logger.warning(f"[orwell] finale failed: {e}")
+            _warn_throttled("finale", f"[orwell] finale failed: {_err_detail(e)}")
             return {"finale": None}
 
     @router.get("/roster")
@@ -252,49 +533,48 @@ def setup_orwell_routes() -> APIRouter:
         empty roster so the sidebar never blocks the page.
 
         Also reports `imagesAvailable` so the UI can pick its empty-state copy (a configured-
-        but-not-yet-generated set vs. graceful absence — no image model)."""
+        but-not-yet-generated set vs. graceful absence — no image model).
+
+        L15: while a generation run is in flight the engine is busy committing the run's writes,
+        so a state read can transiently time out — we serve the LAST-GOOD roster (flagged `stale`)
+        instead of blanking the panel, and surface the live `generation` progress so the cast shows
+        "Generating N of M…" instead of going dark or dropping the connection."""
         user = _current_user(request)
+        # L15: a roster read tolerates a busier engine than a chat-framing read — use a wider
+        # timeout (still bounded) so a generation-busy queue doesn't blank the cast on every poll.
         try:
-            state = await orwell_engine.get_game_state(user=user)
+            state = await orwell_engine.get_game_state(user=user, timeout=8.0)
         except Exception as e:
-            logger.warning(f"[orwell] roster failed: {e}")
+            # Transient read failure (e.g. the per-user queue is busy committing portraits): keep
+            # the cast on screen by serving the last roster we built, never an empty one.
+            cached = _last_good_roster(user)
+            if cached is not None:
+                _warn_throttled("roster", f"[orwell] roster read failed — serving last-good roster: {_err_detail(e)}")
+                return _roster_payload(user, cached, stale=True)
+            _warn_throttled("roster", f"[orwell] roster failed: {_err_detail(e)}")
             return {"roster": [], "imagesAvailable": False}
 
+        _clear_warn("roster")
         if not isinstance(state, dict) or state.get("started") is False:
+            _forget_roster(user)  # a real "no cast" state must empty the panel
             return {"roster": [], "imagesAvailable": False}
 
         cards = _roster_cards(state, user)
-
-        # G20: the completeness counter (active cast only, shared derivation) so the cast
-        # panel can show "Generating N remaining…" while the reconciler works the set.
-        # Happy path only — the fail-open shapes above are pinned, and the panel falls
-        # back to its own roster-derived count when the keys are absent.
-        counts = {"total": 0, "present": 0, "missing": 0}
-        try:
-            counts = orwell_portraits.completeness(user, cards)
-        except Exception:
-            pass
-
-        images_available = False
-        try:
-            images_available = orwell_portraits.image_generation_available(user)
-        except Exception:
-            images_available = False
+        _remember_roster(user, cards)  # the fresh good roster — the fallback above serves it
 
         # G9 backfill: seasons that predate 0051 (or whose generation failed) have no stored
         # portraits — once a provider IS configured, generate the missing set in the background
         # via the engine's live `getPortraitPrompt` tool. Debounced per user in orwell_portraits
         # (one attempt per process per window); fire-and-forget, NEVER blocks this response.
-        if images_available:
-            try:
+        try:
+            if orwell_portraits.image_generation_available(user):
                 missing = orwell_portraits.missing_portrait_ids(user, cards)
                 if missing:
                     orwell_portraits.kickoff_backfill(missing, user)
-            except Exception as e:
-                logger.info(f"[orwell] portrait backfill kick failed: {e}")
+        except Exception as e:
+            logger.info(f"[orwell] portrait backfill kick failed: {e}")
 
-        return {"roster": cards, "imagesAvailable": images_available,
-                "portraitsPresent": counts["present"], "portraitsTotal": counts["total"]}
+        return _roster_payload(user, cards, stale=False)
 
     @router.post("/portraits/backfill")
     async def orwell_portraits_backfill(request: Request):
@@ -500,12 +780,16 @@ def setup_orwell_routes() -> APIRouter:
         statement: Optional[str] = None
         appeal: Optional[str] = None
         intent: Optional[str] = None
+        # 0061 — self-eviction: ONLY confirmed:true executes the irreversible walk-out.
+        confirmed: Optional[bool] = None
 
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "houseguests-choice",
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
+        # 0061 — the sanctioned confirmed self-eviction rides the same validated decision seam.
+        "self-evict",
     }
 
     @router.post("/decision")
@@ -520,6 +804,7 @@ def setup_orwell_routes() -> APIRouter:
         try:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
             orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
             # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
@@ -530,6 +815,44 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=502, content={"error": str(e)})
         except Exception as e:
             logger.warning(f"[orwell] decision failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    @router.post("/self-eviction/request")
+    async def orwell_self_eviction_request(request: Request):
+        """0061 step 1 — the player expressed an OOC intent to LEAVE/quit. Raise the self-evict
+        CONFIRMATION on the engine (it names the irreversible stakes) and change NO state: the house
+        never hears it, and nothing evicts until the player explicitly confirms. The confirmed exit
+        then rides the validated /decision seam ({kind:'self-evict', confirmed:true})."""
+        try:
+            res = await orwell_engine.request_self_eviction(user=_current_user(request))
+            orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
+            return res
+        except orwell_engine.EngineToolError as e:
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] self-eviction request failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] self-eviction request failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    @router.post("/self-eviction/cancel")
+    async def orwell_self_eviction_cancel(request: Request):
+        """0061 — the player declined the self-evict confirmation. Clear it; they remain ACTIVE and in
+        the house, unchanged."""
+        try:
+            res = await orwell_engine.cancel_self_eviction(user=_current_user(request))
+            orwell_engine.remember_pending(res, user=_current_user(request))
+            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
+            return res
+        except orwell_engine.EngineToolError as e:
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] self-eviction cancel failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] self-eviction cancel failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/new-game")
@@ -575,6 +898,13 @@ def setup_orwell_routes() -> APIRouter:
             # decision card so no phantom pending bleeds onto the status route until season 2's
             # first advance. The casting card has no `pending`, so this clears _LAST_PENDING.
             orwell_engine.remember_pending(res, user=user)
+            # 0064: a new season is a new chat — unbind the canonical game session so devices
+            # rebind to a fresh chat (a dead season's transcript never narrates the new one).
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             # Kick off move-in cast portraits (0051) — background, never blocks the response,
             # silent no-op when no image model is configured (graceful absence).
             try:
@@ -587,6 +917,72 @@ def setup_orwell_routes() -> APIRouter:
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
+    # ── 0064: the canonical game chat session (one game = one chat, every device on it) ──────
+    class BindGameSessionRequest(BaseModel):
+        sessionId: str = ""
+
+    @router.get("/game-session")
+    async def orwell_game_session(request: Request):
+        """Feature 0064: the user's CANONICAL game chat session id — the one chat every device
+        opens for the game, so the existing cross-device sync engages instead of each device
+        running its own parallel casting interview. Vault-free (a session id carries no secret);
+        scoped to the caller's own user. ``{sessionId: <id or null>}`` — null means nothing is
+        bound yet (the first device binds it via POST after it creates the chat)."""
+        from src import orwell_game_session
+        return {"sessionId": orwell_game_session.get_game_session(_current_user(request))}
+
+    @router.post("/game-session")
+    async def orwell_bind_game_session(body: BindGameSessionRequest, request: Request):
+        """Feature 0064: bind a chat session as the user's canonical game session — FIRST-WRITER-
+        WINS, so two devices racing the first open converge on ONE id (a racing second caller
+        adopts the already-bound id). Returns the EFFECTIVE bound id and whether the caller's id
+        was the one bound. Per-user keyed ⇒ a caller can only ever bind within their own bucket."""
+        from src import orwell_game_session
+        user = _current_user(request)
+        requested = (body.sessionId or "").strip()
+        if not requested:
+            return JSONResponse(status_code=400, content={"error": "sessionId is required"})
+        effective = orwell_game_session.bind_game_session(user, requested)
+        return {"sessionId": effective, "bound": effective == requested}
+
+    # ── 0064 Part F: window / HUD layout, synced across the user's devices ──────────────────
+    class LayoutPatchRequest(BaseModel):
+        windowId: str
+        state: dict = {}
+        # An opaque per-tab token so the originating device can ignore its OWN broadcast echo
+        # (there is no stream to key self-echo on, unlike a chat run).
+        origin: str = ""
+
+    @router.get("/layout")
+    async def orwell_layout(request: Request):
+        """Feature 0064 (F): the user's synced window/HUD layout — open/minimized/docked + size +
+        position per window. Vault-free (geometry carries no secret); scoped to the caller. The kit
+        seeds from this on load so every device shows the same arrangement."""
+        from src import orwell_layout
+        return orwell_layout.get_layout(_current_user(request))
+
+    @router.patch("/layout")
+    async def orwell_patch_layout(body: LayoutPatchRequest, request: Request):
+        """Feature 0064 (F): persist a window's state change (last-write-wins per field) and FAN it
+        out to the user's other devices over the canonical game session's SSE channel as a
+        `layout-changed` event (ids + geometry numbers only — never a message body or Vault). The
+        originating device ignores the echo via `origin`."""
+        from src import orwell_layout, orwell_game_session, session_events
+        user = _current_user(request)
+        saved = orwell_layout.patch_layout(user, body.windowId, body.state)
+        if not saved:
+            return JSONResponse(status_code=400, content={"error": "no usable layout fields"})
+        # Broadcast to the user's other devices (best-effort): they all view the canonical game
+        # session, so its existing per-session SSE channel reaches every one of them.
+        try:
+            sid = orwell_game_session.get_game_session(user)
+            if sid:
+                session_events.publish(sid, "layout-changed",
+                                       {"windowId": body.windowId, "state": saved, "origin": body.origin or ""})
+        except Exception:
+            logger.debug("[orwell] layout-changed publish skipped", exc_info=True)
+        return {"windowId": body.windowId, "state": saved}
 
     # ── 0057: seasons as levels — the per-user season number + the two restart actions ──────
     @router.get("/season")
@@ -617,6 +1013,10 @@ def setup_orwell_routes() -> APIRouter:
             is_over = bool(state.get("finished")) or state.get("moment") == "post-season"
             if not is_over:
                 return JSONResponse(status_code=409, content={"error": "the current season is not over yet"})
+            # Calibration instrumentation (belt): the season is provably OVER here, so capture its
+            # public outcome BEFORE the reset wipes the engine sandbox — idempotent, so it never
+            # double-logs a season the recap poll already captured. Never blocks the season advance.
+            await _capture_season_outcome(user)
             # A new season is a new cast: scrub the prior portrait set before generating (0051).
             try:
                 orwell_portraits.scrub_user(user)
@@ -631,6 +1031,12 @@ def setup_orwell_routes() -> APIRouter:
             # D3/E66 restart-door hygiene: clear the prior season's cached decision card so no phantom
             # pending (e.g. last season's juror-vote) rides the status route into the new season.
             orwell_engine.remember_pending(res, user=user)
+            # 0064: rotate the canonical game session so the new season opens in a fresh chat.
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             season = orwell_seasons.increment_season(user)  # the level is cleared — advance the counter
             try:
                 prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
@@ -659,6 +1065,12 @@ def setup_orwell_routes() -> APIRouter:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
             orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
+            # 0064: rotate the canonical game session so the restarted level opens in a fresh chat.
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_game_session(user)
+            except Exception:
+                pass
             return {"reset": True, "state": res}  # season number is deliberately UNTOUCHED
         except Exception as e:
             logger.warning(f"[orwell] reset-progress failed: {e}")

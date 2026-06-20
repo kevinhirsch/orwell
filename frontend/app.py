@@ -74,6 +74,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# L37 — quiet the per-request httpx access lines ("INFO HTTP Request: GET …/models 200").
+# The FE warms/keepalives the LLM endpoints' /models every ~60s and model discovery polls them
+# too, so httpx's INFO log of every request firehosed the journal (and the ops-panel.log tail
+# that captures it). Request-level access logs from the HTTP client are noise; raise httpx (and its
+# transport, httpcore) to WARNING so real client errors still surface but the steady drip is gone.
+from src.log_quiet import quiet_http_loggers as _quiet_http_loggers
+_quiet_http_loggers()
+
 # ========= APP =========
 # Lifespan is defined below (after all helpers it references are in scope)
 # and passed to FastAPI so we can use the modern context-manager lifecycle
@@ -557,11 +565,47 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.admin_transcript_routes import setup_admin_transcript_routes
 app.include_router(setup_admin_transcript_routes())
 
+# Calibration instrumentation — admin read over the per-season outcome log (Vault-free public
+# outcomes; "gather playtest data first" lane). Behind require_admin; read-only; no game chrome.
+from routes.admin_calibration_routes import setup_admin_calibration_routes
+app.include_router(setup_admin_calibration_routes())
+
 # Admin Health & Logs (Lane G1) — aggregated engine/FE health + the engine's recent-failure
 # ring + the secrets-redacted debug bundle. Behind require_admin; read-only by construction.
 from routes.admin_health_routes import setup_admin_health_routes, setup_admin_status_page
 app.include_router(setup_admin_health_routes())
 app.include_router(setup_admin_status_page())  # G1b: the self-contained ops page at /admin/status
+
+# Admin one-click Update — pull latest → rebuild engine → refresh FE deps → restart both. The
+# operator's deploy-merged-fixes button on the admin status page. Behind require_admin; the
+# command is FIXED (no user input); runs detached / fire-and-forget so the self-restart doesn't
+# kill it mid-flight (prefers the privilege-safe G19b root flag trigger when installed).
+from routes.admin_update_routes import setup_admin_update_routes
+app.include_router(setup_admin_update_routes())
+
+# Admin Factory Reset (OOBE) — wipe everything to exact first-run state, KEEP the API-key/LLM
+# provider config (never touches data/.env). The operator's "clear all context/db/mcp/settings"
+# button on the admin status page. Behind require_admin; FIXED argv (no user input); the
+# destructive run demands a type-"RESET" confirmation in the browser and prefers the
+# privilege-safe root flag trigger (orwell-ops-factory-reset.path) when installed.
+from routes.admin_reset_routes import setup_admin_reset_routes
+app.include_router(setup_admin_reset_routes())
+
+# Admin Update + Reset (keep API keys) — the combined middle tier of the three maintenance
+# controls (Update · Update + Reset · Reset). Pull latest + rebuild, THEN reset to first-run OOBE
+# while PRESERVING the API-key/LLM provider config (never touches data/.env). Behind require_admin;
+# FIXED argv (no user input); the destructive run demands a type-"RESET" confirmation in the
+# browser and prefers the privilege-safe root flag trigger (orwell-ops-update-reset.path) when
+# installed. Fail-closed: a failed update never proceeds to the wipe (see orwell-update-reset.sh).
+from routes.admin_update_reset_routes import setup_admin_update_reset_routes
+app.include_router(setup_admin_update_reset_routes())
+
+# Admin ops-status — the read side of the ops-progress lane. Every privileged ops button (Update,
+# Factory Reset (OOBE), Update+Reset) has its deploy script publish step-by-step progress to
+# data/ops/<action>-status.json; this admin-gated, Vault-free, read-only endpoint surfaces the
+# latest status so the status page renders a live timeline that survives the services restart.
+from routes.admin_ops_status_routes import setup_admin_ops_status_routes
+app.include_router(setup_admin_ops_status_routes())
 
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
@@ -817,8 +861,12 @@ async def serve_login(request: Request):
 
 @app.get("/api/version")
 async def get_version():
-    from core.constants import APP_VERSION
-    return {"version": APP_VERSION}
+    # Version is derived from the deployed checkout's git history — the highest
+    # merged PR number, rendered v{PR/100} (e.g. PR #360 -> v3.60). Computed once
+    # and cached; falls back to a committed string when git is unavailable. See
+    # src/orwell_version.py.
+    from src.orwell_version import get_version as _fe_version
+    return {"version": _fe_version()}
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
