@@ -1,5 +1,7 @@
 # Calibration data — the "coast to Final 2, then lose" pattern (data-gathering lane)
 
+> 📋 **Audit record** · 2026-06-19 · Calibration data (instrument-first) · **Status:** **Data record** — no calibration constant changed
+
 **Date:** 2026-06-19 · **Status:** DATA ONLY — **no calibration constant was changed in this lane.**
 This document quantifies the largest open game-feel concern (the "playtest-gated calibration revisit"
 in the close-out ledger) and hands a follow-up lane a ranked, concrete tuning menu. The instrument

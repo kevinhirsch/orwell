@@ -1,5 +1,7 @@
 # Orwell full product audit — 2026-06-09
 
+> 📋 **Audit record** · 2026-06-09 · Full product / engine (rounds 1–2) · **Status:** Historical record · governing *Remediation principles*
+
 Scope: the entire repo — spec corpus (docs/, all 44 feature specs, the legacy Bible), engine
 (`src/domain`, `src/engine`), runtime/composition/adapters (`src/composition`, `src/adapters`,
 `src/surfaces`), and the front-end player journey (`frontend/`). Conducted as four parallel

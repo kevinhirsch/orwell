@@ -365,31 +365,69 @@ The canonical rules the domain core implements:
 ## Install & update
 
 Orwell runs as **two co-located services in one container** — the TypeScript **engine** (MCP
-server) and the chat **front-end** (Python) — wired over local MCP. On a Proxmox host, two
-one-liners install and update it:
+server) and the chat **front-end** (Python) — wired over local MCP, on a single Debian LXC on a
+Proxmox host. The repo is **private**, so the first install authenticates **once** with a
+fine-grained PAT (scope: this repo, *Contents: read-only*); the installer persists it under
+`/opt/orwell/data/.env` and **every later command runs the local checkout** — no GitHub fetch, no
+re-prompt.
+
+**1 · Install** — run on the **Proxmox host** shell (the single authenticated moment):
 
 ```bash
-# install (run on the Proxmox host shell)
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
-# update
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell-update.sh)"
+GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
 ```
 
-The install creates a Debian LXC, installs Node 22 + Python, builds the engine, sets up the
-front-end, and starts both as systemd services. Save data (per-user game saves + souls)
-lives under `/opt/orwell/data` and is **preserved across updates**; a separate
-`orwell-factory-reset.sh` scrubs everything back to first-run. The LLM provider (Ollama or
-an API key) and ports are set in `/opt/orwell/data/.env`.
+It creates the LXC (4 vCPU / 8 GB by default), installs Node 22 + Python, builds the engine,
+starts both services, and persists the token + LLM config under `/opt/orwell/data` (preserved
+across every update). Set the LLM provider — an API key or a local Ollama — in
+`/opt/orwell/data/.env`.
 
-Inside the container, a single **`orwell`** command opens a **whiptail control panel** — update /
-rollback / deploy-token rotation, the doctor, backup & restore, the two reset tiers, and a
-readiness check — and the maintenance scripts themselves show the same dialogs when run directly
-on a terminal (a deploy-token password box, a destructive-reset confirm, a doctor mode picker).
-All of it stays fully non-interactive for automation. The login shell greets you with a live
-health panel that points at `orwell`.
+**2 · Update** — from the host **or** inside the container; runs the local copy, never a script fetch:
 
-**Full guide** — install, configuration, manual / non-Proxmox install, updates, services,
-backups, and troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals in
+```bash
+bash /opt/orwell/deploy/orwell-update.sh
+```
+
+**3 · Control panel** — inside the container, one command wraps every operation below in a TUI menu:
+
+```bash
+orwell
+```
+
+**Maintenance** — each script is non-interactive (flags/env) for automation and shows a whiptail
+dialog on a TTY. Run any of them from the host (it bridges into the LXC via `pct`) or inside it:
+
+```bash
+# Health: diagnose both tiers, restart whatever is unhealthy, verify
+bash /opt/orwell/deploy/orwell-doctor.sh
+```
+
+```bash
+# Back up the save (accounts, games, souls, .env) — then restore it
+bash /opt/orwell/deploy/orwell-backup.sh
+bash /opt/orwell/deploy/orwell-restore.sh
+```
+
+```bash
+# NEW SEASON — clear every game; KEEP accounts / sessions / LLM config
+bash /opt/orwell/deploy/orwell-game-reset.sh
+```
+
+```bash
+# FACTORY RESET — back to first-run OOBE; preserves only data/.env
+bash /opt/orwell/deploy/orwell-factory-reset.sh
+```
+
+```bash
+# Rotate the deploy token (fine-grained PATs cap at one year)
+bash /opt/orwell/deploy/orwell-update.sh --set-token
+```
+
+Save data under `/opt/orwell/data` is **preserved across updates**; only the factory reset scrubs
+it. The login shell greets you with a live health panel that points at `orwell`.
+
+**Full guide** — configuration, manual / non-Proxmox install, services, backups, and
+troubleshooting: **[`docs/INSTALL.md`](docs/INSTALL.md)** (deploy internals in
 [`deploy/README.md`](deploy/README.md)).
 
 ---
@@ -471,21 +509,24 @@ Hard rules for the test suite:
 
 ## Status & roadmap
 
-The original milestones **M1–M8** (pure core → ports & isolation → visibility → persistence
-→ the MCP boundary → character generation → off-screen simulation → God Mode & tuning) are
-**all built**, along with the MVP-1 batch, per-user sandboxes, durable saves, the live
-off-screen watcher, the interactive finale, and the character-evolution linchpin (souls now
-evolve in the live game and bend behavior).
+The original milestones **M1–M8** and the full feature set **0001–0063** are built — the eight
+priority invariants, the MCP seam, the gameplay loop, per-user sandboxes, durable saves, the live
+off-screen society, the endgame and interactive finale, the character-evolution linchpin (souls
+evolve live and bend behavior), the born-deep deep-character profiles, the seasons-as-levels lane,
+and the casting diversity floor. **Two specs remain unbuilt** — **0022** (the rich game UI / MVP-2,
+deferred by design) and **0062** (the move-in zeitgeist snapshot, spec only).
 
-Live status is deliberately **not** duplicated here (prose drifts):
+Live status is deliberately **not** duplicated in prose here (it drifts):
 
-- **What's green:** `cucumber.cjs` + the status index in
-  [`docs/features/README.md`](docs/features/README.md).
-- **What's next:** the wave-ordered queue in
-  [`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md) — currently the remaining
-  gameplay features (0042–0044), the finale UI, and the fix batches from two full audits
-  ([`docs/audits/`](docs/audits/)) covering ground-truth integrity, the endgame, security
-  hardening, and the player experience.
+- **What's built:** the reconciled per-feature status index in
+  [`docs/features/README.md`](docs/features/README.md) (cross-checked against the code, not the
+  prose) + the BDD gate list in `cucumber.cjs`.
+- **The authoritative open-items list:** the close-out ledger at the end of
+  [`docs/audits/2026-06-10-full-product-audit.md`](docs/audits/2026-06-10-full-product-audit.md).
+- **The biggest open game-feel lever:** calibration tuning — the data is gathered
+  ([`docs/audits/2026-06-19-calibration-data.md`](docs/audits/2026-06-19-calibration-data.md)),
+  and the next step lowers `JURY_WEIGHTS.gameRespect` so the finale rewards an *earned*
+  relationship reservoir, not just the comp résumé.
 - **The one deliberate deferral:** feature **0022** (the rich game UI / MVP-2) — by design,
   per [ADR 0003](docs/decisions/0003-conversation-is-the-game.md), the chat *is* the UI.
 
@@ -496,11 +537,11 @@ Live status is deliberately **not** duplicated here (prose drifts):
 The original open list (stack, datastore, soul storage, temperature model, veto/jury
 procedure, non-degradation strategy, embedding provider) is **fully resolved** — see
 [`docs/decisions/`](docs/decisions/) and the constants modules the features firmed up.
-The last item, the **embedding provider** for semantic soul recall, was decided 2026-06-10
-([ADR 0004](docs/decisions/0004-embedding-provider.md)): **fastembed (local ONNX)** as the
-runtime target, with the deterministic fake remaining the test adapter. The fastembed
-adapter is **not yet built** — runtime recall currently uses the deterministic fake (ADR
-0004 "Implementation status", audit E86); the build is a tracked deferral.
+The last item, the **embedding provider** for semantic soul recall
+([ADR 0004](docs/decisions/0004-embedding-provider.md)), is resolved **and built** (E86a,
+2026-06-11): **fastembed (local ONNX)** is the runtime `EmbeddingProvider` — warmed at boot and
+served through a worker-thread bridge — with the deterministic fake as the test adapter and the
+whole-process fallback when the model is unavailable.
 
 ---
 

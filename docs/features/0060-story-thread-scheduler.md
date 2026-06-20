@@ -1,8 +1,8 @@
 # 0060 — Story-thread trigger/resolution scheduler (0058 Phase 2)
 
-> **Status:** 📝 **SPEC ONLY — NOT BUILT.** The owner approved building this with a **restrained**
-> posture; the BUILD is **deferred until the current lanes land** (and must be sequenced after any
-> R3 / SQLite per-tick-budget work — see §8). This is the spec the build follows.
+> **Status:** ✅ **BUILT — BDD-gated** (#336; `0060-story-thread-scheduler.feature` in `cucumber.cjs`).
+> Shipped with the owner's **restrained** posture (`threadConstants.ts`; the hard season surfacing
+> cap ≈3–4). This is the spec the build followed.
 >
 > **Parent feature:** [0058 — Deep character profiles](./0058-deep-character-profiles.md). 0058 Phase 1
 > ships the *born-deep* §3 profile split across the Vault Wall and the **story-thread model** (§5): each

@@ -1,5 +1,7 @@
 # 2026-06-10 — Full product audit (round 5): architecture, wiring, FE/UI, game design & player experience
 
+> 📋 **Audit record** · 2026-06-10 · Full product audit (round 5) · **Status:** **ACTIVE — authoritative open-items ledger** (product-owner rulings #1–#21 + the campaign close-out + the 2026-06-19 reconciliation)
+
 **Scope.** A complete sweep of the repo at `main` (87687c0): the engine's ports/composition/
 adapters/surfaces, the pure core and every `src/engine` system against the canonical mechanics
 (CLAUDE.md, `bb-sim-spec.md`, ADRs 0001–0004, the legacy Bible rulings), the vendored front-end

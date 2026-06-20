@@ -1,5 +1,7 @@
 # 2026-06-11 — Settings-wiring audit: every control × {wired, persisted, applied}
 
+> 📋 **Audit record** · 2026-06-11 · Settings wiring × {wired, persisted, applied} (DOC-ONLY) · **Status:** Historical record
+
 **Commission (verbatim).** *"Can we make sure every piece of the settings menu is wired to
 something that actually gets changed?"* — i.e. every control in the Settings modal must map to
 a real setting that is BOTH persisted AND read/applied. No dead UI (a control that saves
