@@ -1,8 +1,14 @@
 # Calibration data — the "coast to Final 2, then lose" pattern (data-gathering lane)
 
-> 📋 **Audit record** · 2026-06-19 · Calibration data (instrument-first) · **Status:** **Data record** — no calibration constant changed
+> 📋 **Audit record** · 2026-06-19 · Calibration data (instrument-first) · **Status:** **Data record** — no calibration constant changed *in the data-gathering lane*
+>
+> ➡️ **Follow-up applied (2026-06-20):** the follow-up tuning lane took recommendation #1 and lowered
+> `JURY_WEIGHTS.gameRespect` **0.9 → 0.7** (single lever). Details in the "Applied change" callout
+> under *Ranked tuning recommendations*. This data record stays as the as-measured (0.9) baseline.
 
-**Date:** 2026-06-19 · **Status:** DATA ONLY — **no calibration constant was changed in this lane.**
+**Date:** 2026-06-19 · **Status:** DATA ONLY — **no calibration constant was changed in this
+(data-gathering) lane.** *(The follow-up lane applied recommendation #1 on 2026-06-20 — `gameRespect`
+0.9 → 0.7; see the callout below. The distributions in this document remain the 0.9 baseline.)*
 This document quantifies the largest open game-feel concern (the "playtest-gated calibration revisit"
 in the close-out ledger) and hands a follow-up lane a ranked, concrete tuning menu. The instrument
 is `tests/calibration/calibrationInstrument.test.ts`; the machine-readable artifact it emits is
@@ -76,20 +82,31 @@ chain, in code:
 
 ### 1. The finale verdict is dominated by the *relative* public comp resume
 
-`src/engine/juryConstants.ts` → `JURY_WEIGHTS`:
+`src/engine/juryConstants.ts` → `JURY_WEIGHTS` **as measured in this lane** (the values the
+distributions above were gathered against):
 
 ```
 { relationship: 1.0, manner: 0.8, finale: 0.3, gameRespect: 0.9, reliability: 0.4 }
 ```
 
+> ⚠️ **Stale framing — corrected below.** This paragraph called `gameRespect` (0.9) "the
+> second-largest jury term." That description was *true at measurement time* (0.9 sat just above
+> `manner` 0.8). It is **no longer current**: the follow-up calibration lane (2026-06-20) lowered
+> `gameRespect` 0.9 → **0.7** (see *Applied change* under the recommendations). At 0.7 it is the
+> **third-largest** term, behind `relationship` (1.0) and `manner` (0.8) — which is the intended
+> effect (let an earned social/reliability reservoir compete with a comp resume). The measured
+> snapshot is kept verbatim for provenance; trust `src/engine/juryConstants.ts` for the live value.
+
 `src/engine/jury.ts` → `juryLean` **deliberately excludes threat** (the D4/E33 ruling, 2026-06-11:
 penalizing "they were a threat" at the finale structurally crowns the harmless goat). In its place,
 `gameRespectTerm(own, other) = own/(own+other) − 0.5` (a signed ±0.5 share of the pair's combined
-comp resume) is weighted **0.9** — the second-largest jury term, just under `relationship` (1.0) and
-above `manner` (0.8). A finalist who reaches F2 with **0 comps against a rival with several** sees a
-gameRespect term near **−0.45 × 0.9 ≈ −0.40** per juror — applied to *every* juror, it is the
-landslide engine. A passive/idle player, by construction, brings a thin resume, so this term runs
-hard against them.
+comp resume) was weighted **0.9 at measurement time** — then the second-largest jury term, just under
+`relationship` (1.0) and above `manner` (0.8). A finalist who reaches F2 with **0 comps against a
+rival with several** saw a gameRespect term near **−0.45 × 0.9 ≈ −0.40** per juror — applied to
+*every* juror, it was the landslide engine. A passive/idle player, by construction, brings a thin
+resume, so this term ran hard against them. *(After the 0.7 retune the same goat sees ≈ −0.45 × 0.7 ≈
+−0.32 per juror — still a real debit, deliberately smaller, leaving room for the earned social terms
+to close the gap.)*
 
 ### 2. The relationship term doesn't rescue the idle player
 
@@ -123,12 +140,34 @@ right levers are the jury-weighting and social-payoff constants.
 
 ## Ranked tuning recommendations (for the FOLLOW-UP lane — NOT applied here)
 
+> ✅ **Applied change (follow-up lane, 2026-06-20): `JURY_WEIGHTS.gameRespect` lowered `0.9 → 0.7`.**
+> The product owner took recommendation #1 (the highest-impact, lowest-risk lever) and resolved the
+> internal conflict baked into its own caveat. **The caveat was arithmetically incompatible with the
+> recommended band:** #1 said both "lower to ~0.6–0.7" *and* "keep it the second-largest term" — but
+> `manner` is `0.8`, so *any* value in `0.6–0.7` necessarily drops `gameRespect` **below** `manner`,
+> i.e. to **third**-largest. You cannot have both. The owner resolved it **in favor of the value
+> (0.7)** and **accepted the third-largest slot as intended** — `gameRespect` is the comp-resume term
+> and the dominant landslide driver, so letting it sit beneath the two *social* terms (`relationship`
+> 1.0, `manner` 0.8) is exactly the targeted effect: an earned relationship/reliability reservoir now
+> competes with a comp resume. The "wins stay earned" guarantee is preserved **not by the ordinal
+> slot** but by the **`juryReach` `EARNED_WINS` guard** in CI — that gate, not where `gameRespect`
+> ranks, is the real anti-sycophancy backstop. **Single-lever scope:** `manner` and every other weight
+> were left untouched. *(Resulting order: `relationship` 1.0 > `manner` 0.8 > `gameRespect` 0.7 >
+> `reliability` 0.4 > `finale` 0.3.)* **Validation runs in CI's sharded heavy lanes** — the `juryReach`
+> `EARNED_WINS`/`F2_WIN_MAX` teeth and the `calibrationGradient` monotonic, plus a re-run of this
+> instrument — **not locally** (the dev box OOMs on the heavy sims).
+
 Goal framing: keep the anti-sycophancy spine (a 0-social, 0-comp goat must still lose; wins stay
 comp-grounded) while making **social play a real, *convertible* path to the win** and turning
 landslide F2 losses into **earned, sometimes-close** ones. Each item names the constant, the
 direction, and the expected effect. Ranked by expected impact-per-risk.
 
 1. **`juryConstants.ts` → `JURY_WEIGHTS.gameRespect`: lower 0.9 → ~0.6–0.7 (highest impact, low risk).**
+   *(✅ APPLIED 2026-06-20 at **0.7** — see the "Applied change" callout above. NOTE: the
+   "keep it the second-largest term" caveat below is **arithmetically impossible** alongside the
+   0.6–0.7 band, since `manner` = 0.8; the owner resolved this in favor of the value — `gameRespect`
+   is now the **third**-largest term — with the `EARNED_WINS` guard as the backstop instead of the
+   ordinal slot. The original recommendation text is preserved verbatim below for the record.)*
    This is the dominant driver of the landslide and of "active wins less." Trimming it lets the
    `relationship` (1.0) + `reliability` (0.4) terms a socially-active player *earns* actually
    compete with a comp resume, converting the active arm's extra F2 seats into wins and shrinking
