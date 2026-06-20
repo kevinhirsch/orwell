@@ -153,6 +153,33 @@ function ensureCss() {
     .ow-window.ow-docked > .ow-body { max-height: none; }
     /* the dock/undock toggle reads as a quieter control than min/close */
     .ow-controls .ow-dock { font-size: .9rem; }
+    /* ── loading affordance (perf/resilience) ─────────────────────────────────
+       A NON-blocking refresh indicator the kit owns: a window opens IMMEDIATELY
+       with its last-good (or placeholder) content and shows a thin top progress
+       sliver + a quiet titlebar "·refreshing" hint while a slow /state fill is in
+       flight — never a blank 30-45s hang. Purely additive overlay: it never hides
+       the body, so a reused last-good snapshot stays visible underneath. reduced-
+       motion stills the sliver to a static tint. */
+    .ow-window.ow-loading > .ow-body { position: relative; }
+    .ow-window.ow-loading > .ow-body::before {
+      content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+      background: linear-gradient(90deg,
+        transparent, var(--accent, #e06c75) 40%, var(--accent, #e06c75) 60%, transparent);
+      background-size: 240% 100%; animation: ow-load-sweep 1.1s linear infinite;
+      pointer-events: none; z-index: 2;
+    }
+    .ow-title .ow-load-hint {
+      margin-left: .4rem; font-size: .7em; font-weight: 400; opacity: .55;
+      letter-spacing: 0; white-space: nowrap;
+    }
+    @keyframes ow-load-sweep {
+      from { background-position: 120% 0; } to { background-position: -120% 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ow-window.ow-loading > .ow-body::before {
+        animation: none; background: var(--accent, #e06c75); opacity: .5;
+      }
+    }
   `;
   document.head.appendChild(st);
 }
@@ -539,6 +566,28 @@ export class OrwellWindow {
 
   /** True while this window is rendered docked into the gadget rail (0054 Phase 2). */
   isDocked() { return !!this._docked; }
+
+  /** Show/hide the non-blocking refresh affordance (perf/resilience). A window opens
+   *  immediately with its last-good/placeholder content; while a slow /state fill is in
+   *  flight the body shows a thin top sliver and the titlebar a quiet "·refreshing" hint —
+   *  the underlying content is NEVER hidden, so a reused last-good snapshot stays readable.
+   *  Idempotent and safe before/after open() (it no-ops if the chrome isn't built yet). */
+  setLoading(on) {
+    if (!this.el) return;
+    this.el.classList.toggle('ow-loading', !!on);
+    const title = this.titlebar && this.titlebar.querySelector('.ow-title');
+    if (!title) return;
+    let hint = title.querySelector('.ow-load-hint');
+    if (on && !hint) {
+      hint = document.createElement('span');
+      hint.className = 'ow-load-hint';
+      hint.textContent = '· refreshing';
+      hint.setAttribute('aria-live', 'polite');
+      title.appendChild(hint);
+    } else if (!on && hint) {
+      hint.remove();
+    }
+  }
 
   /** Toggle docked↔floating: persist the flag, tear down, and re-open in the new
    *  mode. ONE position system (F5) — a mode change is a rebuild, never a live

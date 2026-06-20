@@ -69,3 +69,23 @@ def test_generating_copy_prefers_the_live_run_record():
     body = _block(_js(), "function render(data) {", "async function refreshRoster")
     assert "Generating " in body and "of " in body, "the live 'Generating N of M…' copy exists"
     assert "gen.done" in body and "gen.total" in body, "it reads the live run counts"
+
+
+# ── render() never RESURRECTS a closed window (the CI browser-smoke overlap fix) ─────────────
+
+def test_render_does_not_resurrect_a_closed_panel():
+    # The race: a roster fetch begun while the panel was OPEN resolves AFTER the player closed it
+    # (the close stops the poll, but an in-flight request still settles). render()→ensurePanel()
+    # would re-MOUNT #orwell-cast, leaving a slotted, focused window overlapping the sidebar — it
+    # intercepted #session-sort-btn under Playwright (PR #388). render() must bail when closed.
+    body = _block(_js(), "function render(data) {", "async function refreshRoster")
+    head = body[: body.index("const el = ensurePanel()")]
+    assert "if (!_open) return;" in head, "render() must drop a stale result instead of re-mounting a closed panel"
+
+
+def test_refresh_roster_serves_last_good_and_backs_off():
+    body = _block(_js(), "async function refreshRoster()", "function scheduleNextPoll")
+    # Under failure: count it (poll backoff) and keep the last-good cast on screen (keyed upsert).
+    assert "_failures++" in body
+    # A non-blocking loading affordance rides over the existing content (never a blank hang).
+    assert "setLoading(true)" in body and "setLoading(false)" in body

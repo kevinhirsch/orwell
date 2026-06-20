@@ -98,10 +98,20 @@ async def _generate(standing: str, week, phase, anchor: str, user: Optional[str]
 
 async def get_tagline(user: Optional[str] = None) -> dict:
     """The hero line. Raises only if the ENGINE is unreachable (the route's fail-open
-    to the static line handles that); LLM trouble falls open to the curated line here."""
+    to the static line handles that); LLM trouble falls open to the curated line here.
+
+    Issue 2 — pre-game is NOT an error: when there is no active game the engine refuses
+    `playerTagline` with a benign "no active game" (EngineToolError.no_game). That's the
+    ordinary homepage-before-casting state, so return the static line quietly instead of
+    raising (which used to spam `[orwell] tagline failed: no active game` on every poll)."""
     from src import orwell_engine
 
-    curated = (await orwell_engine.player_tagline(user=user)).get("text") or "The house is waiting."
+    try:
+        curated = (await orwell_engine.player_tagline(user=user)).get("text") or "The house is waiting."
+    except orwell_engine.EngineToolError as e:
+        if e.no_game:
+            return {"text": "The house is waiting."}  # pre-game: a normal state, never logged
+        raise
 
     # Pre-game (or unreadable state): nothing to be snarky about yet — curated line as-is.
     try:
