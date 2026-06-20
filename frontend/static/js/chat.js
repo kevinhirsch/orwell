@@ -4776,6 +4776,43 @@ import { isNarrow } from './platform.js';
     _hideUserBubble = true;
   }
 
+  /**
+   * Submit a HIDDEN production cue (no user bubble, no lingering composer text).
+   *
+   * The OOBE hand-off cues — the producers' opener (_orwellOpenGameAfterCasting) and the
+   * post-photo resume (_orwellResumeAfterPhoto) — used to set #message.value then submit.
+   * handleChatSubmit reads the value SYNCHRONOUSLY at call time (the `const msg =
+   * el('message').value` capture near the top), but only CLEARS the textarea later, AFTER
+   * several awaits (session materialize, upload, …). For that gap the cue text sat VISIBLE
+   * in the composer — an ugly flash of an engine instruction the player should never read.
+   *
+   * This seam closes the gap: hide the bubble, write the cue, fire the submit (which captures
+   * the value synchronously), then clear #message.value RIGHT AWAY in the same tick — the
+   * submit already has the text, so clearing now never races it. Fail-open: any hiccup leaves
+   * the composer usable (and never leaves a half-typed cue behind).
+   */
+  export function sendHiddenCue(text) {
+    const box = uiModule.el ? uiModule.el('message') : document.getElementById('message');
+    if (!box || typeof text !== 'string') return false;
+    try {
+      _hideUserBubble = true;            // the cue is the producers reaching out — no player bubble
+      box.value = text;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      handleChatSubmit({ preventDefault() {} });
+      // The value was captured synchronously inside handleChatSubmit above; clear it NOW so the
+      // cue text is never visible in the composer for the await-gap before the normal clear.
+      box.value = '';
+      box.style.height = '';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    } catch (_) {
+      // Never leave the hide-bubble flag armed for a real next turn if the cue blew up.
+      _hideUserBubble = false;
+      try { box.value = ''; } catch (__) {}
+      return false;
+    }
+  }
+
   /** Set the AI element to merge with the next streamed response (continue after stop) */
   export function setPendingContinue(el) {
     _pendingContinue = el;
@@ -5261,6 +5298,7 @@ import { isNarrow } from './platform.js';
     getImageCost: chatRenderer.getImageCost,
     setDisplayOverride,
     setHideUserBubble,
+    sendHiddenCue,
     setPendingContinue,
     regenerateFrom,
     forkFrom,

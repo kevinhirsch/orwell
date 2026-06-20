@@ -41,12 +41,14 @@ describe("the casting-interview moment prompt (0050)", () => {
     expect(prompt).not.toContain("walks into that house");
   });
 
-  // G29: the producer actively pushes the cast-photo headshot (the FE 'Casting headshot' panel),
-  // framed as optional and never blocking the premiere.
-  it("directs the producer to push the headshot panel, optionally", () => {
+  // G29 + photo-first OOBE: the producer opens on the cast-photo headshot (the FE 'Casting headshot'
+  // panel) as casting STEP ONE, framed as optional and never blocking the interview/premiere.
+  it("opens the interview on the headshot panel, optionally (casting step #1)", () => {
     expect(prompt).toMatch(/headshot/i);
     expect(prompt).toMatch(/cast photo|profile pic/i);
-    expect(prompt).toMatch(/NOT required|never block/i);
+    expect(prompt).toMatch(/optional|NOT required|never block|never gate/i);
+    // the photo is the FIRST thing producers ask — the photo-first re-sequence
+    expect(prompt).toMatch(/THIS IS WHERE YOU OPEN|step ONE|first ask|before any other question/i);
   });
 
   // The producer is PROFESSIONAL with a real personality: CALCULATED, strategic humor IS allowed
@@ -211,22 +213,28 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
   });
 
   it("status: ready gates on the name; next follows the engine's coverage order", () => {
+    // The cast photo is casting STEP ONE (photo-first OOBE): a fresh interview's first missing field
+    // and first `next` is the cast photo, BEFORE the name — but it never gates `ready`.
     const fresh = castingStatusOf(emptyIntake());
     expect(fresh.ready).toBe(false);
-    expect(fresh.missing[0]).toBe("playerName");
+    expect(fresh.missing[0]).toBe("castPhoto");
+    expect(CASTING_COVERAGE[0]!.field).toBe("castPhoto");
     expect(fresh.next).toBe(CASTING_COVERAGE[0]!.ask);
 
+    // Recording ONLY the name makes casting ready, but the optional cast photo is still the open
+    // step #1, so `next` stays the photo (the name does not advance past an earlier unanswered step).
     const named = castingStatusOf(mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee" }));
     expect(named.ready).toBe(true);
     expect(named.known["playerName"]).toBe("The Interviewee");
     expect(named.missing).not.toContain("playerName");
-    expect(named.next).toBe(CASTING_COVERAGE[1]!.ask);
+    expect(named.missing[0]).toBe("castPhoto");
+    expect(named.next).toBe(CASTING_COVERAGE[0]!.ask);
   });
 
   it("a fully covered intake has no next step", () => {
     let intake = emptyIntake();
     intake = mergeCastingUpdate(intake, {
-      playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
+      castPhoto: "uploaded", playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
       personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
       archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
     });
@@ -324,6 +332,74 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
     expect(view.started).toBe(false);
     expect(view.casting).toBeDefined();
     expect(view.casting!.ready).toBe(false);
+  });
+});
+
+// 0065 — the cast photo is the FIRST casting step (photo-first OOBE), engine-driven, and OPTIONAL.
+// "Producers ask what you look like before anything else"; the FE sets `castPhoto` to "uploaded" or
+// "skipped" when the in-chat photo box closes. It must NOT gate `ready` (the photo is skippable).
+describe("the cast photo is casting step #1, engine-driven and optional (0065)", () => {
+  it("castPhoto is the first coverage step — a fresh interview asks for it before the name", () => {
+    expect(CASTING_COVERAGE[0]!.field).toBe("castPhoto");
+    const fresh = castingStatusOf(emptyIntake());
+    expect(fresh.missing[0]).toBe("castPhoto");
+    expect(fresh.next).toBe(CASTING_COVERAGE[0]!.ask);
+    // It precedes the required name in the engine's ask-order.
+    const fields = CASTING_COVERAGE.map((c) => c.field);
+    expect(fields.indexOf("castPhoto")).toBeLessThan(fields.indexOf("playerName"));
+  });
+
+  it("recording castPhoto:\"uploaded\" removes it from missing and advances next; ready is unchanged", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), { castPhoto: "uploaded" });
+    const st = castingStatusOf(intake);
+    expect(st.known["castPhoto"]).toBe("uploaded");
+    expect(st.missing).not.toContain("castPhoto");
+    // next has advanced past the photo to the next open coverage step (still the name).
+    expect(st.next).toBe(CASTING_COVERAGE[1]!.ask);
+    expect(st.missing[0]).toBe("playerName");
+    // The photo NEVER gates readiness — only a name does, and none is on file yet.
+    expect(st.ready).toBe(false);
+  });
+
+  it("recording castPhoto:\"skipped\" also handles the step (any non-empty string marks it done)", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), { castPhoto: "skipped" });
+    const st = castingStatusOf(intake);
+    expect(st.known["castPhoto"]).toBe("skipped");
+    expect(st.missing).not.toContain("castPhoto");
+    expect(st.next).toBe(CASTING_COVERAGE[1]!.ask);
+  });
+
+  it("castPhoto does NOT change ready, with or without it — ready stays name-only", () => {
+    // Name on file, photo skipped ⇒ ready.
+    const skipped = castingStatusOf(mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee", castPhoto: "skipped" }));
+    expect(skipped.ready).toBe(true);
+    // Name on file, photo never asked ⇒ STILL ready (the photo is optional, never a gate).
+    const noPhoto = castingStatusOf(mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee" }));
+    expect(noPhoto.ready).toBe(true);
+    // Photo uploaded but no name ⇒ NOT ready (the name is the only hard gate).
+    const photoOnly = castingStatusOf(mergeCastingUpdate(emptyIntake(), { castPhoto: "uploaded" }));
+    expect(photoOnly.ready).toBe(false);
+  });
+
+  it("the live session accepts castPhoto end to end and finalizes whether uploaded or skipped", () => {
+    // The FE-set field is accepted, recorded, and echoed in the status (not an ignored key).
+    const s = new GameSessionAdapter();
+    const st = s.updateCasting({ castPhoto: "uploaded" });
+    expect(st.known["castPhoto"]).toBe("uploaded");
+    expect(st.ignoredKeys).toBeUndefined(); // castPhoto IS a recognized casting field
+    // A photo-skipped interview still finalizes once a name is in (the photo never blocks creation).
+    const s2 = new GameSessionAdapter();
+    s2.updateCasting({ castPhoto: "skipped", playerName: "The Interviewee" });
+    const view = s2.createCharacter({ seed: 5 });
+    expect(view.started).toBe(true);
+    expect(view.player!.name).toBe("The Interviewee");
+  });
+
+  it("a re-write of castPhoto (uploaded → skipped) is reported as an overwrite (C8)", () => {
+    const first = mergeCastingUpdate(emptyIntake(), { castPhoto: "uploaded" });
+    expect(overwrittenScalars(first, { castPhoto: "skipped" })).toEqual(["castPhoto"]);
+    // The identical value is a no-op overwrite-wise.
+    expect(overwrittenScalars(first, { castPhoto: "uploaded" })).toEqual([]);
   });
 });
 

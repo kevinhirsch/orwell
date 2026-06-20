@@ -280,7 +280,11 @@ async def update_casting(fields: dict | None = None, user: str | None = None) ->
     the season starts records nothing and reports done."""
     allowed = {"playerName", "archetype", "strategyStyle", "personaArchetype",
                "personaStrategyStyle", "backstory", "motivation", "privateStrategy",
-               "interviewNotes"}
+               "interviewNotes",
+               # The cast photo is the FIRST casting step (optional/skippable): the FE records
+               # how it was handled — "uploaded" (photo finalized) or "skipped". A plain string
+               # scalar, so the generic `elif str(value).strip()` branch below carries it through.
+               "castPhoto"}
     args: dict = {}
     for key, value in (fields or {}).items():
         if key not in allowed or value is None:

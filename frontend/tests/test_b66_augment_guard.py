@@ -38,6 +38,12 @@ SANCTIONED = {
     # (ADR 0003 §4 intact); it only error-corrects the model's documented engine bypass. Its guard
     # marker is the ceremony-phase allowlist that scopes the advance.
     "advance_game": ("routes/chat_helpers.py", "_pre_resolve_npc_ceremony", "_CEREMONY_RESOLVE_PHASES"),
+    # 0065 (cast photo as casting step #1): the /casting/photo route records ONLY the player's
+    # photo-step marker (castPhoto uploaded/skipped). The photo box is a FE-only affordance the
+    # narration model cannot observe, so the FE must mark the outcome — it augments, never replaces
+    # (the model still runs the whole interview and records every substantive answer) and never
+    # advances the week (castPhoto does not gate `ready`). Its guard marker is the status allowlist.
+    "update_casting": ("routes/orwell_routes.py", "orwell_casting_photo", "_CAST_PHOTO_STATUSES"),
 }
 
 

@@ -86,32 +86,34 @@ def test_l3_studio_keeps_the_card_open_when_options_appear():
     assert "> .ow-body { max-height" in js
 
 
-# ── L4: picking a headshot dismisses the picker and hands off ────────────────────────
+# ── L4: picking a headshot dismisses the picker and resumes the interview ─────────────
 
 def test_l4_finalize_hands_off_instead_of_painting_the_finalized_state():
     js = _read("static", "js", "orwellHeadshot.js")
     # both finalize paths (studio finalize + library select) call the handoff and bail
     assert "onFinalized" in js
     assert "if (handoff()) return" in js
-    # the host wires the handoff to unmount the card + open the game
+    # the host wires the handoff to unmount the box + record the step + resume the interview
     assert "onCastingHeadshotChosen" in js
     chosen = js[js.index("function onCastingHeadshotChosen"):]
     chosen = chosen[: chosen.index("\n  }")]
-    # tear the WINDOW down (item 6: keep the composer-lift drop through the handoff) and
-    # hand off into the producers' open
+    # tear the WINDOW down and resume the interview (OOBE re-sequence: no longer "open the game")
     assert "teardownWindow()" in chosen
-    assert "_orwellOpenGameAfterCasting" in chosen
+    assert "_orwellResumeAfterPhoto" in chosen
+    assert "recordPhotoStep" in chosen
 
 
 # ── L5: the producers send the first message automatically ──────────────────────────
+# OOBE re-sequence (2026-06-20): the producers' kickoff now fires on WELCOME dismiss (route's
+# onProceed), not on photo finalize. The photo finalize fires the SEPARATE resume cue.
 
-def test_l5_producers_auto_open_the_game_after_casting():
+def test_l5_producers_auto_open_the_game_on_welcome_dismiss():
     js = _read("static", "js", "orwellOnboarding.js")
     assert "window._orwellOpenGameAfterCasting" in js
     seg = js[js.index("window._orwellOpenGameAfterCasting"):]
     seg = seg[: seg.index("\n  };")]
-    # it AUTO-SENDS (this single cutover departs from the prefill-only rule)
-    assert "handleChatSubmit" in seg
+    # it AUTO-SENDS via the hidden-cue seam (this single cutover departs from the prefill-only rule)
+    assert "sendHiddenCue" in seg
     # ...but only once, only on the game build, and never over the player's own typing /
     # an in-flight stream
     assert "data-game-build" in seg
@@ -120,6 +122,7 @@ def test_l5_producers_auto_open_the_game_after_casting():
     assert "hasActiveStream" in seg
 
 
-def test_l5_headshot_module_triggers_the_producer_open():
+def test_l5_headshot_finalize_resumes_not_opens():
     js = _read("static", "js", "orwellHeadshot.js")
-    assert "window._orwellOpenGameAfterCasting" in js
+    # the photo box fires the resume cue (the opener already happened at welcome dismiss)
+    assert "window._orwellResumeAfterPhoto" in js

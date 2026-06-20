@@ -642,6 +642,47 @@ def setup_orwell_routes() -> APIRouter:
         orwell_portraits.clear_player_intake(_current_user(request))
         return {"ok": True}
 
+    # ── Cast-photo casting step (the FIRST step of the casting interview, optional) ────────
+    # The cast photo opens casting (0050) and is SKIPPABLE. The FE records how the player
+    # handled it into the engine's casting state machine via updateCasting({castPhoto}) so
+    # the engine can advance `casting.next`/`ready`. Idempotent and Vault-free — it records
+    # only the player's OWN step metadata. Pre-game only; the engine no-ops once a season has
+    # started (we pass through whatever it returns).
+    #
+    # B66 (augment-not-replace, ADR 0003 §4): this is a SANCTIONED FE-side casting record, not a
+    # UI replacement of the interview. The photo box is a FE-only affordance the narration model
+    # genuinely CANNOT observe (it never sees the upload/skip), so the FE must mark the outcome —
+    # exactly the error-correction the other sanctioned paths (ensure_turn_recorded,
+    # _pre_resolve_npc_ceremony) embody. It records ONLY the photo-step marker, never a
+    # substantive casting answer, never advances the week, and never replaces the model-run
+    # interview. `_CAST_PHOTO_STATUSES` is the scoping allowlist guard (the b66 marker).
+    _CAST_PHOTO_STATUSES = ("uploaded", "skipped")
+
+    class CastPhotoRequest(BaseModel):
+        status: str
+
+    @router.post("/casting/photo")
+    async def orwell_casting_photo(body: CastPhotoRequest, request: Request):
+        if body.status not in _CAST_PHOTO_STATUSES:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "status must be 'uploaded' or 'skipped'"},
+            )
+        try:
+            return await orwell_engine.update_casting(
+                {"castPhoto": body.status}, user=_current_user(request)
+            )
+        except orwell_engine.EngineToolError as e:
+            # "No active game" is the benign pre/post-game state (the engine is reachable; it
+            # refused), NOT an outage — a clean 409 so the FE never shows a false "unreachable".
+            if e.no_game:
+                return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            logger.warning(f"[orwell] casting/photo failed: {e}")
+            return JSONResponse(status_code=502, content={"error": str(e)})
+        except Exception as e:
+            logger.warning(f"[orwell] casting/photo failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/portrait/studio/generate")
     async def orwell_portrait_studio_generate(request: Request):
         """Generate up to 3 AI studio OPTIONS off the uploaded photo (image-to-image). Call it

@@ -49,13 +49,17 @@ def test_control_is_pre_game_and_game_build_only():
 
 
 def test_control_is_vault_safe_reads_only_its_own_portrait_surfaces():
-    """It may only touch /api/orwell/state (started?), its own /portrait/* (intake + studio),
-    and /avatar — never a roster, status, or any surface that could carry game content."""
+    """It may only touch /api/orwell/state (started? + casting status), its own /portrait/* (intake +
+    studio), /avatar, and /casting/photo (record the player's own photo-step) — never a roster,
+    status, or any surface that could carry game content."""
     js = _read("static/js/orwellHeadshot.js")
     import re
     endpoints = set(re.findall(r'/api/orwell/[a-z/\-]+', js))
     allowed = {
         "/api/orwell/state", "/api/orwell/avatar",
+        # OOBE re-sequence: record the player's own cast-photo step (uploaded/skipped). Vault-safe —
+        # it carries only the player's own photo-step status, never game content.
+        "/api/orwell/casting/photo",
         "/api/orwell/portrait/intake",
         "/api/orwell/portrait/studio/generate",
         "/api/orwell/portrait/studio/finalize",
