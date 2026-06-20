@@ -467,6 +467,20 @@ async def game_status(user: str | None = None) -> dict:
     return await _call("gameStatus", {}, user=user)
 
 
+async def state_delta(since_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """0065 Part E — the beatSeq-keyed DELTA: what changed since the caller's last-seen `beatSeq`.
+
+    Returns ``{ beatSeq, events:[{id,ts,type,content}], changes?:{field:{from,to}}, finishedChanged?,
+    winner?, board, fullRefresh }`` — Vault-free by construction (the same closed-set ceremony fields
+    the full projection already exposes). ``fullRefresh`` is true when the engine cannot compute an
+    incremental delta (no/odd `sinceBeatSeq`, a restart) — the FE then leaves the full context alone.
+    The model never sees the token; the FE holds the last-seen `beatSeq` and passes it here."""
+    args: dict = {}
+    if since_beat_seq is not None:
+        args["sinceBeatSeq"] = since_beat_seq
+    return await _call("stateDelta", args, user=user)
+
+
 async def get_visible_state(user: str | None = None) -> dict:
     """The player's own visible projection: witnessed events + things they know for certain."""
     return await _call("getVisibleStateFor", {}, user=user)

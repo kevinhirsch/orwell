@@ -727,6 +727,75 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
         return True  # fail-open: never suppress on an error.
 
 
+# ── 0065 Part E2 — weave the engine DELTA into the moment context (additive, concise) ─────────── #
+#
+# The model is handed the full authoritative GAME CONTEXT block every turn (it needs the whole board
+# to stay grounded). Part E adds, ALONGSIDE it, a tight "Since your last turn: …" line built from the
+# engine's `stateDelta` — the closed-set ceremony fields that MOVED + any new player-visible beats —
+# so staleness is self-evident to the model (ADR 0003: prefer a crisp diff to more context). This is
+# purely ADDITIVE: the full block is never replaced. A `fullRefresh` (no/odd last-seen, a restart) or
+# an EMPTY delta (nothing committed since) ⇒ NO line at all (today's full context stands). Fail-open:
+# any hiccup fetching/rendering the delta leaves the turn exactly as it is today.
+
+# Cap the diff line so it can never balloon (ADR 0003 §1 — prefer removing context): a phrase or two.
+_DELTA_MAX_CHANGES = 6
+_DELTA_MAX_EVENTS = 4
+_DELTA_EVENT_CHARS = 120
+
+
+def _render_delta_line(delta: dict) -> Optional[str]:
+    """Build the tight 'Since your last turn: …' line from a `stateDelta` result, or None when there
+    is nothing to say. Returns None on a `fullRefresh` (the caller leaves the full context alone) and
+    on an empty delta (no ceremony field moved and no new player-visible beat). Closed-set + Vault-free
+    by construction — it only voices the ceremony fields the projection already exposes + beat content
+    the player witnessed. Fail-safe on every field."""
+    if not isinstance(delta, dict) or delta.get("fullRefresh"):
+        return None
+    parts: list[str] = []
+    # (1) Ceremony field diffs — what moved on the board (HOH crowned, noms set, veto used…).
+    changes = delta.get("changes")
+    if isinstance(changes, dict):
+        for field_name, move in list(changes.items())[:_DELTA_MAX_CHANGES]:
+            if not isinstance(move, dict):
+                continue
+            frm = move.get("from")
+            to = move.get("to")
+            parts.append(f"{field_name} {frm!r}→{to!r}" if frm is not None else f"{field_name} now {to!r}")
+    # The terminal transition + winner, when the delta carries it (closed-set, Vault-free).
+    if delta.get("finishedChanged"):
+        winner = delta.get("winner")
+        parts.append(f"the season FINISHED (winner: {winner})" if winner else "the season FINISHED")
+    # (2) New player-visible beats since last turn — a phrase each, bounded.
+    events = delta.get("events")
+    if isinstance(events, list):
+        for ev in events[:_DELTA_MAX_EVENTS]:
+            if not isinstance(ev, dict):
+                continue
+            content = str(ev.get("content") or ev.get("type") or "").strip()
+            if content:
+                parts.append(content[:_DELTA_EVENT_CHARS])
+    if not parts:
+        return None  # nothing committed since last turn → omit the line entirely
+    return "Since your last turn: " + "; ".join(parts) + "."
+
+
+async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
+    """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
+    turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
+    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction."""
+    if user is None or not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
+        return None  # no prior turn to diff against → leave today's full context untouched
+    try:
+        from src import orwell_engine
+        delta = await orwell_engine.state_delta(last_seen_beat_seq, user=user)
+        # Keep the last-seen token fresh from the delta's own beatSeq (it carries one like every read).
+        _refresh_beat_seq(user, delta if isinstance(delta, dict) else {})
+        return _render_delta_line(delta if isinstance(delta, dict) else {})
+    except Exception as e:
+        logger.debug("[orwell] state-delta line skipped for user=%s: %s", user, _exc_detail(e))
+        return None
+
+
 def _runway_sig(game_state: dict) -> str:
     """The `(week:phase)` signature of the beat the player is currently sitting in. A change in this
     signature means a ceremony resolved and we entered a new beat — the cue to arm a fresh runway."""
@@ -934,6 +1003,10 @@ async def apply_game_framing(
     if incognito and not game_build:
         return engine_available, game_active, feed_down
     _gkey = user or "__anon__"
+    # 0065 Part E2: the last-seen `beatSeq` from the PREVIOUS turn, captured BEFORE this turn's first
+    # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
+    # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
+    _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
 
     # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
@@ -1010,6 +1083,16 @@ async def apply_game_framing(
             _LAST_BEAT_SIG[user] = await _capture_beat_signature(user)
         except Exception as e:
             logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)
+        # 0065 Part E2: ADDITIVE — alongside the full authoritative GAME CONTEXT block (built into the
+        # moment prompt), append a tight "Since your last turn: …" diff so staleness is self-evident to
+        # the model. Built from the engine's `stateDelta` since the PREVIOUS turn's last-seen beatSeq;
+        # a fullRefresh / no last-seen / an empty delta ⇒ NO line (the full block stands). Fail-open.
+        try:
+            _delta_line = await _maybe_delta_line(user, _prev_seen_beat_seq)
+            if _delta_line:
+                gm_prompt = gm_prompt + "\n\n" + _delta_line
+        except Exception as e:
+            logger.warning("[orwell] state-delta framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
