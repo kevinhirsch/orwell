@@ -96,12 +96,14 @@ live in `orwell-tui.sh` (sourced; it changes no shell options); `orwell.sh` (the
 installer) and `orwell-install.sh` keep their own inline copies — they must each stay one
 standalone file.
 
-### Factory reset (back to OOBE)
+### Factory reset (back to OOBE, **keep the API-key / LLM config**)
 
-To scrub **all** game + user data and start over as if freshly installed — every sandbox (saves,
-souls, the hidden Vault layer) and the whole front-end store (accounts, settings, uploads) — run it
-either **on the Proxmox host** (it bridges into the LXC, like `orwell-update.sh`) or **inside the
-container as root**:
+Returns the box to a fresh first-run state — every game sandbox (saves, souls, the hidden Vault
+layer) **and** the whole front-end store (accounts, chats/sessions, memory, MCP configs, uploads,
+**every cast portrait / avatar / headshot**, presets, and every other user setting) — while
+**keeping your LLM setup**: the **API keys**, the **selected models**, and the **model defaults**.
+Run it either **on the Proxmox host** (it bridges into the LXC, like `orwell-update.sh`) or
+**inside the container as root**:
 
 ```bash
 # from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell");
@@ -119,9 +121,11 @@ bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # preview what would
 without a re-prompt.
 
 It stops the services, removes the data, and restarts — the next visit begins at first-run
-onboarding. **Config is preserved** (`data/.env`: ports, engine URL, LLM keys), so the box still
-boots and reaches your LLM. Unlike `orwell-update.sh` (which never touches `data/`), this is the
-one script that deliberately **does**.
+onboarding **with an LLM already configured**. This is **identical** to the in-app admin
+**Factory Reset (OOBE)** button and to `orwell reset-oobe`: the script delegates to
+`orwell-oobe-reset.sh` (the keep-the-LLM-config tier documented just below) so the two can never
+drift. A factory reset deliberately **keeps** your provider config — to also wipe the keys, remove
+`frontend/data/.app_key`, `.key`, `api_keys.json`, and `app.db` by hand.
 
 > **The engine save dir matters.** The engine writes per-user saves (and the hidden Vault layer)
 > to `ORWELL_DATA_DIR`, **defaulting to `./.orwell-data`** if unset. Fresh installs now pin
