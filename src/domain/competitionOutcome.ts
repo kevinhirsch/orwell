@@ -6,7 +6,8 @@ import type { TemperatureConstants } from "./temperatureConstants";
 /**
  * Competition resolution: outcomes are earned, never story convenience. A score
  * is the relevant stat (vs. the competition type) + a per-moment temperature roll
- * + a soul-sourced emotional modifier (NO Luck stat) + the declared intent. The
+ * + a soul-sourced emotional modifier (NO Luck stat) + the declared intent + a hidden
+ * REST deficit (ADR 0006: staying up late before a comp dulls performance). The
  * engine never special-cases the player. Deterministic under a fixed seed.
  * Weights are tunable config (the exact math is an open decision, spec §16.2).
  */
@@ -18,6 +19,13 @@ export interface Competitor {
   stats: { physical: number; mental: number; social: number };
   /** 0..1 from the dynamic soul; 0.5 = baseline. A rattled houseguest competes differently. */
   emotionalState?: number;
+  /**
+   * The hidden REST deficit (0..1) carried into this comp from staying up late the night before
+   * (ADR 0006). 0 = rested — the DEFAULT, which leaves the score BYTE-IDENTICAL to the pre-feature
+   * model (the seeded calibration spine is unmoved); 1 = ran clear into late-night. Bounded, never
+   * protective, and never a number the player sees — only the worse result.
+   */
+  restPenalty?: number;
 }
 
 /** The governing aptitude per competition type — exported so the 0042 library can pin to it. */
@@ -81,6 +89,9 @@ export function resolveCompetition(
     if (c.emotionalState !== undefined && !Number.isFinite(c.emotionalState)) {
       throw new Error("resolveCompetition: non-finite emotionalState for a competitor");
     }
+    if (c.restPenalty !== undefined && !Number.isFinite(c.restPenalty)) {
+      throw new Error("resolveCompetition: non-finite restPenalty for a competitor");
+    }
   }
 
   const stat = RELEVANT[type];
@@ -101,7 +112,11 @@ export function resolveCompetition(
       intent === "throw" ? -w.throwPenalty
       : intent === "play-safe" ? -w.playSafePenalty
       : 0;
-    scores[c.id] = base + temp + emo + intentAdj;
+    // The hidden, bounded sleep cost (ADR 0006). 0 by default ⇒ this term vanishes and the score is
+    // byte-identical to the pre-feature model; a tired houseguest competes worse, and the engine
+    // never protects them (a tired favorite can lose). No rng here — the deficit was decided already.
+    const rest = -(c.restPenalty ?? 0) * w.sleepPenalty;
+    scores[c.id] = base + temp + emo + intentAdj + rest;
   }
 
   let winner = competitors[0]!.id;

@@ -89,9 +89,11 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
+  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1448,6 +1450,7 @@ export class GameSessionAdapter implements GameSession {
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token; Vault-free
       week: this.week,
       phase: this.phase,
+      ...(this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay } : {}), // ADR 0006: the shared, public day-phase
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
@@ -2716,6 +2719,17 @@ export class GameSessionAdapter implements GameSession {
 
   // --- Live weekly loop (0011) ---------------------------------------------------
 
+  /**
+   * Whether the in-game time-of-day clock + sleep economy (ADR 0006) is engaged. OPT-IN, default OFF
+   * — exactly like the wall-clock watcher (`ORWELL_WATCHER_TICK_MS`): when off, the clock never
+   * advances, `timeOfDay` stays undefined, `restOf` returns 0, and every seeded outcome (the juryReach
+   * calibration spine, the UAT) is byte-identical to the pre-feature model. The deploy turns it on.
+   */
+  private get timeOfDayEnabled(): boolean {
+    const v = process.env.ORWELL_TIME_OF_DAY;
+    return v === "1" || v === "true" || v === "on";
+  }
+
   /** Build the Vault-free season context the pure loop reads (stats + live relationships + mood). */
   private ctx(): SeasonCtx {
     return {
@@ -2724,6 +2738,14 @@ export class GameSessionAdapter implements GameSession {
       rel: this.rel,
       // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
       emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
+      // The hidden REST deficit (ADR 0006): the player's from how late THEY stayed up last night, an
+      // NPC's from their character-driven bedtime habit (the night owls pay). Feeds the comp fold only;
+      // never crosses the wall. DORMANT unless the clock is actually running (opt-in) ⇒ returns 0, so
+      // the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
+      restOf: (id) => {
+        if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
+        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.statsOf(id));
+      },
       // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
       // emergent bloc term. Derived per read; never stored (decision 0002).
       loyaltyOf: (id) => {
@@ -2993,6 +3015,10 @@ export class GameSessionAdapter implements GameSession {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
+        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per advance, cycling toward
+        // late-night and wrapping to a new morning (banking a late night the player never ended). The
+        // diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
+        if (this.timeOfDayEnabled) advanceClock(this.live!);
         this.commit(ev);
       }
       // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
@@ -3040,6 +3066,24 @@ export class GameSessionAdapter implements GameSession {
       this.commit(ev);
       return this.advanceView(ev);
     }));
+  }
+
+  /**
+   * The player's bedtime lever (ADR 0006 §Principle 6): the player CHOOSES to turn in for the night.
+   * Ends their night where it stands (an early night ⇒ rested for tomorrow; outlasting the house into
+   * late-night ⇒ running on empty) and rolls the house to the next morning. Never auto-called — only
+   * the player's own action fires it. A no-op when the clock isn't running, the game is over, or the
+   * player has left. Durable (0030): the new morning + banked rest survive a reload.
+   */
+  turnIn(): AdvanceView {
+    if (!this.house || !this.live) return this.advanceView(null);
+    if (!this.timeOfDayEnabled) return this.advanceView(null); // dormant unless the clock is running
+    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
+    return this.inOneCommit(() => {
+      playerTurnIn(this.live!, PLAYER);
+      this.persist();
+      return this.advanceView(null);
+    });
   }
 
   /**
@@ -3962,6 +4006,7 @@ export class GameSessionAdapter implements GameSession {
       whereabouts: this.whereabouts(),
       week: this.week,
       phase: this.phase,
+      ...(this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay } : {}), // ADR 0006: the shared, public day-phase
       moment,
       player: {
         id: p.id,
@@ -3971,6 +4016,9 @@ export class GameSessionAdapter implements GameSession {
         archetype: p.persona?.archetype ?? p.character.archetype,
         strategyStyle: p.persona?.strategyStyle ?? p.character.strategyStyle,
         status,
+        // ADR 0006 §Principle 5: the player's OWN qualitative tiredness (their body is their knowledge) —
+        // a cue, never a number, and never any NPC's sleep state. Present only once the clock is running.
+        ...(this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? DAY_START) } : {}),
         // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
         // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
         castingCard: {

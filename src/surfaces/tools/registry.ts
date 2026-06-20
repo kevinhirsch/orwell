@@ -47,6 +47,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "submitDecision", channel: "player", readsVault: false, description: "Resolve the player's pending binding decision — whatever kind the engine is blocked on; the pending decision itself names its kind and legal options — and continue the loop. (For a confirmed self-eviction (0061), submit { kind: 'self-evict', confirmed: true } — ONLY after the player has explicitly confirmed the raised confirmation.)" },
   { name: "requestSelfEviction", channel: "player", readsVault: false, description: "Step 1 of a player self-eviction (0061): the player expressed an OOC intent to LEAVE/quit. Raise the confirmation (names the irreversible stakes) and change NO state — the house never hears it, and nothing evicts until the player explicitly confirms via submitDecision({ kind:'self-evict', confirmed:true }). FE-driven; never call this off an in-character throwaway line." },
   { name: "cancelSelfEviction", channel: "player", readsVault: false, description: "Cancel a raised self-eviction confirmation (0061): the player decided to stay. Clears the confirmation; they remain ACTIVE and in the house, unchanged." },
+  { name: "turnIn", channel: "player", readsVault: false, description: "The player's bedtime lever (ADR 0006): the player CHOOSES to turn in for the night. Ends their night where it stands (an early night ⇒ rested for tomorrow's comp; outlasting the house into late-night ⇒ running on empty) and rolls the house to the next morning. The player is never auto-slept — only this call retires them. FE-driven; a no-op when the clock isn't running." },
   { name: "makeDeal", channel: "player", readsVault: false, description: "Make a deal with a houseguest (safety / vote / final-two / target-other). Tracked as a first-class promise; the engine reconciles it against later binding actions and a broken promise hurts." },
   { name: "recordImageBeat", channel: "player", readsVault: false, description: "Record that an in-character image was shown to the player (0051) — a player-witnessed image-shown event so it has memory ('recorded or it didn't happen'). Returns its id." },
   // FE-driven authoring/pre-warm seams (0058/0065) — NOT model levers (the FE producer-LLM drives them).
@@ -92,6 +93,10 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // lever. `requestSelfEviction` IS advertised (below): on a clear OOC intent the model raises the
   // confirmation — which changes NO state — and the player's explicit confirm (the card) is what binds.
   "cancelSelfEviction",
+  // ADR 0006: `turnIn` is the FE-driven bedtime lever (the "head to bed" affordance that surfaces in
+  // the late-night edge cases), NOT an always-on base-manifest model lever — so it stays OUT of the
+  // base prompt's lever manifest (the manifest↔registry drift test stays green), like cancelSelfEviction.
+  "turnIn",
   // PREMIERE meet-everyone (#380): both are PREMIERE-only levers fully documented in the `premiere`
   // moment fragment (the meet-everyone flow + markHouseguestMet are spelled out there with their
   // who's-left list woven in), NOT always-on base-manifest levers — so they ride the moment, like
