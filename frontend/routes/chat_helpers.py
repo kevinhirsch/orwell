@@ -116,6 +116,18 @@ PRE_GAME_PROMPT = (
     "You may help with anything unrelated to the game."
 )
 
+# Audit 2026-06-20 (live walkthrough): the casting prompt finalizes only "when the status shows
+# ready AND the photo is handled", but the model is never told the headshot is already on file —
+# so it loops asking for a cast photo the player ALREADY uploaded and never calls createCharacter,
+# stranding them in an endless interview. When the intake/avatar exists, tell the model the photo
+# is handled so the only remaining gate is the engine's casting-ready status.
+CASTING_HEADSHOT_ON_FILE_NOTE = (
+    "PRODUCTION NOTE (not for the player): the player's cast headshot is ALREADY on file — the photo "
+    "is handled. Do NOT ask them for a headshot again or wait on one. With the photo done, the moment "
+    "the casting status shows it is ready, call createCharacter to finalize and start the season; do "
+    "not keep interviewing once everything required is on file and the player is ready to go."
+)
+
 # Used ONLY when the game is confirmed started but the per-moment prompt fetch hiccups: the game is
 # real, so we must stay in character and never claim the feeds are down — but we lack the precise
 # moment context, so we forbid inventing specific outcomes (the Vault Wall / anti-fabrication line).
@@ -801,6 +813,17 @@ async def apply_game_framing(
             except Exception as e:
                 logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
                 pre_prompt = PRE_GAME_PROMPT
+            # A/C fix (2026-06-20): once the cast headshot is on file, tell the model the photo is
+            # handled so it stops re-asking for it and can finalize. Fail-open — never block a turn.
+            try:
+                from src import orwell_portraits
+                _intake = orwell_portraits.intake_status(user)
+                _has_photo = bool(_intake.get("present") or _intake.get("finalized")) \
+                    or bool(orwell_portraits.user_avatar_path(user))
+                if _has_photo:
+                    pre_prompt = pre_prompt + "\n\n" + CASTING_HEADSHOT_ON_FILE_NOTE
+            except Exception as e:
+                logger.warning("[orwell] casting headshot-status check skipped for user=%s: %s", _gkey, e)
             # The casting interview marks the session too: the premiere that follows
             # createCharacter in THIS session is the premiere, not a re-entry (P2).
             if session_id is not None:
