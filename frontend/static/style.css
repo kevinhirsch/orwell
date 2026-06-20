@@ -929,7 +929,15 @@ body.bg-pattern-sparkles {
                   inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
     }
     .minimized-dock-chip svg { opacity: 0.7; flex-shrink: 0; }
-    .minimized-dock-label { white-space: nowrap; }
+    /* The label takes the row's remaining width and truncates with an ellipsis so a
+       long window title (e.g. "📼 The Season, Watched Back") never overflows the
+       sidebar slot or shoves the close × off the chip. min-width:0 lets a flex item
+       shrink below its content size; the icon (flex-shrink:0) and × (flex-shrink:0
+       below) keep their full size while the label gives way. */
+    .minimized-dock-label {
+      flex: 1 1 auto; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     /* Mobile: chips are icon-only round pills. Tap to restore, drag toward
        the trash zone at top-center to close. touch-action:none lets the
@@ -1110,7 +1118,7 @@ body.bg-pattern-sparkles {
       display: inline-flex; align-items: center; justify-content: center;
       width: 16px; height: 16px; border-radius: 50%;
       font-size: 14px; line-height: 1; opacity: 0.4;
-      margin-left: 3px;
+      margin-left: 3px; flex-shrink: 0;
     }
     .minimized-dock-x:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
     @keyframes dock-chip-in {
@@ -1853,11 +1861,13 @@ body.bg-pattern-sparkles {
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
       display: flex; flex-direction: column; }
-    /* canonical stacking regardless of which gadget mounted first (drag-reorder —
-       L13 — overrides these inline). 0054 Phase 2 docked windows slot in after the
-       always-on HUD gadgets; the rail body scrolls (overflow-y:auto) for tall ones. */
+    /* Canonical stacking fallback — these MIRROR the gadget registry in
+       orwellGadgetRail.js (the single source of truth, which also applies these as
+       inline `order`; drag-reorder — L13 — overrides per-user). 0054 Phase 2 docked
+       windows slot in after the always-on HUD gadgets; the rail body scrolls
+       (overflow-y:auto) for tall ones. Keep these in sync with REGISTRY. */
     .gadget-rail-body > #orwell-status { order: 1; }
-    .gadget-rail-body > #orwell-social { order: 2; }
+    .gadget-rail-body > #orwell-deals { order: 2; }     /* 0039: your deals */
     .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
     .gadget-rail-body > #orwell-presence { order: 4; }
     .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
@@ -2245,8 +2255,12 @@ body.bg-pattern-sparkles {
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
 
-    /* L36 — the one-time, dismissible composer hint surfacing the OOC convention. */
-    .orwell-ooc-hint {
+    /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
+       width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
+       inset) and shares its visual language — fully theme-token driven (derives from
+       --fg) so the frosted house themes stay readable. SHIPS WITH NO ACTIVE TIPS; the
+       class is ready for any future composer hint via OrwellChatHint.register/show. */
+    .orwell-chat-hint {
       display: flex;
       align-items: center;
       gap: 10px;
@@ -2260,15 +2274,15 @@ body.bg-pattern-sparkles {
       line-height: 1.4;
       animation: msg-enter 0.3s ease-out both;
     }
-    .orwell-ooc-hint-text { flex: 1 1 auto; }
-    .orwell-ooc-hint code {
+    .orwell-chat-hint-text { flex: 1 1 auto; }
+    .orwell-chat-hint code {
       font-size: 0.92em;
       padding: 0 4px;
       border-radius: 4px;
       background: color-mix(in srgb, var(--fg) 10%, transparent);
       color: var(--fg);
     }
-    .orwell-ooc-hint-dismiss {
+    .orwell-chat-hint-dismiss {
       flex: 0 0 auto;
       padding: 3px 10px;
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
@@ -2278,11 +2292,11 @@ body.bg-pattern-sparkles {
       font-size: 12px;
       cursor: pointer;
     }
-    .orwell-ooc-hint-dismiss:hover {
+    .orwell-chat-hint-dismiss:hover {
       background: color-mix(in srgb, var(--fg) 8%, transparent);
       color: var(--fg);
     }
-    .orwell-ooc-hint-out { opacity: 0; transition: opacity 0.2s ease; }
+    .orwell-chat-hint-out { opacity: 0; transition: opacity 0.2s ease; }
 
     .rag-sources {
       margin-top: 12px;

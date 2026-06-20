@@ -281,36 +281,31 @@ def main() -> int:
                   f"L36: an `ooc:` aside is .msg-ooc with the prefix stripped ({_rows[2:3]})")
             check(ooc_probe.get("badged") is True,
                   f"L36: the OOC bubble carries the 'to production' badge ({ooc_probe})")
-            # the one-time composer hint mounts in the game build and is dismissible + per-user keyed
-            ooc_hint = page.evaluate(
+            # The old one-time OOC composer TIP is GONE. The reusable chat-bar hint
+            # surface (orwellChatHint.js) is present but ships with ZERO active tips,
+            # so nothing renders by default — and register()+show() is the one-entry
+            # enable path. (The ((...))/ooc: INPUT detection above is unchanged.)
+            hint_state = page.evaluate(
                 """() => {
-                  const h = document.getElementById('orwell-ooc-hint');
+                  const old = document.getElementById('orwell-ooc-hint');
+                  const api = window.OrwellChatHint;
+                  const nothingUp = !document.getElementById('orwell-chat-hint');
+                  // an unknown key never renders (the empty registry)
+                  const unknownNoop = !!api && api.show('does-not-exist') === false;
                   return {
-                    present: !!h,
-                    hasDismiss: !!(h && h.querySelector('.orwell-ooc-hint-dismiss')),
-                    namesBoth: !!(h && /double parens/i.test(h.textContent)
-                                  && /ooc:/i.test(h.textContent)),
+                    oldTipGone: !old,
+                    apiPresent: !!(api && api.register && api.show && api.hide),
+                    nothingUp: nothingUp,
+                    unknownNoop: unknownNoop,
                   };
                 }"""
             )
-            check(ooc_hint.get("present") is True,
-                  f"L36: the OOC composer hint mounts in the game build ({ooc_hint})")
-            check(ooc_hint.get("hasDismiss") is True and ooc_hint.get("namesBoth") is True,
-                  f"L36: the hint is dismissible and names both conventions ({ooc_hint})")
-            # dismiss it -> persists under the per-user key -> stays gone on a remount attempt
-            ooc_dismissed = page.evaluate(
-                """() => {
-                  const h = document.getElementById('orwell-ooc-hint');
-                  if (h) h.querySelector('.orwell-ooc-hint-dismiss').click();
-                  const user = (document.body.dataset.user || '');
-                  const stored = localStorage.getItem('orwell-ooc-hint-dismissed:' + user);
-                  // a remount attempt must be a no-op now that it's dismissed
-                  window.dispatchEvent(new Event('orwell:gamechanged'));
-                  return { stored: stored, stillGone: !document.getElementById('orwell-ooc-hint') };
-                }"""
-            )
-            check(ooc_dismissed.get("stored") == "1",
-                  f"L36: dismissal persists under the per-user key ({ooc_dismissed})")
+            check(hint_state.get("oldTipGone") is True,
+                  f"the old OOC composer tip is removed ({hint_state})")
+            check(hint_state.get("apiPresent") is True,
+                  f"the shared chat-hint API is wired ({hint_state})")
+            check(hint_state.get("nothingUp") is True and hint_state.get("unknownNoop") is True,
+                  f"the chat-hint system ships with no active tips ({hint_state})")
 
             # C31/S5: the System Danger Zone only offers wipes for data the game build has.
             wipes = page.evaluate("""() => {
@@ -1405,6 +1400,30 @@ def main() -> int:
               localStorage.removeItem('orwell-gadget-order:' + u);
             }""")
 
+            # 0054 strip refactor: the COLLAPSED icon strip is derived from the gadget
+            # registry, filtered to the gadgets actually mounted-and-visible, in the rail's
+            # current order. Collapse the rail and assert the strip maps 1:1 (same ids, same
+            # order) to the active gadget set, and that each icon carries its gadget id so a
+            # click acts on THAT gadget (not a blanket expand).
+            strip11 = page.evaluate("""() => {
+              if (window._orwellStatusEnsure) window._orwellStatusEnsure();
+              const api = window.OrwellGadgetRail;
+              if (!api || !api.activeGadgets) return { ok: false, why: 'no-api' };
+              const rail = document.getElementById('gadget-rail');
+              const wasCollapsed = rail.getAttribute('data-collapsed') === 'true';
+              const toggle = document.getElementById('gadget-rail-toggle');
+              if (!wasCollapsed && toggle) toggle.click();   // enter the icon-strip mode
+              const active = api.activeGadgets();
+              const strip = api.stripGadgets();
+              const allReg = strip.every(id => api.registry.some(g => g.id === id));
+              if (!wasCollapsed && toggle) toggle.click();   // restore expanded
+              return { ok: true, active: active, strip: strip,
+                       match: active.join() === strip.join(), allReg: allReg };
+            }""")
+            check(strip11.get("ok") is True and strip11.get("match") is True
+                  and strip11.get("allReg") is True and len(strip11.get("strip") or []) >= 1,
+                  f"0054: collapsed strip maps 1:1 to active gadgets, in order ({strip11})")
+
             # G3 (sidebar coherence, ruling 2026-06-11): every VISIBLE sidebar button
             # measures the SAME computed padding as the New Chat / Search rows (the
             # .list-item standard), and no collapse chevron renders on a section with
@@ -1943,10 +1962,11 @@ def main() -> int:
                   "G17/F5: the confessional text itself is restored")
             g17.close()
 
-            # F4: the casting-seat prefill re-arms after a refresh (the marker used to
-            # one-shot at prefill time, stranding an empty composer forever). Pre-game is
-            # staged with routed fakes — the sanctioned G5-audit pattern, same as the G15
-            # decision route above: state says started:false, models says one is live.
+            # P1 OOBE: the houseguest IMAGE is the player's FIRST interaction. Pre-game with a model
+            # configured but NO cast photo secured, the chat is LOCKED (gate up, composer NOT
+            # prefilled — the old seat-line pre-prompt is gone) and the WELCOME MODAL greets the
+            # player. Securing a photo releases the gate. Pre-game is staged with routed fakes — the
+            # sanctioned G5-audit pattern: state started:false, models live, intake NOT finalized.
             f4 = new_page(browser)
             f4.route("**/api/orwell/state",
                      lambda r: r.fulfill(status=200, content_type="application/json",
@@ -1954,24 +1974,50 @@ def main() -> int:
             f4.route("**/api/models",
                      lambda r: r.fulfill(status=200, content_type="application/json",
                                          body='{"items": [{"models": ["m"], "offline": false}]}'))
+            # the gate's "is a photo secured?" probe — NOT finalized yet, so the chat must lock
+            _intake_finalized = {"v": False}
+            f4.route("**/api/orwell/portrait/intake",
+                     lambda r: r.fulfill(status=200, content_type="application/json",
+                                         body=('{"present": true, "mode": "reference", "finalized": '
+                                               + ("true" if _intake_finalized["v"] else "false")
+                                               + ', "candidates": 0}')))
             f4.goto(base + "/", wait_until="load", timeout=30000)
-            f4.wait_for_timeout(3000)  # route() probes + the fresh-session click + the prefill
+            f4.wait_for_timeout(3000)  # route() probes + the gate recompute + the welcome modal
+            # the composer is NOT prefilled — the pre-prompt is removed; the image step comes first
             f4_seat0 = f4.input_value("#message")
-            check(f4_seat0.startswith("I take my seat"),
-                  f"G17/F4 setup: pre-game boot prefills the casting-seat line ({f4_seat0!r})")
+            check(not f4_seat0.strip(),
+                  f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
+            # the welcome modal is its own modal (greets, points at the cast photo)
+            f4_welcome = f4.evaluate(
+                "() => { const c = document.querySelector('#orwell-onboarding .ob-card');"
+                "  return c ? c.textContent : ''; }")
+            check("cast photo" in (f4_welcome or "").lower(),
+                  f"P1: the welcome modal greets and points at the cast photo ({(f4_welcome or '')[:60]!r})")
+            # dismiss the welcome (its own modal) to reach the locked chat underneath
+            if f4.query_selector("#orwell-onboarding [data-ob-welcome-go]"):
+                f4.click("#orwell-onboarding [data-ob-welcome-go]")
+                f4.wait_for_timeout(400)
+            # HARD GATE: the chat input + send are LOCKED until a photo is secured, and the page
+            # says why ("Add your cast photo to begin").
+            check(f4.evaluate("!!document.getElementById('message').disabled") is True,
+                  "P1: the chat input is LOCKED pre-image (disabled)")
+            check(f4.evaluate("() => { const s = document.querySelector('.send-btn'); return !!(s && s.disabled); }") is True,
+                  "P1: the send affordance is LOCKED pre-image (disabled)")
+            check(f4.evaluate("!!document.getElementById('orwell-chat-gate-note')") is True,
+                  "P1: an inline note explains the cast-photo gate")
+            check(f4.evaluate("(document.getElementById('message').getAttribute('placeholder') || '')")
+                  == "Add your cast photo to begin",
+                  "P1: the composer placeholder states the gate reason")
+            # securing a photo releases the gate (intake now finalized + the avatarchanged signal)
+            _intake_finalized["v"] = True
+            f4.evaluate("window.dispatchEvent(new CustomEvent('orwell:avatarchanged'))")
+            f4.wait_for_timeout(600)  # the gate re-derives from the finalized intake
+            check(f4.evaluate("!document.getElementById('message').disabled") is True,
+                  "P1: securing a cast photo UNLOCKS the chat input")
+            check(f4.evaluate("!document.getElementById('orwell-chat-gate-note')") is True,
+                  "P1: the cast-photo gate note clears once a photo is secured")
             check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
-                  "G17/F4 setup: the seat marker is set (the F7 one-session fence)")
-            # The exact F4 trap: no draft left (composer emptied for real) AND the marker
-            # claiming "interview underway" — a refresh used to strand this forever.
-            f4.click("#message")
-            f4.keyboard.press("Control+a")
-            f4.keyboard.press("Delete")
-            f4.wait_for_timeout(300)  # the empty write lands (drops the F3 record)
-            f4.reload(wait_until="load")
-            f4.wait_for_timeout(3000)  # route() + the re-arm's settle delay
-            f4_seat1 = f4.input_value("#message")
-            check(f4_seat1.startswith("I take my seat"),
-                  f"G17/F4: with the marker set and no draft, the seat prefill RE-ARMS after reload ({f4_seat1!r})")
+                  "P1: the fresh-session fence is still set once per interview (F7)")
             f4.close()
 
             # S1+S2 / F1 (2026-06-11 settings-wiring audit): the Shortcuts

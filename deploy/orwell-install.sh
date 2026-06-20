@@ -28,11 +28,30 @@ for _pv in "ORWELL_PORT=${ORWELL_PORT}" "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT
     || { echo "ERROR: ${_pn}='${_pp}' is not a valid port (1-65535)." >&2; exit 1; }
 done
 
+# ── Presentation (inline — this installer is its own standalone file; it does not source the TUI
+# lib, mirroring orwell.sh). Colour auto-disables off a TTY (the install runs over `pct exec` with
+# no PTY, so the tee'd log stays plain ASCII) or when NO_COLOR / TERM=dumb. Pure echo; no input. ─
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  C_BOLD=$'\e[1m'; C_DIM=$'\e[2m'; C_GRN=$'\e[32m'; C_CYN=$'\e[36m'; C_OFF=$'\e[0m'
+else
+  C_BOLD=""; C_DIM=""; C_GRN=""; C_CYN=""; C_OFF=""
+fi
+banner() {
+  printf '%s\n' \
+"${C_CYN} _____ _____ _ _ _ _____ __    __    ${C_OFF}" \
+"${C_CYN}|     |  _  | | | |   __|  |  |  |   ${C_OFF}" \
+"${C_CYN}|  |  |    -| | | |   __|  |__|  |__ ${C_OFF}" \
+"${C_CYN}|_____|__|__|_____|_____|_____|_____|${C_OFF}" \
+"${C_BOLD}            O R W E L L${C_OFF}" \
+"   ${C_DIM}${1:-}${C_OFF}"
+  printf '\n'
+}
+
 # ── Failure observability ──────────────────────────────────────────────────────────────────────
 # Each phase declares itself via step(); the ERR trap reports WHICH step died, where the log is,
 # and that a plain re-run resumes. set -E makes the trap fire inside functions too.
 STEP="startup"
-step() { STEP="$1"; echo "==> $1"; }
+step() { STEP="$1"; echo "${C_CYN}▸${C_OFF} $1"; }
 on_err() {
   local rc=$? line=$1
   {
@@ -51,7 +70,9 @@ trap 'on_err $LINENO' ERR
 mkdir -p "$DATA_DIR"
 INSTALL_LOG="${DATA_DIR}/install.log"
 exec > >(tee -a "$INSTALL_LOG") 2>&1
-echo "── orwell install run: $(date -Is) (branch ${BRANCH}, UI port ${ORWELL_PORT}) ──"
+banner "in-container install"
+echo "${C_DIM}── run $(date -Is) · branch ${BRANCH} · UI port ${ORWELL_PORT} · log ${INSTALL_LOG}${C_OFF}"
+echo
 
 # ── Phases ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -348,7 +369,7 @@ verify_install() {
     done
     exit 1
   fi
-  echo "==> verified: both services active; engine + UI answering"
+  echo "${C_GRN}✓${C_OFF} verified: both services active; engine + UI answering"
 }
 
 main() {
@@ -370,7 +391,13 @@ main() {
   # message). hostname -I is the container's address; fall back if it's somehow empty.
   local ip
   ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  echo "==> orwell installed at ${APP_DIR} (data: ${DATA_DIR}). UI: http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  echo
+  echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
+  echo "  ${C_BOLD}${C_GRN}orwell is installed and running.${C_OFF}"
+  echo "  ${C_BOLD}play:${C_OFF}    http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  echo "  ${C_DIM}app:${C_OFF}     ${APP_DIR}   ${C_DIM}data:${C_OFF} ${DATA_DIR}"
+  echo "  ${C_DIM}manage:${C_OFF}  ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}   ${C_DIM}health:${C_OFF} orwell-panel"
+  echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
 }
 
 main "$@"

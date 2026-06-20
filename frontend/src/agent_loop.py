@@ -1439,6 +1439,24 @@ _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptiv
 # (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
 _ADVANCE_GRACE_TURNS = 2
 
+# P1 onboarding — the LIGHT-TOUCH guided FIRST WEEK. A brand-new player's premiere week should
+# move briskly through its first HOH → eviction so the loop "clicks" before the open-ended middle
+# game; the producers/narrator nudge a little more actively. This is PACING ONLY (no scripted rails,
+# no engine-authored content — the owner's ruling): in week 1 the staleness grace before the lull
+# advance-nudge is shorter, so a lull on a settled beat seizes the moment sooner. Engaging play
+# still never nudges (the lull gate is unchanged); only the lull→advance latency shrinks. Tunable.
+_FIRST_WEEK_GRACE_TURNS = 1
+# Per-game "is the live season in its FIRST WEEK?" hint, refreshed from the state read the nudge
+# block already performs (zero extra fetches — it lags by at most one turn, immaterial for pacing).
+# Absent ⇒ the standard grace, so the brisker cadence only ever applies once week 1 is confirmed.
+_FIRST_WEEK_HINT: Dict[str, bool] = {}
+
+
+def _effective_advance_grace(owner) -> int:
+    """The staleness grace before the lull advance-nudge — shorter in the guided first week (P1),
+    the standard grace otherwise. Pure pacing; never changes WHAT gets nudged, only the latency."""
+    return _FIRST_WEEK_GRACE_TURNS if _FIRST_WEEK_HINT.get(owner or "") else _ADVANCE_GRACE_TURNS
+
 # L39(b) — the SAFETY NET for a model that ignores every escalating nudge. The graduated text nudges
 # above rely entirely on the model eventually calling advanceGame; the 2026-06-19 God-Mode transcript
 # showed a model that NEVER did ("not a single beat advanced", then hit step limits speed-running). So
@@ -3060,7 +3078,9 @@ async def stream_agent_loop(
                 # a just-started beat are never shoved (owner ruling 2026-06-18).
                 if owner:
                     _TURNS_SINCE_PROGRESS[owner] = 0 if _progressed else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1
-                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _ADVANCE_GRACE_TURNS
+                # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
+                # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
+                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _effective_advance_grace(owner)
                 _is_lull = _player_turn_is_lull(messages)
                 # The ORDER of the turn's beat-tools decides whether it left an uncommitted/undelivered
                 # OUTCOME the model may have narrated ahead of the engine (#1 + 1b). The LAST beat-tool:
@@ -3128,6 +3148,12 @@ async def stream_agent_loop(
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
                         _moment = (_gs or {}).get("moment")
+                        # P1: refresh the first-week pacing hint from the same read (no extra fetch).
+                        # The guided premiere window = week 1 of a live season, NOT post-season; this
+                        # feeds _effective_advance_grace on the NEXT turn (a one-turn lag is fine).
+                        if owner is not None:
+                            _wk = (_gs or {}).get("week")
+                            _FIRST_WEEK_HINT[owner] = (_wk == 1 and _moment != "post-season")
                         _house = [{"id": h.get("id"), "name": h.get("name")}
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")

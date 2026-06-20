@@ -682,7 +682,19 @@ export function renderStoryFacts(
   return lines.join("\n");
 }
 
-/** Compose the full system prompt to inject for a moment: base persona + beat fragment + Vault-free context. */
-export function buildSystemPrompt(moment: string, view: GameStateView, storyFacts?: string): string {
-  return [BASE_GAME_MASTER_PROMPT, momentFragment(moment), renderGameContext(view), ...(storyFacts ? [storyFacts] : [])].join("\n\n");
+/**
+ * Compose the full system prompt to inject for a moment: base persona + beat fragment + Vault-free
+ * context. `worldContext` (feature 0062) is the OPTIONAL "the world you all moved in with" block — the
+ * frozen, shared real-world flavor (built Vault-free by the engine adapter from the persisted snapshot,
+ * §5); absent ⇒ the prompt is unchanged (the §8 fail-soft path / a pre-game moment). It is FLAVOR only,
+ * never game truth — exactly as the C32 "THE REAL WORLD." clause in the base prompt already states.
+ */
+export function buildSystemPrompt(moment: string, view: GameStateView, storyFacts?: string, worldContext?: string): string {
+  return [
+    BASE_GAME_MASTER_PROMPT,
+    momentFragment(moment),
+    renderGameContext(view),
+    ...(worldContext ? [worldContext] : []),
+    ...(storyFacts ? [storyFacts] : []),
+  ].join("\n\n");
 }

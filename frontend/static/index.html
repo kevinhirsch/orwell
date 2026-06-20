@@ -1266,11 +1266,10 @@
       <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
     </div>
     <div class="gadget-rail-body" id="gadget-rail-body"></div>
-    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-hidden="true">
-      <button class="grail-ico" type="button" data-grail-expand title="House status" aria-label="House status">📋</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Wants a word" aria-label="Wants a word">🚪</button>
-      <button class="grail-ico" type="button" data-grail-expand title="Where you are" aria-label="Where you are">🧭</button>
-    </div>
+    <!-- The collapsed icon strip is DERIVED from the gadget registry in orwellGadgetRail.js —
+         one icon per mounted-and-visible gadget, in the rail's current order, each acting on
+         THAT gadget. Built dynamically so an icon can never mismatch or outlive its gadget. -->
+    <div class="gadget-rail-strip" id="gadget-rail-strip" aria-label="Control-room gadgets"></div>
   </aside>
   <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden>📋</button>
   <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
@@ -1833,6 +1832,7 @@
                 <div id="settings-account-username" style="font-size:var(--fs-sm);font-weight:600;"></div>
                 <div id="settings-account-role" style="font-size:var(--fs-xs);opacity:0.5;"></div>
               </div>
+              <div id="settings-app-version" title="Orwell build version" style="font-size:var(--fs-xs);opacity:0.45;font-family:inherit;white-space:nowrap;align-self:flex-start;" aria-label="App version"></div>
               <button id="settings-logout-btn" style="background:color-mix(in srgb, var(--color-error) 10%, transparent);border:1px solid var(--color-error);border-radius:6px;padding:6px 12px;color:var(--color-error);font-family:inherit;font-size:var(--fs-sm);font-weight:500;cursor:pointer;transition:opacity 0.15s,background 0.15s;display:inline-flex;align-items:center;gap:6px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Logout
@@ -2299,7 +2299,8 @@
 <script type="module" src="/static/js/a11y.js"></script>
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
-<script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: char creation before chat -->
+<script src="/static/js/orwellChatGate.js"></script>  <!-- P1 OOBE: the "secure your cast photo first" HARD GATE — locks chat send pre-game until an image is secured (fails open) -->
+<script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: one guided flow — model gate → welcome modal → image step → producers reach out first -->
 <script src="/static/js/orwellSlots.js"></script>  <!-- BB anchor slots: floaters position by slot, never coordinate (E91/S11) -->
 <script type="module" src="/static/js/orwellWindow.js"></script>  <!-- THE window kit (Lane F): one window class + .ow-* family every surface composes -->
 <script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
@@ -2321,7 +2322,8 @@
 <script type="module" src="/static/js/orwellEngineStatus.js"></script>  <!-- BB engine-down banner: visible OOC error reporting -->
 <script type="module" src="/static/js/orwellDecision.js"></script>  <!-- BB decisions: confirm-on-binding guardrail (Vault-free, C20) -->
 <script src="/static/js/orwellComposerDraft.js"></script>  <!-- BB composer draft: {text, drMode, pendingApproachId} survives refresh; DR mode restores BEFORE text (G17, audit F3/F5/F7) -->
-<script type="module" src="/static/js/orwellOocAside.js"></script>  <!-- L36: OOC aside channel — `((...))`/`ooc:` detection (player-input bubble style) + the one-time dismissible composer hint -->
+<script type="module" src="/static/js/orwellChatHint.js"></script>  <!-- The one reusable chat-bar hint surface (OrwellChatHint.register/show); ships with NO active tips -->
+<script type="module" src="/static/js/orwellOocAside.js"></script>  <!-- L36: OOC aside channel — `((...))`/`ooc:` detection drives the player-input bubble style (the old composer tip is gone; hints live in orwellChatHint.js) -->
 <script src="/static/js/orwellPremiereTutorial.js"></script>  <!-- L31 (FE): the premiere is a light, one-time, dismissible tutorial card (week 1) — sets the weekly-rhythm expectation, never replaces the chat -->
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
 </body>

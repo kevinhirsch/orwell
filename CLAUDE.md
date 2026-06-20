@@ -40,7 +40,8 @@ the game-build provider gating (OpenRouter image models via `/chat/completions`)
 item** — the remaining known deferrals are listed under [Current status](#current-status); the
 governing design rulings are `docs/audits/2026-06-09-product-audit.md` ("Remediation
 principles"), the **product-owner rulings #1–#21** in `docs/audits/2026-06-10-full-product-audit.md`,
-and ADR `docs/decisions/0003`.
+and ADRs `docs/decisions/0003` (the conversation is the game) and `docs/decisions/0005` (split
+authority by openness — the engine records the open set of social play, never normalizes it).
 
 ## Source of truth — read these first
 
@@ -187,6 +188,18 @@ constrained extraction call (`{withIds, kind, content}`, model-proposed directio
 `recordInteraction` itself, GUARANTEEING the social play moves the hidden weights. Model-driven
 recording always takes precedence. When debugging "the game won't advance" or "social play has no
 consequence," look here, not only at the engine.
+
+**Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
+*openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
+the Vault) is engine-dictated — *no dynamism to lose* — while the **open set** (the meaning/texture
+of social play) is recorded faithfully and **never normalized** into a closed bucket in a way that
+changes what can be narrated or played next. Concretely (PR #355): `recordInteraction` / the 0023
+`ConsequenceEngine` take an optional, Vault-free `consequence` descriptor — the model proposes the
+*shape* (which edge moves, which direction, relative `emphasis`); the engine keeps the bounded,
+seeded *magnitude* (no raw number crosses; `kind` is the floor, so no descriptor ⇒ byte-identical
+fold). `tests/unit/expressiveNonCollapse.test.ts` + `frontend/tests/test_expressive_non_collapse.py`
+are the permanent gate, and the FE desync guard may fire only on closed-set board claims, never on
+creative prose.
 
 ## Characters, souls & per-moment temperature
 

@@ -110,6 +110,16 @@ export interface SessionCore {
    * restore ONLY for a truly pre-0063 cast; a 0063 cast with an empty map simply had everyone out).
    */
   privateOrientations?: Record<EntityId, import("./diversityConstants").Orientation>;
+  /**
+   * The move-in zeitgeist snapshot (feature 0062): the ONE frozen, shared real-world flavor the whole
+   * cast moved in with. Captured ONCE at season creation, FROZEN byte-stable, and persisted here so it
+   * survives a restart (0030) and is recalled — never re-searched — all season (§9). OUTWARD-SAFE by
+   * construction: it is public, shared real-world flavor (a THIRD state category — neither Vault-secret
+   * nor game truth, §6), so carrying it on this engine-only core leaks nothing and it MAY cross to the
+   * player- and off-screen-facing prompts. Absent on pre-0062 saves AND when no snapshot was captured
+   * (the §8 fail-soft skip) — an absent snapshot round-trips as absent and changes no outcome.
+   */
+  worldSnapshot?: import("./zeitgeist").WorldSnapshot;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
@@ -229,6 +239,12 @@ export function toGameState(snap: SessionSnapshot): GameState {
     characters,
     suspicions,
     vaultIds: (snap.vault ?? []).map((r) => r.id),
+    // 0062 — the frozen zeitgeist snapshot rides into the 0007 projection so the non-degradation
+    // checkpoint (0031) byte-stable-guards it (it must never regenerate or drift). Conditional spread
+    // keeps an absent snapshot absent (a pre-0062 / no-provider save never trips a spurious failure).
+    ...(snap.worldSnapshot !== undefined
+      ? { worldSnapshot: snap.worldSnapshot as unknown as Record<string, unknown> }
+      : {}),
   };
   _gameStateCache.set(snap, gs);
   return gs;

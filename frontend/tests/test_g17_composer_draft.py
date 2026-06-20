@@ -145,31 +145,31 @@ def test_restore_hands_the_id_back_to_social():
     assert "window._orwellPendingApproach.restore" in SRC
 
 
-# ── 4. F4: the casting-seat marker no longer one-shots the prefill ─────────────
+# ── 4. P1 onboarding: the casting-seat PRE-PROMPT is GONE (image is the first step) ─────
+# The redesigned OOBE makes the houseguest image the player's FIRST interaction; the old
+# "I take my seat for the casting interview." composer pre-prompt is removed entirely, and the
+# producers reach out first once the photo is secured. What remains is the F7 fresh-session fence.
 
-def test_seated_path_rearms_instead_of_dead_ending():
-    seated = OB[OB.index('sessionStorage.getItem(SEAT_TAKEN_KEY)'):OB.index("sessionStorage.setItem(SEAT_TAKEN_KEY")]
-    assert "rearmSeatPrefill()" in seated, \
-        "F4: the seated branch must re-arm the prefill, not return into a dead composer"
+def test_casting_seat_preprompt_is_removed():
+    # No composer prefill / SEAT_LINE survives — the image step + the producers' reach-out replace it.
+    assert "I take my seat for the casting interview." not in OB
+    assert "SEAT_LINE" not in OB
+    assert "function takeASeat" not in OB and "rearmSeatPrefill" not in OB
 
 
-def test_rearm_is_prefill_only_never_a_second_session():
-    body = OB[OB.index("function rearmSeatPrefill"):]
+def test_fresh_interview_session_never_prefills_the_composer():
+    body = OB[OB.index("function openFreshInterviewSession"):]
     body = body[:body.index("\n  }") + 4]
-    assert "sidebar-new-chat-btn" not in body and "rail-new-session" not in body, \
-        "F4: the re-arm must never repeat the fresh-session click (the F7 fence)"
-    assert "SEAT_LINE" in body
-    # Guards: a restored F3 draft / live typing wins; a spoken interview wins.
-    assert "box.value.trim()" in body
-    assert ".msg-user" in body
+    # It opens a fresh session (F7) but NEVER writes the composer value (no pre-prompt).
+    assert "sidebar-new-chat-btn" in body or "rail-new-session" in body
+    assert "box.value =" not in body and "SEAT_LINE" not in body
 
 
 def test_the_f7_fence_itself_is_intact():
-    # The marker still sets once per interview (fresh-session spam stays impossible),
-    # and the prefill is one shared constant.
+    # The marker still sets once per interview, so fresh-session spam stays impossible — but it
+    # now fences only the session open (the prefill is gone).
     assert OB.count('sessionStorage.setItem(SEAT_TAKEN_KEY, "1")') == 1
-    assert OB.count('"I take my seat for the casting interview."') == 1  # the SEAT_LINE const
-    assert OB.count("SEAT_LINE;") == 2  # takeASeat + rearmSeatPrefill share it
+    assert OB.count('"I take my seat for the casting interview."') == 0  # the pre-prompt is removed
 
 
 # ── 5. shipped + the behavioral gate moved with the feature ────────────────────
@@ -183,4 +183,7 @@ def test_browser_smoke_drives_the_draft_for_real():
     smoke = _read_root("scripts", "browser_smoke.py")
     assert "G17/F3: the typed draft is restored into the composer after reload" in smoke
     assert "G17/F5: DR mode was active BEFORE the restored text landed" in smoke
-    assert "G17/F4: with the marker set and no draft, the seat prefill RE-ARMS" in smoke
+    # P1 onboarding: the old F4 seat-prefill block was replaced by the image-gate flow — the smoke
+    # now drives the cast-photo HARD GATE (locked pre-image, unlocked on secure) for real.
+    assert "P1: the chat input is LOCKED pre-image (disabled)" in smoke
+    assert "P1: securing a cast photo UNLOCKS the chat input" in smoke

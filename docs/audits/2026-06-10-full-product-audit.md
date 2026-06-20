@@ -1767,7 +1767,18 @@ wins and the drift is called out under *Ledger corrections* below.
 - **#344** — live-debug verification pass: L1–L20 confirmed fixed in code (running instance was a stale deploy); logged L43/L44/L45.
 - **#342 / #341** — CI: jury path-filter + UAT fan-out (split matrix, one file per runner).
 - **#340** — **0061 player self-eviction — BUILT, BDD-gated** (forfeit-on-quit, skippable parting message, any-beat-resolved; NPC self-eviction out of scope).
-- **#339** — **0062 move-in zeitgeist snapshot — SPEC**.
+- **0062 move-in zeitgeist snapshot — BUILT, BDD-gated** (2026-06-20). `src/engine/zeitgeist.ts` captures
+  ONE frozen, seeded `WorldSnapshot` at season creation (same seed hinge as the cast), persists it byte-
+  stable on `SessionCore`/`GameState` (recalled never re-searched; 0007 superset/byte-compare guards the
+  freeze), and renders the Vault-free "world you all moved in with" block into BOTH the player moment
+  prompt AND the off-screen/`social` prompt (the C32-beyond reach), scaling the out-of-the-loop drift by
+  the live week. FLAVOR ONLY — a seeded game advanced WITH vs. WITHOUT the snapshot is byte-identical in
+  every comp result, vote, nomination, and relationship/soul fold (the §6/§10 headline guard, proven
+  structurally). Owner recs taken: one-time 7-day lag offset (§11 #1), capture-once-persist + deterministic
+  `model-framed` fallback for tests/replays (§11 #2/#9), small-and-bounded slices (§11 #3), engine-side
+  outward `GameState` field (§11 #4). FE `web_search` capture lands via the `recordWorldSnapshot` write-back
+  seam (FE provider wiring is its own lane, like 0051). `0062-*.feature` in `cucumber.cjs`; unit `tests/unit/zeitgeist.test.ts`.
+- **#339** — **0062 move-in zeitgeist snapshot — SPEC** (superseded by the BUILT entry above).
 - **#338** — NPC movement weighting, RNG- & calibration-isolated (juryReach green).
 - **#337** — calibration instrumentation + gradient gate (no weight changes).
 - **#336** — **0060 story-thread trigger/resolution scheduler — BUILT** (`src/engine/threadConstants.ts`; `0060-*.feature` in `cucumber.cjs`).
@@ -1801,7 +1812,9 @@ and finisher agents drove each to green — fast-gate only, **no heavy sims loca
 
 ### Still genuinely open (forward backlog, after this session)
 1. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
-2. **0062** — move-in zeitgeist snapshot (📝 spec only; the one remaining net-new feature).
+2. ✅ **0062** — move-in zeitgeist snapshot **— BUILT, BDD-gated** (2026-06-20; see the ledger entry above).
+   *Forward FE follow-on (its own lane, not blocking):* wire the FE `web_search` capture into
+   `recordWorldSnapshot` at season creation (the engine seam is built; the FE owns the provider, like 0051).
 3. **0022** — MVP-2 rich game UI (the long-standing deliberate deferral; the chat *is* the UI per ADR 0003).
 4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
 5. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
@@ -1830,3 +1843,36 @@ single-container deploy — not blocking launch, filed here so it's a planned wa
   Postgres buys what SQLite does not: **multi-instance shared state, a managed cloud database, heavier
   concurrent write throughput, and replication / point-in-time recovery** — i.e. it matters only when
   Orwell scales past a single host. No gameplay impact.
+
+## 2026-06-20 — ADR 0005: split authority by openness (the dynamism guard) — MERGED
+
+**#355 — ADR 0005 + the generative-consequence path + the expressive-non-collapse gate.** A new
+design principle and its first implementation, shipped end to end. Captures the constraint that
+keeps the growing LLM↔engine **sync spine** from flattening creative play: **authority is split by
+*openness*, not by *layer*.** The **closed set** (outcomes, eligibility, state truth, persistence,
+the Vault) is engine-dictated and may be as strict as it likes — there is *no dynamism to lose*.
+The **open set** (the meaning/texture/consequence of social play) is recorded faithfully and never
+*normalized* — the engine may not collapse an open-ended utterance into a closed bucket in a way
+that changes what can be narrated or played next.
+
+- **Built, not just stated** — `recordInteraction` / the 0023 `ConsequenceEngine` now take an
+  optional, Vault-free `consequence` descriptor (`{ toward, direction, emphasis? }` + `rationale`):
+  the model proposes the *shape*; the engine still owns the bounded, seeded *magnitude*
+  (`emphasis`→a clamped 0.6/1.0/1.4 multiplier — no raw number crosses; mandate #3 holds). `kind`
+  stays the floor (no descriptor ⇒ byte-identical fold). The MCP boundary shape-guards a malformed
+  descriptor (clean 400, E31/D10/R6 pattern); the FE schema/client forward it and the 0055
+  `_auto_record_scene` can propose one.
+- **A new permanent regression gate** joins richness + the Vault sentinel:
+  `tests/unit/expressiveNonCollapse.test.ts` (lossless record / consequenced-not-dropped /
+  recalled-in-full / distinguishable-downstream) + `frontend/tests/test_expressive_non_collapse.py`
+  (no rail-correction of creative prose). The desync guard's WINNER/NEW-HOH branches were
+  phase-scoped so a creative claim can't trip a board-outcome rail-correction.
+- Documented in **[ADR 0005](../decisions/0005-split-authority-by-openness.md)** (now *Accepted —
+  BUILT*) and folded into the `docs/decisions/` index + the `docs/features/README.md` amendments
+  table (under 0023/0055).
+
+This **does not** close any item in the forward backlog above (calibration tuning, 0062, 0022,
+the real-host smoke, R3, the browser-render validations, A11, MVP-002 remain exactly as listed) —
+it is a *new* refinement record plus its implementation. Its standing claim is the **litmus test**
+in the ADR: any future sync or consequence change must keep the open set recordable,
+consequenceable, recallable, and narratable in full while only ever constraining the closed set.
