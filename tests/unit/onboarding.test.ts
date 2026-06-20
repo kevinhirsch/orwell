@@ -56,8 +56,10 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
     expect(Object.keys(card).sort()).toEqual(
       // L28 + 0058 + 0063: vocation/hometown/demeanor + biography/physicalCharacteristics + the public
       // identity facets are ALL Vault-free, byte-stable; the hidden half (secrets/goals/perception/
-      // closeted orientation) never appears.
-      ["age", "appearance", "archetype", "background", "biography", "demeanor", "ethnicity", "genderPresentation", "hometown", "id", "name", "outOrientation", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
+      // closeted orientation) never appears. L29: the prose `appearance` is NOT on a 0058 card — the
+      // structured `physicalCharacteristics` is the single physical descriptor (the prose is the pre-0058
+      // fallback only), so the picture and the narrated body can never contradict.
+      ["age", "archetype", "background", "biography", "demeanor", "ethnicity", "genderPresentation", "hometown", "id", "name", "outOrientation", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
   });
 });
 

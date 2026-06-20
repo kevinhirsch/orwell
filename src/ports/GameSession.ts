@@ -66,6 +66,13 @@ export interface HouseguestCard {
   strategyStyle?: string;
   background?: string;
   age?: number;
+  /**
+   * The prose appearance blurb (the older 0004 facet). PRE-0058 FALLBACK ONLY: a card carries EITHER the
+   * structured `physicalCharacteristics` (0058 — the single source of truth narration AND the portrait
+   * read) OR this prose line, NEVER both — they were independently generated and could otherwise
+   * contradict on build/skin/hair (L29). New 0058 casts ship `physicalCharacteristics`; only a pre-0058
+   * save (or the player, who has no structured facet) falls back to this.
+   */
   appearance?: string;
   presentation?: string;
   /**
@@ -558,7 +565,13 @@ export interface NpcVoiceView {
   /** The stable public persona facets (B61) — byte-stable across the whole season. */
   persona: {
     archetype?: string; strategyStyle?: string; background?: string;
-    age?: number; appearance?: string; presentation?: string;
+    age?: number; presentation?: string;
+    /**
+     * Prose appearance (the older 0004 facet). PRE-0058 FALLBACK ONLY — a houseguest is voiced through
+     * EITHER the structured `physicalCharacteristics` OR this prose, never both (independently generated,
+     * they could contradict, L29). A 0058 houseguest is voiced via `physicalCharacteristics`.
+     */
+    appearance?: string;
     /** The observable voice register (L28) — voice this houseguest in THEIR demeanor, not a default. */
     demeanor?: string;
     /**

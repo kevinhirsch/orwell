@@ -3,6 +3,7 @@ import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
+import { physicalFacetToAppearance } from "./portraitPrompts";
 import { GIVEN_NAMES } from "./data/givenNames";
 import { SURNAMES } from "./data/surnames";
 import { VOCATIONS } from "./data/vocations";
@@ -802,7 +803,10 @@ export function portraitDescriptorFor(hg: { name: string; character: Character }
   return {
     name: hg.name,
     age: c.age,
-    appearance: c.appearance,
+    // L29 single source of truth: when the structured 0058 facet exists it AUTHORS the look (through the
+    // SAME builder the portrait prompt uses), so this descriptor can never diverge from the cast photo;
+    // the prose `appearance` is the pre-0058 fallback only.
+    appearance: c.physicalCharacteristics ? physicalFacetToAppearance(c.physicalCharacteristics) : c.appearance,
     presentation: c.presentation,
     vibe: `${c.archetype} energy, a ${c.strategyStyle} presence`,
   };

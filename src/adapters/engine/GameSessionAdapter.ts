@@ -55,7 +55,7 @@ function oneLine(s: string): string {
 function isUsableTagline(s: string): boolean {
   return s.length > 0 && s.length <= 120 && !/[{}]/.test(s) && !/forEntity|visibleEvents|systemPrompt/i.test(s);
 }
-import { buildPortraitPrompt, buildCastPortraitPrompts } from "../../engine/portraitPrompts";
+import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearance } from "../../engine/portraitPrompts";
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
@@ -548,15 +548,19 @@ export class GameSessionAdapter implements GameSession {
         strategyStyle: npc.character.strategyStyle,
         background: npc.character.background,
         age: npc.character.age,
-        appearance: npc.character.appearance,
         presentation: npc.character.presentation,
         // L28: voice them in their STORED observable register (blunt / deadpan / anxious…), not a default.
         ...(npc.character.demeanor !== undefined ? { demeanor: npc.character.demeanor } : {}),
-        // 0058: voice the STORED biography + physical characteristics, never invent (and drift) them.
-        // Public facets only — the hidden deep profile is never on this projection (the §8 wall).
+        // 0058: voice the STORED biography, never invent (and drift) it. Public facet only — the hidden
+        // deep profile is never on this projection (the §8 wall).
         ...(npc.character.biography !== undefined ? { biography: npc.character.biography } : {}),
+        // L29 single physical descriptor (appearance/physicalCharacteristics consistency): the STRUCTURED
+        // facet is the ONE source of truth the portrait + narration share; the prose `appearance` rides
+        // ONLY as the pre-0058 fallback — NEVER both at once (they were independently generated and could
+        // contradict on build/skin/hair). When the facet is present it alone is voiced.
         ...(npc.character.physicalCharacteristics !== undefined
-          ? { physicalCharacteristics: npc.character.physicalCharacteristics } : {}),
+          ? { physicalCharacteristics: npc.character.physicalCharacteristics }
+          : npc.character.appearance !== undefined ? { appearance: npc.character.appearance } : {}),
         // 0063: voice the PUBLIC identity facets — heritage, gender presentation, and a PUBLICLY-OUT
         // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed; the houseguest
         // would never lead with it until a pathway surfaces it, §5). One true facet, never the character.
@@ -1771,6 +1775,13 @@ export class GameSessionAdapter implements GameSession {
       // the heritage the cast was guaranteed — the text and the picture never contradict the identity.
       const grounded = this.groundedSkinTones[n.id];
       if (grounded) n.character.physicalCharacteristics.skinTone = grounded;
+      // L29 single-source reconciliation (appearance/physicalCharacteristics consistency fix): the prose
+      // `appearance` is the OLDER 0004 descriptor, generated from INDEPENDENT pools — it could contradict
+      // the structured facet (different build/skin/hair/age-look). Re-derive it FROM the structured facet
+      // (the SAME builder the portrait uses) so the persisted prose can never disagree with the source of
+      // truth, and any pre-0058 fallback reader stays consistent. Done at generation, before the first
+      // persist, so the static Character still round-trips byte-stable (0007).
+      n.character.appearance = physicalFacetToAppearance(n.character.physicalCharacteristics);
     }
     // HIDDEN — engine-only, sealed off the player AND admin.
     this.deepProfiles = layer.hidden;
@@ -3229,7 +3240,6 @@ export class GameSessionAdapter implements GameSession {
         strategyStyle: n.character.strategyStyle,
         background: n.character.background,
         age: n.character.age,
-        appearance: n.character.appearance,
         presentation: n.character.presentation,
         // L28: the concrete, diverse, PERSISTED backstory facets — the narrator voices the STORED
         // vocation/hometown instead of inventing (and mirroring the player's). Public, Vault-free.
@@ -3238,12 +3248,16 @@ export class GameSessionAdapter implements GameSession {
         // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
         // is not a room of identical warm professionals. Public, Vault-free.
         ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
-        // 0058: the PUBLIC deep-profile facets — the multi-sentence biography + the structured physical
-        // characteristics (the single source of truth narration AND portraits read). Public, Vault-free.
-        // The HIDDEN profile (secrets/goals/weakness/perception) is NEVER selected here.
+        // 0058: the PUBLIC multi-sentence biography. Public, Vault-free; the HIDDEN profile
+        // (secrets/goals/weakness/perception) is NEVER selected here.
         ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
+        // L29 single physical descriptor (appearance/physicalCharacteristics consistency): the STRUCTURED
+        // `physicalCharacteristics` facet is the ONE source of truth narration AND portraits read; the prose
+        // `appearance` rides ONLY as the pre-0058 fallback — NEVER both (independently generated, they could
+        // contradict on build/skin/hair). When the facet is present it alone is shipped.
         ...(n.character.physicalCharacteristics !== undefined
-          ? { physicalCharacteristics: n.character.physicalCharacteristics } : {}),
+          ? { physicalCharacteristics: n.character.physicalCharacteristics }
+          : n.character.appearance !== undefined ? { appearance: n.character.appearance } : {}),
         // 0063: the PUBLIC diversity-identity facets — the heritage/cultural identity (an authentic facet
         // of a full character, grounding the skin tone), the gender presentation, and a PUBLICLY-OUT
         // orientation only. A PRIVATELY-held orientation is NEVER here (it's Vault-sealed, §5). Descriptive
