@@ -3677,7 +3677,8 @@ import { isNarrow } from './platform.js';
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let roundText = '';
+    let replyText = '';      // public reply deltas
+    let reasoningText = '';  // reasoning deltas (thinking:true) — kept OUT of the bubble
     let gotDelta = false;
     let leftSession = false;
     let metricsData = null;
@@ -3691,9 +3692,22 @@ import { isNarrow } from './platform.js';
       _resumingStreams.delete(sessionId);
     };
 
+    // Canonical combined source: reasoning wrapped in a CLOSED <think> block (so it renders
+    // in the default-collapsed accordion and can NEVER leak into the public bubble) followed
+    // by the clean reply. This is the SAME shape the primary stream path and the history
+    // reload use, routed through the SAME renderer (processWithThinking) — so an observer tab
+    // that re-attaches to a live run renders reasoning identically instead of dumping it raw
+    // into the bubble. That divergence WAS the cross-session "reasoning leaks" hot mess.
+    const _combined = () => {
+      const reply = stripToolBlocks(replyText);
+      return reasoningText.trim()
+        ? '<think>' + reasoningText + '</think>\n\n' + reply
+        : reply;
+    };
     const renderDelta = () => {
-      const dt = stripToolBlocks(roundText);
-      contentDiv.innerHTML = markdownModule.mdToHtml(markdownModule.squashOutsideCode(dt));
+      contentDiv.innerHTML = markdownModule.processWithThinking(
+        markdownModule.squashOutsideCode(_combined())
+      );
       uiModule.scrollHistory();
     };
 
@@ -3723,7 +3737,10 @@ import { isNarrow } from './platform.js';
           let json;
           try { json = JSON.parse(payload); } catch (_) { continue; }
           if (json.delta) {
-            roundText += json.delta;
+            // Route reasoning (thinking:true) to its own buffer so it lands in the collapsed
+            // accordion, exactly like the primary stream path — never raw into the bubble.
+            if (json.thinking) reasoningText += json.delta;
+            else replyText += json.delta;
             if (!gotDelta) { gotDelta = true; try { spinner.destroy(); } catch (_) {} }
             renderDelta();
           } else if (json.type === 'doc_stream_open') {
@@ -3756,11 +3773,13 @@ import { isNarrow } from './platform.js';
     // Plain text reply: finalize in place. Replace the live bubble with a
     // canonical single message (markdown + footer actions + metrics) using the
     // same renderer history does. No history refetch, no end-of-stream flicker.
-    if (onThisSession && !rich && roundText.trim()) {
+    // Pass the canonical <think>-wrapped source so addMessage's processWithThinking
+    // splits reasoning → accordion and reply → bubble (matching the live render above).
+    if (onThisSession && !rich && replyText.trim()) {
       if (holder.parentNode) holder.remove();
       const model = meta && meta.model;
       const meta_ = metricsData ? Object.assign({ model }, metricsData) : { model };
-      chatRenderer.addMessage('assistant', roundText, model, meta_);
+      chatRenderer.addMessage('assistant', _combined(), model, meta_);
       uiModule.scrollHistory();
       return true;
     }
