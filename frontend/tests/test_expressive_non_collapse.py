@@ -217,10 +217,13 @@ def test_mis_narrated_finale_tally_is_still_caught():
 
 
 def test_phantom_new_hoh_is_still_caught():
-    """Closed set: a new HOH is narrated but the HOH id did not change → re-ground."""
+    """Closed set: a new HOH is narrated DURING the HOH beat but the HOH id did not change →
+    re-ground. (Scoped to the HOH phase — see test_hoh_flavor_outside_the_hoh_beat_is_clean for
+    the other side of that line.)"""
+    hoh = {**_UNCHANGED, "phase": "hoh-competition"}
     out = chat_helpers._narration_claims_outcome(
         "A houseguest wins the Head of Household competition and seizes the reins.",
-        _UNCHANGED, _UNCHANGED,
+        hoh, hoh,
     )
     assert out and "HEAD OF HOUSEHOLD" in out
 
@@ -229,6 +232,26 @@ def test_phantom_new_hoh_is_still_caught():
 #
 # A closed-set claim whose own signature field DID move is legitimate narration — the guard must
 # return None. This proves the guard is a desync detector, not a blanket censor of outcome words.
+
+
+def test_hoh_flavor_outside_the_hoh_beat_is_clean():
+    """ADR 0005 #1 (the phase-gating fix): 'the new HOH…' uttered as reflection in a NON-HOH phase
+    is flavor, not a committed crown — the guard must not rail-correct it. The board is unchanged
+    with a sitting HOH (the exact setting in which the un-gated guard used to false-alarm)."""
+    assert chat_helpers._narration_claims_outcome(
+        "She muses that the new HOH always seems to end up with a target on their back.",
+        _UNCHANGED, _UNCHANGED,  # social phase, hoh unchanged
+    ) is None
+
+
+def test_hypothetical_winner_outside_finale_is_clean():
+    """ADR 0005 #1 (the phase-gating fix): 'crowned the winner someday' mid-season is hypothetical
+    flavor, not a premature crown — the guard must not rail-correct it. (The un-gated WINNER claim
+    fired on this in any non-finished phase — the surface the engine-side gate now closes.)"""
+    assert chat_helpers._narration_claims_outcome(
+        "He grins at the thought — imagine it, crowned the winner of Big Brother, confetti and all.",
+        _UNCHANGED, _UNCHANGED,  # social phase, not finished
+    ) is None
 
 
 def test_real_eviction_with_incremented_count_is_clean():
