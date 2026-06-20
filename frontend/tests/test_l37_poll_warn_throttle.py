@@ -54,3 +54,37 @@ def test_distinct_keys_throttle_independently(caplog):
         orw._warn_throttled("status", "[orwell] status failed: y")
         orw._warn_throttled("finale", "[orwell] finale failed: z")
     assert len([r for r in caplog.records if r.name == LOGGER]) == 3
+
+
+# ── The `[orwell] state failed:` EMPTY-error fix ────────────────────────────────────────────────
+# The field bug: the engine log showed bare `state failed:` lines with NO reason, because several
+# exceptions a slow/large /state export raises have an empty `str(e)`. `_err_detail` must always
+# name a cause (the exception type at minimum), and surface an upstream HTTP status when present.
+
+def test_err_detail_is_never_empty_for_a_message_less_exception():
+    class _Boom(Exception):
+        pass
+    detail = orw._err_detail(_Boom())  # str(e) == "" — the exact empty-`state failed:` case
+    assert detail.strip() != ""
+    assert "_Boom" in detail  # the type names the cause even with no message
+
+
+def test_err_detail_includes_message_and_type_when_present():
+    detail = orw._err_detail(TimeoutError("timed out reading the export"))
+    assert "TimeoutError" in detail
+    assert "timed out reading the export" in detail
+
+
+def test_err_detail_surfaces_an_upstream_http_status():
+    class _Resp:
+        status_code = 502
+    class _StatusErr(Exception):
+        response = _Resp()
+    detail = orw._err_detail(_StatusErr())
+    assert "502" in detail  # the gateway status is in the line, not a blank
+
+
+def test_err_detail_strips_to_a_single_clean_line():
+    detail = orw._err_detail(ValueError("  padded  "))
+    # No leading/trailing whitespace runs that would render as a ragged log line.
+    assert detail == "ValueError: padded"
