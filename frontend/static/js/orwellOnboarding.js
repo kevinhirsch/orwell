@@ -347,19 +347,38 @@
     }, 250);
   };
 
-  // E65: a season restart (createCharacter success mid-session) opens a FRESH chat
-  // session so the dead season's transcript never rides as narrator context (F7's
-  // page-load-only fence, now event-driven too). The seat marker resets so a future
-  // pre-game state runs the casting flow again.
+  // E65: a season RESTART (season 2+) opens a FRESH chat session so the dead season's transcript
+  // never rides as narrator context (F7's page-load-only fence, now event-driven too). The seat
+  // marker resets so a future pre-game state runs the casting flow again.
+  //
+  // P1 (OOBE conversation split): this MUST NOT fire for the INITIAL first-season onboarding.
+  // There the casting interview is the legitimate lead-in and must flow into the game in the SAME
+  // conversation — firing here split the one onboarding into TWO chats (the hidden kickoff cue +
+  // the producer's opener in session A, the rest of the interview + house entry in an auto-titled
+  // session B), blanked #chat-history, and flickered the chat list. The createCharacter tool fires
+  // at the end of EVERY interview (initial AND restart), so chat.js can't tell them apart on its
+  // own. The distinguisher is engine state at the trigger: a true restart is requested while a game
+  // is ALREADY started (reset-progress / next-season — they call `markRestart()` right before this);
+  // the initial onboarding runs entirely from `started === false` and never arms it.
+  //
+  // So this seam is a NO-OP unless a restart was explicitly armed. The genuine restart entry points
+  // (settings.js, orwellNewSeason.js) arm it and open the fresh session at THEIR trigger — clearing
+  // the dead transcript before casting re-opens — and the redundant chat.js createCharacter call
+  // that follows finds the flag disarmed and does nothing. The seam stays referenced from chat.js
+  // (the createCharacter success path) so a future engine-driven restart can still arm it.
+  window._orwellMarkRestart = () => { try { window._orwellRestartArmed = true; } catch (_) {} };
   window._orwellFreshSession = () => {
+    // Initial first-season onboarding: NOT a restart — keep it ONE continuous conversation,
+    // never blank/switch the chat (the casting interview IS the lead-in into the game).
+    if (!window._orwellRestartArmed) return;
+    try { window._orwellRestartArmed = false; } catch (_) {}
     try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
-    // FE-render #7: createCharacter fires mid-stream at the casting→game cutover, so the
-    // fresh-session click (createDirectChat) blanks #chat-history + shows the welcome splash
-    // WHILE the still-finalizing tool beat / casting card is re-painting the old transcript.
-    // For one beat the most important transition reads as "the chat lost my conversation".
-    // Mark the transition so showWelcomeScreen suppresses the splash until the swap settles
-    // (it only suppresses while the OLD transcript still has bubbles — a genuinely empty new
-    // session still gets its welcome once this clears). Self-clearing so nothing stays stuck.
+    // FE-render #7: the fresh-session click (createDirectChat) blanks #chat-history + shows the
+    // welcome splash WHILE the still-finalizing tool beat / casting card is re-painting the old
+    // transcript. For one beat the transition reads as "the chat lost my conversation". Mark the
+    // transition so showWelcomeScreen suppresses the splash until the swap settles (it only
+    // suppresses while the OLD transcript still has bubbles — a genuinely empty new session still
+    // gets its welcome once this clears). Self-clearing so nothing stays stuck.
     try {
       window._orwellCastingTransition = true;
       clearTimeout(window._orwellCastingTransitionTimer);

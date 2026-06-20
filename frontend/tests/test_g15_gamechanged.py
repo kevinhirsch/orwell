@@ -84,7 +84,10 @@ MUTATING_TOOLS = ["advanceGame", "submitDecision", "recordInteraction",
 def _chat_g15_block():
     i = CHAT.find("G15:")
     assert i != -1, "chat.js tool-result seam must carry the G15 dispatcher call"
-    return CHAT[i:i + 1200]
+    # The seam spans the G15 comment, the ok-gated mutating-tool dispatch, and the
+    # createCharacter branch (fresh-session hook + the P1 finalizing indicator). The
+    # window covers that whole branch — these are deeply indented lines.
+    return CHAT[i:i + 1500]
 
 
 def test_chat_tool_result_seam_routes_every_mutating_tool_through_the_helper():
@@ -101,6 +104,78 @@ def test_chat_keeps_the_fresh_session_hook_reachable():
     # actually fire on createCharacter success.
     block = _chat_g15_block()
     assert "_orwellFreshSession" in block
+
+
+# ── 3c. P1: the INITIAL onboarding is ONE conversation; only a RESTART splits ──
+# Bug: finalizing the FIRST casting interview split the single onboarding into TWO
+# chats — _orwellFreshSession fired on EVERY createCharacter success, including the
+# legitimate initial onboarding (where the interview is the lead-in and must flow
+# into the game in the SAME conversation). The fix: the split is armed ONLY by a
+# genuine restart (reset-progress / next-season, both of which run while a game is
+# already started); the initial onboarding never arms it, so the seam is a no-op.
+
+SETTINGS = (JS_DIR / "settings.js").read_text(encoding="utf-8")
+NEWSEASON = (JS_DIR / "orwellNewSeason.js").read_text(encoding="utf-8")
+FINALIZING = (JS_DIR / "orwellFinalizing.js").read_text(encoding="utf-8")
+
+
+def test_fresh_session_is_a_no_op_unless_a_restart_was_armed():
+    m = re.search(r"window\._orwellFreshSession\s*=\s*\(\)\s*=>\s*\{(.*?)\n  \};",
+                  ONBOARDING, re.S)
+    assert m, "orwellOnboarding.js must define window._orwellFreshSession"
+    body = m.group(1)
+    # The first statement gates on the restart-armed flag and bails for the initial
+    # onboarding BEFORE any session swap / history blank.
+    guard = body.find("_orwellRestartArmed")
+    swap = body.find("sidebar-new-chat-btn")
+    transition = body.find("_orwellCastingTransition")
+    assert guard != -1, "the seam must consult the restart-armed flag"
+    assert "if (!window._orwellRestartArmed) return;" in body, \
+        "the initial onboarding (no restart armed) must early-return — ONE conversation, no split"
+    assert swap == -1 or guard < swap, "the guard must run BEFORE the new-chat swap"
+    assert transition == -1 or guard < transition, \
+        "the guard must run BEFORE the transition flag / history blank"
+
+
+def test_only_genuine_restart_entry_points_arm_the_split():
+    # markRestart is the arming seam; the two real restarts (already-started game)
+    # arm it right before opening the fresh session.
+    assert "window._orwellMarkRestart" in ONBOARDING, \
+        "orwellOnboarding.js must expose the restart-arming seam"
+    for src, name in ((SETTINGS, "settings.js reset-progress"),
+                      (NEWSEASON, "orwellNewSeason.js next-season")):
+        mark = src.find("_orwellMarkRestart")
+        fresh = src.find("_orwellFreshSession")
+        assert mark != -1, f"{name} must arm the restart before splitting"
+        assert fresh != -1 and mark < fresh, \
+            f"{name} must arm BEFORE calling _orwellFreshSession"
+
+
+def test_chat_createcharacter_does_not_arm_a_restart():
+    # The createCharacter success path (fires for EVERY interview, initial included)
+    # must NOT arm the restart — otherwise the initial onboarding would split.
+    assert "_orwellMarkRestart" not in CHAT, \
+        "chat.js must never arm a restart on createCharacter — that re-splits the initial onboarding"
+
+
+# ── 3d. P1: the finalizing/loading state across the cutover ───────────────────
+# The createCharacter → house-entry beat is heavy; the chat used to look frozen.
+# An inline (never modal — the transcript stays) indicator appears at the cutover
+# and clears when the house-entry narration streams.
+
+def test_finalizing_indicator_module_is_inline_and_fails_open():
+    assert "_orwellFinalizing" in FINALIZING and "begin" in FINALIZING and "end" in FINALIZING
+    # Inline into the transcript, NOT a blocking modal (no inert/aria-modal scrim).
+    assert "chat-history" in FINALIZING, "the indicator mounts inline in the transcript"
+    assert "aria-modal" not in FINALIZING, "must NOT be a blocking modal — the transcript stays visible"
+
+
+def test_chat_drives_the_finalizing_indicator_begin_and_clear():
+    # begin() at createCharacter success; cleared on the first narration token and
+    # safety-netted in the stream's finally.
+    assert "window._orwellFinalizing.begin()" in CHAT, "createCharacter must start the indicator"
+    assert CHAT.count("window._orwellFinalizing.end()") >= 2, \
+        "the indicator must clear on the narration token AND in the finally safety net"
 
 
 # ── 3b. FE-render #7: no welcome-splash flash at the casting→game cutover ──────

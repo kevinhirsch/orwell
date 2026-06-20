@@ -614,6 +614,9 @@ import { isNarrow } from './platform.js';
 
     // Declare accumulated outside try block so it's accessible in catch
     let accumulated = '';
+    // P1 (OOBE cutover): set when createCharacter paints the inline "finalizing" indicator this
+    // turn, so the first house-entry narration token can clear it (and the finally can safety-net).
+    let _orwellFinalizingActive = false;
     // Are we currently inside an unclosed <think> block? Toggled per think/answer
     // cycle so a multi-round agent response (one reasoning phase PER round) wraps each
     // round's reasoning in its own <think>…</think> instead of leaking rounds 2+ as text.
@@ -1486,6 +1489,12 @@ import { isNarrow } from './platform.js';
               if (json.delta) {
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
+                // P1 (OOBE cutover): the house-entry narration is now streaming — clear the inline
+                // "finalizing" indicator so it gives way to the actual move-in prose.
+                if (_orwellFinalizingActive) {
+                  _orwellFinalizingActive = false;
+                  try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
+                }
                 // Text arrived after tools — connect thread line to this bubble
                 const _threadAbove = roundHolder?.previousElementSibling;
                 if (_threadAbove && _threadAbove.classList.contains('agent-thread') && !_threadAbove.classList.contains('has-bottom')) {
@@ -2322,8 +2331,15 @@ import { isNarrow } from './platform.js';
                   if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter',
                              'updateCasting', 'manageSandbox', 'runCompetition'].includes(json.tool)) {
                     if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
-                    // E65: a new season (createCharacter success mid-session) opens a FRESH chat.
-                    if (json.tool === 'createCharacter' && window._orwellFreshSession) window._orwellFreshSession();
+                    if (json.tool === 'createCharacter') {
+                      // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
+                      // next-season); NO-OP for the initial onboarding — it stays ONE conversation.
+                      if (window._orwellFreshSession) window._orwellFreshSession();
+                      // P1 (OOBE cutover): paint the inline "finalizing" indicator — createCharacter
+                      // → house-entry is a heavy beat that must never read as frozen (cleared by the
+                      // first narration token in the json.delta path, with a finally-block safety net).
+                      try { if (window._orwellFinalizing) { _orwellFinalizingActive = true; window._orwellFinalizing.begin(); } } catch (_) {}
+                    }
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
                   // L7: a node is only EXPANDABLE when it has real content (command,
@@ -3228,6 +3244,12 @@ import { isNarrow } from './platform.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
+      // ended (or errored) without any narration token to clear it.
+      if (_orwellFinalizingActive) {
+        _orwellFinalizingActive = false;
+        try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
+      }
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
       if (_chatLogDone) _chatLogDone.setAttribute('aria-busy', 'false');
