@@ -164,56 +164,62 @@ def test_chatjs_imports_every_helper_it_calls():
         assert imp, "chat.js calls isGameBuild() but does not import it from orwellToolBeats.js"
 
 
-# --- 4. the model's private reasoning never reaches the player in the game build ---------
+# --- 4. reasoning is SEPARATED from the public bubble (default-collapsed accordion) ------
+# Owner ruling 2026-06-20: the public bubble must carry ONLY the in-character narration; the
+# model's reasoning/drafts/"rewind" must NOT mix into it — instead it streams into a condensed,
+# default-COLLAPSED "Thinking" accordion (debug-viewable, expandable). See the thinking/public
+# split tests in test_thinking_public_split.py for the routing + default-collapsed assertions.
 
-def test_markdown_suppresses_thinking_in_the_game_build():
-    # IMMERSION LEAK: a reasoning model's chain-of-thought (wrapped in <think>…</think>) was
-    # rendering as visible chat text in the GAME BUILD — leaking engine lever names. markdown.js
-    # is the chokepoint every reload + final-render path funnels through; in the game build it
-    # must render reply-only (no thinking section), gated by a helper that fails OPEN to hiding.
+
+def test_markdown_separates_reasoning_from_the_public_bubble_in_the_game_build():
+    # markdown.js is the chokepoint every reload + final-render path funnels through. In the
+    # game build the reply text is always SCRUBBED clean of reasoning, and the reasoning is
+    # routed to its own (default-collapsed) accordion via gameBuildShowsThinkingAccordion().
     md = _read("static", "js", "markdown.js")
     assert "export function gameBuildSuppressesThinking()" in md
-    # the helper checks the game-build marker and the admin-only opt-in escape hatch
+    assert "export function gameBuildShowsThinkingAccordion()" in md
+    # the game-build markers + the admin/operator gates
     assert "data-game-build" in md
-    assert "data-show-thinking" in md  # admin-only setting to view reasoning (off by default)
-    # fail-open to HIDING: a thrown check still suppresses (return true in the catch)
+    assert "data-show-thinking" in md  # admin-only: legacy inline render off the game path
+    assert "hide-thinking" in md       # operator opt-out fully hides the accordion
+    # fail direction: a thrown suppress check still SCRUBS the reply (return true in the catch)
     cap = md[md.index("export function gameBuildSuppressesThinking()"):]
-    cap = cap[:cap.index("export function processWithThinking")]
+    cap = cap[:cap.index("export function gameBuildShowsThinkingAccordion")]
     assert "catch" in cap and "return true;" in cap
-    # processWithThinking gates on the helper and renders reply-only (no createThinkingSection)
+    # processWithThinking gates on the helpers: scrub the reply, render the accordion collapsed
     pwt = md[md.index("export function processWithThinking"):]
     assert "if (gameBuildSuppressesThinking())" in pwt
     gated = pwt[pwt.index("if (gameBuildSuppressesThinking())"):]
     gated = gated[:gated.index("let html = ''")]
-    assert "createThinkingSection" not in gated  # no thinking dropdown is built in the game build
+    # the reply is still scrubbed (no reasoning preamble bleeds into the public bubble) ...
+    assert "scrubReasoningPreamble(" in gated
+    # ... and the reasoning now renders in its own accordion (gated on the show-accordion helper)
+    assert "gameBuildShowsThinkingAccordion()" in gated
+    assert "createThinkingSection(" in gated
 
 
-def test_live_streaming_thinking_indicator_is_game_build_gated():
-    # The LIVE stream path (chat.js) renders reasoning two ways: a "Thinking…" indicator while
-    # the <think> is open, and a streaming live-think box. BOTH must be gated off in the game
-    # build (hold/continue without building DOM), then render the reply only on close.
+def test_live_streaming_thinking_box_is_a_collapsed_accordion_in_the_game_build():
+    # The LIVE stream path (chat.js): reasoning streams into the shared live-think box (a
+    # collapsed accordion). The game build no longer suppresses it wholesale — only an operator
+    # `body.hide-thinking` holds the bubble empty. The reply still renders scrubbed on close.
     chat = _read("static", "js", "chat.js")
-    # the unclosed-think indicator returns early in the game build (no "Thinking…" header DOM)
-    assert "If thinking is still streaming (unclosed <think>)" in chat
-    ind = chat[chat.index("If thinking is still streaming (unclosed <think>)"):]
-    ind = ind[:600]
-    assert "if (isGameBuild()) {" in ind
-    # the live-think BOX builder is bypassed in the game build (the reasoning DOM is never made)
-    assert "if (isGameBuild() && (hasUnclosedThink || isThinking)) {" in chat
-    gb = chat[chat.index("if (isGameBuild() && (hasUnclosedThink || isThinking)) {"):]
-    gb = gb[:gb.index("if (hasUnclosedThink && !isThinking) {")]
-    # while reasoning is open we hold (continue) and never build the live-think box
-    assert "continue;" in gb
-    assert "live-think" not in gb  # the box markup is NOT emitted in the game-build branch
-    # on close, the reply renders via the normal stream path (reply-only)
-    assert "_renderStream();" in gb
+    # the wholesale game-build suppression (`isGameBuild() && (hasUnclosedThink || isThinking)`)
+    # is gone — the only game-build hold is gated on the operator hide-thinking opt-out.
+    assert "if (isGameBuild() && (hasUnclosedThink || isThinking)) {" not in chat
+    assert "isGameBuild() && document.body.classList.contains('hide-thinking')" in chat
+    # the shared live-think box is built (the same collapsed accordion for game + non-game)
+    assert "Create a live thinking box" in chat
+    assert "live-think" in chat
 
 
-def test_reload_path_skips_thinking_reconstruction_in_the_game_build():
+def test_reload_path_reconstructs_collapsed_accordion_in_the_game_build():
     # The history-RELOAD path (chatRenderer.js) reconstructs thinking from metadata.thinking.
-    # In the game build that reconstruction must be SKIPPED entirely — render the reply text only.
+    # The game build now reconstructs too (no `!isGameBuild()` guard) and lets processWithThinking
+    # render the default-collapsed accordion (or drop it under an operator hide-thinking opt-out).
     renderer = _read("static", "js", "chatRenderer.js")
-    assert "metadata?.thinking && !isGameBuild()" in renderer
+    assert "metadata?.thinking && !isGameBuild()" not in renderer  # the old game-build skip is gone
+    assert "role === 'assistant' && metadata?.thinking" in renderer
+    assert "'<think' + (thinkTime ? ` time=\"${thinkTime}\"` : '') + '>' + metadata.thinking" in renderer
 
 
 def test_non_game_build_still_renders_the_collapsible_thinking():
@@ -223,7 +229,7 @@ def test_non_game_build_still_renders_the_collapsible_thinking():
     # the normal (non-game) branch still calls createThinkingSection
     assert "thinkingBlocks.forEach((block, index) => {" in md
     assert "html += createThinkingSection(block, index, thinkingTime);" in md
-    # the reload reconstruction is only gated by the game build — its full form is preserved
+    # the reload reconstruction preserves its full <think>-reconstruction form
     renderer = _read("static", "js", "chatRenderer.js")
     assert "markdownModule.processWithThinking(" in renderer
     assert "'<think' + (thinkTime ? ` time=\"${thinkTime}\"` : '') + '>' + metadata.thinking" in renderer
