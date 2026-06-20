@@ -3488,6 +3488,14 @@ import { isNarrow } from './platform.js';
    *  Called from both abort paths when no tokens had streamed yet. */
   function _renderCancelledBubble(holder) {
     if (!holder) return;
+    // Idempotent per turn. A single empty-stream user Stop reaches this from BOTH the
+    // stop-button branch in handleChatSubmit AND the aborted reader's catch block, for the
+    // SAME holder. Each call POSTs inject_messages, so without this guard the cancel is
+    // persisted TWICE — invisible in the acting tab (one DOM node) but surfacing as DUPLICATE
+    // "[Cancelled by user]" bubbles on reload and in a second concurrent session (the mirror /
+    // cross-device sync re-reads history). Record the cancel exactly once.
+    if (holder.dataset.cancelledRendered === '1') return;
+    holder.dataset.cancelledRendered = '1';
     holder.dataset.raw = '';
     const body = holder.querySelector('.body');
     if (body) {
