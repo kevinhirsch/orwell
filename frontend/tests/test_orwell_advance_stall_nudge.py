@@ -115,11 +115,11 @@ def test_l39b_safety_net_forces_an_advance_past_the_last_rung():
     # previewed/undelivered outcome still gets its targeted text nudge — the model is one call away)
     assert "_level >= _ADVANCE_FORCE_LEVEL" in js
     assert "and not _previewed_uncommitted and not _decision_undelivered" in js
-    # it pulls the engine lever directly and resets the staleness clock
+    # it pulls the engine lever directly (via the shared silent-commit helper) and resets the clock
     assert "_oe3.advance_game(owner)" in js
     assert "FORCED advanceGame" in js
     # fail-open: a forced advance that errors falls through to the text nudge, never crashes the turn
-    assert "forced advanceGame failed" in js
+    assert "silent advanceGame failed" in js
 
 
 def test_l39b_force_level_is_past_the_last_text_rung():

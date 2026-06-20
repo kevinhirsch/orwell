@@ -1665,8 +1665,9 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
                 f"THE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
         ]
+        # Room for a reasoning model to think THEN emit the tiny room JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=400, timeout=45)
+                                   temperature=0.1, max_tokens=1200, timeout=45)
         raw = raw or ""
         # The JSON may sit after a reasoning block — scan the WHOLE response, take the LAST object
         # carrying a "room" key (reasoning models emit the answer last).
@@ -1734,8 +1735,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
         ]
+        # A heavy REASONING model (deepseek-v*, qwen3, …) spends tokens THINKING before it emits the
+        # JSON answer. With a tiny cap it burns the whole budget on reasoning and gets truncated BEFORE
+        # the object — so `raw` carried no parseable JSON (the `len=0` auto-record failure that left
+        # social play with zero consequence). Give it room to finish thinking AND answer; the JSON is
+        # tiny, so the extra budget only matters for the reasoning preamble. (llm_call_async now also
+        # reads the `reasoning`/`thinking` field, so the answer is recoverable even when the model
+        # routes everything there.)
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.2, max_tokens=700, timeout=45)
+                                   temperature=0.2, max_tokens=1500, timeout=45)
         raw = raw or ""
         # The JSON may sit after a reasoning block OR inside it — take the LAST object carrying
         # withIds (reasoning models emit the answer last). The object may now NEST a `consequence`
@@ -1825,8 +1833,9 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{scene}\n\nJSON:"},
         ]
+        # Room for a reasoning model to think THEN emit the deal JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=500, timeout=45) or ""
+                                   temperature=0.1, max_tokens=1200, timeout=45) or ""
         obj = None
         for cand in reversed(re.findall(r"\{[^{}]*\"struck\"[^{}]*\}", raw, re.DOTALL)):
             try:
@@ -3202,34 +3211,77 @@ async def stream_agent_loop(
                         # forget the per-user re-approach state so the NEXT post-season starts clean.
                         _POSTSEASON_OFFTOPIC_TURNS.pop(owner or "", None)
                         _REAPPROACH_LEVEL.pop(owner or "", None)
-                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1)
+                    # advance a lull — OR commit a previewed-but-uncommitted ceremony outcome (#1).
+                    #
+                    # ONE-NARRATION-PER-TURN invariant (fixes the "rewind"/double-scene bug): a nudge
+                    # that re-prompts the model makes it narrate AGAIN, and that second narration is
+                    # appended to the SAME message bubble — the player sees two contradictory scenes
+                    # concatenated. So once the model has ALREADY shown the player a visible scene this
+                    # turn (`_emitted_visible`), we NEVER re-prompt for a second narration: we progress
+                    # STATE silently (commit the previewed/undelivered beat, or pull the forced advance)
+                    # and END the turn. The engine resolves to the SAME outcome the model already
+                    # previewed, so the board now AGREES with the one scene the player saw, and the real
+                    # next beat surfaces on the player's next turn. We re-prompt (the historical text
+                    # nudge → another narration) ONLY when nothing visible has been shown yet, where a
+                    # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
+                    # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
                     if _want_advance and _phase in _ADVANCE_PHASES:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
                             _ADVANCE_STALL_LEVEL[owner] = _level + 1
+
+                        async def _commit_advance_silently(_why: str) -> bool:
+                            """Progress the beat in the engine WITHOUT re-prompting the model — so a
+                            turn that already narrated a scene does not get a second one. Resets the
+                            staleness clock on success. Fail-open: any hiccup just returns False so the
+                            caller can fall back to the (re-prompting) text nudge."""
+                            try:
+                                from src import orwell_engine as _oe3
+                                await _oe3.advance_game(owner)
+                                if owner:
+                                    # The beat moved — reset the staleness clock AND clear the
+                                    # persisted escalation so the next stall (if any) starts gentle,
+                                    # mirroring the model-driven progression cleanup below.
+                                    _TURNS_SINCE_PROGRESS[owner] = 0
+                                    _ADVANCE_STALL_LEVEL.pop(owner, None)
+                                logger.info(f"[orwell] committed advanceGame silently ({_why}, "
+                                            f"phase={_phase}) round {round_num} user={owner}")
+                                return True
+                            except Exception as _e:
+                                logger.warning(f"[orwell] silent advanceGame failed ({_why}): {_e}")
+                                return False
+
+                        # If the player has already seen a scene this turn, NEVER narrate a second one.
+                        # Commit the outcome the model previewed/left undelivered (or pull the forced
+                        # advance) silently and end the turn — the board catches up to the scene shown,
+                        # and the next real beat is voiced on the player's next turn. Falls through to
+                        # the text-nudge path only when the silent commit could not run.
+                        if _emitted_visible:
+                            if await _commit_advance_silently(
+                                    "preview-commit" if _previewed_uncommitted
+                                    else "decision-deliver" if _decision_undelivered
+                                    else f"stall L{_level}"):
+                                break  # one scene shown, state committed — done this turn
+                            # else: silent commit failed — fall through to the re-prompt below.
+
                         # L39(b) SAFETY NET: the model has been nudged through every text rung across
                         # several turns and STILL won't advance (the "not a single beat advanced" stall).
                         # Pull the engine lever ourselves — one beat, deterministically resolved — then
                         # tell the model to re-read and voice the REAL result. Only for a plain stall (a
                         # previewed/undelivered outcome still gets its targeted text nudge, since the model
                         # is one call away). A pending player decision is returned unchanged by the engine.
+                        # (Only reached when NOTHING visible was shown yet — so this single narration is
+                        # the turn's first and only scene, no double-narration.)
                         if (_level >= _ADVANCE_FORCE_LEVEL
                                 and not _previewed_uncommitted and not _decision_undelivered):
-                            try:
-                                from src import orwell_engine as _oe3
-                                await _oe3.advance_game(owner)
-                                if owner:
-                                    _TURNS_SINCE_PROGRESS[owner] = 0  # the beat moved — reset the clock
+                            if await _commit_advance_silently(f"forced stall L{_level}"):
                                 logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
                                             f"round {round_num} user={owner}")
                                 messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
-                            except Exception as _e:
-                                # Fail-open: a forced advance that errors just falls through to the text
-                                # nudge below — never crash the turn over the safety net.
-                                logger.warning(f"[orwell] forced advanceGame failed: {_e}")
+                            # else: forced advance failed — fall through to the text nudge below.
                         # A previewed-but-uncommitted outcome (or an undelivered decision result) gets
                         # the FORCEFUL nudge straight away (it is not a gentle "lingering beat").
                         if _previewed_uncommitted:
