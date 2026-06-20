@@ -26,7 +26,7 @@ def _wire(monkeypatch, extraction_json, deals_made):
     async def fake_llm(*a, **k):
         return extraction_json
 
-    async def fake_make_deal(with_id, kind, terms, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
         deals_made.append({"with": with_id, "kind": kind, "terms": terms, "user": user})
         return {"ok": True}
 
@@ -110,7 +110,8 @@ def test_backfill_is_wired_into_the_finishing_block():
     js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "src", "agent_loop.py"), encoding="utf-8").read()
     assert "async def _auto_record_deal" in js
-    assert "_oe.make_deal(" in js
+    # 0065: routed through the CAS helper so the back-fill carries the compare-and-swap beatSeq token.
+    assert "_backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms, user=owner)" in js
     # gated on the per-turn cap + the cheap deal-language pre-filter over the WHOLE turn's narration
     # (a deal struck on a turn that also advanced a beat still counts — NOT gated on _progressed)
     assert "_want_deal = (_turn_deal_nudges < 1" in js

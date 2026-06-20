@@ -1626,6 +1626,51 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
     return out
 
 
+# ── 0065 Part A — CAS-guard the FE-issued BACK-FILL mutating calls ────────────────────────────── #
+#
+# The progression calls (advanceGame/submitDecision) already carry the compare-and-swap `beatSeq`
+# token. This wires the same token onto the FE-issued BACK-FILL mutations — `recordInteraction`,
+# `makeDeal`, `moveTo` (the `_auto_record_scene`/`_auto_record_deal`/`_auto_move_player` belts) — the
+# 0065 Part A tail that the A/B integration deferred as a "documented future refinement".
+#
+# These differ from the progression case and need CARE:
+#   • They fire MID-TURN, often AFTER other mutations (the pre-resolve advance, a model-driven record)
+#     already bumped beatSeq. So the SELF-409 risk is real: if we attached a stale last-seen token we
+#     would 409 our own back-fill on a perfectly normal turn. We defeat that by refreshing last-seen
+#     from EVERY response (`_refresh_beat_seq`) — every read and every mutation, including these ones.
+#   • They are LOW-value, re-derivable side effects (the scene/deal/move can be banked again next
+#     turn). They are NOT the double-apply case. So a stale 409 here is NOT reconciled-then-retried:
+#     it means the board genuinely moved under the back-fill, so we RECONCILE via the existing desync
+#     spine (`_handle_stale_beat` — re-ground next turn, count it) and SKIP the back-fill entirely.
+#     We never blind-retry into a stomp and never let the exception escape.
+async def _backfill_with_cas(owner, fn, *args, **kwargs):
+    """Issue an FE back-fill mutating engine call (`record_interaction`/`make_deal`/`move_to`) with the
+    0065 Part A compare-and-swap token attached, refreshing last-seen from its response.
+
+    Returns the engine response dict on success, or None when a stale 409 was reconciled-and-skipped
+    (the board moved under the back-fill — re-derivable next turn). Re-raises any NON-stale error so the
+    caller's own fail-closed `except` handles it exactly as today.
+
+    Why this is safe (the no-self-409 contract): last-seen is refreshed from EVERY engine response this
+    turn (reads AND mutations), so the token attached here is the freshest the FE has seen — a normal
+    turn never 409s itself. A stale 409 means a genuine concurrent move (another device / the 0064
+    queued-turn case), which we reconcile and skip rather than stomp."""
+    from routes import chat_helpers as _ch
+    try:
+        result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
+    except Exception as _e:
+        if _ch._is_stale_beat_error(_e):
+            # The board moved under this back-fill — reconcile (re-ground next turn, counted) and SKIP.
+            # Do NOT retry: the scene/deal/move is re-derivable on the next turn against the moved board.
+            await _ch._handle_stale_beat(owner, _e)
+            return None
+        raise  # a non-stale error → let the caller's fail-closed handler deal with it as before
+    # CRITICAL: refresh last-seen from the back-fill's own response so a LATER mutation this same turn
+    # (e.g. the pre-resolve advance) attaches the freshest token and never self-409s.
+    _ch._refresh_beat_seq(owner, result if isinstance(result, dict) else {})
+    return result
+
+
 # ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
 # Owner ledger (L21/L24 — "the single biggest immersion-killer"): turn to turn the world resets
 # because the model invents positions instead of grounding to the engine. The engine grounding
@@ -1708,7 +1753,10 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
         room = obj.get("room")
         if not isinstance(room, str) or room not in _HOUSE_ROOMS:
             return False  # null / no move / unknown room → nothing to do
-        await _oe.move_to(room, user=owner)
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response; a stale 409 (the
+        # board moved under us) is reconciled-and-skipped (None) — the move re-derives next turn.
+        if await _backfill_with_cas(owner, _oe.move_to, room, user=owner) is None:
+            return False
         logger.info(f"[orwell] auto-moved player → {room} user={owner}")
         return True
     except Exception as _e:
@@ -1834,8 +1882,13 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
         # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
         consequence = _validate_consequence(obj.get("consequence"), valid)
-        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind,
-                                     consequence=consequence, user=owner)
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the
+        # board moved under us mid-turn) is reconciled-and-skipped (None) — the scene re-derives next
+        # turn against the moved board; never a stomp, never an exception escapes.
+        if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
+                                    with_ids=ids, kind=kind, consequence=consequence,
+                                    user=owner) is None:
+            return False
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
                     f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
         return True
@@ -1924,7 +1977,11 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
             return False
         kind = obj.get("kind") if obj.get("kind") in _DEAL_KINDS else "safety"
         terms = (obj.get("terms") or "").strip()[:200] or "a mutual protection deal"
-        await _oe.make_deal(with_id, kind, terms, user=owner)
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the
+        # board moved under us mid-turn) is reconciled-and-skipped (None) — the deal re-derives next
+        # turn; never a stomp, never an exception escapes.
+        if await _backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms, user=owner) is None:
+            return False
         logger.info(f"[orwell] auto-recorded deal (kind={kind}, with={with_id}) user={owner}")
         return True
     except Exception as _e:

@@ -384,10 +384,14 @@ _DESYNC_REGROUND: dict = {}
 #      desync mechanism (`_DESYNC_REGROUND`), and surface nothing scary to the player.
 # Process-local (like `_LAST_BEAT_SIG`); a front-end restart simply re-seeds from the first read.
 #
-# Future refinement (documented, not built here): the lower-value mutating tools
-# (`recordInteraction`/`makeDeal`/`moveTo`/`surfaceInformationTo`) are left CAS-FREE in this slice —
-# attaching a token mid-turn to a sequence of those risks a self-409 for little gain (they are not the
-# queued-turn double-apply case). They keep the client param available; the wiring is deferred.
+# NOW WIRED (the 0065 Part A tail): the lower-value FE-issued mutating tools also carry the CAS token.
+# `recordInteraction` (the E22 fallback `ensure_turn_recorded` below; the `_auto_record_scene` belt),
+# `makeDeal` (`_auto_record_deal`) and `moveTo` (`_auto_move_player`) — all in `src/agent_loop.py` —
+# attach `expected_beat_seq=last_beat_seq(owner)` and refresh last-seen from EVERY response, so a
+# normal multi-call turn never self-409s. These are re-derivable back-fills, not the double-apply
+# case, so a stale 409 is reconciled-and-SKIPPED via `_handle_stale_beat` (never retried into a stomp,
+# never an escaping exception, counted for the ledger). `surfaceInformationTo` is only ever
+# model-driven through the tool seam (no FE-issued call exists), so there is nothing to wire for it.
 _LAST_BEAT_SEQ: dict = {}
 
 # Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
@@ -1266,7 +1270,19 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
     _fallback_in_flight.add(user)
     try:
         from src import orwell_engine
-        await orwell_engine.record_interaction(digest, user=user)
+        # 0065 Part A: this is an FE-ISSUED recordInteraction (the E22 fallback) — attach the current
+        # last-seen CAS token and refresh last-seen from its response. A stale 409 (the board moved
+        # under this fire-and-forget fallback) reconciles via the desync spine and SKIPS — the digest
+        # is re-derivable on the next under-called turn; never a stomp, never an exception escapes.
+        try:
+            _res = await orwell_engine.record_interaction(
+                digest, expected_beat_seq=last_beat_seq(user), user=user)
+        except Exception as _stale_e:
+            if _is_stale_beat_error(_stale_e):
+                await _handle_stale_beat(user, _stale_e)
+                return False
+            raise
+        _refresh_beat_seq(user, _res if isinstance(_res, dict) else {})
         return True
     except Exception as e:
         logger.warning("[orwell] E22 fallback recordInteraction failed for user=%s: %s", user, e)
