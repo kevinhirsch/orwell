@@ -1,0 +1,21 @@
+# Cloudflare Tunnel ingress for Orwell — feature 0067 / ADR 0007 (RECOMMENDED option).
+#
+# Only the player FRONT-END is exposed. The engine is engine-only and is intentionally NOT named
+# anywhere in this file, so it is structurally unreachable through the tunnel. Outbound-only: the
+# origin host opens zero inbound ports.
+#
+# Install: copy to /etc/cloudflared/config.yml, then `sudo cloudflared service install`.
+# Replace <TUNNEL-UUID> with your tunnel id (`cloudflared tunnel create orwell`) and set your
+# domain below. The front-end port must match ORWELL_PORT (installer default 8080).
+
+tunnel: <TUNNEL-UUID>
+credentials-file: /etc/cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  # The authenticated player UI — the ONLY public surface.
+  - hostname: hiorwell.com
+    service: http://127.0.0.1:8080
+  - hostname: www.hiorwell.com
+    service: http://127.0.0.1:8080
+  # Catch-all: everything else (including the engine, which is deliberately absent above) is refused.
+  - service: http_status:404

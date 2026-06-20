@@ -131,8 +131,11 @@ git config --system credential.helper \
 
 # run the two services (e.g. in two shells, or use the units in deploy/systemd/):
 npm start                                                # engine — MCP server
-( cd frontend && ./.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8080 )   # front-end UI
+( cd frontend && ./.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8080 )  # front-end UI (loopback)
 ```
+
+> The FE binds **loopback** by default (feature 0067). For a public deploy, keep it on loopback and
+> put a TLS-terminating proxy / tunnel in front — see **Public deployment (hiorwell.com)** below.
 
 Persistent setup: install the units from `deploy/systemd/` and `systemctl enable --now
 orwell-engine orwell-frontend`.
@@ -184,6 +187,64 @@ Updates never touch either data dir (non-degradation, feature 0007).
   token in constant time. Behind TLS, also set `SECURE_COOKIES=true`.
 - Each container is its own **sandbox** (one game namespace). The **Vault Wall** keeps secret game
   state off every player-facing surface — enforced structurally, not by prompt.
+
+---
+
+## Public deployment (hiorwell.com)
+
+Putting the player tier on the open internet — feature **0067** / ADR **0007**. Two halves: a
+**hardening floor** (below, mandatory) and an **exposure layer** (recommended: **Cloudflare Tunnel +
+Access**). Reference configs for every option live in **[`deploy/expose/`](../deploy/expose/)**.
+
+**The engine never goes public.** It stays bound to loopback (`ORWELL_ENGINE_HOST=127.0.0.1`) and is
+never named in any tunnel/proxy config — only the front-end is exposed, and it only ever serves
+Vault-free projections of the player's own game.
+
+### 1. Turn on the public profile (the FE refuses to boot otherwise)
+
+In `data/.env`:
+
+```ini
+ORWELL_PUBLIC=1                                  # arms the fail-closed boot guard
+AUTH_ENABLED=true                                # never disable on a public host
+LOCALHOST_BYPASS=false
+SECURE_COOKIES=true                              # session cookies get the Secure flag (you're behind TLS)
+ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com      # Host-header pin (TrustedHostMiddleware)
+ALLOWED_ORIGINS=https://hiorwell.com             # CORS
+# ORWELL_BIND_HOST stays 127.0.0.1 (the default) — the proxy/connector reaches the FE on loopback.
+```
+
+With `ORWELL_PUBLIC=1`, the FE **refuses to start** if auth is off, the localhost bypass is on,
+cookies aren't secure, or the Host isn't pinned — failing closed instead of serving the game in the
+clear. The login throttle keys on the **real client IP** from the trusted proxy header
+(`CF-Connecting-IP` / `X-Forwarded-For`), not the tunnel's `127.0.0.1`.
+
+### 2. Expose the front-end (recommended: Cloudflare Tunnel + Access)
+
+Outbound-only — the origin opens **zero inbound ports** — with free DDoS + WAF and an email-OTP
+login wall in front. On the LXC:
+
+```bash
+cloudflared tunnel login                         # pick the hiorwell.com zone
+cloudflared tunnel create orwell
+cloudflared tunnel route dns orwell hiorwell.com
+sudo cp deploy/expose/cloudflared/config.yml /etc/cloudflared/config.yml   # fill in <TUNNEL-UUID>
+sudo cloudflared service install && sudo systemctl enable --now cloudflared
+```
+
+Then in the Cloudflare dashboard: enable the **WAF Free Managed Ruleset** + **Bot Fight Mode**, and
+add an **Access** application over `hiorwell.com` (email-OTP allow-list). Self-hosted-control
+alternatives — **Pangolin on a VPS** (`deploy/expose/pangolin/`) and **plain VPS + Caddy**
+(`deploy/expose/caddy/`) — are in `deploy/expose/README.md`.
+
+### 3. Harden the host
+
+```bash
+sudo MODE=tunnel bash deploy/expose/host-hardening.sh   # ufw (deny inbound) + fail2ban + auto-updates
+```
+
+Under a tunnel, the only inbound port is SSH (key-only). Schedule `orwell-backup.sh` **off-host** and
+test a restore.
 
 ---
 

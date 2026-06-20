@@ -112,6 +112,15 @@ app.add_middleware(
     ],
 )
 
+# ========= TRUSTED HOST (Host-header pin) =========
+# Pins the Host header to ALLOWED_HOSTS (feature 0067 / ADR 0007). Defaults to ["*"]
+# (accept any Host) so dev / trusted-LAN deployments are unaffected; a public deploy sets
+# ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com to reject Host-header attacks. The
+# public-profile boot guard below refuses to start if this is left unset under ORWELL_PUBLIC.
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from core.middleware import allowed_hosts_from_env
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts_from_env(os.environ))
+
 # ========= SECURITY HEADERS MIDDLEWARE =========
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -165,6 +174,14 @@ AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() != "false"
 LOCALHOST_BYPASS = os.getenv("LOCALHOST_BYPASS", "false").lower() == "true"
 if LOCALHOST_BYPASS:
     logger.warning("LOCALHOST_BYPASS is enabled, loopback requests bypass authentication. Do not expose this instance to a network.")
+
+# Public-profile fail-closed guard (feature 0067 / ADR 0007): if ORWELL_PUBLIC is set
+# (an internet-facing deployment), refuse to boot with an unsafe security posture — auth
+# off, localhost-bypass on, insecure cookies, or an unpinned Host header — instead of
+# silently serving the game in the clear. No-op when ORWELL_PUBLIC is unset, so the
+# default / trusted-LAN start path is byte-identical.
+from core.middleware import assert_public_profile_safe
+assert_public_profile_safe(os.environ)
 
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
