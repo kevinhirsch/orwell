@@ -505,8 +505,9 @@ the **per-feature status index** in `docs/features/README.md` is reconciled agai
 **close-out ledger** in `docs/audits/2026-06-10-full-product-audit.md` is the authoritative
 open-items list): **0022** MVP-2 (the one deferred feature); 0010's container smoke on a real Proxmox host — which is also the
 real-host verification the A4 single-PAT deploy design still needs (do it during the
-private-repo flip); the **Postgres + pgvector** relational tier (SQLite + sqlite-vec shipped opt-in,
-#330; souls/vectors still default to in-memory + file); the MCP/JSON-RPC envelope is **now built** (an
+private-repo flip); the **Postgres + pgvector** relational tier — **reclassified under the MVP-002
+post-launch scale-out milestone** (SQLite + sqlite-vec shipped opt-in, #330; only matters past a
+single-host deploy — see the close-out ledger's MVP-002 section); the MCP/JSON-RPC envelope is **now built** (an
 additive `POST /:channel/rpc` doing `initialize`/`tools/list`/`tools/call` + notifications/batch
 over the same guardrails — `src/adapters/mcp/jsonRpc.ts`; only the SSE server-push stream is left,
 and it is **unneeded** here — the engine emits no server-initiated messages);
