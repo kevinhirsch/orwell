@@ -422,6 +422,9 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
   <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
+  <!-- BEGIN update-reset-combo lane button (self-contained; endpoint + logic live in routes/admin_update_reset_routes.py) -->
+  <button type="button" class="btn" id="update-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — pulls latest, rebuilds, THEN resets to first-run OOBE: wipes ALL accounts, chats, memory, MCP configs, uploads, and every game. Keeps your API keys / LLM config so you don't re-enter them. Requires typing RESET.">Update + Reset (OOBE, keep API keys)</button>
+  <!-- END update-reset-combo lane button -->
   <!-- BEGIN factory-oobe-reset lane button (self-contained; endpoint + logic live in routes/admin_reset_routes.py) -->
   <button type="button" class="btn" id="factory-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — wipe ALL accounts, chats, memory, MCP configs, uploads, and every game; return to first-run OOBE. Keeps your API-key/LLM config so you don't re-enter it. Requires typing RESET.">Factory Reset (OOBE)</button>
   <!-- END factory-oobe-reset lane button -->
@@ -593,6 +596,39 @@ async function fastForwardFinale() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
+// ── BEGIN update-reset-combo lane: destructive Update + Reset (pull+rebuild THEN OOBE; type RESET) ──
+// Pulls latest + rebuilds, THEN wipes everything to first-run OOBE — keeping the API-key/LLM config.
+// Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint in
+// routes/admin_update_reset_routes.py and rides the restart back to OOBE via waitForBack().
+async function updateReset() {
+  const typed = prompt(
+    "UPDATE + RESET (OOBE)\\n\\n" +
+    "First UPDATES: pulls latest, rebuilds the engine, refreshes front-end deps.\\n" +
+    "Then RESETS to OOBE: PERMANENTLY deletes ALL accounts, chats, memory, MCP server configs, " +
+    "uploads, every user setting, and every game — returning the app to first-run onboarding.\\n\\n" +
+    "PRESERVED: your API keys / LLM provider configuration (so you don't re-enter them).\\n" +
+    "If the update fails, the reset does NOT run and nothing is wiped.\\n\\n" +
+    "Type RESET to confirm:");
+  if (typed === null) return;                 // cancelled
+  if (typed.trim() !== "RESET") { updMsg.innerHTML = '<span class="warn">Update + Reset cancelled — you must type RESET exactly.</span>'; return; }
+  updMsg.textContent = "Starting update + reset…";
+  try {
+    const r = await fetch("/api/admin/update-reset", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.started) {
+      updMsg.innerHTML = '<span class="warn">Updating + resetting… returning to OOBE. The app is restarting, reconnecting…</span>';
+      waitForBack();
+    } else {
+      updMsg.innerHTML = '<span class="bad">Could not start the update + reset.</span>';
+    }
+  } catch (e) {
+    // A dropped connection here can simply mean the restart already began — start reconnecting.
+    updMsg.innerHTML = '<span class="warn">Update + reset requested (connection dropped — likely already restarting); reconnecting to OOBE…</span>';
+    waitForBack();
+  }
+}
+document.getElementById("update-reset").addEventListener("click", updateReset);
+// ── END update-reset-combo lane ──
 // ── BEGIN factory-oobe-reset lane: destructive OOBE reset (type RESET to confirm) ──
 // Wipes ALL accounts/chats/memory/MCP/settings + every game; keeps the API-key/LLM config.
 // Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint
