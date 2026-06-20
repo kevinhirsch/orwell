@@ -5,6 +5,10 @@ import type { EventStore } from "../ports/EventStore";
 import type { GameEvent } from "../domain/event";
 import { RelationshipModel } from "./relationships";
 import type { InteractionType, EdgeSignals } from "./relationships";
+import {
+  CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, scaleImpact,
+  type ConsequenceDirection,
+} from "./relationshipConstants";
 import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 
@@ -21,6 +25,31 @@ import { SeededRandom } from "../adapters/random/SeededRandom";
  * 0001) — the player sees later behavior, never the ledger. The ENGINE owns the magnitude
  * (anti-sycophancy); a caller may PROPOSE the interaction's nature (`kind`).
  */
+/**
+ * A per-edge consequence PROPOSAL (ADR 0005 — the generative path). The caller/LLM reads the scene
+ * and proposes WHICH directed edge moves, in WHICH direction, with what RELATIVE emphasis. The engine
+ * owns the AMOUNT (it maps `direction`→signal+sign and `emphasis`→a bounded multiplier of its OWN
+ * base) — so a proposal can never inflate how far a hidden number moves (anti-sycophancy #3).
+ */
+export interface EdgeConsequence {
+  /** Whose hidden opinion of the initiator moves. */
+  toward: EntityId;
+  /** Which signal(s) move and their sign — a member of the closed `EdgeSignals` space. */
+  direction: ConsequenceDirection;
+  /** RELATIVE weight only (NOT a magnitude). */
+  emphasis?: "slight" | "notable" | "strong";
+}
+
+/**
+ * The generative-consequence descriptor (ADR 0005). Open-set interpretation (which edge, which
+ * direction, why) rides here + the free-text `content`; the magnitude stays engine-owned. The
+ * `rationale` is RECORDED (open-set content) but NEVER scored into any magnitude.
+ */
+export interface ConsequenceDescriptor {
+  edges?: EdgeConsequence[];
+  rationale?: string;
+}
+
 export interface Happening {
   initiator: EntityId;
   witnessSet: EntityId[];
@@ -29,6 +58,12 @@ export interface Happening {
   kind?: InteractionType;
   /** Whose hidden opinion of the initiator moves (default: the other witnesses). */
   toward?: EntityId[];
+  /**
+   * The OPTIONAL generative-consequence descriptor (ADR 0005). When present it REFINES the
+   * partner-edge targeting/direction; `kind` stays the floor (it may still seed the base magnitude).
+   * Absent ⇒ the fold is byte-identical to the `kind`-only path.
+   */
+  consequence?: ConsequenceDescriptor;
   /** Event kind for the record (default "conversation"). */
   type?: string;
 }
@@ -70,6 +105,45 @@ export function foldHiddenImpact(
   }
 }
 
+/**
+ * The GENERATIVE-consequence fold (ADR 0005 — "split authority by openness"). Where `foldHiddenImpact`
+ * collapses every social scene onto ONE global 7-way `kind` magnitude, this lets the caller/LLM propose
+ * a PER-EDGE shape — which directed signal moves, in which direction, with what relative emphasis —
+ * read off the specific scene. The engine still OWNS the amount (anti-sycophancy #3): the caller's
+ * `direction` only selects which engine-owned base impact applies, and `emphasis` only picks a bounded,
+ * clamped multiplier of it; no raw number ever crosses from the caller. Folds run through the SAME
+ * proven update rule (`applyImpactDirected` → disposition × jitter × clamp) as every other fold.
+ *
+ * Important subtlety (ADR 0005): the relationship SIGNAL space (trust/affinity/threat/alignment) is
+ * legitimately a small CLOSED, finite set — `direction` names a member of it, and that is fine. What
+ * stays OPEN is the *interpretation* of the scene, which lives in the free-text `content` + the
+ * recorded `rationale`, never collapsed. The generative win is the per-edge, scene-chosen
+ * direction/targeting/emphasis REPLACING the single global `kind` — not a new closed enum by the back
+ * door (these directions are just the existing edge signals, exposed).
+ *
+ * Returns the set of `toward` entities whose PARTNER edge the descriptor moved, so the caller can run
+ * its own bystander pass on the witnesses the descriptor did NOT name (the partner/bystander split
+ * stays the caller's, exactly as in the `kind`-only path). Respects the per-edge `cap` budget.
+ */
+export function foldGenerativeConsequence(
+  rel: RelationshipModel,
+  rng: RandomnessSource,
+  initiator: EntityId,
+  edges: readonly EdgeConsequence[],
+  spend: (toward: EntityId) => boolean = () => true,
+): Set<EntityId> {
+  const moved = new Set<EntityId>();
+  for (const e of edges) {
+    if (e.toward === initiator) continue; // an action never folds onto its own initiator
+    if (!spend(e.toward)) continue; // the per-beat-per-edge budget (E21) gates the descriptor too
+    const base = CONSEQUENCE_DIRECTION_IMPACTS[e.direction];
+    const factor = CONSEQUENCE_EMPHASIS[e.emphasis ?? "notable"]; // RELATIVE weight → engine multiplier
+    rel.applyImpactDirected(e.toward, initiator, scaleImpact(base, factor), rng);
+    moved.add(e.toward);
+  }
+  return moved;
+}
+
 export class ConsequenceEngine {
   private seq = 0;
   private tick = 0;
@@ -94,7 +168,21 @@ export class ConsequenceEngine {
       initiator: h.initiator, witnessSet: h.witnessSet,
       hidden: !h.witnessSet.includes(PLAYER), content: h.content,
     });
-    if (h.kind) foldHiddenImpact(this.rel, this.rng, h.initiator, h.witnessSet, h.kind, h.toward);
+    // The generative path (ADR 0005): a supplied descriptor refines the PARTNER-edge targeting/
+    // direction (the engine still owns the amount). The named edges take the per-edge fold; any
+    // `kind` then runs the bystander pass over the witnesses the descriptor did NOT name, so the
+    // tag stays the floor. With NO descriptor, this is byte-identical to the prior `kind`-only path.
+    const named = h.consequence?.edges?.length
+      ? foldGenerativeConsequence(this.rel, this.rng, h.initiator, h.consequence.edges)
+      : null;
+    if (h.kind) {
+      if (named) {
+        const bystanders = h.witnessSet.filter((w) => w !== h.initiator && !named.has(w));
+        foldHiddenImpact(this.rel, this.rng, h.initiator, h.witnessSet, h.kind, [], undefined, bystanders);
+      } else {
+        foldHiddenImpact(this.rel, this.rng, h.initiator, h.witnessSet, h.kind, h.toward);
+      }
+    }
     return { eventId };
   }
 

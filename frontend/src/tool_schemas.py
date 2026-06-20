@@ -1205,7 +1205,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "recordInteraction",
-            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` whenever the scene shifts a relationship — that is what makes the engine fold the HIDDEN consequence into how the houseguests feel about the player (you never see the magnitude; the engine decides it).",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` for the simple case — one coarse direction for the whole scene. Use `consequence` when one scene affects specific houseguests DIFFERENTLY (e.g. it warms one and threatens another): you propose the shape per houseguest, the engine still owns the magnitude (you never see the numbers).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1214,7 +1214,35 @@ FUNCTION_TOOL_SCHEMAS = [
                     "kind": {
                         "type": "string",
                         "enum": ["bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"],
-                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude).",
+                        "description": "The nature of the interaction. Set this when the scene should move a relationship — the engine folds the hidden trust/affinity/threat impact (you propose the kind, the engine owns the magnitude). This is the floor/default.",
+                    },
+                    "consequence": {
+                        "type": "object",
+                        "description": "Optional richer consequence shape for when a single scene moves specific houseguests in DIFFERENT directions. You propose which houseguests' feelings move, which way, and the RELATIVE emphasis; the engine owns the magnitude.",
+                        "properties": {
+                            "edges": {
+                                "type": "array",
+                                "description": "Per-houseguest directed shifts this scene should cause.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "toward": {"type": "string", "description": "The houseguest id whose feelings move (same id space as withIds, e.g. 'npc:3')."},
+                                        "direction": {
+                                            "type": "string",
+                                            "enum": ["warmer", "cooler", "more-trust", "less-trust", "more-threatened", "less-threatened", "more-aligned", "less-aligned"],
+                                            "description": "Which way that houseguest's feeling moves.",
+                                        },
+                                        "emphasis": {
+                                            "type": "string",
+                                            "enum": ["slight", "notable", "strong"],
+                                            "description": "Optional RELATIVE weight only — never an absolute amount; the engine sets the magnitude.",
+                                        },
+                                    },
+                                    "required": ["toward", "direction"],
+                                },
+                            },
+                            "rationale": {"type": "string", "description": "Optional free text — why these shifts, grounded in the scene."},
+                        },
                     },
                 },
                 "required": ["content"],

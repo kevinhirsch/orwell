@@ -331,15 +331,20 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
-    knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023)."""
+    knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
+    an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
+    houseguests' feelings move, in which direction, with what relative emphasis — the engine still
+    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path."""
     witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
     if "player" not in witness:
         witness.append("player")
     req: dict = {"initiator": initiator, "witnessSet": witness, "content": content}
     if kind:
         req["kind"] = kind
+    if consequence:
+        req["consequence"] = consequence
     return await _call("recordInteraction", req, user=user)
 
 

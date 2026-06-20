@@ -306,6 +306,10 @@ _CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
 # which we don't police here — the eviction claim does that).
 _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
+# Phases where "wins HOH" / "the new HOH" reads as a COMMITTED crown (vs. mid-week reflection or
+# flavor). The new-HOH claim is scoped to these the way the tally claim is scoped to the finale —
+# so an HOH-flavored line outside the HOH beat is never rail-corrected (ADR 0005 principle #1).
+_HOH_PHASES = ("hoh",)
 
 
 def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
@@ -325,7 +329,12 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     if _CLAIM_EVICTED_RE.search(text) and after.get("evicted") == before.get("evicted"):
         desync = "an EVICTION (a houseguest leaving the house)"
     # (2) A season winner / crowning was narrated, but the game isn't finished → premature crown.
-    elif _CLAIM_WINNER_RE.search(text) and not after.get("finished"):
+    #     Scoped to FINALE phases: mid-season "crowned the winner" language is necessarily
+    #     hypothetical flavor ("you could be crowned the winner someday"), never a committed
+    #     outcome — policing it elsewhere would rail-correct creative prose (ADR 0005 principle #1).
+    elif (_CLAIM_WINNER_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
+          and not after.get("finished")):
         desync = "the SEASON WINNER being crowned"
     # (3) A finale vote TALLY was narrated, but the game isn't finished → narrated the count
     #     before the engine revealed all the jury votes.
@@ -335,7 +344,11 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
         desync = "a FINAL VOTE TALLY (the jury count)"
     # (4) A new HOH was narrated, but the HOH id didn't change → no new reign was committed.
     #     `after.hoh` must equal `before.hoh` AND not be a fresh crown (before was empty).
+    #     Scoped to HOH phases (like the tally branch): outside the HOH beat, "the new HOH…" /
+    #     "wins HOH" reads as reflection or flavor, not a committed crown — policing it elsewhere
+    #     would rail-correct creative prose (ADR 0005 principle #1).
     elif (_CLAIM_NEW_HOH_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_HOH_PHASES)
           and after.get("hoh") == before.get("hoh")
           and not (before.get("hoh") is None and after.get("hoh") is not None)):
         desync = "a NEW HEAD OF HOUSEHOLD being crowned"

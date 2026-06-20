@@ -164,6 +164,12 @@ describe("E31 — malformed tool args are deliberate 400s naming the field, neve
     ["surfaceInformationTo", { entity: "player", fact: {}, pathway: "told" }, "fact.content"],
     ["diaryRoom", {}, "entry"],
     ["runCompetition", { participantIds: "everyone" }, "participantIds"],
+    // 0005: the generative-consequence descriptor's shape guard — a malformed descriptor is a 400
+    // naming the offending field, not a 500 dying deep in the fold (the R6 class).
+    ["recordInteraction", { initiator: "player", witnessSet: ["player"], content: "x", consequence: "warmer" }, "consequence"],
+    ["recordInteraction", { initiator: "player", witnessSet: ["player"], content: "x", consequence: { edges: "warmer" } }, "consequence.edges"],
+    ["recordInteraction", { initiator: "player", witnessSet: ["player"], content: "x", consequence: { edges: [{ direction: "warmer" }] } }, "consequence.edges[].toward"],
+    ["recordInteraction", { initiator: "player", witnessSet: ["player"], content: "x", consequence: { edges: [{ toward: "npc:1" }] } }, "consequence.edges[].direction"],
   ] as Array<[string, Record<string, unknown>, string]>)(
     "%s with bad args is a 400 naming %s",
     async (name, args, field) => {
