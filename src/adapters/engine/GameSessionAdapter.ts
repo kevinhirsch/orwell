@@ -68,6 +68,7 @@ import {
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
+import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
@@ -237,6 +238,18 @@ export class GameSessionAdapter implements GameSession {
    * input. Null pre-game / when no snapshot was captured (the §8 fail-soft skip).
    */
   private worldSnapshot: WorldSnapshot | null = null;
+  /**
+   * The PRODUCER persona's seed (producer-persona feature). The producer is a REAL generated
+   * character — as deep a persona as any houseguest, built by the same `CharacterFactory` machinery —
+   * but OFF-CAMERA: no headshot, never one of the 16, never in the roster/portraits/whereabouts. The
+   * casting interview voices it CONSISTENTLY. It must be stable BEFORE the season starts (the interview
+   * is pre-game) AND through the game, so its seed is established LAZILY the first time it's needed
+   * (pre-game) via real entropy, PERSISTED in the snapshot, and reused at `createCharacter`. Same seed
+   * → same producer (reproducible across turns and a restart). Null until first established.
+   */
+  private producerSeed: number | null = null;
+  /** Memoized producer for `producerSeed` (rebuilt on restore / when the seed is first set). */
+  private producerCache: Producer | null = null;
 
   /**
    * The live relationship model drives NPC decisions (threat/trust). The registry
@@ -851,6 +864,9 @@ export class GameSessionAdapter implements GameSession {
       // movement trajectory stays reproducible across a restart (absent ⇒ 0).
       ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
+      // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
+      // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
+      ...(this.producerSeed !== null ? { producerSeed: this.producerSeed } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // 0062 — the FROZEN move-in zeitgeist snapshot persists so it is RECALLED (never re-searched) all
       // season and survives a restart byte-identical (§3/§9). Outward-safe public flavor (§6).
@@ -955,6 +971,12 @@ export class GameSessionAdapter implements GameSession {
     // L21/L24: restore the dedicated movement stream's tick counter (absent on older saves ⇒ 0).
     this.presenceTickCount = core.presenceTickCount ?? 0;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
+    // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
+    // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates
+    // it, fall back to the season seed (the producer becomes the season's producer, exactly as at cast
+    // time). A fresh pre-interview session restores none and re-mints lazily on first need.
+    this.producerSeed = core.producerSeed ?? core.seed ?? null;
+    this.producerCache = null; // rebuilt from the (possibly new) seed on next read
     // 0051: restore the per-season portrait style anchor. On a legacy save that predates it, re-seed
     // from the game seed (so the look stays stable for a resumed game), or fall back to the first
     // variant when there's no seed either — either way the season looks like itself.
@@ -1429,6 +1451,12 @@ export class GameSessionAdapter implements GameSession {
     // first-class for tests and replays.
     const seed = effReq.seed ?? entropySeed();
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
+    // The producer persona (producer-persona feature): keep the producer the player has been interviewing
+    // with if one was already established pre-game; otherwise bind it to the season seed so a direct
+    // `createCharacter` (no prior interview, e.g. tests) still has a deterministic, reproducible producer.
+    // Either way the off-camera producer is NEVER one of the 16 — it is not added to the house below.
+    if (this.producerSeed === null) this.producerSeed = seed;
+    this.producerCache = null;
     // 0051: draw ONE per-season portrait style anchor, seeded off the game seed — same seed always
     // draws the same anchor, so the house looks like itself across restarts and through the season.
     this.portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
@@ -2848,7 +2876,43 @@ export class GameSessionAdapter implements GameSession {
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
     const view = this.view();
     const moment = req.moment ?? view.moment;
-    return { moment, systemPrompt: buildSystemPrompt(moment, view, this.storyFacts(moment), this.worldContext(moment)) };
+    return {
+      moment,
+      systemPrompt: buildSystemPrompt(
+        moment, view, this.storyFacts(moment), this.worldContext(moment), this.producerVoice(moment),
+      ),
+    };
+  }
+
+  /**
+   * The producer persona for this season — a REAL generated character (as deep as any houseguest, built
+   * by the same `CharacterFactory` machinery) but OFF-CAMERA: no headshot, not one of the 16, never in
+   * the roster/portraits/whereabouts. Seeded for reproducibility. The interview runs PRE-GAME (before
+   * there is a season seed), so the producer's seed is established LAZILY here the first time it's needed,
+   * with real entropy, then PERSISTED — so the same producer is voiced every turn of the interview and
+   * survives a restart, and `createCharacter` reuses the very same seed into the season. Cached.
+   */
+  private producer(): Producer {
+    if (this.producerSeed === null) {
+      // First need (pre-game): mint a stable seed and persist it, so the SAME producer is voiced for the
+      // whole interview and survives a restart. (Once a game starts, the season seed is used — see below.)
+      this.producerSeed = entropySeed();
+      this.producerCache = null;
+      this.persist();
+    }
+    if (!this.producerCache) this.producerCache = producerForSeed(this.producerSeed);
+    return this.producerCache;
+  }
+
+  /**
+   * The producer-persona block woven into the casting-interview prompt (facts to voice, ADR 0003): the
+   * model voices THIS specific, seeded producer consistently. Present ONLY on the pre-game casting beat
+   * (`character-creation`); every other moment is a houseguest/host beat with no producer voice. Vault-free
+   * by construction — the producer carries only PUBLIC voice flavor, never a hidden number or secret.
+   */
+  private producerVoice(moment: string): string | undefined {
+    if (moment !== "character-creation") return undefined;
+    return renderProducerVoice(this.producer());
   }
 
   /**
