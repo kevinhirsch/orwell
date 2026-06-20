@@ -38,6 +38,26 @@
     return Number.isFinite(v) && v > BOTTOM_BASE ? v + 4 : BOTTOM_BASE;
   }
 
+  // Game panels are viewport-fixed, but the persistent left rail (#sidebar) also occupies the
+  // left edge — so a "top-left" slot pinned at the bare 14px safe-margin lands ON TOP of the
+  // sidebar's controls and blocks them (S6-2: the cast window covered New Chat / Search / sort).
+  // Inset left-anchored slots past the sidebar's LIVE right edge instead of hardcoding 240px, so
+  // it tracks a resized/collapsed rail; fall back to 14 when there's no docked rail (the slot
+  // engine already stands down under 768px, where the sidebar is a drawer, so this only runs wide).
+  function leftBase() {
+    try {
+      const sb = document.getElementById("sidebar");
+      if (sb) {
+        const r = sb.getBoundingClientRect();
+        const shown = r.width > 0 && getComputedStyle(sb).display !== "none";
+        // Only inset when the rail actually hugs the left edge (a docked rail, not a collapsed
+        // 0-width / off-edge state): clear its right edge plus the standard gap.
+        if (shown && r.left <= 1 && r.right > 14) return Math.round(r.right) + GAP;
+      }
+    } catch (_) {}
+    return 14;
+  }
+
   // slot → [{ el, key, draggable }]
   const slots = { "top-right": [], "top-left": [], "bottom-center": [], "bottom-right": [] };
   let _user = "";
@@ -150,7 +170,7 @@
       setStyle(el, "position", "fixed");
       // Derive the slot's anchor coordinates numerically — no intermediate writes.
       const baseLeft = name.endsWith("right") ? (window.innerWidth - 14 - w)
-        : name.endsWith("left") ? 14
+        : name.endsWith("left") ? leftBase()
         : (window.innerWidth - w) / 2;
       const baseTop = top !== null ? top : (window.innerHeight - bottom - h);
       const off = entry.key ? loadOffset(entry.key) : null;
