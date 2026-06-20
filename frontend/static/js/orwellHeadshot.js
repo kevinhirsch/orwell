@@ -222,6 +222,13 @@
       const lib = libraryHtml();
 
       if (status.finalized) {
+        // Auto-hand-off: if the gate ever renders an ALREADY-finalized headshot — set on this
+        // device, set on another device/tab, or already set on a reload — dismiss the picker and
+        // open the game, instead of leaving the "set" card stuck open over the chat. (A fresh set
+        // via finalizeSelected/selectFromLibrary already hands off; this also covers the
+        // mount/refresh-with-already-set path, which is what left it stuck.) In Settings → Account
+        // no onFinalized is wired, so handoff() is a no-op and the set card stays put to manage it.
+        if (handoff()) return;
         body.innerHTML = lib + `
           <div class="hs-row">
             <div class="hs-preview" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
