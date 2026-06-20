@@ -455,6 +455,64 @@ export interface PublicGameStatus {
   pending: PendingDecisionView | null;
 }
 
+/**
+ * A player-visible event the delta feed (0065 Part E) emits — the SAME Vault-free projection the
+ * player surface reads (ids→names scrubbed; never hidden/Vault content). `id`/`ts` let the FE de-dupe
+ * against what it already showed; `content` is the player-facing prose.
+ */
+export interface DeltaEventView {
+  id: string;
+  ts: number;
+  type: string;
+  content: string;
+}
+
+/**
+ * The `beatSeq`-keyed delta state feed (0065 Part E) — given the caller's last-seen `beatSeq`, exactly
+ * WHAT CHANGED since: the player-visible events appended, the ceremony field transitions, and any
+ * finished/winner flip. The FE weaves a tight "since your last turn: …" line into the moment context
+ * so staleness is self-evident, and the engine's per-turn export stops growing with season length (the
+ * delta is O(Δ) — it materializes only the events after the token, never the whole log; the R3 cure).
+ *
+ * VAULT-FREE BY CONSTRUCTION: `events` reuse the player's witness-filtered visible projection (no hidden
+ * content), `board`/`changes` are the same ceremony-level public facts `gameStatus` exposes, and a
+ * counter carries no Vault content. CROSS-USER ISOLATED: it reads only this sandbox's session.
+ *
+ * Two non-delta signals the FE must honor instead of guessing:
+ *  - `fullRefresh` — the token is UNKNOWN (ahead of the current counter, negative, or older than the
+ *    retained history window — e.g. after a restart, which resets the window). The FE should fetch the
+ *    full projection (`getGameState`) rather than trust an incomplete delta. `events` is then empty.
+ *  - an EMPTY delta (`events: []`, `changes` absent, `finishedChanged` false) — `sinceBeatSeq` equals
+ *    the current `beatSeq`: nothing has committed since ("since last turn: nothing committed").
+ */
+export interface StateDeltaView {
+  /** The current committed beat counter (what the caller should re-ground its last-seen token to). */
+  beatSeq: number;
+  /** True iff the token was unknown/too-old: fetch the full projection instead of trusting this delta. */
+  fullRefresh: boolean;
+  /** The player-visible events appended since the token, in order (empty on full-refresh / no change). */
+  events: DeltaEventView[];
+  /**
+   * The ceremony field transitions since the token — only the fields that actually CHANGED appear
+   * (so an unchanged field is absent, not echoed). Present only when at least one changed; absent on a
+   * full refresh or an empty delta. Vault-free (the same ceremony-level public facts as `board`).
+   */
+  changes?: {
+    week?: { from: number; to: number };
+    phase?: { from: string; to: string };
+    hoh?: { from: NamedRef | null; to: NamedRef | null };
+    nominees?: { from: NamedRef[]; to: NamedRef[] };
+    vetoHolder?: { from: NamedRef | null; to: NamedRef | null };
+    vetoUsed?: { from: boolean; to: boolean };
+  };
+  /** True iff the season's finished/winner flipped since the token (the terminal transition). */
+  finishedChanged?: boolean;
+  /** The winner now (name only), if the season is over; null otherwise. */
+  winner?: NamedRef | null;
+  /** The CURRENT Vault-free board (ceremony-level public status) — the freshest ground to re-anchor on. */
+  board: PublicGameStatus;
+}
+
 /** A named houseguest reference for decisions/options (Vault-free — id + name only). */
 export interface NamedRef {
   id: EntityId;
@@ -881,6 +939,15 @@ export interface GameSession {
   gameStatus(): PublicGameStatus;
   /** The current Vault-free game state (phase, the player's card, the house roster). */
   getGameState(): GameStateView;
+  /**
+   * The `beatSeq`-keyed delta state feed (0065 Part E): given the caller's last-seen `beatSeq`, return
+   * exactly WHAT CHANGED since (player-visible events appended, ceremony field diffs, finished/winner
+   * flip). Vault-free by construction (reuses the player's witness-filtered visible projection) and
+   * O(Δ) (materializes only the events after the token — the R3 latency cure). An unknown/too-old token
+   * signals `fullRefresh` instead of guessing a partial delta; `sinceBeatSeq === current` ⇒ an empty
+   * delta. A pure READ (never mutates / commits); safe to poll.
+   */
+  stateDelta(sinceBeatSeq: number): StateDeltaView;
   /** The managed system prompt to inject for the current (or requested) moment. */
   getMomentPrompt(req: MomentPromptReq): MomentPromptView;
   /**

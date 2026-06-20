@@ -2,6 +2,7 @@ import type { EventStore } from "../ports/EventStore";
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { EntityId } from "../domain/ids";
 import type { GameEvent } from "../domain/event";
+import { classify } from "../domain/event";
 import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
 import { makeForPlayerScrub } from "../domain/humanize";
 
@@ -67,6 +68,22 @@ export class VisibleStateService {
         .knownTo(entity)
         .map((k) => ({ ...k, content: scrub(k.content) })),
     };
+  }
+
+  /**
+   * 0065 Part E — the player-visible events appended AT OR AFTER `fromIndex` in the append-only log, in
+   * order: the O(Δ) delta tail. It slices the immutable log tail FIRST (`eventsSince` — copies only
+   * Δ elements) and then applies the SAME witness filter + roster scrub `getVisibleStateFor` uses — so
+   * the result is Vault-free by construction (hidden events the entity never witnessed are dropped) and
+   * the work is bounded by the number of events since `fromIndex`, never the whole log. `fromIndex` is
+   * an event-log length (a count), clamped to `[0, total]`.
+   */
+  visibleEventsSince(entity: EntityId, fromIndex: number): GameEvent[] {
+    const scrub = makeForPlayerScrub(this.roster());
+    return this.events
+      .eventsSince(Math.max(0, fromIndex))
+      .filter((e) => classify(e, entity) === "VISIBLE")
+      .map((e) => ({ ...e, content: scrub(e.content) }));
   }
 
   /**

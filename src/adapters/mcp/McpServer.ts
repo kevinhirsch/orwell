@@ -155,6 +155,12 @@ export class McpServer {
         return this.deps.session.getGameState();
       case "gameStatus":
         return this.deps.session.gameStatus();
+      case "stateDelta":
+        // 0065 Part E — the beatSeq-keyed delta read. `sinceBeatSeq` is the caller's last-seen token;
+        // an absent/non-number value reads as 0 (the engine then signals full-refresh when it's stale).
+        return this.deps.session.stateDelta(
+          typeof args["sinceBeatSeq"] === "number" ? args["sinceBeatSeq"] : 0,
+        );
       case "playerTagline":
         return this.deps.session.playerTagline();
       case "finaleView":

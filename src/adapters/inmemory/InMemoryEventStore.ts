@@ -69,4 +69,16 @@ export class InMemoryEventStore implements EventStore {
   count(): number {
     return this.events.length;
   }
+
+  /**
+   * 0065 Part E — the O(Δ) tail: the events appended at or after `fromIndex`, in order. `Array.slice(from)`
+   * copies ONLY `length - from` elements, so the delta state feed's per-turn work tracks the number of NEW
+   * events, never the whole, ever-growing log (the R3 latency cure). The log is insertion-ordered and
+   * append-only (record/restoreRecord only push), so the tail is exactly what was recorded since the
+   * caller last observed `fromIndex` events. `fromIndex` is clamped into `[0, length]`.
+   */
+  eventsSince(fromIndex: number): GameEvent[] {
+    const from = Math.max(0, Math.min(fromIndex, this.events.length));
+    return this.events.slice(from);
+  }
 }

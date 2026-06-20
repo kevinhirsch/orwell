@@ -12,6 +12,15 @@ export interface EventStore {
   record(event: GameEvent): void;
   query(filter?: EventQuery): GameEvent[];
   /**
+   * The events appended AT OR AFTER index `fromIndex` in the append-only log, in order — the O(Δ) tail
+   * (0065 Part E). It copies ONLY `count() - fromIndex` elements (an array slice from an offset), never
+   * the whole log, so the delta state feed's per-turn work tracks the number of new events, not the
+   * total accumulated history (the R3 latency cure). `fromIndex` is clamped to `[0, count()]`; a value at
+   * or beyond `count()` returns an empty array. The log is insertion-ordered, so the tail is exactly the
+   * events recorded since the caller last observed `fromIndex` events.
+   */
+  eventsSince(fromIndex: number): GameEvent[];
+  /**
    * The number of recorded events — O(1). Many hot-path call sites only need the count (to mint a
    * monotonic id/ts, or to report `eventCount`); `query().length` allocated a full filtered array
    * copy of the whole log every time, which is O(events) and quadratic over a season. `count()` is

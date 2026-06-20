@@ -100,6 +100,18 @@ function buildUserSandbox(user = "default"): UserSandbox {
     events: () => engine.events.query(),
     hidden: () => engine.vault.readHidden(),
   });
+  // 0065 Part E — the delta feed's O(Δ) providers. `count` anchors each beat checkpoint at commit time
+  // (O(1) log length). `visibleEventsSince` slices the immutable log TAIL from the checkpoint's count and
+  // runs the SAME witness-filter + roster scrub the player surface uses — so the delta is Vault-free by
+  // construction (hidden events the player never witnessed are dropped) and never re-scans the whole log.
+  // The shape mapped here is the player-facing `DeltaEventView` (id/ts/type/content), not the raw event.
+  session.setDeltaProviders({
+    count: () => engine.events.count(),
+    visibleEventsSince: (fromCount) =>
+      outward.visible.visibleEventsSince(PLAYER, fromCount).map((e) => ({
+        id: e.id, ts: e.ts, type: e.type as string, content: e.content,
+      })),
+  });
   // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
   // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
   session.setOnSeal((reserve) => {
@@ -338,6 +350,10 @@ function importSnapshot(sb: UserSandbox, snap: SessionSnapshot): void {
   sb.engine.relationships.load(snap.relationships);
   if (snap.knowledge) sb.engine.knowledge.load(snap.knowledge);
   for (const r of snap.vault ?? []) sb.engine.vault.writeHidden(r); // the producer's secrets resume sealed
+  // 0065 Part E — the events are now loaded: seed the delta ring's BASELINE at the resumed beatSeq so the
+  // first delta a resumed session serves (keyed on the resumed token) slices its tail instead of looping
+  // on full-refresh. (`restore` clears the ring; events arrive only above, after it.)
+  sb.session.seedDeltaBaseline();
 }
 
 export class GameSessionRegistry {

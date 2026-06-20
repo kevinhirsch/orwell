@@ -8,6 +8,7 @@ import type {
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
+  StateDeltaView, DeltaEventView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -51,6 +52,11 @@ const TAGLINE_INSTRUCTION =
 /** First line, trimmed, length-capped — a hero line is one short line. */
 function oneLine(s: string): string {
   return (s.split("\n")[0] ?? "").trim().slice(0, 120);
+}
+
+/** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
+function sameIds(a: readonly EntityId[], b: readonly EntityId[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 /** Reject empty/over-long output and the Echo stub's context dump (so we fall open to the template). */
 function isUsableTagline(s: string): boolean {
@@ -382,6 +388,48 @@ export class GameSessionAdapter implements GameSession {
    */
   bumpBeatSeq(): void {
     this.beatSeq++;
+    this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — seed the delta ring's BASELINE checkpoint at the CURRENT `beatSeq` (the resumed value),
+   * capturing the current event-log length + board. The registry calls this once after a resume finishes
+   * loading the events (`restore` clears the ring; the events arrive AFTER it), so the very FIRST delta a
+   * resumed session serves — keyed on the resumed `beatSeq` — can slice its tail instead of full-refreshing
+   * forever. A no-op if a checkpoint for the current beat already exists (a fresh game's first commit
+   * captured it). Vault-free (ids/counts only).
+   */
+  seedDeltaBaseline(): void {
+    if (!this.beatCheckpoints.has(this.beatSeq)) this.captureBeatCheckpoint();
+  }
+
+  /**
+   * 0065 Part E — snapshot the lightweight board state AT the new `beatSeq` so the delta feed can later
+   * slice the event tail (O(Δ)) and diff the ceremony WITHOUT re-deriving "what existed then". Called
+   * once per committed mutation (right after the counter bumps), the events for this commit are already
+   * recorded, so `count()` here is the event-log length AS OF this beat. Bounded to the last
+   * `DELTA_WINDOW` beats (the oldest checkpoint evicts) so a busy season's ring stays small; a token
+   * older than the retained window correctly full-refreshes. Vault-free (ids/counts only).
+   */
+  private captureBeatCheckpoint(): void {
+    const eventCount = this.deltaSource?.count() ?? this.record?.events().length ?? 0;
+    this.beatCheckpoints.set(this.beatSeq, {
+      eventCount,
+      week: this.week,
+      phase: this.phase,
+      ...(this.ceremony.hoh !== undefined ? { hoh: this.ceremony.hoh } : {}),
+      nominees: [...this.ceremony.nominees],
+      ...(this.ceremony.vetoHolder !== undefined ? { vetoHolder: this.ceremony.vetoHolder } : {}),
+      vetoUsed: this.ceremony.vetoUsed,
+      finished: !!this.live?.finished,
+      ...(this.live?.winner !== undefined ? { winner: this.live.winner } : {}),
+    });
+    // Evict the oldest beyond the window (insertion-ordered Map ⇒ the first key is the oldest).
+    while (this.beatCheckpoints.size > GameSessionAdapter.DELTA_WINDOW) {
+      const oldest = this.beatCheckpoints.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      this.beatCheckpoints.delete(oldest);
+    }
   }
 
   /**
@@ -578,6 +626,59 @@ export class GameSessionAdapter implements GameSession {
     hidden: () => ReadonlyArray<{ kind: string; content: string }>;
   }): void {
     this.record = p;
+  }
+
+  /**
+   * 0065 Part E — the delta feed's O(Δ) providers, wired by the registry. `count` is the O(1) event-log
+   * length (used to anchor each beat checkpoint at commit time). `visibleEventsSince(fromCount)` returns
+   * the PLAYER-VISIBLE events appended AT OR AFTER `fromCount` — the registry slices the immutable log
+   * tail (O(Δ)) and runs the SAME witness-filter + roster scrub the player surface uses, so the delta is
+   * Vault-free by construction and never re-scans the whole log. Absent on a standalone adapter (no
+   * registry) ⇒ the delta degrades to a full refresh (it cannot fetch a Vault-safe tail without them).
+   */
+  private deltaSource?: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  };
+
+  setDeltaProviders(p: {
+    count: () => number;
+    visibleEventsSince: (fromCount: number) => DeltaEventView[];
+  }): void {
+    this.deltaSource = p;
+  }
+
+  /**
+   * 0065 Part E — a per-turn beat checkpoint ring: `beatSeq → { eventCount, ceremony/board snapshot,
+   * finished/winner }` captured at each `bumpBeatSeq` (the single commit funnel). The delta looks up the
+   * checkpoint AT `sinceBeatSeq` to slice the event tail (O(Δ)) and diff the ceremony — so it never
+   * re-derives "what existed then" by scanning. Bounded (the last `DELTA_WINDOW` beats); a token older
+   * than the oldest retained checkpoint (or after a restart, which starts the ring empty) ⇒ a full
+   * refresh, never a guessed partial delta. NOT persisted — it is a process-local read accelerator; on a
+   * resume the FE's last-seen token resets too, so an unknown token correctly full-refreshes.
+   */
+  private readonly beatCheckpoints = new Map<number, {
+    eventCount: number;
+    week: number;
+    phase: string;
+    hoh?: EntityId;
+    nominees: EntityId[];
+    vetoHolder?: EntityId;
+    vetoUsed: boolean;
+    finished: boolean;
+    winner?: EntityId;
+  }>();
+  private static readonly DELTA_WINDOW = 64;
+
+  /**
+   * 0065 Part E — an OPTIONAL diagnostic seam (Vault-free, no behavior change): reports how many tail
+   * events the last `stateDelta` MATERIALIZED, so a complexity test can assert the work is bounded by Δ
+   * (never O(events)). Off by default; set only in tests. It carries a count, never any event content.
+   */
+  private deltaScanProbe?: (scanned: number) => void;
+
+  setDeltaScanProbe(fn: ((scanned: number) => void) | undefined): void {
+    this.deltaScanProbe = fn;
   }
 
   /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
@@ -1112,6 +1213,10 @@ export class GameSessionAdapter implements GameSession {
     // Part A's counter still guards a double-apply after the cache is gone).
     this.beatSeq = core.beatSeq ?? 0;
     this.idempotencyCache.clear();
+    // 0065 Part E — the delta ring is a process-local read accelerator (not persisted); a resume starts
+    // it empty, so the FE's pre-restart token (which also resets across a restart) correctly full-
+    // refreshes rather than slicing against a window that no longer holds its checkpoint.
+    this.beatCheckpoints.clear();
     this.house = core.house ? cloneSession(core.house) : null;
     this.week = core.week;
     this.phase = core.phase;
@@ -3202,6 +3307,72 @@ export class GameSessionAdapter implements GameSession {
 
   getGameState(): GameStateView {
     return this.view();
+  }
+
+  /**
+   * 0065 Part E — the `beatSeq`-keyed delta state feed. Given the caller's last-seen `beatSeq`, return
+   * exactly WHAT CHANGED since: the player-visible events appended, the ceremony field transitions, and
+   * any finished/winner flip — plus the freshest board to re-anchor on. A pure READ (no mutation).
+   *
+   * O(Δ): the per-beat checkpoint ring (`beatCheckpoints`) holds the event-log length + the board AS OF
+   * `sinceBeatSeq`, so the delta slices ONLY the event tail (`visibleEventsSince(eventCountThen)`) and
+   * diffs the ceremony against the captured snapshot — it never re-scans the whole log. VAULT-FREE: the
+   * event tail comes through the player's witness-filtered visible projection (no hidden content), and
+   * the board/changes are the same ceremony-level public facts `gameStatus` exposes.
+   *
+   * Full-refresh signal (never a guessed partial delta): the token is ahead of the current counter,
+   * negative, or older than the retained window (e.g. after a restart, which empties the ring). Empty
+   * delta: `sinceBeatSeq === current` — nothing committed since.
+   */
+  stateDelta(sinceBeatSeq: number): StateDeltaView {
+    const board = this.gameStatus();
+    const current = this.beatSeq;
+    const empty = (fullRefresh: boolean): StateDeltaView => ({ beatSeq: current, fullRefresh, events: [], board });
+
+    // Nothing committed since (the FE is already up to date) — an empty, non-refresh delta.
+    if (sinceBeatSeq === current) return empty(false);
+    // A token ahead of the current counter, or negative/malformed ⇒ full refresh (never guess forward).
+    if (sinceBeatSeq < 0 || sinceBeatSeq > current) return empty(true);
+    // A token older than the retained window (or after a restart, when the ring is empty) ⇒ full refresh.
+    const cp = this.beatCheckpoints.get(sinceBeatSeq);
+    if (!cp) return empty(true);
+
+    // O(Δ) event tail: only the player-visible events appended AT OR AFTER the checkpoint's event count.
+    // Without the registry-wired providers (a standalone adapter) we cannot fetch a Vault-safe tail, so
+    // we fall back to a full refresh rather than risk an unscrubbed/over-broad projection.
+    if (!this.deltaSource) return empty(true);
+    const events = this.deltaSource.visibleEventsSince(cp.eventCount);
+    this.deltaScanProbe?.(events.length); // diagnostic only — a count, never content (Part E perf guard)
+
+    // Ceremony field diffs (only the fields that actually moved appear). Compare the captured board AS OF
+    // `sinceBeatSeq` against the live ceremony — the same public ceremony-level facts `gameStatus` exposes.
+    const changes: NonNullable<StateDeltaView["changes"]> = {};
+    if (cp.week !== this.week) changes.week = { from: cp.week, to: this.week };
+    if (cp.phase !== this.phase) changes.phase = { from: cp.phase, to: this.phase };
+    if (cp.hoh !== this.ceremony.hoh) changes.hoh = { from: this.card(cp.hoh), to: this.card(this.ceremony.hoh) };
+    if (!sameIds(cp.nominees, this.ceremony.nominees)) {
+      changes.nominees = {
+        from: cp.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+        to: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
+      };
+    }
+    if (cp.vetoHolder !== this.ceremony.vetoHolder) {
+      changes.vetoHolder = { from: this.card(cp.vetoHolder), to: this.card(this.ceremony.vetoHolder) };
+    }
+    if (cp.vetoUsed !== this.ceremony.vetoUsed) changes.vetoUsed = { from: cp.vetoUsed, to: this.ceremony.vetoUsed };
+
+    const finishedNow = !!this.live?.finished;
+    const finishedChanged = cp.finished !== finishedNow || cp.winner !== this.live?.winner;
+    const hasChanges = Object.keys(changes).length > 0;
+    return {
+      beatSeq: current,
+      fullRefresh: false,
+      events,
+      ...(hasChanges ? { changes } : {}),
+      ...(finishedChanged ? { finishedChanged: true } : {}),
+      ...(finishedNow ? { winner: this.named(this.live?.winner) } : {}),
+      board,
+    };
   }
 
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
