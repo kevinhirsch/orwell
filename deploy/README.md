@@ -31,8 +31,12 @@ file every reset preserves) and wires a git **credential helper** that reads it 
 updates and resets never re-prompt and the token never lands in a remote URL or `.git/config`.
 
 ```bash
-# install — on the Proxmox host shell (THE one authenticated moment)
-GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+# install — on the Proxmox host shell (THE one authenticated moment).
+# EXPORT the token (in `VAR=x bash -c "$(curl …$VAR…)"` the substitution runs in the OUTER shell
+# before VAR= applies, so curl gets an EMPTY token → 404/401). Fetch via the contents API, not
+# raw.githubusercontent.com (which 404s for fine-grained PATs). Works with fine-grained OR classic.
+export GIT_TOKEN=github_pat_xxx
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 
 # update — host or inside the container: run the LOCAL checked-out copy (no GitHub fetch)
 bash /opt/orwell/deploy/orwell-update.sh
@@ -252,8 +256,9 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 
 ```bash
 # fully non-interactive example (the 4 vCPU / 8 GB baseline is the default — shown here explicitly)
-GIT_TOKEN=github_pat_xxx CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
-  bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)" --default
+export GIT_TOKEN=github_pat_xxx
+CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
+  bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")" --default
 ```
 
 ## Layout
