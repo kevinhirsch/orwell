@@ -342,6 +342,28 @@ if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   fi
 fi
 
+# ── 3c. Restore data-dir OWNERSHIP to the service user. This script needs root (to stop services
+#        and scrub /opt), so the rebuilt app.db + recreated dirs are now root-owned — and the
+#        hardened orwell-* services run UNPRIVILEGED, so they would fail to read/write their own
+#        store and the UI would "refuse to connect" until ownership is handed back. Root-only,
+#        best-effort; runs BEFORE the restart so the services boot able to write. Also re-homes
+#        data/ops so the non-root web tier can still drop the next trigger flag.
+if [[ "$DRY_RUN" -eq 0 && "$(id -u)" -eq 0 ]]; then
+  SVC_USER="${ORWELL_SERVICE_USER:-}"
+  [[ -n "$SVC_USER" ]] || SVC_USER="$(systemctl show -p User --value "$FRONTEND_SVC" 2>/dev/null || true)"
+  [[ -n "$SVC_USER" ]] || SVC_USER="$(systemctl show -p User --value "$ENGINE_SVC" 2>/dev/null || true)"
+  [[ -n "$SVC_USER" ]] || SVC_USER="orwell"
+  if id "$SVC_USER" >/dev/null 2>&1; then
+    SVC_GROUP="$(id -gn "$SVC_USER" 2>/dev/null || printf '%s' "$SVC_USER")"
+    msg "restoring data-dir ownership to ${SVC_USER}:${SVC_GROUP} (root-run scrub left files root-owned)"
+    for d in "$FE_DATA_DIR" "$ENGINE_SAVE_DIR" "$CONFIG_DIR"; do
+      [[ -d "$d" ]] && chown -R "$SVC_USER":"$SVC_GROUP" "$d" 2>/dev/null || true
+    done
+  else
+    warn "service user '${SVC_USER}' not found — skipping ownership restore (set ORWELL_SERVICE_USER)"
+  fi
+fi
+
 # ── 4. Restart so the app re-initialises a fresh DB (init_db re-creates every other table)
 #       and lands at OOBE — with the LLM already configured. ──────────────────────────────────
 ops_step 5 "restarting services"
