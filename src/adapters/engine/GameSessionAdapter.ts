@@ -686,8 +686,14 @@ export class GameSessionAdapter implements GameSession {
     const prev: DeepProfile = this.deepProfiles[target.id]
       // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
       // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
-      // individual hidden life, not a flat shared-pool draw.
-      ?? generateDeepProfile(new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)), undefined, target.character);
+      // individual hidden life, not a flat shared-pool draw. The narrative text rides a DEDICATED
+      // sub-stream (#392 RNG-isolation), matching the cast-layer key so the fallback agrees with it.
+      ?? generateDeepProfile(
+        new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)),
+        undefined,
+        target.character,
+        hashSeed(`${this.gameSeed ?? 0}:deep-narrative:${target.name}`),
+      );
     const next: DeepProfile = {
       secrets: req.secrets ?? prev.secrets,
       trueGoals: req.trueGoals ?? prev.trueGoals,

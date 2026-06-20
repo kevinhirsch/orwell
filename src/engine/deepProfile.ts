@@ -523,25 +523,56 @@ function composeWeakness(rng: RandomnessSource, f: ConditioningFacets): string {
 }
 
 /**
- * Mint a character-CONDITIONED hidden DeepProfile off a side rng (the P1 coherence path). Every secret,
- * the goal pair, and the weakness are COMPOSED from this houseguest's own archetype/vocation/age — so the
- * hidden life is individual and coherent, not a shared-pool draw. Distinct within the profile (no two
- * identical secrets/goals). Player-independent + deterministic. The Day-1 perception still comes from the
- * net-zero-balanced PERCEPTION_POOL (anti-sycophancy: that balance is the juryReach calibration gate).
+ * Mint a character-CONDITIONED hidden DeepProfile (the P1 coherence path). Every secret, the goal pair,
+ * and the weakness are COMPOSED from this houseguest's own archetype/vocation/age — so the hidden life is
+ * individual and coherent, not a shared-pool draw. Distinct within the profile (no two identical
+ * secrets/goals). Player-independent + deterministic.
+ *
+ * RNG-ISOLATION (the #392 desync fix — the whole point of this function's two-stream split): the
+ * conditioned narrative TEXT is the ONLY thing #392 changed, and it must change NOTHING about game
+ * outcomes. The one hidden field that DOES feed outcomes is `dayOnePerception` — it seeds the move-in
+ * NPC→player edge (trust/affinity/threat leans) — and the cast-wide perception selection depends on how
+ * far the OUTCOME `rng` (the per-NPC `hidRng`) is advanced before the perception roll AND on the shared
+ * cap fill. So this function keeps the two roles on SEPARATE streams:
+ *   • `rng` (the OUTCOME stream): consumed in the EXACT pre-#392 sequence — `count` int, the legacy
+ *     shared-pool draws (their TEXT discarded), then the perception draw — so the perception SELECTION
+ *     and the cast-wide `caps` fill are BYTE-IDENTICAL to the old shared-pool floor. The move-in edges,
+ *     and every downstream comp/vote/jury outcome, are therefore unchanged by this PR.
+ *   • `narrativeRng` (the dedicated NARRATIVE stream): the conditioned, coherent hidden text — fully
+ *     isolated, so however many draws the conditioning makes it CANNOT perturb the outcome stream.
+ * Net effect: identical OUTCOMES to the old floor, with coherent character-conditioned hidden TEXT. The
+ * Day-1 perception still comes from the net-zero-balanced PERCEPTION_POOL (anti-sycophancy: that balance
+ * is the juryReach calibration gate).
  */
 function generateConditionedDeepProfile(
   rng: RandomnessSource,
+  narrativeRng: RandomnessSource,
   facets: ConditioningFacets,
-  perceptionCaps?: Map<string, number>,
+  caps?: CastSpreadCaps,
 ): DeepProfile {
+  // OUTCOME stream (`rng`): replay EXACTLY what the pre-#392 shared-pool floor consumed, so the
+  // perception draw lands byte-identically (and the cast-wide perception cap fills as before). The
+  // shared-pool TEXT drawn here is discarded — only the rng advancement + the cap fill matter; the
+  // conditioned text below replaces it.
   const count = SECRET_RANGE.min + rng.int(SECRET_RANGE.max - SECRET_RANGE.min + 1); // 2..3
-  const secrets = composeDistinct(rng, count, () => composeSecret(rng, facets));
-  const trueGoals = composeDistinct(rng, 2, () => composeGoal(rng, facets));
-  const weakness = composeWeakness(rng, facets);
-  const p = perceptionCaps
-    ? pickPerceptionCapped(rng, perceptionCaps, MAX_PER_PERCEPTION)
-    : PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]!;
-  return { secrets, trueGoals, weakness, dayOnePerception: { ...p } };
+  let dayOnePerception: DayOnePerception;
+  if (caps) {
+    pickDistinctCapped(rng, SECRET_POOL, count, caps.secretUses, MAX_PER_SECRET);
+    pickDistinctCapped(rng, TRUE_GOAL_POOL, 2, caps.goalUses, MAX_PER_GOAL);
+    pickCapped(rng, WEAKNESS_POOL, caps.weaknessUses, MAX_PER_WEAKNESS);
+    dayOnePerception = { ...pickPerceptionCapped(rng, caps.perceptionUses, MAX_PER_PERCEPTION) };
+  } else {
+    pickDistinct(rng, SECRET_POOL, count);
+    pickDistinct(rng, TRUE_GOAL_POOL, 2);
+    rng.pick(WEAKNESS_POOL);
+    dayOnePerception = { ...PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]! };
+  }
+  // NARRATIVE stream (`narrativeRng`): the conditioned, coherent hidden text — fully isolated from the
+  // outcome stream, so its (variable) draw count never shifts a single game outcome.
+  const secrets = composeDistinct(narrativeRng, count, () => composeSecret(narrativeRng, facets));
+  const trueGoals = composeDistinct(narrativeRng, 2, () => composeGoal(narrativeRng, facets));
+  const weakness = composeWeakness(narrativeRng, facets);
+  return { secrets, trueGoals, weakness, dayOnePerception };
 }
 
 /** Compose `n` values distinct within this profile, re-rolling on a collision (bounded guard). */
@@ -618,20 +649,30 @@ export type DeepProfileCharacter = Pick<Character, "archetype" | "vocation" | "a
  * scheduler/standalone tests still exercise). When `caps` is supplied that legacy path honors the L41
  * spread caps; the conditioned path needs no secret/goal/weakness caps (the conditioning makes verbatim
  * collisions vanishingly rare) but still caps the small Day-1 PERCEPTION pool through `caps.perceptionUses`.
+ *
+ * RNG-ISOLATION (#392): on the conditioned path the OUTCOME-relevant `dayOnePerception` is still drawn
+ * off `rng` byte-identically to the legacy floor (so the move-in NPC→player edge is unchanged), while the
+ * narrative TEXT is composed off a DEDICATED sub-stream — derived from `narrativeSeed` when the caller
+ * supplies a per-NPC key (the cast-wide/live path), else forked off the facets so a standalone call stays
+ * deterministic. See {@link generateConditionedDeepProfile}.
  */
 export function generateDeepProfile(
   rng: RandomnessSource,
   caps?: CastSpreadCaps,
   character?: DeepProfileCharacter,
+  narrativeSeed?: number,
 ): DeepProfile {
   // The P1 path: compose from the individual character (coherent, unique). Falls back to the shared
   // pool only when the vocation is unknown (pre-L28 saves) — the conditioning needs a concrete vocation.
   if (character && character.vocation) {
-    return generateConditionedDeepProfile(
-      rng,
-      { archetype: character.archetype, vocation: character.vocation, ageBand: ageBandOf(character.age) },
-      caps?.perceptionUses,
+    const facets = { archetype: character.archetype, vocation: character.vocation, ageBand: ageBandOf(character.age) };
+    // The dedicated NARRATIVE sub-stream — ISOLATED from the outcome `rng` so its (variable) draw count
+    // can never perturb the game stream. Keyed off the caller's per-NPC `narrativeSeed` (the cast path),
+    // or forked deterministically off the character facets for a standalone call. Player-independent.
+    const narrativeRng = new SeededRandom(
+      hashSeed(`deep-narrative:${narrativeSeed ?? `${facets.archetype}:${facets.vocation}:${facets.ageBand}`}`),
     );
+    return generateConditionedDeepProfile(rng, narrativeRng, facets, caps);
   }
   const count = SECRET_RANGE.min + rng.int(SECRET_RANGE.max - SECRET_RANGE.min + 1); // 2..3
   if (caps) {
@@ -813,7 +854,12 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
       biography: generateBiography(pubRng, hg.character),
       physicalCharacteristics: generatePhysicalCharacteristics(pubRng, hg.character.age),
     };
-    const profile = generateDeepProfile(hidRng, caps, hg.character);
+    // The narrative TEXT rides a DEDICATED per-NPC sub-stream (#392 RNG-isolation): the conditioned
+    // secrets/goals/weakness draw off this key, NEVER `hidRng` — so the outcome-relevant `dayOnePerception`
+    // (drawn off `hidRng`) and the cast-wide cap fill stay byte-identical to the pre-#392 floor, while the
+    // hidden text is per-NPC unique and player-independent (keyed off the seeded name, never the player).
+    const narrativeSeed = hashSeed(`${seed}:deep-narrative:${hg.name}`);
+    const profile = generateDeepProfile(hidRng, caps, hg.character, narrativeSeed);
     hidden[hg.id] = profile;
     threads.push(...deriveStoryThreads(thrRng, hg.id, profile));
   }
