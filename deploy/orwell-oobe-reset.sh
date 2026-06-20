@@ -184,7 +184,13 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then ha
 svc_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
 
 if [[ "$DRY_RUN" -eq 0 && "$(id -u)" -ne 0 ]]; then
-  if [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$FE_DATA_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
+  # Root is needed to remove data under /opt and to stop/start the systemd services — but NOT for a
+  # self-contained run on non-/opt paths with no orwell-* units present (a CI/dev test). Gate on what
+  # the run will actually touch, not merely on systemd being installed (CI runners have systemd).
+  needs_root=0
+  [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$FE_DATA_DIR" == /opt/* ]] && needs_root=1
+  if [[ "$have_systemd" -eq 1 ]] && { svc_exists "$ENGINE_SVC" || svc_exists "$FRONTEND_SVC"; }; then needs_root=1; fi
+  if [[ "$needs_root" -eq 1 ]]; then
     die "run as root (sudo): needs to stop services and remove the game + user data under ${APP_DIR}."
   fi
 fi
