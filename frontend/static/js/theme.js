@@ -626,6 +626,10 @@ export function initThemeUI() {
           popup.style.removeProperty('background');
           popup.style.removeProperty('backdrop-filter');
           popup.style.removeProperty('-webkit-backdrop-filter');
+          // Clear the peek tint off the title strip too, so it reverts to
+          // its CSS window-chrome background when leaving Customize.
+          const hdr = document.getElementById('theme-popup-header');
+          if (hdr) hdr.style.removeProperty('background-color');
           popup.querySelectorAll('.admin-card').forEach(c => {
             c.style.removeProperty('background');
             c.style.removeProperty('backdrop-filter');
@@ -647,6 +651,12 @@ export function initThemeUI() {
     if (!toggle || !popup || toggle.dataset.bound === '1') return;
     toggle.dataset.bound = '1';
     const PEEK = 55; // % opacity when peeking
+    // The title strip carries its OWN opaque var(--win-bg) (CSS, so it
+    // matches the other windows' chrome rather than the page bg). When
+    // peeking, fade it to the same translucent mix as the popup root so the
+    // whole window — header included — goes glassy; clear it on off so the
+    // header reverts to its CSS window-chrome background.
+    const header = document.getElementById('theme-popup-header');
     const apply = (on) => {
       const cards = popup.querySelectorAll('.admin-card');
       if (on) {
@@ -658,6 +668,7 @@ export function initThemeUI() {
         popup.style.setProperty('backdrop-filter', 'none', 'important');
         popup.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
         popup.style.removeProperty('opacity');
+        if (header) header.style.setProperty('background-color', bgMix, 'important');
         cards.forEach(c => {
           c.style.setProperty('background', panelMix, 'important');
           c.style.setProperty('backdrop-filter', 'none', 'important');
@@ -668,6 +679,7 @@ export function initThemeUI() {
         popup.style.removeProperty('background');
         popup.style.removeProperty('backdrop-filter');
         popup.style.removeProperty('-webkit-backdrop-filter');
+        if (header) header.style.removeProperty('background-color');
         cards.forEach(c => {
           c.style.removeProperty('background');
           c.style.removeProperty('backdrop-filter');
