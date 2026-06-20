@@ -525,15 +525,15 @@ the flash was specific to the **reply-after-thinking** sub-path (chat.js:1310, r
 now fixed. The DSML/tool-call markup is halted server-side (`tool_parsing.py` /
 `agent_loop.py`) — solid, no client risk.
 
-### Backlog — sync findings NOT yet resolved (lower severity; documented for follow-up)
+### Backlog — sync findings (DISPOSITION, resolved 2026-06-20 via parallel agents → `main`)
 
-| ID | Sev | Finding | Direction |
+| ID | Sev | Finding | Disposition |
 |---|---|---|---|
-| **F3** | POLISH | **Status projection omits `finished`/`winner`** (= the old S4-2): a status-only client hangs on "finale" post-season; FE recovers only via `/state`. | Add `finished`/`winner`/`post-season` to the `gameStatus` projection (Vault-safe post-season), and gate the status panel on `started && !finished`. |
-| **F4** | POLISH | **SSE drop doesn't reconcile the pollers** — after a dropped stream / `run-started` from another device, the HUD lags up to the 20 s poll cadence. | On `run-started`/`run-done`, fire an immediate status/state re-fetch instead of waiting for the next poll. |
-| **F5** | LOW | **Pending cache can survive a key-omitting engine response** (`orwell_engine.remember_pending`): only clears on a truthy `pending`; an older engine omitting the key leaves a stale card on reload. | Treat an omitted `pending` as cache-clear, or require the engine to always send `pending` (incl. `null`). |
-| **F6** | LOW | **Stall watchdog can false-fire** during a legitimate 25 s+ tool call (60 s threshold vs the engine's 30 s read timeout). | Reset the watchdog on `tool_start`/`tool_end` events, not just deltas. |
-| **F7** | LOW | **Forced-advance race** (`agent_loop.py`): the FE's last-resort `advanceGame` can double-advance if another device advances between the state read and the POST. | Re-read the beat immediately before the forced POST; skip if it already moved. |
+| **F3** | POLISH | **Status projection omits `finished`/`winner`** (= the old S4-2): a status-only client hangs on "finale" post-season; FE recovers only via `/state`. | ✅ **MERGED (#417)** — `PublicGameStatus` gains `finished`/`winner` (Vault-safe, reuse `AdvanceView`/`SeasonRecap`); `orwellStatusPanel.js` gates on `started && !finished` and renders a terminal "Season complete — winner: <name>" state; new `tests/unit/statusProjectionFinished.test.ts` + `test:arch`. |
+| **F4** | POLISH | **HUD lags up to the 20 s poll cadence** after a turn / a turn on another device. | ✅ **ALREADY RESOLVED (no new code; #418 closed)** — the **g15** lane already dispatches the debounced `orwellGameChanged` at every game-mutating tool seam + decision POST; the panels subscribe (listener hardened in #417); cross-device is handled by **0064** (`_publish_game_updated`). An ad-hoc dispatch would be redundant and break the g15 "one dispatcher" gate. |
+| **F5** | LOW | **Pending cache can survive a key-omitting engine response** (`orwell_engine.remember_pending`): only clears on a truthy `pending`. | ✅ **MERGED (#419)** — three-case semantics (truthy⇒update, null⇒clear, absent⇒keep) + a lifecycle-marker exception so restart-door views still clear the stale card; `clear_pending()` + clear-on-submit in the decision route. |
+| **F6** | LOW | **Stall watchdog can false-fire** during a legitimate 25 s+ tool call. | ✅ **NON-ISSUE (no code; verified)** — `_startStallWatchdog()` is **deliberately disabled** on `main` (the manual banner was ruled "redundant (and annoying)"; superseded by the server-side stall detector + auto-continue loop-breaker). A disabled watchdog can't false-fire; re-enabling it would revert that decision. |
+| **F7** | LOW | **Forced-advance race** (`agent_loop.py`): the FE's last-resort `advanceGame` can double-advance if another device advances between the state read and the POST. | ✅ **MERGED (#419)** — captures the beat key `(week, phase, moment)` at read, **re-reads** immediately before the forced POST, forces only if unchanged; fail-open (re-read failure ⇒ don't force); per-turn cap unchanged. |
 
 **Verified clean (no race):** the **0064 Messenger turn-queue** serialization — concurrent game
 turns chain via `prev_task` and never stomp; **optimistic UI** — the FE never renders a user
