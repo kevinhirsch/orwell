@@ -1,13 +1,23 @@
 # 0058 — Deep character profiles (born deep, persist, play out)
 
-> **Status:** ✅ **PHASE 1 BUILT** (the engine foundation; deterministic generation) — BDD-gated by
-> `0058-deep-character-profiles.feature`. The seeded floor now spawns the §3-depth profile split
-> across the Vault Wall, persists it byte-stable, seeds & seals story threads, seeds the NPC→player
-> edge from the Day-1 read, and recalls authored detail in full. **DEFERRED to Phase 2** (seamed but
-> not wired): the **LLM-authored** write-back (`recordCastProfile` is the typed, unit-tested STUB),
-> the **portrait consumption** of the physical facet (L29), the **premiere voicing** (L31), and the
-> full thread **trigger/resolution scheduler** (the activation+fold HOOK is built and proven; the
-> automatic when-to-fire scheduler is Phase 2).
+> **Status:** ✅ **PHASE 1 + PHASE 2 BUILT** — BDD-gated by `0058-deep-character-profiles.feature`.
+> Phase 1 (the engine foundation): the seeded floor spawns the §3-depth profile split across the Vault
+> Wall, persists it byte-stable, seeds & seals story threads, seeds the NPC→player edge from the Day-1
+> read, and recalls authored detail in full. **Phase 2 is now LIVE too** (the items previously deferred):
+> the **LLM-authored** write-back is wired end to end — `recordCastProfile` (commit `852f2db`,
+> `GameSessionAdapter.recordCastProfile`) validates non-player-mirroring, SPLITS PUBLIC↔HIDDEN across
+> the Vault Wall, folds the public facets onto the byte-stable Character, seals the hidden half into the
+> Vault + soul recall index, re-derives the story threads, and is idempotent; the FE producer-LLM
+> authoring pipeline (`frontend/src/orwell_cast_authoring.py`, kicked off pre-portraits in
+> `tool_implementations.py`) calls it. The **portrait consumption** of the physical facet (L29) feeds
+> `castPortraitPrompts` / `portraitPrompts.ts`. The **premiere voicing** (L31) voices the public §3
+> biography through the `premiere` moment prompt + the houseguest vibe lines in `momentPrompts.ts`. The
+> full thread **trigger/resolution scheduler** shipped as feature **0060** (`scheduleStoryThreads`,
+> wired into the off-screen tick in `orchestrator.ts`) — dormant→active→surfaced→resolved→expired, all
+> Vault-safe. **Remaining (deliberate, by design):** `recordCastProfile` does NOT re-seed the
+> NPC→player edge from an authored Day-1 read — the engine deliberately KEEPS the calibrated seeded
+> leans (anti-sycophancy: the LLM authors flavor, never the hidden weights; this preserves the net-zero
+> perception balance the juryReach calibration gate depends on). Only the read TEXT is authored.
 > **Depth reference (FORMAT/DEPTH ONLY, never ingest as data):** `docs/legacy/BB_ProducersVault.md` §3.
 > **Executable spec:** `0058-deep-character-profiles.feature`.
 
