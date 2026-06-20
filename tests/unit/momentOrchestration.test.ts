@@ -135,6 +135,22 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(ctx).not.toMatch(/\d\.\d/);
   });
 
+  it("surfaces the exact walkable rooms to the model so it never guesses a moveTo room (the bug fix)", () => {
+    const game = new GameSessionAdapter();
+    game.createCharacter({ playerName: "Player One", seed: 4 });
+    const ctx = renderGameContext(game.getGameState());
+    // The model is handed the menu of rooms it may walk the player to (so it never guesses "bedroom"
+    // and loops on "isn't mapping"). Every walkable room's natural name appears, the diary room does not.
+    expect(ctx).toContain("ROOMS YOU CAN WALK THE PLAYER TO");
+    for (const name of ["kitchen", "living room", "backyard", "bedroom A", "bedroom B", "HOH room", "bathroom", "storage room"]) {
+      expect(ctx, `lists ${name}`).toContain(name);
+    }
+    // The diary room is a beat, not a walkable hangout — it is NOT on the menu.
+    expect(ctx).not.toContain("diary room.");
+    // The lever manifest also points at the menu + advertises forgiving phrasing.
+    expect(BASE_GAME_MASTER_PROMPT).toContain("ROOMS YOU CAN WALK THE PLAYER TO");
+  });
+
   it("editing a moment fragment changes only that moment", () => {
     const original = MOMENT_PROMPTS["social"]!;
     try {

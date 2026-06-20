@@ -75,7 +75,9 @@ class Session:
         if _session_manager:
             _session_manager._persist_message(self.id, message)
 
-    def get_context_messages(self) -> List[Dict[str, Any]]:
+    def get_context_messages(
+        self, exclude_phases: Optional[set] = None
+    ) -> List[Dict[str, Any]]:
         """Get messages in format for LLM API.
 
         Slash-command / setup replies are persisted to history so they render
@@ -84,11 +86,24 @@ class Session:
         ``metadata.source == "slash"``; exclude them here so they never reach
         the model. Display/history-load paths use the raw ``history`` and are
         unaffected.
+
+        ``exclude_phases`` is the Vault-Wall scope for the in-game narrator
+        (casting-leak fix). The pre-game casting interview (0050) is an OOC,
+        producer-level channel — like the Diary Room, it has NO in-game pathway
+        to any NPC's knowledge. Those turns are persisted with
+        ``metadata.phase == "casting"`` (so the player still SEES them in
+        scrollback — one continuous conversation), but once a season is live the
+        in-game narration context EXCLUDES them so the model cannot leak the
+        player's private casting strategy/OOC reads to the houseguests. The model
+        cannot leak what it never receives. Pass ``{"casting"}`` on a live-game
+        turn; display/history paths use raw ``history`` and are unaffected.
         """
+        phases = exclude_phases or set()
         return [
             msg.to_dict()
             for msg in self.history
             if (msg.metadata or {}).get("source") != "slash"
+            and (not phases or (msg.metadata or {}).get("phase") not in phases)
         ]
 
     def get(self, key: str, default=None):
