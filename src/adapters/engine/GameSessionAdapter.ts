@@ -14,7 +14,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY, HOUSE_ROOMS } from "../../domain/house";
+import { HOUSE_ADJACENCY, resolveRoom } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -1273,19 +1273,33 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The player DIRECTS their own movement (L21/L24 — the player is a person, not engine-relocated):
-   * walk to any real room. Sets the player's room and resets their tenure; the engine holds them
-   * there (NPCs drive around them) until the next directed move. No-op for an unknown room or before
-   * presence is seeded. Returns the player's resulting whereabouts so the caller can voice the move.
+   * walk to a room they NAMED. The name is resolved FORGIVINGLY (`resolveRoom`) — case/space/hyphen-
+   * insensitive, natural aliases ("living room"/"lounge", "backyard"/"yard", "HOH", "pantry"), and a
+   * bare "bedroom" disambiguated to the player's current/adjacent bedroom — so a guessed room never
+   * silently no-ops into the narrator's 5-retry "isn't mapping" loop (the real-log bug). Sets the
+   * player's room, resets their tenure; the engine holds them there (NPCs drive around them) until the
+   * next directed move. For a truly UNKNOWN name it leaves the player put and returns the current
+   * whereabouts unchanged (the model knows the valid rooms from the moment prompt, so this is rare).
+   * Returns the resulting whereabouts so the caller can voice the move. Vault-free.
    */
   movePlayer(room: string): WhereaboutsView | null {
     if (!this.house || !this.presence) return null;
-    if (!(HOUSE_ROOMS as readonly string[]).includes(room)) return this.whereabouts();
     const me = this.house.player.id;
-    if (this.presence.get(me) === room) return this.whereabouts(); // already there — nothing to move
-    this.presence.set(me, room as Room);
+    const here = this.presence.get(me) ?? null;
+    // Forgiving resolution (Vault-free, deterministic): natural names → a canonical room id; the
+    // player's current room sharpens an ambiguous "bedroom". An ambiguous result still moves (we take
+    // the best-guess first candidate) rather than no-op — never a silent failure into a retry loop.
+    const resolved = resolveRoom(room, here);
+    const dest =
+      resolved.kind === "ok" ? resolved.room
+      : resolved.kind === "ambiguous" ? resolved.candidates[0]!
+      : null;
+    if (dest === null) return this.whereabouts(); // truly unknown — stay put, report where they are
+    if (here === dest) return this.whereabouts(); // already there — nothing to move
+    this.presence.set(me, dest);
     // L21/L24: the player's position is identical in both views — keep the calibration-neutral base in sync
     // so the society's player-overhears and `whereabouts` always agree about where the player is.
-    this.presenceBase?.set(me, room as Room);
+    this.presenceBase?.set(me, dest);
     (this.presenceTenure ??= new Map()).set(me, 0); // a fresh arrival
     this.persist();
     return this.whereabouts();

@@ -2105,6 +2105,10 @@ function initAccount() {
             });
             if (!r.ok) throw new Error('reset failed');
             if (rpMsg) { rpMsg.textContent = 'Done — casting begins again.'; rpMsg.style.color = 'var(--green)'; }
+            // This is a genuine season RESTART (a game was already running) — arm the fresh-session
+            // split so the dead season's transcript never rides along as narrator context (E65).
+            // The initial first-season onboarding never reaches here, so it stays ONE conversation.
+            try { window._orwellMarkRestart && window._orwellMarkRestart(); } catch (_) {}
             try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
             // G15: refresh every surface through THE one shared dispatcher (never an ad-hoc CustomEvent).
             try { window.orwellGameChanged && window.orwellGameChanged('reset-progress'); } catch (_) {}

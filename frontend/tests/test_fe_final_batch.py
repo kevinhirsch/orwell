@@ -63,9 +63,6 @@ def test_c22_producers_reach_out_first_after_the_image_step():
     assert "setHideUserBubble" in seg                              # producers appear to reach out first
     assert "handleChatSubmit" in seg                               # auto-sent (this single cutover)
     assert "_openSent" in seg                                      # fired once
-    import os
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    repo = os.path.dirname(repo)
-    with open(os.path.join(repo, "src", "engine", "momentPrompts.ts"), encoding="utf-8") as f:
-        prompt = f.read()
-    assert "roll straight into the premiere" in prompt
+    # The engine-side casting->premiere transition wording is verified by ENGINE tests
+    # (lifecycleMoments / premiereDay1) — an FE test must not assert engine-prompt text, since
+    # engine-only PRs skip the FE job and such a cross-layer assertion then breaks latently on main.
