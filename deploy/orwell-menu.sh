@@ -25,6 +25,16 @@ for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bba
   if [[ -r "$__lib" ]]; then . "$__lib"; break; fi
 done
 type tui_active >/dev/null 2>&1 || tui_active() { return 1; }   # fallback: no TUI ⇒ plain paths
+# Presentation-helper fallbacks: a box updated before this change runs an installed orwell-tui.sh
+# that predates the ow_* helpers — define minimal no-frills versions so the panel never errors on
+# a missing function (the helpers only print; they never change behaviour or exit codes).
+type ow_logo    >/dev/null 2>&1 || ow_logo()    { :; }
+type ow_section >/dev/null 2>&1 || ow_section() { echo "── $1 ──"; }
+type ow_rule    >/dev/null 2>&1 || ow_rule()    { [[ -n "${1:-}" ]] && echo "── $1 ──" || echo "──"; }
+type ow_step    >/dev/null 2>&1 || ow_step()    { echo "  > $*"; }
+type ow_ok      >/dev/null 2>&1 || ow_ok()      { echo "  + $*"; }
+type ow_fail    >/dev/null 2>&1 || ow_fail()    { echo "  x $*"; }
+type ow_info    >/dev/null 2>&1 || ow_info()    { echo "  $*"; }
 ORWELL_TUI_TITLE="Orwell — control panel"
 
 msg() { echo -e "==> $*"; }
@@ -85,11 +95,11 @@ DEPLOY_DIR="$__here"
 run() {
   local title="$1"; shift
   tui_active && { command -v clear >/dev/null 2>&1 && clear || true; }
-  echo "── ${title} ──────────────────────────────────────────────"
-  echo "▶ $*"; echo
+  ow_section "$title"
+  ow_step "$*"; echo
   "$@"; local rc=$?
   echo
-  [[ $rc -eq 0 ]] && echo "✓ ${title}: done." || echo "✗ ${title}: exited ${rc}."
+  [[ $rc -eq 0 ]] && ow_ok "${title}: done." || ow_fail "${title}: exited ${rc} (see output above)."
   tui_active && { read -rsn1 -p "Press any key to return to the menu… " _ || true; echo; }
   return $rc
 }
@@ -181,6 +191,13 @@ case "${1:-}" in
 esac
 
 # ── Interactive menu loop ───────────────────────────────────────────────────────────────────────
+# A one-time logo splash on the terminal before the first dialog draws (whiptail's boxed widgets
+# can't render the wordmark themselves). Cleared away by the menu; cheap and TTY-only.
+if [[ -t 1 ]]; then
+  command -v clear >/dev/null 2>&1 && clear || true
+  ow_logo "control panel  ·  ${APP_DIR}@$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  sleep 1 2>/dev/null || true
+fi
 while :; do
   choice=""
   wt_menu choice "$(printf 'Orwell @ %s  (%s)\n\nChoose an action:' \

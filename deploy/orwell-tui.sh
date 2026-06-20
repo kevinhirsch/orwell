@@ -67,3 +67,57 @@ wt_confirm_phrase() {
 
 # wt_textbox FILE — scrollable view of a file (command output, a log tail, etc.).
 wt_textbox() { whiptail --title "$ORWELL_TUI_TITLE" --scrolltext --textbox "$1" 24 90; }
+
+# ── Presentation layer (the "look" — separate from the whiptail dialogs above) ──────────────────
+# A small set of pure-echo helpers giving every checkout-run script the same banner + sectioned,
+# step-by-step status lines. They write to stdout, change NO shell options, and never read input —
+# safe under the caller's `set -euo pipefail`. Colour auto-disables when stdout is not a terminal,
+# when NO_COLOR is set, or when TERM=dumb, so piped / CI / `pct exec` output stays plain ASCII (the
+# exact tokens other tools read, e.g. "VERDICT:" / "READY", are never wrapped in escapes).
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  OW_BOLD=$'\e[1m'; OW_DIM=$'\e[2m'; OW_RED=$'\e[31m'; OW_GRN=$'\e[32m'
+  OW_YLW=$'\e[33m'; OW_CYN=$'\e[36m'; OW_OFF=$'\e[0m'
+else
+  OW_BOLD=""; OW_DIM=""; OW_RED=""; OW_GRN=""; OW_YLW=""; OW_CYN=""; OW_OFF=""
+fi
+
+# ow_logo [subtitle] — the ASCII-art wordmark banner. Optional subtitle prints beneath it.
+# Plain block letters (ASCII only) so it renders identically on any terminal/codepage.
+ow_logo() {
+  printf '%s\n' \
+"${OW_CYN} _____ _____ _ _ _ _____ __    __    ${OW_OFF}" \
+"${OW_CYN}|     |  _  | | | |   __|  |  |  |   ${OW_OFF}" \
+"${OW_CYN}|  |  |    -| | | |   __|  |__|  |__ ${OW_OFF}" \
+"${OW_CYN}|_____|__|__|_____|_____|_____|_____|${OW_OFF}" \
+"${OW_BOLD}            O R W E L L${OW_OFF}"
+  if [[ -n "${1:-}" ]]; then printf '%s\n' "   ${OW_DIM}$1${OW_OFF}"; fi
+  printf '\n'
+}
+
+# _ow_repeat N STR — STR repeated N times (locale-safe: never slices a multibyte string, so the
+# em-dash rule stays correct under a C/POSIX locale where ${var:o:n} would count BYTES, not chars).
+_ow_repeat() {
+  local n="$1" s="$2" out=""
+  while (( n-- > 0 )); do out+="$s"; done
+  printf '%s' "$out"
+}
+
+# ow_rule [text] — a full-width divider, optionally captioned (── Update ──────────).
+ow_rule() {
+  if [[ -n "${1:-}" ]]; then
+    local pad=$(( 54 - ${#1} )); (( pad < 0 )) && pad=0
+    printf '%s\n' "${OW_DIM}──${OW_OFF} ${OW_BOLD}$1${OW_OFF} ${OW_DIM}$(_ow_repeat "$pad" '─')${OW_OFF}"
+  else
+    printf '%s\n' "${OW_DIM}$(_ow_repeat 60 '─')${OW_OFF}"
+  fi
+}
+
+# ow_section "Title" — a captioned divider with a blank line above it.
+ow_section() { printf '\n'; ow_rule "$1"; }
+
+# Step / status lines. Glyphs are UTF-8 (render on any modern terminal); colour is what degrades.
+ow_step() { printf '%s\n' "  ${OW_CYN}▸${OW_OFF} $*"; }
+ow_ok()   { printf '%s\n' "  ${OW_GRN}✓${OW_OFF} $*"; }
+ow_warn() { printf '%s\n' "  ${OW_YLW}!${OW_OFF} $*"; }
+ow_fail() { printf '%s\n' "  ${OW_RED}✗${OW_OFF} $*"; }
+ow_info() { printf '%s\n' "  ${OW_DIM}·${OW_OFF} ${OW_DIM}$*${OW_OFF}"; }

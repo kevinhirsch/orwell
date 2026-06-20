@@ -9,9 +9,18 @@ set -uo pipefail
 
 ENGINE="${ORWELL_ENGINE_MCP_URL:-http://127.0.0.1:${ORWELL_ENGINE_PORT:-8765}}"
 FE="http://127.0.0.1:${ORWELL_PORT:-8000}"
+# Colour auto-disables off a TTY / under NO_COLOR / TERM=dumb (the verdict words READY / NOT READY
+# are never wrapped — only the leading glyph carries colour — so anything reading them stays safe).
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+  R_BOLD=$'\e[1m'; R_DIM=$'\e[2m'; R_RED=$'\e[31m'; R_GRN=$'\e[32m'; R_OFF=$'\e[0m'
+else
+  R_BOLD=""; R_DIM=""; R_RED=""; R_GRN=""; R_OFF=""
+fi
 fails=0
-ok()   { echo "  ok  — $*"; }
-bad()  { echo "  NOT READY — $*"; fails=$((fails + 1)); }
+ok()   { echo "  ${R_GRN}✓${R_OFF} $*"; }
+bad()  { echo "  ${R_RED}✗${R_OFF} NOT READY — $*"; fails=$((fails + 1)); }
+
+echo "${R_BOLD}orwell readiness${R_OFF} ${R_DIM}— a green run means a player can sit down and play${R_OFF}"
 
 curl -fsS --max-time 5 "${ENGINE%/}/health" >/dev/null 2>&1 \
   && ok "engine reachable (${ENGINE})" || bad "engine unreachable (${ENGINE})"
@@ -38,4 +47,8 @@ else
 fi
 
 echo
-if [[ "$fails" -eq 0 ]]; then echo "READY"; exit 0; else echo "NOT READY (${fails})"; exit 1; fi
+if [[ "$fails" -eq 0 ]]; then
+  echo "${R_GRN}${R_BOLD}READY${R_OFF}"; exit 0
+else
+  echo "${R_RED}${R_BOLD}NOT READY (${fails})${R_OFF}"; exit 1
+fi
