@@ -3261,6 +3261,14 @@ import { isNarrow } from './platform.js';
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
       if (_chatLogDone) _chatLogDone.setAttribute('aria-busy', 'false');
+      // Staged-comp / forced-advance fix (audit 2026-06-20): a SILENT server-side advance (the FE's
+      // error-correction when the model under-calls advanceGame) progresses the engine onto a NEW
+      // player pending but emits NO visible tool result — so the per-tool G15 seam above never fires
+      // and the decision card never arms in the open page (pre-fix it re-armed only on a reload). Nudge
+      // THE shared dispatcher at turn-end so orwellDecision's rearmFromStatus pulls gameStatus.pending
+      // and arms the card. Debounced + idempotent (coalesces with any per-tool dispatch this turn);
+      // a no-op outside the game build (orwellGameChanged is undefined there).
+      if (window.orwellGameChanged) window.orwellGameChanged('turn-settled');
       // Always clean up research tracking regardless of background state
       _researchingStreamIds.delete(streamSessionId);
       if (_researchingStreamIds.size === 0) {
