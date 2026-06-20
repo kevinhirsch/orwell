@@ -461,6 +461,19 @@ import { isNarrow } from './platform.js';
       return;
     }
 
+    // --- OOBE image gate (P1 onboarding): the houseguest photo is the player's FIRST
+    // interaction. Pre-game, until a cast photo is secured, NO chat message may be sent — this
+    // covers every send path (button, Enter, programmatic) at one chokepoint. The gate module
+    // fails OPEN (only ever blocks a confirmed pre-game game-build with no image yet), so this is
+    // a no-op for normal play, a non-game build, an engine outage, or a started season. The
+    // producers' auto-open fires only AFTER the photo is finalized, so it is never blocked here.
+    try {
+      if (window._orwellChatGate && window._orwellChatGate.blocked()) {
+        if (window._orwellChatGate.recompute) window._orwellChatGate.recompute();
+        return;
+      }
+    } catch (_) { /* gate unavailable → never block the chat */ }
+
     // --- Send-path entry: block re-clicks between submit and stream start ---
     if (_sendInFlight) return;
     _sendInFlight = true;

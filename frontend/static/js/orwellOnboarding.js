@@ -1,25 +1,34 @@
-// Orwell onboarding — the casting interview lives in the CHAT (feature 0050).
+// Orwell onboarding — one continuous, guided OOBE flow (P1 redesign).
 //
-// There is NO data-entry modal: character creation is the game's first scene. Pre-game,
-// the server frames every chat turn as the producer's casting interview (the engine's
-// character-creation moment prompt), the producer asks, the player answers, and the model
-// records each answer with updateCasting — the ENGINE tracks what's captured and what the
-// next step is, so the interview can be none, half, or fully done and always resumes.
+// The flow, in order:
+//   1. Settings → the player enters their LLM info (provider/key/model). The MODEL GATE (J4)
+//      below holds the flow until a feed is configured — production literally cannot speak
+//      without one.
+//   2. A WELCOME MODAL — kept as its own modal (NOT folded into the chat) — greets the player
+//      and points them at their first task: securing a cast photo.
+//   3. The houseguest IMAGE step is the player's FIRST interaction (orwellHeadshot.js mounts the
+//      casting card; orwellChatGate.js LOCKS the chat until a photo is secured). The card makes
+//      the upload-or-generate choice explicit; the chat input is disabled with a clear reason.
+//   4. The moment the photo is confirmed, the PRODUCERS reach out FIRST — a hidden kickoff
+//      (no player bubble) opens the casting interview so the player never types the opening word.
+//   5. The casting interview proceeds in the chat (the engine's character-creation moment prompt
+//      + incremental updateCasting → createCharacter).
+//   6. House entry + a light-touch guided first week (the engine premiere + the agent-loop pacing).
 //
 // This module's remaining jobs:
-//   • J4 (model gate): no chat model configured → a game-framed holding card ("Production
-//     needs a feed source") — the interview literally cannot speak without one.
+//   • J4 (model gate): no chat model configured → a game-framed holding card ("Production needs a
+//     feed source") — the interview literally cannot speak without one.
 //   • F5 (engine down): the dark-house holding card instead of a generic workspace welcome.
-//   • F7 (fresh season): the FIRST seat-taking of a new interview opens a fresh chat
-//     session so a dead season's transcript never rides along as narrator context.
-//   • Hand-off: pre-game with everything ready, PREFILL the composer (never auto-send —
-//     ADR 0003: the player owns the first keypress) and let the chat do the rest.
+//   • F7 (fresh season): the FIRST seat-taking of a new interview opens a fresh chat session so a
+//     dead season's transcript never rides along as narrator context.
+//   • The WELCOME MODAL (its own modal) shown once per account pre-game, before the image step.
+//   • The PRODUCERS-OPEN kickoff after the photo is secured.
 //
 // On a non-game build an unreachable engine never blocks the normal chat (fail open).
 (function () {
   "use strict";
 
-  const SEAT_TAKEN_KEY = "orwell-interview-open"; // sessionStorage: one fresh-session+prefill per interview
+  const SEAT_TAKEN_KEY = "orwell-interview-open"; // sessionStorage: one fresh-session per interview
 
   const ready = (fn) =>
     document.readyState === "loading"
@@ -60,6 +69,11 @@
         }
         #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
         #orwell-onboarding .ob-hold .ob-hold-sub { opacity: .7; font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
+        #orwell-onboarding .ob-steps { text-align: left; margin: 1rem 0 .2rem; padding: 0; list-style: none;
+          font-size: .8rem; line-height: 1.6; opacity: .85; }
+        #orwell-onboarding .ob-steps li { margin: .15rem 0; }
+        #orwell-onboarding .ob-steps .ob-step-n { display: inline-block; width: 1.4rem; font-weight: 700;
+          color: var(--brand-color, var(--red, #e06c75)); }
         #orwell-onboarding .ob-hold-actions { display: flex; gap: .6rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
         #orwell-onboarding .ob-btn {
           font: inherit; font-size: .82rem; padding: .45rem .9rem; border-radius: 8px; cursor: pointer;
@@ -102,9 +116,9 @@
     });
   }
 
-  // F5/J4: a blocking production notice — the only modal left in onboarding (it carries
-  // no data entry; it blocks because the game genuinely cannot proceed). Re-probes
-  // quietly and dissolves back into the flow the moment the blocker clears.
+  // F5/J4: a blocking production notice — the holding modal (it carries no data entry; it blocks
+  // because the game genuinely cannot proceed). Re-probes quietly and dissolves back into the flow
+  // the moment the blocker clears.
   //
   // A blocking notice must never be a TRAP: the page behind it is inert, so any remedy the
   // card's copy names must be operable FROM the card, and there is always an explicit way
@@ -163,6 +177,64 @@
     }, 5000);
   }
 
+  // ── The WELCOME MODAL (kept as its OWN modal — never folded into the chat) ──────────────
+  // Shown once per account, pre-game, AFTER the model is configured and BEFORE the image step.
+  // It greets the player, frames the show, and lays out the first-run sequence, then hands off
+  // to the image step (the casting card + the chat lock are already in place underneath). Unlike
+  // the holding cards this is NOT a blocker — it is the welcome — so dismissing it ("Let's go")
+  // simply proceeds. Per-user persisted so it greets once, not every reload.
+  const WELCOME_KEY = "orwell-welcome-seen";
+
+  function welcomeKey() {
+    return WELCOME_KEY + ":" + ((document.body && document.body.dataset.user) || "");
+  }
+  function welcomeSeen() {
+    try { return localStorage.getItem(welcomeKey()) === "1"; } catch (_) { return false; }
+  }
+  function markWelcomeSeen() {
+    try { localStorage.setItem(welcomeKey(), "1"); } catch (_) {}
+  }
+
+  function mountWelcome(onProceed) {
+    if (document.getElementById("orwell-onboarding")) return;
+    const el = buildOverlay();
+    el.setAttribute("aria-label", "Welcome to Big Brother");
+    const card = el.querySelector(".ob-card");
+    card.setAttribute("tabindex", "-1");
+    card.innerHTML = `
+      <div class="ob-hold">
+        <h1>Welcome to the house</h1>
+        <p class="ob-hold-sub">You're cast on <b>Big Brother</b>. One house, sixteen strangers,
+          one winner — and production is watching everything. Here's how the next few minutes go:</p>
+        <ol class="ob-steps">
+          <li><span class="ob-step-n">1.</span> Add your <b>cast photo</b> — upload one or generate it.</li>
+          <li><span class="ob-step-n">2.</span> The <b>producers</b> reach out for your casting interview.</li>
+          <li><span class="ob-step-n">3.</span> <b>Move-in day</b> — meet the house and start playing.</li>
+        </ol>
+        <p class="ob-hold-sub">First up: your cast photo. The chat opens the moment it's set.</p>
+        <div class="ob-hold-actions"></div>
+      </div>`;
+    const row = card.querySelector(".ob-hold-actions");
+    const dismiss = () => {
+      markWelcomeSeen();
+      uninertBackground();
+      el.remove();
+      try { onProceed && onProceed(); } catch (_) {}
+    };
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "ob-btn ob-btn-primary";
+    go.setAttribute("data-ob-welcome-go", "");
+    go.textContent = "Add my cast photo";
+    go.addEventListener("click", dismiss);
+    row.appendChild(go);
+    el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
+    document.body.appendChild(el);
+    inertBackground(el);
+    trapFocus(el);
+    try { go.focus(); } catch (_) {}
+  }
+
   // The remedy the J4 card names: the workspace's own settings trigger. Called AFTER
   // dismiss so the modal never opens behind the inert wall.
   //
@@ -185,6 +257,9 @@
       "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
       async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
   };
+
+  // Seam for the headless browser gate: mount the welcome modal on demand.
+  window._orwellWelcomeMount = function () { mountWelcome(); };
 
   // L2: is the caller an admin? The J4 card offers "Open Settings → Add Models" only to
   // operators who can actually fix it. The old gate read `window._isAdmin`, which nothing in
@@ -213,56 +288,43 @@
     } catch (_) { return true; }
   }
 
-  // The casting-seat line is ONE constant: takeASeat prefills it, and the G17/F4
-  // re-arm re-offers it after a refresh.
-  const SEAT_LINE = "I take my seat for the casting interview.";
-
-  // Hand the player to the producer — in the chat, no modal. Runs ONCE per interview
-  // (sessionStorage marker): opens a fresh chat session (F7 — a finished or reset season's
-  // transcript must never ride along as narrator context for the new one), then PREFILLS
-  // the composer so the player's own Enter starts the interview. Never auto-sends.
-  function takeASeat() {
+  // F7: a brand-new interview opens a FRESH chat session so a dead/reset season's transcript never
+  // rides along as narrator context. Runs ONCE per interview (sessionStorage marker). There is NO
+  // composer prefill any more — the image step is the player's first interaction and the producers
+  // open the conversation (the old casting-seat pre-prompt has been removed).
+  function openFreshInterviewSession() {
     let seated = false;
     try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
-    if (seated) {
-      // G17/F4: mid-interview reload — re-offer the seat line if nothing was spoken
-      // (the marker used to one-shot at prefill time and strand an empty composer).
-      rearmSeatPrefill();
-      return;
-    }
+    if (seated) return;
     try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
     } catch (_) {}
-    setTimeout(() => {
-      const box = document.getElementById("message");
-      if (box && !box.value.trim()) {
-        box.value = SEAT_LINE;
-        box.dispatchEvent(new Event("input", { bubbles: true }));
-        box.focus();
-      }
-    }, 400); // after the fresh-session click settles
   }
 
-  // L5: the casting→game cutover. Picking the casting headshot is the LAST pre-game
-  // step (orwellHeadshot.js calls this on finalize); the PRODUCERS open the show — the
-  // player should never have to type the opening word. We auto-send ONE producer-framed
-  // kickoff so the model (under the pre-game/casting moment prompt) finalizes casting if
-  // needed (createCharacter) and narrates the premiere. This is a deliberate, scoped
-  // departure from the "prefill, never auto-send" rule — only at this single handoff,
-  // game-build only, fired once. Guards: never override the player's own typing or an
-  // in-flight stream, and never fire if the conversation is already underway from a
-  // started game.
+  // L5 → P1: the casting cutover. Securing the cast photo is the player's FIRST step
+  // (orwellHeadshot.js calls this on finalize); the PRODUCERS open the show — the player never
+  // types the opening word. We auto-send ONE kickoff with the user bubble HIDDEN, so the first
+  // VISIBLE message in the chat is the producers reaching out, not a player line. The model (under
+  // the pre-game/casting moment prompt) finalizes casting if needed (createCharacter) and narrates
+  // the producers' reach-out. This is a deliberate, scoped departure from "the player owns the
+  // first keypress" — only at this single handoff, game-build only, fired once. Guards: never
+  // override the player's own typing or an in-flight stream, and never fire if a started game's
+  // conversation is already underway.
   const OPEN_GAME_LINE =
-    "Casting's done and my headshot's set — I'm ready. Let's open the show.";
+    "(Production cue — begin the casting interview now. Reach out to me first, in character as the " +
+    "producers; do not wait for me to speak.)";
   let _openSent = false;
   window._orwellOpenGameAfterCasting = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild || _openSent) return;
     _openSent = true;
-    // Give the headshot card's teardown a beat, then auto-send through the normal
-    // submit path (the same seam chat.js uses for its own programmatic sends).
+    // The photo is now secured — make sure the chat is unlocked before the kickoff sends.
+    try { if (window._orwellChatGate && window._orwellChatGate.notePhotoSecured) window._orwellChatGate.notePhotoSecured(); } catch (_) {}
+    // Give the headshot card's teardown a beat, then auto-send through the normal submit path
+    // (the same seam chat.js uses for its own programmatic sends), with the user bubble hidden so
+    // the producers appear to reach out first.
     setTimeout(() => {
       try {
         const box = document.getElementById("message");
@@ -271,33 +333,19 @@
         if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
           _openSent = false; return;                  // a turn is already running — let it finish
         }
+        // Hide the kickoff bubble so the FIRST thing the player sees is the producers' message.
+        try { if (window.chatModule && window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
         box.value = OPEN_GAME_LINE;
         box.dispatchEvent(new Event("input", { bubbles: true }));
         if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
           window.chatModule.handleChatSubmit({ preventDefault() {} });
         } else {
-          // No send seam available — fall back to a focused prefill so the player's Enter starts it.
+          // No send seam available — fall back to a focused composer so the player can nudge it.
           box.focus();
         }
       } catch (_) { _openSent = false; /* fail open — the composer is still the way in */ }
     }, 250);
   };
-
-  // F4: re-run the PREFILL ONLY — never the fresh-session click (the F7 fence stays
-  // one-per-interview, so a reload can never spawn extra sessions). Guards: an
-  // F3-restored draft or the player's own typing always wins (composer non-empty), and
-  // once the interview has spoken (a player message exists in the transcript) the
-  // conversation is the cue, not the prefill.
-  function rearmSeatPrefill() {
-    setTimeout(() => {
-      const box = document.getElementById("message");
-      if (!box || box.value.trim()) return;                            // a draft/typing wins
-      if (document.querySelector("#chat-history .msg-user")) return;   // already speaking
-      box.value = SEAT_LINE;
-      box.dispatchEvent(new Event("input", { bubbles: true }));
-      box.focus();
-    }, 700); // after boot settles: the F3 draft restore + the session transcript render
-  }
 
   // E65: a season restart (createCharacter success mid-session) opens a FRESH chat
   // session so the dead season's transcript never rides as narrator context (F7's
@@ -346,7 +394,14 @@
           admin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
         return;
       }
-      takeASeat();
+      // Pre-game with a model configured: open the fresh interview session (F7), then run the
+      // guided sequence — the WELCOME MODAL first (once per account), which hands off to the image
+      // step. The chat is already locked by orwellChatGate.js until a photo is secured; the casting
+      // card (orwellHeadshot.js) is the image step itself.
+      openFreshInterviewSession();
+      if (!welcomeSeen()) {
+        mountWelcome(); // its own modal; on "Add my cast photo" it dissolves into the image step
+      }
     } catch (_) {
       // Engine unreachable: on the game build that's a dark house, not a silent skip (F5).
       if (gameBuild) window._orwellOnboardingMount();
