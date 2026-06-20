@@ -376,10 +376,14 @@
   let _dismissedSig = null;     // signature of the pending the player dismissed, so a game
                                 // change re-arms a genuinely NEW decision but never re-mounts
                                 // the SAME card the player just waved away (cross-device race).
+  let _rearmRunning = false;    // re-entrancy guard: boot + gamechanged + the S4-1 poll can all
+                                // call rearmFromStatus; don't stack the re-assert loop.
   const _sig = (p) => (p && p.kind)
     ? p.kind + "|" + (p.options || []).map((o) => o && o.id).join(",") + "|" + (p.prompt || "")
     : "";
   async function rearmFromStatus() {
+    if (_rearmRunning) return;
+    _rearmRunning = true;
     try {
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
       if (!r.ok) return;
@@ -409,11 +413,20 @@
         await new Promise((res) => setTimeout(res, 200));
       }
     } catch (_) { /* fail open */ }
+    finally { _rearmRunning = false; }
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", rearmFromStatus, { once: true });
   } else { rearmFromStatus(); }
   window.addEventListener("orwell:gamechanged", rearmFromStatus);
+  // S4-1 (E2E audit) — the structural escape hatch: a pending player decision must be reachable
+  // WITHOUT the chat agent ever dispatching it. `orwell:gamechanged` only fires on a LOCAL
+  // game-mutating tool, so a pending that surfaces with no such event in this tab (the model
+  // narrated past it without calling submitDecision, another device advanced, a missed tool call)
+  // would otherwise sit unreachable until a reload. Poll the engine's own `pending` on a slow
+  // cadence as a backstop. rearmFromStatus is fail-open and honors an explicit dismissal
+  // (_dismissedSig), so this only ever surfaces a LIVE pending — it never re-nags a waved-away card.
+  setInterval(rearmFromStatus, 15000);
 
   window.addEventListener("orwell:pending", (e) => {
     try {
