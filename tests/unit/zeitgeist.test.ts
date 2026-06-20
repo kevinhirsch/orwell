@@ -304,7 +304,7 @@ describe("0062 — the HOH music perk flows into the live moment prompt", () => 
       if (v.finished) break;
     }
     expect(hoh).not.toBeNull();
-    const me = s.getGameState().player.id;
+    const me = s.getGameState().player!.id;
 
     // The LIVE music framing in the per-moment world block (distinct from the always-on base-prompt rule,
     // which states the perk exists regardless): "on rotation in the HOH room RIGHT NOW".
