@@ -627,11 +627,20 @@ export class GameSessionAdapter implements GameSession {
     const target = this.house.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
 
-    // Validate — non-player-mirroring (L28): the cast is independent of the player, so the authored
-    // PUBLIC material must not echo the player's name. Refuse a mirror (Vault-safe: no value echoed).
+    // Validate — non-player-mirroring (L28 + the anti-sycophancy mandate #3): the cast is INDEPENDENT
+    // of the player, so NEITHER the authored PUBLIC material NOR the hidden STORYLINE material (secrets,
+    // true goals, weakness) may be built around the player — an NPC's drama must not echo the player's
+    // name. This is the airtight guard: even if an authoring model ignores the prompt and weaves the
+    // player into an NPC's secret/goal/weakness, the engine refuses it here so no player-centric story
+    // material is ever sealed. The Day-1 read of the player is the ONE legitimately player-facing field
+    // and is excluded from this check (the engine owns its seeded value regardless). Vault-safe: the
+    // refusal echoes no authored value. (A short player name is ignored to avoid false positives.)
     const playerName = (this.house.player.name ?? "").trim();
-    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`.toLowerCase();
-    if (playerName.length >= 3 && publicText.includes(playerName.toLowerCase())) {
+    const mentionsPlayer = (text: string): boolean =>
+      playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
+    const storylineText = `${(req.secrets ?? []).join(" ")} ${(req.trueGoals ?? []).join(" ")} ${req.weakness ?? ""}`;
+    if (mentionsPlayer(publicText) || mentionsPlayer(storylineText)) {
       return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
     }
 
