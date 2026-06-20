@@ -150,6 +150,42 @@ describe("0006 staged-rounds — per-round approach is committed before, locked 
     for (let i = 1; i < seenRounds.length; i++) expect(seenRounds[i]!).toBeGreaterThan(seenRounds[i - 1]!);
   });
 
+  it("FEWER, BIGGER rounds (audit 2026-06-20): a large field resolves in ≤8 staged rounds, not one-per-houseguest", () => {
+    // Pre-fix a 16-player HOH dropped one houseguest per round = ~15 rounds (a slog, repeated for the
+    // veto every week). Batched drops cap it near the 4-8 band. The CROWN + drop order are unchanged
+    // (presentation only) — the calibration tests above still hold; this only pins the round COUNT.
+    const ctx: SeasonCtx = { player: PLAYER, statsOf: (id) => (id === PLAYER ? flat(0.95) : flat(0.4)), rel: new RelationshipModel(0.5) };
+    const s = newLiveSeason([PLAYER, ...Array.from({ length: 15 }, (_, i) => npc(i + 1))]); // 16-player field
+    const rng = new SeededRandom(7);
+    let maxRound = 0;
+    for (let g = 0; g < 80 && !s.hoh; g++) {
+      if (s.competition) maxRound = Math.max(maxRound, s.competition.round);
+      if (s.pending?.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
+      else advance(s, ctx, rng);
+    }
+    expect(s.hoh).toBeDefined();
+    expect(maxRound, `staged rounds=${maxRound}`).toBeGreaterThanOrEqual(2); // still multi-round drama
+    expect(maxRound, `staged rounds=${maxRound}`).toBeLessThanOrEqual(8);    // NOT the ~15-round slog
+  });
+
+  it("only the FIRST round binds; later rounds are non-binding flavor (audit 2026-06-20)", () => {
+    // The single up-front roll honors round 1's approach; later per-round prompts are color over an
+    // already-decided result. The `binding` flag tells the surface to present them as flavor, not stakes.
+    const ctx: SeasonCtx = { player: PLAYER, statsOf: (id) => (id === PLAYER ? flat(0.95) : flat(0.4)), rel: new RelationshipModel(0.5) };
+    const s = newLiveSeason([PLAYER, ...Array.from({ length: 15 }, (_, i) => npc(i + 1))]);
+    const rng = new SeededRandom(7);
+    const bindings: boolean[] = [];
+    for (let g = 0; g < 80 && !s.hoh; g++) {
+      if (s.pending?.kind === "comp-round") {
+        bindings.push(s.pending.binding);
+        applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
+      } else advance(s, ctx, rng);
+    }
+    expect(bindings.length).toBeGreaterThan(1);     // the favorite survives ⇒ multiple per-round prompts
+    expect(bindings[0]).toBe(true);                 // round 1 BINDS (the intent the roll honored)
+    for (let i = 1; i < bindings.length; i++) expect(bindings[i], `round ${i + 1}`).toBe(false); // later = flavor
+  });
+
   it("a late comp-round approach (after the crown) is a no-op — the round is locked", () => {
     const ctx: SeasonCtx = { player: PLAYER, statsOf: () => flat(0.5), rel: new RelationshipModel(0.5) };
     const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4)]);

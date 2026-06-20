@@ -68,7 +68,7 @@ export type PendingDecision =
   // --- STAGED competition round (0006 staged-rounds evolution): the player declares their approach for
   // THIS elimination round, seeing who is still in. Committed BEFORE the round resolves (anti-sycophancy);
   // once the round resolves it is locked — adaptation happens forward (the next round), never backward. ---
-  | { kind: "comp-round"; by: EntityId; comp: "hoh-competition" | "veto-competition"; round: number; stillIn: EntityId[] }
+  | { kind: "comp-round"; by: EntityId; comp: "hoh-competition" | "veto-competition"; round: number; stillIn: EntityId[]; binding: boolean }
   // --- "Houseguest's Choice" (0046/B45): the player drew the chip and picks the sixth veto player ---
   | { kind: "houseguests-choice"; by: EntityId; options: EntityId[] }
   | { kind: "replacement"; by: EntityId; saved: EntityId; options: EntityId[] }
@@ -384,7 +384,7 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     // Anti-sycophancy: the player commits their approach BEFORE the comp resolves. If they are in the
     // field and have not committed one, pause for round 1 (no rng consumed — exactly the baseline pause).
     if (field.includes(ctx.player) && s.compIntent === undefined) {
-      s.pending = { kind: "comp-round", by: ctx.player, comp: "hoh-competition", round: 1, stillIn: [...field] };
+      s.pending = { kind: "comp-round", by: ctx.player, comp: "hoh-competition", round: 1, stillIn: [...field], binding: true };
       return null;
     }
     // Resolve ONCE with the baseline RNG pattern (byte-identical crown), then stage the reveals. The
@@ -407,7 +407,7 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
   if (!s.competition) {
     const field = s.vetoField!;
     if (field.includes(ctx.player) && s.compIntent === undefined) {
-      s.pending = { kind: "comp-round", by: ctx.player, comp: "veto-competition", round: 1, stillIn: [...field] };
+      s.pending = { kind: "comp-round", by: ctx.player, comp: "veto-competition", round: 1, stillIn: [...field], binding: true };
       return null;
     }
     // The SAME comp drawn at stage A (0042) — looked up, never re-drawn (restart-safe, 0030).
@@ -432,6 +432,20 @@ function beginStaged(
 }
 
 /**
+ * Staged-competition pacing (audit 2026-06-20, owner ruling): an endurance comp reveals its drops in
+ * FEWER, BIGGER rounds — roughly this many rounds total regardless of field size — instead of one drop
+ * per round (which made a 15-player HOH a ~14-round slog, repeated for the veto every week). The batch
+ * size is sized so the round count lands near this target; small fields (a six-player veto) stay near
+ * one drop per round, which is already inside the 4-8 band. Tunable.
+ */
+const STAGED_TARGET_ROUNDS = 5;
+
+/** Drops to reveal per staged round so a comp resolves in ~STAGED_TARGET_ROUNDS rounds (≥1). */
+function stagedBatchSize(fieldSize: number): number {
+  return Math.max(1, Math.ceil((fieldSize - 1) / STAGED_TARGET_ROUNDS));
+}
+
+/**
  * Advance the staged competition ONE step (0006 staged-rounds evolution) — PRESENTATION ONLY. The
  * outcome (winner + drop order) is already fixed; this reveals one elimination at a time, narrowing
  * the field, and pauses for the player's per-round approach (`comp-round`) when they are STILL IN. That
@@ -445,16 +459,30 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   // The crowned winner stands alone — crown them.
   if (c.stillIn.length <= 1) return crownCompetition(s);
   // The player commits an approach for THIS round before its reveal (expression; locked after). If
-  // they are still in and have not committed one, pause and surface the narrowed still-in field.
+  // they are still in and have not committed one, pause and surface the narrowed still-in field. Only
+  // the FIRST approach (round 1, asked in resolveHohBeat/resolveVetoComp) is the BINDING intent the
+  // single roll honored; these later rounds are non-binding FLAVOR (the outcome is already fixed), so
+  // they carry `binding: false` and the surface presents them as color, not a stakes decision (#380
+  // audit 2026-06-20).
   if (c.stillIn.includes(ctx.player) && s.compIntent === undefined) {
-    s.pending = { kind: "comp-round", by: ctx.player, comp: c.comp, round: c.round, stillIn: [...c.stillIn] };
+    s.pending = { kind: "comp-round", by: ctx.player, comp: c.comp, round: c.round, stillIn: [...c.stillIn], binding: false };
     return null;
   }
   s.compIntent = undefined; // the round's approach is consumed + LOCKED — the next round re-asks
-  // Reveal the next scheduled DROP from the pre-derived order; the winner survives by construction.
-  const dropped = c.dropOrder![c.eliminated.length]!;
-  c.stillIn = c.stillIn.filter((id) => id !== dropped);
-  c.eliminated.push(dropped);
+  // Reveal a BATCH of the scheduled drops this round — FEWER, BIGGER rounds (audit 2026-06-20 owner
+  // ruling: ~4-8 rounds per comp, not one drop per round which made a 15-player HOH a ~14-round slog).
+  // PRESENTATION ONLY: the winner and the full drop ORDER are unchanged (still the single up-front
+  // roll), so the trajectory/calibration is byte-identical — only how many drops group per reveal
+  // changes. The winner is never in `dropOrder`, so the crown survives every batch by construction.
+  const remaining = c.dropOrder!.length - c.eliminated.length;
+  const batch = Math.min(stagedBatchSize(c.field.length), remaining);
+  const droppedThisRound: EntityId[] = [];
+  for (let i = 0; i < batch; i++) {
+    const dropped = c.dropOrder![c.eliminated.length]!;
+    c.stillIn = c.stillIn.filter((id) => id !== dropped);
+    c.eliminated.push(dropped);
+    droppedThisRound.push(dropped);
+  }
   c.round += 1;
   if (c.stillIn.length === 1) return crownCompetition(s);
   return {
@@ -462,8 +490,10 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
     // `comp-elimination` falls through every commit side-effect switch (no fold, no soul inflection, no
     // confessional, no rng) — so a reveal is inert to the game state, keeping the trajectory unchanged.
     beat: "comp-elimination",
-    content: `${dropped} is eliminated; ${c.stillIn.length} remain`,
-    participants: [dropped, ...c.stillIn],
+    content: droppedThisRound.length === 1
+      ? `${droppedThisRound[0]} is eliminated; ${c.stillIn.length} remain`
+      : `${droppedThisRound.join(", ")} are eliminated; ${c.stillIn.length} remain`,
+    participants: [...droppedThisRound, ...c.stillIn],
   };
 }
 

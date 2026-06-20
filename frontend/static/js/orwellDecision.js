@@ -204,9 +204,12 @@
     let textarea = null;
     const confirm = document.createElement("button");
     confirm.className = "odec-confirm"; confirm.type = "button";
-    // 0006 staged-rounds: a comp-round commit binds THIS round only (locked once it resolves), not the
-    // whole comp — phrase it so the per-round model is clear, while still an explicit commitment.
-    confirm.textContent = kind === "comp-round" ? "Lock in this round" : "Confirm — this is binding";
+    // 0006 staged-rounds: only the FIRST comp-round BINDS (the approach the single outcome roll honors);
+    // later rounds are non-binding FLAVOR over an already-decided result (audit 2026-06-20) — phrase the
+    // confirm so a flavor round reads as "push through", never a fresh stakes commitment.
+    confirm.textContent = kind === "comp-round"
+      ? (pending.binding === false ? "Push through this round" : "Lock in your approach")
+      : "Confirm — this is binding";
     confirm.disabled = true;
 
     const sync = () => { confirm.disabled = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto) == null; };
@@ -261,7 +264,15 @@
       (Array.isArray(pending.appeals) && pending.appeals.length ? pending.appeals : []).forEach((a) => addChip(String(a), String(a)));
     } else if (kind === "comp-intent" || kind === "comp-round") {
       // 0006 staged-rounds: the same compete/throw/play-safe approaches, but per-round for comp-round.
-      COMP_INTENTS.forEach((i) => addChip(i, i));
+      const chips = COMP_INTENTS.map((i) => addChip(i, i));
+      // audit 2026-06-20: only the FIRST comp-round binds (the intent the single outcome roll honored).
+      // A later round is non-binding FLAVOR over an already-decided result — default it to "compete" so
+      // the player can one-click "Push through" (still free to pick a different colour, or dismiss).
+      if (kind === "comp-round" && pending.binding === false && chips[0]) {
+        sel = [COMP_INTENTS[0]];
+        chips[0].setAttribute("aria-pressed", "true");
+        confirm.disabled = false;
+      }
     } else if (kind === "self-evict") {
       // 0061: no options to pick — an explicit Confirm IS the irreversible decision (a Cancel
       // button is added to the row below, posting the engine cancel so the player plays on).
@@ -295,9 +306,11 @@
     if (kind === "self-evict") {
       note.textContent = "This ends and forfeits your game — it cannot be undone.";
     } else if (kind === "comp-round") {
-      // 0006 staged-rounds: make clear this locks for THIS round only — adaptation is forward, never a
-      // single irrevocable popup. Still "your selection only — never read from prose" (anti-sycophancy).
-      note.textContent = "This round only — you'll choose again as the field narrows. Your selection only — never read from prose.";
+      // 0006 staged-rounds (audit 2026-06-20): the first round sets the binding approach; later rounds
+      // are color over an already-decided result, so say so plainly rather than implying fresh stakes.
+      note.textContent = pending.binding === false
+        ? "Just color — your approach was locked in the first round. Push through, or dismiss to play it out in conversation."
+        : "This sets how you play the comp. Your selection only — never read from prose.";
     } else {
       note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
     }

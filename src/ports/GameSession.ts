@@ -571,6 +571,13 @@ export interface PendingDecisionView {
    */
   round?: number;
   stillIn?: NamedRef[];
+  /**
+   * STAGED competition (#380 audit 2026-06-20) — for a `comp-round`, whether THIS round's approach is
+   * BINDING. Only the first round binds (it is the intent the single outcome roll honors); later rounds
+   * are non-binding FLAVOR over an already-decided result, so the surface presents them as color, not a
+   * stakes decision. Absent for every other kind.
+   */
+  binding?: boolean;
   /** How many to pick (nominations = 2; others = 1; finale-statement / juror-question = 0). */
   pick: number;
 }

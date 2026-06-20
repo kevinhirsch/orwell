@@ -3416,17 +3416,20 @@ export class GameSessionAdapter implements GameSession {
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
         return { kind: p.kind, by, prompt: "Declare your approach to this competition: compete, throw, or play it safe.", options: COMP_INTENTS.map((i) => ({ id: i, name: i })), pick: 1 };
       case "comp-round": {
-        // 0006 staged-rounds: the player picks their approach for THIS elimination round, seeing who is
-        // STILL IN. Options are the three approaches (compete first = default); `stillIn` carries the
-        // narrowed field so they can adapt (everyone left an ally → throw; a threat still in → compete).
+        // 0006 staged-rounds: the player's approach for THIS elimination round, seeing who is STILL IN.
+        // Only the FIRST round BINDS (the intent the single outcome roll honors); later rounds are
+        // non-binding FLAVOR over an already-decided result (audit 2026-06-20) — the prompt + the
+        // `binding` flag tell the surface to present those as color, not a stakes decision.
         const stillIn = refs(p.stillIn);
         const others = stillIn.filter((r) => r.id !== PLAYER).map((r) => r.name);
         const fieldLine = others.length ? ` Still in with you: ${others.join(", ")}.` : " You are the last one in.";
+        const prompt = p.binding
+          ? `Set your approach to this competition: compete, throw (drop out), or play it safe.${fieldLine} This locks in how you play the comp.`
+          : `The field narrows — ${stillIn.length} still standing.${fieldLine} Your approach is already locked from the first round, so this is just color: say how you're pushing through, or skip ahead.`;
         return {
-          kind: p.kind, by,
-          prompt: `Round ${p.round} — set your approach for THIS round: compete, throw (drop out), or play it safe.${fieldLine} Your choice locks for this round only; you'll choose again as the field narrows.`,
+          kind: p.kind, by, prompt,
           options: COMP_INTENTS.map((i) => ({ id: i, name: i })),
-          round: p.round, stillIn, pick: 1,
+          round: p.round, stillIn, binding: p.binding, pick: 1,
         };
       }
       case "houseguests-choice":
