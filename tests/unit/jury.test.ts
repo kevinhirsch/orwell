@@ -175,6 +175,7 @@ describe("0037 — engine-legible finale appeals (anti-sycophancy)", () => {
 
 // ── gameRespect (D4/E33 ruling 2026-06-11) ─────────────────────────────────────
 import { gameRespectTerm } from "../../src/engine/jury";
+import { MANNER_LEAN } from "../../src/engine/juryConstants";
 
 describe("gameRespectTerm — the jury weighs who actually played", () => {
   it("splits the pair's resume share, signed and bounded", () => {
@@ -185,7 +186,12 @@ describe("gameRespectTerm — the jury weighs who actually played", () => {
     expect(gameRespectTerm(3, 1)).toBeCloseTo(0.25);  // bounded in (−0.5, 0.5)
   });
   it("a wronged jury can still outvote the resume (bitterness stays possible)", () => {
-    // betrayal manner (−0.6 × 0.8) outweighs the full respect split (0.5 × 0.9)
-    expect(0.8 * 0.6).toBeGreaterThan(0.9 * 0.5);
+    // A full betrayal manner (MANNER_LEAN.betrayed × JURY_WEIGHTS.manner) must outweigh the
+    // maximum gameRespect split (±0.5 × JURY_WEIGHTS.gameRespect). Bound to the constants so this
+    // property holds across retunes — incl. the 2026-06-20 gameRespect 0.9→0.7 calibration drop,
+    // which only widens the margin (gameRespect is now the THIRD-largest term, below manner).
+    const fullBetrayal = Math.abs(MANNER_LEAN.betrayed) * JURY_WEIGHTS.manner;
+    const maxRespectSplit = 0.5 * JURY_WEIGHTS.gameRespect;
+    expect(fullBetrayal).toBeGreaterThan(maxRespectSplit);
   });
 });
