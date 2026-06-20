@@ -27,7 +27,8 @@ every later update/reset reads it from there via a git credential helper (no re-
 in a URL or `.git/config`):
 
 ```bash
-GIT_TOKEN=github_pat_xxx bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" https://raw.githubusercontent.com/kevinhirsch/orwell/main/deploy/orwell.sh)"
+export GIT_TOKEN=github_pat_xxx   # fine-grained (Contents: Read-only) OR classic (repo scope)
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GIT_TOKEN" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/kevinhirsch/orwell/contents/deploy/orwell.sh?ref=main")"
 ```
 
 This creates a Debian LXC and installs everything. Override defaults via env before the command:

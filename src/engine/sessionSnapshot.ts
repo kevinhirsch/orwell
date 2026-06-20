@@ -71,6 +71,14 @@ export interface SessionCore {
   presenceTickCount?: number;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
+  /**
+   * The PRODUCER persona's seed (producer-persona feature). The producer is the OFF-CAMERA casting-interview
+   * voice — a seeded, reproducible persona, NOT one of the 16 (no headshot, never in the roster). The
+   * interview runs PRE-GAME, so this seed is established (and persisted) lazily before any season seed
+   * exists, so the same producer is voiced across turns and a restart; at season start it is set to the
+   * season `seed`. Absent on pre-feature saves AND a fresh pre-interview session (re-minted on first need).
+   */
+  producerSeed?: number;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
   casting?: CastingIntake;
   /** Per-season photorealistic style anchor (0051): seeded at cast time, stable through the season. Absent on older saves (falls back to a default). */

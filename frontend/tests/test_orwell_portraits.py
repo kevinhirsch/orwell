@@ -89,6 +89,50 @@ def test_create_character_tool_kicks_off_generation(tmp_portraits, monkeypatch):
     assert captured["prompts"] == _PROMPTS
 
 
+def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits, monkeypatch):
+    """Bug B — cast portraits must start generating BY MOVE-IN, not after.
+
+    With a cast present, createCharacter must (a) kick portrait generation off IMMEDIATELY from
+    the seeded facets (in parallel with authoring), and (b) still run cast authoring with a
+    `then` top-up callback. The picture must NOT be chained behind the (slow, 15-call) authoring
+    pass — that is what made portraits land around/after house entry."""
+    tool_impl = importlib.import_module("src.tool_implementations")
+    cast_authoring = importlib.import_module("src.orwell_cast_authoring")
+
+    async def fake_create(*a, **k):
+        return {
+            "started": True,
+            "portraitPrompts": _PROMPTS,
+            "house": [{"id": "npc:1"}, {"id": "npc:2"}],
+            "player": {"name": "The Player"},
+        }
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+
+    order = []  # record the call order so we can prove portraits don't wait on authoring
+
+    def fake_kickoff_generation(prompts, user):
+        order.append(("portraits", tuple(p["houseguestId"] for p in prompts)))
+    monkeypatch.setattr(orwell_portraits, "kickoff_generation", fake_kickoff_generation)
+
+    captured = {}
+
+    def fake_kickoff_authoring(cast, player_name, owner, then=None):
+        order.append(("authoring", player_name))
+        captured["then"] = then  # the top-up callback must be wired (not None)
+    monkeypatch.setattr(cast_authoring, "kickoff_authoring", fake_kickoff_authoring)
+
+    res = _run(tool_impl.do_create_character('{"playerName":"P"}', owner="bob"))
+    assert res["exit_code"] == 0
+    # Portraits kicked off, and BEFORE authoring is even scheduled — never chained behind it.
+    assert ("portraits", ("player", "npc:1", "npc:2")) in order
+    assert order.index(("portraits", ("player", "npc:1", "npc:2"))) < \
+        next(i for i, c in enumerate(order) if c[0] == "authoring")
+    # Authoring still runs, with a top-up callback to fill any not-yet-landed face from the
+    # authored facet (idempotent).
+    assert ("authoring", "The Player") in order
+    assert callable(captured.get("then"))
+
+
 # --- graceful absence: skip silently when generation is unavailable ---------------------
 
 def test_skips_silently_when_generation_unavailable(tmp_portraits, monkeypatch):

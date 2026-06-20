@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  momentForPhase, momentFragment, buildSystemPrompt, renderGameContext,
+  momentForPhase, momentFragment, buildSystemPrompt, renderGameContext, physicalLook,
   BASE_GAME_MASTER_PROMPT, MOMENT_PROMPTS,
 } from "../../src/engine/momentPrompts";
+import { physicalFacetToAppearance } from "../../src/engine/portraitPrompts";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import type { EntityId } from "../../src/domain/ids";
 
 describe("0018 — narrative & moment orchestration", () => {
   it("maps phases to moments deterministically", () => {
@@ -154,5 +156,84 @@ describe("0018 — narrative & moment orchestration", () => {
     const prompt = buildSystemPrompt("nominations", view);
     expect(prompt).toContain(MOMENT_PROMPTS["nominations"]!.slice(0, 20));
     expect(view.phase).toBe(before); // narration/prompt-building does not advance the game
+  });
+});
+
+/**
+ * L29/L23 consistency gate: the narrated body and the cast portrait MUST derive from ONE source —
+ * the structured `physicalCharacteristics` facet. The live-playtest bug was a houseguest narrated
+ * "stocky with honey-blond waves" while her portrait showed an entirely different person, because
+ * the narrator-facing context fed only the prose `appearance` blurb while the portrait used the
+ * structured facet. This proves both consumers consume the SAME facet for the same character.
+ */
+describe("L29 — narration and portrait share ONE appearance source", () => {
+  it("the narrator context voices the SAME structured physical facet the portrait prompt was drawn from", () => {
+    const game = new GameSessionAdapter();
+    game.createCharacter({ playerName: "The Player", seed: 31 });
+    const view = game.getGameState();
+    // A live houseguest carrying the seeded structured facet (the 0058 floor seeds every active NPC).
+    const npc = view.house.find((h) => h.status === "active" && h.physicalCharacteristics)!;
+    expect(npc).toBeTruthy();
+
+    // The SAME builder both consumers use, applied to this card's facet — the single source of truth.
+    const sharedLook = physicalFacetToAppearance(npc.physicalCharacteristics!);
+    expect(sharedLook).toContain(npc.physicalCharacteristics!.hair);
+    expect(sharedLook).toContain(npc.physicalCharacteristics!.heightBuild);
+
+    // Consumer #1 — the narrator-facing context: voices the shared look (hair + build), not an
+    // improvised description. The structured facet AUTHORS the look here.
+    const ctx = renderGameContext(view);
+    expect(ctx).toContain(npc.physicalCharacteristics!.hair);
+    expect(ctx).toContain(npc.physicalCharacteristics!.heightBuild);
+
+    // Consumer #2 — the portrait prompt: built from the SAME facet (the live cast portrait path).
+    const pp = game.getPortraitPrompt(npc.id as EntityId)!;
+    expect(pp.prompt).toContain(npc.physicalCharacteristics!.hair);
+    expect(pp.prompt).toContain(npc.physicalCharacteristics!.heightBuild);
+
+    // The hinge: the EXACT physical clause the portrait builds is present verbatim in the narrator
+    // context — there is one description, voiced once and pictured once, never two that can diverge.
+    expect(pp.prompt).toContain(sharedLook);
+    expect(ctx).toContain(sharedLook);
+  });
+
+  it("physicalLook prefers the structured facet and falls back to the prose appearance (pre-0058 saves)", () => {
+    const facet = {
+      heightBuild: "tall and broad-shouldered", skinTone: "warm brown skin", hair: "tight natural curls, jet black",
+      facialFeatures: "a square jaw", distinguishingMark: "none notable",
+      ageLook: "settled, thirties presence", style: "streetwear and bold sneakers",
+    };
+    // With a facet present, the facet authors the look (NOT the prose blurb) — same as the portrait.
+    expect(physicalLook({ appearance: "ignored prose blurb", physicalCharacteristics: facet }))
+      .toBe(physicalFacetToAppearance(facet));
+    expect(physicalLook({ appearance: "ignored prose blurb", physicalCharacteristics: facet }))
+      .not.toContain("ignored prose blurb");
+    // No facet (a pre-0058 save): fall back to the prose appearance so older saves still describe a body.
+    expect(physicalLook({ appearance: "athletic, close-cropped hair" })).toBe("athletic, close-cropped hair");
+    expect(physicalLook({})).toBeUndefined();
+  });
+
+  it("the shared physical facet carries NO hidden/Vault content into the narrator context", () => {
+    // Poison every hidden surface of one NPC with a unique sentinel, restore, then assert the
+    // narrator context (which now voices the structured facet) surfaces NONE of it. The facet is a
+    // PUBLIC §3 baseline — proving the consistency fix did not open a leak path.
+    const game = new GameSessionAdapter();
+    game.createCharacter({ playerName: "The Player", seed: 9 });
+    const snap = game.snapshot();
+    const SENTINEL = "SENTINEL-L29-NARRATION-LEAK-DO-NOT-SURFACE";
+    const poison = (hg: { character: { stats: { physical: number; mental: number; social: number };
+      hiddenElements: { kind: "secret-motive"; detail: string }[] }; soul: { memory: string[] } }) => {
+      hg.character.hiddenElements.push({ kind: "secret-motive", detail: `${SENTINEL}-motive` });
+      hg.soul.memory.push(`${SENTINEL}-memory`);
+      hg.character.stats.physical = 99999;
+    };
+    poison(snap.house!.npcs[0]! as unknown as Parameters<typeof poison>[0]);
+    poison(snap.house!.player as unknown as Parameters<typeof poison>[0]);
+    const restored = new GameSessionAdapter();
+    restored.restore(snap);
+
+    const ctx = renderGameContext(restored.getGameState());
+    expect(ctx).not.toContain(SENTINEL);
+    expect(ctx).not.toContain("99999");
   });
 });
