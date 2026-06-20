@@ -638,12 +638,14 @@ export interface SubmitDecisionReq {
  * (mirrors the 0051 portrait-prompt handshake). The engine validates / repairs (diversity + non-
  * player-mirroring), SPLITS it across the Vault Wall (public facets onto the byte-stable Character;
  * secrets/goals/weakness/perception sealed into the Vault), INDEXES it for full-fidelity recall
- * (L27b), and SEEDS the story threads + the NPC→player edge from it.
+ * (L27b), and re-derives the story threads from it.
  *
- * PHASE 1: this is the clearly-TYPED seam, STUBBED (it records nothing structurally yet) and unit-
- * tested. The deterministic seeded floor is the live profile source for now; wiring the live LLM
- * write-back (validate/repair/split/seal/index) is Phase 2. Everything PUBLIC here may cross to the
- * player; everything HIDDEN is sealed and never projected.
+ * NOW LIVE (Phase 2, commit 852f2db): the write-back validates / splits / seals / re-derives / re-indexes
+ * for real, REPLACING the seeded floor for that houseguest (idempotent). The deterministic seeded floor
+ * remains the offline fallback / pre-write source. Anti-sycophancy: the engine KEEPS its calibrated
+ * seeded NPC→player leans (the LLM authors the Day-1 read TEXT only, never the hidden weights — so the
+ * net-zero perception balance the juryReach calibration gate depends on is preserved). Everything PUBLIC
+ * here may cross to the player; everything HIDDEN is sealed and never projected.
  */
 export interface RecordCastProfileReq {
   /** Which houseguest this authored profile is for. */
@@ -785,10 +787,10 @@ export interface GameSession {
   /**
    * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded
    * here so the ENGINE is the source of truth: PUBLIC facets fold onto the byte-stable Character;
-   * HIDDEN facets are sealed into the Vault and NEVER projected. PHASE 1: clearly typed + STUBBED
-   * (it validates the target and reports which fields it would accept, without yet overwriting the
-   * seeded floor); the live validate/repair/split/seal/index wiring is Phase 2. The result never
-   * echoes a hidden value (it reports field NAMES only).
+   * HIDDEN facets are sealed into the Vault and NEVER projected. NOW LIVE (Phase 2): it validates the
+   * target (non-player-mirroring), splits PUBLIC↔HIDDEN across the wall, seals + re-indexes the hidden
+   * half for full-fidelity recall, and re-derives the story threads — replacing the seeded floor for
+   * that houseguest (idempotent). The result never echoes a hidden value (it reports field NAMES only).
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
 }

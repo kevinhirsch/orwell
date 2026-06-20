@@ -544,12 +544,17 @@ sanctioned reset); the ≤5px season **progress bar** + "Season N" chip HUD
 (`orwellSeasonProgress.js`); the persistent post-season **"New season" surface**
 (`orwellNewSeason.js`, which **subsumes the 0056 FE keep/recreate UX** + the per-season portrait
 studio); and the engagement-driven post-season **producers re-approach** agent-loop nudge.
-**0058** (deep character profiles — *born deep, persist, play out*) — ✅ **Phase 1 built**,
-**BDD-gated** (`0058-deep-character-profiles.feature`, now in `cucumber.cjs`): the seeded floor
+**0058** (deep character profiles — *born deep, persist, play out*) — ✅ **Phase 1 + Phase 2 built**,
+**BDD-gated** (`0058-deep-character-profiles.feature`, in `cucumber.cjs`): the seeded floor
 spawns §3-depth profiles split across the Vault Wall (byte-stable baseline), seeds & seals story
-threads, seeds the Day-1 NPC→player edge, and recalls authored detail in full; **Phase 2 deferred**
-(seamed, not wired): the LLM-authored write-back (`recordCastProfile` is a typed stub), portrait
-consumption of the physical facet, premiere voicing, and the thread trigger/resolution scheduler.
+threads, seeds the Day-1 NPC→player edge, and recalls authored detail in full. **Phase 2 is now LIVE:**
+the LLM-authored write-back (`recordCastProfile`, commit `852f2db` — validate/split-across-the-wall/
+seal/re-derive/re-index, idempotent; FE producer-LLM authoring in `frontend/src/orwell_cast_authoring.py`
+kicked off pre-portraits), the portrait consumption of the physical facet (L29 — feeds
+`castPortraitPrompts`), the premiere voicing (L31 — the public biography voiced via the `premiere`
+moment prompt), and the thread trigger/resolution scheduler (shipped as feature **0060**,
+`scheduleStoryThreads` wired into the off-screen tick). *By design (anti-sycophancy), the write-back
+keeps the engine's calibrated seeded NPC→player leans — the LLM authors the Day-1 read TEXT only.*
 **0059** (hidden seeded relationships) — 📝 **SPEC only**: consolidates ledger **L35** (pre-game
 ties) + **L40** (showmance overload — the narrator currently reads every high-affinity edge as
 romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances that surface only

@@ -11,8 +11,9 @@ export type { PhysicalCharacteristics };
 /**
  * Feature 0058 — deep character profiles ("born deep, persist, play out").
  *
- * PHASE 1 (this module): the DETERMINISTIC, seeded floor for the §3-depth profile, split across the
- * Vault Wall. From each houseguest's seed-stable Character it produces TWO things:
+ * THIS module: the DETERMINISTIC, seeded floor for the §3-depth profile, split across the Vault Wall —
+ * the offline fallback the engine validates LLM output against, and the live profile source when no
+ * authoring model is wired. From each houseguest's seed-stable Character it produces TWO things:
  *
  *   1. PUBLIC facets (`PublicDepth`) — a real multi-sentence `biography` (not a one-liner) + a
  *      STRUCTURED `physicalCharacteristics` facet (the single source of truth for BOTH the portrait
@@ -24,12 +25,14 @@ export type { PhysicalCharacteristics };
  *      Vault and NEVER appears on any outward projection (the §8 Vault-Wall non-negotiable). It is a
  *      richer, structured sibling of the older `hiddenElements` (B50) — same discipline, more depth.
  *
- * DEFERRED to a later phase (seamed but not wired): the LLM authors these (endless variety) and writes
- * them BACK through `GameSession.recordCastProfile` — the engine then validates / repairs / splits /
- * seals (the 0051 portrait-prompt handshake mirror, ledger L28b). Phase 1 ships the deterministic
- * floor that is ALSO the offline fallback the engine validates LLM output against, plus the write-back
- * seam STUB. The portrait consumption (L29), the premiere voicing (L31), and FULL thread resolution
- * wiring are likewise phase 2 — Phase 1 seeds, seals, persists, and folds at least one thread.
+ * Phase 2 is LIVE (no longer deferred): the LLM authors these (endless variety) and writes them BACK
+ * through `GameSession.recordCastProfile` — the engine then validates / repairs / splits / seals (the
+ * 0051 portrait-prompt handshake mirror, ledger L28b). The portrait consumption (L29 — the structured
+ * physical facet feeds `castPortraitPrompts`), the premiere voicing (L31 — the public biography is
+ * voiced through the `premiere` moment prompt), and the FULL thread trigger/resolution scheduler
+ * (feature 0060 — `GameSessionAdapter.scheduleStoryThreads`, wired into the off-screen tick) are all
+ * wired. This module remains the deterministic floor: it seeds, seals, persists, and the live scheduler
+ * walks the threads dormant→active→surfaced→resolved→expired.
  *
  * Determinism: every generator is driven by a SIDE rng hashed off the houseguest's name + seed, so it
  * never perturbs the main house stream (stats/names stay byte-stable, 0007) and the same seed yields
