@@ -486,232 +486,39 @@ TS tooling (see `frontend/INTEGRATION.md`).
 
 ## Current status
 
-Built BDD/TDD-first, in priority order:
+**Built BDD/TDD-first and feature-complete through the drafted spec set (0001–0066).** The eight
+priority invariants, the MCP seam, the full weekly loop, per-user sandboxes, durable persistence, the
+live off-screen society, the endgame + interactive finale, the character-evolution linchpin (0041),
+deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the LLM↔engine sync spine
+(0065), and in-game time + the sleep economy (0066 / ADR 0006) are all in. The **one deliberate
+deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
 
-- **0001 — Vault Wall isolation:** ✅ green (player + admin surfaces; boundary proven by
-  dependency-cruiser; sentinel + property tests; fixed tool allowlist).
-- **0002 — Event visibility & propagation:** ✅ green (witness-derived visibility with a
-  store-enforced invariant against mislabeling; pathway-only propagation; knowledge vs
-  suspicion; Diary-Room isolation; NPC-to-NPC gossip diffusion with provenance/confidence/drift).
-- **0003 — Behavioral fidelity:** ✅ green (seeded multi-day simulation; off-screen-heavy
-  social life, alliance churn over a computed relationship model, rare/bounded hidden-element
-  surfacing — richness asserted as property thresholds in `src/engine/richnessConfig.ts`).
-- **0004 — Replayability & naming:** ✅ green (`CharacterFactory`: a 16-cast — one OOBE-authored
-  player + 15 procedurally-named NPCs; curated/balanced ensemble; Character/Soul split; no
-  hard-coded name list; no cross-seed identity carryover; same-seed reproducible). Amended by
-  E38/D8 (2026-06-10): NPC names are **seeded samples from the vendored real-name corpora**
-  (`src/engine/data/`), and live `createCharacter` defaults to a **persisted entropy seed** —
-  the same player name never replays the identical season; explicit seeds are for tests/replays.
-- **0005 — Competition eligibility:** ✅ green (pure-core hard rules: outgoing-HOH exclusion,
-  veto-winner-can't-be-replacement, six-player veto draw with the "Houseguest's Choice" chip,
-  eviction voters + HOH tiebreak; invariant under temperature and reserve twists).
-- **0006 — Outcomes by stats + temperature:** ✅ green (stat-vs-type + bounded per-moment
-  temperature roll + soul emotional modifier, no Luck; reproducible by seed; favorite wins a
-  calibrated strong majority (~72%) but loses real upsets; player unprotected; intent immutable).
-- **0007 — Persistence non-degradation:** ✅ green (serializable `GameState`; lossless
-  round-trip; co-versioned `SaveStore` (Vault+Journal bump together); cross-save superset +
-  monotonic counts; the dynamic soul deepens materially while the static character is byte-stable).
-- **0008 — Daily-event invariant:** ✅ green (ceremony-driven scheduler; every in-game day
-  carries a meaningful event; a week = one HOH reign, HOH comp → eviction; at most one optional
-  social day per week (often none), and even it carries a significant house event).
+**Trust the code over this prose — it drifts.** The authoritative sources, in order:
+- `docs/features/README.md` — the per-feature status index, reconciled against the source (built /
+  spec-only / deferred, with each feature's verification gate).
+- `cucumber.cjs` `paths` — the live list of BDD-gated features.
+- `docs/audits/2026-06-10-full-product-audit.md` (the close-out ledger) — the authoritative open-items
+  list going forward.
+- `git log --oneline` for what last merged green; `npm test` for the authoritative pass/fail.
 
-- **0009 — MCP tool boundary (M5):** ✅ green (a permissioned `McpServer` mounts only the
-  channel allowlist; read tools come from the visible projection, action tools cross a Vault-free
-  `EngineCommands` port; the adapter has no Vault/vector/engine-root dependency — dependency-cruiser
-  rule extended to cover it; every tool output proven sentinel-free; channels isolated).
+**A few load-bearing invariants worth knowing up front** (enforced in code; easy to violate by accident):
+- `runCompetition` is the **single outcome authority** — `resolveCompetition` is not on the player
+  channel — and `recordInteraction` requires the player actually witnessed the scene.
+- The live engine-side narrator is `EchoNarrativePort`; **narration happens in the front-end** via
+  `getMomentPrompt` (the `setNarrator` seam exists if engine-side narration is ever wired).
+- Souls evolve live (`src/engine/emotionalArc.ts`) and bend the competition modifier; `CHARACTER` stays
+  byte-stable; no number ever crosses to the player.
 
-**All eight priority invariants (0001–0008) plus the M5 MCP seam (0009) are implemented and
-green.** The engine is also **runnable**: `npm run build` → `npm start` serves the HTTP MCP
-API the front-end calls (`src/main.ts` → `src/adapters/mcp/HttpMcpServer.ts`), with a static
-"no secrets committed" guard. `npm test` runs clean: typecheck → build → unit/property/arch →
-all BDD scenarios.
-
-**Gameplay loop:** **0011 — weekly loop orchestration** is ✅ green (`src/engine/season.ts`): a
-pure, seed-deterministic season — HOH → noms → veto → ceremony → eviction down to Final 2 + a
-jury vote (last-9 jury, last-juror tie-break); NPC decisions are relationship-driven (threat/
-trust), player decision points are surfaced and validated. **0012–0014** (conversation & scene
-system, Diary Room, jury & endgame) are ✅ green too.
-
-**Renamed & folded:** the project is now **Orwell** (repo `kevinhirsch/orwell`); the game is
-**folded into the main chat** — the vendored Orwell front-end (`frontend/`) drives play through
-the engine's MCP tools, and the engine supplies a **tight, per-moment game-master system prompt**
-(0018) with a **lever manifest** (the model knows how to access and pull every engine lever).
-
-**MVP-1 batch (0015–0031) — green** (the canonical list is `cucumber.cjs` `paths`): 0015 OOBE ·
-0016 God Mode · 0017 relationship model · 0018 moment orchestration · 0019 agent play loop · 0020
-player experience MVP-1 · 0021 per-user sandboxes · **0023 consequence & memory** (the former
-critical gap — now wired into the live game) · 0024 soul storage & semantic recall (md + vector) ·
-0025 reserve twists (Vault-sealed) · 0026 relationship math · 0027 the real LLM `NarrativePort` ·
-0028 temperature/emotional constants · 0030 durable persistence (survive engine restart) · 0031
-per-sandbox game orchestrator & integrity watcher. **0022** (player experience MVP-2) is **deferred**.
-
-**Live loop batch (0032–0037) — built:** **0034** (live weekly progression & decision seam),
-**0035** (the off-screen watcher wired into the runtime — `SystemClock` + `composeRuntime`; since
-the 2026-06-10 ruling it is **opt-in, not the default**: the house lives between the player's own
-turns via per-turn ticks and does not exist while the player is away — BDD-gated via B70), and
-**0037** (the interactive finale / jury-vote choreography: appeal scorer + staged statements →
-per-juror questions → ordered vote reveal, through the 0034 seam) are BDD-gated in `cucumber.cjs`.
-**0033** (`playerTagline`) and **0036** (`socialInitiatives` + `diaryRoom` live tools) shipped
-**unit-gated** (a recorded deviation — see their spec headers; audit E87a). **0032** (front-end surface reduction / the game
-build) is Python-only, tested in `frontend/tests/` with pytest — never added to `cucumber.cjs`;
-**0029** (app administrator role & user management — the account tier, not God Mode) is likewise
-front-end pytest-validated.
-The 0037 **finale UI is built** (B26 — the Vault-free `finaleView` read tool on the `GameSession`
-port / `PLAYER_TOOLS` — plus C11, the `frontend/static/js/orwellFinale.js` panel over an
-`orwell_engine.finale_view` client; fail-open to `{ finale: null }`).
-
-**Post-audit batch (0038–0044) — ✅ complete (2026-06-10).** **0041** character evolution & arc
-— **the linchpin** — is green (`src/engine/emotionalArc.ts` + a live `SoulStore`): consequential
-beats + the off-screen tick drive bounded, mean-reverting soul evolution that modulates the live
-competition modifier (0006/0028) and a rattled-HOH read; the arc persists and is recall-able;
-`CHARACTER` stays byte-stable; no number crosses to the player. **0038** live off-screen society
-is fully green (varied scenes, live soul-deepening, B27b gossip→player diffusion with the
-pathway-aware 0031 leak heuristic). **0039** (deals), **0040** (confessionals with live
-soul-recall), **0042** (the competition library — curated defs + seeded no-repeat draws +
-Vault-free narrative scaffolds on the result view), **0043** (emergent blocs — derived per read,
-never stored, per ADR 0002), and **0044** (strategic nominations & enriched votes —
-disposition-gated pawn/backdoor/direct tactics, political temperature, mood/bloc/deal-aware
-votes, all magnitudes in `src/engine/decisionConstants.ts`) are green and BDD-gated.
-
-**Endgame batch (0045–0047) — green** (Wave 2 of the product-audit queue; BDD-gated in
-`cucumber.cjs`): **0045** endgame structure (the explicit Final 5 → Final 4 → Final 3 → Final 2
-ladder replacing a generic late-game loop), **0046** player eviction & the juror's seat (the
-player can genuinely lose — `GameStateView.player.status`; evicted pre-jury ⇒ terminal recap,
-jury ⇒ the player serves as a juror under a defined **juror knowledge model**: jurors witness
-ceremonies-as-broadcast only), and **0047** eviction night live (staged vote reveal + goodbye
-messages). **0048** (season retrospective & the Vault unsealing — `seasonRecap` from the record
-+ the one sanctioned, code-gated post-season Vault read, with its front-end panel) and **0049**
-(house presence & lingering play — rooms/adjacency in the pure core, seeded occupancy, the
-`whereabouts` lever, overheard-pathway eavesdropping, per ADR 0003) are **✅ green and
-BDD-gated**. **0050 — the casting interview — is green** (BDD-gated): character creation is the
-game's first scene, acquired **through the chat, no modal** — pre-game, the chat is a
-producer-led "get to know the cast" interview (the `character-creation` moment prompt carries
-the canonical casting-sheet manifest, drift-tested, plus the live casting status). The intake
-is **incremental**: `updateCasting` records answers as they land into a durable pre-game intake
-(half-done OOBE survives a restart and resumes), the **engine** computes what's captured /
-missing / the next step, and `createCharacter` finalizes from it (persona, backstory,
-motivation, private strategy, interview notes seed the Character/Soul datastore) returning a
-**casting card** (character type, strategy, per-aptitude tier words — qualitative only, no
-number crosses). **The product-audit, front-end & experience, and ops/security/test-integrity
-waves (B34–B73 / C12–C33) all landed** — every queue item is marked ✅ with its verifying
-artifact.
-
-**Rounds 4–7 (2026-06-10/11) — the audit campaign — ✅ landed end to end.** The round-4 UI &
-runtime audit (D1–D11), the round-5/6 full product audit (rulings #1–#21; E/P/W/S/T/C parallel
-lanes), the prioritized UI track (U1–U5, rulings #15/#16), and the close-out lanes all shipped:
-the **one sanctioned restart door** (D1/R1 — season 2 commits clean and survives an engine
-restart; typed 409 refusals); knowledge-integrity hardening (pathway anchoring requires content
-lineage; `resolveCompetition` removed from the player channel — `runCompetition` is the single
-outcome authority; `recordInteraction` requires the player witnessed, folds budgeted);
-**the social sim made consequential** (deals horizon-aware, every binding actor reconciled,
-honoring pays via the new `reliability` evidence signal; gossip receipt folds move third-party
-reads; per-role arc emotions; structured confessionals with live soul-recall); player agency
-(secret ballots E12, player-authored goodbyes E34, the player-juror's own question E37, the
-witnessed veto-chip draw E35); **real-name casts + entropy seeds** (E38/D8); **jury calibration**
-(L9 — passive jury-reach ruled emergent realism; finale wins must be comp-earned; the permanent
-gate is `tests/property/juryReach.property.test.ts`); the hardening sweep (default-deny
-dependency-cruiser, two-tier HTTP auth, deeper live sentinel sweeps, fsync save durability);
-ops (the single-PAT private-repo flow, E85 systemd hardening, the A12 login health panel); the
-FE UI system (responsive tokens + the matrix gate, settings repair, sidebar chrome, the
-played-record transcript surface, the five 0052 house themes, game-build trims); **E86a** the
-real fastembed `EmbeddingProvider`; and **0053** admin transcripts (FE pytest lane). The
-**campaign close-out ledger** at the end of `docs/audits/2026-06-10-full-product-audit.md` is
-the authoritative open-items list going forward.
-
-**Verifying current state.** Because the status prose drifts, trust the code over this section:
-the **per-feature status index** in `docs/features/README.md` is reconciled against the source
-(audited 2026-06-20 — no orphaned/untracked unbuilt specs; 0022 is the deferred one, and specs now run through 0066);
-`cucumber.cjs` `paths` is the live list of BDD-gated features; and `git log --oneline` shows which
-`NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
-
-**Remaining work** (the queue is drained; new work starts as a new spec/queue item — and the
-**close-out ledger** in `docs/audits/2026-06-10-full-product-audit.md` is the authoritative
-open-items list): **0022** MVP-2 (the one deferred feature); 0010's container smoke on a real Proxmox host — which is also the
-real-host verification the A4 single-PAT deploy design still needs (do it during the
-private-repo flip); the **Postgres + pgvector** relational tier — **reclassified under the MVP-002
-post-launch scale-out milestone** (SQLite + sqlite-vec shipped opt-in, #330; only matters past a
-single-host deploy — see the close-out ledger's MVP-002 section); the MCP/JSON-RPC envelope is **now built** (an
-additive `POST /:channel/rpc` doing `initialize`/`tools/list`/`tools/call` + notifications/batch
-over the same guardrails — `src/adapters/mcp/jsonRpc.ts`; only the SSE server-push stream is left,
-and it is **unneeded** here — the engine emits no server-initiated messages);
-the **calibration tuning** lane (passive players coast to Final 2 in ~half of seasons
-and lose there — now **instrumented + data-gathered**, #354 / `docs/audits/2026-06-19-calibration-data.md`;
-the next step lowers `JURY_WEIGHTS.gameRespect` ~0.9→0.6–0.7 and re-runs the instrument + the juryReach
-`EARNED_WINS` guard — **the largest open game-feel lever**); the post-campaign UI follow-ups **A5–A7**
-are **done** (#353 theme particles + frosted-top + the L45 punctuation guard; #335 fly-out); the low-priority sweep defects **A8–A10** are **now closed
-(PR #292)** — `humanizeIds` substitutes entity ids as whole tokens (no more mangled "player(s)"
-in beat prose), a turn-driven *supplementary* off-screen tick no longer faults on an empty society,
-and houseguests-choice / tie-break / final-eviction accept the FE-documented `choice` field; **R3 is
-resolved** (PR #422 — the snapshot export was already O(Δ); `EngineCommandsAdapter.currentBeatKey`, the
-last per-commit whole-log scan, is now incremental, O(events)→constant — one adjacent item stays
-flagged: `InMemoryKnowledgeService.pathwayAnchored` full-scans per surfacing, its own item only if
-surfacing latency shows); and **0062** (the move-in zeitgeist
-snapshot — the one remaining net-new spec, not built). **0054 Phase 2** (docking finale / cast /
-retrospective into the control-room gadget rail) is **DONE** (#335). *(The ADR 0004
-fastembed adapter is BUILT — E86a, 2026-06-11.)* *(By design, not a gap: the live engine-side
-narrator is `EchoNarrativePort` — narration happens in the front-end via `getMomentPrompt`; the
-`playerTagline` `setNarrator` seam is ready if engine-side narration is ever wired.)*
-
-**Session 2026-06-18 — two new FE features shipped (specs in `docs/features/`):** **0054** (the
-control-room **gadget rail** — Phase 1: the right-side collapsible HUD; status / "wants a word" /
-"where you are" mount into `#gadget-rail-body`, with collapse→icon-strip, side-swap, mobile drawer,
-content-driven visibility, persisted layout — `frontend/static/js/orwellGadgetRail.js`) and **0055**
-(**social play moves the weights** — the FE `_auto_record_scene` guarantee documented in the
-consequence-loop section above; *Big Brother is politics*, so ongoing role-play must move other
-houseguests' hidden perceptions, and it now structurally does).
-
-**Session 2026-06-19 — the returning-player / deep-profile arc (specs 0056–0059):** the
-"seasons as levels" lane shipped and the cast got materially deeper. **0056** (season-to-season
-character continuity) — engine carry-over **built**, unit-gated (`tests/unit/seasonContinuity.test.ts`):
-starting a new season offers a **soft re-run of casting** — *keep* the same houseguest into a
-brand-new cast or *recreate* via the interview — reusing the **one sanctioned restart door**
-(D1/R1); the FE relay threads `keepCharacter` through `/new-game` + `create_character`. **0057**
-(seasons as levels) — SPEC + **chunks 1–4 built FE-side**: the per-user season store
-(`frontend/src/orwell_seasons.py`), `GET /api/orwell/season` + `POST /api/orwell/next-season`
-(finished-season-gated, increments) + `POST /api/orwell/reset-progress` (both through the one
-sanctioned reset); the ≤5px season **progress bar** + "Season N" chip HUD
-(`orwellSeasonProgress.js`); the persistent post-season **"New season" surface**
-(`orwellNewSeason.js`, which **subsumes the 0056 FE keep/recreate UX** + the per-season portrait
-studio); and the engagement-driven post-season **producers re-approach** agent-loop nudge.
-**0058** (deep character profiles — *born deep, persist, play out*) — ✅ **Phase 1 + Phase 2 built**,
-**BDD-gated** (`0058-deep-character-profiles.feature`, in `cucumber.cjs`): the seeded floor
-spawns §3-depth profiles split across the Vault Wall (byte-stable baseline), seeds & seals story
-threads, seeds the Day-1 NPC→player edge, and recalls authored detail in full. **Phase 2 is now LIVE:**
-the LLM-authored write-back (`recordCastProfile`, commit `852f2db` — validate/split-across-the-wall/
-seal/re-derive/re-index, idempotent; FE producer-LLM authoring in `frontend/src/orwell_cast_authoring.py`
-kicked off pre-portraits), the portrait consumption of the physical facet (L29 — feeds
-`castPortraitPrompts`), the premiere voicing (L31 — the public biography voiced via the `premiere`
-moment prompt), and the thread trigger/resolution scheduler (shipped as feature **0060**,
-`scheduleStoryThreads` wired into the off-screen tick). *By design (anti-sycophancy), the write-back
-keeps the engine's calibrated seeded NPC→player leans — the LLM authors the Day-1 read TEXT only.*
-**0059** (hidden seeded relationships) — 📝 **SPEC only**: consolidates ledger **L35** (pre-game
-ties) + **L40** (showmance overload — the narrator currently reads every high-affinity edge as
-romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances that surface only
-organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
-pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
-
-**Session 2026-06-20 — multi-device sync + the LLM↔engine sync spine (0064, 0065).** **0064** (live
-multi-device game sync) — a server-authoritative **canonical chat session per user**
-(`frontend/src/orwell_game_session.py`), **Messenger-style turn serialization** ("queue, don't stomp"
-— `agent_runs.start(..., queue=True)`), the `game-updated` instant-reconcile SSE ping, and cross-device
-**window/HUD layout sync** (`frontend/src/orwell_layout.py`). **0065** (the LLM↔engine **sync spine** —
-ADR 0005's closed-set counterpart, spec `docs/features/0065-llm-engine-sync-spine.md`) shipped end to
-end (PR #414 + the perf/CAS tails #422): `beatSeq` compare-and-swap (409 `stale-beat`) + idempotency
-keys, the FE attach + 409 reconcile, the same-turn **pre-emission outcome guard**, the Vault-free
-**sync ledger**, and the `beatSeq`-keyed O(Δ) **`stateDelta`** delta feed — see the architecture note in
-[The consequence & memory loop](#the-consequence--memory-loop-the-mvp-1-backbone--feature-0023) and
-ADR `docs/decisions/0005`. *(0064 §3.C's queued-turn known-minor is closed by 0065 Part A's stale-write
-guard.)*
-
-**Session 2026-06-20 — in-game time of day & the sleep economy (ADR 0006 + feature 0066; opt-in).** Gated
-by `ORWELL_TIME_OF_DAY` (default off ⇒ the seeded calibration spine stays byte-identical; the deploy sets
-it on). Time-of-day (morning → late-night) is first-class live-season state (`src/engine/timeOfDay.ts`);
-presence (0049) is made **time-driven** — houseguests reach their **character-driven bedtimes**, the
-*awake set* shrinks, and the player **owns their own bedtime** (no curfew). Staying up applies a **hidden,
-bounded** `sleepPenalty` (~0.15) in `resolveCompetition`, beside the 0041 emotional modifier — never
-protective, never shown to the player, **0 ⇒ byte-identical** when absent. FE: the House Status panel
-shows a time-of-day graphic + the player's rest cue. See the mechanics + open-decisions sections above and
-ADR `docs/decisions/0006`.
+**Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative):
+- **Calibration tuning — the largest open game-feel lever.** Passive players coast to Final 2 and lose
+  there; data in `docs/audits/2026-06-19-calibration-data.md`; the next step lowers `JURY_WEIGHTS.gameRespect`
+  (~0.9→0.6–0.7) and re-runs the instrument + the permanent `tests/property/juryReach.property.test.ts`
+  `EARNED_WINS` guard (finale wins must be comp-earned).
+- **0022** (MVP-2, deferred) and **0059** (hidden seeded relationships, spec only) — the unbuilt specs.
+- **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
+  during the private-repo flip).
+- **Postgres + pgvector** relational tier — MVP-002 post-launch scale-out (SQLite + sqlite-vec shipped
+  opt-in, #330); only matters past a single-host deploy.
 
 ## Open decisions (remaining)
 
