@@ -3244,11 +3244,16 @@ async def stream_agent_loop(
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
                 if _want_advance or _want_record or _want_deal or _want_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
+                    _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
                         _moment = (_gs or {}).get("moment")
+                        # F7: a coarse identity for THIS beat (week + phase + moment). If it differs on a
+                        # re-read just before the forced advance, the game moved on under us (another device
+                        # or the model's own tool path advanced) and the forced advance would double-advance.
+                        _beat_key_at_read = ((_gs or {}).get("week"), _phase, _moment)
                         # P1: refresh the first-week pacing hint from the same read (no extra fetch).
                         # The guided premiere window = week 1 of a live season, NOT post-season; this
                         # feeds _effective_advance_grace on the NEXT turn (a one-turn lag is fine).
@@ -3381,7 +3386,31 @@ async def stream_agent_loop(
                         # the turn's first and only scene, no double-narration.)
                         if (_level >= _ADVANCE_FORCE_LEVEL
                                 and not _previewed_uncommitted and not _decision_undelivered):
-                            if await _commit_advance_silently(f"forced stall L{_level}"):
+                            # F7 DOUBLE-ADVANCE GUARD: between the state read at the top of this block and
+                            # this forced POST, another device (or the model's own tool path) may have
+                            # advanced the game. The state we read said "stalled on beat X"; if the beat has
+                            # since MOVED, forcing advanceGame now would resolve the NEXT beat unintentionally
+                            # (a double-advance). So RE-READ the live beat and force ONLY if it still sits on
+                            # the same stalled beat we observed. Fail-OPEN: if the re-read fails or the beat
+                            # is unknown, prefer NOT to force (a missed nudge is recoverable next turn; a
+                            # double-advance silently skips a beat). The per-turn cap still holds (one force).
+                            _force_ok = True
+                            try:
+                                _gs_now = await _oe.get_game_state(owner)
+                                _beat_now = ((_gs_now or {}).get("week"),
+                                             (_gs_now or {}).get("phase"),
+                                             (_gs_now or {}).get("moment"))
+                                if _beat_key_at_read is None or _beat_now != _beat_key_at_read:
+                                    _force_ok = False
+                                    logger.info(
+                                        f"[orwell] forced advance SKIPPED — beat moved since read "
+                                        f"({_beat_key_at_read} -> {_beat_now}) round {round_num} user={owner}")
+                            except Exception as _e:
+                                _force_ok = False  # re-read failed: do NOT force (avoid a double-advance)
+                                logger.warning(
+                                    f"[orwell] forced-advance re-read failed, skipping force: "
+                                    f"{type(_e).__name__}: {_e}".rstrip(': '))
+                            if _force_ok and await _commit_advance_silently(f"forced stall L{_level}"):
                                 logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
                                             f"round {round_num} user={owner}")
                                 messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})

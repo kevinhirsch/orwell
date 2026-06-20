@@ -872,7 +872,15 @@ def setup_orwell_routes() -> APIRouter:
         decision = {k: v for k, v in body.model_dump().items() if v is not None}
         try:
             res = await orwell_engine.submit_decision(decision, user=_current_user(request))
-            orwell_engine.remember_pending(res, user=_current_user(request))  # D3/E66
+            # D3/E66 + F5: mirror the engine's `pending` into the FE cache. remember_pending now KEEPS
+            # the cache when a view OMITS `pending` (the route's omit-fallback for an old engine). A
+            # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
+            # didn't carry an explicit `pending`, clear it here rather than keep a stale card that would
+            # re-arm on the next status reload. (A present `pending`, incl. null, is handled as engine truth.)
+            if isinstance(res, dict) and "pending" not in res:
+                orwell_engine.clear_pending(user=_current_user(request))
+            else:
+                orwell_engine.remember_pending(res, user=_current_user(request))
             _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
             return res
         except orwell_engine.EngineToolError as e:
