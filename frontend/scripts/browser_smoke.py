@@ -1119,6 +1119,177 @@ def main() -> int:
                   f"G16/F2: after restore + reload the cast window comes back OPEN, no stale chip ({after2})")
             g16.close()
 
+            # 0051 — IN-CHARACTER IMAGES render (the owed browser-render validation): with a
+            # provider configured (roster.imagesAvailable:true) and a real portrait URL on a
+            # card, the cast grid must render an actual <img> that is PRESENT, has the served
+            # src, and is SIZED on screen (non-zero, ~square holder) — not a zero-box or a
+            # bare placeholder glyph. Driven for REAL through the live fetch→render path
+            # (_orwellCastEnsure → /api/orwell/roster) on an isolated routed page, so this is
+            # the same code that paints the player's actual cast portraits. Vault-free: the
+            # roster projection carries only public id/name/status + the portrait URL.
+            por = new_page(browser)
+            # a 1x1 transparent GIF data-URI stands in for a generated portrait file (no engine,
+            # no network) — the renderer treats it like any portrait src.
+            _PORTRAIT_URI = ("data:image/gif;base64,"
+                             "R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==")
+            por_roster = (
+                '{"imagesAvailable": true, "portraitsTotal": 2, "portraitsPresent": 2, "roster": ['
+                '{"id": "player", "name": "The Player", "status": "active", "isPlayer": true,'
+                ' "portrait": "' + _PORTRAIT_URI + '"},'
+                '{"id": "npc:1", "name": "A Houseguest", "status": "active",'
+                ' "portrait": "' + _PORTRAIT_URI + '"}]}'
+            )
+            por.route("**/api/orwell/roster", _g16_json(por_roster))
+            por.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            por.goto(base + "/", wait_until="load", timeout=30000)
+            _por_ok = False
+            for _ in range(75):  # CSP blocks string-predicate wait_for_function; poll via evaluate
+                if por.evaluate("typeof window._orwellCastEnsure === 'function'"):
+                    _por_ok = True
+                    break
+                por.wait_for_timeout(200)
+            check(_por_ok, "0051: the cast seam mounts (portrait render page)")
+            por.evaluate("window._orwellCastEnsure()")
+            por.wait_for_selector("#orwell-cast #oc-grid img", timeout=8000)
+            por.wait_for_timeout(400)  # let the kit open animation settle before measuring geometry
+            por_img = por.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              const imgs = grid ? [...grid.querySelectorAll('.oc-portrait img')] : [];
+              if (!imgs.length) return { count: 0 };
+              const r = imgs[0].getBoundingClientRect();
+              const holder = imgs[0].closest('.oc-portrait').getBoundingClientRect();
+              return {
+                count: imgs.length,
+                hasSrc: !!imgs[0].getAttribute('src'),
+                w: Math.round(r.width), h: Math.round(r.height),
+                hw: Math.round(holder.width), hh: Math.round(holder.height),
+                // a placeholder glyph (the person silhouette) renders instead of an <img>
+                // when no portrait — assert these cards are NOT falling back to placeholders.
+                placeholders: grid.querySelectorAll('.oc-portrait .oc-ph').length,
+              };
+            }""")
+            check(por_img.get("count", 0) >= 2 and por_img.get("hasSrc") is True,
+                  f"0051: a real portrait <img> renders per cast card ({por_img})")
+            check(por_img.get("w", 0) >= 40 and por_img.get("h", 0) >= 40,
+                  f"0051: the portrait img is SIZED on screen (non-zero box) ({por_img})")
+            # the holder is the square (aspect-ratio 1/1) frame — width and height track each
+            # other (a collapsed/overflowing card would show a wildly non-square holder).
+            _hw, _hh = por_img.get("hw", 0), por_img.get("hh", 0)
+            check(_hw >= 40 and _hh >= 40 and abs(_hw - _hh) <= max(6, round(_hw * 0.12)),
+                  f"0051: the portrait holder is a sized ~1:1 frame, no overflow ({por_img})")
+            check(por_img.get("placeholders", 1) == 0,
+                  f"0051: provider-on cards render the image, not the placeholder glyph ({por_img})")
+            por.close()
+
+            # 0057 — SEASONS-AS-LEVELS render (the owed browser-render validation): the season
+            # progress bar, the "Season N" chip, and the persistent post-season "New season"
+            # surface must actually render — bar present & ≤5px & no horizontal overflow; chip
+            # reads "Season N" past season 1; the post-season window MOUNTS. Driven for REAL
+            # through each module's live refresh against routed Vault-free projections
+            # (/season, /status, /state) on an isolated page. The terminal state
+            # (moment:"post-season") forces the bar to 100% AND triggers the new-season panel.
+            sea = new_page(browser)
+            sea.route("**/api/orwell/season", _g16_json('{"season": 3}'))  # past season 1 → chip
+            sea.route("**/api/orwell/status",
+                      _g16_json('{"started": true, "week": 9, "phase": "finale"}'))
+            sea.route("**/api/orwell/state", _g16_json(
+                '{"started": true, "week": 9, "phase": "finale", "moment": "post-season",'
+                ' "player": {"id": "player", "name": "The Player", "status": "active"},'
+                ' "house": [{"id": "npc:1", "name": "A Houseguest", "status": "active"},'
+                ' {"id": "npc:2", "name": "Another Houseguest", "status": "active"}]}'))
+            sea.route("**/api/orwell/health", _g16_json('{"engine": true}'))
+            sea.route("**/api/orwell/finale", _g16_json('{"finale": null}'))
+            sea.goto(base + "/", wait_until="load", timeout=30000)
+            _sea_ok = False
+            for _ in range(75):
+                if sea.evaluate("typeof window._orwellSeasonProgressEnsure === 'function'"
+                                " && typeof window.orwellRefreshSeasonProgress === 'function'"):
+                    _sea_ok = True
+                    break
+                sea.wait_for_timeout(200)
+            check(_sea_ok, "0057: the season-progress seam + refresh mount")
+            sea.evaluate("window.orwellRefreshSeasonProgress()")  # real refresh against the routes
+            sea.wait_for_selector("#orwell-season-progress", timeout=8000)
+            sea.wait_for_timeout(700)  # the .5s fill transition + the chip's settle reflow
+            sea_bar = sea.evaluate("""() => {
+              const bar = document.getElementById('orwell-season-progress');
+              if (!bar) return { present: false };
+              const r = bar.getBoundingClientRect();
+              const fill = bar.querySelector('.osp-fill');
+              const fr = fill ? fill.getBoundingClientRect() : null;
+              return {
+                present: true,
+                visible: getComputedStyle(bar).display !== 'none',
+                h: Math.round(r.height),
+                w: Math.round(r.width),
+                vw: window.innerWidth,
+                role: bar.getAttribute('role'),
+                valuenow: parseInt(bar.getAttribute('aria-valuenow') || '-1', 10),
+                // post-season ⇒ fill at 100%, so the fill width tracks the bar width.
+                fullFill: !!fr && r.width > 0 && fr.width >= r.width - 2,
+                // the page itself must not scroll horizontally because of the bar.
+                pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+              };
+            }""")
+            check(sea_bar.get("present") is True and sea_bar.get("visible") is True
+                  and sea_bar.get("role") == "progressbar",
+                  f"0057: the season progress bar renders (a progressbar) ({sea_bar})")
+            check(0 < sea_bar.get("h", 0) <= 5,
+                  f"0057: the progress bar is a thin (<=5px) bar ({sea_bar})")
+            check(sea_bar.get("w", 0) >= sea_bar.get("vw", 0) - 2 and sea_bar.get("pageOverflow", 99) <= 1,
+                  f"0057: the bar spans the viewport WITHOUT adding a horizontal scrollbar ({sea_bar})")
+            check(sea_bar.get("valuenow", -1) == 100 and sea_bar.get("fullFill") is True,
+                  f"0057: post-season forces the fill to 100% ({sea_bar})")
+            sea_chip = sea.evaluate("""() => {
+              const chip = document.getElementById('orwell-season-chip');
+              if (!chip) return { present: false };
+              const r = chip.getBoundingClientRect();
+              return { present: true, visible: getComputedStyle(chip).display !== 'none',
+                       text: (chip.textContent || '').trim(),
+                       right: Math.round(r.right), vw: window.innerWidth, top: Math.round(r.top) };
+            }""")
+            check(sea_chip.get("present") is True and sea_chip.get("visible") is True
+                  and sea_chip.get("text") == "Season 3",
+                  f"0057: the 'Season N' chip renders past season 1 ({sea_chip})")
+            check(sea_chip.get("right", 99999) <= sea_chip.get("vw", 0) + 1 and sea_chip.get("top", -1) >= 0,
+                  f"0057: the season chip sits inside the viewport (no overflow/overlap) ({sea_chip})")
+            # the persistent post-season "New season" surface MOUNTS on the terminal state.
+            _ns_ok = False
+            for _ in range(75):
+                if sea.evaluate("typeof window._orwellNewSeasonRefresh === 'function'"
+                                " && !!window.OrwellWindowKit"):
+                    _ns_ok = True
+                    break
+                sea.wait_for_timeout(200)
+            check(_ns_ok, "0057: the new-season seam + the window kit mount")
+            sea.evaluate("window._orwellNewSeasonRefresh()")  # real post-season gate + show()
+            sea.wait_for_selector("#orwell-new-season", state="visible", timeout=8000)
+            sea.wait_for_timeout(300)  # kit open animation
+            sea_ns = sea.evaluate("""() => {
+              const el = document.getElementById('orwell-new-season');
+              if (!el) return { mounted: false };
+              const r = el.getBoundingClientRect();
+              return {
+                mounted: true,
+                visible: getComputedStyle(el).display !== 'none',
+                kit: el.hasAttribute('data-ow-window'),
+                keep: !!el.querySelector('[data-keep="1"]'),
+                recast: !!el.querySelector('[data-keep="0"]'),
+                w: Math.round(r.width), h: Math.round(r.height),
+                // inside the viewport (the vault/new-season slot-collision fix) — never stranded.
+                inView: r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1
+                        && r.left >= -1 && r.top >= -1,
+              };
+            }""")
+            check(sea_ns.get("mounted") is True and sea_ns.get("visible") is True
+                  and sea_ns.get("kit") is True,
+                  f"0057: the post-season 'New season' surface mounts (kit window) ({sea_ns})")
+            check(sea_ns.get("keep") is True and sea_ns.get("recast") is True,
+                  f"0057: it offers keep + recast ({sea_ns})")
+            check(sea_ns.get("w", 0) >= 40 and sea_ns.get("h", 0) >= 40 and sea_ns.get("inView") is True,
+                  f"0057: the new-season window is sized and inside the viewport (no overflow) ({sea_ns})")
+            sea.close()
+
             # F6 tail (wave 3): the engine-down banner's dismiss is the shared
             # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
