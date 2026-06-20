@@ -35,6 +35,15 @@
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
       : fn();
 
+  // P1 OOBE overhaul (item 3): while an onboarding step is on screen (the welcome modal
+  // OR the cast-photo window), SUPPRESS the welcome splash's rotating gameplay tips + the
+  // "house is waiting" tagline so they don't bleed through behind the surface. CSS in
+  // game-trim.css hides #welcome-tip / #welcome-sub while body.ow-onboarding is set. (The
+  // image-step window separately sets body.ow-casting-headshot-open, also covered there.)
+  function setOnboardingActive(on) {
+    try { document.body.classList.toggle("ow-onboarding", !!on); } catch (_) {}
+  }
+
   async function fetchState() {
     const r = await fetch("/api/orwell/state", { credentials: "same-origin" });
     if (!r.ok) throw new Error("state " + r.status);
@@ -130,6 +139,11 @@
   function mountHolding(title, sub, readyAgain, actions) {
     if (document.getElementById("orwell-onboarding")) return;
     const el = buildOverlay();
+    // Tag a blocking HOLDING card (vs. the welcome modal) so the model-config
+    // auto-advance (orwell:models-changed) can clear it immediately instead of
+    // waiting on the 5s re-probe. The welcome modal carries no such tag, so the
+    // auto-advance never yanks a welcome the player is reading.
+    el.setAttribute("data-ob-holding", "");
     const card = el.querySelector(".ob-card");
     card.setAttribute("tabindex", "-1");
     card.innerHTML = `
@@ -144,6 +158,8 @@
       uninertBackground();
       el.remove();
     };
+    // Expose the dismiss so the auto-advance can tear this card down cleanly.
+    el._obDismiss = dismiss;
     const row = card.querySelector(".ob-hold-actions");
     (actions || []).forEach((a) => {
       const b = document.createElement("button");
@@ -205,13 +221,9 @@
       <div class="ob-hold">
         <h1>Welcome to the house</h1>
         <p class="ob-hold-sub">You're cast on <b>Big Brother</b>. One house, sixteen strangers,
-          one winner — and production is watching everything. Here's how the next few minutes go:</p>
-        <ol class="ob-steps">
-          <li><span class="ob-step-n">1.</span> Add your <b>cast photo</b> — upload one or generate it.</li>
-          <li><span class="ob-step-n">2.</span> The <b>producers</b> reach out for your casting interview.</li>
-          <li><span class="ob-step-n">3.</span> <b>Move-in day</b> — meet the house and start playing.</li>
-        </ol>
-        <p class="ob-hold-sub">First up: your cast photo. The chat opens the moment it's set.</p>
+          one winner — and production is watching everything.</p>
+        <p class="ob-hold-sub">First up: your cast photo. The producers are due any minute for
+          your casting interview.</p>
         <div class="ob-hold-actions"></div>
       </div>`;
     const row = card.querySelector(".ob-hold-actions");
@@ -219,6 +231,9 @@
       markWelcomeSeen();
       uninertBackground();
       el.remove();
+      // The welcome modal is gone; the cast-photo WINDOW keeps the splash suppressed via
+      // its own body flag, so clearing ow-onboarding here is safe (the window re-asserts it).
+      setOnboardingActive(false);
       try { onProceed && onProceed(); } catch (_) {}
     };
     const go = document.createElement("button");
@@ -230,6 +245,7 @@
     row.appendChild(go);
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
     document.body.appendChild(el);
+    setOnboardingActive(true); // suppress the splash tip/tagline while the welcome is up
     inertBackground(el);
     trapFocus(el);
     try { go.focus(); } catch (_) {}
@@ -426,6 +442,26 @@
       if (gameBuild) window._orwellOnboardingMount();
     }
   }
+
+  // P1 OOBE auto-advance: the whole flow must move WITHOUT a manual page reload. The
+  // route() above ran once on load; re-run it agentically on the signals that change what
+  // the flow should show — chiefly when the player configures an LLM model in Settings.
+  //
+  //   Settings → LLM  →  welcome modal  →  image (required)  →  producers reach out first
+  //
+  // models.js fires orwell:models-changed on the none→some transition. When it lands and a
+  // blocking holding card (e.g. "Production needs a feed source") is still up, clear it
+  // immediately (don't wait on its 5s re-probe) and re-evaluate so the welcome modal opens
+  // right away. A welcome modal already showing carries no holding tag, so it's left alone.
+  function _reRouteAfterModelConfig() {
+    const open = document.getElementById("orwell-onboarding");
+    if (open && open.hasAttribute("data-ob-holding")) {
+      try { if (typeof open._obDismiss === "function") open._obDismiss(); else open.remove(); } catch (_) {}
+      try { uninertBackground(); } catch (_) {}
+    }
+    route();
+  }
+  window.addEventListener("orwell:models-changed", _reRouteAfterModelConfig);
 
   ready(route);
 })();
