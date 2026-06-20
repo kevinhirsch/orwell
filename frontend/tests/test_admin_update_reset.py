@@ -5,10 +5,12 @@ The combined middle tier of the three maintenance controls (Update · Update + R
 Proves:
   * the endpoint is admin-gated (403 without an admin session under AUTH_ENABLED=true, the shared
     require_admin contract — like test_admin_update / test_admin_factory_reset);
-  * an admin call launches the FIXED combined script DETACHED (start_new_session=True, no shell,
-    fixed argv incl. --yes) and returns {started: true} IMMEDIATELY — never blocking on completion;
+  * with a genuine privileged path (ORWELL_UPDATE_RESET_DIRECT=1 / sudo) an admin call launches the
+    FIXED combined script DETACHED (start_new_session=True, no shell, fixed argv incl. --yes);
   * with the G19b flag dir present it prefers the privilege-safe flag trigger (no subprocess) and
     writes the EXISTENCE-only flag `update-reset-requested`;
+  * the PRIVILEGE FIX (ops-run lane): with NO privileged path the endpoint FAILS LOUDLY
+    ({started: false, error: …} + a FAILED ops-status file) instead of a silent detached no-op;
   * the command carries NO user input (fixed path, env-overridable only for tests/dev);
   * the destructive "Update + Reset" button renders on the admin-gated status page, sits between
     the existing "Update Orwell" and "Factory Reset (OOBE)" buttons, and the page demands a
@@ -41,9 +43,13 @@ def test_update_reset_is_admin_gated(monkeypatch):
 
 
 def test_update_reset_runs_detached_and_returns_started(monkeypatch, tmp_path):
-    # No real host path is touched: the script path is overridden and Popen is captured.
+    # No real host path is touched: the script path is overridden and Popen is captured. The
+    # detached path now requires an EXPLICIT privileged signal (ORWELL_UPDATE_RESET_DIRECT=1) —
+    # without it the endpoint fails loudly (see test_update_reset_fails_loudly_...).
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))                 # no data/ops → the detached path
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_DIRECT", "1")        # the genuine privileged-path override
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(tmp_path / "no-such.path"))  # no watcher
     monkeypatch.delenv("ORWELL_UPDATE_RESET_SUDO", raising=False)
     stub = tmp_path / "fake-update-reset.sh"
     stub.write_text("#!/bin/bash\necho updating-then-resetting\n")
@@ -81,6 +87,7 @@ def test_update_reset_sudo_wraps_argv(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ORWELL_UPDATE_RESET_SUDO", "1")
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(tmp_path / "no-such.path"))  # no watcher → sudo path
     stub = tmp_path / "fake-update-reset.sh"
     stub.write_text("#!/bin/bash\n")
     monkeypatch.setenv("ORWELL_UPDATE_RESET_SCRIPT", str(stub))
@@ -135,6 +142,50 @@ def test_update_reset_force_direct_overrides_flag(monkeypatch, tmp_path):
     assert r.json()["via"] == "detached"
     assert captured["argv"] == ["bash", str(stub), "--yes"]
     assert not (tmp_path / "ops" / "update-reset-requested").exists()
+
+
+def test_update_reset_fails_loudly_when_no_privileged_path(monkeypatch, tmp_path):
+    # PRIVILEGE FIX (ops-run lane): no watcher unit, no data/ops, no sudo, no direct override →
+    # fail loudly (started:false + error + a FAILED ops-status file), never a silent detached no-op.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(tmp_path / "no-such.path"))
+    monkeypatch.delenv("ORWELL_UPDATE_RESET_SUDO", raising=False)
+    monkeypatch.delenv("ORWELL_UPDATE_RESET_DIRECT", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("no subprocess may run when there is no privileged path")
+
+    monkeypatch.setattr(aurr.subprocess, "Popen", _boom)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.post("/api/admin/update-reset")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["started"] is False and body["via"] == "none"
+    assert "no privileged path" in body["error"]
+    import json
+    status = json.loads((tmp_path / "ops" / "update-reset-status.json").read_text())
+    assert status["ok"] is False and status["running"] is False
+    assert status["message"].startswith("FAILED:")
+
+
+def test_update_reset_uses_flag_when_watcher_unit_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    unit = tmp_path / "orwell-ops-update-reset.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setenv("ORWELL_UPDATE_RESET_WATCHER_UNIT", str(unit))
+    monkeypatch.delenv("ORWELL_UPDATE_RESET_DIRECT", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("flag trigger must be preferred when the watcher unit is installed")
+
+    monkeypatch.setattr(aurr.subprocess, "Popen", _boom)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.post("/api/admin/update-reset")
+    assert r.json()["via"] == "flag-trigger"
+    assert (tmp_path / "ops").is_dir()
+    assert (tmp_path / "ops" / "update-reset-requested").exists()
 
 
 def test_default_script_path_is_fixed():

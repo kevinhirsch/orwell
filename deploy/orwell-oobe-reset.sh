@@ -54,6 +54,16 @@ for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bba
 done
 type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
 
+# ── ops-progress lane: step-by-step progress to data/ops/<action>-status.json (sourced helper) ──
+# Lets the admin health page render a live timeline for THIS reset (stopping → preserving keys →
+# wiping → scrubbing → restarting → OOBE ready). Best-effort: if the helper is missing the no-op
+# stubs keep the reset working unchanged. APP_DIR is resolved later (in-container); the helper
+# re-reads it each call, and the web tier passes ORWELL_OPS_DIR explicitly when it needs to.
+for __pf in "${__here}/orwell-ops-progress.sh" /opt/orwell/deploy/orwell-ops-progress.sh /opt/bbai/deploy/orwell-ops-progress.sh; do
+  if [[ -n "${__pf:-}" && -r "$__pf" ]]; then . "$__pf"; break; fi
+done
+type ops_progress_init >/dev/null 2>&1 || { ops_progress_init() { :; }; ops_progress_step() { :; }; ops_progress_done() { :; }; ops_progress_fail() { :; }; }
+
 # Collect flags so they can be forwarded to the in-container run.
 ASSUME_YES=0; DRY_RUN=0; RESTART=1; EXTRA_FLAGS=()
 while [[ $# -gt 0 ]]; do
@@ -221,6 +231,19 @@ EOF
   fi
 fi
 
+# ── ops-progress lane: publish a live timeline for a REAL run (skip dry-runs — nothing changes) ──
+# The status file lives where the web tier reads it: <CONFIG_DIR>/ops/factory-reset-status.json
+# (CONFIG_DIR is the engine data dir = where data/ops/ lives). A non-zero exit anywhere below
+# trips the trap and records "FAILED: …" so the page surfaces the error instead of going silent.
+OPS_PROGRESS=0
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  export ORWELL_OPS_DIR="${CONFIG_DIR%/}/ops"
+  OPS_PROGRESS=1
+  ops_progress_init "factory-reset" 6
+  trap 'rc=$?; if [[ "$OPS_PROGRESS" -eq 1 && "$rc" -ne 0 ]]; then ops_progress_fail "reset exited with code $rc — see ops-factory-reset.log"; fi' EXIT
+fi
+ops_step() { [[ "$OPS_PROGRESS" -eq 1 ]] && ops_progress_step "$1" "$2" || true; }
+
 # ── Helpers (dry-run aware) ───────────────────────────────────────────────────────────────────
 do_rm()  { if [[ "$DRY_RUN" -eq 1 ]]; then echo "  would remove: $1"; else rm -rf -- "$1"; fi; }
 do_svc() {
@@ -235,6 +258,7 @@ fe_kept() {
 }
 
 # ── 1. Stop the services so nothing writes while we scrub ─────────────────────────────────────
+ops_step 1 "stopping services"
 if [[ "$have_systemd" -eq 1 ]]; then
   msg "stopping services"
   for svc in "$FRONTEND_SVC" "$ENGINE_SVC"; do svc_exists "$svc" && do_svc stop "$svc"; done
@@ -264,6 +288,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     done < <(find "$FE_DATA_DIR" -mindepth 1 -maxdepth 1 -print0)
   fi
 else
+  ops_step 2 "preserving API keys / LLM config"
   if [[ -f "$OOBE_HELPER" ]]; then
     msg "preserving LLM/provider config (model_endpoints + LLM settings) via the helper"
     # The helper honors DATA_DIR / DATABASE_URL; point it at the FE store explicitly so it
@@ -280,6 +305,7 @@ else
   # Now scrub every OTHER file in the FE store: keep the key files AND the just-rebuilt
   # app.db / settings.json; remove everything else (accounts/auth.json, sessions, uploads,
   # portraits, caches, …). This is what makes it OOBE.
+  ops_step 3 "wiping front-end store (accounts, sessions, uploads)"
   msg "scrubbing front-end store ${FE_DATA_DIR} (keeping API-key config + rebuilt DB/settings)"
   if [[ -d "$FE_DATA_DIR" ]]; then
     while IFS= read -r -d '' entry; do
@@ -294,6 +320,7 @@ else
 fi
 
 # ── 3. Scrub the engine SAVE dir — the real per-user games (saves + hidden Vault layer) ───────
+ops_step 4 "scrubbing game sandboxes (saves, souls, Vault layer)"
 msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
 if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
@@ -307,13 +334,17 @@ fi
 if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   msg "scrubbing config dir ${CONFIG_DIR} (keeping ${ENV_KEEP})"
   if [[ -d "$CONFIG_DIR" ]]; then
+    # ops-progress lane: also KEEP the ops/ trigger dir — it holds the live progress status file
+    # this very run is writing, and is the orwell-owned flag dir the root watcher relies on (a
+    # fresh root-owned recreate would lock the non-root web tier out of the next trigger).
     while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d ! -name models -print0)
+      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d ! -name models ! -name ops -print0)
   fi
 fi
 
 # ── 4. Restart so the app re-initialises a fresh DB (init_db re-creates every other table)
 #       and lands at OOBE — with the LLM already configured. ──────────────────────────────────
+ops_step 5 "restarting services"
 if [[ "$RESTART" -eq 1 && "$have_systemd" -eq 1 ]]; then
   msg "restarting services"
   for svc in "$ENGINE_SVC" "$FRONTEND_SVC"; do svc_exists "$svc" && do_svc start "$svc"; done
@@ -324,5 +355,9 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   msg "dry run complete — nothing was removed."
 else
+  # ops-progress lane: terminal OK. Clear the trap FIRST so the success write is not overwritten
+  # by the EXIT trap (which would otherwise re-fire with rc=0 and is a no-op, but be explicit).
+  trap - EXIT
+  ops_progress_done "OOBE ready — open the UI to begin first-run onboarding"
   msg "OOBE reset complete. Open the UI: it begins at first-run onboarding — with your LLM already configured."
 fi

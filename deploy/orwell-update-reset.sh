@@ -50,6 +50,14 @@ for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bba
 done
 type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
 
+# ── ops-progress lane: an UMBRELLA timeline for the combined run, on top of the per-phase progress
+# the composed update/reset scripts publish (the admin health page renders whichever action it is
+# watching). Best-effort; missing helper ⇒ no-op stubs. Steps fire on the in-container run.
+for __pf in "${__here}/orwell-ops-progress.sh" /opt/orwell/deploy/orwell-ops-progress.sh /opt/bbai/deploy/orwell-ops-progress.sh; do
+  if [[ -n "${__pf:-}" && -r "$__pf" ]]; then . "$__pf"; break; fi
+done
+type ops_progress_init >/dev/null 2>&1 || { ops_progress_init() { :; }; ops_progress_step() { :; }; ops_progress_done() { :; }; ops_progress_fail() { :; }; }
+
 # Collect flags so they can be forwarded to the in-container run.
 ASSUME_YES=0; DRY_RUN=0; RESTART=1; EXTRA_FLAGS=()
 while [[ $# -gt 0 ]]; do
@@ -168,11 +176,19 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
+# ── ops-progress lane: umbrella timeline for the combined run; the trap surfaces a failure ──
+export ORWELL_OPS_DIR="${APP_DIR%/}/data/ops"
+ops_progress_init "update-reset" 2
+trap 'rc=$?; if [[ "$rc" -ne 0 ]]; then ops_progress_fail "update+reset exited with code $rc — see ops-update-reset.log"; fi' EXIT
+
 # ── Phase 1 — UPDATE (restart suppressed so the reset owns the single final restart) ───────────
 # Fail-closed: if the update fails, orwell-update.sh has already reverted to the previous build and
 # left the services as they were — we ABORT here and never touch user data. Config stays intact.
 msg "phase 1/2 — UPDATE (pull → rebuild → refresh FE deps; restart suppressed)"
+ops_progress_step 1 "updating (pull → rebuild → refresh deps)"
 if ! bash "$UPDATE_SCRIPT" --no-restart; then
+  ops_progress_fail "the update phase failed — nothing was wiped (your API keys are safe)"
+  trap - EXIT  # the explicit fail above is the final status
   die "UPDATE failed — NOT proceeding to the reset. The box is on its previous build and NOTHING was wiped (your API keys are safe). Fix the update, then retry."
 fi
 
@@ -183,7 +199,13 @@ fi
 RESET_FLAGS=(--yes); RESET_TAIL=" + final restart"
 [[ "$RESTART" -eq 0 ]] && { RESET_FLAGS+=(--no-restart); RESET_TAIL=" (services left down)"; }
 msg "phase 2/2 — RESET to OOBE (keep API keys)${RESET_TAIL}"
+ops_progress_step 2 "resetting to OOBE (keep API keys) + final restart"
+# The composed reset re-exports its own ORWELL_OPS_DIR, so it publishes its own factory-reset
+# progress alongside this umbrella update-reset status — both readable by the status page.
 bash "$RESET_SCRIPT" "${RESET_FLAGS[@]}" \
   || die "RESET phase failed. The update is already in place; re-run 'orwell reset-oobe' to complete the reset."
 
+# ops-progress lane: terminal OK — clear the trap so its EXIT handler doesn't re-stamp a fail.
+trap - EXIT
+ops_progress_done "Update + Reset complete — OOBE ready on the fresh build"
 msg "Update + Reset complete — freshly pulled build, back at first-run OOBE, with your LLM already configured."

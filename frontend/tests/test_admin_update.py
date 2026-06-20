@@ -3,9 +3,12 @@
 Proves:
   * the endpoint is admin-gated (403 without an admin session under AUTH_ENABLED=true, the shared
     require_admin contract — like test_g1_health_logs / test_0053_admin_transcripts);
-  * an admin call launches the FIXED script DETACHED (start_new_session=True, no shell, fixed
-    argv) and returns {started: true} IMMEDIATELY — never blocking on completion;
+  * with a genuine privileged path (ORWELL_UPDATE_DIRECT=1 / sudo) an admin call launches the FIXED
+    script DETACHED (start_new_session=True, no shell, fixed argv) and returns {started: true};
   * with the G19b flag dir present it prefers the privilege-safe flag trigger (no subprocess);
+  * the PRIVILEGE FIX (ops-run lane): with NO privileged path (no watcher unit, no sudo, no direct
+    override) the endpoint FAILS LOUDLY — {started: false, error: …} + a FAILED ops-status file —
+    instead of the old silent detached no-op (the unprivileged run aborts on the script's root-guard);
   * the command carries NO user input (fixed path, env-overridable only for tests/dev);
   * the Update button renders on the admin-gated status page (admin-only DOM by construction).
 
@@ -37,10 +40,14 @@ def test_update_is_admin_gated(monkeypatch):
 
 
 def test_admin_update_runs_detached_and_returns_started(monkeypatch, tmp_path):
-    # No real host path is touched: the script path is overridden and Popen is captured.
+    # No real host path is touched: the script path is overridden and Popen is captured. The
+    # detached path now requires an EXPLICIT privileged signal (ORWELL_UPDATE_DIRECT=1 — the dev
+    # override) — without it the endpoint fails loudly (see test_admin_update_fails_loudly_...).
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))                 # no data/ops → the detached path
+    monkeypatch.setenv("ORWELL_UPDATE_DIRECT", "1")              # the genuine privileged-path override
     monkeypatch.delenv("ORWELL_UPDATE_SUDO", raising=False)
+    monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(tmp_path / "no-such.path"))  # no watcher
     stub = tmp_path / "fake-update.sh"
     stub.write_text("#!/bin/bash\necho updating\n")
     monkeypatch.setenv("ORWELL_UPDATE_SCRIPT", str(stub))
@@ -78,6 +85,7 @@ def test_admin_update_sudo_wraps_argv(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ORWELL_UPDATE_SUDO", "1")
+    monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(tmp_path / "no-such.path"))  # no watcher → sudo path
     stub = tmp_path / "fake-update.sh"
     stub.write_text("#!/bin/bash\n")
     monkeypatch.setenv("ORWELL_UPDATE_SCRIPT", str(stub))
@@ -131,6 +139,55 @@ def test_admin_update_force_direct_overrides_flag(monkeypatch, tmp_path):
     assert r.json()["via"] == "detached"
     assert captured["argv"] == ["bash", str(stub)]
     assert not (tmp_path / "ops" / "update-requested").exists()
+
+
+def test_admin_update_fails_loudly_when_no_privileged_path(monkeypatch, tmp_path):
+    # PRIVILEGE FIX (ops-run lane): no watcher unit, no data/ops, no sudo, no direct override →
+    # the endpoint must NOT silently "start" a doomed unprivileged run. It returns started:false
+    # with an error AND writes a FAILED ops-status file so the status page surfaces it.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(tmp_path / "no-such.path"))
+    monkeypatch.delenv("ORWELL_UPDATE_SUDO", raising=False)
+    monkeypatch.delenv("ORWELL_UPDATE_DIRECT", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("no subprocess may run when there is no privileged path")
+
+    monkeypatch.setattr(aur.subprocess, "Popen", _boom)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.post("/api/admin/update")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["started"] is False
+    assert body["via"] == "none"
+    assert "no privileged path" in body["error"]
+    # The failure is published through the ops-progress channel the status page polls.
+    import json
+    status = json.loads((tmp_path / "ops" / "update-status.json").read_text())
+    assert status["ok"] is False and status["running"] is False
+    assert status["message"].startswith("FAILED:")
+
+
+def test_admin_update_uses_flag_when_watcher_unit_present(monkeypatch, tmp_path):
+    # The watcher UNIT FILE (not just data/ops) is the true privileged-door signal — present → the
+    # endpoint creates data/ops itself and drops the flag (no subprocess).
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    unit = tmp_path / "orwell-ops-update.path"
+    unit.write_text("[Path]\n")
+    monkeypatch.setenv("ORWELL_UPDATE_WATCHER_UNIT", str(unit))
+    monkeypatch.delenv("ORWELL_UPDATE_DIRECT", raising=False)
+
+    def _boom(*a, **k):
+        raise AssertionError("flag trigger must be preferred when the watcher unit is installed")
+
+    monkeypatch.setattr(aur.subprocess, "Popen", _boom)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.post("/api/admin/update")
+    assert r.json()["via"] == "flag-trigger"
+    assert (tmp_path / "ops").is_dir()  # the endpoint created data/ops itself
+    assert (tmp_path / "ops" / "update-requested").exists()
 
 
 def test_default_script_path_is_fixed():

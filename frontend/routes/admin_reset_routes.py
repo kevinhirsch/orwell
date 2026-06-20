@@ -72,19 +72,74 @@ def _ops_dir() -> str:
     return os.path.join(_data_dir(), "ops")
 
 
+# The root-side path unit that consumes the flag and runs the reset AS ROOT (deploy/systemd).
+# Its presence is the TRUE signal that dropping a flag will actually do something — without it,
+# a flag is written and nothing ever consumes it (the old silent no-op). Overridable for tests.
+_WATCHER_UNIT = "/etc/systemd/system/orwell-ops-factory-reset.path"
+
+
+def _watcher_unit_path() -> str:
+    return os.environ.get("ORWELL_OOBE_RESET_WATCHER_UNIT") or _WATCHER_UNIT
+
+
+def _watcher_installed() -> bool:
+    """True when the root-side path unit is installed — the only privileged door that actually
+    runs the reset with root (the unit watches ``data/ops/<flag>`` and runs the script as root)."""
+    return os.path.isfile(_watcher_unit_path())
+
+
 def _flag_trigger_installed() -> bool:
-    """True when the root-side path unit's flag dir exists — the privilege-safe door."""
-    return os.path.isdir(_ops_dir())
+    """True when the privilege-safe flag door is usable. Back-compat: a present ``data/ops/`` dir
+    counts too (the install/update create it alongside the units, and tests stand it up directly)."""
+    return _watcher_installed() or os.path.isdir(_ops_dir())
+
+
+def _ensure_ops_dir() -> bool:
+    """Create ``data/ops/`` if missing so the flag can be dropped. Best-effort: returns whether the
+    dir exists afterwards (the non-root FE may fail to create it if the parent isn't writable)."""
+    ops = _ops_dir()
+    try:
+        os.makedirs(ops, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.isdir(ops)
 
 
 def _trigger_via_flag() -> dict:
     """Drop the existence-only flag the root ``orwell-ops-factory-reset.path`` unit watches.
-    The content is ignored by the unit; we stamp a timestamp for human log readability only."""
+    The content is ignored by the unit; we stamp a timestamp for human log readability only.
+    Ensures ``data/ops/`` exists first (so a fresh box / a box that just gained the units works)."""
+    _ensure_ops_dir()
     ops = _ops_dir()
     flag = os.path.join(ops, FLAG_NAME)
     with open(flag, "w", encoding="utf-8") as fh:
         fh.write(_dt.datetime.now(timezone.utc).isoformat() + "\n")
     return {"started": True, "via": "flag-trigger", "log": "ops-factory-reset.log"}
+
+
+def _write_failed_status(action: str, reason: str) -> None:
+    """FAIL LOUDLY through the same ops-progress channel the status page polls: stamp
+    ``data/ops/<action>-status.json`` with a terminal FAILED entry so the UI surfaces the error
+    instead of the old silent "triggered" no-op. Best-effort — never raises into the request."""
+    if not _ensure_ops_dir():
+        return
+    payload = {
+        "action": action, "step": 0, "total": 0,
+        "message": f"FAILED: {reason}", "running": False, "ok": False,
+        "error": reason, "ts": _dt.datetime.now(timezone.utc).isoformat(),
+    }
+    import json as _json
+    path = os.path.join(_ops_dir(), f"{action}-status.json")
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _run_detached() -> dict:
@@ -135,14 +190,35 @@ def setup_admin_reset_routes() -> APIRouter:
         except Exception:
             pass
         force_direct = os.environ.get("ORWELL_OOBE_RESET_DIRECT", "").lower() in ("1", "true", "yes")
+        has_sudo = os.environ.get("ORWELL_OOBE_RESET_SUDO", "").lower() in ("1", "true", "yes")
+
+        # PRIVILEGE FIX (ops-run lane): the reset MUST run with root. The privilege-safe door is
+        # the root-side flag watcher (G19b) — prefer it whenever it is usable, creating data/ops/
+        # first so a box that just gained the watcher units (e.g. via the update button) works.
         if _flag_trigger_installed() and not force_direct:
+            _ensure_ops_dir()
             logger.info("[factory-reset] admin '%s' triggered OOBE reset via the root flag trigger", who)
             try:
                 return _trigger_via_flag()
             except OSError as e:
-                logger.warning("[factory-reset] flag trigger failed (%s); falling back to detached run", e)
-        logger.info("[factory-reset] admin '%s' triggered OOBE reset via detached run of %s",
-                    who, _reset_script())
-        return _run_detached()
+                logger.warning("[factory-reset] flag trigger failed (%s); evaluating detached run", e)
+
+        # The detached Popen runs the script AS THE NON-ROOT FE USER — which the script's root-guard
+        # aborts before scrubbing anything (this was the silent-no-op bug). So only take it when a
+        # genuine privileged path exists: ORWELL_OOBE_RESET_SUDO=1 (the scoped sudoers drop-in) or an
+        # explicit ORWELL_OOBE_RESET_DIRECT=1 override (dev / a box the operator vouches is root-able).
+        if has_sudo or force_direct:
+            logger.info("[factory-reset] admin '%s' triggered OOBE reset via detached run of %s",
+                        who, _reset_script())
+            return _run_detached()
+
+        # FAIL LOUDLY — no privileged path is available. Surface the error through the same
+        # ops-progress channel the status page polls, so it is visible instead of a silent no-op.
+        reason = ("no privileged path to run the reset — the root-side flag watcher "
+                  "(orwell-ops-factory-reset.path) is not installed and sudo is not enabled. "
+                  "Deploy the update (it installs the watcher) or set ORWELL_OOBE_RESET_SUDO=1.")
+        logger.error("[factory-reset] admin '%s' could NOT start the OOBE reset: %s", who, reason)
+        _write_failed_status("factory-reset", reason)
+        return {"started": False, "via": "none", "error": reason}
 
     return router

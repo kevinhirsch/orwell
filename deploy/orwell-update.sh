@@ -50,6 +50,15 @@ for __lib in "${__here}/orwell-tui.sh" /opt/orwell/deploy/orwell-tui.sh /opt/bba
 done
 type tui_active >/dev/null 2>&1 || tui_active() { return 1; }
 
+# ── ops-progress lane: step-by-step progress to data/ops/<action>-status.json (sourced helper) ──
+# Lets the admin health page render a live timeline for THIS update (fetching → rebuilding →
+# refreshing deps → restarting → updated). Best-effort; missing helper ⇒ no-op stubs. The
+# in-container run is the one that does the work, so the steps fire there (the host bridge exits).
+for __pf in "${__here}/orwell-ops-progress.sh" /opt/orwell/deploy/orwell-ops-progress.sh /opt/bbai/deploy/orwell-ops-progress.sh; do
+  if [[ -n "${__pf:-}" && -r "$__pf" ]]; then . "$__pf"; break; fi
+done
+type ops_progress_init >/dev/null 2>&1 || { ops_progress_init() { :; }; ops_progress_step() { :; }; ops_progress_done() { :; }; ops_progress_fail() { :; }; }
+
 # Interactive front door: with no action chosen and a TTY, offer the same actions as the flags.
 # Automation (flags / env / no TTY) is completely unaffected — this block is skipped entirely.
 if [[ $ROLLBACK -eq 0 && $SET_TOKEN -eq 0 && -z "${REF:-}" && $# -eq 0 ]] && tui_active; then
@@ -223,6 +232,13 @@ if [[ "$ROLLBACK" -eq 1 ]]; then
   exit 0
 fi
 
+# ── ops-progress lane: publish a live timeline for THIS update; the trap surfaces a failure ──
+# (fetching → rebuilding → refreshing deps → restarting → updated). data/ops/update-status.json
+# is where the web tier reads it; any non-zero exit below trips the trap and records "FAILED: …".
+export ORWELL_OPS_DIR="${APP_DIR%/}/data/ops"
+ops_progress_init "update" 5
+trap 'rc=$?; if [[ "$rc" -ne 0 ]]; then ops_progress_fail "update exited with code $rc — see ops-update.log"; fi' EXIT
+
 echo "==> updating orwell in ${APP_DIR} (save in ${APP_DIR}/data is preserved)"
 PREV_SHA="$(git -C "$APP_DIR" rev-parse HEAD)"
 # Keep the running build so a failed update (or a later --rollback) can restore it untouched.
@@ -232,6 +248,7 @@ if [[ -d "${APP_DIR}/dist" ]]; then
 fi
 
 # Fetch + check out the TARGET (a pinned REF wins over the branch tip).
+ops_progress_step 1 "fetching latest code"
 if [[ -n "$REF" ]]; then
   git -C "$APP_DIR" fetch origin "$REF" || git -C "$APP_DIR" fetch --tags origin
   TARGET="$REF"
@@ -244,9 +261,12 @@ git -C "$APP_DIR" reset --hard "$TARGET"
 # Build BEFORE committing to the swap (B71/ops A4): a failed build must leave the services on the
 # PREVIOUS checkout + build — never a new tree with a stale dist, never a restart into a broken build.
 echo "==> rebuild engine (the update commits only if this succeeds)"
+ops_progress_step 2 "rebuilding engine"
 cd "$APP_DIR"
 if ! (npm ci && npm run build); then
   echo "ERROR: build FAILED on ${TARGET} — reverting to ${PREV_SHA}; services were NOT restarted." >&2
+  ops_progress_fail "build failed on ${TARGET} — reverted to ${PREV_SHA}, services NOT restarted"
+  trap - EXIT  # the explicit fail above is the final status; don't let the EXIT trap re-stamp it
   git -C "$APP_DIR" reset --hard "$PREV_SHA"
   if [[ -d "$PREV_DIST" ]]; then rm -rf "${APP_DIR}/dist"; cp -a "$PREV_DIST" "${APP_DIR}/dist"; fi
   echo "Hint: retry with REF=<known-good sha|tag>, or run 'orwell-update.sh --rollback' later." >&2
@@ -260,6 +280,7 @@ node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/mo
   || echo "WARN: embedding model prefetch failed — engine will retry at boot"
 
 echo "==> refresh front-end deps"
+ops_progress_step 3 "refreshing front-end deps"
 cd "${APP_DIR}/frontend"
 # Pinned lockfile first (audit E83): updates re-install exactly what CI tested, never a blind
 # re-resolution of unpinned ranges.
@@ -327,6 +348,18 @@ OPS_UNITS_READY=0
 if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-update.path" ]]; then
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.path"    /etc/systemd/system/orwell-ops-update.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update.service" /etc/systemd/system/orwell-ops-update.service
+  # OPS-RUN FIX (ops-run lane): also (re)install the FACTORY-RESET watcher units here. They are why
+  # the admin "Factory Reset (OOBE)" button silently no-op'd: the feature shipped in the repo but a
+  # box installed before it (and never re-provisioned) never had these units — so the FE fell back
+  # to a detached Popen run as the unprivileged `orwell` user, which the script's root-guard aborts
+  # before scrubbing anything. Installing them on EVERY update means deploying the update is what
+  # wires the watcher up on existing boxes. Reconcile only when the units exist in the checkout.
+  if [[ -f "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.path" ]]; then
+    install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.path"    /etc/systemd/system/orwell-ops-factory-reset.path
+    install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-factory-reset.service" /etc/systemd/system/orwell-ops-factory-reset.service
+    touch "${APP_DIR}/data/ops-factory-reset.log"
+    chmod 644 "${APP_DIR}/data/ops-factory-reset.log"
+  fi
   # The flag dir is orwell-OWNED (the web tier writes the flag; root consumes it; the flag's
   # content is ignored — existence only) and the live log exists ahead of the first run,
   # FE-readable (the status page tails it). The log is touched, never truncated by a re-run.
@@ -357,16 +390,31 @@ if [[ "$OPS_UNITS_READY" -eq 1 ]]; then
   # config — restarting the PATH unit never touches a run already in flight (separate unit).
   systemctl enable --now orwell-ops-update.path
   systemctl restart orwell-ops-update.path
+  # OPS-RUN FIX (ops-run lane): arm the factory-reset watcher too, so the admin OOBE button works.
+  if [[ -f /etc/systemd/system/orwell-ops-factory-reset.path ]]; then
+    systemctl enable --now orwell-ops-factory-reset.path
+    systemctl restart orwell-ops-factory-reset.path
+  fi
 fi
 if [[ "$OPS_UPDATE_RESET_READY" -eq 1 ]]; then
   systemctl enable --now orwell-ops-update-reset.path
   systemctl restart orwell-ops-update-reset.path
 fi
 
+# ops-progress lane: terminal OK. Clear the trap before the success write so the EXIT trap can't
+# re-stamp it. (The FE restart below can kill this very process if it is the FE — but the updater
+# runs detached / under the root ops watcher, not under the FE unit, so it survives to here.)
 if [[ "$NO_RESTART" -eq 1 ]]; then
+  # --no-restart: the composed Update + Reset tier owns the SINGLE final restart, so the OOBE reset
+  # that runs next will publish its own restart/OOBE-ready progress. Mark the update phase done.
   echo "==> --no-restart: build is in place but services were NOT restarted (the caller restarts)."
+  trap - EXIT
+  ops_progress_done "updated — handing off to the reset for the final restart"
 else
   echo "==> restart services (${ENGINE_SVC}, ${FRONTEND_SVC})"
+  ops_progress_step 4 "restarting services"
   systemctl restart "$ENGINE_SVC" "$FRONTEND_SVC"
+  trap - EXIT
+  ops_progress_done "updated — services restarting"
 fi
 echo "==> update complete ($(git -C "$APP_DIR" rev-parse --short HEAD)); previous build kept for --rollback."
