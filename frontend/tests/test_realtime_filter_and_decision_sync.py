@@ -50,6 +50,26 @@ def test_processWithThinking_scrubs_content_channel_leak_in_game_build():
     assert "_RAW_NPC_ID_RE" in md and "_REASONING_LINE_RE" in md
 
 
+# ── F8: realtime reasoning body-flash hardening (client-side) ──────────────────────── #
+
+def test_body_render_strips_unclosed_think_tail():
+    # chat.js _renderStream drops any UNCLOSED <think> tail before any body render path, so
+    # round-2+ reasoning (opened but not yet closed) can't be mis-read as the reply.
+    chat = _read("static", "js", "chat.js")
+    assert "F8 (realtime flash fix)" in chat
+    assert "hasUnclosedThinkTag(dt)" in chat
+
+
+def test_reasoning_scrub_openers_extended_and_npc_lines_dropped():
+    md = _read("static", "js", "markdown.js")
+    # the operator-aside opener set now catches the observed leaks
+    for opener in ["the player", "i now", "now,? (?:let me|i'?ll)", "i have the game"]:
+        assert opener in md, f"missing scrub opener: {opener}"
+    # raw engine ids are dropped from ANY reply line (not just a leading run)
+    assert "export function dropRawEngineIdLines" in md
+    assert "reply = (dropRawEngineIdLines(reply) || '').trim();" in md
+
+
 # ── 2: the decision card respects an explicit dismissal of the same pending ────────── #
 
 def test_decision_card_keys_dismissal_to_the_pending_signature():

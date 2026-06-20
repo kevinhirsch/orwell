@@ -162,7 +162,7 @@ export function startsWithReasoningPrefix(text) {
 // (the planning preamble), then return whatever narration follows. If the whole
 // block is preamble, we return '' so the leak renders as nothing — fail-open to
 // hiding (immersion is the priority). Operates on raw text BEFORE markdown.
-const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b)/i;
+const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|i have to\b|i now\b|i have the game\b|first,? i\b|now,? i\b|now,? (?:let me|i'?ll)\b|the player\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b)/i;
 const _RAW_NPC_ID_RE = /\bnpc:\d+\b/i;
 
 export function scrubReasoningPreamble(text) {
@@ -183,6 +183,17 @@ export function scrubReasoningPreamble(text) {
   if (start === 0) return text;            // nothing scrubbed
   const rest = lines.slice(start).join('\n').replace(/^\s+/, '');
   return rest;
+}
+
+// Raw engine ids (`npc:<n>`) are machinery — they never belong in player-facing narration
+// (the narration uses the houseguest's NAME). Drop ANY line carrying one from the public reply
+// (not just a leading run), so a mid-reply analysis list the model sometimes emits as content
+// ("(npc:1) - ALLY. Knows: …") can never render in the bubble even if the <think> wrapping
+// failed to route it to the accordion. (F8 — realtime reasoning-flash hardening.)
+export function dropRawEngineIdLines(text) {
+  if (!text) return text;
+  if (!/\bnpc:\d+\b/i.test(text)) return text;
+  return text.split('\n').filter((l) => !/\bnpc:\d+\b/i.test(l)).join('\n');
 }
 
 export function normalizeThinkingMarkup(text) {
@@ -532,6 +543,9 @@ export function processWithThinking(text) {
       // that never got tagged as thinking — scrub it before render so engine
       // machinery + the cast roster never reach the player.
       reply = (scrubReasoningPreamble(reply) || '').trim();
+      // Belt: drop any line carrying a raw engine id (`npc:<n>`) anywhere in the reply —
+      // a mid-reply analysis list can't be caught by the leading-only preamble scrub. (F8)
+      reply = (dropRawEngineIdLines(reply) || '').trim();
     }
     // Prepend the reasoning accordion (collapsed by default), then the clean
     // reply. The accordion is debug-only chrome; it never touches the reply text.

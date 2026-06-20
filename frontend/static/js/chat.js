@@ -1263,6 +1263,16 @@ import { isNarrow } from './platform.js';
       // Direct render helper for streaming text
       _renderStream = () => {
         let dt = stripToolBlocks(roundText);
+        // F8 (realtime flash fix): reasoning must NEVER reach a BODY render path. Drop any
+        // UNCLOSED <think> tail before any downstream render — a round-2+ reasoning block that
+        // has opened but not yet closed (common right after a tool call) was otherwise mis-read
+        // as "reply" by the garbled-<think> extractor below and flashed raw in the bubble for
+        // seconds until the close arrived. The live "Thinking" accordion renders reasoning from
+        // roundText separately, so it is unaffected; CLOSED <think>…</think> blocks remain for
+        // processWithThinking to route into the accordion.
+        if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
+          dt = dt.replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>(?:(?!<\/(?:think(?:ing)?|thought)>)[\s\S])*$/i, '');
+        }
         const bodyEl = roundHolder.querySelector('.body');
         const contentEl = _ensureStreamLayout(bodyEl);
 

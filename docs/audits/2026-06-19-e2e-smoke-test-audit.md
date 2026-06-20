@@ -578,7 +578,26 @@ by the raw-delta split. No server change is warranted; the server's channel sepa
 *(I did not implement the server change despite its approval, because the evidence showed it was
 the wrong layer — flagged back to the owner.)*
 
-**Correct fix (client-side, two parts):**
+**Fixes applied this round (client-side, tested) — PARTIAL:** (1) `_renderStream` drops any
+**unclosed `<think>` tail** before any body render (chat.js) — closes the round-2+ reasoning
+mis-read-as-reply path; (2) **extended the scrub openers** (markdown.js `_REASONING_LINE_RE`:
+"the player", "i now", "now let me/I'll", "i have the game"); (3) **`dropRawEngineIdLines`** —
+drop ANY body line carrying a raw `npc:<n>` id (markdown.js), not just a leading run. Verified
+via the MutationObserver body/accordion detector: **raw `npc:<id>` ids are now eliminated from
+the body**. **Residual:** operator-aside *reasoning prose* ("The player keeps asking…") still
+intermittently lands in the body mid-content (as `<li>`/stream tokens) — pattern-scrubbing every
+variant is **whack-a-mole** because the reasoning is arbitrary text.
+
+**Root cause / the real fix (escalation needed):** the primary stream MERGES `thinking:true`
+deltas into `roundText`/`accumulated` with synthesized `<think>` tags and relies on regex
+extraction to keep them out of the body — fragile, with render-timing races. The principled fix
+(the **same pattern PR #408 used for `resumeStream`**) is to give the body its **own
+reply-only buffer** (accumulate `thinking:false` separately; the body renders ONLY that;
+reasoning goes to its own buffer → accordion). Then reasoning can NEVER reach the body, by
+construction — no scrubbing needed. Alternative: the **suppress-reasoning-in-game-build** option
+(previously declined). *(Owner decision pending — the lowest-touch scrub path can't fully close it.)*
+
+**Original correct-fix sketch (client-side, two parts):**
 1. **Close the body-flash window:** ensure `thinking:true` content can NEVER paint in the body —
    route it to the accordion (or hold it) from the very first delta and across round boundaries,
    so the round-2+ reasoning window can't leak into the bubble.
