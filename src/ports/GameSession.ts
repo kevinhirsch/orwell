@@ -256,6 +256,15 @@ export interface GameStateView {
  * a restart, 0030). `createCharacter` finalizes from it.
  */
 export interface UpdateCastingReq {
+  /**
+   * The cast photo step (casting step #1, the photo-first OOBE): FE-set when the in-chat photo box
+   * closes — `"uploaded"` (a cast photo was finalized) or `"skipped"` (the player declined). Any
+   * non-empty string marks the step handled. The FIRST entry of `CASTING_COVERAGE`, so a fresh
+   * interview's `next` asks for it before anything else — but it is OPTIONAL: it does NOT gate
+   * `ready` (which stays name-only), so finalization proceeds whether the photo was uploaded or
+   * skipped. Vault-free: the player's own metadata, never secret.
+   */
+  castPhoto?: string;
   /** The player's display name — the one REQUIRED field before casting can finalize. */
   playerName?: string;
   /** The producer's canonical casting-sheet mapping (drives balanced hidden stats). */

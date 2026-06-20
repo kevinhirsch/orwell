@@ -183,7 +183,10 @@ def test_browser_smoke_drives_the_draft_for_real():
     smoke = _read_root("scripts", "browser_smoke.py")
     assert "G17/F3: the typed draft is restored into the composer after reload" in smoke
     assert "G17/F5: DR mode was active BEFORE the restored text landed" in smoke
-    # P1 onboarding: the old F4 seat-prefill block was replaced by the image-gate flow — the smoke
-    # now drives the cast-photo HARD GATE (locked pre-image, unlocked on secure) for real.
-    assert "P1: the chat input is LOCKED pre-image (disabled)" in smoke
-    assert "P1: securing a cast photo UNLOCKS the chat input" in smoke
+    # P1 OOBE re-sequence (2026-06-20): the cast photo is now the FIRST casting STEP (engine-driven)
+    # and OPTIONAL — the chat is usable from the start (no hard gate), and the photo box reveals
+    # mid-interview (after the producers ask) with a "Skip for now" affordance. The smoke drives that
+    # new flow for real, so it pins the new assertions, not the retired hard-gate ones.
+    assert "P1: the chat input is USABLE pre-photo (the hard gate is retired)" in smoke
+    assert "P1: the cast-photo box reveals mid-interview as a kit OrwellWindow" in smoke
+    assert "P1: skipping the cast photo closes the box (the step is optional)" in smoke

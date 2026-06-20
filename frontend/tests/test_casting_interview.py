@@ -350,3 +350,82 @@ def test_create_character_no_longer_hard_requires_a_name():
 def test_update_casting_is_pinned_and_agent_callable():
     assert "updateCasting" in tool_schemas.ORWELL_GAME_TOOLS
     assert "updateCasting" in agent_tools.GAME_TOOL_KEEP
+
+
+# --- 4. the cast-photo casting step (first, optional step of the interview) -------------
+
+def test_update_casting_carries_cast_photo_through(monkeypatch):
+    """castPhoto is a plain string scalar — the client must forward it untouched."""
+    sent = {}
+
+    async def fake_call(tool, args, user=None):
+        sent["tool"] = tool
+        sent["args"] = args
+        return {"known": {}, "missing": [], "next": None, "ready": False}
+
+    monkeypatch.setattr(orwell_engine, "_call", fake_call)
+    _run(orwell_engine.update_casting({"castPhoto": "uploaded"}, user="u"))
+    assert sent["tool"] == "updateCasting"
+    assert sent["args"] == {"castPhoto": "uploaded"}
+
+
+class TestCastingPhotoRoute:
+    """POST /api/orwell/casting/photo — record the cast-photo step into the engine."""
+
+    def _client(self):
+        import importlib
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        orwell_routes = importlib.import_module("routes.orwell_routes")
+        app = FastAPI()
+        app.include_router(orwell_routes.setup_orwell_routes())
+        return TestClient(app)
+
+    def test_uploaded_records_and_returns_casting_status(self, monkeypatch):
+        seen = {}
+
+        async def fake_update(fields, user=None):
+            seen.update(fields)
+            return {"known": {"castPhoto": "uploaded"}, "missing": ["playerName"],
+                    "next": "their name", "ready": False}
+
+        monkeypatch.setattr(orwell_engine, "update_casting", fake_update)
+        r = self._client().post("/api/orwell/casting/photo", json={"status": "uploaded"})
+        assert r.status_code == 200
+        assert seen == {"castPhoto": "uploaded"}
+        assert r.json()["known"]["castPhoto"] == "uploaded"
+
+    def test_skipped_records_and_returns_casting_status(self, monkeypatch):
+        seen = {}
+
+        async def fake_update(fields, user=None):
+            seen.update(fields)
+            return {"known": {"castPhoto": "skipped"}, "missing": ["playerName"],
+                    "next": "their name", "ready": False}
+
+        monkeypatch.setattr(orwell_engine, "update_casting", fake_update)
+        r = self._client().post("/api/orwell/casting/photo", json={"status": "skipped"})
+        assert r.status_code == 200
+        assert seen == {"castPhoto": "skipped"}
+
+    def test_bad_status_is_rejected_without_touching_the_engine(self, monkeypatch):
+        called = []
+
+        async def fake_update(fields, user=None):
+            called.append(fields)
+            return {}
+
+        monkeypatch.setattr(orwell_engine, "update_casting", fake_update)
+        r = self._client().post("/api/orwell/casting/photo", json={"status": "deleted"})
+        assert r.status_code == 400
+        assert not called
+
+    def test_no_active_game_is_a_benign_409(self, monkeypatch):
+        async def refuse(fields, user=None):
+            raise orwell_engine.EngineToolError("no active game for this user")
+
+        monkeypatch.setattr(orwell_engine, "update_casting", refuse)
+        r = self._client().post("/api/orwell/casting/photo", json={"status": "skipped"})
+        assert r.status_code == 409
+        assert r.json()["started"] is False
