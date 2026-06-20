@@ -4,7 +4,8 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
-  UpdateCastingReq, CastingStatusView, PortraitPromptEntry,
+  UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
+  PreSeedCastReq, PreSeedCastView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
@@ -154,6 +155,31 @@ function retrospectiveLabel(kind: string): string {
 function entropySeed(): number {
   return randomBytes(4).readUInt32LE(0);
 }
+
+/**
+ * 0065 — the pre-game holding store for a PRE-WARMED cast (see `GameSessionAdapter.prewarm`). Holds
+ * exactly the player-INDEPENDENT cast state that `createCharacter` would otherwise generate at finalize:
+ * the NPC roster (with their PUBLIC facets + any AUTHORED enrichment), the HIDDEN deep layer, the derived
+ * story threads, the sealed private orientations, the grounded skin tones, and the per-season portrait
+ * style anchor. ENGINE-ONLY (it carries the hidden layer); persisted in the snapshot so a half-warmed
+ * cast survives a restart.
+ */
+interface PrewarmCast {
+  seed: number;
+  npcs: GameHouse["npcs"];
+  deepProfiles: Record<EntityId, DeepProfile>;
+  storyThreads: StoryThread[];
+  privateOrientations: Record<EntityId, Orientation>;
+  groundedSkinTones: Record<EntityId, string>;
+  portraitStyleAnchor: string;
+}
+
+/**
+ * 0065 — the throwaway player name `preSeedCast` builds its temporary house with. The pre-warm cast is
+ * player-INDEPENDENT, so this never reaches the warmed NPCs (their generation runs before any player
+ * material) and the placeholder player is discarded the instant the cast is captured.
+ */
+const PREWARM_PLAYER_NAME = "(pre-warm)";
 
 /**
  * Flatten untrusted FE text before it rides into a SYSTEM prompt (the C8 pattern): collapse ALL
@@ -530,6 +556,18 @@ export class GameSessionAdapter implements GameSession {
   private storyThreads: StoryThread[] = [];
 
   /**
+   * 0065 — the engine-side pre-game holding store for a PRE-WARMED cast. Before the casting interview
+   * ends, `preSeedCast` generates the player-INDEPENDENT cast (composition + diversity + deep layer)
+   * off the season seed into here; the FE then authors it deeply (`recordCastProfile` lands HERE
+   * pre-game), and the portrait prompts read it. When `createCharacter` finalizes it ADOPTS this
+   * finished cast (the SAME seed) instead of regenerating the thin seeded floor — so portraits, shot
+   * from the warmed store, match the finished person. Null until a warm happens; cleared on adoption.
+   * Durable (0030): a warmed-but-not-finalized cast survives a restart. ENGINE-ONLY — it holds the
+   * hidden deep layer + private orientations (sealed at warm time; never projected).
+   */
+  private prewarm: PrewarmCast | null = null;
+
+  /**
    * The engine-only HIDDEN seeded relationship layer (0059): sparse pre-game ties + showmances, sealed
    * off the player AND admin. NEVER projected (no view/npcVoice/portrait/moment path reads it); sealed
    * into the Vault at seed time and persisted in the snapshot. The admin may set the per-season COUNT
@@ -828,8 +866,27 @@ export class GameSessionAdapter implements GameSession {
    * author omits keeps its prior (seeded) value, so the profile always stays complete.
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult {
-    if (!this.house) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
-    const target = this.house.npcs.find((n) => n.id === req.houseguestId);
+    // 0065: the authored profile lands on the PRE-WARMED cast pre-game (the cast is generated before the
+    // player finishes the interview — `preSeedCast` → `prewarm`), or on the live house once a season is
+    // running (e.g. a season-2 re-author). Same split/seal logic either way; the only difference is which
+    // store holds the cast + which name guards the non-mirroring check (the live player, or the intake name).
+    const ctx = this.house
+      ? {
+        npcs: this.house.npcs, playerName: (this.house.player.name ?? "").trim(), prewarm: false,
+        profiles: this.deepProfiles,
+        getThreads: (): StoryThread[] => this.storyThreads,
+        setThreads: (t: StoryThread[]): void => { this.storyThreads = t; },
+      }
+      : this.prewarm
+      ? {
+        npcs: this.prewarm.npcs, playerName: (this.intake.playerName ?? "").trim(), prewarm: true,
+        profiles: this.prewarm.deepProfiles,
+        getThreads: (): StoryThread[] => this.prewarm!.storyThreads,
+        setThreads: (t: StoryThread[]): void => { this.prewarm!.storyThreads = t; },
+      }
+      : null;
+    if (!ctx) return { accepted: false, publicFields: [], hiddenFields: [], reason: "no game started" };
+    const target = ctx.npcs.find((n) => n.id === req.houseguestId);
     if (!target) return { accepted: false, publicFields: [], hiddenFields: [], reason: "unknown houseguest" };
 
     // Validate — non-player-mirroring (L28 + the anti-sycophancy mandate #3): the cast is INDEPENDENT
@@ -840,7 +897,7 @@ export class GameSessionAdapter implements GameSession {
     // material is ever sealed. The Day-1 read of the player is the ONE legitimately player-facing field
     // and is excluded from this check (the engine owns its seeded value regardless). Vault-safe: the
     // refusal echoes no authored value. (A short player name is ignored to avoid false positives.)
-    const playerName = (this.house.player.name ?? "").trim();
+    const playerName = ctx.playerName;
     const mentionsPlayer = (text: string): boolean =>
       playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
     const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
@@ -863,7 +920,7 @@ export class GameSessionAdapter implements GameSession {
     // The author supplies the Day-1 read as PROSE only — the engine KEEPS the calibrated seeded leans
     // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
     // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
-    const prev: DeepProfile = this.deepProfiles[target.id]
+    const prev: DeepProfile = ctx.profiles[target.id]
       // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
       // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
       // individual hidden life, not a flat shared-pool draw. The narrative text rides a DEDICATED
@@ -882,13 +939,13 @@ export class GameSessionAdapter implements GameSession {
         ? { ...prev.dayOnePerception, read: req.dayOnePerception }
         : prev.dayOnePerception,
     };
-    this.deepProfiles[target.id] = next;
+    ctx.profiles[target.id] = next;
 
     // (3) Re-derive THIS source's story threads (replace), deterministic off the name. The NPC→player
     // edge keeps its seeded lean (the engine owns the numbers — see above), so no edge re-seed here.
     const thrRng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-thread-authored:${target.name}`));
-    this.storyThreads = this.storyThreads.filter((t) => t.sourceId !== target.id)
-      .concat(deriveStoryThreads(thrRng, target.id, next));
+    ctx.setThreads(ctx.getThreads().filter((t) => t.sourceId !== target.id)
+      .concat(deriveStoryThreads(thrRng, target.id, next)));
 
     // (4) Full-fidelity recall (L27b): replace the prior deep-profile note in the authoritative soul
     // memory (engine-only; never crosses) so the authored detail is recall-able in full and persists +
@@ -909,7 +966,12 @@ export class GameSessionAdapter implements GameSession {
     this.soul?.recordToSoul(target.id, newNote);
 
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
-    this.onResealProfile?.(target.id, next, this.storyThreads.filter((t) => t.sourceId === target.id));
+    this.onResealProfile?.(target.id, next, ctx.getThreads().filter((t) => t.sourceId === target.id));
+
+    // 0065: a pre-game authored profile lands on `prewarm`, which is durable state — persist it (the
+    // live path commits through the orchestrator hook around the tool call, as before). `persist()` is
+    // re-entrancy-guarded, so a wrapping commit still defers to one write.
+    if (ctx.prewarm) this.persist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
@@ -1124,6 +1186,9 @@ export class GameSessionAdapter implements GameSession {
       ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
       // A half-done casting interview is durable state too (0050/0030).
       ...(intakeIsEmpty(this.intake) ? {} : { casting: cloneSession(this.intake) }),
+      // 0065 — a pre-warmed (possibly FE-authored) cast is durable pre-game state: persist it so a
+      // half-warmed cast resumes after a restart rather than re-warming from scratch. Cleared on adoption.
+      ...(this.prewarm ? { prewarm: cloneSession(this.prewarm) } : {}),
       // 0058: the engine-only HIDDEN deep layer — persisted so an ACTIVATED thread stays activated and
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
@@ -1248,6 +1313,9 @@ export class GameSessionAdapter implements GameSession {
           : STYLE_ANCHOR_VARIANTS[0])
         : null);
     this.intake = core.casting ? cloneSession(core.casting) : emptyIntake();
+    // 0065 — restore a half-warmed (possibly FE-authored) cast so author/portrait warm resume rather than
+    // re-warming from scratch. Engine-only; absent on all prior saves and once the season has started.
+    this.prewarm = core.prewarm ? cloneSession(core.prewarm) : null;
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
@@ -1807,11 +1875,17 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
+    // 0065 — ADOPT a pre-warmed cast. If `preSeedCast` already generated (and the FE deeply authored)
+    // the cast during the interview, finalize ATOP it: reuse its seed so the warmed cast is the cast that
+    // ships, and skip re-seeding the thin floor below. An explicit seed that DIFFERS discards the stale
+    // warm (the caller asked for a specific cast); same/absent seed adopts.
+    const adopt = this.prewarm && (effReq.seed === undefined || effReq.seed === this.prewarm.seed)
+      ? this.prewarm : null;
     // E39/C7/D8: the DEFAULT seed is real entropy, persisted with the snapshot — the same player
     // name must never replay the byte-identical season (incl. its hidden elements and twist
     // schedule: a restarting player would replay secrets they already know). Explicit seeds stay
-    // first-class for tests and replays.
-    const seed = effReq.seed ?? entropySeed();
+    // first-class for tests and replays. An adopted warm reuses its already-minted seed.
+    const seed = adopt ? adopt.seed : (effReq.seed ?? entropySeed());
     this.gameSeed = seed; // B60/E12: every per-moment rng below keys off the GAME's seed
     // The producer persona (producer-persona feature): keep the producer the player has been interviewing
     // with if one was already established pre-game; otherwise bind it to the season seed so a direct
@@ -1821,7 +1895,8 @@ export class GameSessionAdapter implements GameSession {
     this.producerCache = null;
     // 0051: draw ONE per-season portrait style anchor, seeded off the game seed — same seed always
     // draws the same anchor, so the house looks like itself across restarts and through the season.
-    this.portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
+    // (An adopted warm already drew it off the same seed — reuse it so it is byte-identical.)
+    this.portraitStyleAnchor = adopt ? adopt.portraitStyleAnchor : STYLE_ANCHOR_VARIANTS[
       new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
     ];
     // 0062 — capture the move-in zeitgeist snapshot ONCE, here, off the SAME season-seed hinge as the
@@ -1849,6 +1924,11 @@ export class GameSessionAdapter implements GameSession {
       ...(merged.motivation ? { motivation: merged.motivation } : {}),
       ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
     });
+    // 0065 — when adopting a pre-warmed cast, keep the freshly-built PLAYER but swap in the warmed NPCs
+    // (which carry any FE-authored §3 depth). The warmed NPCs are byte-identical to the floor
+    // `startNewGame` just regenerated PLUS the authoring, so the seeded competition/vote calibration is
+    // unchanged; only the authored prose/secrets differ. The cast is consumed — clear the holding store.
+    if (adopt) this.house = { player: this.house.player, npcs: adopt.npcs };
     this.intake = emptyIntake(); // the interview is over — its material lives on the player now
     this.week = 1;
     this.phase = "premiere";
@@ -1868,19 +1948,35 @@ export class GameSessionAdapter implements GameSession {
       this.live.reserve = reserve;
       this.onSeal?.(reserve);
     }
-    // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
-    // isolated sub-stream (never the shared house/competition stream — the #338 RNG-isolation lesson),
-    // validate/repair to the four floors (BIPOC / gender balance / age spread / LGBTQ+), fold the PUBLIC
-    // facets (ethnicity, gender presentation, an out orientation) onto each byte-stable Character, GROUND
-    // physicalCharacteristics.skinTone from the ethnicity, and SEAL each private orientation into the
-    // Vault. Done BEFORE seedDeepProfiles so the deep layer's skin-tone reads the grounded ethnicity.
-    this.seedDiversity(seed);
-    // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
-    // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
-    // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
-    // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
-    // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
-    this.seedDeepProfiles(seed);
+    if (adopt) {
+      // 0065 — adopt the warmed cast's already-sealed layers wholesale (the diversity floor + the §3
+      // deep layer + threads were generated and sealed to the Vault at `preSeedCast` time, and the FE
+      // may have authored over them). Re-running the seeders here would regenerate the thin floor and
+      // CLOBBER the authoring, so they are SKIPPED — the warm is the source of truth from here.
+      this.deepProfiles = adopt.deepProfiles;
+      this.storyThreads = adopt.storyThreads;
+      this.privateOrientations = adopt.privateOrientations;
+      this.groundedSkinTones = adopt.groundedSkinTones;
+      this.nominationWeeks = {};
+      this.surfacedThreadCount = 0;
+      this.prewarm = null; // consumed
+    } else {
+      // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
+      // isolated sub-stream (never the shared house/competition stream — the #338 RNG-isolation lesson),
+      // validate/repair to the four floors (BIPOC / gender balance / age spread / LGBTQ+), fold the PUBLIC
+      // facets (ethnicity, gender presentation, an out orientation) onto each byte-stable Character, GROUND
+      // physicalCharacteristics.skinTone from the ethnicity, and SEAL each private orientation into the
+      // Vault. Done BEFORE seedDeepProfiles so the deep layer's skin-tone reads the grounded ethnicity.
+      this.seedDiversity(seed);
+      // 0058 — born deep: generate the cast's deterministic DEEP layer (the seeded floor + offline
+      // fallback), then SPLIT it across the Vault Wall. The PUBLIC facets (biography + the structured
+      // physical characteristics) fold onto each byte-stable Character; the HIDDEN profile + the derived
+      // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
+      // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
+      this.seedDeepProfiles(seed);
+      // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
+      this.prewarm = null;
+    }
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -1949,9 +2045,12 @@ export class GameSessionAdapter implements GameSession {
    * fields the visible projection exports on the HouseguestCard. No stats, no soul, no hidden
    * elements ever reach `buildCastPortraitPrompts`.
    */
-  private castPortraitPrompts(): PortraitPromptEntry[] {
-    if (!this.house || !this.portraitStyleAnchor) return [];
-    const everyone = [this.house.player, ...this.house.npcs];
+  private castPortraitPrompts(roster?: GameHouse["npcs"], anchor?: string): PortraitPromptEntry[] {
+    // 0065: pre-warm passes the NPC-only roster + the warmed anchor (no player exists yet); the live
+    // path defaults to the whole house (player + NPCs). Same builder either way.
+    const styleAnchor = anchor ?? this.portraitStyleAnchor;
+    const everyone = roster ?? (this.house ? [this.house.player, ...this.house.npcs] : []);
+    if (!styleAnchor || everyone.length === 0) return [];
     const publicCast = everyone.map((h) => ({
       id: h.id,
       name: h.name,
@@ -1969,7 +2068,103 @@ export class GameSessionAdapter implements GameSession {
       ...(h.character.genderPresentation !== undefined ? { genderPresentation: h.character.genderPresentation } : {}),
       ...(h.character.demeanor !== undefined ? { demeanor: h.character.demeanor } : {}),
     }));
-    return buildCastPortraitPrompts(publicCast, this.portraitStyleAnchor);
+    return buildCastPortraitPrompts(publicCast, styleAnchor);
+  }
+
+  /**
+   * 0065 — the Vault-free public roster card for ONE houseguest: exactly the observable facets the
+   * visible projection's `house` array ships (id/name/persona/age/presentation/diverse facets/the public
+   * biography + physical facet). NO stats, soul, hidden elements, or relationship number. Shared by the
+   * live `view()` mapping AND `preSeedCast` (the pre-warm roster) so the FE authors/shoots against the
+   * same shape it will see at season start. `status` defaults to ACTIVE (pre-game everyone is in).
+   */
+  private castCard(n: GameHouse["npcs"][number], status: HouseguestCard["status"] = "active"): HouseguestCard {
+    return {
+      id: n.id, name: n.name, status,
+      archetype: n.character.archetype,
+      strategyStyle: n.character.strategyStyle,
+      background: n.character.background,
+      age: n.character.age,
+      presentation: n.character.presentation,
+      ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
+      ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
+      ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
+      ...(n.character.physicalCharacteristics !== undefined
+        ? { physicalCharacteristics: n.character.physicalCharacteristics }
+        : n.character.appearance !== undefined ? { appearance: n.character.appearance } : {}),
+      ...(n.character.ethnicity !== undefined ? { ethnicity: n.character.ethnicity } : {}),
+      ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
+      ...(n.character.outOrientation !== undefined ? { outOrientation: n.character.outOrientation } : {}),
+    } as HouseguestCard;
+  }
+
+  /**
+   * 0065 — pre-warm the cast. Generate the player-INDEPENDENT cast off the season seed into the
+   * `prewarm` holding store BEFORE the interview ends, so the FE can deeply author it
+   * (`recordCastProfile` lands on `prewarm` pre-game) and portraits read the FINISHED store. The whole
+   * cast is deterministic off the seed (no player field is read), so this is safe the instant a model
+   * is selectable. Idempotent (a second call returns the already-warmed cast); durable (0030). The
+   * SAME seed is adopted by `createCharacter`, so the warmed cast is the cast that ships. Vault-free out.
+   */
+  preSeedCast(req: PreSeedCastReq): PreSeedCastView {
+    // A season is already running (or crowned): casting is closed — refuse honestly, change nothing.
+    if (this.house) {
+      return { warmed: false, seed: this.gameSeed ?? 0, house: [], portraitPrompts: [],
+        refused: this.live?.finished ? "over" : "in-progress" };
+    }
+    // Idempotent: a cast is already warmed. Re-warm only if an explicit seed DIFFERS (tests/replays);
+    // otherwise return the existing warm so author/portrait warm never restart mid-flight.
+    if (this.prewarm && (req.seed === undefined || req.seed === this.prewarm.seed)) {
+      return {
+        warmed: true, alreadyWarmed: true, seed: this.prewarm.seed,
+        house: this.prewarm.npcs.map((n) => this.castCard(n)),
+        portraitPrompts: this.castPortraitPrompts(this.prewarm.npcs, this.prewarm.portraitStyleAnchor),
+      };
+    }
+    // Mint + persist the season seed NOW (E39/C7 entropy by default) so the warmed cast is reproducible
+    // and `createCharacter` adopts THIS seed. An explicit seed stays first-class (tests/replays).
+    const seed = req.seed ?? entropySeed();
+    this.gameSeed = seed;
+    if (this.producerSeed === null) this.producerSeed = seed; // keep the casting producer stable pre-game
+    const portraitStyleAnchor = STYLE_ANCHOR_VARIANTS[
+      new SeededRandom(hashSeed(`${seed}:portrait-style`)).int(STYLE_ANCHOR_VARIANTS.length)
+    ]!;
+    this.portraitStyleAnchor = portraitStyleAnchor;
+    // Generate the cast by REUSING the exact live seeding path against a temporary house — so the warmed
+    // seeded floor is BYTE-IDENTICAL to what `createCharacter` would produce un-warmed (no golden-test
+    // drift). The NPC roster is player-independent: `generateHouse(rng)` runs fully BEFORE `runPlayerOOBE`
+    // (which never consumes the rng), so these NPCs equal the ones `createCharacter` regenerates off the
+    // same seed. The placeholder player is type-scaffolding ONLY — discarded below; `seedDiversity` /
+    // `seedDeepProfiles` touch `npcs` exclusively, never the player.
+    const temp = startNewGame({ seed, playerName: PREWARM_PLAYER_NAME });
+    const npcs = temp.npcs;
+    this.house = { player: temp.player, npcs };
+    this.seedDiversity(seed);    // folds public diversity facets + seals private orientations to the Vault
+    this.seedDeepProfiles(seed); // folds the §3 deep layer + seals the hidden profile/threads to the Vault
+    // Capture the finished cast into the holding store, then RESET back to a clean pre-game state (the
+    // cast lives in `prewarm` from here; the live house does not exist until `createCharacter`).
+    this.prewarm = {
+      seed, npcs,
+      deepProfiles: this.deepProfiles,
+      storyThreads: this.storyThreads,
+      privateOrientations: this.privateOrientations,
+      groundedSkinTones: this.groundedSkinTones,
+      portraitStyleAnchor,
+    };
+    this.house = null;
+    this.deepProfiles = {};
+    this.storyThreads = [];
+    this.privateOrientations = {};
+    this.groundedSkinTones = {};
+    this.nominationWeeks = {};
+    this.surfacedThreadCount = 0;
+    this.persist(); // a warmed cast is durable pre-game state (0030)
+    return {
+      warmed: true, seed,
+      house: npcs.map((n) => this.castCard(n)),
+      portraitPrompts: this.castPortraitPrompts(npcs, portraitStyleAnchor),
+    };
   }
 
   /**

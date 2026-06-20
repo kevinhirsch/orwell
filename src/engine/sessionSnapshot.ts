@@ -105,6 +105,22 @@ export interface SessionCore {
   deepProfiles?: Record<EntityId, DeepProfile>;
   storyThreads?: StoryThread[];
   /**
+   * 0065 — a PRE-WARMED but not-yet-finalized cast: the player-INDEPENDENT cast `preSeedCast` generates
+   * during the casting interview (before `createCharacter`), possibly already FE-authored deeply. Persisted
+   * so a half-warmed cast survives a restart and resumes (0030) rather than re-warming from scratch.
+   * ENGINE-ONLY (it carries the hidden deep layer + private orientations). Absent once the season starts
+   * (the cast is adopted onto the live house and the holding store is cleared). Absent on all prior saves.
+   */
+  prewarm?: {
+    seed: number;
+    npcs: GameHouse["npcs"];
+    deepProfiles: Record<EntityId, DeepProfile>;
+    storyThreads: StoryThread[];
+    privateOrientations: Record<EntityId, import("./diversityConstants").Orientation>;
+    groundedSkinTones: Record<EntityId, string>;
+    portraitStyleAnchor: string;
+  };
+  /**
    * Feature 0060 — the story-thread scheduler's engine-only, HIDDEN bookkeeping: the distinct weeks each
    * houseguest has been nominated (drives the `nominated-twice` trigger) and the count of threads that
    * have ever SURFACED this season (the hard restraint cap, §5). Persisted so both survive a restart

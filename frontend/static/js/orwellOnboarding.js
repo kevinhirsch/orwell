@@ -394,6 +394,15 @@
     } catch (_) {}
     return false;
   }
+  // 0065 — cast pre-warm triggers (fire-and-forget; the server endpoints are idempotent). AUTHOR WARM
+  // fires the instant a model is selectable (route(), before the interview); PORTRAIT WARM fires at the
+  // first interview turn (the producers' opener) and the server holds it until authoring fully finishes.
+  function _orwellWarm(path) {
+    try {
+      fetch("/api/orwell/" + path, { method: "POST", credentials: "same-origin" }).catch(() => {});
+    } catch (_) {}
+  }
+
   let _openSent = false;
   window._orwellOpenGameAfterCasting = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
@@ -402,6 +411,9 @@
     // here) means we must never fire a second one.
     if (_conversationHasAssistantTurn()) { _openSent = true; return; }
     _openSent = true;
+    // 0065 PORTRAIT WARM: the interview is opening (the first turn) — kick the portrait warm. The server
+    // HOLDS it until author warm has fully finished, so faces are never shot from a half-authored store.
+    _orwellWarm("warm-portraits");
     // Give the welcome modal's teardown a beat, then auto-send through the normal submit path
     // (the same seam chat.js uses for its own programmatic sends), with the user bubble hidden so
     // the producers appear to reach out first.
@@ -552,6 +564,9 @@
       // the interview opens AFTER the welcome (not after a photo). The chat is no longer locked for
       // the photo; the photo box appears mid-interview once the producers ask (orwellHeadshot.js).
       await openFreshInterviewSession();
+      // 0065 AUTHOR WARM: a model is configured and the season hasn't started — pre-seed + deeply author
+      // the cast in the background NOW, before the interview, so it is fully authored before any portrait.
+      _orwellWarm("prewarm-cast");
       const onProceed = async () => {
         try { await openFreshInterviewSession(); } catch (_) {}
         try { if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting(); } catch (_) {}

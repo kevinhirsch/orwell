@@ -1474,6 +1474,31 @@ _FORCED_ADVANCE_NUDGE = (
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
 
+# ── Casting finalize fallback (audit 2026-06-20: the game won't reliably START) ─────────────────
+# The pre-game twin of the advance stall-guard. The model reliably UNDER-CALLS createCharacter:
+# with casting.ready=true and the player asking to start, it keeps interviewing (often waiting on
+# a headshot already on file) and never finalizes — the live walkthrough sat in the casting
+# interview for 5+ turns past an explicit "I'm ready, put me in the house". So once casting is
+# FINALIZABLE (the engine says ready) AND the player has SIGNALLED readiness, we nudge — then, past
+# the rungs, finalize ourselves (the same engine lever the model was asked to pull, the way the
+# advance safety-net and _auto_record_scene error-correct the omission). Conservative by design:
+# only when the ENGINE confirms ready (createCharacter would succeed) and the player asked — it
+# never starts a game the player did not ask for. Persisted per user so the escalation carries.
+_CASTING_STALL_LEVEL: Dict[str, int] = {}
+_CASTING_NUDGES = [
+    "(Production note, not for the player.) Casting is COMPLETE — every required answer is on file "
+    "and the player just signalled they're ready. Do not keep interviewing or wait on a photo: your "
+    "very next action is the createCharacter function call to finalize and start the season. After it "
+    "returns, read back their casting card in your producer voice and move into the premiere.",
+    "STOP interviewing. The player is ready and casting is on file, but the season has NOT started "
+    "because createCharacter was never called. Call createCharacter NOW — nothing else.",
+]
+_CASTING_FORCE_LEVEL = len(_CASTING_NUDGES)  # past the last text rung
+_CASTING_FORCED_NOTE = (
+    "(Production note, not for the player.) Casting has been finalized and the season has begun. Read "
+    "back the player's casting card in your producer voice, then walk them through the front door into "
+    "the house for the premiere. Voice ONLY what the game now shows — never invent it.")
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -1689,6 +1714,53 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
     except Exception as _e:
         logger.warning(f"[orwell] auto-move failed: {_e}")
         return False
+
+
+async def _auto_mark_premiere_intros(narration, owner) -> int:
+    """PREMIERE (#380) — GUARANTEE the meet-everyone gate progresses. The premiere prompt has the
+    producer introduce all 15 houseguests (calling markHouseguestMet each time) before the first
+    HOH unlocks, but the model reliably UNDER-CALLS markHouseguestMet: it narrates introductions
+    while the engine's meet-list never shrinks, so `complete` never flips and the player is trapped
+    in introductions (the live walkthrough sat in `premiere` across 6 turns). Error-correct the
+    omission the way _auto_record_scene / _auto_move_player do: for each STILL-TO-MEET houseguest
+    whose name the model just introduced in this turn's narration, mark them met ourselves.
+
+    Deterministic (name-match against the engine's own `remaining` list — no LLM call), idempotent
+    (the engine no-ops a re-mark), and fail-open. This KEEPS the designed meet-everyone feature
+    intact (the gate, its test, the tutorial); it only guarantees the introductions REGISTER so the
+    premiere can reach its first HOH. Returns the number newly marked."""
+    if not narration or not owner:
+        return 0
+    try:
+        from src import orwell_engine as _oe
+        intros = await _oe.premiere_intros(owner)
+    except Exception as e:
+        logger.warning(f"[orwell] premiere-intros fetch failed: {type(e).__name__}: {e}".rstrip(': '))
+        return 0
+    if not isinstance(intros, dict):
+        return 0
+    remaining = intros.get("remaining") or []
+    marked = 0
+    for fi in remaining:
+        hg = (fi or {}).get("houseguest") or {}
+        name, hid = hg.get("name"), hg.get("id")
+        if not name or not hid:
+            continue
+        # An introduction names the houseguest — match the full name OR the first name as a whole
+        # word in the turn's narration. Marking met is low-stakes and idempotent, so a generous
+        # match (unstick the premiere) beats a strict one (leave the player trapped).
+        first = name.split()[0]
+        if (re.search(rf"\b{re.escape(name)}\b", narration, re.IGNORECASE)
+                or re.search(rf"\b{re.escape(first)}\b", narration, re.IGNORECASE)):
+            try:
+                await _oe.mark_houseguest_met(hid, user=owner)
+                marked += 1
+            except Exception as e:
+                logger.warning(f"[orwell] auto markHouseguestMet failed for {hid}: "
+                               f"{type(e).__name__}: {e}".rstrip(': '))
+    if marked:
+        logger.info(f"[orwell] auto-marked {marked} premiere intro(s) user={owner}")
+    return marked
 
 
 async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
@@ -3317,6 +3389,13 @@ async def stream_agent_loop(
                         logger.warning(
                             f"[orwell] error-correction state fetch failed: "
                             f"{type(_e).__name__}: {_e}".rstrip(': '))
+                    # ── PREMIERE auto-mark belt (#380): the model narrated introductions but
+                    # under-calls markHouseguestMet, so the meet-everyone list never empties and the
+                    # premiere can't reach its first HOH. Mark any still-to-meet houseguest just
+                    # introduced by name — keeps the designed gate, guarantees the intros register.
+                    # Pure persist side effect (never a re-prompt); runs before the other belts.
+                    if _moment == "premiere":
+                        await _auto_mark_premiere_intros(_turn_narration, owner)
                     # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
                     # The player walked to a room this turn but the model never called moveTo, so the
                     # engine still has them in the OLD room and next turn's whereabouts would snap back.
@@ -3523,6 +3602,51 @@ async def stream_agent_loop(
                         "any tool — just the moment, in your narrator voice.")})
                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                     continue
+            elif game_mode == "casting":
+                # ── Casting finalize fallback (the game won't START): the model under-calls
+                # createCharacter. If casting is finalizable (engine ready) AND the player signalled
+                # readiness but the model didn't finalize this turn, nudge — then, past the rungs,
+                # finalize ourselves. Mirrors the advance safety-net; conservative (engine-ready +
+                # player-asked only). createCharacter THIS turn short-circuits (model-driven wins).
+                _created_this_turn = "createCharacter" in {
+                    (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
+                if not _created_this_turn and owner is not None and _player_turn_is_lull(messages):
+                    try:
+                        from src import orwell_engine as _oec
+                        _cs = await _oec.get_game_state(owner)
+                    except Exception as _e:
+                        logger.warning(f"[orwell] casting-finalize state fetch failed: "
+                                       f"{type(_e).__name__}: {_e}".rstrip(': '))
+                        _cs = None
+                    _casting = (_cs or {}).get("casting") if isinstance(_cs, dict) else None
+                    _ready = bool(_casting and _casting.get("ready")) and not (_cs or {}).get("started")
+                    if _ready:
+                        _clv = _CASTING_STALL_LEVEL.get(owner, 0)
+                        _CASTING_STALL_LEVEL[owner] = _clv + 1
+                        if _clv >= _CASTING_FORCE_LEVEL:
+                            try:
+                                from src.tool_implementations import do_create_character
+                                _cres = await do_create_character("{}", owner=owner)
+                                if isinstance(_cres, dict) and not _cres.get("error") \
+                                        and not _cres.get("createRefused"):
+                                    _CASTING_STALL_LEVEL.pop(owner, None)
+                                    logger.info(f"[orwell] FORCED createCharacter (casting stall "
+                                                f"L{_clv}) round {round_num} user={owner}")
+                                    messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
+                                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                    continue
+                                logger.warning("[orwell] forced createCharacter did not start the "
+                                               f"season (res={_cres!r}); falling back to a nudge")
+                            except Exception as _e:
+                                logger.warning(f"[orwell] forced createCharacter failed: "
+                                               f"{type(_e).__name__}: {_e}".rstrip(': '))
+                        _cn = _CASTING_NUDGES[min(_clv, len(_CASTING_NUDGES) - 1)]
+                        logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
+                        messages.append({"role": "system", "content": _cn})
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
+                    elif owner is not None:
+                        _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────

@@ -373,6 +373,18 @@ async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> di
     return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
 
 
+async def pre_seed_cast(seed: int | None = None, user: str | None = None) -> dict:
+    """Feature 0065: pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting
+    interview ends, so the FE can deeply author it (``record_cast_profile``) and the portrait prompts
+    read the FINISHED store. Returns ``{ warmed, seed, house, portraitPrompts, alreadyWarmed?, refused? }``
+    — the Vault-free roster + cast portrait prompts. Mints + persists the season seed (which
+    ``createCharacter`` then adopts). Idempotent; a no-op refusal once a season is running."""
+    args: dict = {}
+    if seed is not None:
+        args["seed"] = seed
+    return await _call("preSeedCast", args, user=user)
+
+
 async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
     becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the

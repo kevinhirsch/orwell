@@ -603,6 +603,34 @@ def setup_orwell_routes() -> APIRouter:
             kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
 
+    # ── 0065: cast pre-warm — author the cast deeply BEFORE any portrait is generated ──────
+    @router.post("/prewarm-cast")
+    async def orwell_prewarm_cast(request: Request):
+        """AUTHOR WARM (earliest): the FE calls this the instant a model is selectable (casting open,
+        before the season begins). The engine pre-seeds the player-INDEPENDENT cast and the FE deeply
+        authors it in the background. Idempotent; fail-open. Player-channel (Vault-free roster only)."""
+        user = _current_user(request)
+        try:
+            from src import orwell_prewarm
+            return await orwell_prewarm.prewarm_cast(user)
+        except Exception as e:  # never block onboarding on a pre-warm hiccup
+            logger.info(f"[orwell] prewarm-cast failed: {e}")
+            return {"warmed": False, "count": 0}
+
+    @router.post("/warm-portraits")
+    async def orwell_warm_portraits(request: Request):
+        """PORTRAIT WARM (held until the first interview turn): generate the cast portraits in the
+        background — but ONLY after author warm has fully finished. A fully warmed authorship before any
+        photo, ever. Idempotent; fail-open; declines if no author warm ran (createCharacter's fallback
+        owns portraits then)."""
+        user = _current_user(request)
+        try:
+            from src import orwell_prewarm
+            return await orwell_prewarm.warm_portraits(user)
+        except Exception as e:
+            logger.info(f"[orwell] warm-portraits failed: {e}")
+            return {"started": False}
+
     # ── G26/G27: the player's own casting headshot + the account avatar ───────────────────
     # Player-channel (not admin): it sets the PLAYER's OWN portrait and the account's circle
     # avatar — the same exposure as the backfill lever. 'exact' = the cropped photo, finalized
