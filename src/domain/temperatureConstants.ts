@@ -20,6 +20,12 @@ export interface OutcomeWeights {
   emotion: number;
   throwPenalty: number;
   playSafePenalty: number;
+  /**
+   * The hidden sleep cost (ADR 0006): a competitor's rest deficit (0..1) scales this into a bounded
+   * score malus. ~¾ of the emotion weight — meaningful but never fatal, and never protective. Tuning,
+   * not architecture; 0 here would disable the sleep→comp consequence entirely.
+   */
+  sleepPenalty: number;
 }
 
 export interface EmotionalConstants {
@@ -63,7 +69,7 @@ export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   // band was 1 ± 0.1 (= initiative/2) and the bond-pick wobble was ±0.05 (= allianceShift/2).
   variableWeights: { initiative: 0.2, allianceShift: 0.1 },
   // Calibrated so a clear stat favorite wins a strong majority but loses a real minority (0006).
-  outcome: { stat: 1.0, temperature: 0.36, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2 },
+  outcome: { stat: 1.0, temperature: 0.36, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.15 },
   emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3, swingTemperatureWeight: 0.25 },
   hiddenSurfacingRate: 0.05,
 };

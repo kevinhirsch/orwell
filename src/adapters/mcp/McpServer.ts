@@ -208,6 +208,9 @@ export class McpServer {
       case "cancelSelfEviction":
         // 0061: decline the confirmation — the player plays on, ACTIVE and unchanged.
         return this.deps.session.cancelSelfEviction();
+      case "turnIn":
+        // ADR 0006: the player's bedtime lever — ends their night, rolls to the next morning.
+        return this.deps.session.turnIn();
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
       case "getVisibleStateFor":

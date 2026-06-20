@@ -249,6 +249,13 @@ export interface RenderZeitgeistOpts {
    * THIS person's slice emphasis so they don't recite an identical list. Read-time, public-facets-only.
    */
   persona?: Parameters<typeof sliceEmphasisFor>[0];
+  /**
+   * 0062 media-fidelity (the HOH music perk): when TRUE the reader currently holds live music — they are
+   * the reigning HOH (the real-BB luxury) or in the HOH room overhearing it — so the MUSIC slice reads as
+   * PLAYING NOW for them, the one live-media exception in a sealed house. When FALSE/absent music is
+   * frozen MEMORY like every other slice (the house has no live media; singing a real song cuts the feeds).
+   */
+  musicAccess?: boolean;
 }
 
 /**
@@ -272,6 +279,7 @@ export function renderZeitgeist(snap: WorldSnapshot | null | undefined, opts: Re
 
   const emphasis = opts.persona ? sliceEmphasisFor(opts.persona) : [...ZEITGEIST_SLICES];
   const lead = emphasis.filter((s) => snap.slices[s].length > 0);
+  const musicAccess = opts.musicAccess === true;
   const lines: string[] = [
     "THE WORLD YOU ALL MOVED IN WITH (shared, frozen real-world flavor — voice it in character, never as a",
     `  dashboard; FLAVOR ONLY — it never decides or informs ANY game fact, outcome, or decision). The house`,
@@ -280,9 +288,22 @@ export function renderZeitgeist(snap: WorldSnapshot | null | undefined, opts: Re
     "  AFTER move-in is UNKNOWABLE to the whole house: a guess, gotten wrong, or waved off (\"no idea, we've",
     "  been locked in here\"). The longer the season runs, the more dated the references and the more the",
     "  house leans into being behind — that out-of-the-loop wrongness is CORRECT, it is the played texture.",
+    // Media-fidelity (0062): these are MEMORIES, not media playing in the house — the cast is sealed off
+    // with no TV/internet/music. They reminisce, quote, and argue about this world; they do not stream it.
+    "  These are MEMORIES — there is NO live media in the sealed house (no TV, no internet, no music). They",
+    "  reminisce and quote; nothing is playing. If a houseguest goes to belt out a real song, the live feeds",
+    "  cut to the jingle — voice the wink (\"—and we're back\"), NEVER actual copyrighted lyrics.",
   ];
   for (const slice of lead) {
-    lines.push(`  · ${SLICE_LABEL[slice]}: ${snap.slices[slice].join("; ")}.`);
+    // The HOH music perk (0062): the reigning HOH (a real-BB luxury) — and anyone in the HOH room with
+    // them — actually has music. For that reader the MUSIC slice is PLAYING NOW, not a memory; everyone
+    // else only remembers these. The sole live-media exception, and a scarce, status-linked texture.
+    if (slice === "music" && musicAccess) {
+      lines.push(`  · Music (the HOH MUSIC PERK — these are actually on rotation in the HOH room RIGHT NOW, the one`,
+        `    live exception; anyone else in there overhears, everyone else only remembers them): ${snap.slices.music.join("; ")}.`);
+    } else {
+      lines.push(`  · ${SLICE_LABEL[slice]}: ${snap.slices[slice].join("; ")}.`);
+    }
   }
   if (opts.persona && lead.length > 0) {
     lines.push(

@@ -49,6 +49,12 @@ export interface PlayerCard {
   status: "active" | "jury" | "evicted";
   /** The casting interview's distilled card (0050) — qualitative only; re-showable all season. */
   castingCard?: CastingCard;
+  /**
+   * The player's OWN qualitative tiredness (ADR 0006 §Principle 5): "rested" | "tired" | "running on
+   * empty", from how late THEY chose to stay up. Their own body is their own knowledge — a cue, never
+   * a number, and never any NPC's sleep state. Absent pre-game / when the clock isn't running.
+   */
+  restStatus?: string;
 }
 
 /**
@@ -186,6 +192,12 @@ export interface GameStateView {
   beatSeq: number;
   week: number;
   phase: string;
+  /**
+   * The in-game TIME OF DAY (ADR 0006): "morning" | "afternoon" | "evening" | "night" | "late-night".
+   * A coarse, PUBLIC, shared band (one clock for the whole house) — never a wall-clock, never a number.
+   * Drives the time-of-day HUD and grounds narration in the real hour. Absent pre-game.
+   */
+  timeOfDay?: string;
   /**
    * The season is OVER — a winner is crowned (audit B6-01). Vault-free (whether the game ended is
    * public). Lets the FE gate the season lifecycle (0057 next-season) and fill the progress bar to
@@ -437,6 +449,11 @@ export interface PublicGameStatus {
   beatSeq: number;
   week: number;
   phase: string;
+  /**
+   * The in-game TIME OF DAY (ADR 0006) — see `GameStateView.timeOfDay`. The shared, public day-phase
+   * the time-of-day HUD renders; Vault-free; absent pre-game / when the clock isn't running.
+   */
+  timeOfDay?: string;
   /**
    * The in-game DAY within the current HOH week (E58): hoh=1, nominations=2, veto=3,
    * veto-ceremony=4, eviction=5 — the canonical `dayOfWeek(phase)` mapping that already feeds the
@@ -1052,6 +1069,14 @@ export interface GameSession {
    * pending and leave them ACTIVE and in the house, state unchanged. A no-op when nothing is pending.
    */
   cancelSelfEviction(): AdvanceView;
+  /**
+   * The player's bedtime lever (ADR 0006 §Principle 6) — the player CHOOSES to turn in for the night.
+   * Ends THEIR night where it stands (an early night ⇒ rested for tomorrow's comp; outlasting the house
+   * into late-night ⇒ running on empty) and rolls the house to the next morning. The player is never
+   * auto-slept; only this call retires them. A no-op when the clock isn't running, the game is over, or
+   * the player has left. Returns the Vault-free view (the new morning + the player's own rest cue).
+   */
+  turnIn(): AdvanceView;
   /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding
