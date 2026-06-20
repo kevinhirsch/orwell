@@ -210,9 +210,23 @@ wait_for() { # label  probe-fn  tries
   return 1
 }
 
+# A11 [LOW · Noise]: onnxruntime (fastembed) logs a HARMLESS
+# `pthread_setaffinity_np … error code: 22` (twice, at thread-pool creation) inside an LXC
+# whose cgroup cpuset doesn't grant the host CPU indexes ORT tries to pin — threads run
+# unpinned, inference is unaffected. fastembed-js doesn't expose ORT's intraOpNumThreads, so
+# the mitigation is to IGNORE it here: drop only that exact benign line from the failure tail
+# (and note how many were hidden) so it never masquerades as the crash reason. Genuine
+# diagnostics — every other line — pass through untouched.
+ORT_AFFINITY_NOISE='pthread_setaffinity_np.*error code: 22'
+
 journal_tail() {
   echo "---- last 25 journal lines: $1 ----"
-  journalctl -u "$1" -n 25 --no-pager 2>/dev/null || echo "(journalctl unavailable — run as root?)"
+  local raw
+  raw="$(journalctl -u "$1" -n 25 --no-pager 2>/dev/null)" || { echo "(journalctl unavailable — run as root?)"; echo "-----------------------------------"; return 0; }
+  local hidden
+  hidden="$(grep -Ec "$ORT_AFFINITY_NOISE" <<<"$raw" || true)"
+  grep -Ev "$ORT_AFFINITY_NOISE" <<<"$raw"
+  [[ "${hidden:-0}" -gt 0 ]] && echo "(+${hidden} harmless onnxruntime cpuset line(s) hidden — see README, A11)"
   echo "-----------------------------------"
 }
 

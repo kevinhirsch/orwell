@@ -1726,14 +1726,19 @@ itself; a future incremental-snapshot item if play feels it.
   choice-shaped decisions but `submitDecision` expects the pick on `vote` — any non-FE
   client trips. Align the field or document it on the pending view.
 
-- **A11 [LOW · Noise · prod-observed 2026-06-11]** onnxruntime inside an LXC logs
+- **A11 [LOW · Noise · prod-observed 2026-06-11] ✅ DONE (ops-render-checks lane) — documentation +
+  the doctor ignores it.** onnxruntime inside an LXC logs
   `pthread_setaffinity_np … error code: 22` (twice, at thread-pool creation) when the
   container's cgroup cpuset doesn't grant the host CPU indexes ORT tries to pin — harmless
   (threads run unpinned; inference unaffected), appears at prefetch and once at boot
   warm-up. Mitigation is documentation only (deploy README + the doctor ignores it):
   fastembed-js doesn't expose ORT's `intraOpNumThreads`, and widening the LXC cpuset is a
   worse trade. Upgrades to a real finding only if it ever spams per-inference (it
-  shouldn't — one session, one pool, created once).
+  shouldn't — one session, one pool, created once). *Fix:* a new **"Known harmless log noise (A11)"**
+  section in `deploy/README.md` documents it as expected-and-ignorable, and
+  `orwell-doctor.sh`'s `journal_tail` now drops exactly that benign ORT line from a failing
+  unit's journal tail (reporting how many lines it hid) so it can never masquerade as the crash
+  reason — every genuine diagnostic line still passes through.
 
 ## A12 [Ruling #21 · 2026-06-11 — SHIPPED same day] The container shell greets with a live health panel
 **Ruling:** entering the container must never feel hung — interactive shells get a terminal
@@ -1800,8 +1805,16 @@ and finisher agents drove each to green — fast-gate only, **no heavy sims loca
 3. **0022** — MVP-2 rich game UI (the long-standing deliberate deferral; the chat *is* the UI per ADR 0003).
 4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
 5. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
-6. **Browser-render validations owed** — 0051 portrait render · 0057 progress-bar / panel placement.
-7. **A11** — onnxruntime cpuset log noise inside the LXC (documentation-only).
+6. ✅ **Browser-render validations owed — DONE (ops-render-checks lane).** `browser_smoke.py`
+   now drives the real FE headless and asserts both surfaces actually render: **0051** — a real
+   cast-portrait `<img>` is present, has its src, and is SIZED (~1:1 holder, no placeholder
+   fallback); **0057** — the season progress bar is present & ≤5px & spans the viewport without
+   horizontal overflow, the "Season N" chip reads past season 1 inside the viewport, and the
+   post-season "New season" kit window mounts in-view (keep + recast). Vault-free routed
+   projections only; whole suite green locally + CI.
+7. ✅ **A11 — DONE (ops-render-checks lane).** onnxruntime cpuset log noise: documented in
+   `deploy/README.md` as expected-and-ignorable, and `orwell-doctor.sh` filters the exact benign
+   line out of its failing-unit journal tail (see the A11 entry above).
 8. **Postgres + pgvector** → reclassified under **MVP-002** (see below).
 
 ### MVP-002 — post-launch scale-out (milestone)

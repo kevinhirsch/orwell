@@ -197,6 +197,22 @@ doesn't cure it. Exit `0` means healthy. It also reads `systemd-analyze security
 and warns when a unit's exposure score drifts above the hardening floor (audit E85; override with
 `ORWELL_SECURITY_FLOOR=<score>`).
 
+### Known harmless log noise (A11)
+
+The engine's semantic-recall provider (fastembed / onnxruntime) logs, **twice at boot/prefetch**:
+
+```
+pthread_setaffinity_np ... error code: 22
+```
+
+This is **harmless and expected inside an LXC** whose cgroup cpuset doesn't grant the host CPU
+indexes onnxruntime tries to pin its thread pool to. The threads simply run **unpinned** —
+inference is unaffected, and it appears **once** (one session, one thread pool, created once),
+never per inference. `fastembed-js` doesn't expose ORT's `intraOpNumThreads` to silence it, and
+widening the container's cpuset is a worse trade, so there is **nothing to fix** — ignore it.
+`orwell-doctor.sh` already filters this exact line out of the failing-unit journal tail (and
+notes how many lines it hid) so it can never be mistaken for the actual crash reason.
+
 ## Config UX (community-scripts style)
 
 On a TTY the installer shows a **whiptail menu** with every field pre-populated:
