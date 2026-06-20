@@ -369,6 +369,134 @@
     document.addEventListener("DOMContentLoaded", decorateAll, { once: true });
   } else { decorateAll(); }
 
+  // ── width drag-resize (desktop, persisted + clamped) ───────────────────────
+  // A thin grab-handle on the rail's INNER edge (the chat-facing edge) drives the
+  // rail's `--gadget-rail-width` (applied inline on #gadget-rail). The width is
+  // clamped to a sane range and persisted under WIDTH_KEY. Honors side-swap: on the
+  // right the handle is on the LEFT edge and dragging LEFT widens; under side-swap the
+  // rail is on the LEFT, the handle is on its RIGHT edge, and dragging RIGHT widens.
+  // The handle is hidden (CSS) when collapsed and on the mobile drawer.
+  var WIDTH_KEY = "orwell-gadget-rail-width";
+  var MIN_W = 220;
+  function maxW() { return Math.min(520, Math.round(window.innerWidth * 0.40)); }
+  function clampW(w) {
+    var hi = maxW();
+    var lo = Math.min(MIN_W, hi);  // never let min exceed max on tiny viewports
+    if (!isFinite(w)) return null;
+    return Math.max(lo, Math.min(hi, Math.round(w)));
+  }
+  function readSavedWidth() {
+    var raw = lsGet(WIDTH_KEY);
+    if (raw == null) return null;
+    var n = parseFloat(raw);
+    if (!isFinite(n)) return null;   // reject NaN / garbage
+    return clampW(n);
+  }
+  function applyWidth(w) {
+    var c = clampW(w);
+    if (c == null) return;
+    rail.style.setProperty("--gadget-rail-width", c + "px");
+  }
+  function persistWidth(w) {
+    var c = clampW(w);
+    if (c == null) return;
+    lsSet(WIDTH_KEY, String(c));
+  }
+
+  // restore the saved width on init (no-op when nothing valid is stored → CSS default)
+  (function restoreWidth() {
+    var w = readSavedWidth();
+    if (w != null) applyWidth(w);
+  })();
+
+  // the handle element (created here so the markup stays minimal)
+  var resizeHandle = null;
+  function ensureResizeHandle() {
+    if (resizeHandle && rail.contains(resizeHandle)) return resizeHandle;
+    resizeHandle = document.createElement("div");
+    resizeHandle.className = "gadget-rail-resize-handle";
+    resizeHandle.setAttribute("role", "separator");
+    resizeHandle.setAttribute("aria-orientation", "vertical");
+    resizeHandle.setAttribute("aria-label", "Resize the control room");
+    resizeHandle.setAttribute("tabindex", "0");
+    rail.appendChild(resizeHandle);
+    wireResize(resizeHandle);
+    return resizeHandle;
+  }
+
+  function isResizable() {
+    // desktop only, and not while collapsed to the icon strip
+    if (_isNarrow()) return false;
+    if (rail.getAttribute("data-collapsed") === "true") return false;
+    return true;
+  }
+  function railLeftSide() {
+    return document.body.getAttribute("data-gadget-side") === "left";
+  }
+  function currentWidth() {
+    return rail.getBoundingClientRect().width || 300;
+  }
+
+  function wireResize(handle) {
+    var dragging = false;
+    var startX = 0;
+    var startW = 0;
+    function onMove(e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX;
+      // On the RIGHT (handle on the left edge): dragging LEFT (dx<0) widens.
+      // Under side-swap on the LEFT (handle on the right edge): dragging RIGHT (dx>0) widens.
+      var next = railLeftSide() ? startW + dx : startW - dx;
+      applyWidth(next);
+    }
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      rail.classList.remove("grail-resizing");
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", endDrag);
+      handle.removeEventListener("pointercancel", endDrag);
+      persistWidth(currentWidth());
+    }
+    handle.addEventListener("pointerdown", function (e) {
+      if (!isResizable()) return;
+      if (e.button != null && e.button !== 0) return;  // primary button only
+      dragging = true;
+      startX = e.clientX;
+      startW = currentWidth();
+      rail.classList.add("grail-resizing");
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", endDrag);
+      handle.addEventListener("pointercancel", endDrag);
+      e.preventDefault();
+    });
+    // keyboard a11y: arrows nudge the width (sense follows the side so it feels natural)
+    handle.addEventListener("keydown", function (e) {
+      if (!isResizable()) return;
+      var step = e.shiftKey ? 32 : 12;
+      var dir = 0;
+      if (e.key === "ArrowLeft") dir = -1;
+      else if (e.key === "ArrowRight") dir = 1;
+      else return;
+      e.preventDefault();
+      // widen = grow toward the chat: LEFT on the right-side rail, RIGHT under side-swap
+      var grow = railLeftSide() ? dir > 0 : dir < 0;
+      var next = currentWidth() + (grow ? step : -step);
+      applyWidth(next);
+      persistWidth(currentWidth());
+    });
+  }
+
+  ensureResizeHandle();
+  // re-clamp the stored width if the viewport shrinks (max is viewport-relative)
+  window.addEventListener("resize", function () {
+    if (_isNarrow()) return;
+    var w = clampW(currentWidth());
+    if (w != null) { applyWidth(w); persistWidth(w); }
+  });
+
   // public seam (the headless gate + any future control surface)
   window.OrwellGadgetRail = {
     reorder: reorder,

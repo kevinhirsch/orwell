@@ -1837,7 +1837,8 @@ body.bg-pattern-sparkles {
 
     /* ── 0054: the control-room gadget rail (right-side HUD column) ───────────── */
     .gadget-rail {
-      width: 300px; flex-shrink: 0; min-height: 0;
+      width: var(--gadget-rail-width, 300px); flex-shrink: 0; min-height: 0;
+      position: relative;
       display: flex; flex-direction: column;
       background: var(--sidebar-bg, var(--panel));
       border-left: 1px solid var(--border);
@@ -1846,6 +1847,33 @@ body.bg-pattern-sparkles {
       transition: width 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
     }
     .gadget-rail[hidden] { display: none; }
+    /* width drag-resize: a thin grab-handle on the rail's INNER edge (the edge facing
+       the chat). Default the rail sits on the right, so the handle is on its LEFT edge;
+       under side-swap the rail is on the left, so the handle moves to its RIGHT edge.
+       Disabled (hidden) when collapsed and on the mobile drawer. */
+    .gadget-rail-resize-handle {
+      position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; z-index: 4;
+      cursor: ew-resize; touch-action: none; background: transparent;
+      border: none; padding: 0; margin: 0;
+    }
+    .gadget-rail-resize-handle::before {
+      content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+      background: transparent; transition: background .12s ease;
+    }
+    .gadget-rail-resize-handle:hover::before,
+    .gadget-rail-resize-handle:focus-visible::before,
+    .gadget-rail.grail-resizing .gadget-rail-resize-handle::before {
+      background: color-mix(in srgb, var(--accent, #e06c75) 70%, transparent);
+    }
+    .gadget-rail-resize-handle:focus-visible { outline: none; }
+    body[data-gadget-side="left"] .gadget-rail-resize-handle {
+      left: auto; right: -3px;
+    }
+    body[data-gadget-side="left"] .gadget-rail-resize-handle::before { left: auto; right: 3px; }
+    /* while actively dragging, kill the width transition so the rail tracks the pointer */
+    .gadget-rail.grail-resizing { transition: none; }
+    /* no resize affordance when collapsed to the icon strip */
+    .gadget-rail[data-collapsed="true"] .gadget-rail-resize-handle { display: none; }
     .gadget-rail-head {
       display: flex; align-items: center; gap: .4rem;
       padding: .55rem .6rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -1910,6 +1938,8 @@ body.bg-pattern-sparkles {
         transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1);
       }
       .gadget-rail.grail-open { transform: translateX(0); }
+      /* no width drag-resize on the mobile slide-over drawer */
+      .gadget-rail-resize-handle { display: none; }
       /* the drawer always shows its full body on mobile — no icon-strip mode */
       .gadget-rail[data-collapsed="true"] { width: min(300px, 86vw); }
       .gadget-rail[data-collapsed="true"] .gadget-rail-body { display: block; }
