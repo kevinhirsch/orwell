@@ -1850,17 +1850,32 @@ body.bg-pattern-sparkles {
       display: flex; align-items: center; gap: .4rem;
       padding: .55rem .6rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
     }
-    .gadget-rail-title { font-weight: 700; letter-spacing: .03em; font-size: .82rem; flex: 1;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gadget-rail-title { font-weight: 700; letter-spacing: .03em; font-size: .82rem; flex: 1 1 auto;
+      min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Header controls never crowd the (ellipsizing) title at a narrow width — they
+       hold a fixed size and don't shrink, so the title yields first. A 30px min box
+       keeps them comfortably tappable without bloating the header. */
     .gadget-rail-toggle, .gadget-rail-swap, .gadget-rail-close {
-      background: transparent; border: none; color: var(--fg); cursor: pointer;
+      flex: 0 0 auto; background: transparent; border: none; color: var(--fg); cursor: pointer;
       font-size: 1rem; line-height: 1; padding: .25rem .35rem; border-radius: 6px; opacity: .7;
+      min-width: 30px; min-height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
     }
     .gadget-rail-toggle:hover, .gadget-rail-swap:hover, .gadget-rail-close:hover {
       opacity: 1; background: color-mix(in srgb, var(--fg) 10%, transparent); }
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
-      display: flex; flex-direction: column; }
+      min-width: 0; display: flex; flex-direction: column; }
+    /* Responsive gadget sizing — the rail width is user-resizeable, so every gadget
+       (the HUD cards + the docked .ow-window panels) reflows to the rail's CURRENT
+       width instead of assuming ~300px. No fixed px widths survive here; long content
+       wraps/ellipsizes and rows never force horizontal overflow. The own margins each
+       gadget sets (margin: var(--space-2) var(--space-2) 0) collapse to the body
+       padding so a card can't out-set the rail at a narrow width. */
+    .gadget-rail-body > * {
+      box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0;
+      margin-left: 0 !important; margin-right: 0 !important; flex-shrink: 0;
+    }
     /* Canonical stacking fallback — these MIRROR the gadget registry in
        orwellGadgetRail.js (the single source of truth, which also applies these as
        inline `order`; drag-reorder — L13 — overrides per-user). 0054 Phase 2 docked
@@ -1873,9 +1888,20 @@ body.bg-pattern-sparkles {
     .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
     .gadget-rail-body > #orwell-cast { order: 6; }      /* 0054 P2: docked full cast roster */
     .gadget-rail-body > #orwell-retro { order: 7; }     /* 0054 P2: docked retrospective */
-    .gadget-rail-strip { display: none; flex-direction: column; align-items: center; gap: .3rem; padding: .5rem 0; }
-    .grail-ico { background: transparent; border: none; cursor: pointer; font-size: 1.1rem;
-      padding: .35rem; border-radius: 8px; line-height: 1; }
+    /* The collapsed icon strip: a column of up to 7 gadget icons in a 50px-wide rail.
+       It SCROLLS (min-height:0 inside the flex column gives it a real overflow context)
+       so on a short viewport the icons never stack on top of each other — the strip
+       scrolls instead of overlapping. flex-shrink:0 on each icon keeps every tap target
+       at its full height (the flexbox can't squeeze them into a collision). */
+    .gadget-rail-strip { display: none; flex-direction: column; align-items: center;
+      gap: .35rem; padding: .5rem 0; flex: 1; min-height: 0;
+      overflow-y: auto; overflow-x: hidden;
+      scrollbar-width: none; -ms-overflow-style: none; }
+    .gadget-rail-strip::-webkit-scrollbar { width: 0; height: 0; }
+    .grail-ico { flex-shrink: 0; background: transparent; border: none; cursor: pointer;
+      font-size: 1.1rem; width: 38px; height: 38px; min-width: 38px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 8px; line-height: 1; }
     .grail-ico:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
     /* collapsed: a thin icon strip; the body + most chrome hide, the chevron flips */
     .gadget-rail[data-collapsed="true"] { width: 50px; }
