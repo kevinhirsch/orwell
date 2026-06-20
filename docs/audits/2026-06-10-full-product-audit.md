@@ -1817,3 +1817,36 @@ single-container deploy — not blocking launch, filed here so it's a planned wa
   Postgres buys what SQLite does not: **multi-instance shared state, a managed cloud database, heavier
   concurrent write throughput, and replication / point-in-time recovery** — i.e. it matters only when
   Orwell scales past a single host. No gameplay impact.
+
+## 2026-06-20 — ADR 0005: split authority by openness (the dynamism guard) — MERGED
+
+**#355 — ADR 0005 + the generative-consequence path + the expressive-non-collapse gate.** A new
+design principle and its first implementation, shipped end to end. Captures the constraint that
+keeps the growing LLM↔engine **sync spine** from flattening creative play: **authority is split by
+*openness*, not by *layer*.** The **closed set** (outcomes, eligibility, state truth, persistence,
+the Vault) is engine-dictated and may be as strict as it likes — there is *no dynamism to lose*.
+The **open set** (the meaning/texture/consequence of social play) is recorded faithfully and never
+*normalized* — the engine may not collapse an open-ended utterance into a closed bucket in a way
+that changes what can be narrated or played next.
+
+- **Built, not just stated** — `recordInteraction` / the 0023 `ConsequenceEngine` now take an
+  optional, Vault-free `consequence` descriptor (`{ toward, direction, emphasis? }` + `rationale`):
+  the model proposes the *shape*; the engine still owns the bounded, seeded *magnitude*
+  (`emphasis`→a clamped 0.6/1.0/1.4 multiplier — no raw number crosses; mandate #3 holds). `kind`
+  stays the floor (no descriptor ⇒ byte-identical fold). The MCP boundary shape-guards a malformed
+  descriptor (clean 400, E31/D10/R6 pattern); the FE schema/client forward it and the 0055
+  `_auto_record_scene` can propose one.
+- **A new permanent regression gate** joins richness + the Vault sentinel:
+  `tests/unit/expressiveNonCollapse.test.ts` (lossless record / consequenced-not-dropped /
+  recalled-in-full / distinguishable-downstream) + `frontend/tests/test_expressive_non_collapse.py`
+  (no rail-correction of creative prose). The desync guard's WINNER/NEW-HOH branches were
+  phase-scoped so a creative claim can't trip a board-outcome rail-correction.
+- Documented in **[ADR 0005](../decisions/0005-split-authority-by-openness.md)** (now *Accepted —
+  BUILT*) and folded into the `docs/decisions/` index + the `docs/features/README.md` amendments
+  table (under 0023/0055).
+
+This **does not** close any item in the forward backlog above (calibration tuning, 0062, 0022,
+the real-host smoke, R3, the browser-render validations, A11, MVP-002 remain exactly as listed) —
+it is a *new* refinement record plus its implementation. Its standing claim is the **litmus test**
+in the ADR: any future sync or consequence change must keep the open set recordable,
+consequenceable, recallable, and narratable in full while only ever constraining the closed set.
