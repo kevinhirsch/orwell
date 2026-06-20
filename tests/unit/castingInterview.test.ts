@@ -4,7 +4,8 @@ import {
   playerAptitudesWithinNpcBounds,
 } from "../../src/engine/characterFactory";
 import {
-  CASTING_COVERAGE, CASTING_LIMITS, castingStatusOf, emptyIntake, intakeIsEmpty,
+  CASTING_COVERAGE, CASTING_LIMITS, CASTING_FINALIZE_FLOOR, castingFinalizable,
+  castingStatusOf, emptyIntake, intakeIsEmpty,
   mergeCastingUpdate, neutralizeForPrompt, overwrittenScalars,
 } from "../../src/engine/castingIntake";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
@@ -301,7 +302,7 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
     const st = s.updateCasting({ playerName: "Somebody Else" });
     // The old fake `ready:true` looked like success and let the model narrate a fresh interview;
     // now it refuses with `ready:false` + a reason, and the live game is untouched.
-    expect(st).toEqual({ known: {}, missing: [], next: null, ready: false, refused: "in-progress" });
+    expect(st).toEqual({ known: {}, missing: [], next: null, ready: false, finalizable: false, refused: "in-progress" });
     expect(s.getGameState().player!.name).toBe("The Interviewee");
   });
 
@@ -400,6 +401,114 @@ describe("the cast photo is casting step #1, engine-driven and optional (0065)",
     expect(overwrittenScalars(first, { castPhoto: "skipped" })).toEqual(["castPhoto"]);
     // The identical value is a no-op overwrite-wise.
     expect(overwrittenScalars(first, { castPhoto: "uploaded" })).toEqual([]);
+  });
+});
+
+// The mobile short-circuit fix (feature 0050): name+photo alone made `ready` true and let the FE
+// FORCE-finalize via createCharacter("{}"), minting a default-archetype "floater with no stats."
+// `finalizable` is the higher floor for an automated/forced finalize — a GENUINE interview must have
+// happened (name + backstory + motivation + at least one persona/strategy answer); the photo never counts.
+describe("the finalize floor — name+photo is not finalizable (0050 mobile fix)", () => {
+  const fullInterview = () =>
+    mergeCastingUpdate(emptyIntake(), {
+      playerName: "The Interviewee",
+      backstory: "a recorded life",
+      motivation: "to win quietly",
+      personaArchetype: "the watcher",
+    });
+
+  it("a name-only intake is ready but NOT finalizable", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee" });
+    const st = castingStatusOf(intake);
+    expect(st.ready).toBe(true);          // ready stays name-only (the explicit-finalize floor)
+    expect(st.finalizable).toBe(false);   // but a real interview never happened
+    expect(castingFinalizable(intake)).toBe(false);
+  });
+
+  it("name + photo is STILL not finalizable — the photo does not count", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), { playerName: "The Interviewee", castPhoto: "uploaded" });
+    const st = castingStatusOf(intake);
+    expect(st.ready).toBe(true);
+    expect(st.finalizable).toBe(false);
+    // Even with backstory + motivation, the photo alone adds nothing toward the floor.
+    const photoFloor = mergeCastingUpdate(emptyIntake(), { castPhoto: "uploaded" });
+    expect(castingFinalizable(photoFloor)).toBe(false);
+  });
+
+  it("a genuine interview (name + backstory + motivation + a persona/strategy answer) is finalizable", () => {
+    const intake = fullInterview();
+    const st = castingStatusOf(intake);
+    expect(st.ready).toBe(true);
+    expect(st.finalizable).toBe(true);
+    expect(castingFinalizable(intake)).toBe(true);
+  });
+
+  it("the floor requires ALL of name+backstory+motivation, plus one persona/strategy answer", () => {
+    expect(CASTING_FINALIZE_FLOOR).toEqual(["playerName", "backstory", "motivation"]);
+    // Missing the persona/strategy "any-of" ⇒ not finalizable.
+    const noStrategy = mergeCastingUpdate(emptyIntake(), {
+      playerName: "The Interviewee", backstory: "a life", motivation: "to win",
+    });
+    expect(castingFinalizable(noStrategy)).toBe(false);
+    // Missing backstory ⇒ not finalizable even with persona on file.
+    const noBackstory = mergeCastingUpdate(emptyIntake(), {
+      playerName: "The Interviewee", motivation: "to win", personaArchetype: "the watcher",
+    });
+    expect(castingFinalizable(noBackstory)).toBe(false);
+    // privateStrategy alone satisfies the any-of.
+    const withPrivate = mergeCastingUpdate(emptyIntake(), {
+      playerName: "The Interviewee", backstory: "a life", motivation: "to win", privateStrategy: "lay low",
+    });
+    expect(castingFinalizable(withPrivate)).toBe(true);
+  });
+
+  it("the pre-game view carries finalizable so the FE can gate the forced finalize", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({ playerName: "The Interviewee", castPhoto: "uploaded" });
+    expect(s.getGameState().casting!.finalizable).toBe(false);
+    s.updateCasting({ backstory: "a life", motivation: "to win", personaArchetype: "the watcher" });
+    expect(s.getGameState().casting!.finalizable).toBe(true);
+  });
+});
+
+// The engine completeness backstop (the mobile short-circuit fix, 0050): createCharacter("{}") on a
+// name-only intake (empty args, identity pulled from a thin intake) is REFUSED — it would mint a floater.
+// A direct, intentional creation (explicit name+seed, an archetype, or a real interview) is unaffected.
+describe("createCharacter refuses a substance-free finalize (0050 mobile fix)", () => {
+  it("name-only intake + empty args ⇒ refused, the season does not start", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({ playerName: "The Interviewee", castPhoto: "uploaded" });
+    const view = s.createCharacter({}); // the exact forced-finalize bug shape
+    expect(view.createRefused).toBe("casting-incomplete");
+    expect(view.started).toBe(false);
+    // The intake is untouched — the interview can simply continue.
+    expect(s.getGameState().casting!.known["playerName"]).toBe("The Interviewee");
+  });
+
+  it("an explicit seed is intentional creation — name+seed succeeds (programmatic/fixtures)", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({ playerName: "The Interviewee" });
+    const view = s.createCharacter({ seed: 5 });
+    expect(view.createRefused).toBeUndefined();
+    expect(view.started).toBe(true);
+  });
+
+  it("an explicit archetype is substance — it finalizes (admin debug door)", () => {
+    const s = new GameSessionAdapter();
+    const view = s.createCharacter({ playerName: "The Interviewee", archetype: ARCHETYPES[1]!.archetype });
+    expect(view.createRefused).toBeUndefined();
+    expect(view.started).toBe(true);
+  });
+
+  it("a real interview on file finalizes from intake even with empty args", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({
+      playerName: "The Interviewee", backstory: "a life", motivation: "to win",
+      personaArchetype: "the watcher",
+    });
+    const view = s.createCharacter({});
+    expect(view.createRefused).toBeUndefined();
+    expect(view.started).toBe(true);
   });
 });
 
