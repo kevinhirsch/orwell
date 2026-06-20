@@ -257,7 +257,8 @@ def test_build_chat_context_passes_the_attachment_flag():
 def _capture_record(monkeypatch):
     calls = []
 
-    async def fake_record(content, with_ids=None, initiator="player", kind=None, user=None):
+    async def fake_record(content, with_ids=None, initiator="player", kind=None,
+                          expected_beat_seq=None, user=None):
         calls.append({"content": content, "user": user})
         return {"recorded": True}
 
@@ -322,7 +323,8 @@ def test_concurrent_same_user_fallbacks_do_not_stack(monkeypatch):
     gate = asyncio.Event()
     calls = []
 
-    async def slow_record(content, with_ids=None, initiator="player", kind=None, user=None):
+    async def slow_record(content, with_ids=None, initiator="player", kind=None,
+                          expected_beat_seq=None, user=None):
         calls.append({"user": user})
         await gate.wait()  # hold the write 'in flight' like a slow late-season commit
         return {"recorded": True}
@@ -353,7 +355,8 @@ def test_a_different_user_is_never_blocked_by_anothers_in_flight_fallback(monkey
     gate = asyncio.Event()
     calls = []
 
-    async def record(content, with_ids=None, initiator="player", kind=None, user=None):
+    async def record(content, with_ids=None, initiator="player", kind=None,
+                     expected_beat_seq=None, user=None):
         calls.append(user)
         if user == "A":
             await gate.wait()
@@ -378,7 +381,8 @@ def test_a_different_user_is_never_blocked_by_anothers_in_flight_fallback(monkey
 def test_a_failed_fallback_releases_the_in_flight_slot(monkeypatch):
     """L18 — a raised recordInteraction must not wedge the slot shut (else one engine hiccup
     permanently disables the guard for that user). The finally-release proves it reopens."""
-    async def boom(content, with_ids=None, initiator="player", kind=None, user=None):
+    async def boom(content, with_ids=None, initiator="player", kind=None,
+                   expected_beat_seq=None, user=None):
         raise RuntimeError("engine said no")
 
     monkeypatch.setattr(orwell_engine, "record_interaction", boom)

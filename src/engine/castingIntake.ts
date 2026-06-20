@@ -149,7 +149,13 @@ export function castingStatusOf(intake: CastingIntake, overwrote: string[] = [])
       if (next === null) next = ask;
     }
   }
-  const status: CastingStatusView = { known, missing, next, ready: captured(intake, "playerName") };
+  const status: CastingStatusView = {
+    known,
+    missing,
+    next,
+    ready: captured(intake, "playerName"),
+    finalizable: castingFinalizable(intake),
+  };
   if (overwrote.length > 0) status.overwrote = overwrote;
   return status;
 }
@@ -157,4 +163,36 @@ export function castingStatusOf(intake: CastingIntake, overwrote: string[] = [])
 /** True when nothing has been captured yet (a fresh interview — nothing to persist or resume). */
 export function intakeIsEmpty(intake: CastingIntake): boolean {
   return CASTING_COVERAGE.every(({ field }) => !captured(intake, field));
+}
+
+/**
+ * The FINALIZE floor (the mobile short-circuit fix, feature 0050): `ready` (name-only) is the floor
+ * for an EXPLICIT, player-driven finalize, but it is NOT enough to FORCE-finalize from an automated
+ * fallback — name+photo alone produced a "floater with no stats." `finalizable` requires that a
+ * genuine interview actually happened: a name, a backstory, a motivation, AND at least one persona/
+ * strategy answer. `castPhoto` is OPTIONAL and never counts toward it.
+ */
+export const CASTING_FINALIZE_FLOOR: ReadonlyArray<keyof CastingIntake> = [
+  "playerName",
+  "backstory",
+  "motivation",
+] as const;
+
+/** At least one of these must be captured for the interview to be finalizable. */
+const CASTING_FINALIZE_ANY_OF: ReadonlyArray<keyof CastingIntake> = [
+  "personaArchetype",
+  "personaStrategyStyle",
+  "privateStrategy",
+] as const;
+
+/**
+ * True when a genuine interview has happened — enough authored substance that a finalize mints a real
+ * houseguest, not the default floater. The hard floor (name+backstory+motivation) plus at least one
+ * persona/strategy answer. `castPhoto` does NOT count.
+ */
+export function castingFinalizable(intake: CastingIntake): boolean {
+  return (
+    CASTING_FINALIZE_FLOOR.every((field) => captured(intake, field)) &&
+    CASTING_FINALIZE_ANY_OF.some((field) => captured(intake, field))
+  );
 }

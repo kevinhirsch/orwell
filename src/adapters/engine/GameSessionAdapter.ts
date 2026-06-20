@@ -1880,6 +1880,29 @@ export class GameSessionAdapter implements GameSession {
         "casting needs a name before the season can start — ask the player and record it with updateCasting",
       );
     }
+    // Completeness backstop (the mobile short-circuit fix, 0050): the forced FE finalize fires
+    // `createCharacter("{}")` — empty args that pull the whole identity from a thin, name-only intake
+    // (name+photo, no real interview), minting the default-archetype "floater with no stats." Refuse
+    // that exact shape (typed) so the interview continues instead of silently minting a floater.
+    // The guard fires ONLY when BOTH are true: (a) zero authored substance anywhere in `merged`
+    // (cast photo is NOT substance), and (b) the explicit args carried no identity intent of their own
+    // (no `playerName`/`seed`/`archetype`). That keeps every direct, intentional creation working — the
+    // admin debug door (archetype), tests/fixtures (an explicit name+seed), and a real interview (which
+    // arrives with backstory/motivation/persona substance) — and blocks only the empty-args bug path.
+    const hasSubstance =
+      !!merged.archetype ||
+      !!merged.strategyStyle ||
+      !!merged.backstory ||
+      !!merged.motivation ||
+      !!merged.personaArchetype ||
+      !!merged.personaStrategyStyle ||
+      !!merged.privateStrategy ||
+      merged.interviewNotes.length > 0;
+    const argsCarriedIdentity =
+      !!effReq.playerName || effReq.seed !== undefined || !!effReq.archetype || !!effReq.strategyStyle;
+    if (!hasSubstance && !argsCarriedIdentity) {
+      return { ...this.view(), createRefused: "casting-incomplete" };
+    }
     // 0065 — ADOPT a pre-warmed cast. If `preSeedCast` already generated (and the FE deeply authored)
     // the cast during the interview, finalize ATOP it: reuse its seed so the warmed cast is the cast that
     // ships, and skip re-seeding the thin floor below. An explicit seed that DIFFERS discards the stale
@@ -2184,7 +2207,7 @@ export class GameSessionAdapter implements GameSession {
     // model narrate a fresh casting interview post-season while the engine never started one. The
     // refusal names whether a season is live (`in-progress`) or already crowned (`over`).
     if (this.house) {
-      return { known: {}, missing: [], next: null, ready: false, refused: this.live?.finished ? "over" : "in-progress" };
+      return { known: {}, missing: [], next: null, ready: false, finalizable: false, refused: this.live?.finished ? "over" : "in-progress" };
     }
     const before = this.intake;
     // C8: which already-captured scalars this update replaces — computed against the PRIOR intake,
@@ -3416,17 +3439,20 @@ export class GameSessionAdapter implements GameSession {
         // and the front-end both pick from them; the first ("compete") is the default (B46/audit B5).
         return { kind: p.kind, by, prompt: "Declare your approach to this competition: compete, throw, or play it safe.", options: COMP_INTENTS.map((i) => ({ id: i, name: i })), pick: 1 };
       case "comp-round": {
-        // 0006 staged-rounds: the player picks their approach for THIS elimination round, seeing who is
-        // STILL IN. Options are the three approaches (compete first = default); `stillIn` carries the
-        // narrowed field so they can adapt (everyone left an ally → throw; a threat still in → compete).
+        // 0006 staged-rounds: the player's approach for THIS elimination round, seeing who is STILL IN.
+        // Only the FIRST round BINDS (the intent the single outcome roll honors); later rounds are
+        // non-binding FLAVOR over an already-decided result (audit 2026-06-20) — the prompt + the
+        // `binding` flag tell the surface to present those as color, not a stakes decision.
         const stillIn = refs(p.stillIn);
         const others = stillIn.filter((r) => r.id !== PLAYER).map((r) => r.name);
         const fieldLine = others.length ? ` Still in with you: ${others.join(", ")}.` : " You are the last one in.";
+        const prompt = p.binding
+          ? `Set your approach to this competition: compete, throw (drop out), or play it safe.${fieldLine} This locks in how you play the comp.`
+          : `The field narrows — ${stillIn.length} still standing.${fieldLine} Your approach is already locked from the first round, so this is just color: say how you're pushing through, or skip ahead.`;
         return {
-          kind: p.kind, by,
-          prompt: `Round ${p.round} — set your approach for THIS round: compete, throw (drop out), or play it safe.${fieldLine} Your choice locks for this round only; you'll choose again as the field narrows.`,
+          kind: p.kind, by, prompt,
           options: COMP_INTENTS.map((i) => ({ id: i, name: i })),
-          round: p.round, stillIn, pick: 1,
+          round: p.round, stillIn, binding: p.binding, pick: 1,
         };
       }
       case "houseguests-choice":

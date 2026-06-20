@@ -143,9 +143,10 @@ def test_consequence_loop_auto_records_engaged_scenes():
         assert tool in js, tool
     assert "_scene_touched_houseguest" in js
     assert "async def _auto_record_scene" in js
-    # the auto-record proposes a model kind + validates ids, then records via the engine
+    # the auto-record proposes a model kind + validates ids, then records via the engine — 0065
+    # routes it through the CAS helper so the back-fill carries the compare-and-swap beatSeq token.
     assert "_RECORD_KINDS" in js
-    assert "record_interaction(content" in js
+    assert "_backfill_with_cas(owner, _oe.record_interaction, content[:400]" in js
     assert "_oe.record_interaction" in js
     # gated on engagement (not a lull) + a houseguest scene + nothing recorded + NOT a beat-advance
     assert "(not _recorded) and (not _is_lull) and (not _progressed)" in js

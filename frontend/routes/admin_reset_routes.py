@@ -64,8 +64,14 @@ def _reset_log() -> str:
 
 
 def _data_dir() -> str:
+    # The DEPLOY data dir (e.g. /opt/orwell/data): where the root-side systemd ops path units
+    # watch data/ops/<flag>, where the installer creates data/ops, and where ops-*.log live. It
+    # is the deploy tree — NOT the front-end app-data dir (frontend/data), a DIFFERENT tree only
+    # two levels up from here. Resolving to frontend/data was the bug: the FE dropped the trigger
+    # flag where no root watcher ever looked, so the button reported success while nothing ran.
+    # Three dirnames up (frontend/routes/<file> -> APP_DIR) + /data. DATA_DIR overrides (tests/dev).
     return os.environ.get("DATA_DIR") or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
 
 
 def _ops_dir() -> str:

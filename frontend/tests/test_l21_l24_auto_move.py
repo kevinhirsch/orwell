@@ -27,7 +27,7 @@ def _wire(monkeypatch, extraction_json, moves):
     async def fake_llm(*a, **k):
         return extraction_json
 
-    async def fake_move_to(room, user=None):
+    async def fake_move_to(room, expected_beat_seq=None, user=None):
         moves.append({"room": room, "user": user})
         return {"whereabouts": {"room": room, "present": [], "nearby": []}}
 
@@ -122,7 +122,8 @@ def test_auto_move_is_wired_into_the_finishing_block():
     js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "src", "agent_loop.py"), encoding="utf-8").read()
     assert "async def _auto_move_player" in js
-    assert "_oe.move_to(room, user=owner)" in js
+    # 0065: routed through the CAS helper so the back-fill carries the compare-and-swap beatSeq token.
+    assert "_backfill_with_cas(owner, _oe.move_to, room, user=owner)" in js
     # gated on: model didn't moveTo + the per-turn cap + the cheap movement pre-filter over the
     # player's OWN last message (deliberately NOT gated on _progressed/_is_lull).
     assert "_moved = bool(_tool_names & _MOVE_TOOLS)" in js
