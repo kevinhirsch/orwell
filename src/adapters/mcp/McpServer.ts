@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, RecordCastProfileReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -103,6 +103,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
       if (!isStr(args["imageRef"])) refuse("imageRef", "a non-empty string");
       return;
+    case "recordCastProfile":
+      // 0058/0065: the FE authoring write-back. Only `houseguestId` is structurally required; every
+      // authored field is optional (the engine keeps the prior/seeded value for any omitted field) and
+      // domain-validated (non-player-mirroring) inside the adapter, not here.
+      if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
+      return;
+    case "preSeedCast":
+      // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
+      if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
+      return;
     default:
       return; // read tools and free-text tools take no required structure
   }
@@ -129,6 +139,12 @@ export class McpServer {
         return this.deps.session.createCharacter(args as unknown as CreateCharacterReq);
       case "updateCasting":
         return this.deps.session.updateCasting(args as unknown as UpdateCastingReq);
+      case "preSeedCast":
+        // 0065: pre-warm the player-independent cast before the interview ends (Vault-free roster + prompts out).
+        return this.deps.session.preSeedCast(args as unknown as PreSeedCastReq);
+      case "recordCastProfile":
+        // 0058/0065: seal one houseguest's authored §3 profile (PUBLIC/HIDDEN split; never echoes a hidden value).
+        return this.deps.session.recordCastProfile(args as unknown as RecordCastProfileReq);
       case "getGameState":
         return this.deps.session.getGameState();
       case "gameStatus":
