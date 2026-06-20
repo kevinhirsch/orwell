@@ -1773,34 +1773,29 @@ wins and the drift is called out under *Ledger corrections* below.
 - **#328** — 0058 Phase 2 thread-scheduler SPEC (built as 0060 in #336).
 - **#327** — R3 incremental O(Δ) checkpoint (the `eloquent-hamilton` lane).
 
-### In-flight (branches pushed; finisher agents recovering after a mid-session container restart)
-The restart killed the agent *processes*; all work survived as on-disk worktrees and was
-committed + pushed as WIP checkpoints. Finisher agents continue each branch (fast-gate only —
-**no heavy sims locally**, which was the real OOM cause):
-- **`claude/0063-build`** — 0063 casting diversity floor (BIPOC/LGBTQ+/gender/age floors; ethnicity facet; **Vault-sealed private orientation**) + **orientation-aware 0059 showmance eligibility** + portrait enrichment. *(Finisher running.)*
-- **`claude/ci-targeted-and-sharded`** — per-job path-filtering + shard heavy lanes (UAT 12→3, jury 20→5, gradient 6→2) under a unified deadlock-free `ci-gate`. **Supersedes #343.** *(Finisher running.)*
-- **`claude/portrait-image-config`** — square (1:1) aspect + pinned 1024² size + reference-image-on-regen (identity preservation for B&W eviction shots + L17 re-shoots). *(Finisher running.)*
-- **`claude/fe-polish-0054p2-a5a6-l45`** — **A5 (theme particles) + L45 (punctuation guard ?→!/./…) committed**; **A6 (frosted-top) is the only remaining sub-task** — *0054 P2 is DROPPED here, already merged in #335.* *(Queued.)*
-- **`claude/calibration-data-instrument`** — season-outcome instrumentation (instrument-&-gather-data-first). *(Queued.)*
+### The five dispatched lanes — ALL MERGED (a mid-session container restart killed the agent
+*processes*; all work survived as on-disk worktrees, was committed + pushed as WIP checkpoints,
+and finisher agents drove each to green — fast-gate only, **no heavy sims locally**, the real OOM cause):
+- **#352** (`claude/0063-build`) — 0063 casting diversity floor (BIPOC/LGBTQ+/gender/age floors; ethnicity facet; **Vault-sealed private orientation**) + **orientation-aware 0059 showmance eligibility** + portrait enrichment. **Supersedes the #346 spec.**
+- **#351** (`claude/ci-targeted-and-sharded`) — per-job path-filtering + shard heavy lanes (UAT 12→3, jury 20→5, gradient 6→2) under a unified deadlock-free `ci-gate`. **Supersedes #343.** Proved itself green end-to-end; every heavy lane <3 min.
+- **#349** (`claude/portrait-image-config`) — square (1:1) aspect + pinned 1024² size + reference-image-on-regen (identity preservation for B&W eviction shots + L17 re-shoots).
+- **#353** (`claude/fe-polish-…`) — **A5 (theme particles) + A6 (frosted-top, the kit titlebar's own backdrop-filter re-blurring the glass) + L45 (punctuation guard ?→!/./…)**. *0054 P2 dropped — already merged in #335.*
+- **#354** (`claude/calibration-data-instrument`) — season-outcome instrument + the data report (`docs/audits/2026-06-19-calibration-data.md`). Instrument excluded from the fast gate/coverage (60-season run, on-demand only).
 
-### Queued (not started)
-- **0058 Phase 2 remainder** — `recordCastProfile` LLM write-back + premiere voicing (the portrait physical-facet consumption is now largely covered by the 0063 portrait enrichment; the thread scheduler shipped as 0060/#336). Holds until `claude/0063-build` merges — it shares `GameSessionAdapter.ts`.
+### Now in flight
+- **0058 Phase 2 remainder** (`claude/0058-phase2-build`) — `recordCastProfile` LLM write-back + premiere voicing (the portrait physical-facet consumption is largely covered by the 0063 enrichment; the thread scheduler shipped as 0060/#336). **Kicked off now that 0063 merged** off the shared `GameSessionAdapter.ts`.
 
-### Open PRs to close as superseded (once the finishers land)
-- **#346** (0063 SPEC) → superseded by `claude/0063-build`.
-- **#343** (jury shard only) → superseded by `claude/ci-targeted-and-sharded`.
+### Closed as superseded
+- **#346** (0063 SPEC) → folded into #352. · **#343** (jury shard only) → folded into #351.
 
 ### Ledger corrections (drift fixed this pass)
-- **0054 Phase 2 + A7 = DONE** (#335). Any earlier "0054 P2 pending" note is stale.
-- **0060 = BUILT + BDD-gated** (#336) — `features/README.md` still rows it "📝 SPEC ONLY"; that row is stale.
-- **Relational adapters = DONE** (#330) — not an open item.
-- **A7 fly-out = DONE** (#335). Remaining UI polish is **A6 frosted-top** (A5 particles committed on the fe-polish branch).
-- **live-debug ledger:** L43 fixed (#345); L15/L17 shipped (#329 — statuses flipped to ☑); L45 guard committed on the fe-polish branch.
+- **0054 Phase 2 + A7 = DONE** (#335). **0060 = BUILT + BDD-gated** (#336). **Relational adapters (SQLite) = DONE** (#330). **A6 frosted-top = DONE** (#353).
+- **live-debug ledger:** L43 fixed (#345); L15/L17 shipped (#329); L45 guard extended (#353).
 
-### Still genuinely open (forward backlog)
-1. **Calibration TUNING** — after the instrument lane lands its data (passive players coast to F2 ~half of seasons, then lose). Largest open game-feel question.
-2. **0058 Phase 2 remainder** — `recordCastProfile` write-back + premiere voicing.
-3. **A6** — frosted-top render fix.
+### Still genuinely open (forward backlog, after this session)
+1. **0058 Phase 2 remainder** — in flight (`claude/0058-phase2-build`); see above.
+2. **Calibration TUNING** — the instrument (#354) landed the data: passive reaches F2 43% / wins 17%, landslide F2 losses trace to `JURY_WEIGHTS.gameRespect: 0.9`. The follow-up lane lowers it ~0.6–0.7 and re-runs the instrument + `juryReach` `EARNED_WINS` guard. **The single biggest game-feel lever still unpulled.**
+3. **0022** — MVP-2 (the one long-deferred feature).
 4. **0010 real-Proxmox container smoke** + A4 single-PAT real-host verification (do at the private-repo flip).
 5. **Postgres / pgvector tier** — the relational follow-on beyond SQLite (#330 shipped SQLite + sqlite-vec only).
 6. **R3 deep follow-on** — the full O(Δ) `isSuperset`/leak-check rewrite (the WeakMap memo + #348 cut the worst hotspots; the export itself is still O(events)).
