@@ -71,8 +71,10 @@ def test_chat_gate_locks_the_input_and_send_affordance():
     assert "disabled = true" in js
     assert ".send-btn" in js
     assert 'setAttribute("placeholder"' in js
-    # an inline note above the input bar explains the lock
-    assert "ow-chat-gate-note" in js
+    # P1 OOBE overhaul: the redundant inline banner note is GONE — the ONE instruction
+    # lives in the cast-photo window; the composer keeps only the minimal placeholder.
+    assert "ow-chat-gate-note" not in js
+    assert "mountNote" not in js and "unmountNote" not in js
     # …and the lock is fully reversible (the original placeholder is restored on release)
     assert "_savedPlaceholder" in js
     assert "releaseLock" in js
@@ -110,6 +112,36 @@ def test_image_step_offers_both_upload_and_generate():
     assert "Use photo as-is" in js                 # upload path (exact)
     assert "Make AI studio portraits" in js        # generate path (studio)
     assert "/api/orwell/portrait/intake" in js
+
+
+def test_image_step_is_a_kit_window_not_a_collapsible_card():
+    # P1 OOBE overhaul (item 1): the cast-photo step composes the OrwellWindow kit
+    # (no bespoke chrome — the F-3 ratchet pins this) and is NON-DISMISSABLE because it
+    # GATES the chat: no close/minimize control, no collapse-to-nothing affordance.
+    js = _read("static", "js", "orwellHeadshot.js")
+    assert "OrwellWindowKit.create(" in js
+    # mandatory: the kit window carries neither close nor minimize
+    assert "closable: false" in js
+    assert "minimizable: false" in js
+    # title-cased + iconed
+    assert 'title: "Your Cast Photo"' in js
+    assert "icon: CAST_ICON" in js or "CAST_ICON" in js
+    # the old collapsible-card chrome is gone (no chevron/head toggle)
+    assert "hs-chev" not in js
+    assert 'class="hs-head"' not in js
+
+
+def test_image_step_window_clears_with_no_lingering_set_indicator():
+    # P1 OOBE overhaul (item 5): finalizing tears the window down (handoff), and the casting
+    # window paints NO persistent "set ✓" chip above the composer — the summary callback is a
+    # no-op in this host (the Settings host keeps the chip; the casting window does not).
+    js = _read("static", "js", "orwellHeadshot.js")
+    # the casting host passes an empty onSummary (no chip to linger)
+    seg = js[js.index("function mount()"):]
+    seg = seg[: seg.index("function onCastingHeadshotChosen")]
+    assert "onSummary: function () {}" in seg
+    # …and the window is destroyed on handoff (unmount → destroy)
+    assert "_win.destroy()" in js
 
 
 def test_image_step_unlocks_the_chat_the_instant_it_is_secured():
@@ -202,6 +234,58 @@ def test_welcome_modal_hands_off_to_the_image_step():
     assert "Add my cast photo" in seg
     # dismissing marks it seen and proceeds (the image step + chat lock are already underneath)
     assert "markWelcomeSeen()" in seg
+
+
+def test_welcome_modal_copy_is_the_exact_spec_text():
+    # P1 OOBE overhaul (item 7): the welcome modal uses EXACTLY the spec copy — the old
+    # 3-step ordered list is dropped.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    seg = onb[onb.index("function mountWelcome"):]
+    seg = seg[: seg.index("\n  }\n")]
+    assert "Welcome to the house" in seg
+    assert "One house, sixteen strangers,\n          one winner — and production is watching everything." in seg
+    assert "First up: your cast photo. The producers are due any minute for\n          your casting interview." in seg
+    # the dropped ordered-list scaffolding is gone
+    assert "ob-steps" not in seg
+    assert "ob-step-n" not in seg
+
+
+# ── 3b. Auto-advance after the model is configured (no manual reload) ──────────────────
+
+def test_flow_auto_advances_after_model_config_without_a_reload():
+    # P1 OOBE overhaul (item 4): once the player configures an LLM model in Settings, the flow
+    # must re-evaluate and proceed to the welcome modal WITHOUT a page reload. models.js fires
+    # orwell:models-changed on the none→some transition; onboarding listens and re-runs route().
+    models = _read("static", "js", "models.js")
+    assert "orwell:models-changed" in models
+    assert "_modelsAvailable" in models       # the none→some guard
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert 'addEventListener("orwell:models-changed"' in onb
+    # the re-route clears a stale holding card immediately (not on the 5s re-probe)
+    assert "_reRouteAfterModelConfig" in onb
+    assert "data-ob-holding" in onb           # only a holding card is auto-dismissed
+    # the re-route ultimately calls route() so the welcome modal opens
+    seg = onb[onb.index("function _reRouteAfterModelConfig"):]
+    seg = seg[: seg.index("\n  }")]
+    assert "route()" in seg
+
+
+def test_splash_tips_are_suppressed_during_onboarding():
+    # P1 OOBE overhaul (item 3): the welcome splash's rotating gameplay tips + the "house is
+    # waiting" tagline must NOT show during the welcome modal / cast-photo step (they bleed
+    # through behind the surface). A body flag drives a CSS suppression.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert "setOnboardingActive" in onb
+    assert 'classList.toggle("ow-onboarding"' in onb
+    # the welcome modal arms it on mount
+    seg = onb[onb.index("function mountWelcome"):]
+    seg = seg[: seg.index("\n  }\n")]
+    assert "setOnboardingActive(true)" in seg
+    css = _read("static", "css", "game-trim.css")
+    # both onboarding flags hide the splash tip + tagline
+    assert ".ow-onboarding #welcome-screen .welcome-tip" in css
+    assert ".ow-casting-headshot-open #welcome-screen .welcome-tip" in css
+    assert "welcome-sub" in css
 
 
 # ── 4. OOBE resume after a restart still works ─────────────────────────────────────────
