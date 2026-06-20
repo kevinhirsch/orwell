@@ -949,6 +949,12 @@ def setup_chat_routes(
                 yield f"data: {json.dumps({'type': 'compacted', 'context_length': ctx.context_length})}\n\n"
 
             full_response = ""
+            # Reasoning ("thinking:true") deltas are kept OUT of the public reply but must
+            # still be PERSISTED so the collapsed "Thinking" accordion survives a reload and
+            # renders the same in a second browser session. Accumulated separately here and
+            # threaded into save_assistant_response / clean_thinking_for_save below; without
+            # this, clean-channel reasoning is shown live but lost on reload (cross-session desync).
+            full_reasoning = ""
             last_metrics = None
 
             # Configured fallback chain for the default chat model. Tried in
@@ -1035,9 +1041,11 @@ def setup_chat_routes(
                                 if "delta" in data:
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them so the client can show a thinking
-                                    # indicator, but don't fold them into the saved
-                                    # reply (mirrors the rewrite path below).
-                                    if not data.get("thinking"):
+                                    # indicator, and accumulate them separately so they
+                                    # PERSIST into metadata.thinking (kept out of the reply).
+                                    if data.get("thinking"):
+                                        full_reasoning += data["delta"]
+                                    else:
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
                                     yield chunk
@@ -1108,6 +1116,7 @@ def setup_chat_routes(
                                     used_memories=ctx.used_memories,
                                     do_research=effective_do_research,
                                     incognito=incognito,
+                                    reasoning=full_reasoning,
                                     # Vault Wall (casting-leak fix): an OOC pre-game casting
                                     # reply is stamped so the in-game narrator never receives it.
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
@@ -1134,6 +1143,7 @@ def setup_chat_routes(
                                 "model": _actual_model or _answered_by or _requested_model,
                                 "requested_model": _requested_model,
                             },
+                            reasoning=full_reasoning,
                         )
                         sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
                         if not incognito:
@@ -1195,9 +1205,12 @@ def setup_chat_routes(
                                 data = json.loads(chunk[6:])
                                 if "delta" in data:
                                     # Reasoning tokens arrive flagged thinking:true.
-                                    # Forward them for the live indicator, but keep
-                                    # them out of the saved reply (same as chat mode).
-                                    if not data.get("thinking"):
+                                    # Forward them for the live indicator, accumulate them
+                                    # separately so they PERSIST into metadata.thinking
+                                    # (kept out of the saved reply, same as chat mode).
+                                    if data.get("thinking"):
+                                        full_reasoning += data["delta"]
+                                    else:
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
                                     yield chunk
@@ -1259,6 +1272,7 @@ def setup_chat_routes(
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
                                     incognito=incognito,
+                                    reasoning=full_reasoning,
                                     # Vault Wall (casting-leak fix): an OOC pre-game casting
                                     # reply is stamped so the in-game narrator never receives it.
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
@@ -1296,6 +1310,7 @@ def setup_chat_routes(
                                     "model": _actual_model or _answered_by or _requested_model,
                                     "requested_model": _requested_model,
                                 },
+                                reasoning=full_reasoning,
                             )
                             sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
                             if not incognito:
