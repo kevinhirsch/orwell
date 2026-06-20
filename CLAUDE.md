@@ -10,8 +10,9 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Every
-feature **0001–0063 is built and green except 0022 (MVP-2, deferred) and 0062 (zeitgeist snapshot, spec only)** — plus **0053**
+**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Specs now run
+through **0066** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
+reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
 including the **living, persisted consequence loop (0023)** (act → hidden impact → persist →
@@ -32,7 +33,7 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0053**; 0052 — the house themes — shipped FE-side from the audit
+`docs/features/` (through **0066**; 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
 backfill, the casting headshot studio + player-uploaded/AI account avatar, portrait variety, and
@@ -122,7 +123,9 @@ returns no Vault data.
 Each running game is its own isolated sandbox — keyed to the **physical-world user**: **one
 active game per user**, **unlimited users concurrently**, each fully isolated. **Cross-user
 isolation** is a first-class guarantee *alongside* the Vault Wall (no call for user A may return
-user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.)
+user B's game — secret or not). The chat is each user's window into *their* game. (Feature 0021.) A user's **one
+game is canonical across all their devices** (feature 0064 stopgap, 2026-06-20 — every device shares the one
+session/chat; full Messenger-style live sync + window/HUD layout sync are the owed follow-on).
 
 ## The event / visibility model (build this carefully — it caused real bugs before)
 
@@ -188,6 +191,14 @@ constrained extraction call (`{withIds, kind, content}`, model-proposed directio
 `recordInteraction` itself, GUARANTEEING the social play moves the hidden weights. Model-driven
 recording always takes precedence. When debugging "the game won't advance" or "social play has no
 consequence," look here, not only at the engine.
+
+**The LLM↔engine turn protocol is versioned and at-most-once (feature 0065 — the sync spine).** Every advance
+carries a `beatSeq` **compare-and-swap** token + an **idempotency key**, so a retried or racing turn cannot
+double-advance the game; the engine serves an **O(Δ) `StateDeltaView` delta feed** keyed by `beatSeq` (the FE
+pulls only what changed since its last token, with a `fullRefresh` fallback); and the FE runs a **pre-emission
+outcome guard** that catches a phantom board claim — an outcome the model narrates that the engine never produced
+— *before* the player sees it. When debugging stale/duplicated state or a chat-vs-board divergence, this is the
+layer: `beatSeq`, the delta feed, and the FE sync/divergence ledger.
 
 **Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
 *openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
@@ -262,6 +273,15 @@ creative prose.
 - **Standard weekly cadence:** Day 1 HOH comp → Day 2 nominations → Day 3 veto comp →
   Day 4 veto ceremony → Day 5 eviction, with the next HOH beginning immediately. A genuine
   rest day is a rare producer judgment call, **not** the default.
+- **In-game time of day & sleep (feature 0066 / ADR `docs/decisions/0006`; opt-in).** Time-of-day
+  (morning → afternoon → evening → night → late-night) is first-class live-season state. Presence (0049)
+  is **time-driven**: as the night gets late, NPCs turn in per character, the *awake set* shrinks, and play
+  runs out of *people*, not a timer — the player owns their **own** bedtime (no forced curfew). **Sleep is
+  consequential:** staying up late applies a **hidden, bounded** rest penalty in `resolveCompetition`
+  (`src/domain/competitionOutcome.ts`), beside the soul emotional modifier — the player never sees a number,
+  only the later behavior. Time-of-day is a Vault-free projection (a HUD + the player's own rest cue); NPC
+  fatigue stays hidden. Governed by ADR 0006 (diegetic, character-driven bedtimes; the bound is the
+  emptying house + escalating cost, never a curfew).
 - **Jury & endgame:** the final **9 evictees** form the jury; how the player treats houseguests
   on the way out genuinely influences their later vote (jury management is a real mechanic). At
   Final 2 each finalist gives a statement and takes one question per juror. **Ties:** the HOH
@@ -315,10 +335,10 @@ sqlite-vec** save store is **built and opt-in** (`ORWELL_STORE=sqlite`, engine-o
 
 | Command | What it does |
 |---|---|
-| `npm install` | Install dependencies (dev toolchain + the one runtime dep, `fastembed`, pinned exact). |
+| `npm install` | Install dependencies (dev toolchain + three pinned-exact runtime deps: `fastembed`, `better-sqlite3`, `sqlite-vec`). |
 | `npm test` | Full gate: `typecheck` → `build` → unit/property/arch → BDD. |
 | `npm run typecheck` | `tsc --noEmit`. |
-| `npm run build` | Bundle the engine to `dist/main.js` + the embedding worker to `dist/embedWorker.js` (esbuild; `fastembed` stays external). |
+| `npm run build` | Bundle the engine to `dist/main.js` + the embedding worker to `dist/embedWorker.js` (esbuild; `fastembed`, `better-sqlite3`, `sqlite-vec` stay external). |
 | `npm start` | Run the built engine — the HTTP MCP server: the REST-ish tool API (`/:channel/{tools,call}`) **plus** an additive MCP/JSON-RPC 2.0 envelope (`POST /:channel/rpc` — `initialize`/`tools/list`/`tools/call`, notifications + batch; same auth/isolation guardrails). The SSE server-push stream is unimplemented and unneeded (no server-initiated messages). `ORWELL_ENGINE_PORT`, default 8765; `ORWELL_PORT` / `BBAI_*` are legacy fallbacks. |
 | `npm run test:unit` | Vitest — unit, property, and the dependency-cruiser boundary test (the WHOLE suite, incl. the heavy sims). |
 | `npm run test:unit:fast` | Vitest minus the two heavy simulation files (`tests/uat/**` + `juryReach`); what CI's `test` job runs via `test:ci`. |
@@ -510,7 +530,7 @@ the authoritative open-items list going forward.
 
 **Verifying current state.** Because the status prose drifts, trust the code over this section:
 the **per-feature status index** in `docs/features/README.md` is reconciled against the source
-(audited 2026-06-20 — no orphaned/untracked unbuilt specs; only 0022 deferred + 0062 spec-only);
+(audited 2026-06-20 — no orphaned/untracked unbuilt specs; 0022 is the deferred one, and specs now run through 0066);
 `cucumber.cjs` `paths` is the live list of BDD-gated features; and `git log --oneline` shows which
 `NNNN` features last merged green. Run `npm test` for the authoritative pass/fail.
 
@@ -578,6 +598,15 @@ romance); adds a small, hidden, Vault-sealed layer of pre-game ties & showmances
 organically. The **gadget rail** (0054) Phase 2 advanced too — drag-reorder, cast/finale windows
 pinned into the rail (L11–L16) — and the **close-out ledger** now runs through **L42**.
 
+**Session 2026-06-20 — sync spine, in-game time & multi-device (features 0062/0064/0065/0066, ADR 0006):**
+**0065** (the LLM↔engine **sync spine**) shipped — `beatSeq` compare-and-swap + idempotency keys (at-most-once
+advances), the O(Δ) `StateDeltaView` delta feed, the pre-emission phantom-outcome guard, and the FE
+sync/divergence ledger. **0064** (multi-device) shipped its **stopgap** — one canonical game session per user
+across every device; the Messenger-style live sync + window/HUD layout sync are the owed follow-on. **0062**
+(the move-in zeitgeist snapshot) shipped. And **ADR 0006** + feature **0066** landed the **in-game time-of-day +
+sleep economy** (opt-in): time-of-day on the live season, presence (0049) made time-driven, and a hidden bounded
+rest penalty in `resolveCompetition` — see the mechanics and open-decisions sections above.
+
 ## Open decisions (remaining)
 
 **Resolved:** tech stack, datastore, and vector adoption (above); soul storage = markdown +
@@ -598,4 +627,10 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    runtime `EmbeddingProvider` — warmed up at boot (`ORWELL_EMBEDDINGS=fastembed`, the deploy
    default), served synchronously through a worker-thread bridge, with the deterministic fake
    as both the test adapter and the whole-process fallback when the model is unavailable.
-   *(No genuinely-open decisions remain.)*
+
+5. 🆕 **In-game time, sleep & the nightly presence economy** — ADR `docs/decisions/0006`, built **opt-in** as
+   feature **0066** (time-of-day on the live season; presence 0049 made time-driven — the awake set shrinks as
+   NPCs turn in per character, the player owns their **own** bedtime, no curfew; a hidden bounded **rest** term
+   beside the emotional modifier in `src/domain/competitionOutcome.ts`, never shown to the player). Only *tuning*
+   is open — the bound's exact feel, and whether sleep cost reaches past competitions — per ADR 0006's
+   "Open / to confirm".
