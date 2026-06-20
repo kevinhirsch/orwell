@@ -344,6 +344,12 @@
   }
 
   function render(data) {
+    // A roster fetch begun while the panel was OPEN can resolve AFTER the player closed it (the
+    // close stops the poll, but an in-flight request still settles). render() must NOT resurrect a
+    // closed window — ensurePanel() would re-mount #orwell-cast, leaving a slotted, focused panel
+    // overlapping the sidebar (it intercepted #session-sort-btn in CI). If we're closed, drop the
+    // stale result; the next open re-fetches fresh.
+    if (!_open) return;
     const el = ensurePanel();
     const grid = el.querySelector("#oc-grid");
     const empty = el.querySelector("#oc-empty");
