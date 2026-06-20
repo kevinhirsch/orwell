@@ -52,12 +52,32 @@ def test_processWithThinking_scrubs_content_channel_leak_in_game_build():
 
 # ── F8: realtime reasoning body-flash hardening (client-side) ──────────────────────── #
 
-def test_body_render_strips_unclosed_think_tail():
-    # chat.js _renderStream drops any UNCLOSED <think> tail before any body render path, so
-    # round-2+ reasoning (opened but not yet closed) can't be mis-read as the reply.
+def test_body_render_never_sources_reasoning():
+    # F8 structural fix superseded the old unclosed-<think> strip: the body now renders a
+    # reply-only buffer, so reasoning is excluded by construction (no strip/extraction needed).
     chat = _read("static", "js", "chat.js")
-    assert "F8 (realtime flash fix)" in chat
-    assert "hasUnclosedThinkTag(dt)" in chat
+    # _renderStream sources roundReplyText, NOT the merged roundText
+    assert "const dt = stripToolBlocks(roundReplyText);" in chat
+    # the old per-delta unclosed-<think> body strip is gone (no longer needed)
+    assert "hasUnclosedThinkTag(dt)" not in chat
+
+
+def test_primary_stream_has_a_reply_only_body_buffer():
+    # F8 structural fix: the primary stream splits deltas by channel so the BODY can never paint
+    # reasoning. Reply-only buffer feeds every body render; reasoning buffer feeds the accordion.
+    chat = _read("static", "js", "chat.js")
+    assert "let roundReplyText" in chat and "let roundReasoningText" in chat
+    # the split keys off json.thinking using the RAW delta (before <think>-wrapping)
+    assert "if (json.thinking) roundReasoningText += json.delta;" in chat
+    assert "else               roundReplyText += json.delta;" in chat
+    # all three body render paths source the reply-only buffer
+    assert chat.count("stripToolBlocks(roundReplyText)") >= 2  # _renderStream + finalize (+ tool_start)
+    # the accordion sources the reasoning buffer
+    assert "roundReasoningText.trim()" in chat
+    # the buffers reset in lockstep with roundText (both reset sites)
+    assert chat.count("roundReplyText = '';") >= 2 and chat.count("roundReasoningText = '';") >= 2
+    # the fragile extraction machinery is gone from the live body path
+    assert "garbled <think>" not in chat
 
 
 def test_reasoning_scrub_openers_extended_and_npc_lines_dropped():

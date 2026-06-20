@@ -588,14 +588,24 @@ the body**. **Residual:** operator-aside *reasoning prose* ("The player keeps as
 intermittently lands in the body mid-content (as `<li>`/stream tokens) — pattern-scrubbing every
 variant is **whack-a-mole** because the reasoning is arbitrary text.
 
-**Root cause / the real fix (escalation needed):** the primary stream MERGES `thinking:true`
-deltas into `roundText`/`accumulated` with synthesized `<think>` tags and relies on regex
-extraction to keep them out of the body — fragile, with render-timing races. The principled fix
-(the **same pattern PR #408 used for `resumeStream`**) is to give the body its **own
-reply-only buffer** (accumulate `thinking:false` separately; the body renders ONLY that;
-reasoning goes to its own buffer → accordion). Then reasoning can NEVER reach the body, by
-construction — no scrubbing needed. Alternative: the **suppress-reasoning-in-game-build** option
-(previously declined). *(Owner decision pending — the lowest-touch scrub path can't fully close it.)*
+**Root cause:** the primary stream MERGED `thinking:true` deltas into `roundText`/`accumulated`
+with synthesized `<think>` tags and relied on regex extraction to keep them out of the body —
+fragile, with render-timing races.
+
+**✅ RESOLVED (structural fix, owner-approved) — the reply-only body buffer.** Mirroring the
+pattern PR #408 used for `resumeStream`, the primary stream now keeps two per-round buffers:
+`roundReplyText` (deltas with `json.thinking` falsy) and `roundReasoningText` (truthy). **Every
+body render path** (`_renderStream`, the `tool_start` intermediate finalize, and the final render)
+sources `roundReplyText`; the live "Thinking" accordion sources `roundReasoningText`. Reasoning is
+now **structurally absent from the body** — it cannot leak, no scrubbing required. The fragile
+extraction machinery (`_replyAfterClosedThinking` usage, the garbled-`<think>` regex, prefix
+heuristics, the unclosed-`<think>` body strip) was deleted. `roundText`/`accumulated` stay
+byte-identical for all other consumers (doc-fence, TTS, persistence, background, time-metadata).
+**Verification:** the MutationObserver detector (`flash_accurate.mjs`) shows **`inBODY_BUG: 0`
+across 3 heavy-reasoning turns** ("clean body — leak only in the intended accordion");
+`inAccordion_OK` 33–50 (reasoning correctly in the accordion). FE pytest **1463 passed, 2
+skipped**; browser_smoke no new failures. (`frontend/static/js/chat.js`;
+`frontend/tests/test_realtime_filter_and_decision_sync.py`.)
 
 **Original correct-fix sketch (client-side, two parts):**
 1. **Close the body-flash window:** ensure `thinking:true` content can NEVER paint in the body —
