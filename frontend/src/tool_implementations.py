@@ -4514,9 +4514,16 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     text = (args.get("content") or args.get("text") or "").strip()
     if not text:
         return {"error": "content is required (what happened in the scene)", "exit_code": 1}
+    # ADR 0005: an OPTIONAL Vault-free consequence descriptor (which edges move, which way, with what
+    # relative emphasis) rides alongside `kind`. Forward it ONLY when it is actually a dict — a
+    # malformed shape is ignored silently (the engine also guards, but we never forward junk).
+    _consequence = args.get("consequence")
+    if not isinstance(_consequence, dict):
+        _consequence = None
     try:
         res = await orwell_engine.record_interaction(
-            text, with_ids=args.get("withIds"), kind=args.get("kind"), user=owner,
+            text, with_ids=args.get("withIds"), kind=args.get("kind"),
+            consequence=_consequence, user=owner,
         )
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:

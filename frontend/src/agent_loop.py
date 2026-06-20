@@ -1498,6 +1498,90 @@ _MAX_RECORD_NUDGES_PER_TURN = 1  # at most one auto-record per finishing turn
 
 _RECORD_KINDS = {"bonding", "betrayal", "conflict", "strategy", "alliance", "gossip", "showmance"}
 
+# ADR 0005: the closed directed-edge signal space the model MAY propose per houseguest. The model
+# proposes shape (which edges move, which way, relative emphasis) — open-set reading-comprehension of
+# the scene — while the engine still owns the magnitude (anti-sycophancy). emphasis is RELATIVE weight
+# only and never an absolute amount, so widening what the model proposes never widens what it magnitudes.
+_CONSEQUENCE_DIRECTIONS = {
+    "warmer", "cooler", "more-trust", "less-trust",
+    "more-threatened", "less-threatened", "more-aligned", "less-aligned",
+}
+_CONSEQUENCE_EMPHASES = {"slight", "notable", "strong"}
+
+
+def _last_json_object_with_key(raw: str, key: str):
+    """Pull the LAST brace-balanced JSON object that carries `"<key>"` out of a free-text model reply
+    (reasoning models emit the answer last). Handles a NESTED object (e.g. a `consequence` block) that
+    a flat `[^{}]` regex could never match, while still tolerating a draft-then-final emission. Returns
+    the parsed dict, or None when nothing parses — so the caller fails closed exactly as before."""
+    if not raw:
+        return None
+    needle = '"' + key + '"'
+    found = None
+    for m in re.finditer(re.escape(needle), raw):
+        # Walk left to the opening brace of the object this key belongs to, then scan a balanced span.
+        start = raw.rfind("{", 0, m.start())
+        if start < 0:
+            continue
+        depth, end, in_str, esc = 0, -1, False, False
+        for i in range(start, len(raw)):
+            c = raw[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end < 0:
+            continue
+        try:
+            cand = json.loads(raw[start:end + 1])
+        except Exception:
+            continue
+        if isinstance(cand, dict) and key in cand:
+            found = cand  # keep going; we want the LAST valid one
+    return found
+
+
+def _validate_consequence(raw, valid_ids) -> dict | None:
+    """ADR 0005 — defensively validate a model-proposed consequence descriptor against the active
+    roster. Keep only edges whose `toward` is a living houseguest id AND whose `direction` is one of
+    the 8; carry `emphasis` only when it is one of the 3 (else drop the field — it is optional). Carry
+    `rationale` only when it is a string. Return the cleaned descriptor, or None when nothing valid
+    remains — so a None return means the call falls back to exactly the kind-only path (no regression)."""
+    if not isinstance(raw, dict):
+        return None
+    edges = []
+    for e in (raw.get("edges") or []):
+        if not isinstance(e, dict):
+            continue
+        toward = e.get("toward")
+        direction = e.get("direction")
+        if toward not in valid_ids or direction not in _CONSEQUENCE_DIRECTIONS:
+            continue
+        edge: dict = {"toward": toward, "direction": direction}
+        if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
+            edge["emphasis"] = e.get("emphasis")
+        edges.append(edge)
+    if not edges:
+        return None
+    out: dict = {"edges": edges}
+    rationale = raw.get("rationale")
+    if isinstance(rationale, str) and rationale.strip():
+        out["rationale"] = rationale.strip()[:400]
+    return out
+
 
 # ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
 # Owner ledger (L21/L24 — "the single biggest immersion-killer"): turn to turn the world resets
@@ -1593,6 +1677,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
     scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
     and we call recordInteraction ourselves — so the hidden trust/affinity/threat weights actually
     move. The model OWNS the magnitude; we only supply a direction-correct kind it proposed.
+
+    ADR 0005 — the extraction MAY ALSO propose a richer `consequence` descriptor (which edges move,
+    which way, relative emphasis only, and why) for a scene that moves houseguests in DIFFERENT
+    directions. It is the generative-mapping payoff for this error-correction path. The descriptor is
+    validated against the roster and the closed direction/emphasis enums (`_validate_consequence`);
+    only direction/emphasis/targeting + rationale ever come from the model — NEVER a number, so the
+    engine keeps the magnitude. When the model proposes no (or no valid) descriptor, the call is
+    exactly today's kind-only behavior — the 0055 guarantee is unchanged.
+
     Fail-closed: any hiccup just skips (the prompt nudge + E22 fallback still apply). The recording
     is invisible to the player (hidden consequence), exactly as the Vault Wall requires."""
     try:
@@ -1609,8 +1702,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 "thinking, no prose, no code fence:\n"
                 '{"withIds":[<ids of houseguests the player actually interacted WITH, from the roster>],'
                 '"kind":"<one of: bonding, betrayal, conflict, strategy, alliance, gossip, showmance>",'
-                '"content":"<one concise past-tense sentence of what passed between them>"}\n'
-                "Pick the kind matching the emotional/strategic direction. If no houseguest was genuinely "
+                '"content":"<one concise past-tense sentence of what passed between them>",'
+                '"consequence":{"edges":[{"toward":"<houseguest id>",'
+                '"direction":"<one of: warmer, cooler, more-trust, less-trust, more-threatened, '
+                'less-threatened, more-aligned, less-aligned>","emphasis":"<slight|notable|strong>"}],'
+                '"rationale":"<why, grounded in the scene>"}}\n'
+                "Pick the kind matching the emotional/strategic direction. Add `consequence` ONLY when "
+                "the scene moves different houseguests DIFFERENTLY (e.g. it warms one and threatens "
+                "another); otherwise omit it. Propose only direction and relative emphasis — NEVER any "
+                "number or magnitude (the engine decides how far). If no houseguest was genuinely "
                 'engaged (a solo/internal beat), reply {"withIds":[]}.'},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
@@ -1619,14 +1719,11 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
                                    temperature=0.2, max_tokens=700, timeout=45)
         raw = raw or ""
-        # The JSON may sit after a reasoning block OR inside it — scan the WHOLE response and take
-        # the LAST object carrying withIds (reasoning models emit the answer last).
-        obj = None
-        for cand in reversed(re.findall(r"\{[^{}]*\"withIds\"[^{}]*\}", raw, re.DOTALL)):
-            try:
-                obj = json.loads(cand); break
-            except Exception:
-                continue
+        # The JSON may sit after a reasoning block OR inside it — take the LAST object carrying
+        # withIds (reasoning models emit the answer last). The object may now NEST a `consequence`
+        # with inner braces, which the old flat `[^{}]` regex could never match — so scan for every
+        # `{"withIds"...}` start and pull a brace-balanced object from each, newest first.
+        obj = _last_json_object_with_key(raw, "withIds")
         if obj is None:
             logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
             return False
@@ -1636,8 +1733,13 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         kind = obj.get("kind") if obj.get("kind") in _RECORD_KINDS else "strategy"
         content = (obj.get("content") or "").strip() or "The player and a houseguest had a private exchange."
-        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind, user=owner)
-        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}) user={owner}")
+        # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
+        # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
+        consequence = _validate_consequence(obj.get("consequence"), valid)
+        await _oe.record_interaction(content[:400], with_ids=ids, kind=kind,
+                                     consequence=consequence, user=owner)
+        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
+                    f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-record failed: {_e}")
