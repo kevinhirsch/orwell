@@ -739,16 +739,63 @@ _LAST_PENDING: dict = {}
 
 
 def remember_pending(view, user=None) -> None:
-    """Record (or clear) the pending decision from any AdvanceView-shaped dict."""
+    """Record (or clear) the pending decision from any AdvanceView-shaped dict.
+
+    The cache mirrors the engine's `pending` so GET /api/orwell/status can re-arm the
+    decision card after a reload WITHOUT a poll ever advancing the game. It is the route's
+    OMIT-fallback: the status route trusts a PRESENT `pending` (including null) as engine
+    truth and only falls back to this cache when the engine response OMITS the key entirely
+    (an older engine). So the three cases are distinct (F5):
+
+      * present & truthy → UPDATE the cache (a real pending decision to re-arm);
+      * present & null/None → CLEAR the cache (the engine says "no pending" — the prior
+        card is resolved; keeping it would re-surface a stale card on reload);
+      * key ABSENT → KEEP the prior cache (an old engine that never exposed `pending` — the
+        route's omit-fallback still serves the last-seen card).
+
+    The earlier cut popped on any falsy `view.get("pending")`, which conflated absent with
+    null — harmless for the route, but it meant an explicit `pending: null` and a missing key
+    were indistinguishable here. The distinction matters for the clear-on-submit safety in the
+    decision route (a successful submit returns `pending: null` ⇒ this clears; a result that
+    happens to OMIT the key must NOT silently keep a stale card — see clear_pending).
+
+    ONE deliberate exception to "absent ⇒ keep": a LIFECYCLE result (a createCharacter /
+    manageSandbox casting card or a refused-restart GameStateView) carries no `pending` field
+    by construction, yet the restart-door call sites pass it here SPECIFICALLY to wipe the prior
+    season's stale card (D3/E66 restart-door hygiene). Those views are recognizable by their
+    lifecycle markers (`started` / `characterType` / `createRefused` / `castingCard`); when we
+    see one, an absent `pending` means CLEAR, not keep. A decision/advance/status view that an
+    old engine returned without a `pending` key has none of those markers, so its omit-fallback
+    still keeps the last-seen card."""
     try:
+        if not isinstance(view, dict):
+            return
         key = user or ""
-        pending = view.get("pending") if isinstance(view, dict) else None
+        if "pending" not in view:
+            # A lifecycle/restart-door view (casting card / refused restart) carries no `pending`
+            # but is passed here to CLEAR the prior season's card — honor that intent. Anything
+            # else that merely omits `pending` (an old engine's advance/status view) is KEPT so the
+            # route's omit-fallback can still re-arm the last-seen card.
+            if any(k in view for k in ("started", "characterType", "createRefused", "castingCard")):
+                _LAST_PENDING.pop(key, None)
+            return
+        pending = view.get("pending")
         if pending:
-            _LAST_PENDING[key] = pending
+            _LAST_PENDING[key] = pending  # present & truthy: a real card to re-arm
         else:
-            _LAST_PENDING.pop(key, None)
+            _LAST_PENDING.pop(key, None)  # present & null/None: the engine says "no pending"
     except Exception:
         pass
+
+
+def clear_pending(user=None) -> None:
+    """Unconditionally drop the cached pending decision for a user (F5 clear-on-submit safety).
+
+    `remember_pending` now KEEPS the cache when a view OMITS the `pending` key, so a path that
+    KNOWS the card is resolved (e.g. a successful decision submit whose result happens not to
+    carry `pending`) must clear explicitly rather than rely on the omit-fallback — otherwise a
+    stale card could re-arm on the next status reload."""
+    _LAST_PENDING.pop(user or "", None)
 
 
 def last_pending(user=None):
