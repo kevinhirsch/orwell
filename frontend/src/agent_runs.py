@@ -138,15 +138,26 @@ async def _drain(session_id: str, agen: AsyncGenerator[str, None],
         _schedule_evict(session_id)
 
 
-def start(session_id: str, agen: AsyncGenerator[str, None]) -> _Run:
-    """Start a detached run draining `agen` for a session. If a run is already in
-    flight for this session (e.g. a rapid double-send), it's cancelled first."""
+def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = False) -> _Run:
+    """Start a detached run draining `agen` for a session.
+
+    Default (plain chat): if a run is already in flight for this session (a rapid double-send), it is
+    CANCELLED first and the new run replaces it.
+
+    `queue=True` (feature 0064 Part C — the Messenger model for GAME turns): the in-flight run is NOT
+    cancelled — the new run CHAINS after it (it awaits the current run's natural completion via the
+    same `prev_task` wait, then drains). So a second device's game turn never STOMPS the one in
+    flight; turns serialize, and there is never more than one reasoning chain at a time. The new run
+    streams to its own subscribers only once the prior one ends. (Plain chats keep cancel-on-double-
+    send — only the game path opts into queuing.)
+    """
     prev = _RUNS.get(session_id)
     prev_task: Optional[asyncio.Task] = None
     if prev:
         if prev.task and not prev.task.done():
-            prev.task.cancel()
-            prev_task = prev.task   # new run awaits this before it starts writing
+            if not queue:
+                prev.task.cancel()  # plain chat: replace the in-flight run (the historical behavior)
+            prev_task = prev.task    # new run awaits this — a CANCELLED stomp OR a queued natural finish
         if prev.evict_task and not prev.evict_task.done():
             prev.evict_task.cancel()
     run = _Run()
