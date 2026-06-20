@@ -4935,6 +4935,37 @@ async def do_move_to(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_premiere_intros(content: str, owner: Optional[str] = None) -> Dict:
+    """PREMIERE ONLY (#380): the meet-everyone progress — who's met + who's STILL to introduce."""
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.premiere_intros(user=owner)
+        if res is None:
+            return {"output": "Not in the premiere — everyone has already been met.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_mark_houseguest_met(content: str, owner: Optional[str] = None) -> Dict:
+    """PREMIERE ONLY (#380): mark a houseguest met. `content` is the tool args JSON ({id})."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content) if content and content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    hg_id = (args.get("id") or "").strip()
+    if not hg_id:
+        return {"error": "id is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.mark_houseguest_met(hg_id, user=owner)
+        if res is None:
+            return {"output": "Not in the premiere — there is nobody left to meet.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_diary_room(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

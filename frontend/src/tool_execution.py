@@ -1169,6 +1169,7 @@ async def execute_tool_block(
         do_create_character, do_update_casting, do_advance_game, do_submit_decision,
         do_request_self_eviction,
         do_social_initiatives, do_diary_room, do_make_deal, do_whereabouts, do_move_to,
+        do_premiere_intros, do_mark_houseguest_met,
         do_season_recap, do_season_retrospective, do_npc_voice,
         do_app_api,
     )
@@ -1532,6 +1533,12 @@ async def execute_tool_block(
     elif tool == "moveTo":
         desc = "moveTo"
         result = await do_move_to(content, owner=owner)
+    elif tool == "premiereIntros":
+        desc = "premiereIntros"
+        result = await do_premiere_intros(content, owner=owner)
+    elif tool == "markHouseguestMet":
+        desc = "markHouseguestMet"
+        result = await do_mark_houseguest_met(content, owner=owner)
     elif tool == "seasonRecap":
         desc = "seasonRecap"
         result = await do_season_recap(content, owner=owner)

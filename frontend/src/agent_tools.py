@@ -61,6 +61,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
              "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts", "moveTo",
+             "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
@@ -99,6 +100,9 @@ GAME_TOOL_KEEP = frozenset({
     "whereabouts",
     # L21/L24: the player walks where they choose; the engine never auto-relocates a person.
     "moveTo",
+    # PREMIERE meet-everyone (#380): the premiere-only meet-everyone tracker — the read + the mark
+    # (the engine guarantees all 15 NPCs are met before the first HOH; the model drives it from here).
+    "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.

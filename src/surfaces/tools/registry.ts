@@ -27,6 +27,8 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "socialInitiatives", channel: "player", readsVault: false, description: "Which houseguests want to approach the player now (relationship-driven; names + a coarse motive category (bond | probe) the narrator voices in its own words — never a number)." },
   { name: "whereabouts", channel: "player", readsVault: false, description: "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only, never motives, numbers, or non-adjacent rooms." },
   { name: "moveTo", channel: "player", readsVault: false, description: "The player WALKS to a room they named ({room}). Valid rooms: kitchen, living room, backyard, bedroom A, bedroom B, HOH room, bathroom, storage room (the diary room is its own beat). Name resolution is FORGIVING — case/space/hyphen-insensitive plus natural aliases (\"living room\"/\"lounge\", \"backyard\"/\"yard\", \"HOH\", \"pantry\"); a bare \"bedroom\" resolves to the player's own bedroom — so it never silently fails. The player is a person — they direct their own movement; call this whenever the player heads somewhere, then voice the new room from the returned whereabouts (the engine holds them there; NPCs move around them)." },
+  { name: "premiereIntros", channel: "player", readsVault: false, description: "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; null outside the premiere." },
+  { name: "markHouseguestMet", channel: "player", readsVault: false, description: "PREMIERE ONLY (#380): mark a houseguest ({id}) as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere)." },
   { name: "seasonRecap", channel: "player", readsVault: false, description: "The season's public arc from the event record (0048): reigns, ceremonies, evictions, deals — Vault-free, stores not memory." },
   { name: "seasonRetrospective", channel: "player", readsVault: false, description: "POST-SEASON ONLY (0048): the finished season's unsealed hidden story — off-screen scheming, confessionals, the twists. Returns null while a season is live (gated on the terminal state in code)." },
   { name: "npcVoice", channel: "player", readsVault: false, description: "The knowledge-bounded voicing projection for ONE active houseguest (B65): persona + room/co-presence + what THEY legitimately know + hunches + organic stances (labels, never numbers). The model cannot voice what they never learned." },
@@ -72,7 +74,12 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // 0061: `cancelSelfEviction` is the confirmation card's own Cancel action (FE-driven), NOT a model
   // lever. `requestSelfEviction` IS advertised (below): on a clear OOC intent the model raises the
   // confirmation — which changes NO state — and the player's explicit confirm (the card) is what binds.
-  "cancelSelfEviction"]);
+  "cancelSelfEviction",
+  // PREMIERE meet-everyone (#380): both are PREMIERE-only levers fully documented in the `premiere`
+  // moment fragment (the meet-everyone flow + markHouseguestMet are spelled out there with their
+  // who's-left list woven in), NOT always-on base-manifest levers — so they ride the moment, like
+  // finaleView rides the finale. Excluding them keeps the base prompt untouched (drift test stays green).
+  "premiereIntros", "markHouseguestMet"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

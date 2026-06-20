@@ -1439,6 +1439,28 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "premiereIntros",
+            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; returns null outside the premiere.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "markHouseguestMet",
+            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "The houseguest id just introduced (from the roster)."},
+                },
+                "required": ["id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "diaryRoom",
             "description": "Record the player's private, out-of-character Diary Room confessional. Nothing here ever reaches any houseguest — it is the player's own space, never an in-game pathway. Use whenever the player speaks in the Diary Room.",
             "parameters": {
@@ -1728,6 +1750,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "whereabouts",
     # L21/L24: the player directs their own movement (the engine never auto-relocates a person).
     "moveTo",
+    # PREMIERE meet-everyone (#380): the premiere-only meet-everyone tracker — the read + the mark.
+    "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
     # B65: the knowledge-bounded per-NPC voicing projection.

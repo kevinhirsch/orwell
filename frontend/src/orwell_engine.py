@@ -560,6 +560,20 @@ async def move_to(room: str, user: str | None = None):
     return await _call("moveTo", {"room": room}, user=user)
 
 
+async def premiere_intros(user: str | None = None):
+    """PREMIERE ONLY (#380): the meet-everyone progress — who's met + who's STILL to introduce before
+    the first HOH, each with their OBSERVABLE public persona (Vault-free; no soul/number). ``None``
+    outside the premiere."""
+    return await _call("premiereIntros", {}, user=user)
+
+
+async def mark_houseguest_met(houseguest_id: str, user: str | None = None):
+    """PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they've introduced their
+    public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH.
+    Returns the updated meet-everyone progress (``None`` outside the premiere)."""
+    return await _call("markHouseguestMet", {"id": houseguest_id}, user=user)
+
+
 async def finale_view(user: str | None = None):
     """The Vault-free in-progress finale projection (0037 §8.1): finalists, the current stage, and the
     votes revealed SO FAR — or ``None`` when no finale is staging. Never a lean/tally/manner or the
