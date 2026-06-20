@@ -28,15 +28,34 @@ logger = logging.getLogger(__name__)
 _AUTHOR_WARM_TIMEOUT = 15 * 60.0
 
 
+def _prompt_id(entry) -> Optional[str]:
+    """The houseguest id a portrait prompt belongs to (the gating key)."""
+    if not isinstance(entry, dict):
+        return None
+    hid = entry.get("houseguestId") or entry.get("id")
+    return str(hid) if hid else None
+
+
 class _Warm:
-    __slots__ = ("seed", "prompts", "author_done", "author_started", "portraits_started")
+    __slots__ = ("seed", "prompts", "author_done", "author_started", "portraits_started",
+                 "npc_authored")
 
     def __init__(self) -> None:
         self.seed = None
         self.prompts: list = []
-        self.author_done = asyncio.Event()
+        self.author_done = asyncio.Event()  # whole-cast done (success OR failure) — the fallback gate
         self.author_started = False
         self.portraits_started = False
+        # Per-NPC completion gates (#7): an Event per houseguest id, set the moment THAT NPC's
+        # authoring write-back lands, so its portrait shoots as soon as it is authored — never before.
+        self.npc_authored: dict[str, asyncio.Event] = {}
+
+    def npc_event(self, hid: str) -> asyncio.Event:
+        ev = self.npc_authored.get(hid)
+        if ev is None:
+            ev = asyncio.Event()
+            self.npc_authored[hid] = ev
+        return ev
 
 
 _STATE: dict[str, _Warm] = {}
@@ -96,9 +115,28 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
     st.prompts = res.get("portraitPrompts") or []
     cast = res.get("house") or []
     st.author_started = True
-    # Author the cast in the background; ALWAYS release the gate when done (the seeded floor is still a
+    # Pre-create a per-NPC gate for every houseguest that has a portrait prompt (#7), so portrait warm
+    # can wait on the SAME Event objects the authoring callback sets — even if authoring is slow to start.
+    for entry in st.prompts:
+        hid = _prompt_id(entry)
+        if hid:
+            st.npc_event(hid)
+
+    def _on_authored(hid: str) -> None:
+        # THIS NPC's write-back landed → open its gate so its portrait shoots now (never before).
+        st.npc_event(str(hid)).set()
+
+    def _on_done() -> None:
+        # Whole-cast authoring finished (success OR failure): release the fallback gate AND open any
+        # per-NPC gate that never fired (an NPC the model couldn't author) — its face then shoots from
+        # the seeded facets at authoring-end rather than waiting out the full timeout.
+        st.author_done.set()
+        for ev in st.npc_authored.values():
+            ev.set()
+
+    # Author the cast in the background; ALWAYS release the gates when done (the seeded floor is still a
     # complete cast), so the gated portrait warm proceeds even if a houseguest couldn't be authored.
-    authoring.kickoff_authoring(cast, user, then=lambda: st.author_done.set())
+    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored)
     return {"warmed": True, "count": len(st.prompts)}
 
 
@@ -119,14 +157,28 @@ async def warm_portraits(user: Optional[str] = None, *, portraits=None,
         from src import orwell_portraits as portraits
     st.portraits_started = True
 
-    async def _run() -> None:
+    async def _shoot_one(entry, gate: asyncio.Event) -> None:
+        # PER-NPC GATING (#7): hold THIS face until its houseguest is authored, then shoot just it —
+        # so portraits stream in as authoring completes, never before a character is authored. The
+        # whole-cast `author_done` + the timeout are the fallbacks (a never-authored NPC still shoots).
         try:
-            await asyncio.wait_for(st.author_done.wait(), timeout=timeout)
+            await asyncio.wait_for(gate.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             logger.info(
-                "[prewarm] author warm overran %.0fs — shooting portraits anyway "
-                "(re-shoot backstop covers a later store change)", timeout)
-        portraits.kickoff_generation(st.prompts, user)
+                "[prewarm] author warm for one houseguest overran %.0fs — shooting its portrait "
+                "anyway (re-shoot backstop covers a later store change)", timeout)
+        portraits.kickoff_generation([entry], user)
+
+    async def _run() -> None:
+        tasks = []
+        for entry in st.prompts:
+            hid = _prompt_id(entry)
+            # A prompt with a known houseguest waits on that NPC's gate; an id-less prompt (no per-NPC
+            # signal possible) falls back to the whole-cast gate so it still shoots once authoring ends.
+            gate = st.npc_event(hid) if hid else st.author_done
+            tasks.append(asyncio.create_task(_shoot_one(entry, gate)))
+        if tasks:
+            await asyncio.gather(*tasks)
 
     try:
         loop = asyncio.get_running_loop()

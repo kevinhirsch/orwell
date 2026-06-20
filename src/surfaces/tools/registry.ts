@@ -52,6 +52,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   // FE-driven authoring/pre-warm seams (0058/0065) — NOT model levers (the FE producer-LLM drives them).
   { name: "preSeedCast", channel: "player", readsVault: false, description: "FE-driven (0065): pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting interview ends, so the FE can deeply author it and the portrait prompts read the finished store. Returns the Vault-free roster + the cast portrait prompts; mints + persists the season seed (which createCharacter then adopts). Idempotent; durable. Not a model lever." },
   { name: "recordCastProfile", channel: "player", readsVault: false, description: "FE-driven write-back (0058/0065): seal one houseguest's authored §3 profile — the PUBLIC biography + structured physical facet (cross to the player) SPLIT from the HIDDEN secrets/true-goals/weakness/Day-1 read (Vault-sealed). Reports accepted field NAMES only, never a hidden value; refuses a player-mirroring profile. Lands on the pre-warmed cast pre-game, the live house once a season runs. Not a model lever." },
+  { name: "recordWorldSnapshot", channel: "player", readsVault: false, description: "FE-driven write-back (0062): freeze the move-in zeitgeist — the PUBLIC, shared real-world flavor the whole cast moved in WITH (an optional subset of public slices: screen/music/sports/news/internet/mood). The FE owns the concrete web-search capture (like the 0051 image port); the engine persists it as the single FROZEN artifact and RECALLS it (never re-searches) all season. Empty slices keep the fallback's value (non-degradation). Public flavor only — no Vault, no game input. Not a model lever." },
 ];
 
 export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
@@ -83,6 +84,10 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // the cast, the FE pre-warms it before portraits), NOT game-driving levers the GM model pulls — so
   // they stay OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
   "preSeedCast", "recordCastProfile",
+  // 0062: the move-in zeitgeist write-back is an FE-driven seam (the front-end owns the concrete
+  // web-search capture and freezes it onto the season), NOT a game-driving lever the GM model pulls —
+  // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
+  "recordWorldSnapshot",
   // 0061: `cancelSelfEviction` is the confirmation card's own Cancel action (FE-driven), NOT a model
   // lever. `requestSelfEviction` IS advertised (below): on a clear OOC intent the model raises the
   // confirmation — which changes NO state — and the player's explicit confirm (the card) is what binds.

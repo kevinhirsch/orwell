@@ -17,7 +17,10 @@ def _run(coro):
 
 def _drive():
     # Let the loop process the background task(s) created by warm_portraits / kickoff_authoring.
-    _run(asyncio.sleep(0))
+    # Portrait warm now nests tasks (the `_run` dispatcher spawns a per-NPC `_shoot_one` task each,
+    # #7), so a single yield can't drain every level — pump the loop a few turns to settle them all.
+    for _ in range(5):
+        _run(asyncio.sleep(0))
 
 
 class _FakeEngine:
@@ -31,21 +34,39 @@ class _FakeEngine:
 
 
 class _FakeAuthoring:
-    """Captures the kickoff and the gate-release callback; releases on `finish()` (or immediately)."""
+    """Captures the kickoff and the gate-release callbacks; releases on `finish()` (or immediately).
+
+    Mirrors the real `kickoff_authoring(cast, user, then=None, on_authored=None)` signature (#7): it
+    captures the per-NPC `on_authored` callback so a test can fire ONE houseguest's completion in
+    isolation via `finish_npc(hid)`, plus the whole-cast `then` gate via `finish()`."""
     def __init__(self, auto_finish=True):
         self.cast = None
         self.calls = 0
         self._then = None
+        self._on_authored = None
         self._auto = auto_finish
 
-    def kickoff_authoring(self, cast, user, then=None):
+    def kickoff_authoring(self, cast, user, then=None, on_authored=None):
         self.cast = cast
         self.calls += 1
         self._then = then
-        if self._auto and then:
-            then()
+        self._on_authored = on_authored
+        if self._auto:
+            # auto-finish authors every NPC (per-NPC gate) AND closes the whole-cast gate.
+            for npc in (cast or []):
+                hid = npc.get("id")
+                if hid and hid != "player" and on_authored:
+                    on_authored(hid)
+            if then:
+                then()
+
+    def finish_npc(self, hid):
+        """Fire ONE houseguest's per-NPC completion (its portrait gate opens)."""
+        if self._on_authored:
+            self._on_authored(hid)
 
     def finish(self):
+        """Fire the whole-cast completion gate (and, in the real wiring, any never-fired per-NPC gate)."""
         if self._then:
             self._then()
 
@@ -54,10 +75,16 @@ class _FakePortraits:
     def __init__(self):
         self.prompts = None
         self.calls = 0
+        self.shot_ids = []  # every houseguest id whose portrait was shot, in order (#7 per-NPC gating)
 
     def kickoff_generation(self, prompts, user):
         self.prompts = prompts
         self.calls += 1
+        for entry in (prompts or []):
+            if isinstance(entry, dict):
+                hid = entry.get("houseguestId") or entry.get("id")
+                if hid:
+                    self.shot_ids.append(hid)
 
 
 _WARM_RES = {
@@ -148,6 +175,68 @@ def test_portraits_NEVER_shoot_before_authoring_completes():
     auth.finish()  # authoring completes → the gate opens
     _drive()
     assert port.calls == 1, "the portrait did not shoot once authoring finished"
+
+
+# A two-houseguest cast + two prompts, for the per-NPC gating invariant (#7).
+_WARM_RES_2 = {
+    "warmed": True, "seed": 7,
+    "house": [
+        {"id": "npc:1", "name": "A", "biography": "A deep bio. Two sentences."},
+        {"id": "npc:2", "name": "B", "biography": "B deep bio. Two sentences."},
+    ],
+    "portraitPrompts": [
+        {"houseguestId": "npc:1", "name": "A", "prompt": "portrait A"},
+        {"houseguestId": "npc:2", "name": "B", "prompt": "portrait B"},
+    ],
+}
+
+
+def test_portraits_gate_PER_NPC_each_face_shoots_only_after_that_npc_is_authored():
+    """#7: per-houseguest gating. NPC X's portrait shoots only AFTER X's authoring write-back lands;
+    a still-unauthored NPC's face is NOT shot early. Faces stream in as authoring completes."""
+    eng = _FakeEngine(_WARM_RES_2)
+    auth = _FakeAuthoring(auto_finish=False)  # author each NPC manually, one at a time
+    port = _FakePortraits()
+
+    _run(P.prewarm_cast("u1", engine=eng, authoring=auth))
+    _run(P.warm_portraits("u1", portraits=port))
+    _drive()  # both per-NPC portrait tasks start and AWAIT their own gate
+    assert port.shot_ids == [], "a portrait shot before its houseguest was authored"
+
+    # Author ONLY npc:1 → only npc:1's face may shoot; npc:2 stays held.
+    auth.finish_npc("npc:1")
+    _drive()
+    assert port.shot_ids == ["npc:1"], "expected only npc:1's portrait after only npc:1 authored"
+
+    # Now author npc:2 → its face streams in.
+    auth.finish_npc("npc:2")
+    _drive()
+    assert port.shot_ids == ["npc:1", "npc:2"], "npc:2's portrait did not shoot once it was authored"
+    # Each face was shot exactly once, individually (per-NPC, not one whole-cast batch).
+    assert port.calls == 2
+
+
+def test_portraits_whole_cast_fallback_shoots_an_unauthored_npc_at_authoring_end():
+    """#7 fallback: an NPC the model never authored still gets a face — the whole-cast `then` releases
+    any per-NPC gate that never fired, so its portrait shoots from the seeded facets at authoring-end
+    (without waiting out the full timeout)."""
+    eng = _FakeEngine(_WARM_RES_2)
+    auth = _FakeAuthoring(auto_finish=False)
+    port = _FakePortraits()
+
+    _run(P.prewarm_cast("u1", engine=eng, authoring=auth))
+    _run(P.warm_portraits("u1", portraits=port))
+    _drive()
+    assert port.shot_ids == []
+
+    auth.finish_npc("npc:1")  # only one NPC authored
+    _drive()
+    assert port.shot_ids == ["npc:1"]
+
+    auth.finish()  # whole-cast done → the never-fired npc:2 gate opens (the fallback)
+    _drive()
+    assert sorted(port.shot_ids) == ["npc:1", "npc:2"], "the unauthored NPC's fallback face never shot"
+    assert P.warm_state("u1")["authorDone"] is True
 
 
 def test_warm_portraits_is_idempotent():

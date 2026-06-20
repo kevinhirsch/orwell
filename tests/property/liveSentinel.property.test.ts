@@ -67,6 +67,9 @@ const args = (name: string): Record<string, unknown> => {
     // never bites their outputs either.
     case "recordCastProfile": return { houseguestId: npc(1), biography: "A two-sentence public backstory. It has presentable parts." };
     case "preSeedCast": return { seed: 1 };
+    // 0062: the FE zeitgeist write-back — PUBLIC real-world flavor only (no Vault, no game input).
+    // The sweep proves the canary never bites its output (an empty subset is a valid capture).
+    case "recordWorldSnapshot": return { slices: {} };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels

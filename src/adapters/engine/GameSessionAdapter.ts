@@ -2557,6 +2557,13 @@ export class GameSessionAdapter implements GameSession {
    * player is rarer (gated behind `surfaceToPlayerProb` AND a real modeled pathway via the registry's
    * `surfaceInformationTo`, E9). Either way it counts ONCE against the hard season cap (§5). What
    * crosses is a belief with source + confidence — never the premise, never a number (§7).
+   *
+   * FIDELITY by pathway (2026-06-20): when the source is a genuine CONFIDANT of the player — the
+   * player→source bond (the engine's own trust+affinity read) sits at/above `THREAD.confidantBondThreshold`
+   * — the player hears a FULLER, less-glossed version (`confidantThreadRumor`), the way a close ally
+   * actually confides. A stranger's gossip stays the ordinary vague `threadRumor`. The fuller variant is
+   * STILL Vault-safe: keyed only by the public source CLASS (the same `weakness`/`true goal`/secret
+   * prefix the class gloss already uses), never the verbatim premise/trigger, never a number (§7).
    */
   private surfaceThread(thread: StoryThread, pos: SeasonPosition, rng: RandomnessSource): void {
     const name = this.nameOf(thread.sourceId);
@@ -2569,8 +2576,12 @@ export class GameSessionAdapter implements GameSession {
     if (toPlayer && this.onThreadSurfaceToPlayer) {
       // Rare: a modeled pathway already reaches the player — surface a content-lineage-anchored belief
       // (E9). An unanchored attempt is correctly downgraded to a suspicion by 0002; either way the
-      // thread is spent (it "surfaced" — the house's drama broke into the open).
-      this.onThreadSurfaceToPlayer(thread.sourceId, rumor);
+      // thread is spent (it "surfaced" — the house's drama broke into the open). Fuller fidelity ONLY
+      // when this is a close-relationship/confidant pathway (a confidant confides; a stranger glosses).
+      const belief = this.isPlayerConfidant(thread.sourceId)
+        ? this.confidantThreadRumor(thread, name)
+        : rumor;
+      this.onThreadSurfaceToPlayer(thread.sourceId, belief);
     } else if (livingNpcs.length > 0 && this.onThreadGossip) {
       // The common case: hand the paraphrase to the 0038 gossip engine to diffuse NPC↔NPC.
       const origin = livingNpcs[rng.int(livingNpcs.length)]!;
@@ -2579,6 +2590,39 @@ export class GameSessionAdapter implements GameSession {
     thread.status = "surfaced";
     thread.lifecycleWeek = this.week;
     this.surfacedThreadCount++;
+  }
+
+  /**
+   * Is the thread's source a genuine CONFIDANT of the player? (2026-06-20 — gates the higher-fidelity
+   * surfacing.) Derived ONLY from the existing relationship model: the player's OWN read of the source
+   * (`player→source`). When that bond — trust + affinity, the engine's directed read — sits at/above
+   * `THREAD.confidantBondThreshold` (the `ally`-grade band), the source is someone the player is close
+   * to, the kind of houseguest who CONFIDES rather than has their secret merely whispered about. This is
+   * a pure engine read (no number crosses the wall — it only chooses WHICH Vault-safe paraphrase, never
+   * exposes the value). A stranger (bond below the band) always gets the ordinary vague gloss.
+   */
+  private isPlayerConfidant(sourceId: EntityId): boolean {
+    const e = this.rel.edge(PLAYER, sourceId);
+    return e.trust + e.affinity >= THREAD.confidantBondThreshold;
+  }
+
+  /**
+   * The FULLER (but still Vault-safe) paraphrase a CONFIDANT surfacing gives the player (2026-06-20):
+   * a richer, less-glossed belief than `threadRumor`, reading like a close ally actually confiding —
+   * "they told me, in confidence, that …". It is keyed ONLY by the public source CLASS (the same
+   * `weakness`/`true goal`/secret prefix the existing class gloss reads — never the verbatim premise,
+   * never the trigger, never a number, §7), so the no-leak sentinel sweep stays strict: the SECRET text
+   * never crosses, only a fuller-textured BELIEF with a known source. The §7 leak gate verifies this.
+   */
+  private confidantThreadRumor(thread: StoryThread, name: string): string {
+    // The public source CLASS only — the same rule the engine's class gloss uses (a prefix on the
+    // premise label, NOT the secret body). No premise/trigger/number is read here.
+    const fuller = thread.premise.startsWith("weakness")
+      ? `there's a real soft spot in their game they keep covering for`
+      : thread.premise.startsWith("true goal")
+        ? `their plan in here runs deeper and quieter than they let the house believe`
+        : `they're sitting on something heavy they've hidden from almost the whole house`;
+    return `${name} confided in you — you came away believing ${fuller}`;
   }
 
   /** 0060 §3 (`nominated-twice`) — accrue the DISTINCT weeks each current nominee has been on the block. */
