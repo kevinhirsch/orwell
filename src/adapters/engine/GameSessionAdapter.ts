@@ -1709,7 +1709,9 @@ export class GameSessionAdapter implements GameSession {
    * acts toward the player (the witness/partner), moving the hidden relationship layer by the thread's
    * `weightImpact` interaction. Returns the activated thread (or undefined when none is dormant for
    * that source). The player sees only the later BEHAVIOR; no number, no premise ever crosses (§8).
-   * Phase 1 ships the activation+fold hook proven; the full trigger/resolution scheduler is Phase 2.
+   * This is the directly-callable activation+fold hook; the full automatic trigger/resolution scheduler
+   * is LIVE in `scheduleStoryThreads` (feature 0060), wired into the off-screen tick — both share the
+   * one `foldThreadActivation` step, zero drift.
    */
   activateThread(sourceId: EntityId, rng: RandomnessSource = new SeededRandom(hashSeed(`${this.gameSeed}:thread:${sourceId}`))): StoryThread | undefined {
     const thread = this.storyThreads.find((t) => t.sourceId === sourceId && t.status === "dormant");
