@@ -1767,8 +1767,16 @@ def _extract_thinking_meta(text: str) -> dict | None:
     return None
 
 
-def clean_thinking_for_save(content: str, metadata: dict | None = None) -> tuple[str, dict]:
-    """Extract thinking from content into metadata. Use for save paths that bypass save_assistant_response."""
+def clean_thinking_for_save(
+    content: str, metadata: dict | None = None, reasoning: str = ""
+) -> tuple[str, dict]:
+    """Extract thinking from content into metadata. Use for save paths that bypass save_assistant_response.
+
+    `reasoning` carries the model's separate reasoning channel (DeepSeek/vLLM `thinking:true`
+    deltas), which never appears in `content` — so without it the accordion is shown live but
+    LOST on reload / in a second browser session. Persist it into metadata.thinking when the
+    content itself didn't already carry an inline <think> block.
+    """
     md = dict(metadata) if metadata else {}
     info = _extract_thinking_meta(content)
     if info:
@@ -1776,8 +1784,12 @@ def clean_thinking_for_save(content: str, metadata: dict | None = None) -> tuple
             md["thinking"] = info["thinking"]
         if info.get("time"):
             md["thinking_time"] = info["time"]
-        return info["reply"], md
-    return content, md
+        out = info["reply"]
+    else:
+        out = content
+    if reasoning and reasoning.strip() and not md.get("thinking"):
+        md["thinking"] = reasoning.strip()
+    return out, md
 
 
 def save_assistant_response(
@@ -1796,6 +1808,7 @@ def save_assistant_response(
     tool_events: list = None,
     incognito: bool = False,
     phase: str = None,
+    reasoning: str = "",
 ):
     """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence.
 
@@ -1843,6 +1856,13 @@ def save_assistant_response(
         _content = _think_info["reply"]
     else:
         _content = full_response
+    # Clean-channel reasoning (DeepSeek/vLLM `thinking:true` deltas) never lands in
+    # full_response, so the extractor above can't recover it. Persist it explicitly so the
+    # collapsed "Thinking" accordion survives a reload and renders IDENTICALLY in a second
+    # browser session — the cross-session desync was reasoning shown live but never saved.
+    # Only when the content didn't already carry an inline <think> block.
+    if reasoning and reasoning.strip() and not md.get("thinking"):
+        md["thinking"] = reasoning.strip()
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:
