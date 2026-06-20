@@ -35,9 +35,13 @@ These resolve §7's open questions and steer the build:
   kickoff** (this PR): salvaged from the parallel build (PR #400) in the **Messenger** model — i.e.
   **without** that build's turn-lock / spectator / take-over (owner ruling). `game-updated` fires on
   `/decision` + `/self-eviction/*`; the cast-photo gate pins centered and closes across devices.
-- **C — Messenger serialization (queue-don't-stomp)** remains **owed**: today a truly simultaneous
-  two-device send can still cancel the in-flight run (the rare race). The lock-based design from #400
-  was deliberately *not* taken; the queue-based Messenger serialization is the follow-up.
+- **C — Messenger serialization (queue-don't-stomp)** (this PR): a game-framed turn now **queues**
+  behind any in-flight run for the canonical session instead of cancelling it
+  (`agent_runs.start(..., queue=True)` — the chat route opts in via `ctx.framed`). Two devices on
+  the one game chat serialize: one reasoning chain at a time, the live turn is never stomped. Plain
+  chats keep cancel-on-double-send. *(Known minor: a queued turn uses its submit-time context, so in
+  the rare exactly-simultaneous case the second reply may not yet reflect the first — non-destructive;
+  the engine state is authoritative and reconciles via `game-updated`/the desync spine.)*
 
 ---
 

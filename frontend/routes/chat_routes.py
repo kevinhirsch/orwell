@@ -1339,7 +1339,11 @@ def setup_chat_routes(
         if compare_mode:
             return StreamingResponse(_safe_stream(), media_type="text/event-stream")
 
-        agent_runs.start(session, _safe_stream())
+        # 0064 Part C (Messenger model): a GAME-framed turn QUEUES behind any in-flight run for this
+        # session instead of cancelling it — two devices on the one canonical game chat serialize
+        # (one reasoning chain at a time, the live turn is never stomped). Plain chats keep
+        # cancel-on-double-send. `ctx.framed` covers in-character, casting, and feeds-down turns.
+        agent_runs.start(session, _safe_stream(), queue=bool(getattr(ctx, "framed", False)))
         # Tell every other device viewing this session that a new run started, so
         # they reconcile (load the new user message + attach to the live reply).
         session_events.publish(session, "run-started")
