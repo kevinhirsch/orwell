@@ -5,4 +5,4 @@
  * dependency-free and importable everywhere; `src/adapters/**` is not. This module re-exports it so
  * the existing engine-side importers (`GameSessionAdapter`) are unchanged.
  */
-export { humanizeIds, tidyPathwaySlugs, humanizeForPlayer } from "../../domain/humanize";
+export { humanizeIds, tidyPathwaySlugs, humanizeForPlayer, humanizeForRetrospective } from "../../domain/humanize";

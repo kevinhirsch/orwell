@@ -69,7 +69,16 @@ describe("0048/B56 — the Vault unsealing is gated on the finished terminal sta
     expect(retro!.winner).toBeTruthy();
     const story = JSON.stringify(retro!.hiddenStory);
     expect(story).toContain(`${SENTINEL}-done`);            // the planted hidden scene is in the story
-    expect(retro!.hiddenStory.some((h) => h.type === "confessional")).toBe(true); // NPC interiority included
+    // NPC interiority is included — under its READABLE retrospective label (the raw kind slug is mapped to
+    // a plain category word so the FE's "[type] content" row reads as prose, not a debug dump).
+    expect(retro!.hiddenStory.some((h) => h.type === "Confessional")).toBe(true);
+    // …and no row's label is a raw machine slug: a readable label is Capitalized and carries no slug
+    // punctuation (`:`/`_`) nor an all-lowercase-hyphen machine token (`hidden-thread`, `offscreen-event`).
+    for (const h of retro!.hiddenStory) {
+      expect(h.type).not.toMatch(/[:_]/);
+      expect(h.type).not.toMatch(/^[a-z]+(?:-[a-z]+)+$/); // not a raw lowercase-hyphen kind slug
+      expect(h.type[0]).toBe(h.type[0]!.toUpperCase());   // a readable, Capitalized category word
+    }
     expect(retro!.twists).toEqual([{ kind: "double-eviction", firedWeek: null }]); // the twist that never fired
   });
 

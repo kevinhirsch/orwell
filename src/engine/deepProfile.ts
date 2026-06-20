@@ -600,6 +600,67 @@ export function storyThreadToVaultContent(t: StoryThread): string {
   ].join("\n");
 }
 
+// ── Post-season retrospective rendering (0048 — the Wall's ONE sanctioned reveal) ──────────────────
+// `storyThreadToVaultContent` above is the engine-only AUDIT serialization (machine ids + slugs — fine,
+// the Vault is engine-only). It is NOT player-readable, so the 0048 retrospective must NOT show it raw
+// (the live repro: "[hidden-thread] story-thread thread:npc:8:0 [dormant] premise: secret — …"). These
+// helpers render the SAME thread as plain, name-resolved prose for that post-season unsealing — the
+// machine thread id (`thread:npc:N:M`) is dropped entirely (its `npc:N` is resolved to the source's
+// NAME), the status / trigger-condition / surfacing-pathway slugs become readable clauses, and the
+// premise's `secret —`/`weakness —`/`true goal —` tag becomes a natural lead. Pure / Vault-free.
+
+/** A thread's lifecycle status as a readable post-season clause (or "" for the live `active` middle). */
+function threadStatusClause(status: ThreadStatus): string {
+  switch (status) {
+    case "dormant":
+      return "never surfaced";
+    case "active":
+      return "in play but never broke into the open";
+    case "surfaced":
+      return "broke into the open";
+    case "resolved":
+      return "played out";
+    case "expired":
+      return "passed without ever landing";
+    default:
+      return "";
+  }
+}
+
+/** Turn the premise tag (`secret — …` / `weakness — …` / `true goal — …`) into a natural lead. */
+function premiseLead(premise: string): string {
+  const m = /^(secret|weakness|true goal)\s*—\s*(.*)$/s.exec(premise);
+  if (!m) return premise.trim();
+  const body = m[2]!.trim();
+  // The premise bodies are authored as bare predicates ("is hiding …", "talks too much …", "protect …"),
+  // so the lead doubles as the sentence subject's continuation (the source NAME is prepended by the
+  // caller): "<Name> — Secretly was hiding …".
+  switch (m[1]) {
+    case "secret":
+      return `Secretly ${body}`;
+    case "weakness":
+      return `Their blind spot — ${body}`;
+    case "true goal":
+      return `Their real game — ${body}`;
+    default:
+      return body;
+  }
+}
+
+/**
+ * Render ONE hidden story thread as readable post-season prose, the source id resolved to a name via
+ * `nameOf` (a public roster fact). Contains ZERO raw `npc:N` / `thread:` token by construction — the
+ * machine id is never interpolated; only the resolved source NAME and translated clauses are. The
+ * premise text (the good part) is preserved verbatim after its tag is naturalized.
+ */
+export function storyThreadToRetrospectiveProse(t: StoryThread, nameOf: (id: EntityId) => string): string {
+  const name = nameOf(t.sourceId);
+  const lead = premiseLead(t.premise);
+  const status = threadStatusClause(t.status);
+  const tail = status ? ` (${status})` : "";
+  return `${name} — ${lead}${tail}`;
+}
+
 // ── 0060 — the scheduler's PURE support (the season-position predicates + the Vault-safe paraphrase) ─
 // All of this is engine-only and Vault-free BY CONSTRUCTION: the predicates read only PUBLIC position
 // facts, and the paraphrase is a vague atmospheric gloss keyed by SOURCE CLASS — it never touches the
