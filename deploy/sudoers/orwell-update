@@ -1,0 +1,23 @@
+# orwell — tightly-scoped sudoers drop-in for the web-triggered update (admin "Update" button).
+#
+# Installed to /etc/sudoers.d/orwell-update (mode 0440) by orwell-install.sh. OPTIONAL: only
+# needed when the admin status page's Update button runs the script via the DIRECT detached path
+# (ORWELL_UPDATE_SUDO=1). The DEFAULT and preferred door is the root-side flag trigger
+# (orwell-ops-update.path / G19b), which needs no sudo at all — the FE just drops a flag file.
+#
+# Why this exists: the front-end runs as the non-root `orwell` user inside the E85-hardened
+# orwell-frontend.service (NoNewPrivileges=yes, empty CapabilityBoundingSet=, ProtectSystem=strict).
+# That user cannot git-pull into /opt/orwell, write /etc/systemd, or `systemctl restart`. This grant
+# lets it run EXACTLY ONE fixed command — the deploy updater — and nothing else.
+#
+# Security posture:
+#   * A single fully-qualified command, no wildcards, no arguments accepted from the caller — the
+#     full argv is fixed here (`/usr/bin/bash /opt/orwell/deploy/orwell-update.sh`). The web tier
+#     chooses WHEN, never WHAT or with-which-args.
+#   * NOPASSWD (the service user is non-interactive; `sudo -n` never prompts).
+#   * NoNewPrivileges=yes in the FE unit normally BLOCKS setuid sudo. Operators using the direct
+#     path must add a drop-in clearing it for the FE unit (documented in deploy/README.md); the
+#     flag-trigger door avoids this entirely and is recommended.
+#
+# Adjust the user/paths if APP_DIR is non-default; the installer writes the effective ones.
+orwell ALL=(root) NOPASSWD: /usr/bin/bash /opt/orwell/deploy/orwell-update.sh

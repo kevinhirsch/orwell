@@ -6537,7 +6537,18 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
        card was removed). The inner .theme-tab-panel keeps overflow:auto, so
        any taller content still scrolls inside. */
     #theme-popup { overflow-y: hidden; max-height: min(85vh, 600px); }
-    #theme-popup .modal-header { flex-shrink: 0; }
+    /* The popup ROOT is var(--bg) (inline) so its inner .admin-cards
+       (themselves var(--panel)) keep a visible contrast in the body. But
+       the base .modal-header is `background-color: inherit`, so the title
+       strip behind the Peek bar inherited that page-background var(--bg)
+       and read as a flat, mismatched gray — unlike every other window's
+       chrome, whose titlebar shows var(--win-bg) (= var(--panel)). Pin the
+       header to the shared window-chrome token so it matches the kit
+       (.ow-titlebar over var(--win-bg)) and the other modals, and tracks
+       theme changes (the house presets + the custom colors set right here
+       move --panel/--win-bg). Scoped to the header only — the body keeps
+       var(--bg) for its card contrast. */
+    #theme-popup .modal-header { flex-shrink: 0; background-color: var(--win-bg); }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 

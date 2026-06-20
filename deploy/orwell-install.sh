@@ -312,6 +312,26 @@ EOF
     rm -f "$FRONTEND_DROPIN"
   fi
 
+  # OPTIONAL — the admin "Update" button's DIRECT path (ORWELL_UPDATE_SUDO=1): a tightly-scoped
+  # sudoers drop-in letting the non-root `orwell` FE user run EXACTLY the one fixed update script.
+  # OFF by default: the recommended door is the root-side flag trigger (orwell-ops-update.path,
+  # above), which needs no sudo. Only install this when the operator opts into the detached-Popen
+  # path. The drop-in is validated with `visudo -c` before it is trusted (a bad sudoers file can
+  # lock out sudo entirely). NOTE: NoNewPrivileges=yes in the FE unit blocks setuid sudo — the
+  # operator must also add a drop-in clearing it (deploy/README.md); the flag trigger avoids this.
+  if [[ "${ORWELL_UPDATE_SUDO:-0}" == "1" ]]; then
+    step "admin-update sudoers drop-in (ORWELL_UPDATE_SUDO=1)"
+    local sudoers_tmp="/etc/sudoers.d/.orwell-update.tmp"
+    install -m 0440 "${APP_DIR}/deploy/sudoers/orwell-update" "$sudoers_tmp"
+    if visudo -cf "$sudoers_tmp" >/dev/null 2>&1; then
+      mv -f "$sudoers_tmp" /etc/sudoers.d/orwell-update
+      echo "==> installed /etc/sudoers.d/orwell-update (scoped to orwell-update.sh)"
+    else
+      rm -f "$sudoers_tmp"
+      echo "WARNING: deploy/sudoers/orwell-update failed visudo -c — NOT installed" >&2
+    fi
+  fi
+
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
   # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).

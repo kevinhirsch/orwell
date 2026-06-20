@@ -1319,11 +1319,12 @@ import { isNarrow } from './platform.js';
 
         // If thinking is still streaming (unclosed <think>), show indicator instead of raw text
         if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
-          // GAME BUILD (immersion): NEVER render the model's reasoning — not even the
-          // "Thinking…" indicator (it would carry leaked engine lever names once the
-          // box exists, and the header itself breaks the diegesis). Hold the bubble
-          // empty while reasoning is open; the reply-only render lands when it closes.
-          if (isGameBuild()) {
+          // GAME BUILD: the live-think accordion (built in the main stream loop) owns the
+          // reasoning display; this secondary render path is reached only AFTER reasoning
+          // closes, so it should never see an open <think> here. If an operator fully hid
+          // the accordion (`body.hide-thinking`), hold the bubble empty while reasoning is
+          // open; the clean reply-only render lands when it closes.
+          if (isGameBuild() && document.body.classList.contains('hide-thinking')) {
             uiModule.scrollHistory();
             return;
           }
@@ -1608,23 +1609,25 @@ import { isNarrow } from './platform.js';
                   }
                 }
 
-                // GAME BUILD (immersion): the model's reasoning must NEVER reach the DOM —
-                // it leaks engine lever names (whereabouts, npcVoice, getGameState, …) and
-                // breaks the show. We STILL track the thinking open/close state (so we know
-                // when reasoning ends and the reply begins) but build NO reasoning DOM:
-                //   • opening  → mark isThinking, destroy the spinner, hold the bubble empty
-                //   • streaming → keep holding (no live-think box)
-                //   • closing  → clear the flag, let normal streaming render the reply only
-                // The model keeps reasoning; it just never renders here. _renderStream() +
-                // processWithThinking() strip any reasoning that bleeds into the reply text.
-                if (isGameBuild() && (hasUnclosedThink || isThinking)) {
+                // GAME BUILD (2026-06-20 owner ruling): the model's reasoning must be
+                // CLEANLY SEPARATED from the public bubble — never mixed in. Reasoning
+                // streams into a condensed, DEFAULT-COLLAPSED "Thinking" accordion
+                // (debug-viewable, expandable) while the public bubble carries ONLY the
+                // in-character narration. The reasoning is Vault-free (the model receives
+                // no secret state) so showing it collapsed for debug is safe; the reply
+                // render below still scrubs any reasoning/draft that bled into content.
+                // The shared live-think path (immediately below) already builds a
+                // collapsed accordion — both the game build and the non-game build use it.
+                // An operator may fully hide the accordion via `body.hide-thinking`.
+                if (isGameBuild() && document.body.classList.contains('hide-thinking') &&
+                    (hasUnclosedThink || isThinking)) {
                   if (hasUnclosedThink) {
                     if (!isThinking) {
                       isThinking = true;
                       thinkingStartTime = Date.now();
                       if (spinner && spinner.element) spinner.destroy();
                     }
-                    // Reasoning still streaming — render nothing, just wait.
+                    // Operator hid the accordion — render nothing, just wait.
                     uiModule.scrollHistory();
                     continue;
                   }
@@ -2859,8 +2862,13 @@ import { isNarrow } from './platform.js';
             }
           }
           if (_liveReplyEl && _finalReply) {
-            // Render reply into the live-reply container (thinking bar already showing)
-            var _replyHtml = markdownModule.mdToHtml(markdownModule.squashOutsideCode(_finalReply));
+            // Render reply into the live-reply container (thinking bar already showing).
+            // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs —
+            // the public bubble must never carry a reasoning preamble that bled into the
+            // reply text (the thinking accordion already holds the reasoning separately).
+            var _replyHtml = isGameBuild()
+              ? markdownModule.processWithThinking(markdownModule.squashOutsideCode(_finalReply))
+              : markdownModule.mdToHtml(markdownModule.squashOutsideCode(_finalReply));
             _liveReplyEl.innerHTML = _replyHtml;
             _liveReplyEl.classList.remove('live-reply-content');
             if (_sourcesData) {
