@@ -3672,8 +3672,26 @@ export class GameSessionAdapter implements GameSession {
   private worldContext(moment: string): string | undefined {
     if (!this.worldSnapshot || !this.house) return undefined;
     const channel = moment === "social" || moment === "diary-room" ? "offscreen" : "player";
-    const block = renderZeitgeist(this.worldSnapshot, { week: this.week, channel });
+    // 0062 HOH music perk: the player has LIVE music only when they hold it — the reigning HOH (the real-BB
+    // luxury) or in the HOH room overhearing it; otherwise the music slice is frozen memory like the rest.
+    const block = renderZeitgeist(this.worldSnapshot, {
+      week: this.week, channel, musicAccess: this.hasMusicPerk(this.house.player.id),
+    });
     return block.length > 0 ? block : undefined;
+  }
+
+  /**
+   * 0062 media-fidelity (the HOH music perk): who currently has LIVE music — the one live-media exception
+   * in the sealed house. The reigning HOH gets the music luxury (real BB), and anyone in the HOH room
+   * overhears it. No HOH (premiere / between reigns) ⇒ nobody. Reads ONLY public state (the HOH + room
+   * co-presence already cross to the player via gameStatus/whereabouts), so it leaks nothing — and it is a
+   * prompt-rendering read, never a game input, so the §6 outcome-invariance holds.
+   */
+  private hasMusicPerk(id: EntityId): boolean {
+    const hoh = this.ceremony.hoh;
+    if (!hoh) return false;
+    if (id === hoh) return true;
+    return this.presence?.get(id) === "hoh-room";
   }
 
   /**
