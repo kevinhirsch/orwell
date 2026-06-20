@@ -42,6 +42,17 @@ export interface CeremonyState {
 /** The live-session core the `GameSessionAdapter` snapshots/restores. */
 export interface SessionCore {
   started: boolean;
+  /**
+   * The monotonic per-sandbox beat counter (feature 0065 Part A) — increments by one on every
+   * committed state mutation; stable on a no-op. Persisted here so the compare-and-swap stale-write
+   * token is RESTART-SAFE and co-versioned with the save (0007/0030): after a resume the counter
+   * resumes at the saved value, so a queued/in-flight write computed against the pre-restart board is
+   * still correctly refused. NOT secret (a counter carries no Vault content), and it lives on the
+   * 0007 GameState projection only as a scalar (never a `counts()` dimension), so it cannot trip a
+   * non-degradation false positive. Absent on a pre-0065 save ⇒ 0 (a resumed game continues from 0;
+   * the next commit bumps it — benign, since the FE's last-seen token resets across a restart too).
+   */
+  beatSeq?: number;
   week: number;
   phase: string;
   ceremony: CeremonyState;

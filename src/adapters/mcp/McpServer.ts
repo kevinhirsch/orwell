@@ -40,8 +40,21 @@ function requireShape(name: string, args: Record<string, unknown>): void {
   const refuse = (field: string, want: string): never => {
     throw new EngineRefusal(`invalid args for ${name}: "${field}" must be ${want}`);
   };
+  // 0065 — shape-guard the OPTIONAL sync-spine fields the SAME way E31/D10/R6 guards every other
+  // optional arg (a malformed value would otherwise cast blindly into the adapter): `expectedBeatSeq`
+  // must be a number when present (the CAS token, Part A); `idempotencyKey` a string when present
+  // (the at-most-once retry key, Part B). Absent ⇒ unchanged (fully opt-in).
+  const guardSyncFields = (allowIdempotency: boolean): void => {
+    if (args["expectedBeatSeq"] !== undefined && typeof args["expectedBeatSeq"] !== "number") {
+      refuse("expectedBeatSeq", "a number when present");
+    }
+    if (allowIdempotency && args["idempotencyKey"] !== undefined && typeof args["idempotencyKey"] !== "string") {
+      refuse("idempotencyKey", "a string when present");
+    }
+  };
   switch (name) {
     case "recordInteraction":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq (no idempotency key here)
       if (!isStr(args["initiator"])) refuse("initiator", "a houseguest id (string)");
       if (!isStrArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids");
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
@@ -68,6 +81,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       }
       return;
     case "surfaceInformationTo": {
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["entity"])) refuse("entity", "an entity id (string)");
       const fact = args["fact"];
       if (typeof fact !== "object" || fact === null || !isStr((fact as Record<string, unknown>)["content"])) {
@@ -79,11 +93,19 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "diaryRoom":
       if (!isStr(args["entry"])) refuse("entry", "a non-empty string");
       return;
+    case "advanceGame":
+      guardSyncFields(true); // 0065 Parts A+B — optional expectedBeatSeq + idempotencyKey
+      return;
     case "submitDecision":
+      guardSyncFields(true); // 0065 Parts A+B — optional expectedBeatSeq + idempotencyKey
       if (!isStr(args["kind"])) refuse("kind", "a decision kind (string)");
       if (args["choice"] !== undefined && !isStrArray(args["choice"])) refuse("choice", "an array of houseguest ids when present");
       return;
+    case "moveTo":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      return;
     case "makeDeal":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
       if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
       if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
@@ -142,7 +164,8 @@ export class McpServer {
       case "runCompetition":
         return this.deps.session.runCompetition(args as unknown as RunCompetitionReq);
       case "advanceGame":
-        return this.deps.session.advanceGame();
+        // 0065 — optional expectedBeatSeq (CAS) + idempotencyKey (at-most-once) ride the args.
+        return this.deps.session.advanceGame(args as { expectedBeatSeq?: number; idempotencyKey?: string });
       case "submitDecision":
         return this.deps.session.submitDecision(args as unknown as SubmitDecisionReq);
       case "requestSelfEviction":
@@ -164,7 +187,11 @@ export class McpServer {
       case "whereabouts":
         return this.deps.session.whereabouts();
       case "moveTo":
-        return this.deps.session.movePlayer(String(args["room"] ?? ""));
+        // 0065 Part A — optional expectedBeatSeq CAS token rides the args.
+        return this.deps.session.movePlayer(
+          String(args["room"] ?? ""),
+          typeof args["expectedBeatSeq"] === "number" ? args["expectedBeatSeq"] : undefined,
+        );
       // PREMIERE meet-everyone (feature #380 follow-on): read who's still to introduce / mark a meeting.
       case "premiereIntros":
         return this.deps.session.premiereIntros();

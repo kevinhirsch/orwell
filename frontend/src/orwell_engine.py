@@ -423,12 +423,17 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
     knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
     an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
     houseguests' feelings move, in which direction, with what relative emphasis — the engine still
-    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path."""
+    owns the magnitude. With neither supplied the request is byte-identical to the kind-only path.
+
+    0065 Part A — an optional `expected_beat_seq` compare-and-swap token is threaded in ONLY when
+    provided; if it no longer matches the engine's committed beatSeq the call is refused (409
+    `stale-beat`). Absent ⇒ the request is identical to today (the FE owns the per-turn capture/
+    attach of the token — sequenced after this engine slice)."""
     witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
     if "player" not in witness:
         witness.append("player")
@@ -437,13 +442,19 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["kind"] = kind
     if consequence:
         req["consequence"] = consequence
+    if expected_beat_seq is not None:
+        req["expectedBeatSeq"] = expected_beat_seq
     return await _call("recordInteraction", req, user=user)
 
 
-async def surface_information(information: str, pathway: str, user: str | None = None) -> dict:
+async def surface_information(information: str, pathway: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
     """Surface a fact into this user's player knowledge via a named in-game pathway
-    (e.g. "overheard", "told-by:npc:2")."""
-    return await _call("surfaceInformationTo", {"entity": "player", "fact": {"content": information}, "pathway": pathway}, user=user)
+    (e.g. "overheard", "told-by:npc:2"). 0065 Part A — an optional `expected_beat_seq` CAS token is
+    threaded in only when provided (absent ⇒ identical request to today)."""
+    req: dict = {"entity": "player", "fact": {"content": information}, "pathway": pathway}
+    if expected_beat_seq is not None:
+        req["expectedBeatSeq"] = expected_beat_seq
+    return await _call("surfaceInformationTo", req, user=user)
 
 
 async def game_status(user: str | None = None) -> dict:
@@ -490,18 +501,37 @@ async def end_of_session_summary(user: str | None = None) -> dict:
     return await _call("endOfSessionSummary", {}, user=user)
 
 
-async def advance_game(user: str | None = None) -> dict:
+async def advance_game(expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Advance the weekly loop by one beat (HOH→noms→veto→ceremony→eviction→finale).
     NPC beats resolve automatically; returns the beat event, any pending player decision,
-    and the public status. Vault-free."""
-    return await _call("advanceGame", {}, user=user)
+    and the public status. Vault-free.
+
+    0065 — both optional sync-spine fields are threaded in ONLY when provided: `expected_beat_seq`
+    (Part A compare-and-swap; a stale token ⇒ 409 `stale-beat`) and `idempotency_key` (Part B
+    at-most-once; a replayed key returns the original AdvanceView without advancing again). Absent ⇒
+    the request is byte-identical to today (the FE owns per-turn token capture + key minting — that
+    wiring is sequenced after this engine slice)."""
+    args: dict = {}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
+    return await _call("advanceGame", args, user=user)
 
 
-async def submit_decision(decision: dict, user: str | None = None) -> dict:
+async def submit_decision(decision: dict, expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Resolve the player's pending decision (nominations / use veto / replacement /
     eviction vote) and continue the loop. `decision` is the validated payload.
-    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}."""
-    return await _call("submitDecision", decision or {}, user=user)
+    For a confirmed self-eviction (0061), `decision` is {"kind": "self-evict", "confirmed": True}.
+
+    0065 — `expected_beat_seq` (Part A CAS) and `idempotency_key` (Part B at-most-once) are merged
+    into the decision payload ONLY when provided; absent ⇒ identical to today."""
+    payload = dict(decision or {})
+    if expected_beat_seq is not None:
+        payload["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        payload["idempotencyKey"] = idempotency_key
+    return await _call("submitDecision", payload, user=user)
 
 
 async def request_self_eviction(user: str | None = None) -> dict:
@@ -530,9 +560,14 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
-async def make_deal(with_id: str, kind: str, terms: str, user: str | None = None) -> dict:
-    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it."""
-    return await _call("makeDeal", {"with": with_id, "kind": kind, "terms": terms}, user=user)
+async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Record a player<->NPC deal (0039). The engine tracks and adjudicates it. 0065 Part A — an
+    optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
+    today)."""
+    args: dict = {"with": with_id, "kind": kind, "terms": terms}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("makeDeal", args, user=user)
 
 
 async def season_recap(user: str | None = None) -> dict:
@@ -558,10 +593,15 @@ async def whereabouts(user: str | None = None):
     return await _call("whereabouts", {}, user=user)
 
 
-async def move_to(room: str, user: str | None = None):
+async def move_to(room: str, expected_beat_seq: int | None = None, user: str | None = None):
     """L21/L24: the player walks to a room they named — the engine moves them (it never auto-relocates
-    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game."""
-    return await _call("moveTo", {"room": room}, user=user)
+    a person) and returns the resulting whereabouts. No-op for an unknown room / pre-game. 0065 Part A —
+    an optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
+    today)."""
+    args: dict = {"room": room}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("moveTo", args, user=user)
 
 
 async def premiere_intros(user: str | None = None):

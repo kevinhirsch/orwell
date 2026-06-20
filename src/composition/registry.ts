@@ -72,6 +72,11 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // Validated references (B39): a recorded interaction may only name LIVING houseguests — the session
   // knows who's still in the house (player + non-evicted NPCs).
   commands.setLivingProvider(() => session.livingIds());
+  // 0065 Part A — the command port enforces the compare-and-swap stale-write guard against the SAME
+  // monotonic beatSeq the session owns/persists, and composes its typed `stale-beat` refusal with the
+  // session's Vault-free board. Both readers are Vault-free (a counter + ceremony-level public status).
+  commands.setBeatSeqProvider(() => session.beatSeqNow());
+  commands.setBoardProvider(() => session.gameStatus());
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
@@ -482,6 +487,12 @@ export class GameSessionRegistry {
     // re-exports the candidate, so this commit's candidate caches at the new rev and the cache can
     // never hand back a snapshot older than the live state.
     this.bumpRev(user);
+    // 0065 Part A — the single commit funnel both adapters route their `onPersist` through: bump the
+    // session's monotonic beat counter ONCE per committed mutation, BEFORE the delegate exports the
+    // candidate snapshot (so the new value is persisted). A commit the integrity checkpoint then
+    // refuses is rolled back via `restore(baseline)`, which resets the counter from the baseline
+    // snapshot — so a refused/failed commit never leaves the counter advanced.
+    this.sandboxes.get(user)?.session.bumpBeatSeq();
     if (this.commitDelegate) this.commitDelegate(user);
     else this.saveUser(user);
   }

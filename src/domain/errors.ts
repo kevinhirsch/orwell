@@ -12,6 +12,12 @@
  * - `TurnRefusedError` — the fail-closed integrity checkpoint (0031) refused the commit and rolled
  *   the sandbox back. State is unchanged and NOTHING was persisted; the request itself FAILS
  *   (HTTP 409) — never 200-then-rollback (audit E3/D1). Carries only fault KINDS, never content.
+ * - `StaleBeatError` — the compare-and-swap stale-write guard (0065 Part A): a mutating call carried
+ *   an `expectedBeatSeq` that no longer matches the committed `beatSeq`, so the board moved under it
+ *   (the 0064 queued-turn case). The write is REFUSED with NO state change — HTTP 409 with a stable
+ *   `code: "stale-beat"`, the CURRENT `beatSeq`, and the Vault-free current board, so the caller can
+ *   re-ground immediately. Distinct from `TurnRefusedError` (an integrity failure of an applied
+ *   candidate); this refuses BEFORE the mutation, so nothing was ever applied to roll back.
  * - `PersistFailureError` — the durable save itself failed (disk full, I/O). Its own fault class,
  *   never misread as "degradation" and never fail-open (audit E7): the turn is rolled back, the
  *   message is sanitized (no paths), HTTP 500.
@@ -40,5 +46,27 @@ export class PersistFailureError extends Error {
   constructor() {
     super("the turn could not be saved and was rolled back — nothing was lost; try again");
     this.name = "PersistFailureError";
+  }
+}
+
+/**
+ * A mutating call's `expectedBeatSeq` no longer matches the committed `beatSeq` — the board moved
+ * under it (0065 Part A). The write is refused BEFORE any mutation (state unchanged, nothing to roll
+ * back). The HTTP edge maps it to 409 with the stable `code: "stale-beat"`, the CURRENT `beatSeq`,
+ * and the Vault-free current `board` so the caller can re-ground and retry against the moved board.
+ * Vault-free by construction: a beat counter carries no Vault content, and `board` is the same
+ * ceremony-level public status `gameStatus` exposes.
+ */
+export class StaleBeatError extends Error {
+  /** A stable machine code the FE keys on (never the human message). */
+  public readonly code = "stale-beat" as const;
+  constructor(
+    /** The current committed beat counter (what the caller should re-ground to). */
+    public readonly beatSeq: number,
+    /** The Vault-free current board (ceremony-level public status) for an immediate re-ground. */
+    public readonly board: unknown,
+  ) {
+    super(`stale write refused — expected beatSeq is behind the current board (now ${beatSeq}); re-ground and retry`);
+    this.name = "StaleBeatError";
   }
 }

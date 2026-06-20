@@ -75,7 +75,7 @@ import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
-import { EngineRefusal } from "../../domain/errors";
+import { EngineRefusal, StaleBeatError } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
@@ -200,6 +200,26 @@ export class GameSessionAdapter implements GameSession {
   private intake: CastingIntake = emptyIntake();
   // Public ceremony state for the status panel (0020). Vault-free: ids → public names only.
   private ceremony: CeremonyState = { nominees: [], vetoUsed: false };
+  /**
+   * The monotonic per-sandbox beat counter (feature 0065 Part A). Bumped exactly ONCE per committed
+   * state mutation by the registry's commit funnel (`bumpBeatSeq`, called before the candidate
+   * snapshot is exported), so it increments by one per beat / aux commit and stays stable on a no-op
+   * (a no-op never fires `onPersist`). Persisted in the snapshot (restart-safe; co-versioned with the
+   * save). Surfaced on every read/advance view; a mutating call may carry `expectedBeatSeq` and is
+   * refused (`stale-beat`/409) when it no longer matches. A rolled-back commit restores the pre-commit
+   * value through `restore` (the baseline snapshot carries it). NOT secret — a counter has no Vault
+   * content, so it crosses the wall freely.
+   */
+  private beatSeq = 0;
+  /**
+   * The at-most-once idempotency cache (feature 0065 Part B) — a small bounded per-sandbox LRU
+   * `idempotencyKey → AdvanceView` for `advanceGame`/`submitDecision`. A repeated key returns the
+   * ORIGINAL view (its `beatSeq` included) WITHOUT advancing again, so a flaky-socket retry never
+   * double-applies. Best-effort + in-memory (a restart drops it and degrades safely — Part A's
+   * `expectedBeatSeq` still guards a double-apply); insertion-ordered so the oldest evicts first.
+   */
+  private readonly idempotencyCache = new Map<string, AdvanceView>();
+  private static readonly IDEMPOTENCY_CACHE_MAX = 32;
   // The incremental weekly-loop state (0011); null until a game starts.
   private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
@@ -346,6 +366,48 @@ export class GameSessionAdapter implements GameSession {
       this.onPersist?.(); // may throw (a refused/failed commit) — AFTER all state mutation (E3)
     }
     return out;
+  }
+
+  /** The current monotonic beat counter (0065 Part A) — surfaced on every read/advance view. */
+  beatSeqNow(): number {
+    return this.beatSeq;
+  }
+
+  /**
+   * Bump the beat counter (0065 Part A) — the registry's commit funnel calls this exactly ONCE per
+   * committed mutation, BEFORE the candidate snapshot is exported, so the new value is persisted. A
+   * commit that is then refused/rolled back is restored from the baseline snapshot (which carries the
+   * pre-commit value), so a refused write never leaves the counter advanced. (Bumping here, not inside
+   * `persist`, keeps an interior deferred `persist` from double-counting one logical commit.)
+   */
+  bumpBeatSeq(): void {
+    this.beatSeq++;
+  }
+
+  /**
+   * Compare-and-swap stale-write guard (0065 Part A). When a mutating call supplies `expectedBeatSeq`
+   * and it no longer matches the committed `beatSeq`, the board moved under it (the 0064 queued-turn
+   * case) — refuse BEFORE any mutation with a typed `stale-beat` conflict carrying the CURRENT counter
+   * and the Vault-free current board, so the caller can re-ground immediately. `undefined` ⇒ opt out
+   * (byte-identical to the pre-0065 path). The board is the same ceremony-level public status
+   * `gameStatus()` exposes — no Vault content.
+   */
+  private guardBeatSeq(expected: number | undefined): void {
+    if (expected !== undefined && expected !== this.beatSeq) {
+      throw new StaleBeatError(this.beatSeq, this.gameStatus());
+    }
+  }
+
+  /** 0065 Part B — remember an `AdvanceView` under its idempotency key (bounded LRU; oldest evicts). */
+  private rememberIdempotent(key: string, view: AdvanceView): AdvanceView {
+    this.idempotencyCache.delete(key); // re-insert at the tail (insertion-ordered = LRU)
+    this.idempotencyCache.set(key, view);
+    while (this.idempotencyCache.size > GameSessionAdapter.IDEMPOTENCY_CACHE_MAX) {
+      const oldest = this.idempotencyCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.idempotencyCache.delete(oldest);
+    }
+    return view;
   }
 
   /** Wire the beat-event sink (the registry records each as a player-witnessed event). */
@@ -925,6 +987,10 @@ export class GameSessionAdapter implements GameSession {
   snapshot(): SessionCore {
     return {
       started: this.house !== null,
+      // 0065 Part A — persist the monotonic beat counter so the CAS token is restart-safe (co-versioned
+      // with the save). Conditional spread keeps a never-bumped (pre-game/legacy) snapshot byte-shaped
+      // as before (absent ⇒ 0 on restore), so a pre-0065 save round-trips unchanged.
+      ...(this.beatSeq > 0 ? { beatSeq: this.beatSeq } : {}),
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
@@ -1040,6 +1106,12 @@ export class GameSessionAdapter implements GameSession {
     // on the OLD array references) must be dropped; a stale clone could otherwise be reused for a new
     // soul that happens to match a length, persisting the wrong history.
     this.soulCloneCache.clear();
+    // 0065 Part A — resume the beat counter at the saved value (restart-safe CAS). Absent on a pre-0065
+    // save ⇒ 0 (the next commit bumps it). A resume replaces the houseguest objects wholesale, so the
+    // process-local idempotency cache (Part B) is for the dead in-memory life — drop it (best-effort;
+    // Part A's counter still guards a double-apply after the cache is gone).
+    this.beatSeq = core.beatSeq ?? 0;
+    this.idempotencyCache.clear();
     this.house = core.house ? cloneSession(core.house) : null;
     this.week = core.week;
     this.phase = core.phase;
@@ -1200,6 +1272,7 @@ export class GameSessionAdapter implements GameSession {
 
   gameStatus(): PublicGameStatus {
     return {
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token; Vault-free
       week: this.week,
       phase: this.phase,
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
@@ -1369,7 +1442,9 @@ export class GameSessionAdapter implements GameSession {
    * whereabouts unchanged (the model knows the valid rooms from the moment prompt, so this is rare).
    * Returns the resulting whereabouts so the caller can voice the move. Vault-free.
    */
-  movePlayer(room: string): WhereaboutsView | null {
+  movePlayer(room: string, expectedBeatSeq?: number): WhereaboutsView | null {
+    // 0065 Part A — refuse a move computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(expectedBeatSeq);
     if (!this.house || !this.presence) return null;
     const me = this.house.player.id;
     const here = this.presence.get(me) ?? null;
@@ -2525,11 +2600,24 @@ export class GameSessionAdapter implements GameSession {
     return new SeededRandom(hashSeed(`${root}:${this.live?.week}:${this.live?.beat}${cycle}`));
   }
 
-  advanceGame(): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+  advanceGame(req: { expectedBeatSeq?: number; idempotencyKey?: string } = {}): AdvanceView {
+    // 0065 Part B — an at-most-once replay returns the ORIGINAL view (its beatSeq included) WITHOUT
+    // advancing again; it WINS even if beatSeq has since moved (the cache is the authority on the
+    // already-applied result). Checked before the CAS guard so a retry of a now-stale key still
+    // returns the cached success rather than a spurious stale-beat conflict.
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a write computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
-    return this.inOneCommit(() => {
+    const view = this.inOneCommit(() => {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
@@ -2539,31 +2627,47 @@ export class GameSessionAdapter implements GameSession {
       // and every ceremony beat are visible in the view, not only recorded to the event store.
       return this.advanceView(ev);
     });
+    // 0065 Part B — cache the committed result under its key, so a retry replays it verbatim.
+    return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, view) : view;
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
+    // 0065 Part B — replay an already-resolved decision verbatim (wins even if beatSeq moved).
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a decision computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) {
+      const v = this.advanceView(null);
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    }
+    // 0065 Part B — every resolved/no-op path below caches its committed view under the key, so a
+    // retry replays it verbatim (and never re-applies the decision).
+    const remember = (v: AdvanceView): AdvanceView =>
+      req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
     // 0061 — self-eviction is the sanctioned CONFIRMED quit. It rides the SAME `submitDecision`
     // seam but resolves through its own dedicated path (NOT the ceremony-pending machinery): the
     // confirmation must already be raised (the OOC step-1 gate), AND `confirmed` must be true.
     // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
-    if (req.kind === "self-evict") return this.resolveSelfEviction(req.confirmed === true);
+    if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
     const compApproach = (k: string): boolean => k === "comp-intent" || k === "comp-round";
     const pendingKind = this.live.pending?.kind;
     const kindMatches = !!pendingKind && (pendingKind === req.kind || (compApproach(pendingKind) && compApproach(req.kind)));
-    if (!kindMatches) return this.advanceView(null);
+    if (!kindMatches) return remember(this.advanceView(null));
     // (E42) Eviction-vote reconciliation moved to `commit`: the staged eviction's `voteOf` carries
     // EVERY voter — player and NPC alike — so the ledger now sees all binding votes in one place.
-    return this.inOneCommit(() => {
+    return remember(this.inOneCommit(() => {
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
       return this.advanceView(ev);
-    });
+    }));
   }
 
   /**
@@ -2620,6 +2724,8 @@ export class GameSessionAdapter implements GameSession {
    * deals are made off-screen and held in the Vault (never crosses this outward seam).
    */
   makeDeal(req: MakeDealReq): DealView | null {
+    // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
@@ -3022,6 +3128,7 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     return {
       started: this.house !== null,
+      beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
       event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
       pending: this.pendingView(),
       status: this.gameStatus(),
@@ -3358,7 +3465,7 @@ export class GameSessionAdapter implements GameSession {
       // Pre-game, the view carries the interview's status (0050): the engine — not the model —
       // says which building blocks are in and what the next step is.
       return {
-        started: false, finished: false, week: 0, phase: this.phase, moment: "character-creation",
+        started: false, beatSeq: this.beatSeq, finished: false, week: 0, phase: this.phase, moment: "character-creation",
         ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         whereabouts: null,
         player: null, house: [], casting: castingStatusOf(this.intake),
@@ -3378,6 +3485,7 @@ export class GameSessionAdapter implements GameSession {
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
     return {
       started: true,
+      beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
       finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
       // C8-04: the live ceremony state in the model's persistent context (the same Vault-free public
       // facts gameStatus() exposes), so the narrator voices the REAL HOH/nominees/veto, never invents.
