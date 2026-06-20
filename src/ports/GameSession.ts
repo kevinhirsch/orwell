@@ -433,6 +433,19 @@ export interface PublicGameStatus {
    * out-of-band advance (the FE's last-seen cache is process-local and goes stale; this never does).
    */
   pending: PendingDecisionView | null;
+  /**
+   * F3: whether the season is OVER (a winner is crowned). Mirrors the same public over-signal as
+   * `AdvanceView.finished` / `SeasonRecap.finished` (`this.live.finished`). Surfaced here so a client
+   * that only watches the status panel learns the game ended without separately hitting `/state` or
+   * `/recap` — otherwise it hangs on the last ceremony state post-season.
+   */
+  finished: boolean;
+  /**
+   * F3: the PUBLIC broadcast season winner (id + display name), post-season only, else null. The same
+   * Vault-free public winner exposed for the finale/retrospective (`this.live.winner`) — a broadcast
+   * fact the whole house knows, NEVER any secret/Vault data.
+   */
+  winner: NamedRef | null;
 }
 
 /** A named houseguest reference for decisions/options (Vault-free — id + name only). */
