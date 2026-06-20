@@ -266,6 +266,99 @@ def test_same_season_rerun_keeps_one_persisted_image_per_npc(tmp_portraits, monk
     assert orwell_portraits._load_cast_epoch("u") == epoch_first  # stable URL version all season
 
 
+# --- 0065 follow-up: the facet FINGERPRINT re-shoot backstop ----------------------------
+# Generate-once versions a face by id+name within a season — but a houseguest's deep FACET can
+# change at the SAME id+name (the no-key→key path, or a seeded-floor shot that predates authoring).
+# The engine bakes the full facet into the deterministic portrait PROMPT, so a changed prompt at an
+# unchanged id+name means the stored face is stale and must be re-shot.
+
+def test_changed_facet_prompt_reshoots_same_houseguest(tmp_portraits, monkeypatch):
+    """A face shot from prompt A is RE-SHOT when the prompt changes to B for the SAME id+name."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    async def fake_gen(prompt, user, reference_png=None):
+        return b"PNG:" + prompt.encode()  # bytes track the prompt so a re-shoot is visible
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    # A seeded-floor portrait shot from facet/prompt A.
+    cast_a = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-A"}]
+    _run(orwell_portraits.generate_and_store(cast_a, "u", record_beats=False))
+    bytes_a = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+    assert bytes_a == b"PNG:facet-A"
+    fp_a = orwell_portraits.load_manifest("u")["npc_1"]["fingerprint"]
+    assert fp_a  # a fingerprint of the prompt was stamped
+
+    # The deep facet lands (same id, same name) → a DIFFERENT prompt → the stale face is re-shot.
+    cast_b = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-B-deeper"}]
+    summary = _run(orwell_portraits.generate_and_store(cast_b, "u", record_beats=False))
+
+    assert summary["generated"] == 1  # regeneration was invoked
+    bytes_b = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+    assert bytes_b == b"PNG:facet-B-deeper" and bytes_b != bytes_a  # the image changed
+    fp_b = orwell_portraits.load_manifest("u")["npc_1"]["fingerprint"]
+    assert fp_b and fp_b != fp_a  # the stored fingerprint tracks the new facet
+
+
+def test_unchanged_facet_prompt_does_not_reshoot(tmp_portraits, monkeypatch):
+    """An UNCHANGED prompt does NOT re-shoot — generate-once-per-season holds (single generation)."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+    calls = {"n": 0}
+
+    async def fake_gen(prompt, user, reference_png=None):
+        calls["n"] += 1
+        return b"PNG:" + prompt.encode() + b":" + str(calls["n"]).encode()
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    cast = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-A"}]
+    _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    assert calls["n"] == 1
+    bytes_first = (tmp_portraits / "u" / "npc_1.png").read_bytes()
+
+    # Same prompt (unchanged facet): generate-once must hold — nothing regenerated.
+    summary = _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    assert summary["generated"] == 0 and summary["skipped"] == 1
+    assert calls["n"] == 1  # exactly one generation, never a second
+    assert (tmp_portraits / "u" / "npc_1.png").read_bytes() == bytes_first  # same persisted image
+
+
+def test_legacy_entry_without_fingerprint_is_not_mass_reshot(tmp_portraits, monkeypatch):
+    """A legacy manifest entry with NO fingerprint backfills the field WITHOUT regenerating —
+    so the change doesn't trigger a mass re-shoot of every existing portrait."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+    calls = {"n": 0}
+
+    async def fake_gen(prompt, user, reference_png=None):
+        calls["n"] += 1
+        return b"PNG:" + prompt.encode()
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    # Seed a LEGACY (pre-fingerprint) portrait: write the file + a manifest entry with NO
+    # fingerprint, exactly as a pre-this-change build would have left it on disk.
+    d = tmp_portraits / "u"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "npc_1.png").write_bytes(b"PNG:legacy")
+    orwell_portraits._save_manifest(
+        "u", {"npc_1": {"file": "npc_1.png", "name": "Houseguest One", "source": "generated"}})
+
+    cast = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-A"}]
+    summary = _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+
+    # The missing field must NOT force a re-shoot — nothing was generated…
+    assert summary["generated"] == 0 and summary["skipped"] == 1
+    assert calls["n"] == 0
+    assert (tmp_portraits / "u" / "npc_1.png").read_bytes() == b"PNG:legacy"  # untouched image
+    # …but the fingerprint self-healed onto the entry so a FUTURE genuine facet change re-shoots.
+    fp = orwell_portraits.load_manifest("u")["npc_1"].get("fingerprint")
+    assert fp == orwell_portraits._prompt_fingerprint("facet-A")
+
+    # Prove the self-heal works: a DIFFERENT prompt now does re-shoot (no longer a legacy entry).
+    summary2 = _run(orwell_portraits.generate_and_store(
+        [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-B"}],
+        "u", record_beats=False))
+    assert summary2["generated"] == 1 and calls["n"] == 1
+    assert (tmp_portraits / "u" / "npc_1.png").read_bytes() == b"PNG:facet-B"
+
+
 # --- the cast roster route: name + status + portrait, Vault-free ------------------------
 
 _HIDDEN_SENTINEL = "VAULT_SECRET_DO_NOT_LEAK"

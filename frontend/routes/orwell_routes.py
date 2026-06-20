@@ -954,6 +954,13 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
+            except Exception:
+                pass
             res = await orwell_engine.create_character(
                 body.playerName.strip() or None,
                 archetype=body.archetype,
@@ -1091,6 +1098,13 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
+            except Exception:
+                pass
             if body.keep:
                 # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
                 res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
@@ -1130,6 +1144,13 @@ def setup_orwell_routes() -> APIRouter:
         try:
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
+            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
+            try:
+                from src import orwell_prewarm
+                orwell_prewarm.reset(user)
             except Exception:
                 pass
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door

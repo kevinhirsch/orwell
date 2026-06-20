@@ -213,3 +213,89 @@ def test_l28b_engine_client_method_exists():
     # the FE engine client exposes the write-back seam the orchestrator forwards to
     from src import orwell_engine
     assert hasattr(orwell_engine, "record_cast_profile")
+
+
+# ── #5 — bounded-concurrency authoring ────────────────────────────────────────
+
+def test_author_cast_authors_all_npcs_with_bounded_concurrency():
+    """#5: NPCs author IN PARALLEL (not serial), but never more than the semaphore bound in flight."""
+    cast = [{"id": f"npc:{i}", "name": f"N{i}"} for i in range(8)]
+    state = {"inflight": 0, "max_inflight": 0}
+
+    async def llm_fn(messages):
+        state["inflight"] += 1
+        state["max_inflight"] = max(state["max_inflight"], state["inflight"])
+        await asyncio.sleep(0)  # yield so concurrent calls overlap (proves it isn't serial)
+        await asyncio.sleep(0)
+        state["inflight"] -= 1
+        return json.dumps(_FULL)
+
+    writes = []
+
+    async def write_fn(profile):
+        writes.append(profile["houseguestId"])
+        return {"accepted": True}
+
+    n = _run(A.author_cast(cast, llm_fn, write_fn, concurrency=3))
+    assert n == 8  # every NPC authored
+    assert sorted(writes) == sorted(npc["id"] for npc in cast)
+    # parallel (more than one in flight at once) AND bounded (never exceeds the semaphore)
+    assert state["max_inflight"] > 1, "authoring ran serially — bounded concurrency not applied"
+    assert state["max_inflight"] <= 3, "concurrency exceeded the semaphore bound"
+
+
+def test_author_cast_fires_on_authored_per_successful_write():
+    """#7 seam: the per-NPC callback fires once per engine-accepted write-back (never for the player,
+    never for a refused write, never for an NPC that didn't parse)."""
+    cast = [
+        {"id": "player", "name": "P"},
+        {"id": "npc:1", "name": "A"},
+        {"id": "npc:2", "name": "B"},  # this one's write is refused
+        {"id": "npc:3", "name": "C"},  # this one produces no JSON
+    ]
+    authored = []
+
+    async def llm_fn(messages):
+        if "C" in messages[1]["content"]:
+            return "no json here"
+        return json.dumps(_FULL)
+
+    async def write_fn(profile):
+        if profile["houseguestId"] == "npc:2":
+            return {"accepted": False, "reason": "refused"}
+        return {"accepted": True}
+
+    n = _run(A.author_cast(cast, llm_fn, write_fn, lambda hid: authored.append(hid)))
+    assert n == 1  # only npc:1 was accepted
+    assert authored == ["npc:1"]  # the callback fired only for the accepted write-back
+
+
+# ── #3 — the FE-side quality floor ────────────────────────────────────────────
+
+def test_quality_floor_drops_a_thin_biography_so_it_cannot_overwrite_the_seeded_floor():
+    """#3: a 1-sentence / short authored biography is OMITTED from the parsed profile (so the engine's
+    richer deterministic floor stands), while the rest of the authored profile still lands."""
+    thin = dict(_FULL, biography="Short bio.")  # one sentence, well under the char floor
+    prof = A.parse_authored_profile(json.dumps(thin), "npc:9")
+    assert prof is not None
+    assert "biography" not in prof, "a thin biography would overwrite the seeded floor"
+    # the rest of the authored material is unaffected by the biography floor
+    assert prof["secrets"] and prof["physicalCharacteristics"]
+
+
+def test_quality_floor_keeps_a_rich_biography():
+    """#3: a coherent biography (>= 2 sentence terminators AND >= 80 chars) IS kept."""
+    prof = A.parse_authored_profile(json.dumps(_FULL), "npc:10")
+    assert prof["biography"] == _FULL["biography"]
+
+
+def test_quality_floor_drops_a_one_word_weakness_and_trivial_secrets():
+    """#3: the light floor on hidden entries — a one-word weakness and trivially-short secrets are
+    dropped so a degraded list never replaces the seeded hidden material."""
+    degraded = dict(_FULL, weakness="loyal", secrets=["x", "no"])
+    prof = A.parse_authored_profile(json.dumps(degraded), "npc:11")
+    assert prof is not None
+    assert "weakness" not in prof, "a one-word weakness would overwrite the seeded value"
+    assert "secrets" not in prof, "all-trivial secrets would overwrite the seeded list"
+    # a rich biography still survives alongside the dropped hidden fields
+    assert prof["biography"] == _FULL["biography"]
