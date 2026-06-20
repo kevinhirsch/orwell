@@ -165,6 +165,13 @@ DEFAULT_SETTINGS = {
         "Newsletters, marketing, automated digests, and FYI-only updates are "
         "NOT urgent."
     ),
+    # Diagnostics — the full LLM I/O trace + log retention (admin /status page).
+    # llm_trace_enabled: capture every model call (full prompt + response +
+    #   reasoning) to the live viewer + data/llm-io.jsonl. On by default.
+    # log_retention_days: trim ALL managed logfiles older than this to save disk
+    #   (auto + the manual "Trim now" button). 0 = keep everything (no auto-trim).
+    "llm_trace_enabled": True,
+    "log_retention_days": 7,
     # Keyboard shortcuts (action: key combination)
     "keybinds": {
         "search": "ctrl+k",

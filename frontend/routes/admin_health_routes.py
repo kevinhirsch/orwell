@@ -492,6 +492,7 @@ def setup_admin_health_routes() -> APIRouter:
         sources = [
             {"id": "live", "label": "Front-end (live)"},
             {"id": "io", "label": "Engine I/O (live) — every tool call in/out"},
+            {"id": "llmio", "label": "LLM I/O (live) — full prompt + response + reasoning"},
         ]
         for name in _log_files():
             sources.append({"id": f"file:{name}", "label": f"{name} (file)"})
@@ -506,6 +507,9 @@ def setup_admin_health_routes() -> APIRouter:
             return {"source": source, "next": nxt, "lines": lines}
         if source == "io":
             nxt, lines = log_rings.IO.since(since)
+            return {"source": source, "next": nxt, "lines": lines}
+        if source == "llmio":
+            nxt, lines = log_rings.LLMIO.since(since)
             return {"source": source, "next": nxt, "lines": lines}
         if source.startswith("file:"):
             name = source[5:]
@@ -525,6 +529,82 @@ def setup_admin_health_routes() -> APIRouter:
             except OSError:
                 return Response(status_code=404)
         return Response(status_code=400)
+
+    @router.get("/logs/retention")
+    async def admin_logs_retention(request: Request):
+        """The LLM I/O trace toggle + log-retention horizon + the live total-size
+        readout (the universal logging setting on the status page). Best-effort."""
+        require_admin(request)
+        from src import llm_trace
+        from src.settings import get_setting
+        total = llm_trace.total_log_bytes()
+        return {
+            "traceEnabled": bool(get_setting("llm_trace_enabled", True)),
+            "retentionDays": llm_trace.retention_days(),
+            "choices": llm_trace.RETENTION_CHOICES,
+            "totalBytes": total,
+            "totalHuman": llm_trace.human_bytes(total),
+            "files": llm_trace.log_inventory(),
+        }
+
+    @router.post("/logs/retention")
+    async def admin_logs_retention_set(request: Request):
+        """Persist the trace toggle and/or retention horizon. Lowering the horizon
+        trims immediately so the freed space shows up at once."""
+        require_admin(request)
+        from src import llm_trace
+        from src.settings import load_settings, save_settings
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        settings = load_settings()
+        changed = False
+        if "traceEnabled" in body:
+            settings["llm_trace_enabled"] = bool(body["traceEnabled"])
+            changed = True
+        if "retentionDays" in body:
+            try:
+                d = int(body["retentionDays"])
+                if d >= 0:
+                    settings["log_retention_days"] = d
+                    changed = True
+            except (TypeError, ValueError):
+                pass
+        if changed:
+            save_settings(settings)
+        # Apply the (possibly new) horizon now so the size readout reflects it.
+        result = llm_trace.trim_logs(None)
+        return {
+            "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
+            "retentionDays": llm_trace.retention_days(),
+            "totalBytes": result["totalBytes"],
+            "totalHuman": result["totalHuman"],
+            "files": result["files"],
+        }
+
+    @router.post("/logs/trim")
+    async def admin_logs_trim(request: Request):
+        """Trim every managed logfile to the selected horizon NOW (the "Trim now"
+        button). Body may carry {"days": N} to override the configured horizon for
+        this run; absent ⇒ the configured retention."""
+        require_admin(request)
+        from src import llm_trace
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        days = None
+        if isinstance(body, dict) and "days" in body:
+            try:
+                days = int(body["days"])
+            except (TypeError, ValueError):
+                days = None
+        result = llm_trace.trim_logs(days)
+        result["removedHuman"] = llm_trace.human_bytes(result["removedBytes"])
+        return result
 
     @router.get("/ops")
     async def admin_ops(request: Request):
@@ -775,6 +855,19 @@ _STATUS_PAGE = """<!doctype html>
 <div class="sub">Run a maintenance script and watch it in the viewer above. Read-only scripts run in-process; the update goes through the root-side trigger (G19b) so the hardened web tier never holds privilege — the viewer follows <code>ops-update.log</code> live, across the restart. The destructive Factory Reset (OOBE) lives in the controls at the top and likewise goes through its own root-side trigger.</div>
 <div class="actions" id="opsrow">Loading ops…</div>
 <div id="opsmsg" class="sub"></div>
+<h1 style="margin-top:26px">LOG RETENTION</h1>
+<div class="sub">Full LLM I/O — system prompt + every message + the response, reasoning, tool calls and token usage — is captured to the <strong>LLM I/O (live)</strong> stream above and archived to <code>llm-io.jsonl</code> (also selectable above). Trim every logfile to a horizon to save disk — applied automatically and on demand. Secrets (auth headers / API keys) are never captured.</div>
+<div class="grid" id="retgrid" style="margin:10px 0">Loading…</div>
+<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
+  <label class="sub" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="trace-toggle"> capture full LLM I/O trace
+  </label>
+  <label class="sub" style="display:flex;align-items:center;gap:6px">trim logs older than
+    <select id="ret-days" style="background:#1b1f27;color:#cfd8e3;border:1px solid #355a66;border-radius:8px;padding:5px 8px;font:inherit"></select>
+  </label>
+  <button type="button" class="btn" id="trim-now" title="Trim every managed logfile to the selected horizon right now">Trim now</button>
+  <span id="retmsg" class="sub"></span>
+</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1197,6 +1290,57 @@ async function loadOps() {
   } catch (e) { opsRow.textContent = "ops unavailable"; }
 }
 loadOps();
+// ── log retention + LLM I/O trace controls ──
+const retGrid = document.getElementById("retgrid"), retDays = document.getElementById("ret-days"),
+      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg");
+function retBytes(n) { n = Math.max(0, +n || 0); const u = ["B","KB","MB","GB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : (n|0)) + " " + u[i]; }
+function renderRetention(d) {
+  const files = (d.files || []).slice().sort((a, b) => b.bytes - a.bytes);
+  const rows = [
+    ["Total log size", '<strong>' + esc(d.totalHuman || "0 B") + "</strong>"],
+    ["LLM I/O trace", d.traceEnabled ? B(true, "ON") : B(false, "OFF")],
+    ["Retention", d.retentionDays ? esc(d.retentionDays) + " day(s)" : "keep everything"],
+  ];
+  retGrid.innerHTML = rows.map(r => '<div class="k">' + esc(r[0]) + "</div><div>" + r[1] + "</div>").join("") +
+    (files.length ? '<div class="k">Files</div><div class="sub">' +
+      files.map(f => esc(f.name) + " — " + esc(retBytes(f.bytes))).join("<br>") + "</div>" : "");
+}
+async function loadRetention() {
+  try {
+    const r = await fetch("/api/admin/logs/retention", { credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
+    retDays.value = String(d.retentionDays);
+    traceToggle.checked = !!d.traceEnabled;
+    renderRetention(d);
+  } catch (e) {}
+}
+async function saveRetention(body, note) {
+  retMsg.textContent = note || "saving…";
+  try {
+    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    renderRetention(d);
+    retMsg.textContent = "";
+  } catch (e) { retMsg.innerHTML = '<span class="bad">save failed</span>'; }
+}
+traceToggle.addEventListener("change", () => saveRetention({ traceEnabled: traceToggle.checked }));
+retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));
+document.getElementById("trim-now").addEventListener("click", async () => {
+  retMsg.textContent = "trimming…";
+  try {
+    const r = await fetch("/api/admin/logs/trim", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: +retDays.value }) });
+    const d = await r.json();
+    renderRetention(d);
+    retMsg.innerHTML = '<span class="ok">freed ' + esc(d.removedHuman || "0 B") + " — now " + esc(d.totalHuman) + "</span>";
+  } catch (e) { retMsg.innerHTML = '<span class="bad">trim failed</span>'; }
+});
+loadRetention();
+setInterval(loadRetention, 15000);
 </script>
 </body></html>"""
 

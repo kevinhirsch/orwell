@@ -1171,6 +1171,43 @@ async def llm_call_async(
     max_retries: int = LLMConfig.MAX_RETRIES,
     prompt_type: Optional[str] = None
 ) -> str:
+    """Tracing wrapper over the non-streaming utility call (src/llm_trace.py) — records
+    the full request + response (or error) for the /admin/status LLM I/O trace, then
+    returns the impl's result unchanged. Best-effort; disabled ⇒ near-zero passthrough."""
+    from src import llm_trace
+    if not llm_trace.enabled():
+        return await _llm_call_async_impl(
+            url, model, messages, temperature=temperature, max_tokens=max_tokens,
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+    started = time.time()
+    try:
+        text = await _llm_call_async_impl(
+            url, model, messages, temperature=temperature, max_tokens=max_tokens,
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+        llm_trace.record_llm_call(
+            kind="call", model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, response={"text": text}, ok=True,
+            duration_ms=int((time.time() - started) * 1000))
+        return text
+    except Exception as e:
+        llm_trace.record_llm_call(
+            kind="call", model=model, messages=messages, temperature=temperature,
+            max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
+            response={"error": {"type": type(e).__name__, "message": str(e)[:500]}})
+        raise
+
+
+async def _llm_call_async_impl(
+    url: str,
+    model: str,
+    messages: List[Dict],
+    temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
+    max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS,
+    headers: Optional[Dict] = None,
+    timeout: int = LLMConfig.STREAM_TIMEOUT,
+    max_retries: int = LLMConfig.MAX_RETRIES,
+    prompt_type: Optional[str] = None
+) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
@@ -1805,6 +1842,38 @@ def _summarize_stream_error(err_chunk: Optional[str]) -> str:
 
 
 async def stream_llm_with_fallback(candidates, messages, **kwargs):
+    """Tracing wrapper over the fallback chain (src/llm_trace.py).
+
+    Captures the full request (system prompt + messages + tool schemas + sampling
+    params) and the reconstructed response (text + reasoning + tool calls + usage,
+    or the error) for the /admin/status LLM I/O trace, then forwards the streamed
+    bytes UNCHANGED. The trace is best-effort and never alters the stream; when the
+    trace is disabled this is a near-zero passthrough."""
+    from src import llm_trace
+    if not llm_trace.enabled():
+        async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
+            yield chunk
+        return
+    cands = _dedupe_candidates(candidates)
+    requested = cands[0][1] if cands else "(none)"
+    acc = llm_trace.StreamAccumulator()
+    started = time.time()
+    try:
+        async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
+            acc.observe(chunk)
+            yield chunk
+    finally:
+        resp = acc.response()
+        llm_trace.record_llm_call(
+            kind="stream", model=resp.get("answeredBy") or requested, requested_model=requested,
+            messages=messages, tools=kwargs.get("tools"),
+            temperature=kwargs.get("temperature"), max_tokens=kwargs.get("max_tokens"),
+            response=resp, ok=resp.get("error") is None,
+            duration_ms=int((time.time() - started) * 1000),
+        )
+
+
+async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
     """Wrap stream_llm with an ordered fallback chain.
 
     `candidates` is a list of (url, model, headers). Each is tried in order,
