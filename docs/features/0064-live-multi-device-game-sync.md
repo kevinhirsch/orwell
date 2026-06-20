@@ -10,6 +10,20 @@ guards described in *Implementer handoff → What this replaces*.
 > front-end), so the executable gate is **front-end pytest** + the browser smoke, **not** Cucumber
 > — it is not added to `cucumber.cjs`.
 
+## Decisions locked (2026-06-20, product owner)
+
+These resolve §7's open questions and steer the build:
+
+1. **Model = Messenger, not a driver lock.** The game chat behaves like a Facebook-Messenger-style
+   thread: **any device may type at any time**, there is **one shared persistent thread**, and it
+   **stays in sync across every device**. There is **no read-only spectator lockout, no disabled
+   composer, and no explicit "take over" button/action.** Concurrency is handled by **serializing**
+   turns into the one thread (never two parallel reasoning chains, never a stomped run) — see the
+   revised §3.C.
+2. **Instant cross-device updates.** Ship the `game-updated` SSE ping (the HUD reconciles
+   immediately, not on the ~2s poll).
+3. **Build order:** **stopgap first** (§7 *Build order*), then the full Messenger-sync build.
+
 ---
 
 ## 1. Why (the bug this closes)
@@ -49,6 +63,9 @@ then leans on the existing sync so all screens render the **same conversation li
 - **D. Once-only casting kickoff** — the producers' opener fires once per game, not once per device.
 - **E. Robustness** — late join (replay + live), reconnect, FE-restart catch-up, multi-tab,
   cross-user isolation, Vault-free throughout.
+- **F. Window & HUD layout sync** — the gadget-rail and every OrwellWindow kit window's
+  **open / minimized / docked** state, **size (w,h)**, and **position (x,y)** sync across the user's
+  devices (currently per-device `localStorage`).
 
 **Out of scope / non-goals:**
 
@@ -80,15 +97,22 @@ clear_game_session(user) -> None             # unbind (season reset / new season
 `data/` already takes it back to OOBE; the in-app reset-progress / new-season rotates it explicitly
 (below).
 
-**New route — `GET /api/orwell/game-session`** (in `routes/orwell_routes.py`), `_current_user`-scoped:
+**Routes (in `routes/orwell_routes.py`), `_current_user`-scoped — _as shipped (stopgap)_:**
 
-- Resolve the bound id. If it is **missing**, or **no longer exists** in the session store, or is
-  **not owned by this user**, mint a fresh chat session (server-side, owner = the user), bind it,
-  and return `{ "sessionId": "<id>", "created": true }`. Otherwise `{ "sessionId": "<id>",
-  "created": false }`.
-- **Idempotent under concurrency** (the whole point): two devices hitting it at the same instant
-  must get the **same** id. Guard with the store lock; first writer wins; a racing second caller
-  reads back the just-written id (re-check inside the lock before minting).
+- `GET /api/orwell/game-session` → `{ "sessionId": <bound id | null> }` (read-only; null ⇒ nothing
+  bound yet).
+- `POST /api/orwell/game-session { sessionId }` → bind **first-writer-wins**; returns
+  `{ "sessionId": <effective>, "bound": <bool> }`. A racing second caller **adopts** the
+  already-bound id (`bound:false`).
+
+**Binding happens server-side on first frame (no fragile client mint-then-bind).** Rather than have
+`GET` mint a chat (server-side session minting needs endpoint/model resolution) or the client bind
+after an async create (the new session has no id until its first message), the binding is performed
+inside **`apply_game_framing`** (`routes/chat_helpers.py`): the **first** session that drives a
+game/casting turn for a user is bound as canonical (`_bind_canonical_game_session`, first-writer-
+wins, best-effort). So the device that opens the interview owns the binding the moment its first
+turn frames; every other device's `GET` then resolves it. The `POST` route remains for explicit
+binding/tests.
 
 **Season-reset rotation.** The three reset doors already exist in `orwell_routes.py`
 (`/new-game`, `/next-season`, `/reset-progress`). Each must `clear_game_session(user)` as part of
@@ -97,10 +121,14 @@ a dead season's transcript never rides as narrator context. This makes the exist
 "fresh session on restart" behavior **server-authoritative** instead of per-tab `sessionStorage`.
 
 **Onboarding change — `static/js/orwellOnboarding.js`.** `openFreshInterviewSession()` no longer
-blindly clicks "+ New chat" (which mints a *device-local* session). Instead it:
+blindly clicks "+ New chat" (which mints a *device-local* session). Instead it (fail-open at every
+step):
 
 1. `GET /api/orwell/game-session` → `sessionId`.
-2. If the currently open session ≠ `sessionId`, `sessionModule.selectSession(sessionId)` (load it).
+2. If a `sessionId` is bound **and it exists in this device's session list**,
+   `sessionModule.selectSession(sessionId)` (open it) and stop — never a second chat.
+3. Otherwise open a fresh chat as before; the server binds **that** session on its first framed turn
+   (above), so the next device resolves and converges onto it.
 
 Every device — first load, second device, a reload — lands on the **same** session id. The
 per-device `SEAT_TAKEN_KEY` (`sessionStorage`) and `WELCOME_KEY` (`localStorage`) guards become
@@ -131,35 +159,36 @@ edges:
    `/self-eviction/*`, and a committed `advanceGame` so B reconciles **instantly** instead of
    waiting up to ~2s (optional nicety; polling remains the correctness floor).
 
-### C. Turn ownership — one driver at a time
+### C. Concurrency — Messenger-style serialization (no lock, no take-over)
 
-**The hazard:** `agent_runs.start(session, …)` **cancels** any prior in-flight run for the same
-session on a new submit (it was designed for *one* device's rapid double-send). With two devices on
-one session, a second device's submit would **stomp** the first's turn mid-stream. A game must have
-**one** reasoning chain.
+**Decision (locked):** the game chat behaves like a **Messenger thread** — any device may type at
+any time, there is **no read-only spectator**, **no disabled composer**, and **no explicit
+"take-over"**. The job here is only to guarantee **one reasoning chain at a time** (the original
+bug was two *parallel* divergent chains) while every device stays in sync.
 
-**The lock.** A per-user (== per game session) **turn lock**, server-side, in-memory (a new
-`frontend/src/game_turn_lock.py`, or a guarded set keyed by session id):
+**The hazard to fix:** `agent_runs.start(session, …)` **cancels** any prior in-flight run for the
+same session on a new submit (designed for one device's rapid double-send). For the game session
+that would let a second device **stomp** the first's turn mid-stream.
 
-- The game chat route acquires the lock when starting a game-framed run; releases it when the run
-  reaches a terminal state (`done` / `error` / `stopped`).
-- While held, a **second device's game-turn submit is refused** with a typed **409**
-  `{ "error": "turn-in-progress", "driver": "<opaque-token>" }` — *never* a silent stomp. (Plain
-  non-game chats are unaffected; the lock is scoped to game-framed turns on the canonical session.)
-- The refused device renders an **in-fiction spectator banner** ("Another screen is in the house
-  right now — you're watching live.") and a **disabled composer**, and attaches to the live reply
-  via the existing path. So it *sees* the turn unfold, it just can't start a second one.
+**The fix — serialize, don't stomp.** For a **game-framed** turn on the canonical session, a submit
+that arrives while a run is in flight is **queued**, not cancelled: the user message is appended to
+the one shared thread and its turn runs when the current turn completes (the engine already
+serializes per user; this aligns the FE run manager with that). Concretely, the game path uses a
+per-session **serial queue** in `agent_runs` (or a thin `game_turn_queue` wrapper) instead of the
+cancel-prev branch. Plain (non-game) chats keep today's cancel-prev behavior unchanged.
 
-**Take-over.** The spectating device gets an explicit **"Take over"** affordance that calls the
-existing `POST /api/chat/stop/{session}` (cancels the current run — the wrapped generator still
-saves its partial), which releases the lock, then re-enables that device's composer. This reclaims a
-stuck/abandoned driver without leaving the game wedged. Guard against accidental double-drive: the
-button confirms, and a normal completed turn releases the lock automatically (no take-over needed
-for the common case).
+**What every device shows.** While the house is composing a reply, every device renders the live
+stream (existing attach path); a subtle, non-blocking "the house is responding…" affordance is fine,
+but the composer **stays enabled** — a message typed during a reply simply **queues** and runs next,
+exactly like sending a second Messenger message. No banner, no lockout, no button.
 
-**Why this kills the bug at the root:** with the canonical session (A) + the lock (C), there is at
-most **one** run per game per instant, enforced server-side — *independent of how many devices,
-tabs, or how flaky the per-device JS guards are.*
+**Near-simultaneous sends.** Two messages sent at the same instant become two queued user turns and
+two sequential house replies (Messenger-equivalent) — never two parallel chains. *(Optional v2
+refinement, not v1: coalesce sends within a short window into one turn.)*
+
+**Why this kills the bug at the root:** with the canonical session (A) + serialization (C), there is
+never more than **one** run in flight per game and runs are **never stomped** — independent of how
+many devices/tabs, or how flaky the per-device JS guards are.
 
 ### D. Once-only casting kickoff
 
@@ -193,6 +222,58 @@ to game state, two layers:
   `/api/orwell/game-session` is `_current_user`-scoped and never returns another user's session;
   the turn lock is keyed by the user's own session id. No call for user A can observe user B.
 
+### F. Window & HUD layout sync across devices
+
+The game UI is a set of draggable/resizable **OrwellWindow** kit windows (cast, finale,
+retrospective, …) plus the **gadget rail** (0054). Their state persists **per-device** today, in
+`localStorage`, under three per-user key families (`static/js/orwellWindow.js`):
+
+- `orwell-slot-offset:<slotKey>:<user>` — the dragged geometry **offset (x,y)** (the one sanctioned
+  geometry scheme, clamped at save + restore, S11/E91) and, where resized, **size (w,h)**;
+- `orwell-win-parked:<id>:<user>` — **minimized / parked** state;
+- `orwell-<id>-docked:<user>` — **docked** state.
+
+So a window you move/minimize/dock on one device is invisible on the next. **F makes the layout a
+synced, per-user blob** so every device shows the same arrangement.
+
+**New store — `frontend/src/orwell_layout.py`** (pattern: `orwell_seasons.py`; Vault-free — UI
+geometry carries no game secret):
+
+```
+get_layout(user) -> dict                      # { "windows": { "<id>": {open, minimized, docked, x, y, w, h} } }
+patch_layout(user, window_id, partial) -> dict # last-write-wins per window; atomic + lock
+```
+
+`DATA_DIR/orwell_layout.json` = `{username: {windows: {...}}}`. Bounded (only known window ids; tiny
+numeric/bool fields); factory-reset scrub takes it to default.
+
+**New routes (in `routes/orwell_routes.py`), `_current_user`-scoped:**
+
+- `GET  /api/orwell/layout` → the user's layout blob (defaults when unset).
+- `PATCH /api/orwell/layout` → `{ windowId, state:{…partial…} }`; persists + publishes a
+  `layout-changed` SSE event (below). **Debounced** on the client (drag/resize settle ~300–400ms;
+  open/minimize/dock fire immediately).
+
+**Client — `static/js/orwellWindow.js` + `orwellGadgetRail.js`:**
+
+- On a geometry/min/dock/open/close change, write to the server (debounced) **in addition to**
+  `localStorage` (localStorage stays the instant local cache + offline fallback; the server is the
+  cross-device source of truth — on load, server layout wins when present).
+- Apply remote `layout-changed` events live (move/resize/minimize/restore/dock the named window),
+  **ignoring the device's own echo** (same pattern as `sessionSync.js`) and **deferring** a remote
+  change to a window the user is **actively dragging/resizing right now** until that gesture ends
+  (never yank a window out from under a live drag).
+
+**Transport.** Reuse the canonical game session's `session_events` channel for `layout-changed`
+(all of the user's game devices are subscribed to it via §B). Payload is ids + small geometry
+numbers only — no message body, no Vault.
+
+**Conflict model.** Last-write-wins per window (UI state, low stakes); debounce avoids chatter.
+`prefers-reduced-motion` is honored when applying a remote move (snap, don't animate).
+
+**Build phase.** F is part of the **full** build (after the stopgap), and is independent of the chat
+serialization (C) — it can ship in its own slice.
+
 ---
 
 ## 4. Port / route / module contracts
@@ -208,7 +289,10 @@ to game state, two layers:
 | `GET /api/chat/events/{id}`, `/resume/{id}` | **reuse** | the existing per-session SSE + run-attach; now engaged because devices share `id`. |
 | `static/js/orwellOnboarding.js` | **amend** | resolve + `selectSession` the canonical session instead of minting a device-local one. |
 | `static/js/sessionSync.js` | **reuse/verify** | already reconciles `run-started` / `message-added`; verify late-join attach. |
-| `static/js/` spectator UI | **new** | the "watching live / Take over" banner + disabled composer on a 409. |
+| `frontend/src/orwell_layout.py` | **new** FE store | `get_layout` / `patch_layout(user, window_id, partial)`; JSON in `DATA_DIR`; atomic + lock; Vault-free (geometry only). |
+| `GET /api/orwell/layout`, `PATCH /api/orwell/layout` | **new** routes | `_current_user`-scoped read/patch; PATCH publishes `layout-changed`. |
+| `static/js/orwellWindow.js`, `orwellGadgetRail.js` | **amend** | write geometry/min/dock/open changes to the server (debounced) + apply remote `layout-changed` (ignore self-echo; defer during a live drag). |
+| `session_events` `game-updated` / `layout-changed` | **new** events | instant cross-device HUD + window reconcile (ids/geometry only). |
 
 **Vault Wall:** every new surface is Vault-free by construction — session **ids**, run status, and
 "something changed" pings only; message bodies are fetched through the existing **owner-guarded**
@@ -235,6 +319,10 @@ clients. No names in any fixture (roles only). Concrete suites:
   sentinel.
 - **Once-only kickoff (`test_0064_kickoff_once.py`)** — with two devices on the canonical session,
   the producers' opener is recorded **once** (one assistant opener; one casting-intake open).
+- **Layout sync (`test_0064_layout_sync.py`)** — `PATCH /api/orwell/layout` for a window persists +
+  is reflected by `GET /api/orwell/layout`; a different user's layout is isolated; a `layout-changed`
+  event fires carrying only ids + geometry numbers (no Vault, no message body); last-write-wins on a
+  concurrent patch of the same window.
 - **Browser smoke (extend `scripts/browser_smoke.py`)** — two headless contexts, same account:
   device A drives a casting turn; device B (already open) renders the **same** producer message and
   the live stream; B's composer is disabled with the spectator banner during A's turn; after A's
@@ -258,14 +346,25 @@ route; the two-device casting-interview no longer produces two reasoning chains.
    degrades to history catch-up without a stuck game.
 6. A season reset **rotates** the canonical session (no dead-season bleed-through).
 7. Every new surface is **owner-scoped and Vault-free**; no cross-user observation.
+8. A window's **open/minimized/docked** state, **size**, and **position** set on one device appear on
+   every other device (live, and on next load), without yanking a window the user is actively
+   dragging.
 
 ---
 
 ## 7. Implementer handoff
 
-**Build order:** A (canonical session + onboarding) → D (once-only kickoff) → C (turn lock +
-spectator UI) → B hardening (late-join/HUD) → E (robustness) → tests throughout (BDD/TDD-first:
-write the pytest red, implement to green).
+**Build order (locked: stopgap first):**
+
+- **Stopgap PR** — **A** (canonical session store + `GET /api/orwell/game-session` + onboarding
+  resolves/selects it; reset doors clear it) + **D** (once-only kickoff). This alone stops today's
+  two-device double-up: once devices share the session, the existing `sessionSync.js` engages and
+  both screens show one conversation.
+- **Full PR(s)** — **C** (Messenger-style serialization: queue-don't-stomp on the game session;
+  composer stays enabled; no take-over) → **B** hardening (late-join attach, hidden-kickoff
+  reconcile, `game-updated` instant HUD event) → **E** (robustness) → **F** (window/HUD layout
+  sync — independent slice) → tests throughout (BDD/TDD-first: write the pytest red, implement to
+  green).
 
 **What this replaces.** The per-tab / per-device onboarding guards (`_openSent`, `SEAT_TAKEN_KEY`,
 the `currentSessionId` localStorage default, the per-session `_SESSION_GAME_FRAMED`) are no longer
@@ -278,16 +377,16 @@ and two reasoning chains.
 session this is now coherent across devices (good) — verify the re-entry moment (P2) fires once on
 the shared session, not per device.
 
-**Open questions (product owner):**
+**Open questions — RESOLVED (2026-06-20, see *Decisions locked* up top):**
 
-1. **Spectator default — passive vs. co-drive?** Spec assumes **passive spectator + explicit
-   take-over** (cleanest; one author of the fiction at a time). Alternative: a softer "request the
-   chair" handoff. Recommend passive + take-over for v1.
-2. **Take-over friction.** Confirm dialog on "Take over" (spec: yes) vs. one-tap. Recommend confirm
-   — accidental take-over mid-sentence is jarring.
-3. **`game-updated` instant-reconcile event (§B.3)** — ship in v1 or rely on the existing ~2s poll?
-   Recommend ship it (small, removes a visible lag on the non-driving device's decision card).
-4. **Idle-driver auto-release.** Should the lock auto-release if a run is "done" but the player
-   never takes the pending decision for N minutes, so another device can drive? Spec leaves the lock
-   tied to **run** lifecycle (not the decision); a stuck *decision* is reclaimable via take-over.
-   Confirm that's enough.
+1. **Concurrency model →** *Messenger-style* (any device types anytime; one shared synced thread; no
+   spectator lockout, no driver lock). Concurrency is handled by **serializing** turns (§3.C), so the
+   former "passive vs co-drive / take-over" question is moot — there is **no take-over action**.
+2. **Take-over friction →** n/a (no explicit take-over).
+3. **`game-updated` instant-reconcile event →** **ship in v1** (instant HUD + window sync).
+4. **Idle-driver auto-release →** n/a (no lock). A stuck *player decision* still surfaces on every
+   device via the engine's authoritative `pending` and can be taken on any device.
+
+**Remaining open question (minor):** should layout sync (F) be **always on** (spec default) or a
+per-user **toggle**? Recommend always-on for v1 (it's what "one game, every screen in sync" implies);
+add a toggle only if a player asks to keep devices independent.
