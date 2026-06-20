@@ -32,12 +32,30 @@ const PRIV_LABELS = {
 async function loadUsers() {
   const list = el('adm-userList');
   try {
+    // Resolve who we are so the UI can hide the self-delete control (guard a).
+    // Best-effort: the server re-checks every guard, so a failed lookup just
+    // means the button shows and the server refuses.
+    let me = '';
+    try {
+      const sres = await fetch('/api/auth/status', { credentials: 'same-origin' });
+      const sd = await sres.json();
+      me = (sd && sd.username ? String(sd.username) : '').trim().toLowerCase();
+    } catch (_) {}
     const res = await fetch('/api/auth/users', { credentials: 'same-origin' });
     if (res.status === 401 || res.status === 403) { list.innerHTML = '<div class="admin-empty">Access denied</div>'; return; }
     const data = await res.json();
     if (!data.users || data.users.length === 0) { list.innerHTML = '<div class="admin-empty">No users found</div>'; return; }
+    // Admin count drives the last-admin UI guard (guard b): the Remove button is
+    // withheld from the final administrator (the server also refuses it).
+    const adminCount = data.users.filter(x => x.is_admin).length;
     list.innerHTML = '';
     data.users.forEach(u => {
+      const uname = String(u.username).trim().toLowerCase();
+      const isSelf = !!me && uname === me;
+      const isLastAdmin = u.is_admin && adminCount <= 1;
+      // Guards (a) + (b) reflected in the UI: never offer to delete yourself or
+      // the last admin. Every other user (admin or not) gets a Remove button.
+      const canDelete = !isSelf && !isLastAdmin;
       const row = document.createElement('div');
       row.className = 'admin-user-row';
 
@@ -57,7 +75,7 @@ async function loadUsers() {
           <button class="admin-btn-sm" data-adm-role-user="${esc(u.username)}" data-adm-is-admin="${u.is_admin ? '1' : '0'}" style="font-size:11px;">${u.is_admin ? 'Revoke admin' : 'Make admin'}</button>
           <button class="admin-btn-sm" data-adm-resetpw-user="${esc(u.username)}" style="font-size:11px;">Reset password</button>
           <button class="admin-btn-sm" data-adm-rename-user="${esc(u.username)}" style="font-size:11px;">Rename</button>
-          ${u.is_admin ? '' : `<button class="admin-btn-delete" data-adm-del-user="${esc(u.username)}" style="font-size:11px;">Remove</button>`}
+          ${canDelete ? `<button class="admin-btn-delete" data-adm-del-user="${esc(u.username)}" style="font-size:11px;">Remove</button>` : ''}
           ${u.is_admin ? '' : '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>'}
         </div>
       `;
@@ -186,16 +204,33 @@ async function loadUsers() {
         });
       }
 
-      // Delete button
+      // Delete button. Guard (c): require the admin to TYPE the exact username.
+      // The typed value must match before we even call the API, and the server
+      // re-checks the match (confirm_username) so the typed step can't be skipped.
       const delBtn = row.querySelector('[data-adm-del-user]');
       if (delBtn) {
         delBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const username = delBtn.dataset.admDelUser;
-          if (!await uiModule.styledConfirm(`Remove user "${username}"?`, { confirmText: 'Remove', danger: true })) return;
-          const res = await fetch('/api/auth/users', { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
+          const typed = await uiModule.styledPrompt(
+            `This permanently deletes "${username}" and wipes their game. Type the username to confirm.`,
+            { title: 'Delete user', placeholder: username, confirmText: 'Delete', cancelText: 'Cancel' });
+          // Cancelled, or the typed name doesn't exactly match — do nothing.
+          if (typed === null) return;
+          if (typed.trim().toLowerCase() !== String(username).trim().toLowerCase()) {
+            uiModule.showError('Username did not match — deletion cancelled');
+            return;
+          }
+          const res = await fetch('/api/auth/users', {
+            method: 'DELETE', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, confirm_username: typed }),
+          });
           if (res.ok) loadUsers();
-          else uiModule.showError('Failed to delete user');
+          else {
+            const d = await res.json().catch(() => ({}));
+            uiModule.showError(d.detail || 'Failed to delete user');
+          }
         });
       }
 

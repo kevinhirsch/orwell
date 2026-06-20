@@ -830,8 +830,12 @@ async def serve_login(request: Request):
 
 @app.get("/api/version")
 async def get_version():
-    from core.constants import APP_VERSION
-    return {"version": APP_VERSION}
+    # Version is derived from the deployed checkout's git history — the highest
+    # merged PR number, rendered v{PR/100} (e.g. PR #360 -> v3.60). Computed once
+    # and cached; falls back to a committed string when git is unavailable. See
+    # src/orwell_version.py.
+    from src.orwell_version import get_version as _fe_version
+    return {"version": _fe_version()}
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
