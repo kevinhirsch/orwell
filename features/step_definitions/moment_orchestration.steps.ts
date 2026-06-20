@@ -62,9 +62,10 @@ Then("the same game state always yields the same moment", function (this: BbWorl
 Given("the game is at the nomination phase", function (this: BbWorld) {
   const game = new GameSessionAdapter();
   // Seed chosen so the PLAYER reaches the HOH seat and the live loop pauses on a real nomination
-  // decision (verified) — the live nomination beat, not a hand-built phase constant. (0006 staged-rounds
-  // shifted which seeds crown the player the opening HOH; seed 3 reaches the player's nomination.)
-  game.createCharacter({ playerName: "Player One", seed: 3 });
+  // decision (verified) — the live nomination beat, not a hand-built phase constant. (The #395
+  // trajectory-neutrality fix restored the pre-staged trajectory, so the seed that lands the player
+  // on a nomination shifted back; seed 0 reaches the player's nomination.)
+  game.createCharacter({ playerName: "Player One", seed: 0 });
   let view = game.advanceGame();
   for (let i = 0; i < 400 && !(view.pending && view.pending.kind === "nominations"); i++) {
     if (view.pending) {

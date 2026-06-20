@@ -112,30 +112,27 @@ export function resolveCompetition(
 }
 
 /**
- * One ELIMINATION round of an endurance-style staged competition (the 0006 staged-rounds
- * evolution). The SAME stat-vs-type + bounded temperature + soul emotional-modifier + intent math
- * as `resolveCompetition` — applied to the still-in field to decide who DROPS this round (the
- * lowest score steps out), not who wins. The cumulative survival across rounds is the comp's
- * outcome: the last houseguest standing is the winner.
+ * The VISIBLE elimination order of an ALREADY-RESOLVED competition (the 0006 staged-rounds
+ * evolution, PR #395) — PRESENTATION ONLY, derived purely from the single roll's scores.
  *
- * Anti-sycophancy holds per round exactly as for the single-shot resolve: the `intents` are read
- * (never prose), and the player's declared per-round approach (compete/play-safe/throw) carries the
- * SAME 0028 penalties — a throw is the deepest survival cut, so a dropped/thrown round steps the
- * player out. Deterministic under a fixed seed (one bounded temperature draw per competitor, in
- * array order). Locks the intents once the round is given — the round's approach can't change after.
+ * The staged endurance presentation narrows the field one houseguest at a time until the crowned
+ * winner stands alone. This derives that drop order from the SAME `scores` `resolveCompetition`
+ * already computed: the LOWEST score drops first, ascending up to (but excluding) the winner, who
+ * survives every round by construction. It consumes NO randomness and reads NO new state — it is a
+ * deterministic RE-TELLING of the one calibrated roll, so the staged presentation can NEVER perturb
+ * the winner OR any downstream seeded roll. This is what makes the staged comp full-trajectory
+ * outcome-neutral with the pre-staging single-shot model (the jury calibration band depends on it).
+ *
+ * `field` is the competitors' ids in their original (resolution) order; `result` is that roll's
+ * output. The returned array lists every NON-winner, earliest drop first. Score ties break by the
+ * original field order (stable), so the order is byte-stable for a given result.
  */
-export function resolveElimination(
-  competitors: Competitor[],
-  type: CompetitionType,
-  intents: CompetitionIntents,
-  rng: RandomnessSource,
-  constants: TemperatureConstants = TEMPERATURE_CONSTANTS,
-): { eliminated: EntityId; scores: Record<EntityId, number> } {
-  if (competitors.length < 2) throw new Error("resolveElimination: needs at least two competitors");
-  // `resolveCompetition` already validates the field, draws bounded temperature, and applies the
-  // intent penalties — we reuse it verbatim and read the SAME scores to pick the LOWEST (the drop).
-  const { scores } = resolveCompetition(competitors, type, intents, rng, constants);
-  let eliminated = competitors[0]!.id;
-  for (const c of competitors) if (scores[c.id]! < scores[eliminated]!) eliminated = c.id;
-  return { eliminated, scores };
+export function eliminationOrder(field: EntityId[], result: CompetitionResult): EntityId[] {
+  const indexOf = new Map(field.map((id, i) => [id, i] as const));
+  return field
+    .filter((id) => id !== result.winner)
+    .sort((a, b) => {
+      const d = result.scores[a]! - result.scores[b]!;
+      return d !== 0 ? d : indexOf.get(a)! - indexOf.get(b)!;
+    });
 }
