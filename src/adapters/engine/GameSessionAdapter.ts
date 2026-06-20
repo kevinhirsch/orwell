@@ -1284,6 +1284,11 @@ export class GameSessionAdapter implements GameSession {
       // The live pending (Vault-free legal options) so the decision card re-arms from engine truth
       // on reload — not the FE's process-local last-seen cache, which a FE restart wipes.
       pending: this.pendingView(),
+      // F3: the same public over-signal + broadcast winner the AdvanceView/SeasonRecap expose, so a
+      // status-only client learns the season ended (and who won) without separately hitting /state or
+      // /recap — otherwise it hangs on the last ceremony state post-season. Vault-free (public winner).
+      finished: !!this.live?.finished,
+      winner: this.named(this.live?.winner),
     };
   }
 

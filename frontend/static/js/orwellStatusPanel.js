@@ -140,16 +140,23 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
         #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
+        /* F4: the clean terminal/post-season state — shown instead of stale ceremony rows once the
+           season is over (finished). */
+        #orwell-status .os-done { margin: .2rem 0 .15rem; font-weight: 600; }
+        #orwell-status .os-done .os-winner { color: var(--accent, var(--red, #e06c75)); }
       </style>
       <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
         <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
         <span class="os-chev" aria-hidden="true">▾</span>
       </div>
       <div class="os-body">
-        <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
-        <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
-        <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
-        <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+        <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
+        <div class="os-ceremony" id="os-ceremony">
+          <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span></div>
+          <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
+          <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
+          <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+        </div>
         <div class="os-roster-h" id="os-roster-h">The House</div>
         <div class="os-roster" id="os-roster"></div>
       </div>
@@ -249,6 +256,32 @@ import { onNarrowChange } from './platform.js';
     _shown = true;
     try { document.body.dataset.gameActive = "1"; } catch (_) {} // E93: the record is live
     const name = (c) => (c && c.name) || "—";
+
+    // F4(b): gate the rendered state on started && !finished. Once the season is OVER (the engine's
+    // public over-signal), the live ceremony rows are stale — render a clean terminal state ("Season
+    // complete — winner: <name>") instead of a frozen "Week N / Phase". The winner is the Vault-free
+    // broadcast winner the status projection now carries.
+    const done = !!st.finished;
+    const ceremonyEl = el.querySelector("#os-ceremony");
+    const doneEl = el.querySelector("#os-done");
+    if (done) {
+      el.querySelector("#os-week").textContent = "Season complete";
+      el.querySelector("#os-phase").textContent = "";
+      if (ceremonyEl) ceremonyEl.hidden = true;
+      if (doneEl) {
+        doneEl.hidden = false;
+        const w = st.winner && st.winner.name;
+        doneEl.querySelector("#os-done-winner").innerHTML =
+          w ? ' — winner: <span class="os-winner">' + esc(w) + "</span>" : "";
+      }
+      _last = { phase: null, hoh: null, noms: null, veto: null }; // reset deltas; no ceremony to announce
+      if (st._state !== undefined) renderRoster(el, st, st._state);
+      el.style.display = "block";
+      return;
+    }
+    if (ceremonyEl) ceremonyEl.hidden = false;
+    if (doneEl) doneEl.hidden = true;
+
     el.querySelector("#os-week").textContent = "Week " + st.week;
     el.querySelector("#os-phase").textContent = phaseLabel(st.phase);
     el.querySelector("#os-hoh").textContent = name(st.hoh);
@@ -360,7 +393,14 @@ import { onNarrowChange } from './platform.js';
 
   // Let onboarding (or any flow that changes the game) trigger an immediate refresh.
   window.orwellRefreshStatus = refresh;
-  window.addEventListener("orwell:gamechanged", refresh);
+  // F4(a): a turn elsewhere (run start/end) dispatches orwell:gamechanged — reconcile the HUD at
+  // once instead of waiting out the ≤20s poll. Reset the backoff and re-arm the cadence so the next
+  // scheduled poll counts from this fresh fetch (cancel/re-arm), not the stale in-flight tick.
+  window.addEventListener("orwell:gamechanged", () => {
+    _failures = 0;
+    if (timer) { clearTimeout(timer); timer = null; }
+    start(); // start() refetches immediately, then re-arms the poll from now
+  });
   // The sidebar drawer handles narrow layouts; nothing to repark (E64). Kept as a
   // no-op subscription so a future narrow-specific treatment has its hook.
   onNarrowChange(() => {});
