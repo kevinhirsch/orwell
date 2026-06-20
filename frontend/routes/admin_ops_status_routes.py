@@ -37,8 +37,14 @@ _OPS_ACTIONS = {
 
 
 def _data_dir() -> str:
+    # The DEPLOY data dir (e.g. /opt/orwell/data): where the ops scripts publish
+    # data/ops/<action>-status.json (and where the root-side path units watch the trigger flags).
+    # It is the deploy tree — NOT the front-end app-data dir (frontend/data), a DIFFERENT tree only
+    # two levels up from here. Resolving to frontend/data was the bug: the page polled a status dir
+    # the ops scripts never wrote to. Three dirnames up (frontend/routes/<file> -> APP_DIR) + /data.
+    # DATA_DIR overrides (tests/dev).
     return os.environ.get("DATA_DIR") or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
 
 
 def _ops_dir() -> str:

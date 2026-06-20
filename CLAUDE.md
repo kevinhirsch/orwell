@@ -208,6 +208,40 @@ fold). `tests/unit/expressiveNonCollapse.test.ts` + `frontend/tests/test_express
 are the permanent gate, and the FE desync guard may fire only on closed-set board claims, never on
 creative prose.
 
+## Front-end client conventions (non-obvious — verify before editing `frontend/static/js/`)
+
+The sections above govern the engine/closed set; these are the **player-tier client** conventions
+that span several JS files, aren't captured elsewhere, and have each caused a real regression. Read
+them before touching the chat stream or the HUD.
+
+- **`orwell:gamechanged` has exactly ONE dispatcher (the g15 freshness seam).** The HUD/sidebar
+  panels are poll-based (20–30s) and stay fresh by *listening* for the debounced `orwell:gamechanged`
+  window event whose **only** dispatcher is `orwellGameChanged(reason)` in
+  `frontend/static/js/platform.js` (~250ms trailing debounce, also `window`-exposed). Every FE
+  mutation seam **calls that helper** — the chat tool-result seam (each game-mutating tool) and the
+  decision-card POST success — and **nothing** may `new CustomEvent('orwell:gamechanged')` ad-hoc.
+  `frontend/tests/test_g15_gamechanged.py` enforces "exactly one dispatcher" + that every mutating
+  tool routes through it. Cross-**device** reconcile is a *separate* seam: `_publish_game_updated`
+  (feature 0064, server-push) in `frontend/routes/orwell_routes.py`. Wiring a new mutation? Call the
+  helper; don't add a poll or an ad-hoc dispatch.
+
+- **The live stream splits by channel — reasoning must NEVER reach the public bubble.** In
+  `frontend/static/js/chat.js` the streaming loop keeps two per-round buffers: `roundReplyText`
+  (deltas with `json.thinking` falsy) and `roundReasoningText` (truthy). The message **body** renders
+  ONLY `roundReplyText` through `markdown.js processWithThinking` (which, in the game build, also
+  scrubs operator-aside / raw `npc:<id>` leaks); the live **"Thinking" accordion** renders
+  `roundReasoningText`. Reasoning is kept out of the body *by construction* — do not reintroduce
+  regex extraction of the reply from a merged buffer. Reset both buffers in lockstep with `roundText`
+  (at `agent_step` / `teacher_takeover`); the merged `roundText` / `accumulated` stay intact for the
+  other consumers (doc-fence, TTS, persistence `dataset.raw`, background streams, `<think time=…>`).
+  The **stall watchdog (`_startStallWatchdog`) is deliberately DISABLED** — the server-side stall
+  detector + auto-continue loop-breaker supersede the old "still working?" banner; don't re-enable it.
+
+- **Run the WHOLE FE suite before pushing FE changes.** `cd frontend && python3 -m pytest tests/`
+  (venv at `frontend/.venv`). Many gates are source-pinned convention checks (g15, the reasoning
+  scrub, the render contract) that live outside obvious keywords — a `-k` subset can pass green while
+  the real gate fails (the CI `frontend` job runs the full suite).
+
 ## Characters, souls & per-moment temperature
 
 - **Only the player's profile is human-authored** (first-run OOBE). **All NPC profiles are

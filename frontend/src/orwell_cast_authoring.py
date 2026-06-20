@@ -72,6 +72,26 @@ _PUBLIC_KEYS = ("biography", "physicalCharacteristics")
 _HIDDEN_KEYS = ("secrets", "trueGoals", "weakness")
 _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style")
 
+# Bounded concurrency for `author_cast` (#5): author NPCs in parallel but never flood the utility
+# endpoint — at most this many authoring LLM calls are in flight at once.
+_AUTHOR_CONCURRENCY = 3
+
+# Quality floor (#3, FE-side guard): a degraded/thin authored field must never overwrite the richer
+# deterministic seeded floor in the engine. Since recordCastProfile only overwrites the fields it
+# receives, OMITTING a sub-floor field is the whole guard — the engine keeps its prior (seeded) value.
+_BIO_MIN_CHARS = 80          # a coherent presentable backstory is more than a clause
+_BIO_MIN_SENTENCES = 2       # >= 2 sentence terminators [.!?]
+_HIDDEN_ENTRY_MIN_CHARS = 12  # a real secret/weakness is more than a stray word
+_SENTENCE_TERMINATORS = re.compile(r"[.!?]")
+
+
+def _biography_meets_floor(bio: str) -> bool:
+    """A presentable backstory must clear the coherence floor (>= 2 sentence terminators AND
+    >= 80 chars). Below it the seeded floor is richer, so we drop the authored value entirely."""
+    if not bio:
+        return False
+    return len(bio) >= _BIO_MIN_CHARS and len(_SENTENCE_TERMINATORS.findall(bio)) >= _BIO_MIN_SENTENCES
+
 
 def build_authoring_messages(npc: dict) -> list[dict]:
     """The producer prompt for ONE houseguest. Seeds the LLM with the houseguest's PUBLIC skeleton
@@ -122,7 +142,16 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
     out: dict = {"houseguestId": houseguest_id}
 
     if isinstance(obj.get("biography"), str) and obj["biography"].strip():
-        out["biography"] = obj["biography"].strip()
+        bio = obj["biography"].strip()
+        # Quality floor (#3): only overwrite the seeded floor with a coherent biography. A thin /
+        # degraded one is dropped (omitted), so the engine keeps its richer deterministic value.
+        if _biography_meets_floor(bio):
+            out["biography"] = bio
+        else:
+            logger.warning(
+                f"[cast-authoring] biography below floor for {houseguest_id} "
+                f"({len(bio)} chars, {len(_SENTENCE_TERMINATORS.findall(bio))} sentence(s)) — "
+                "omitting so the seeded floor stands")
     phys = obj.get("physicalCharacteristics")
     if isinstance(phys, dict):
         facet = {k: str(phys[k]).strip() for k in _PHYS_KEYS if isinstance(phys.get(k), (str, int)) and str(phys.get(k)).strip()}
@@ -131,16 +160,25 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
 
     secrets = obj.get("secrets")
     if isinstance(secrets, list):
-        clean = [str(s).strip() for s in secrets if str(s).strip()]
+        # Light floor (#3): drop trivially-short/empty secrets so a degraded list never replaces
+        # the seeded hidden material wholesale. If everything is too thin, omit the field entirely.
+        clean = [str(s).strip() for s in secrets if len(str(s).strip()) >= _HIDDEN_ENTRY_MIN_CHARS]
         if clean:
             out["secrets"] = clean[:3]
+        elif any(str(s).strip() for s in secrets):
+            logger.warning(f"[cast-authoring] all secrets below floor for {houseguest_id} — omitting")
     goals = obj.get("trueGoals")
     if isinstance(goals, list):
         clean = [str(g).strip() for g in goals if str(g).strip()]
         if clean:
             out["trueGoals"] = clean[:2]
     if isinstance(obj.get("weakness"), str) and obj["weakness"].strip():
-        out["weakness"] = obj["weakness"].strip()
+        weak = obj["weakness"].strip()
+        # Light floor (#3): a one-word weakness is degraded — drop it so the seeded value stands.
+        if len(weak) >= _HIDDEN_ENTRY_MIN_CHARS:
+            out["weakness"] = weak
+        else:
+            logger.warning(f"[cast-authoring] weakness below floor for {houseguest_id} — omitting")
     # `dayOnePerception` is deliberately NOT forwarded (anti-sycophancy): even if a model echoes it
     # back, the NPC's Day-1 read of the player is the engine's seeded, balanced floor — never authored.
 
@@ -156,7 +194,9 @@ LlmFn = Callable[[list[dict]], Awaitable[str]]
 WriteFn = Callable[[dict], Awaitable[dict]]
 
 
-async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn) -> int:
+async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
+                      on_authored: Optional[Callable[[str], None]] = None,
+                      *, concurrency: int = _AUTHOR_CONCURRENCY) -> int:
     """For each NPC in `cast`: build the producer prompt → `llm_fn` → parse → `write_fn`
     (recordCastProfile). Best-effort PER houseguest: one failure never aborts the rest (the seeded
     floor stays authoritative for any NPC that couldn't be authored). Returns how many were written.
@@ -165,27 +205,47 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn) -> int
     id is skipped. The engine owns the wall (validation / split / seal); this never seals anything.
     The player's identity is NOT threaded in at all — NPC storylines are authored player-independent
     (anti-sycophancy, mandate #3).
+
+    Authoring runs with BOUNDED concurrency (#5): NPCs are authored in parallel (the engine write-back
+    is idempotent per houseguest, so there is no cross-NPC ordering dependency), but at most
+    `concurrency` LLM calls are in flight at once so the utility endpoint is never flooded.
+
+    `on_authored(houseguest_id)` — when supplied — is fired AFTER each successful, engine-accepted
+    write-back (per-NPC portrait gating, #7). It is best-effort: a callback raising never aborts
+    authoring. It is never fired for an NPC that wasn't authored / was refused.
     """
-    written = 0
-    for npc in cast or []:
+    sem = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def _author_one(npc: dict) -> int:
         hid = npc.get("id")
         if not hid or hid == "player":
-            continue
-        try:
-            text = await llm_fn(build_authoring_messages(npc))
-        except Exception as e:  # the model can fail for one houseguest; carry on
-            logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
-            continue
-        profile = parse_authored_profile(text or "", hid)
-        if not profile:
-            continue
-        try:
-            res = await write_fn(profile)
-            if isinstance(res, dict) and res.get("accepted"):
-                written += 1
-        except Exception as e:
-            logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
-            continue
+            return 0
+        async with sem:
+            try:
+                text = await llm_fn(build_authoring_messages(npc))
+            except Exception as e:  # the model can fail for one houseguest; carry on
+                logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
+                return 0
+            profile = parse_authored_profile(text or "", hid)
+            if not profile:
+                return 0
+            try:
+                res = await write_fn(profile)
+            except Exception as e:
+                logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
+                return 0
+        if not (isinstance(res, dict) and res.get("accepted")):
+            return 0
+        # The write-back landed — signal this one NPC's completion so its portrait can shoot now (#7).
+        if on_authored is not None:
+            try:
+                on_authored(hid)
+            except Exception as e:  # pragma: no cover - defensive: a gate callback must never abort
+                logger.warning(f"[cast-authoring] on_authored({hid}) failed: {e}")
+        return 1
+
+    results = await asyncio.gather(*[_author_one(npc) for npc in (cast or [])])
+    written = sum(results)
     logger.info(f"[cast-authoring] authored {written} houseguest profile(s)")
     return written
 
@@ -237,9 +297,11 @@ def _delta_text(chunk) -> str:
     return s
 
 
-async def run_authoring(cast: list[dict], owner: Optional[str]) -> int:
+async def run_authoring(cast: list[dict], owner: Optional[str],
+                        on_authored: Optional[Callable[[str], None]] = None) -> int:
     """Resolve the live deps and author the cast. Silent no-op (returns 0) if no model resolves.
-    No player identity is threaded in — NPC storylines are authored player-independent."""
+    No player identity is threaded in — NPC storylines are authored player-independent.
+    `on_authored(houseguest_id)` fires per successful write-back (per-NPC portrait gating, #7)."""
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
         logger.debug("[cast-authoring] no utility model — keeping the seeded floor")
@@ -249,19 +311,25 @@ async def run_authoring(cast: list[dict], owner: Optional[str]) -> int:
     async def _write(profile: dict) -> dict:
         return await orwell_engine.record_cast_profile(profile, user=owner)
 
-    return await author_cast(cast, llm_fn, _write)
+    return await author_cast(cast, llm_fn, _write, on_authored)
 
 
 def kickoff_authoring(cast: list[dict], owner: Optional[str],
-                      then: Optional[Callable[[], None]] = None) -> None:
+                      then: Optional[Callable[[], None]] = None,
+                      on_authored: Optional[Callable[[str], None]] = None) -> None:
     """Fire-and-forget: author the cast in the background BEFORE portraits (the authored physical
     facet feeds the portrait prompt — pipeline order), then call `then` (e.g. the portrait kickoff)
     REGARDLESS of authoring success, so the picture still generates from the seeded facets if the
     model was unavailable. Never blocks game start; never raises into the caller.
-    The player's identity is NOT passed in — NPC storylines are authored player-independent."""
+    The player's identity is NOT passed in — NPC storylines are authored player-independent.
+
+    `on_authored(houseguest_id)` — when supplied — fires after EACH NPC's successful write-back so a
+    consumer can gate that one houseguest's portrait the moment it is authored (#7). `then` still
+    fires once at the very end (whole-cast done), success or failure, so a whole-cast fallback /
+    gate-release can never hang."""
     async def _runner():
         try:
-            await run_authoring(cast, owner)
+            await run_authoring(cast, owner, on_authored)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"[cast-authoring] background run failed: {e}")
         finally:

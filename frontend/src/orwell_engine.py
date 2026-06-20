@@ -395,6 +395,17 @@ async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     return await _call("recordCastProfile", profile, user=user)
 
 
+async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict:
+    """Feature 0062: write a REAL captured move-in zeitgeist BACK to the engine, which persists it
+    as the single FROZEN artifact and RECALLS it (never re-searches) all season. ``snapshot`` carries
+    an optional ``capturedFor`` / ``capturedAt`` plus any subset of the PUBLIC ``slices``
+    (``screen``, ``music``, ``sports``, ``news``, ``internet``, ``mood``) — the shared real-world
+    flavor the whole cast moved in WITH. The FE owns the concrete web-search capture (like the 0051
+    image port); empty slices keep the fallback's value (non-degradation). Returns
+    ``{ accepted, source }``. Public flavor only — no Vault, no game input."""
+    return await _call("recordWorldSnapshot", snapshot, user=user)
+
+
 async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
     """Feature 0051: record that a generated portrait was SHOWN to the player — a
     player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored

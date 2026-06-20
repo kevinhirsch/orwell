@@ -55,20 +55,60 @@ from src import log_rings  # the G1b live rings (FE log + Engine I/O tap)
 
 
 def _data_dir() -> str:
+    """The FRONT-END app-data dir (frontend/data): the FE's own logs (portrait-log.jsonl, the
+    G19a script-run logs) live here. DATA_DIR overrides (tests/dev)."""
     return os.environ.get("DATA_DIR") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 
-def _log_files() -> list:
-    """On-disk log basenames under the data dir (allowlist for the file tail)."""
+def _ops_data_dir() -> str:
+    """The DEPLOY data dir (e.g. /opt/orwell/data): where the root-side systemd ops path units
+    watch data/ops/<flag>, where the installer creates data/ops, and where the ops-*.log run logs
+    live. This is a DIFFERENT tree from _data_dir()/frontend/data — one level higher (APP_DIR).
+    The maintenance buttons (Update / Factory Reset / Update+Reset) hand off through this tree;
+    pointing them at frontend/data was the bug (the FE dropped flags no root watcher ever saw).
+    DATA_DIR overrides (tests/dev) so it collapses onto _data_dir() under a single test root."""
+    return os.environ.get("DATA_DIR") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
+
+
+def _log_dirs() -> list:
+    """The trees the admin log viewer tails: the FE app-data dir (its own logs) AND the deploy
+    data dir (the root-side ops-*.log the maintenance buttons stream). De-duplicated, FE-dir first
+    (so an FE log wins a same-name collision). Under a test DATA_DIR the two collapse to one."""
     out = []
-    try:
-        for n in sorted(os.listdir(_data_dir())):
-            if n.endswith((".log", ".jsonl")) and os.path.isfile(os.path.join(_data_dir(), n)):
-                out.append(n)
-    except OSError:
-        pass
+    for d in (_data_dir(), _ops_data_dir()):
+        if d and d not in out:
+            out.append(d)
     return out
+
+
+def _log_files() -> list:
+    """On-disk log basenames across the viewer's data dirs (allowlist for the file tail)."""
+    out: list = []
+    seen: set = set()
+    for d in _log_dirs():
+        try:
+            for n in sorted(os.listdir(d)):
+                if n in seen:
+                    continue
+                if n.endswith((".log", ".jsonl")) and os.path.isfile(os.path.join(d, n)):
+                    out.append(n)
+                    seen.add(n)
+        except OSError:
+            pass
+    return out
+
+
+def _log_path(name: str) -> str:
+    """Resolve an (already allowlisted) log basename to the first data dir that holds it; falls
+    back to the FE data dir so a brand-new file still has a stable home. No traversal — callers
+    pass only names from _log_files()."""
+    for d in _log_dirs():
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(_data_dir(), name)
 
 # Env keys worth bundling (the deploy-relevant knobs). Values matching _SECRET_RE are redacted.
 _ENV_PREFIXES = ("ORWELL_", "BBAI_", "AUTH_")
@@ -215,15 +255,16 @@ def _ops_status_files() -> dict:
     and a short TAIL of each (the most recent maintenance/diagnostic output). These are the
     app's own ops logs — operational, not secret. Sizes are bounded; tails are clipped."""
     out: dict = {"updateTriggerInstalled": False, "logs": []}
-    data_dir = _data_dir()
     try:
-        out["updateTriggerInstalled"] = os.path.isdir(os.path.join(data_dir, "ops"))
+        # The trigger seam lives in the DEPLOY data dir (where the root path units watch), not the
+        # FE app-data dir — check there.
+        out["updateTriggerInstalled"] = os.path.isdir(os.path.join(_ops_data_dir(), "ops"))
     except Exception:
         pass
     for name in _log_files():
         entry: dict = {"name": name}
         try:
-            path = os.path.join(data_dir, name)
+            path = _log_path(name)
             entry["sizeBytes"] = os.path.getsize(path)
             with open(path, "rb") as fh:
                 size = entry["sizeBytes"]
@@ -515,7 +556,7 @@ def setup_admin_health_routes() -> APIRouter:
             name = source[5:]
             if name not in _log_files():  # strict allowlist — no traversal, ever
                 return Response(status_code=404)
-            path = os.path.join(_data_dir(), name)
+            path = _log_path(name)         # FE app-data dir OR the deploy ops-*.log tree
             try:
                 size = os.path.getsize(path)
                 start = max(int(since), max(0, size - 65536) if since == 0 else 0)
@@ -612,7 +653,7 @@ def setup_admin_health_routes() -> APIRouter:
         require_admin(request)
         return {
             "scripts": [{"id": k, "label": v[0], "log": v[3]} for k, v in _OPS_SCRIPTS.items()],
-            "updateTrigger": {"installed": os.path.isdir(os.path.join(_data_dir(), "ops")),
+            "updateTrigger": {"installed": os.path.isdir(os.path.join(_ops_data_dir(), "ops")),
                               "log": "ops-update.log"},
         }
 
@@ -627,7 +668,9 @@ def setup_admin_health_routes() -> APIRouter:
     async def admin_ops_update(request: Request):
         """G19a: write the flag the root-side path unit (G19b) watches. Content ignored."""
         require_admin(request)
-        ops_dir = os.path.join(_data_dir(), "ops")
+        # The trigger flag must land in the DEPLOY data dir where the root-side path unit watches
+        # (frontend/data is a different tree the watcher never sees — that was the silent-no-op bug).
+        ops_dir = os.path.join(_ops_data_dir(), "ops")
         if not os.path.isdir(ops_dir):
             return {"triggered": False, "installed": False,
                     "note": "update trigger not installed — run the deploy updater once to enable"}

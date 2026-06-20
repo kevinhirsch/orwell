@@ -65,6 +65,17 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** E21: the beat window the fold budget counts within, plus the per-edge tallies inside it. */
   private foldBeatKey = "";
   private readonly foldCounts = new Map<string, number>();
+  /**
+   * R3 (Part E latency tail) — an incremental cache for `currentBeatKey`. The window key is "the latest
+   * recorded `season:` event id"; the log is APPEND-ONLY, so that latest id is MONOTONIC — it can only move
+   * forward as new beats append, never backward. We cache the last answer + the event-count it was computed
+   * at, and on the next call scan only the TAIL appended since (`eventsSince` — O(Δ)) backward for a fresh
+   * `season:` beat; if the tail holds none, the cached key is still the latest. This replaces the per-
+   * `recordInteraction` BACKWARD scan of the WHOLE log (which, between beats, walked every accumulated
+   * interaction/gossip/confessional event — O(events), the season-length latency tail). `count()` is the
+   * cache key (it only ever grows under append-only), so a miss is always a fresh, correct recompute.
+   */
+  private beatKeyCache: { atCount: number; key: string } | null = null;
 
   constructor(
     private readonly events: EventStore,
@@ -264,13 +275,28 @@ export class EngineCommandsAdapter implements EngineCommands {
     return true;
   }
 
-  /** The current beat window: the latest recorded season beat's id (pre-season counts as one window). */
+  /**
+   * The current beat window: the latest recorded season beat's id (pre-season counts as one window).
+   *
+   * R3 — INCREMENTAL: the log is append-only, so the latest `season:` id is monotonic. We scan only the
+   * tail appended since the last call (`eventsSince(atCount)` — O(Δ)); a tail with a fresh beat updates
+   * the cache, an empty/beat-free tail reuses the cached key, and a count that hasn't moved is the
+   * cached key verbatim. The result is byte-identical to the old whole-log backward scan: the old scan
+   * returned the highest-index `season:` event's id (or `"pre-season"` if none ever recorded), and the
+   * cache, being monotonic and seeded once from `"pre-season"`, holds exactly that. (`count()` is the
+   * cache key; it only grows under append-only, so a stale cache is impossible — a miss recomputes.)
+   */
   private currentBeatKey(): string {
-    const evs = this.events.query();
-    for (let i = evs.length - 1; i >= 0; i--) {
-      if (evs[i]!.id.startsWith("season:")) return evs[i]!.id;
+    const count = this.events.count();
+    if (this.beatKeyCache && this.beatKeyCache.atCount === count) return this.beatKeyCache.key;
+    const from = this.beatKeyCache ? this.beatKeyCache.atCount : 0;
+    let key = this.beatKeyCache?.key ?? "pre-season";
+    const tail = this.events.eventsSince(from); // O(Δ): only the events appended since the last call
+    for (let i = tail.length - 1; i >= 0; i--) {
+      if (tail[i]!.id.startsWith("season:")) { key = tail[i]!.id; break; } // latest fresh beat in the tail
     }
-    return "pre-season";
+    this.beatKeyCache = { atCount: count, key };
+    return key;
   }
 
   surfaceInformationTo(req: SurfaceReq): { ok: true; surfaced: boolean } {

@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, RecordCastProfileReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -135,6 +135,15 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
       if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
       return;
+    case "recordWorldSnapshot":
+      // 0062: the FE zeitgeist write-back. `slices` is OPTIONAL — refuse only if present and not an
+      // object (a string/array where an object is expected is the R6 class that dies deep in the merge);
+      // each slice's own shape (bounded, public flavor) is sanitized inside the adapter, not here.
+      if (args["slices"] !== undefined) {
+        const s = args["slices"];
+        if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
+      }
+      return;
     default:
       return; // read tools and free-text tools take no required structure
   }
@@ -167,6 +176,9 @@ export class McpServer {
       case "recordCastProfile":
         // 0058/0065: seal one houseguest's authored §3 profile (PUBLIC/HIDDEN split; never echoes a hidden value).
         return this.deps.session.recordCastProfile(args as unknown as RecordCastProfileReq);
+      case "recordWorldSnapshot":
+        // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
+        return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
       case "getGameState":
         return this.deps.session.getGameState();
       case "gameStatus":
