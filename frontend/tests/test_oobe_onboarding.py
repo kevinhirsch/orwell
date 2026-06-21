@@ -252,18 +252,17 @@ def test_welcome_reshows_after_a_backend_reset_via_fresh_intake():
     # A BACKEND/host factory reset runs server-side and never reaches the FE restart hooks
     # (settings.js / orwellNewSeason.js), so the per-user welcome marker can go stale and skip the
     # welcome on the new season's first open. route() detects a genuinely fresh casting (the engine
-    # intake is empty — casting.known has no captured fields) that THIS tab session never opened
-    # (SEAT_TAKEN captured BEFORE openFreshInterviewSession) and clears the stale marker so the
-    # welcome greets again — without re-popping on a same-session mid-interview reload.
+    # intake is empty — casting.known has no captured fields) with NO interview yet underway and
+    # clears the stale marker so the welcome greets again — without re-popping on a same-session
+    # mid-interview reload.
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
-    # captures the seat state (sessionStorage read) BEFORE the interview is (re)opened this pass
-    assert "_seatTakenBefore" in route
-    assert (route.index("sessionStorage.getItem(SEAT_TAKEN_KEY)")
-            < route.index("await openFreshInterviewSession()"))
-    # the fresh-intake signal is server-derived (casting.known empty), gated by !_seatTakenBefore
+    # the fresh-intake signal is server-derived (casting.known empty), gated on whether the interview
+    # has actually begun — NOT the per-tab seat flag (route() sets that flag every pre-game load, so a
+    # same-tab reload after a host reset kept it true and skipped the welcome — Thing 1).
     assert "st.casting.known" in route
-    assert "_intakeEmpty" in route and "!_seatTakenBefore" in route
+    assert "_intakeEmpty" in route and "!_conversationHasAssistantTurn()" in route
+    assert "!_seatTakenBefore" not in route   # the per-tab seat-flag gate is retired
     # the stale marker is cleared so the welcome re-shows, BEFORE the !welcomeSeen() gate
     clear_at = route.index("clearWelcomeSeen()")
     gate_at = route.index("if (!welcomeSeen())")
@@ -419,3 +418,41 @@ def test_premiere_tutorial_still_frames_the_first_week_lightly():
     assert "fifteen houseguests" in js  # the gate condition
     for beat in ("HOH", "Nominations", "Veto", "Eviction"):
         assert beat in js
+
+
+def test_issue2_production_cues_filtered_by_one_shared_seam():
+    # Issue 2 / J2-07: production cues ("(Production cue …)") must NEVER render as the player's "You"
+    # bubble. They leaked because the skip lists DRIFTED — chat.js had the cue case, sessions.js's
+    # session/archive renders didn't. Fix: ONE shared seam (chat.js isSkippableUserPrompt) used by
+    # every history-render path, so they can't drift again.
+    chat = _read("static", "js", "chat.js")
+    assert "isSkippableUserPrompt: _isSkippableUserPrompt" in chat   # exposed on window.chatModule
+    assert "(production cue" in chat.lower()                          # the envelope is matched
+    sess = _read("static", "js", "sessions.js")
+    # BOTH sessions.js render paths route through the shared seam (was: a hardcoded list missing cues)
+    assert sess.count("window.chatModule.isSkippableUserPrompt") >= 2
+
+
+def test_issue1_meta_strip_hidden_in_game_build():
+    # Issue 1 / J1-22: the tok/s + context-% strip is an OOC dev artifact ("38.57 tok/s · 12% context")
+    # that breaks immersion and confuses players after a reset — never render it in the game build.
+    cr = _read("static", "js", "chatRenderer.js")
+    dm = cr[cr.index("export function displayMetrics"):]
+    head = dm[:dm.index("const responseTime")]   # the guard sits at the top, before any work
+    assert "data-game-build" in head and "return" in head
+
+
+def test_thing2_cast_photo_is_a_pill_not_an_auto_open():
+    # Thing 2: the cast-photo box no longer AUTO-opens after the producer's opener — route() surfaces a
+    # competition-style "Choose Your Character" pill; clicking it opens the box.
+    hs = _read("static", "js", "orwellHeadshot.js")
+    route = hs[hs.index("async function route"):]
+    # route surfaces the pill as the reveal action and must NOT auto-call mount() (the box opens on
+    # the pill click). Strip 'unmount' first so its substring 'mount(' isn't a false positive.
+    assert "showPill();" in route
+    assert "mount(" not in route.replace("unmount", "_um_")
+    assert "Choose Your Character" in hs
+    assert "orwell-choose-character" in hs
+    # the pill's click is what opens the box
+    pill = hs[hs.index("function showPill"):hs.index("function removePill")]
+    assert "mount()" in pill and "hs-choose-btn" in pill

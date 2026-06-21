@@ -1610,6 +1610,11 @@ export function createUserMsgFooter(msgElement) {
 export function displayMetrics(messageElement, metrics) {
   const existingMetrics = messageElement.querySelector('.response-metrics');
   if (existingMetrics) existingMetrics.remove();
+  // J1-22 / Issue 1: the tok/s + context-% strip is an OUT-OF-CHARACTER dev artifact — a raw model
+  // metric ("38.57 tok/s · 12% context") breaks the Big Brother fiction, and the context reading
+  // confuses players (esp. right after a factory reset). Never render it in the game build; the full
+  // workspace still shows it.
+  if (document.body && document.body.hasAttribute('data-game-build')) return;
 
   const metricsContainer = document.createElement('span');
   metricsContainer.className = 'response-metrics';

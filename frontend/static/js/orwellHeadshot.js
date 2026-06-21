@@ -103,7 +103,22 @@
       /* keyboard/touch users have no hover — reveal the delete on focus-within too. */
       .ow-headshot-studio .hs-libitem:hover .hs-libdel,
       .ow-headshot-studio .hs-libitem:focus-within .hs-libdel { opacity: 1; }
-      @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }`;
+      @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }
+      /* "Choose Your Character" pill — a competition-style CTA rendered in the chat right after
+         the producer's opener; clicking it opens the cast-photo box (which no longer auto-opens).
+         Matches the decision-card accent pill (rounded, --accent, ≥44px tap target). */
+      #orwell-choose-character { display: flex; justify-content: center; margin: 10px 0 6px; }
+      .hs-choose-btn {
+        font: inherit; font-size: 14px; font-weight: 700; letter-spacing: .02em;
+        padding: 10px 22px; border-radius: 999px; cursor: pointer; min-height: 44px;
+        background: var(--brand-color, var(--accent, #e06c75)); color: var(--on-accent, var(--bg, #111));
+        border: 1px solid transparent; box-shadow: 0 2px 10px rgba(0,0,0,.25);
+        transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+      }
+      .hs-choose-btn:hover { filter: brightness(1.06); box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+      .hs-choose-btn:focus-visible { outline: 2px solid var(--brand-color, var(--accent, #e06c75)); outline-offset: 3px; }
+      .hs-choose-btn:active { transform: translateY(1px); }
+      @media (prefers-reduced-motion: reduce) { .hs-choose-btn { transition: none; } }`;
     document.head.appendChild(s);
   }
 
@@ -490,6 +505,7 @@
 
   function unmount() {
     teardownWindow();
+    removePill();   // Thing 2: clear the "Choose Your Character" pill when the step is done/closed
     try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
   }
 
@@ -514,6 +530,32 @@
   // castPhoto in `missing`) cannot re-mount the box and TRAP the player. Resets on reload — if the
   // engine genuinely never cleared the step, the box reappears next load and they can act again.
   let _photoHandledLocally = false;
+
+  // Thing 2: the cast-photo box no longer AUTO-opens. Instead, once the producer's opener has
+  // rendered, route() surfaces a competition-style "Choose Your Character" pill in the chat
+  // (right after that message). The box opens only when the player clicks the pill — then the
+  // pill is removed. This keeps the box from popping unbidden over the live narration.
+  const PILL_ID = "orwell-choose-character";
+  function showPill() {
+    if (_win || document.getElementById(ID)) return;        // box already open ⇒ no pill
+    if (document.getElementById(PILL_ID)) return;           // pill already shown
+    const hist = document.getElementById("chat-history");
+    if (!hist) return;
+    const wrap = document.createElement("div");
+    wrap.id = PILL_ID;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hs-choose-btn";
+    btn.textContent = "Choose Your Character";
+    btn.setAttribute("aria-label", "Choose your character — open your cast photo");
+    btn.addEventListener("click", () => { removePill(); mount(); });
+    wrap.appendChild(btn);
+    hist.appendChild(wrap);
+    try { hist.scrollTop = hist.scrollHeight; } catch (_) {}
+  }
+  function removePill() {
+    const p = document.getElementById(PILL_ID); if (p) p.remove();
+  }
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
@@ -551,12 +593,13 @@
       return;
     }
     if (!_conversationHasAssistantTurn()) {
-      // The producers haven't reached out yet — don't pop the box before the question. We'll
+      // The producers haven't reached out yet — don't surface the pill before the question. We'll
       // re-route on orwell:gamechanged (and the light poll) once the opener renders.
       unmount();
       return;
     }
-    mount();
+    // Thing 2: surface the "Choose Your Character" pill (the box opens on click), NOT the box.
+    showPill();
   }
 
   window.addEventListener("orwell:gamechanged", route);

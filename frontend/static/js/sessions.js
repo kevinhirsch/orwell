@@ -1661,8 +1661,14 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
         }
         // Clean up doc selection context for display
         if (msg.role === 'user') {
-          // Hide "Continue where you left off" bubbles
-          if (displayContent.trim() === 'Continue where you left off' || displayContent.trim().startsWith('Your message was cut off.') || displayContent.trim().startsWith('Your previous response was interrupted.') || displayContent.includes('[Instruction: Rewrite') || displayContent.includes('[Instruction: Explain')) continue;
+          // Hide engine/onboarding control prompts (continue / cut-off / instruction / PRODUCTION
+          // CUE) — the SAME skip chat.js applies, via the shared seam so the two lists can't drift.
+          // (The "(Production cue …)" case was missing here, leaking the producers' hidden kickoff +
+          // resume cues as the player's own "You" bubbles on session load — Issue 2 / J2-07.)
+          const _skip = (window.chatModule && window.chatModule.isSkippableUserPrompt)
+            ? window.chatModule.isSkippableUserPrompt(displayContent)
+            : (displayContent.trim() === 'Continue where you left off' || displayContent.trim().startsWith('Your message was cut off.') || displayContent.trim().startsWith('Your previous response was interrupted.') || displayContent.includes('[Instruction: Rewrite') || displayContent.includes('[Instruction: Explain') || displayContent.trim().toLowerCase().startsWith('(production cue'));
+          if (_skip) continue;
           const docEditMatch = displayContent.match(/^In the document, edit this specific text \((lines? [\d-]+)\):\n```\n([\s\S]*?)\n```\n\nInstruction: ([\s\S]*)$/);
           if (docEditMatch) {
             displayContent = `[Doc edit: ${docEditMatch[1]}] ${docEditMatch[3]}`;
@@ -2388,6 +2394,12 @@ async function _arcPeekOpen(sid) {
         if (msg.role === 'user' || msg.role === 'assistant') {
           const model = String((msg.metadata && msg.metadata.model) || '');
           const content = typeof msg.content === 'string' ? msg.content : (Array.isArray(msg.content) ? msg.content : String(msg.content || ''));
+          // Hide engine/onboarding control prompts (incl. "(Production cue …)") in archived views too.
+          if (msg.role === 'user' && window.chatModule && window.chatModule.isSkippableUserPrompt) {
+            const _txt = typeof msg.content === 'string' ? msg.content
+              : (Array.isArray(msg.content) ? msg.content.filter(p => p && p.type === 'text').map(p => p.text).join('\n') : String(msg.content || ''));
+            if (window.chatModule.isSkippableUserPrompt(_txt)) continue;
+          }
           try { addMsg(msg.role, content, model, msg.metadata || null); } catch (e) { console.warn('Failed to render message:', e); }
         }
       }
