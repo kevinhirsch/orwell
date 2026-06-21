@@ -295,21 +295,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
 </head>
 <body>
-  <!-- Loading overlay — hides all flashing until app is ready -->
-  <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#282c34);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
-    <div id="loader-wave" style="color:var(--brand-color,var(--red,#e06c75));font-family:monospace;font-size:var(--fs-xs);opacity:.5">▁▂▃</div>
+  <!-- Loading overlay — hides all flashing until app is ready. role=status + aria-label so a
+       screen reader announces the boot wait instead of silence (UX audit J1-29), with NO
+       child text node (an injected SR span reflowed the page → 390px matrix regression). -->
+  <div id="app-loader" role="status" aria-label="Loading the house" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#282c34);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
+    <div id="loader-wave" aria-hidden="true" style="color:var(--brand-color,var(--red,#e06c75));font-family:monospace;font-size:var(--fs-xs);opacity:.5">▁▂▃</div>
   </div>
   <script nonce="{{CSP_NONCE}}">
   (function(){
     var el=document.getElementById('loader-wave');
     if(!el)return;
-    var frames=['▁▂▃','▂▃▄','▃▄▅','▄▅▆','▅▆▅','▆▅▄','▅▄▃','▄▃▂','▃▂▁'];
-    var i=0;
-    var iv=setInterval(function(){
-      if(!document.getElementById('app-loader')){clearInterval(iv);return}
-      el.textContent=frames[i%frames.length];
-      i++;
-    },150);
+    // J1-29: honor prefers-reduced-motion — hold a static frame instead of animating the wave.
+    var rm=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(!rm){
+      var frames=['▁▂▃','▂▃▄','▃▄▅','▄▅▆','▅▆▅','▆▅▄','▅▄▃','▄▃▂','▃▂▁'];
+      var i=0;
+      var iv=setInterval(function(){
+        if(!document.getElementById('app-loader')){clearInterval(iv);return}
+        el.textContent=frames[i%frames.length];
+        i++;
+      },150);
+    }
     setTimeout(function(){var l=document.getElementById('app-loader');if(l){l.style.opacity='0';setTimeout(function(){l.remove()},300)}},5000);
   })();
   </script>
@@ -1009,7 +1015,7 @@
         <button type="button" class="user-bar-btn" id="tool-theme-btn" title="Theme" aria-label="Theme">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="14" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>
         </button>
-        <button type="button" class="user-bar-btn" id="user-bar-settings" title="Settings">
+        <button type="button" class="user-bar-btn" id="user-bar-settings" title="Settings" aria-label="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
@@ -1919,7 +1925,7 @@
                 <div class="admin-toggle-label">Reset progress</div>
                 <div class="admin-toggle-sub">Wipe this season and restart it from casting. Your season number stays the same — you restart the current level, you don't skip ahead. Irreversible.</div>
               </div>
-              <button class="admin-btn-delete" id="settings-reset-progress-btn" style="white-space:nowrap;">Reset</button>
+              <button class="admin-btn-delete" id="settings-reset-progress-btn" style="white-space:nowrap;flex-shrink:0;">Reset</button>
             </div>
             <div id="settings-reset-progress-msg" style="margin-top:6px;font-size:var(--fs-xs);"></div>
           </div>
