@@ -36641,6 +36641,25 @@ body.theme-frosted .modal {
   .doc-email-richbody.doc-font-m { font-size: 16px !important; }
 }
 
+/* J5-01 (Control-Room audit): the kit-window + gadget-rail chrome controls sit BELOW the
+   44px coarse-pointer tap-target floor — rail header buttons render 30×32, kit-window
+   controls (dock/min/close) 24×32, collapsed-strip icons 38×38. Bump them to the floor on
+   TOUCH only so desktop chrome stays compact (the same pattern as J4-11 / J2-06 / the
+   tour-hint dismiss). Width can grow past the icon — flex centering keeps the glyph centered. */
+@media (hover: none) and (pointer: coarse) {
+  .gadget-rail-head button,
+  .ow-controls button,
+  .ow-dismiss,
+  #gadget-rail-strip [data-grail-gadget],
+  #gadget-rail-strip button {
+    /* !important beats the kit's runtime-injected `.ow-controls button { min-width:24px }`
+       (appended to <head> after style.css, so it'd win on source order otherwise) — the same
+       reason the touch font-size catch-all above pins !important. */
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
 /* GitHub Copilot device-flow connect block (model endpoints → API) */
 .adm-copilot-connect {
   margin-top: 10px;

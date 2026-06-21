@@ -29,7 +29,7 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | J1-01 | J1 | HIGH-PRIORITY POLISH | VIEWED | Raw LLM model slug "deepseek-v4-pro" leaks to player (session title in sidebar/header + composer indicator) |
 | J1-02 | J1 | HIGH-PRIORITY POLISH | VIEWED | Composer placeholder reads "Message Orwell…" while narrator/header is "Big Brother" — brand/voice mismatch |
 | J1-03 | J1 | LAUNCH-BLOCKING UX | VIEWED | Auto-sent "(production cue — begin the casting interview … do not wait for me to speak.)" stage-direction rendered in the player's transcript |
-| J1-04 | J1 | HIGH-PRIORITY POLISH | VIEWED | "Your Cast Photo" card overlaps/occludes the streaming narration that explains it (figure-ground) |
+| J1-04 | J1 | HIGH-PRIORITY POLISH | FIXED (#468) | "Your Cast Photo" card overlaps/occludes the streaming narration that explains it (figure-ground) |
 | J1-05 | J1 | HIGH-PRIORITY POLISH | VIEWED | Narration says "the camera panel next to the chat box" — a desktop-spatial reference that breaks on mobile |
 | J1-06 | J1 | HIGH-PRIORITY POLISH | VIEWED | Theme picker exposes 21+ themes; only ~5 are house themes — choice overload + brand dilution |
 | J1-07 | J1 | UX REFACTOR BACKLOG | VIEWED | Settings exposes many inherited-workspace toggles irrelevant to a BB player (extraneous load) |
@@ -53,9 +53,9 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | J1-20 | HIGH | VIEWED | **Under-animated marquee beats** — welcome entrance, welcome→casting, narration reveal are hard cuts/pop-ins (no staging/streaming); reduced-motion therefore only trivially compliant. Peak-end + game-feel. | visual-F3, interaction; frames `f_0003→f_0004`, `f_0037→f_0039`, narration mass flat from `f_0040` |
 | J1-21 | HIGH | VIEWED | **Composer placeholder "Message Orwell…" contrast ~2.79:1** — WCAG 1.4.3 FAIL. | content-#5, visual-F4; `08-composer-empty.png` (sampled) |
 | J1-22 | HIGH | VIEWED | **Streaming meta strip "tok/s · ⟳ 12%" contrast ~1.5–2:1** + tiny — the only "producers working / progress" feedback is near-invisible; also an OOC artifact in-fiction. WCAG 1.4.3. | visual-F4, interaction-F7, content-#8; `05-casting-kickoff.png` meta-row |
-| J1-23 | HIGH | VIEWED | **No scrim / triple-stacked overlays** — cast-photo card (and theme popup over it) have no backdrop dim, so live narration competes for figure status; Settings modal proves the scrim exists. Gestalt figure/ground. | visual-F1/F6, interaction-F4/F8; `f_0041`, `f_0080`, `07-theme-picker.png`; contrast `f_0061` |
+| J1-23 | HIGH | FIXED (#468) | **No scrim / triple-stacked overlays** — cast-photo card (and theme popup over it) have no backdrop dim, so live narration competes for figure status; Settings modal proves the scrim exists. Gestalt figure/ground. | visual-F1/F6, interaction-F4/F8; `f_0041`, `f_0080`, `07-theme-picker.png`; contrast `f_0061` |
 | J1-24 | BACKLOG | VIEWED | **Theme swatch dots vanish on dark tiles** (the feed/midnight) + abstract 3-dot preview undersells themes. Signifier quality. | visual-F7; `07-theme-picker.png` |
-| J1-25 | LAUNCH-BLOCKING | VIEWED | **Cast Photo dialog: no `aria-modal`, no focus trap, background not inert** — focus escapes into chat (confirmed: mobile Escape landed on `body`). Welcome modal does this correctly — reuse it. WCAG 2.1.2/4.1.2. | content-#4; `orwellWindow.js:340-341`; `mobile/normal/mutation-event-log.jsonl` t=16743 |
+| J1-25 | LAUNCH-BLOCKING | FIXED (#468) | **Cast Photo dialog: no `aria-modal`, no focus trap, background not inert** — focus escapes into chat (confirmed: mobile Escape landed on `body`). Welcome modal does this correctly — reuse it. WCAG 2.1.2/4.1.2. | content-#4; `orwellWindow.js:340-341`; `mobile/normal/mutation-event-log.jsonl` t=16743 |
 | J1-26 | LAUNCH-BLOCKING | VIEWED | **Cast-photo portrait/library tiles are non-semantic clickable `<div>`s** (no role/tabindex/key handler/name) — keyboard- & SR-only players cannot pick/regenerate a portrait in OOBE. WCAG 2.1.1/4.1.2. | content-#3; `orwellHeadshot.js:272, 227` |
 | J1-27 | HIGH | VIEWED | **Cast-photo status messages have no live region** ("Generating…/Upload failed/photo service offline" silent to SR). WCAG 4.1.3. | content-#6; `orwellHeadshot.js:242, 298` |
 | J1-28 | HIGH | VIEWED | **Settings helper/description text contrast ~2.68:1** — WCAG 1.4.3 FAIL (toggle descriptions unreadable for low-vision). | content-#2; `06-settings-appearance.png` (sampled) |
@@ -64,7 +64,7 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | J1-31 | BACKLOG | VIEWED | **Welcome CTA: weak/inconsistent `:focus-visible` ring + empty `aria`** on the journey's first interactive element. WCAG 2.4.7/4.1.2 (minor — visible text mitigates). | interaction-F6; `trace.json` welcome_ctas `aria:""`; `f_0015` vs `04-welcome-overlay.png` |
 | J1-32 | BACKLOG | VIEWED | **Redundant cast-photo lead** — title "Your Cast Photo" then body "**Your cast photo.** Upload…". Content concision. | content-#11; `orwellHeadshot.js:346` |
 | J1-33 | BACKLOG | VIEWED | **Vocabulary drift** — Settings/Shortcuts say "sessions/conversations/Toggle Window" vs in-app "Chats". Consistency. | content-#12; `06-settings-shortcuts.png` |
-| J1-34 | HIGH | VIEWED | **Casting-kickoff cognitive overload (composite)** — long live stream + leaked "You" cue + floating 4-option photo card overlapping the text, all at once, no lead-in. Sweller extraneous load at the marquee moment. | interaction-F4; `05-casting-kickoff.png` |
+| J1-34 | HIGH | FIXED (#468) | **Casting-kickoff cognitive overload (composite)** — long live stream + leaked "You" cue + floating 4-option photo card overlapping the text, all at once, no lead-in. Sweller extraneous load at the marquee moment. | interaction-F4; `05-casting-kickoff.png` |
 
 **Positives confirmed (keep as patterns):** welcome modal a11y is exemplary (`role=dialog`+`aria-modal`+focus-trap+inert+initial-focus, `orwellOnboarding.js:110-130,233,264-269`); `#chat-history` is `role=log aria-live=polite` with `aria-busy` gating the stream (`index.html:1064`, `chat.js:1117/3189`); two-window same-viewport parity is pixel-identical (0.0% — deterministic); welcome copy + "Meet the producers" CTA are strong, on-voice; mobile DPR2 is crisp.
 
@@ -188,8 +188,15 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | **J1-35** | **NEW** (found during validation): danger-zone "Reset" button nowrap-overflows at 390px (`space-between` flex row, default `flex-shrink:1` squeezed it below its content) → `flex-shrink:0`. Borderline on `main`; any index.html perturbation tipped it. | `index.html` |
 
 **Deferred — needs scoped work (NOT in this set):**
-- **J1-25** (cast-photo dialog focus-trap/`aria-modal`/inert) — LAUNCH-BLOCKING a11y, but forcing the whole `.ow-*` window kit modal would break the floating-window/lingering model; needs a per-window `modal` option. → next gated set.
-- **J1-22** (hide tok/s meta strip in game build), **J1-01/J1-02** (model slug + composer voice), **J1-04/J1-23** (cast-photo scrim), **J1-06** (theme scoping), **J1-14** (settings default tab), **J1-05/J1-09/J1-10/J1-12/J1-17/J1-20/J1-24/J1-30/J1-31/J1-32/J1-33/J1-34** → Phase-4 backlog / later gated sets.
+- ✅ **J1-25 / J1-23 / J1-04 / J1-34 — RESOLVED (window-kit modal option, PR #468).** The per-window
+  `modal` option this deferral called for shipped on `OrwellWindow` (opt-in `modal:true`: `aria-modal` +
+  focus-trap + inert background + a backdrop scrim), WITHOUT forcing it on the floating/lingering windows.
+  The cast-photo dialog opts in — so focus no longer escapes into the chat (J1-25), the live narration
+  recedes behind a scrim (J1-23/J1-04), and the floating-card overload is contained (J1-34). Scope + plan:
+  `docs/audits/2026-06-21-window-system-scope.md`.
+- **J1-22** (hide tok/s meta strip in game build), **J1-01/J1-02** (model slug + composer voice),
+  **J1-06** (theme scoping), **J1-14** (settings default tab), **J1-05/J1-09/J1-10/J1-12/J1-17/J1-20/
+  J1-24/J1-30/J1-31/J1-32/J1-33** → Phase-4 backlog / later gated sets.
 
 **Validation (this set):**
 - Local pytest **1663 passed**; the 2 pytest + the browser-smoke failures **reproduce on the pre-change baseline** (stash-compare) — artifacts of the shared dev `frontend/data/` (a casting game in progress + the OpenRouter endpoint) the engine-down/zero-data smoke assumes absent. **Not regressions** (confirmed clean on CI's clean checkout).
@@ -429,6 +436,7 @@ Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consiste
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
 - [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
 - [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 28 findings (J4-01…J4-28). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label) **merged PR #470** (CI green). Gated remediation set #5 (7 fixes: J4-08 confirm label / J4-09 alert region / J4-10 contrast / J4-11 tap target / J4-12 describedby / J4-13 copy / J4-14 aria-describedby). J4-22/25 closed (dup). Deferred: J4-04/05/06/07/15…21/23/24/26/27/28 → Phase-4 backlog / engine work queue.
+- [~] **J5 — The Control Room (the kit windows + gadget-rail "control room" surfaces — finale, cast, retrospective, status, presence)** — IN PROGRESS. Captured headless against the real FE (kit windows mounted + rail revealed/collapsed). **J5-01** (HIGH-PRIORITY POLISH — FIXED): the control-room chrome controls render BELOW the 44px coarse-pointer tap-target floor — rail header buttons 30×32, kit-window dock/min/close 24×32, collapsed-strip icons 38×38 (all properly labelled). Same class as J4-11/J2-06/J4-15. Fix: a touch-only `@media (hover:none) and (pointer:coarse)` floor (44px) — desktop stays compact. Verified headless (44×44 on touch, ~30×32 fine-pointer). Note: the responsive-matrix touch check doesn't reach these (rail drawer closed + kit windows unmounted during its run). *Also recorded this session: A1/#468 closed J1-25/23/04/34 (the cast-photo modal cluster); #472 fixed the ⇄ side-swap (stranded-hamburger overlap).*
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
 
