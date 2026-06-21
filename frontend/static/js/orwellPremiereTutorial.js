@@ -73,7 +73,9 @@
       "  padding: 0 .55rem; }" +
       ".orwell-premiere-tutorial .opt-dismiss:hover, .orwell-premiere-tutorial .opt-dismiss:focus-visible {" +
       "  background: color-mix(in srgb, var(--fg) 16%, transparent); }" +
-      ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }";
+      ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }" +
+      // J2-20: respect prefers-reduced-motion (consistent with orwellCast.js's portrait guard).
+      "@media (prefers-reduced-motion: reduce) { .orwell-premiere-tutorial-out { transition: none; } }";
     document.head.appendChild(st);
   }
 
@@ -98,6 +100,10 @@
     card.id = "orwell-premiere-tutorial";
     card.className = "orwell-premiere-tutorial";
     card.setAttribute("role", "note");
+    // J2-12: the tutorial is injected after the premiere narration, so screen-reader users never
+    // hear about the journey's key expectation-setter. A polite live region announces it on insert
+    // WITHOUT stealing focus (the card stays a non-intrusive note per ADR 0003).
+    card.setAttribute("aria-live", "polite");
     card.innerHTML =
       '<div class="opt-hd">' +
         '<span class="opt-ttl">Welcome to the house — premiere week</span>' +

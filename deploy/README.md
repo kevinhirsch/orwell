@@ -347,8 +347,24 @@ indexes onnxruntime tries to pin its thread pool to. The threads simply run **un
 inference is unaffected, and it appears **once** (one session, one thread pool, created once),
 never per inference. `fastembed-js` doesn't expose ORT's `intraOpNumThreads` to silence it, and
 widening the container's cpuset is a worse trade, so there is **nothing to fix** — ignore it.
-`orwell-doctor.sh` already filters this exact line out of the failing-unit journal tail (and
-notes how many lines it hid) so it can never be mistaken for the actual crash reason.
+`orwell-doctor.sh` filters this exact line out of the failing-unit journal tail (and notes how many
+lines it hid), and `orwell-install.sh` / `orwell-update.sh` filter it from the model-prefetch output,
+so it can never be mistaken for the actual crash reason.
+
+### Dependency advisories (npm audit)
+
+`npm audit` on the host reports advisories, but **every one is in the dev/build/test toolchain, not
+the deployed runtime** — esbuild/vite/vitest (bundler + test runner; the esbuild advisory is its dev
+server, which we never run), `@cucumber/*`→uuid (BDD tests), and `tar` (pulled in by `fastembed` only
+to extract the pinned model from its trusted HuggingFace source at prefetch). The engine runs as a
+**bundled `dist/main.js` + the 3 pinned native deps** (`better-sqlite3`, `fastembed`, `sqlite-vec`);
+none of the flagged packages sit in its request path.
+
+- **Do NOT run `npm audit fix --force`** — it would downgrade `fastembed` 2.1.0→1.0.0 (a pinned
+  ADR-0004 recall migration) and major-bump vitest/cucumber/esbuild (risking the test/build gates).
+- The install/update scripts run **`npm prune --omit=dev` after a successful build**, so the deployed
+  host carries only the runtime tree — the dev-chain advisories aren't present on the box at all. The
+  residual (`tar` via `fastembed` model extraction from a trusted pinned source) is accepted.
 
 ## Config UX (community-scripts style)
 
