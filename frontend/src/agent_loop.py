@@ -4053,40 +4053,48 @@ async def stream_agent_loop(
                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                     continue
             elif game_mode == "casting":
-                # ── Casting auto-record belt: GUARANTEE the player's answers reach the engine. The
-                # model is told to record them AS THEY LAND with updateCasting but reliably under-calls
-                # it; with no belt the interview DEADLOCKS (the producer re-asks for a name the player
-                # already gave, casting never reaches `ready`, and the finalize fallback below can't
-                # engage). When updateCasting was NOT called on an engaged turn, extract what the player
-                # just gave and record it ourselves — then fall through so the finalize path sees the
-                # new state THIS turn. Model-driven recording wins (skipped when updateCasting fired).
-                _cast_recorded_this_turn = "updateCasting" in {
+                # Read the engine's casting status ONCE — shared by the auto-record belt and the
+                # finalize fallback below. Engaged turns only (a cancelled/empty turn changes nothing).
+                _created_this_turn = "createCharacter" in {
                     (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
-                if not _cast_recorded_this_turn and _emitted_visible and owner is not None:
-                    await _auto_record_casting(
-                        _extract_last_user_message(messages), cleaned_round,
-                        endpoint_url, model, headers, owner)
+                # A cancelled / empty turn (the player hit Stop, or nothing was produced) must NOT march
+                # the stall counter or fire the belt. `_emitted_visible` is False on such a turn.
+                _turn_was_cancelled = not _emitted_visible
+                _cs = None
+                if owner is not None and not _turn_was_cancelled:
+                    try:
+                        from src import orwell_engine as _oec
+                        _cs = await _oec.get_game_state(owner)
+                    except Exception as _e:
+                        logger.warning(f"[orwell] casting state fetch failed: "
+                                       f"{type(_e).__name__}: {_e}".rstrip(': '))
+                        _cs = None
+                _casting = (_cs or {}).get("casting") if isinstance(_cs, dict) else None
+                _name_on_file = bool((_casting or {}).get("known", {}).get("playerName"))
+                # ── Casting auto-record belt: GUARANTEE the player's answers reach the engine. The
+                # NAME is the gate to `ready`/`finalizable`, and the model reliably skips recording it —
+                # it may record OTHER fields via updateCasting but miss the name (observed live), or
+                # record nothing at all. Either way the interview DEADLOCKS (the producer re-asks for a
+                # name the player already gave). So whenever the name is STILL missing after an engaged
+                # turn, extract what the player gave and record it ourselves — gated on the missing NAME
+                # (not on whether updateCasting fired), so it catches the partial-record case too. A
+                # model that set the name itself makes `_name_on_file` True and the belt is skipped; one
+                # engine re-read then lets the finalize fallback below see the name THIS turn.
+                if _cs is not None and not _name_on_file and owner is not None:
+                    if await _auto_record_casting(_extract_last_user_message(messages), cleaned_round,
+                                                  endpoint_url, model, headers, owner):
+                        try:
+                            _cs = await _oec.get_game_state(owner)
+                            _casting = (_cs or {}).get("casting") if isinstance(_cs, dict) else None
+                        except Exception:
+                            pass
                 # ── Casting finalize fallback (the game won't START): the model under-calls
                 # createCharacter. If casting is finalizable (engine ready) AND the player signalled
                 # readiness but the model didn't finalize this turn, nudge — then, past the rungs,
                 # finalize ourselves. Mirrors the advance safety-net; conservative (engine-ready +
                 # player-asked only). createCharacter THIS turn short-circuits (model-driven wins).
-                _created_this_turn = "createCharacter" in {
-                    (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
-                # A cancelled / empty turn (the player hit Stop, or nothing was produced) must NOT march
-                # the stall counter — a string of mobile cancellations would otherwise reach the forced
-                # finalize on a name-only intake. `_emitted_visible` is False on such a turn.
-                _turn_was_cancelled = not _emitted_visible
-                if (not _created_this_turn and not _turn_was_cancelled
+                if (not _created_this_turn and not _turn_was_cancelled and _casting is not None
                         and owner is not None and _player_turn_is_lull(messages)):
-                    try:
-                        from src import orwell_engine as _oec
-                        _cs = await _oec.get_game_state(owner)
-                    except Exception as _e:
-                        logger.warning(f"[orwell] casting-finalize state fetch failed: "
-                                       f"{type(_e).__name__}: {_e}".rstrip(': '))
-                        _cs = None
-                    _casting = (_cs or {}).get("casting") if isinstance(_cs, dict) else None
                     _ready = bool(_casting and _casting.get("ready")) and not (_cs or {}).get("started")
                     # The FORCED finalize requires a GENUINE interview (engine `finalizable`), not the
                     # name-only `ready` — name+photo alone minted a default-archetype "floater" (the mobile
@@ -4542,6 +4550,38 @@ async def stream_agent_loop(
     elif _round_finish_reason == "length":
         logger.info("[agent] final round truncated by the output token cap — emitting truncated")
         yield f'data: {json.dumps({"type": "truncated"})}\n\n'
+
+    # ── CASTING turn-end safety net ───────────────────────────────────────────────────────────────
+    # The in-loop casting error-correction (the auto-record belt + the finalize fallback) lives in the
+    # `if not tool_blocks:` branch, so it runs ONLY when the model produces a tool-less "done" round.
+    # When the model calls a casting tool EVERY round (updateCasting / getGameState) it never settles
+    # into one, so neither ran and the interview DEADLOCKED with the player's NAME never recorded — even
+    # though it was given and other fields were (observed live, audit 2026-06-21). This runs ONCE at
+    # turn-end regardless of how the loop exited: if the season still hasn't started and the name is
+    # missing, record it (the belt) from what the player said this turn; then, if that makes the
+    # interview genuinely finalizable AND the player explicitly asked to start, finalize so the season
+    # begins. Idempotent (gated on the still-missing name / not-started), invisible, and fail-open.
+    if game_mode == "casting" and owner and _emitted_visible:
+        try:
+            from src import orwell_engine as _oec_end
+            _cs_e = await _oec_end.get_game_state(owner)
+            _casting_e = (_cs_e or {}).get("casting") if isinstance(_cs_e, dict) else None
+            _last_user_e = _extract_last_user_message(messages)
+            if (_casting_e is not None and not (_cs_e or {}).get("started")
+                    and not (_casting_e.get("known", {}) or {}).get("playerName")):
+                if await _auto_record_casting(_last_user_e, "\n".join(t for t in round_texts if t),
+                                              endpoint_url, model, headers, owner):
+                    _cs_e = await _oec_end.get_game_state(owner)
+                    _casting_e = (_cs_e or {}).get("casting") if isinstance(_cs_e, dict) else None
+            _finalizable_e = bool(_casting_e and _casting_e.get("finalizable")) and not (_cs_e or {}).get("started")
+            if _finalizable_e and _LULL_READY_RE.search(_last_user_e or ""):
+                from src.tool_implementations import do_create_character
+                _cres_e = await do_create_character("{}", owner=owner)
+                if isinstance(_cres_e, dict) and not _cres_e.get("error") and not _cres_e.get("createRefused"):
+                    _CASTING_STALL_LEVEL.pop(owner, None)
+                    logger.info(f"[orwell] turn-end FORCED createCharacter (casting net) user={owner}")
+        except Exception as _net_err:
+            logger.warning(f"[orwell] casting turn-end net failed: {_net_err}")
 
     # BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): now the live-game turn has
     # finished, compare its FULL narration against the engine board's before→after delta. If the

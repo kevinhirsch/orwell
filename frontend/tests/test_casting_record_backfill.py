@@ -112,6 +112,30 @@ def test_unparseable_reply_is_a_noop(monkeypatch):
     assert out is False and rec == []
 
 
+def test_casting_tool_manifest_is_trimmed_to_the_minimal_contract():
+    """Root cause of the deadlock: casting was pinned the FULL game tool set, so the model could spam
+    the live-season tools (runCompetition/advanceGame/submitDecision/renderScene/…) round after round
+    and never settle into a tool-less 'done' round — which is the only place the post-round casting
+    error-correction runs. Pre-game the producer only records, reads casting status, and starts."""
+    from src.tool_schemas import ORWELL_GAME_TOOLS, ORWELL_CASTING_TOOLS
+    assert ORWELL_CASTING_TOOLS <= ORWELL_GAME_TOOLS, "casting tools must be a subset of the game tools"
+    # the essentials the producer genuinely needs pre-game
+    for need in ("createCharacter", "updateCasting", "getGameState"):
+        assert need in ORWELL_CASTING_TOOLS, f"casting needs {need}"
+    # the live-season tools must NOT be offered during casting (there is no season yet)
+    for live in ("runCompetition", "advanceGame", "submitDecision", "renderScene", "socialRead",
+                 "diaryRoom", "makeDeal", "moveTo", "requestSelfEviction"):
+        assert live not in ORWELL_CASTING_TOOLS, f"{live} is a live-season tool — not for casting"
+
+    import os
+    routes = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "routes", "chat_routes.py"), encoding="utf-8").read()
+    # the casting turn (framed, pre-game, feed up) pins the casting set; live pins the full set
+    assert "ORWELL_CASTING_TOOLS" in routes
+    assert "if (ctx.framed and not ctx.game_active and not ctx.feed_down)" in routes
+    assert "else ORWELL_GAME_TOOLS" in routes
+
+
 def test_belt_is_wired_into_the_casting_branch():
     import os
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -120,9 +144,34 @@ def test_belt_is_wired_into_the_casting_branch():
     # keyed off a guaranteed "fields" wrapper via the shared balanced-brace parser
     assert '_last_json_object_with_key(raw, "fields")' in src
     assert "_oe.update_casting(clean, user=owner)" in src
-    # wired in the casting branch, gated on the model NOT having called updateCasting + an engaged turn
-    assert '_cast_recorded_this_turn = "updateCasting" in {' in src
-    assert "if not _cast_recorded_this_turn and _emitted_visible and owner is not None:" in src
+    # GATED ON THE MISSING NAME, not on whether updateCasting fired — so it catches BOTH "recorded
+    # nothing" and "recorded other fields but missed the name" (the partial-record deadlock).
+    assert '_name_on_file = bool((_casting or {}).get("known", {}).get("playerName"))' in src
+    assert "if _cs is not None and not _name_on_file and owner is not None:" in src
     assert "await _auto_record_casting(" in src
-    # it runs BEFORE the finalize fallback so that path sees the freshly-recorded state this turn
+    # it runs BEFORE the finalize fallback so that path sees the freshly-recorded name this turn
     assert src.index("await _auto_record_casting(") < src.index("Casting finalize fallback (the game won't START)")
+    # the casting state is fetched ONCE and shared (the finalize fallback no longer re-fetches)
+    assert src.count('_oec.get_game_state(owner)') >= 1
+    assert "casting-finalize state fetch failed" not in src, "the finalize block must reuse the shared fetch"
+
+
+def test_casting_turn_end_safety_net_runs_regardless_of_tool_less_round():
+    """The in-loop casting error-correction lives in `if not tool_blocks:`, so it only runs on a
+    tool-less round. When the model calls a casting tool every round it never settles into one, so the
+    belt + finalize never ran and the interview deadlocked (observed live). A turn-end net runs ONCE
+    after the round loop — regardless of how it exited — to record the missing name and, if that makes
+    the interview finalizable and the player asked, finalize."""
+    import os
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "src", "agent_loop.py"), encoding="utf-8").read()
+    assert "CASTING turn-end safety net" in src
+    assert 'if game_mode == "casting" and owner and _emitted_visible:' in src
+    # it sits AFTER the round loop (post-loop), alongside the live-turn desync checkpoint
+    net = src.index("CASTING turn-end safety net")
+    assert net > src.index("for round_num in range(1, max_rounds + 1):")
+    assert net < src.index("BEAT-SIGNATURE CHECKPOINT"), "the net runs at turn-end, before the live desync check"
+    # it records the missing name then force-finalizes only when finalizable + the player asked
+    assert "await _auto_record_casting(_last_user_e," in src
+    assert '_LULL_READY_RE.search(_last_user_e or "")' in src
+    assert "turn-end FORCED createCharacter (casting net)" in src

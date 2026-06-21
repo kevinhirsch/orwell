@@ -1759,6 +1759,19 @@ ORWELL_GAME_TOOLS = frozenset({
 })
 
 
+# The casting interview's MINIMAL tool contract (audit 2026-06-21). Pre-game, the producer only needs
+# to RECORD answers (updateCasting), READ the engine's casting status (getGameState/gameStatus), and
+# START the season (createCharacter) — it narrates as plain text. Pinning the FULL ORWELL_GAME_TOOLS
+# during casting handed the model the live-season tools (runCompetition / advanceGame / submitDecision
+# / renderScene / socialRead / diaryRoom / …) it cannot meaningfully use yet — which it would call
+# round after round, so a turn never settled into a tool-less "done" round, and the post-round casting
+# error-correction (the finalize fallback + the updateCasting belt) — both gated on `if not tool_blocks`
+# — never ran, so a stalled interview could DEADLOCK. The trimmed set lets the model settle.
+ORWELL_CASTING_TOOLS = frozenset({
+    "createCharacter", "updateCasting", "getGameState", "gameStatus",
+})
+
+
 # ---------------------------------------------------------------------------
 # Converter: native function call -> ToolBlock
 # ---------------------------------------------------------------------------

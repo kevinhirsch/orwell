@@ -16,7 +16,7 @@ from core.models import ChatMessage
 from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
 from src.agent_loop import stream_agent_loop
-from src.tool_schemas import ORWELL_GAME_TOOLS
+from src.tool_schemas import ORWELL_GAME_TOOLS, ORWELL_CASTING_TOOLS
 from src import agent_runs
 from src import session_events
 from src.model_context import estimate_tokens
@@ -1191,7 +1191,15 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         tool_policy=tool_policy,
                         owner=_user,
-                        pinned_tools=(ORWELL_GAME_TOOLS if ctx.engine_available else None),
+                        # A casting turn (framed, pre-game, feed up) pins the MINIMAL casting
+                        # contract — not the full game set. The live-season tools are noise the
+                        # producer would spam pre-game, keeping a turn from ever settling into a
+                        # tool-less round (so the post-round casting error-correction never ran).
+                        pinned_tools=(
+                            (ORWELL_CASTING_TOOLS
+                             if (ctx.framed and not ctx.game_active and not ctx.feed_down)
+                             else ORWELL_GAME_TOOLS)
+                            if ctx.engine_available else None),
                         # P3: substitution keys on FRAMED, not game_active — a pre-game
                         # casting turn gets the minimal casting tool contract instead of
                         # stacking the producer persona on the generic assistant rulebook.
