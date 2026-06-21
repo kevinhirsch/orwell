@@ -704,6 +704,19 @@ export function syncRailIcons() {
     // The row's game gating is the rail's too (hidden until a game exists).
     btn.style.display = getComputedStyle(src).display === 'none' ? 'none' : '';
   }
+
+  // 3. a11y (WCAG 4.1.2): the rail buttons are icon-only — `title` alone is not a
+  // reliable accessible name, so mirror a real NAME into aria-label, same single-
+  // source rule as the icon. Prefer the expanded source row's name (its aria-label
+  // or title); fall back to the button's own title for the entries that own their
+  // glyph (the delete ✕ / the open-document indicator). Idempotent, and re-runs
+  // with the MutationObserver so a renamed row keeps the rail name in step.
+  rail.querySelectorAll('.icon-rail-btn').forEach((btn) => {
+    const src = btn.dataset.railSource && document.getElementById(btn.dataset.railSource);
+    const name = (src && (src.getAttribute('aria-label') || src.title))
+      || btn.getAttribute('aria-label') || btn.title || '';
+    if (name && btn.getAttribute('aria-label') !== name) btn.setAttribute('aria-label', name);
+  });
 }
 
 function _initRailIconSource() {
