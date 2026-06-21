@@ -5,6 +5,13 @@
 > ➡️ **Follow-up applied (2026-06-20):** the follow-up tuning lane took recommendation #1 and lowered
 > `JURY_WEIGHTS.gameRespect` **0.9 → 0.7** (single lever). Details in the "Applied change" callout
 > under *Ranked tuning recommendations*. This data record stays as the as-measured (0.9) baseline.
+>
+> ✅ **Re-measured (2026-06-21):** a fresh 30-seed instrument run on current main (gameRespect 0.7)
+> shows the inversion **RESOLVED** — **active wins 20% vs passive 7%** (F2-blowouts 50% vs 63%; active
+> meanComp 1.60 vs passive 1.20). The primary goal ("playing the game converts, not just reaches") is
+> **MET**; **do NOT lower `gameRespect` further** (0.65 would over-correct a solved problem). The
+> "active 7% < passive 17%" figures throughout the body below are the **historical as-measured 0.9
+> baseline**. Full numbers + the stale-doc flags: `docs/audits/2026-06-21-session-observations.md`.
 
 **Date:** 2026-06-19 · **Status:** DATA ONLY — **no calibration constant was changed in this
 (data-gathering) lane.** *(The follow-up lane applied recommendation #1 on 2026-06-20 — `gameRespect`
