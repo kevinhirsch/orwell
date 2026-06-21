@@ -4,7 +4,7 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import { initColorPickers, attachColorPicker } from './colorPicker.js';
-import { hexToRgb } from './color/hex.js';
+import { hexToRgb, onAccentColor } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
@@ -293,6 +293,15 @@ export function applyColors(colors) {
   s.setProperty('--panel', colors.panel);
   s.setProperty('--border', colors.border);
   if (colors.red) s.setProperty('--red', colors.red);
+
+  // S6-4: luminance-aware text color for accent-backed CTAs. The accent
+  // (--accent, falling back to --red) is theme-set AND user-customizable, so
+  // white-on-accent can't be guaranteed AA statically — white on the brand red
+  // is only ~3.2:1. Pick whichever of near-white / near-dark clears the higher
+  // WCAG contrast against the resolved accent and publish it as --on-accent;
+  // the CTA rules consume var(--on-accent, #fff). Resolved from the effective
+  // accent (--accent isn't set in JS, so it's always --red here).
+  s.setProperty('--on-accent', onAccentColor(colors.red || '#e06c75'));
 
   // Keep the mobile browser toolbar / status bar matched to the theme bg
   // (same as the early head-script does on first paint).
