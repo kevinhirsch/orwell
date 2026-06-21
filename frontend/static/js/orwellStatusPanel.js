@@ -135,7 +135,7 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-you .os-badge {
           display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
           font-size: .72em; font-weight: 700; letter-spacing: .02em;
-          background: var(--accent, var(--red, #e06c75)); color: #fff;
+          background: var(--accent, var(--red, #e06c75)); color: var(--on-accent, #fff);
         }
         #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }
         #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
