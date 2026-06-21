@@ -160,6 +160,23 @@ import { isNarrow } from './platform.js';
            _resumingStreams.has(sessionId);
   }
 
+  /** ADR 0012 §2.2: stamp a live bubble's role-timestamp from the SERVER-minted ISO time (carried on
+   * the message_saved event) so every window renders the identical time string — replacing the
+   * speculative client `new Date()` the bubble was created with. Formats identically to
+   * chatRenderer.roleTimestamp (the history-reload path) so the live bubble and the settled/reloaded
+   * bubble read the same. Best-effort: a bad/absent value leaves the existing placeholder intact. */
+  function _applyServerTimestamp(holderEl, iso) {
+    try {
+      if (!holderEl || !iso) return;
+      var span = holderEl.querySelector('.role-timestamp');
+      if (!span) return;
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return;
+      span.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      span.title = d.toLocaleString();
+    } catch (_) {}
+  }
+
   // Sources box builder and toggleSources are now in chatRenderer.js
   var _buildSourcesBox = chatRenderer.buildSourcesBox;
 
@@ -614,6 +631,9 @@ import { isNarrow } from './platform.js';
 
     // Declare accumulated outside try block so it's accessible in catch
     let accumulated = '';
+    // ADR 0012 §2.4: set if the server tells this (loser-of-the-bind) window the run lives under a
+    // DIFFERENT canonical session id; converged onto in the finally (never mid-stream).
+    let _adoptCanonicalAfterStream = null;
     // P1 (OOBE cutover): set when createCharacter paints the inline "finalizing" indicator this
     // turn, so the first house-entry narration token can clear it (and the finally can safety-net).
     let _orwellFinalizingActive = false;
@@ -2134,6 +2154,23 @@ import { isNarrow } from './platform.js';
                 // can be edited/deleted immediately, without reloading the chat.
                 if (_isBg) continue;
                 if (currentHolder && json.id) currentHolder.dataset.dbId = json.id;
+                // ADR 0012 §2.2/§3.3: adopt the SERVER-minted timestamp so every window (sender,
+                // observer, a late reload) renders the IDENTICAL time string instead of each window's
+                // own `new Date()` (which drifts). Overwrite the speculative role-timestamp the bubble
+                // was created with; the settled render (reload/addMessage) is already server-sourced.
+                if (json.ts && currentHolder) _applyServerTimestamp(currentHolder, json.ts);
+
+              } else if (json.type === 'canonical_session') {
+                // ADR 0012 §2.4: the loser-of-the-bind window — it POSTed under its own per-tab id but
+                // the authoritative run lives under the canonical game session. The server has already
+                // fanned this run's buffer to us; we just need to RE-KEY this window onto canonical so
+                // its SSE/HUD/reconcile follow the shared game. Defensive belt — the sessions.js
+                // canonical ladder converges most windows BEFORE they POST; this catches one that
+                // didn't. Record it and converge AFTER the stream settles (a mid-stream selectSession
+                // would reload history out from under the live bubble); _adoptCanonicalAfterStream is
+                // consumed in the finally.
+                if (_isBg) continue;
+                if (json.id) _adoptCanonicalAfterStream = json.id;
 
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
@@ -2160,15 +2197,15 @@ import { isNarrow } from './platform.js';
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
                   const dt = stripToolBlocks(roundReplyText);  // F8: reply-only (reasoning → accordion)
-                  // L6b (game build): a tool now follows this round's text, so it
-                  // is an INTERMEDIATE agent round — its free text is the model's
-                  // planning ("Looking at the roster… npc:1 … Let me stay in
-                  // character"), NOT narration. Suppress the whole bubble; only the
-                  // FINAL round (the final-render block) shows the player narration.
-                  // Fail-open to hiding. Non-game build is UNCHANGED.
-                  if (isGameBuild()) {
-                    roundHolder.style.display = 'none';
-                  } else if (dt.trim()) {
+                  // L6c (supersedes L6b): a round that produced VISIBLE narration is the player's
+                  // dialogue (the casting interviewer's lines, a scene beat) — KEEP it even when a
+                  // tool follows. Only a truly-EMPTY tool-only round is hidden. The old L6b rule hid
+                  // every intermediate round in the game build, which structurally lost a multi-line
+                  // interview ("4 answers go away" — prod casting loop). `dt` is reply-only (reasoning
+                  // → accordion) and game-build scrubbed by processWithThinking (scrubReasoningPreamble
+                  // strips planning preambles / raw npc:<id>), so a planning round still scrubs down
+                  // (often to empty → hidden) without losing real narration. Game + non-game identical.
+                  if (dt.trim()) {
                     var _body3 = roundHolder.querySelector('.body');
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
@@ -2663,13 +2700,12 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // L6b (game build): a NEW agent round is starting, so whatever the
-                // PREVIOUS round rendered is an INTERMEDIATE round — followed by
-                // another assistant round — i.e. the model's planning, not the
-                // final narration. Suppress that bubble (the live render may have
-                // already painted its text). The FINAL round's narration is shown
-                // by the final-render block. Non-game build is UNCHANGED.
-                if (isGameBuild() && roundHolder) {
+                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
+                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
+                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
+                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
+                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
+                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
                   roundHolder.style.display = 'none';
                 }
                 // Mark thread as connected to bubble below
@@ -3291,6 +3327,16 @@ import { isNarrow } from './platform.js';
       // (Now that _streamSessionId is cleared above, the setTimeout(0) callback sees hasActiveStream=false
       // and the deferred reconcile actually rebuilds.)
       try { setTimeout(() => { try { flushPendingReconcile(streamSessionId); } catch (_) {} }, 0); } catch (_) {}
+      // ADR 0012 §2.4: a loser-of-the-bind window POSTed under its own per-tab id but the run lived
+      // under the canonical game session (server `canonical_session` event). Now that the stream has
+      // settled, converge onto canonical so this window's history/SSE/HUD re-key onto the shared game
+      // (a mid-stream selectSession would have reloaded history out from under the live bubble). Only
+      // when we're actually on a different id, so it's a no-op for the already-converged common case.
+      if (_adoptCanonicalAfterStream &&
+          sessionModule.getCurrentSessionId &&
+          sessionModule.getCurrentSessionId() !== _adoptCanonicalAfterStream) {
+        try { setTimeout(() => { try { sessionModule.selectSession(_adoptCanonicalAfterStream, { keepSidebar: true }); } catch (_) {} }, 0); } catch (_) {}
+      }
       // Always clean up research tracking regardless of background state
       _researchingStreamIds.delete(streamSessionId);
       if (_researchingStreamIds.size === 0) {
@@ -3763,6 +3809,10 @@ import { isNarrow } from './platform.js';
     holder.className = 'msg msg-ai';
     const meta = sessionModule.getSessions().find(s => s.id === sessionId);
     const roleLabel = _senderLabel(_shortModel(meta && meta.model));
+    // ADR 0012 §2.2: the live bubble is created with a placeholder time, then RE-STAMPED from the
+    // SERVER-minted timestamp the moment the replayed message_saved event arrives (serverTs below), so
+    // an observer re-attaching to a live run reads the IDENTICAL time string as the sender and the
+    // history reload — not its own `new Date()` at attach time.
     const roleTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) +
       ' <span class="role-timestamp">' + roleTs + '</span></div>' +
@@ -3784,6 +3834,10 @@ import { isNarrow } from './platform.js';
     let gotDelta = false;
     let leftSession = false;
     let metricsData = null;
+    // ADR 0012 §2.2: the SERVER-minted message timestamp, captured off the replayed message_saved
+    // event so the finalize renders the identical time string the sender/history do (not a local
+    // attach-time `new Date()`).
+    let serverTs = null;
     // "Rich" responses (tool calls, sources, doc streaming, multi-round) need the
     // full canonical render, which is rebuilt from the saved DB record on reload.
     // Plain text replies can be finalized in place without a reload.
@@ -3853,6 +3907,11 @@ import { isNarrow } from './platform.js';
             if (documentModule && json.delta) documentModule.streamDocDelta(json.delta);
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
+          } else if (json.type === 'message_saved') {
+            // ADR 0012 §2.2: the run's persisted-message signal is in the replay buffer — capture its
+            // server timestamp and re-stamp the live bubble so this observer reads the same time as
+            // every other window. (json.id is the DB id; the finalize/reload carries it forward.)
+            if (json.ts) { serverTs = json.ts; _applyServerTimestamp(holder, serverTs); }
           } else if (json.type === 'tool_start' || json.type === 'tool_output' ||
                      json.type === 'tool_progress' || json.type === 'agent_step' ||
                      json.type === 'web_sources' || json.type === 'rag_sources' ||
@@ -3881,6 +3940,10 @@ import { isNarrow } from './platform.js';
       if (holder.parentNode) holder.remove();
       const model = meta && meta.model;
       const meta_ = metricsData ? Object.assign({ model }, metricsData) : { model };
+      // ADR 0012 §2.2: carry the server timestamp onto the canonical bubble so the finalize renders
+      // the identical time string as the sender's bubble and the history reload (chatRenderer.addMessage
+      // → roleTimestamp(metadata.timestamp)). Absent ⇒ roleTimestamp falls back to "now" (prior behavior).
+      if (serverTs) meta_.timestamp = serverTs;
       chatRenderer.addMessage('assistant', _combined(), model, meta_);
       uiModule.scrollHistory();
       return true;

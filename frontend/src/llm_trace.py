@@ -17,7 +17,10 @@ tool calls + token usage, or the error). Two sinks:
   * the in-memory ``log_rings.LLMIO`` ring — the live tail the /admin/status viewer
     follows (a glanceable summary + clipped request/response); and
   * ``data/llm-io.jsonl`` — the durable, full-fidelity archive, one JSON object per
-    line, governed by retention (auto-trimmed + the manual "Trim now" button).
+    line, governed by retention (auto-trimmed + the manual "Trim now" button). The
+    archive is **LOSSLESS** — the owner directive "preserve ALL I/O — and I mean all":
+    an individual record is NEVER content-dropped or clipped; only time-based retention
+    governs aggregate size (and it never loses I/O within its horizon).
 
 Boundaries
 ----------
@@ -72,9 +75,12 @@ RETENTION_CHOICES = [
     {"days": 0, "label": "Keep everything"},
 ]
 _DEFAULT_RETENTION_DAYS = 7
-# Safety ceiling per persisted record (the full system prompt is large; retention
-# governs aggregate size, this only stops one pathological call from exploding).
-_MAX_RECORD_BYTES = 512 * 1024
+# Soft observability threshold per persisted record (bytes). The durable archive is
+# LOSSLESS — a record is NEVER content-dropped (the owner's "preserve ALL I/O — and I
+# mean all" directive). Aggregate size is governed by time-based retention, which never
+# loses I/O within its horizon. Crossing this threshold only emits one warning so an
+# operator can notice an unusually large call; the record is still written IN FULL.
+_MAX_RECORD_BYTES = 8 * 1024 * 1024
 
 
 def enabled() -> bool:
@@ -148,6 +154,7 @@ class StreamAccumulator:
         self.usage: Optional[dict] = None
         self.error: Optional[dict] = None
         self.answered_by: Optional[str] = None
+        self.finish_reason: Optional[str] = None
 
     def observe(self, chunk: str) -> None:
         try:
@@ -175,6 +182,11 @@ class StreamAccumulator:
                         self.tool_calls.append(c)
                 elif t == "usage":
                     self.usage = j.get("data") or j.get("usage")
+                elif t == "finish":
+                    # The terminal finish_reason (F-S4-D): "length" = output-cap cutoff, "error" =
+                    # a mid-stream provider failure. Captured so the trace records WHY a reply ended
+                    # (preserve ALL I/O — the key truncation/cutoff diagnostic).
+                    self.finish_reason = j.get("reason")
                 elif t == "fallback":
                     self.answered_by = j.get("answered_by")
                 elif "delta" in j:
@@ -193,6 +205,7 @@ class StreamAccumulator:
             "usage": self.usage,
             "error": self.error,
             "answeredBy": self.answered_by,
+            "finishReason": self.finish_reason,
         }
 
 
@@ -254,6 +267,7 @@ def record_llm_call(
             "usage": response.get("usage"),
             "answeredBy": response.get("answeredBy"),
             "error": response.get("error"),
+            "finishReason": response.get("finishReason"),
         })
         ts = int(time.time() * 1000)
         record = {
@@ -303,11 +317,11 @@ def _append_trace_file(record: dict) -> None:
     try:
         line = json.dumps(record, ensure_ascii=False)
         if len(line) > _MAX_RECORD_BYTES:
-            # Trim the heaviest fields rather than drop the record entirely.
-            record = dict(record)
-            record["request"] = {"truncated": True, "model": record.get("model")}
-            record["response"] = {"truncated": True}
-            line = json.dumps(record, ensure_ascii=False)
+            # LOSSLESS: never truncate/drop — preserve ALL I/O. Note the unusually large
+            # record for operator observability, then write it whole.
+            logger.warning(
+                "llm-io: large trace record (%d bytes, kind=%s model=%s) — writing in full",
+                len(line), record.get("kind"), record.get("model"))
         path = trace_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:

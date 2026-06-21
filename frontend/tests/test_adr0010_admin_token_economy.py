@@ -161,7 +161,11 @@ def test_settings_keys_present_with_correct_defaults():
     defaults = settings_mod.DEFAULT_SETTINGS
     assert "reasoning_budget" in defaults
     assert isinstance(defaults["reasoning_budget"], dict)
-    assert defaults["reasoning_budget"] == {}  # empty ⇒ use token_policy code defaults
+    # Populated with the owner-ratified optimized efforts (so the admin UI shows them).
+    assert defaults["reasoning_budget"] == {
+        "narration": "medium", "utility-extraction": "off",  # "off" = genuine disable (reasoning:{enabled:false})
+        "casting": "medium", "background-authoring": "low",
+    }
     assert "token_spend_alert_usd" in defaults
     assert isinstance(defaults["token_spend_alert_usd"], float)
     assert defaults["token_spend_alert_usd"] == 0.0  # 0 ⇒ alert off

@@ -346,32 +346,40 @@
   // Fail-open at every step: any hiccup falls back to the old behavior (open a fresh local chat; the
   // server binds THAT session as canonical on its first framed casting turn, so the next device
   // resolves and converges onto it).
+  // ADR 0012 §3.3 — converge this window onto the user's CANONICAL game chat. Resolves the bound id
+  // (GET /api/orwell/game-session) and, if it is a known session, OPENS it (never a second chat) so
+  // every device shares ONE game and its live run mirrors in lockstep. Returns true if a canonical
+  // chat was resolved (whether or not we had to switch to it), false if nothing is bound yet. This is
+  // the shared kernel of the casting-phase convergence; route() also calls it on the started-season
+  // branch so a window opened FRESH mid-game (the live two-window split-brain) joins the shared game.
+  async function _convergeOnCanonicalGame() {
+    const sm = window.sessionModule;
+    let bound = null;
+    try {
+      const r = await fetch("/api/orwell/game-session", { credentials: "same-origin" });
+      if (r.ok) bound = (await r.json()).sessionId || null;
+    } catch (_) { /* fail open */ }
+    if (!bound) return false;
+    if (sm && sm.selectSession) {
+      try {
+        const known = !sm.getSessions || (sm.getSessions() || []).some((s) => s && s.id === bound);
+        if (known && !(sm.getCurrentSessionId && sm.getCurrentSessionId() === bound)) {
+          await sm.selectSession(bound);
+        }
+      } catch (_) { /* fall through */ }
+    }
+    return true;
+  }
+
   async function openFreshInterviewSession() {
     let seated = false;
     try { seated = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
     if (seated) return;
     try { sessionStorage.setItem(SEAT_TAKEN_KEY, "1"); } catch (_) {}
 
-    const sm = window.sessionModule;
-    // 1) Is a canonical game session already bound for this user (e.g. another device opened it)?
-    let bound = null;
-    try {
-      const r = await fetch("/api/orwell/game-session", { credentials: "same-origin" });
-      if (r.ok) bound = (await r.json()).sessionId || null;
-    } catch (_) { /* fail open — fall through to creating one */ }
-
-    // 2) If it exists in our session list, OPEN it (the convergence) — never a second chat.
-    if (bound && sm && sm.selectSession) {
-      try {
-        const known = !sm.getSessions || (sm.getSessions() || []).some((s) => s && s.id === bound);
-        if (known) {
-          if (!(sm.getCurrentSessionId && sm.getCurrentSessionId() === bound)) {
-            await sm.selectSession(bound);
-          }
-          return;
-        }
-      } catch (_) { /* fall through to creating one */ }
-    }
+    // 1+2) A canonical game session already bound (e.g. another device opened it)? Open it — the
+    // convergence; never a second chat.
+    if (await _convergeOnCanonicalGame()) return;
 
     // 3) Nothing bound (or it's gone): open a fresh chat as before. The server binds this session
     //    as canonical on its first framed (casting) turn, so the next device converges onto it.
@@ -563,6 +571,12 @@
         // A season is running (or the state is unreadable): the NEXT reset begins a new
         // interview, so clear the seat marker.
         try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
+        // ADR 0012 §3.3 — generalize the casting-only convergence to every IN-GAME load: a window
+        // opened fresh mid-game (new tab, second device, cleared storage) must JOIN the one bound
+        // game chat, not sit on its own per-tab session and fork a parallel game (the live two-window
+        // split-brain). Best-effort; the sessions.js canonical ladder is the primary belt — this just
+        // makes the convergence fire reliably at app boot for a started season too.
+        if (st && st.started !== false) { try { await _convergeOnCanonicalGame(); } catch (_) {} }
         return;
       }
       if (!(await anyModelConfigured())) {

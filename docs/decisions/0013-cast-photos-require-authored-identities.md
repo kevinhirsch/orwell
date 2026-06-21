@@ -1,11 +1,11 @@
-# 0012 — Cast photos require a model-authored identity (no authoring → no photo)
+# 0013 — Cast photos require a model-authored identity (no authoring → no photo)
 
 > **Status:** **Accepted — built (2026-06-21).** Implemented FE-side in the portrait warm
 > (`frontend/src/orwell_prewarm.py`): a face is generated ONLY when its houseguest's own authoring
 > gate has fired (a real model write-back via `_on_authored`); the whole-cast `_on_done` no longer
 > force-opens un-fired per-NPC gates, and `_shoot_one` shoots iff its NPC's gate is set (never on a
 > whole-cast-done fallback, never on a pure timeout). The portrait **backfill** shoots a late-authored
-> NPC if/when its authoring lands. Gate: `frontend/tests/test_adr0012_photo_requires_authoring.py`
+> NPC if/when its authoring lands. Gate: `frontend/tests/test_adr0013_photo_requires_authoring.py`
 > (+ the updated `test_0065_cast_prewarm.py` cases).
 > **Source:** Owner ruling, 2026-06-21 — *"a photo should always have a model-authored NPC, otherwise
 > no photo. Photos must always match prewarmed identities; if we feed photos too early before
@@ -93,6 +93,6 @@ the cutover, with Phase-2 portraits then shooting off the adopted, authored iden
 
 ## Testability
 
-- `test_adr0012_photo_requires_authoring.py`: authored NPCs shoot; an un-authored NPC (gate never
+- `test_adr0013_photo_requires_authoring.py`: authored NPCs shoot; an un-authored NPC (gate never
   fired, whole-cast done) does NOT; nothing-authored ⇒ zero photos; no-author-warm ⇒ decline.
 - `test_0065_cast_prewarm.py`: the per-NPC gating cases + the new "unauthored ⇒ no face" case.

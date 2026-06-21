@@ -44,6 +44,7 @@ from routes.chat_helpers import (
     ensure_turn_recorded,
     discard_last_user_message,
     unmark_session_framed,
+    _last_message_ts,
 )
 from src.action_intents import classify_tool_intent as _classify_tool_intent
 from src.tool_policy import build_effective_tool_policy
@@ -1126,7 +1127,11 @@ def setup_chat_routes(
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
                                 )
                                 if _saved_id:
-                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
+                                    # ADR 0012 §2.2/§3.3: carry the SERVER-MINTED message timestamp so
+                                    # every window renders the identical time string (the sender no
+                                    # longer keeps its own `new Date()`). Read off the just-persisted
+                                    # message's metadata; absent ⇒ the client falls back to "now".
+                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess)})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, full_response,
                                     last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
@@ -1290,7 +1295,9 @@ def setup_chat_routes(
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
                                 )
                                 if _saved_id:
-                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
+                                    # ADR 0012 §2.2/§3.3: server-minted timestamp (see the chat-mode
+                                    # save above) so all windows render the identical time string.
+                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess)})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, full_response,
                                     last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
@@ -1366,15 +1373,44 @@ def setup_chat_routes(
         if compare_mode:
             return StreamingResponse(_safe_stream(), media_type="text/event-stream")
 
-        # 0064 Part C (Messenger model): a GAME-framed turn QUEUES behind any in-flight run for this
-        # session instead of cancelling it — two devices on the one canonical game chat serialize
-        # (one reasoning chain at a time, the live turn is never stomped). Plain chats keep
-        # cancel-on-double-send. `ctx.framed` covers in-character, casting, and feeds-down turns.
-        agent_runs.start(session, _safe_stream(), queue=bool(getattr(ctx, "framed", False)))
-        # Tell every other device viewing this session that a new run started, so
-        # they reconcile (load the new user message + attach to the live reply).
-        session_events.publish(session, "run-started")
-        return StreamingResponse(agent_runs.subscribe(session), media_type="text/event-stream")
+        # ADR 0012 §3.1 — key the detached run on the CANONICAL game session for a framed turn, NOT
+        # the per-tab session id this window happened to POST under. Two windows on one game (the
+        # split-brain the live two-window test caught: A=2 msgs, B=12 — different games) both resolve
+        # the SAME canonical id, so they share ONE authoritative `_Run` and mirror its tokens in
+        # lockstep (the Messenger mirror). A plain (non-framed) chat keeps keying on its per-tab
+        # session — unchanged single-chat behavior. Persistence stays on `session` (the SAFE choice in
+        # §3.1's "persistence split" risk row): client-convergence (sessions.js canonical ladder) makes
+        # `session == run_key` on a normal in-game load, so the user/assistant turns persist under the
+        # canonical id like every other window's. The early `canonical_session` event below is the
+        # defensive belt for the rare window that POSTed BEFORE it converged.
+        _framed = bool(getattr(ctx, "framed", False))
+        run_key = (getattr(ctx, "canonical_session", None) or session) if _framed else session
+
+        # 0064 Part C (Messenger model): a GAME-framed turn QUEUES behind any in-flight run for the
+        # CANONICAL session instead of cancelling it — two devices on the one game chat serialize
+        # (one reasoning chain at a time, the live turn is never stomped) and each turn fans out to
+        # every window. Plain chats keep cancel-on-double-send. `ctx.framed` covers in-character,
+        # casting, and feeds-down turns.
+        agent_runs.start(run_key, _safe_stream(), queue=_framed)
+        # Tell every other device viewing the canonical session that a new run started, so they
+        # reconcile (load the new user message + attach to the live reply). Keyed on run_key so an
+        # idle peer on the canonical game chat is invited to attach to THIS shared run.
+        session_events.publish(run_key, "run-started")
+
+        if run_key != session:
+            # The loser-of-the-bind window (§2.4): it POSTed under its own per-tab id before
+            # converging, but the run lives under the canonical id. Prepend a one-off
+            # `canonical_session` event (NOT into the shared replay buffer — it is sender-private) so
+            # this window adopts the canonical session client-side (selectSession) and re-attaches its
+            # SSE/HUD there. Then fan out the canonical run's buffer like any subscriber. Vault-free
+            # (a session id only); idempotent on the client if it already converged.
+            async def _adopt_then_subscribe() -> AsyncGenerator[str, None]:
+                yield f'data: {json.dumps({"type": "canonical_session", "id": run_key})}\n\n'
+                async for ev in agent_runs.subscribe(run_key):
+                    yield ev
+            return StreamingResponse(_adopt_then_subscribe(), media_type="text/event-stream")
+
+        return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream")
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/events — persistent per-session SSE for cross-device sync.
@@ -1402,7 +1438,12 @@ def setup_chat_routes(
     @router.get("/api/chat/resume/{session_id}")
     async def chat_resume(request: Request, session_id: str) -> StreamingResponse:
         _verify_session_owner(request, session_id)
-        if not agent_runs.is_active(session_id):
+        # ADR 0012 — allow resuming a run that EXISTS (running OR terminal-but-still-buffered within
+        # the evict grace), not only an actively-running one. A short turn finishes before a peer's
+        # `run-started`→resume arrives; gating on is_active 404'd the mirroring window and forced it to
+        # fall back to a full reload (the cross-tab "render on reload, not live" gap). subscribe()
+        # replays the finished run's buffer then ends, so the peer still mirrors the turn's tokens.
+        if not agent_runs.has_run(session_id):
             raise HTTPException(404, "No active run for this session")
         return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
 

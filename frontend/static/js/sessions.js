@@ -49,6 +49,31 @@ async function _cleanupIncognitoSessions() {
   ));
 }
 
+// ADR 0012 §3.1/§3.3 — the canonical game session resolver (the convergence linchpin). Returns the
+// user's bound game chat id (GET /api/orwell/game-session → {sessionId}), or null when nothing is
+// bound (pre-game, or just after a next-season unbind). Short-TTL cached so a burst of loadSessions()
+// calls in one beat doesn't refetch, while a restart's server-side unbind is picked up within the
+// window. Best-effort: any failure resolves null so the caller falls through to the normal ladder.
+let _canonGameCache = { id: null, at: 0 };
+const _CANON_GAME_TTL_MS = 4000;
+async function _resolveCanonicalGameSession() {
+  const now = Date.now();
+  if (now - _canonGameCache.at < _CANON_GAME_TTL_MS) return _canonGameCache.id;
+  let id = null;
+  try {
+    const r = await fetch(`${API_BASE}/api/orwell/game-session`, { credentials: 'same-origin' });
+    if (r.ok) id = (await r.json()).sessionId || null;
+  } catch (_) { id = null; }
+  _canonGameCache = { id, at: now };
+  return id;
+}
+// Invalidate the cache on a game change (e.g. a next-season restart unbinds the canonical id) so the
+// next loadSessions() re-resolves instead of forcing a stale id. The dispatcher is platform.js's
+// debounced orwell:gamechanged (the single g15 dispatcher) — we only LISTEN here.
+try {
+  window.addEventListener('orwell:gamechanged', () => { _canonGameCache = { id: null, at: 0 }; });
+} catch (_) {}
+
 // Research indicator tracking
 const _researchingSessions = new Set();
 const _streamingSessions = new Set();   // Background chat streams (not polled against research API)
@@ -1389,9 +1414,36 @@ export async function loadSessions() {
         savedId = null;
       }
     }
+    // ADR 0012 §3.1/§3.3 — the CANONICAL game session step (HIGHEST priority). The live two-window
+    // test caught the split-brain: a window opened fresh mid-game (new tab, cleared storage, a second
+    // device that never cast) landed on its OWN per-tab session and started a PARALLEL game (A=2 msgs,
+    // B=12). The resolution ladder below (hash → currentSession → lastSessionId → most-recent) has no
+    // canonical step, so it never force-selected the one bound game chat. This generalizes the
+    // casting-only convergence in orwellOnboarding.openFreshInterviewSession to every in-game load:
+    // when a season is bound, force-select the canonical chat so this window JOINS the shared game and
+    // its _checkServerStream/resumeStream attach to the live run instead of forking. Game-build only,
+    // fail-open (any error ⇒ fall through to the normal ladder), and only when the bound id is a real
+    // session in the list (a cleared/dead binding — e.g. just after a next-season restart, which
+    // unbinds server-side — returns null and naturally no-ops, so the fresh interview chat is unaffected).
+    let _canonicalGameId = null;
+    const _isGameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
+    if (_isGameBuild) {
+      try {
+        _canonicalGameId = await _resolveCanonicalGameSession();
+        if (_canonicalGameId && !activeSessions.some(s => s.id === _canonicalGameId)) {
+          _canonicalGameId = null;  // bound id not (yet) in our list — don't hijack onto a phantom
+        }
+      } catch (_) { _canonicalGameId = null; }
+    }
+
     const hasPendingChat = !!_pendingChat;
     let targetId = null;
-    if (hasPendingChat) {
+    if (_canonicalGameId) {
+      // A season is bound and its chat is in our list — every in-game window converges on it (the
+      // Messenger mirror). Wins over hash/lastSessionId/most-recent AND over a stray pending New Chat
+      // so a fresh mid-game tab can't fork a second game.
+      targetId = _canonicalGameId;
+    } else if (hasPendingChat) {
       // A model was picked and the UI is showing a fresh New Chat, but the
       // session is not created until the first message. Background stream
       // completions call loadSessions() later; without this guard that reload

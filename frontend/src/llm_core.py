@@ -592,11 +592,28 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
                            ignored for the rest — safe to always send);
       • other direct providers → only when the model is a known thinking model (else omit, so a plain
                            chat model is byte-identical and never 400s on an unknown field).
-    No-op without a policy/effort. Shared by the streaming and non-streaming builders."""
-    if not (policy and isinstance(policy, dict)):
+    EXPLICIT OFF is a genuine disable, not an omission: when a call class resolves to effort
+    "off" the policy carries ``reasoning is None``. OMITTING the field would let a reasoning model
+    (DeepSeek-V*/o-series) fall back to its provider DEFAULT (often ON) — so "off" would silently
+    NOT be a cost floor. Instead we actively send ``reasoning: {"enabled": false}`` to OpenRouter
+    (the unified form documented as "whether reasoning is enabled"; verified upstream via
+    ``debug.echo_upstream_body`` — ADR 0010). OpenAI o-series reasoning is intrinsic and cannot be
+    disabled, so we leave it untouched there.
+
+    No-op without a policy (no call class ⇒ byte-identical). Shared by the streaming and
+    non-streaming builders."""
+    if not (policy and isinstance(policy, dict)) or "reasoning" not in policy:
         return
     reasoning = policy.get("reasoning")
-    eff = (reasoning or {}).get("effort") if isinstance(reasoning, dict) else None
+    # Explicit OFF: a call class was resolved but chose no reasoning. Actively disable it for a
+    # reasoning model rather than omitting (which leaves the provider default ON).
+    if reasoning is None:
+        if provider == "openai" and _uses_max_completion_tokens(model):
+            return  # o-series reasoning is intrinsic — cannot be turned off; leave the default
+        if provider == "openrouter" or _supports_thinking(model):
+            payload["reasoning"] = {"enabled": False}
+        return
+    eff = reasoning.get("effort") if isinstance(reasoning, dict) else None
     if not eff:
         return
     if provider == "openai" and _uses_max_completion_tokens(model):
@@ -1256,15 +1273,17 @@ async def llm_call_async(
         _meter()
         return text
     started = time.time()
+    _meta: Dict = {}
     try:
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
-            policy=policy, usage_sink=_usage)
+            policy=policy, usage_sink=_usage, meta_sink=_meta)
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
-            max_tokens=max_tokens, response={"text": text, "usage": _usage or None}, ok=True,
-            duration_ms=int((time.time() - started) * 1000))
+            max_tokens=max_tokens, ok=True, duration_ms=int((time.time() - started) * 1000),
+            response={"text": text, "reasoning": _meta.get("reasoning") or "",
+                      "finishReason": _meta.get("finish_reason"), "usage": _usage or None})
         _meter()
         return text
     except Exception as e:
@@ -1287,8 +1306,13 @@ async def _llm_call_async_impl(
     prompt_type: Optional[str] = None,
     policy: Optional[Dict] = None,
     usage_sink: Optional[Dict] = None,
+    meta_sink: Optional[Dict] = None,
 ) -> str:
-    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging.
+
+    ``meta_sink`` (optional): when provided, the parsed response's ``reasoning`` and terminal
+    ``finish_reason`` are written into it so the caller can record them in the I/O trace (G2 —
+    "preserve ALL I/O"). Untouched when absent ⇒ byte-identical."""
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1396,6 +1420,13 @@ async def _llm_call_async_impl(
                 else:
                     msg = data["choices"][0]["message"]
                     response = _openai_message_text(msg)
+                    if meta_sink is not None and isinstance(msg, dict):
+                        _rsn = msg.get("reasoning_content") or msg.get("reasoning") or ""
+                        if _rsn:
+                            meta_sink["reasoning"] = _rsn
+                        _fr0 = (data.get("choices") or [{}])[0].get("finish_reason")
+                        if _fr0:
+                            meta_sink["finish_reason"] = _fr0
                 _set_cached_response(cache_key, response)
                 return response
             except Exception:
@@ -1769,6 +1800,31 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                     _fr = _fr_choices[0].get("finish_reason")
                                     if _fr:
                                         _finish_reason = _fr
+                                # Mid-stream provider error (OpenRouter/OpenAI-compat): once the first token
+                                # is sent the HTTP status is already 200, so a later failure arrives IN-BAND
+                                # — a top-level `error` object and/or a choice finishing with reason "error".
+                                # The loop used to ignore it and close with a silent [DONE], so the partial
+                                # reply ended with no signal and the FE later hid it (the "generates then
+                                # disappears" bug). Surface it as an `event: error` carrying the typed
+                                # `error_type`; flush buffered content first so nothing already produced is
+                                # lost. After real output the fallback wrapper passes this through WITHOUT a
+                                # retry (a mid-stream error can't fail over — headers are committed).
+                                _mid_err = j.get("error") if isinstance(j.get("error"), dict) else None
+                                if _mid_err or _finish_reason == "error":
+                                    for _ev in _format_routed_content(_harmony_router.flush()):
+                                        yield _ev
+                                    _meta = (_mid_err or {}).get("metadata") or {}
+                                    _err_payload = {
+                                        "error": (_mid_err or {}).get("message") or "Provider error mid-stream",
+                                        "status": (_mid_err or {}).get("code") or 502,
+                                        "error_type": _meta.get("error_type") or "provider_unavailable",
+                                        "mid_stream": True,
+                                    }
+                                    if _meta.get("provider_code"):
+                                        _err_payload["provider_code"] = _meta.get("provider_code")
+                                    yield f'event: error\ndata: {json.dumps(_err_payload)}\n\n'
+                                    yield "data: [DONE]\n\n"
+                                    return
                                 chunk_model = j.get("model")
                                 if isinstance(chunk_model, str) and chunk_model.strip():
                                     _actual_model = chunk_model.strip()

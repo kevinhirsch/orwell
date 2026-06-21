@@ -73,6 +73,26 @@ def test_record_writes_full_io_to_file_and_ring(data_dir, monkeypatch):
     assert "the system prompt" in last["args"]
 
 
+def test_record_over_soft_ceiling_is_written_in_full(data_dir, monkeypatch):
+    # "Preserve ALL I/O — and I mean all": a record larger than the soft observability
+    # threshold is written LOSSLESSLY, never truncated/dropped.
+    _enable(monkeypatch)
+    monkeypatch.setattr(llm_trace, "_MAX_RECORD_BYTES", 100)  # force the over-ceiling path
+    big_prompt = "X" * 5000
+    big_reply = "Y" * 5000
+    llm_trace.record_llm_call(
+        kind="stream", model="m1",
+        messages=[{"role": "system", "content": big_prompt},
+                  {"role": "user", "content": "hi"}],
+        response={"text": big_reply, "reasoning": "Z" * 5000}, ok=True)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    # Full content survives — no {"truncated": True} sentinel, no clipping.
+    assert rec["request"]["messages"][0]["content"] == big_prompt
+    assert rec["response"]["text"] == big_reply
+    assert rec["response"]["reasoning"] == "Z" * 5000
+    assert "truncated" not in rec["request"] and "truncated" not in rec["response"]
+
+
 def test_record_is_noop_when_disabled(data_dir, monkeypatch):
     _enable(monkeypatch, on=False)
     llm_trace.record_llm_call(kind="call", model="x",
@@ -124,6 +144,67 @@ def test_stream_accumulator_captures_error():
     acc.observe('event: error\ndata: {"error": "boom", "status": 503}\n\n')
     r = acc.response()
     assert r["error"] and r["error"].get("error") == "boom"
+
+
+def test_stream_accumulator_captures_finish_reason():
+    # G1 ("preserve ALL I/O"): the terminal finish_reason ("length"/"error"/…) must reach the trace.
+    acc = llm_trace.StreamAccumulator()
+    acc.observe('data: {"delta": "hi"}\n\n')
+    acc.observe('data: {"type": "finish", "reason": "length"}\n\n')
+    acc.observe('data: [DONE]\n\n')
+    assert acc.response()["finishReason"] == "length"
+
+
+def test_record_persists_finish_reason_and_reasoning(data_dir, monkeypatch):
+    # G1/G2: the durable record carries WHY a reply ended (finishReason) and any reasoning.
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="call", model="m", messages=[{"role": "user", "content": "x"}],
+        response={"text": "ok", "reasoning": "thought process", "finishReason": "error"}, ok=False)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["response"]["finishReason"] == "error"
+    assert rec["response"]["reasoning"] == "thought process"
+
+
+def test_nonstreaming_call_traces_reasoning_and_finish(data_dir, monkeypatch):
+    # G2 end-to-end: the non-streaming utility path threads reasoning + finish_reason into the trace
+    # via meta_sink (previously it recorded text-only). Drives the real llm_call_async with a fake client.
+    import asyncio
+    from src import llm_core as lc
+    _enable(monkeypatch)
+
+    data = {"choices": [{"message": {"content": "answer", "reasoning_content": "deliberation"},
+                         "finish_reason": "stop"}]}
+
+    class _Resp:
+        is_success = True
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return data
+
+    class _Client:
+        async def post(self, url, headers=None, json=None, timeout=None):
+            return _Resp()
+
+    monkeypatch.setattr(lc, "_get_http_client", lambda: _Client())
+    monkeypatch.setattr(lc, "_is_host_dead", lambda u: False)
+    monkeypatch.setattr(lc, "note_model_activity", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "_clear_host_dead", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "_get_cached_response", lambda k: None)
+    monkeypatch.setattr(lc, "_set_cached_response", lambda *a, **k: None)
+
+    async def drive():
+        return await lc.llm_call_async(
+            "https://openrouter.ai/api/v1/chat/completions", "deepseek/deepseek-v4-pro",
+            [{"role": "user", "content": "x"}])
+
+    text = asyncio.get_event_loop().run_until_complete(drive())
+    assert text == "answer"
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["response"]["reasoning"] == "deliberation"
+    assert rec["response"]["finishReason"] == "stop"
 
 
 def test_stream_accumulator_notes_fallback_answerer():

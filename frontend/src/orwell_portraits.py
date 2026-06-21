@@ -1145,7 +1145,17 @@ def add_headshot_to_library(user: Optional[str], png: bytes, kind: str = "studio
     NON-current entry past HEADSHOT_LIBRARY_MAX. Best-effort."""
     if not png:
         return None
+    items = _load_lib_index(user)
     hid = f"{int(time.time() * 1000)}"
+    # Guarantee a UNIQUE id even when two finalizes land in the same millisecond (the id is a ms
+    # timestamp): bump past any existing collision so two cached headshots never share an id — a real
+    # (if rare) production edge case, and a test-timing flake (g30).
+    _existing = {str(i.get("id")) for i in items}
+    if hid in _existing:
+        _n = int(hid) + 1
+        while str(_n) in _existing:
+            _n += 1
+        hid = str(_n)
     d = _lib_dir(user)
     try:
         d.mkdir(parents=True, exist_ok=True)
@@ -1153,7 +1163,6 @@ def add_headshot_to_library(user: Optional[str], png: bytes, kind: str = "studio
     except OSError as e:
         logger.info("[portraits] library write failed: %s", e)
         return None
-    items = _load_lib_index(user)
     items.append({"id": hid, "ts": time.time(), "kind": kind if kind in ("upload", "studio") else "studio"})
     # Evict oldest non-current beyond the cap.
     while len(items) > HEADSHOT_LIBRARY_MAX:

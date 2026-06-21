@@ -68,7 +68,9 @@ def _run(monkeypatch, *, call_class, user, data=_DATA):
 
 def test_utility_call_gets_its_reasoning_budget(monkeypatch):
     payload, _recorded, _text = _run(monkeypatch, call_class="utility-extraction", user="tester")
-    assert payload.get("reasoning") == {"effort": "low"}      # utility-extraction default
+    # utility-extraction default = "off" → a GENUINE disable on a reasoning model (not an omission,
+    # which would leave the provider default ON). OpenRouter unified form: {"enabled": False}.
+    assert payload.get("reasoning") == {"enabled": False}
     assert payload.get("usage") == {"include": True}          # OpenRouter cost accounting, for the meter
 
 
@@ -99,6 +101,6 @@ def test_no_call_class_is_byte_identical(monkeypatch):
 def test_call_class_without_user_budgets_but_does_not_meter(monkeypatch):
     # The verifier path: gets the reasoning budget, but with no user it is not recorded.
     payload, recorded, _text = _run(monkeypatch, call_class="utility-extraction", user=None)
-    assert payload.get("reasoning") == {"effort": "low"}
+    assert payload.get("reasoning") == {"enabled": False}   # off ⇒ genuine disable, still applied
     assert "usage" not in payload          # no metering ⇒ no usage-accounting request
     assert recorded == []                  # no user ⇒ not metered
