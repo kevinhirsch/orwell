@@ -198,8 +198,8 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 
 ## Journey progress
 
-- [ ] **J1 — First launch → main menu / settings / zero-data**
-- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)**
+- [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings logged; gated remediation set #1 (9 fixes incl. launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged to main in PR #449** (CI green). Deferred to later sets: J1-25 (cast-photo modal trap), J1-22, and the visual/IA backlog (J1-01/02/04/05/06/09/10/12/14/17/20/23/24/30/31/32/33/34).
+- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — scenario built (`.audit-telemetry/journeys.py:j2_onboarding`, multi-turn live-LLM); capture pending (recommend `/compact` first).
 - [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)**
 - [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
 
