@@ -193,3 +193,45 @@ def test_server_passes_reasoning_through_to_the_client_unscrubbed():
     seg = loop[loop.index('if data.get("thinking"):'):]
     seg = seg[:seg.index("elif _scrub_active:")]
     assert "yield chunk" in seg  # reasoning passes through; it is filtered/rendered client-side
+
+
+# ── F8: realtime reasoning body-flash hardening (client-side, structural) ──────────── #
+#
+# The PRIMARY chat stream used to merge thinking:true reasoning into the merged roundText (with
+# synthesized <think> tags) and re-extract the reply with fragile regex/heuristics — so reasoning
+# ("The player keeps asking…", `npc:N` analysis) FLASHED in the public bubble for seconds before
+# the final render scrubbed it. The structural fix keeps two per-round buffers: roundReplyText
+# (deltas with json.thinking falsy) feeds EVERY body render path; roundReasoningText (truthy)
+# feeds the live "Thinking" accordion. Reasoning is excluded from the body BY CONSTRUCTION, so it
+# can never paint in the public bubble (belt-and-suspenders WITH processWithThinking's L6b scrub).
+
+def test_primary_stream_has_a_reply_only_body_buffer():
+    # F8 structural fix: the primary stream splits deltas by channel so the BODY can never paint
+    # reasoning. Reply-only buffer feeds every body render; reasoning buffer feeds the accordion.
+    chat = _read("static", "js", "chat.js")
+    # both per-round buffers are declared next to the merged roundText
+    assert "let roundReplyText" in chat and "let roundReasoningText" in chat
+    # the split keys off json.thinking using the RAW delta (before <think>-wrapping)
+    assert "if (json.thinking) roundReasoningText += json.delta;" in chat
+    assert "else               roundReplyText += json.delta;" in chat
+    # all three body render paths source the reply-only buffer
+    # (_renderStream + final-render finalize + tool_start intermediate finalize)
+    assert chat.count("stripToolBlocks(roundReplyText)") >= 2
+    # the accordion sources the reasoning buffer
+    assert "roundReasoningText.trim()" in chat
+    # the buffers reset in LOCKSTEP with roundText (both reset sites: agent_step + teacher_takeover)
+    assert chat.count("roundReplyText = '';") >= 2 and chat.count("roundReasoningText = '';") >= 2
+
+
+def test_body_render_sources_reply_only_buffer_not_merged_roundtext():
+    # F8 structural fix superseded the old unclosed-<think> strip: the body now renders a
+    # reply-only buffer, so reasoning is excluded by construction (no strip/extraction needed).
+    chat = _read("static", "js", "chat.js")
+    # _renderStream sources roundReplyText, NOT the merged roundText
+    assert "const dt = stripToolBlocks(roundReplyText);" in chat
+    # the final render finalizes the body from the reply-only buffer too
+    assert "const finalDisplay = stripToolBlocks(roundReplyText);" in chat
+    # the old per-delta unclosed-<think> body strip is gone (no longer needed)
+    assert "hasUnclosedThinkTag(dt)" not in chat
+    # the fragile reply-extraction machinery is gone from the live body path
+    assert "garbled <think>" not in chat

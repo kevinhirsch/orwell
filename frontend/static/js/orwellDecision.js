@@ -402,6 +402,12 @@
       let stable = 0;
       for (let i = 0; i < 25 && !_userDismissed; i++) {
         const host = document.getElementById("chat-history");
+        // A lingering "✓ Locked in" (.odec-done) card from the PRIOR decision must not block a NEW
+        // pending from arming (audit 2026-06-20): the next round's card could otherwise be suppressed
+        // by the done-card still holding CARD_ID during its 4s fade. Treat it as absent so the fresh
+        // decision card replaces it; a LIVE (not-done) card is left alone (stable branch below).
+        const _doneCard = document.getElementById(CARD_ID);
+        if (_doneCard && _doneCard.classList.contains("odec-done")) _doneCard.remove();
         if (host && !document.getElementById(CARD_ID)) {
           window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
           stable = 0;
@@ -416,6 +422,28 @@
     document.addEventListener("DOMContentLoaded", rearmFromStatus, { once: true });
   } else { rearmFromStatus(); }
   window.addEventListener("orwell:gamechanged", rearmFromStatus);
+  // S4-1 (E2E audit) — the structural escape hatch: a pending player decision must be reachable
+  // WITHOUT the chat agent ever dispatching it. `orwell:gamechanged` fires only on a LOCAL
+  // game-mutating tool, so a pending that surfaces with no such event in this tab (the model
+  // narrated past it without calling submitDecision, another device advanced, a missed tool call)
+  // would otherwise sit unreachable until a reload. Poll the engine's own `pending` on a slow
+  // cadence as a backstop. This deliberately does NOT call rearmFromStatus (which clears
+  // _userDismissed) — it surfaces a pending ONLY when the player hasn't dismissed it and no card
+  // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
+  setInterval(async () => {
+    try {
+      if (_userDismissed) return;                      // respect an explicit dismissal
+      if (document.getElementById(CARD_ID)) return;    // a card is already showing
+      if (!document.getElementById("chat-history")) return;
+      const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const st = await r.json();
+      const pending = st && st.pending && st.pending.kind ? st.pending : null;
+      if (pending && !document.getElementById(CARD_ID)) {
+        window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
+      }
+    } catch (_) { /* fail open — the conversation path always remains */ }
+  }, 15000);
 
   window.addEventListener("orwell:pending", (e) => {
     try {
