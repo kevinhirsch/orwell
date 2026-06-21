@@ -61,6 +61,9 @@ const args = (name: string): Record<string, unknown> => {
     // PREMIERE meet-everyone (#380): mark a houseguest met — the returned reads carry PUBLIC facets
     // only, so no soul/hidden/Vault sentinel may cross (it's also a no-op once past the premiere).
     case "markHouseguestMet": return { id: npc(1) };
+    // ADR 0009: record a narrated NPC relocation — a houseguest id + a room name. The result is a
+    // Vault-free HouseguestMoveResult ({status, whereabouts}); no hidden state may cross.
+    case "moveHouseguest": return { id: npc(1), room: "kitchen" };
     case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
     // 0065: the FE authoring write-back (live house — the season is already running here) + the pre-warm
     // (a no-op refusal once started). Both are Vault-free by construction; the sweep proves the canary
