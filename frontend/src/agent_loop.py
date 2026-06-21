@@ -1897,7 +1897,15 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
     (the engine no-ops a re-mark), and fail-open. This KEEPS the designed meet-everyone feature
     intact (the gate, its test, the tutorial); it only guarantees the introductions REGISTER so the
     premiere can reach its first HOH. Returns the number newly marked."""
-    if not narration or not owner:
+    # NB: `owner` may legitimately be None on the anonymous / localhost-bypass / single-tenant
+    # path (the engine maps a missing user to its one "default" sandbox — exactly what the sibling
+    # belts _auto_record_scene / _auto_move_player rely on by passing None straight through). The
+    # old `or not owner` guard silently dead-lettered THIS belt for that whole class of deploy: the
+    # model under-calls markHouseguestMet, the belt that's supposed to compensate never ran, the
+    # meet-everyone gate never progressed, and the player was soft-locked at premiere (confirmed in
+    # a real-LLM run — metCount stayed 1/16 while ~13 intros were narrated). Tolerate a None owner;
+    # only a missing narration is a real no-op.
+    if not narration:
         return 0
     try:
         from src import orwell_engine as _oe
