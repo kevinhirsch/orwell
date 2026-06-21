@@ -3223,13 +3223,22 @@ import { isNarrow } from './platform.js';
         // Reset button to idle state
         updateSubmitButton('idle', submitBtn);
 
-        // Re-enable message input; on mobile blur to dismiss keyboard
+        // Re-enable message input; on mobile blur to dismiss keyboard.
+        // J4-01: if a decision card is showing, focus it instead of the composer —
+        // the post-stream cleanup must not steal focus from a binding decision the
+        // player needs to act on. The composer is re-focused when the card is
+        // confirmed or dismissed (the confirm handler calls box.focus()).
         if (messageInput) {
           messageInput.disabled = false;
           if (isNarrow()) {
             messageInput.blur();
           } else {
-            messageInput.focus();
+            var _pendingCard = document.getElementById('orwell-decision-card');
+            if (_pendingCard) {
+              try { _pendingCard.focus(); } catch (_) {}
+            } else {
+              messageInput.focus();
+            }
           }
         }
 

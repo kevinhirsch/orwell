@@ -152,7 +152,9 @@
 
     const card = document.createElement("div");
     card.id = CARD_ID;
-    card.setAttribute("role", "group");
+    // J4-02: role="form" makes this a named form landmark (AT users can reach it
+    // via landmark navigation and know a binding decision is required).
+    card.setAttribute("role", "form");
     card.setAttribute("aria-label", titleFor(kind));
     // Focused-context-first: while focus is in the card, Escape belongs to the
     // card's own dismiss-only handler (the global arbiter stands down on this marker).
@@ -164,7 +166,9 @@
     const x = document.createElement("button");
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
-    x.setAttribute("aria-label", "Dismiss");
+    // J4-03: aria-label must be as descriptive as the title so AT users hear the same
+    // context as sighted users who hover. "Dismiss" alone gives no intent signal.
+    x.setAttribute("aria-label", "Dismiss — decide in conversation instead");
     x.addEventListener("click", () => { _userDismissed = true; _dismissedSig = _sig(pending); removeCard(); });
     head.appendChild(x);
     card.appendChild(head);
