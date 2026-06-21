@@ -33,6 +33,10 @@
         var s = document.documentElement.style;
         var c = t.colors;
         s.setProperty('--bg', c.bg);
+        // S1-C: paint the document background from the very first frame (before
+        // style.css's `background:var(--bg)` applies) so the cold-load FOUC white
+        // flash never shows. Theme-correct (uses the saved theme bg, not a literal).
+        s.backgroundColor = c.bg;
         s.setProperty('--fg', c.fg);
         s.setProperty('--panel', c.panel);
         s.setProperty('--border', c.border);

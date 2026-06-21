@@ -160,8 +160,9 @@ def test_studio_routes_generate_serve_and_finalize(tmp, client, monkeypatch):
         return b"\x89PNG-" + (b"R" if reference_png else b"X")
     monkeypatch.setattr(op, "_generate_one", fake_gen)
 
-    # avatar absent until finalized
-    assert client.get("/api/orwell/avatar").status_code == 404
+    # avatar absent until finalized — 204 (not 404): the route is a presence probe,
+    # so "none set" must not log a console/resource error on every load (audit S1-2).
+    assert client.get("/api/orwell/avatar").status_code == 204
     client.post("/api/orwell/portrait/intake",
                 files={"file": ("me.jpg", _img(), "image/jpeg")}, data={"mode": "reference"})
     gen = client.post("/api/orwell/portrait/studio/generate").json()

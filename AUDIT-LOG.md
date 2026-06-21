@@ -96,6 +96,9 @@ The 2026-06-18/19 live runs (DOC-ONLY) are the starting baseline. Open launch-bl
 | S1-5 | State 1 | POLISH | VIEWED | Residual inherited-workspace copy ("Import a file … candidate memories you can approve") still in the game-build DOM (not visible; in `index.html`). |
 | S1-A | State 1 | POLISH | ROOT-CAUSED | Login "Remember me" renders as an **unlabeled 14×14 dot** (`#remember` + `.remember-dot`, `aria-label`/`title` only) — missing signifier + sub-tap-floor (2.5.5/2.5.8 fail); **root: `login.html` never links `responsive-tokens.css`**, so the coarse-pointer floor can't rescue it. |
 | S1-B | State 1 | POLISH | ROOT-CAUSED | Login version "v4.29" contrast **1.89:1** (AA fail) — `.version-label opacity:0.25` crushes a 9.43:1 pair. Borderline-incidental (decorative build string) but measurable; opacity ~0.6 → 4.43:1. |
+| S1-C | State 1 | POLISH | ROOT-CAUSED | **One-frame full-white FOUC flash** on cold load (narrow `f-001`=100% white → dark `f-002`) — UA blank canvas before dark-theme CSS paints; fix: inline dark bg on `html`/`body` in `index.html` head. |
+| S1-1L | State 1 | LATENT | ROOT-CAUSED | Splash-suppression is timing-fragile (TRANS-1): `body.ow-onboarding` set inside `mountWelcome` after the async `route()` chain — a slow engine `/state`/`/models` could let the splash paint before the modal (latent S1-1 regression). Harden: suppress at top of `route()` when `started===false`. |
+| BG-1 | X-cut | POLISH (a11y) | ROOT-CAUSED | **Operator report**: animated bg "not rendering". Under `prefers-reduced-motion` the canvas generator is skipped (`theme.js:644`) so the 6 **canvas-only** patterns (incl. default telescreen→perlin-flow) render **fully blank** (no static fallback). Not my change / not the CSP merge (both ruled out). Fix: draw one static frame. **Pending operator decision.** |
 | S1-3 | State 1 | POLISH | DEFERRED→S2 | Raw `<input type=file>` — re-verify on the casting **headshot card** (State 2) + Account/new-season. |
 | S1-P1 | State 1 | n/a | VIEWED (ruled benign) | Two-window SAME-identity parity: only divergence is the **random rotating Tip**, which is covered by the welcome modal (pixel mismatch 0%) → legitimate client-side nondeterminism, **not** a consistency defect. |
 | S1-P2 | State 1 | n/a | VIEWED (ruled benign) | Mobile Settings nav = **horizontal-scroll tab strip** (tabs reachable; "Appea…" peek = affordance). DEFECT_SCAN `offscreen` is a false positive for a scroll container → **legitimate reflow**, not clipping. |
@@ -204,9 +207,98 @@ the mobile Add-Models/Appearance tabs at 390px.
   hit area → cosmetic, not a functional fail. Also LATENT: login `#search-fb-remove` 13px wide (desktop-only,
   fine-pointer).
 
-### Pending merge (specialist in flight)
-- Transient/animation: filmstrip frame-step of the landing welcome-modal mount (ai-spinner unmount 550ms →
-  `#orwell-onboarding` mount 744ms; the `modal-minimize-btn` mount at 513ms), login transients.
+### S1-C — One-frame white FOUC flash on cold load · [POLISH] · ROOT-CAUSED · NEW (transient specialist)
+- **VIEWED (photometry):** `s1-landing-narrow-frames/f-001.png` = meanL 255 (every px white); `f-002`
+  onward dark (meanL ~17). Desktop/mobile recordings started a hair after theme paint so they didn't sample
+  the pre-theme frame; login `f-001` was already dark.
+- **Mechanism:** classic FOUC — the UA blank-white canvas before the app dark-theme CSS applies on first
+  paint (no app element/mutation; not narrow-specific in nature, only in capture timing). Fix: inline a dark
+  `background` on `html`/`body` in `index.html` `<head>` so the first paint is already dark. WCAG 2.3.1 (one
+  sub-125ms frame) is under threshold, but a full-viewport white→dark jolt on a dark app is a real polish smell.
+
+### Transient specialist — merged (TRANS-1…3); confirmations & one latent
+- **Confirmed S1-P-transient (no splash flash):** photometry shows the welcome-splash never crosses
+  perceptible luminance — the scrim (`color-mix(bg 88%,black)`, z99999) + splash co-fade and the splash is
+  suppressed before reaching visible alpha; modal then rock-stable (49 frames, no flicker/premature
+  unmount/double-mount). Login fully quiescent (0 mutations f-001≈f-038). `jsErrors:0` everywhere.
+- **S1-1L [LATENT]:** the suppression is mechanism-fragile (see table) — fix is to set `body.ow-onboarding`
+  / hide the splash at the **top of `route()`** when `started===false`, not inside `mountWelcome` after the
+  async await chain. Not currently reproducing; proactively de-risks an S1-1 regression under a slow engine.
+- **TRANS-2 [non-bug]:** `modal-minimize-btn` mount-without-unmount = a benign boot injection
+  (`modalManager.injectMinimizeButton`) into **hidden inherited tool modals** (Settings/Theme), NOT the
+  `#orwell-onboarding` overlay (which has no `.modal-header`/uses `.ob-btn`) — confirmed visually absent from
+  every onboarding frame. Audit-instrument noise only (the `[class*=modal]` SEL catches it).
+
+### State 1 — consolidated remediation (APPLIED to working tree; awaiting peer-review gate)
+All [POLISH], FE-only, no engine/Vault impact, one cohesive change set. **Not committed** — held for
+`/diff` review + authorization, then validation (re-capture).
+- **APPLIED #1 S1-2** — `orwell_routes.py` `/avatar` → **204** when unset; `orwellAvatar.js` treats only
+  `status===200` as present (kills the per-load console/resource 404 error).
+- **APPLIED #2 S1-B** — `login.html` `.version-label` opacity `0.25→0.6` (1.89:1 → ~4.43:1, passes AA).
+- **APPLIED #3 S1-C** — `index.html` head script now sets `documentElement.style.backgroundColor=c.bg`
+  (theme-correct first-paint bg) → the cold-load white FOUC frame is gone.
+- **APPLIED #4 S1-A** — `login.html`: the "Remember me" overlay dot replaced by a **visible labelled row**
+  (`.remember-row`, whole-row hit target ≥24px); `#rememberToggle`/`#remember` ids preserved so the auth
+  flow is unchanged.
+- **DEFERRED S1-5** — residual workspace copy is already hidden by game-trim ("optionally strip"); low value,
+  template-structural — left for a template-cleanup pass, not a pre-launch drive-by.
+- **DEFERRED S1-1L** — the splash-suppression hardening is **latent, not reproducing**; a `route()`-flow
+  change risks a real regression (splash not restoring after a J4 dismiss) and warrants its own validation.
+
+**VALIDATION — VERIFIED (authorized 2026-06-21; FE restarted on current main; re-captured).**
+- **S1-2 ✓** — landing net log: the `/avatar` **404 is gone**; landing **console errors 2→0**. (Residual
+  `net::ERR_ABORTED ×2` is a capture-teardown artifact — the `cache:no-store` re-probe aborts as the browser
+  context closes; not a server error, not a console error, not user-facing.)
+- **S1-A ✓** — `s1v-login-{desktop,mobile}.png`: a visible "Remember me" checkbox+label row below the
+  password; the username-field dot is gone. Hit target = the ≥24px label row (the scan still flags the 16px
+  checkbox glyph, but operability is satisfied by the row).
+- **S1-B ✓** — version label legible at opacity 0.6 (`v4.35` post-merge).
+- **S1-C ✓** — narrow `f-001 meanL=18.7` (dark) vs the pre-fix **255 (pure white)**; the FOUC flash is gone.
+
+Status: **S1-2 / S1-A / S1-B / S1-C = VERIFIED.** S1-5 / S1-1L = DEFERRED (documented). No State-1
+launch-blockers. Branch synced onto current `main` (merge `9bca2b1`).
+
+---
+
+## 2.3 Cross-cutting findings & minor-observations log (surfaced during State 1)
+
+### BG-1 — Reduced-motion gives a FULLY BLANK background on canvas-only house patterns · [POLISH / a11y-UX] · ROOT-CAUSED
+- **Reported by the operator** ("the animated frontend background isn't rendering"); reproduced + root-caused.
+- **VIEWED:** Playwright probe — `reducedMotion:'reduce'` → `canvasPresent:false` (no particle canvas), though
+  the `bg-pattern-*` class is still on `body`. `no-preference` → canvas renders **and animates** (rain/embers/
+  constellations, ~6–7k non-zero-alpha px, pixel count changes between 1.5s samples).
+- **Mechanism (traced):** `theme.js:644` — `if (_CANVAS_PATTERNS[p] && !_prefersReducedMotion()) _CANVAS_PATTERNS[p]()`.
+  Under reduced-motion the generator is never called ⇒ no canvas. The 6 **canvas-only** patterns (perlin-flow,
+  petals, sparkles, rain, constellations, embers — `style.css:203-207` have NO CSS base) render **nothing**.
+  Only `dots`/`synapse` keep a CSS gradient. **The default theme telescreen → perlin-flow is canvas-only**, so a
+  reduced-motion user on the default theme sees a dead/flat background — exactly the report.
+- **Steelman:** this is the A5 fix (`e1ae963`, ruling #18) honoring `prefers-reduced-motion`. The code comment
+  intends "static or off; the CSS base still paints" — but for canvas-only patterns the realized behavior is
+  **"off" (blank)**, not "static": the texture is lost, not merely the motion.
+- **Ruled out with evidence:** NOT my S1-C change (perlin-flow canvas is `z-index:0` prepended to `body`, above
+  `<html>`; my html bg can't occlude it; probe confirms canvas present with my change in the served file). NOT
+  the CSP merge (purely additive — added `fonts.*`; canvas needs no CSP directive). The merge did not touch
+  `theme.js`/`style.css`.
+- **Fix options (a product/a11y posture call — ruling #18 deliberately allowed "static or off"):**
+  (a) under reduced-motion, draw **one static frame** of the particle field (texture, zero motion — the truest
+  reduced-motion); (b) CSS-gradient fallback for canvas-only patterns; (c) leave WAI. **Recommend (a).** Deferred
+  pending operator decision.
+
+### Minor-observations log (per the "log EVERY issue, no matter how small" directive)
+- **OBS-1 [low]:** with no saved theme the bg **pattern is non-deterministic across loads** (observed embers →
+  rain → constellations on identical fresh loads) — a brand-new user gets an inconsistent background pattern.
+  Likely the default-theme/pattern resolution isn't pinned. Worth making telescreen→perlin-flow deterministic.
+- **OBS-2 [low]:** the **login page logs 401** on `/api/prefs/theme` + `/api/prefs/custom-themes` pre-auth
+  (2 console errors on the login screen) — benign, but console-error noise (same class as S1-2).
+- **OBS-3 [info]:** residual `/api/orwell/avatar` `net::ERR_ABORTED ×2` on the landing (post-204) is a
+  capture-teardown artifact (the `no-store` re-probe aborts as the context closes) — not user-facing.
+- **OBS-4 [info, accepted]:** the S1-A remember checkbox glyph is 16×16 inside the ≥24px label row — operable via
+  the row; the scan flags the glyph only.
+- **OBS-5 [info]:** `--bg-effect-color` resolves empty (falls back to `--fg`) on the default theme.
+- **OBS-6 [latent/cosmetic] (=S1-L1):** mobile toggle inputs compute to 23×23 (1px under the 24 coarse floor) via
+  the rem clamp at 390px — operable via the row hit area.
+- **OBS-7 [non-bug] (=TRANS-2):** `modal-minimize-btn` mount-without-unmount = benign boot injection into hidden
+  inherited tool modals; audit-instrument noise (the `[class*=modal]` observer SEL).
 
 ---
 
