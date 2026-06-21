@@ -5338,6 +5338,11 @@ import { isNarrow } from './platform.js';
     setDisplayOverride,
     setHideUserBubble,
     sendHiddenCue,
+    // Shared so EVERY history-render path (chat.js softReloadHistory + sessions.js session/archive
+    // loads) filters the same engine/onboarding control prompts — incl. "(Production cue …)". The
+    // lists drifted before (chat.js had the cue case, sessions.js didn't) and leaked cues as "You"
+    // bubbles; this is the one source of truth so that can't recur.
+    isSkippableUserPrompt: _isSkippableUserPrompt,
     setPendingContinue,
     regenerateFrom,
     forkFrom,

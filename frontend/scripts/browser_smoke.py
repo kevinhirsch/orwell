@@ -2078,14 +2078,33 @@ def main() -> int:
                   != "Add your cast photo to begin",
                   "P1: the composer placeholder is NOT the old hard-gate reason")
             # MID-INTERVIEW REVEAL: simulate the producers' opener (a rendered .msg.msg-ai); the
-            # engine-gated box (casting.missing includes "castPhoto") now pops up, AFTER the question.
+            # engine-gated step (casting.missing includes "castPhoto") now surfaces — but per Thing 2
+            # the box NO LONGER auto-opens: a competition-style "Choose Your Character" pill appears
+            # in the chat after the question, and clicking IT opens the box.
             f4.evaluate("""() => {
               const h = document.getElementById('chat-history');
               if (h) { const m = document.createElement('div'); m.className = 'msg msg-ai';
                        m.textContent = 'producer opener'; h.appendChild(m); }
               window.dispatchEvent(new CustomEvent('orwell:gamechanged'));
             }""")
-            f4.wait_for_timeout(900)  # let the headshot route() mount the box + the studio refresh
+            f4.wait_for_timeout(900)  # let route() surface the pill
+            pill = f4.evaluate("""() => ({
+              pill: !!document.getElementById('orwell-choose-character'),
+              text: ((document.querySelector('.hs-choose-btn') || {}).textContent || '').trim(),
+              afterMsg: (() => { const h=document.getElementById('chat-history'),
+                                 p=document.getElementById('orwell-choose-character');
+                return !!(h && p && h.contains(p) && p.previousElementSibling &&
+                          p.previousElementSibling.classList.contains('msg-ai')); })(),
+              boxAutoOpened: !!document.getElementById('orwell-headshot'),
+            })""")
+            check(pill.get("pill") is True and pill.get("text") == "Choose Your Character"
+                  and pill.get("afterMsg") is True and pill.get("boxAutoOpened") is False,
+                  f"P1/Thing2: the 'Choose Your Character' pill appears after the opener; the box does NOT auto-open ({pill})")
+            # Clicking the pill opens the box (and removes the pill).
+            f4.click(".hs-choose-btn")
+            f4.wait_for_timeout(800)
+            check(f4.evaluate("!document.getElementById('orwell-choose-character')") is True,
+                  "P1/Thing2: clicking the pill removes it")
             cast_win = f4.evaluate("""() => {
               const el = document.getElementById('orwell-headshot');
               if (!el) return { mounted: false };

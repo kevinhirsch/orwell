@@ -551,13 +551,12 @@
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
-    // Capture, BEFORE openFreshInterviewSession() (below) can set it, whether THIS tab session has
-    // already opened the casting interview. Used to tell a brand-new pre-game season apart from a
-    // same-session reload so a STALE per-user welcome marker — one left by a prior game that a
-    // BACKEND/host factory reset wiped (those resets run server-side and never reach the FE restart
-    // hooks in settings.js / orwellNewSeason.js) — is cleared and the welcome greets the new season.
-    let _seatTakenBefore = false;
-    try { _seatTakenBefore = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
+    // A STALE per-user welcome marker — one left by a prior game that a BACKEND/host factory reset
+    // wiped (those resets run server-side and never reach the FE restart hooks in settings.js /
+    // orwellNewSeason.js) — is cleared below so the welcome greets the new season. The "is this a
+    // genuinely fresh season?" signal is the engine's empty intake + no rendered producer turn (see
+    // the clear-gate in route()), NOT the per-tab seat flag — that flag is set by route() itself on
+    // every pre-game load, so it skipped the welcome on a same-tab reload after a host reset (Thing 1).
     try {
       const st = await fetchState();
       if (!st || st.started !== false) {
@@ -596,11 +595,14 @@
       // A genuinely FRESH casting (the engine intake is empty — `casting.known` has no captured
       // fields) that this tab session never opened is a NEW season (incl. one begun by a backend/
       // host factory reset, which the FE restart hooks can't see). Clear any stale per-user welcome
-      // marker so the !welcomeSeen() check below greets again. Gated on _seatTakenBefore so the
-      // post-dismiss window (marker just set, the producer turn still in flight) is never mistaken
-      // for a new season — a same-session reload mid-interview keeps the marker and never re-pops.
+      // marker so the !welcomeSeen() check below greets again. Gate on whether the interview has
+      // actually begun (a rendered producer turn) — NOT the per-tab seat flag: route() sets that flag
+      // on every pre-game load, so a same-tab reload after a host reset kept it true and skipped the
+      // welcome (Thing 1). The conversation-emptiness signal is server-truth + DOM: a fresh reset has
+      // an empty intake AND no assistant turn ⇒ greet again; a mid-interview reload has an assistant
+      // turn ⇒ keep the marker and never re-pop.
       const _intakeEmpty = !!(st && st.casting && Object.keys(st.casting.known || {}).length === 0);
-      if (_intakeEmpty && !_seatTakenBefore && welcomeSeen()) {
+      if (_intakeEmpty && !_conversationHasAssistantTurn() && welcomeSeen()) {
         try { clearWelcomeSeen(); } catch (_) {}
       }
       if (!welcomeSeen()) {
