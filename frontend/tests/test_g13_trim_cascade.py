@@ -180,8 +180,8 @@ def test_tab_visibility_resolution_respects_every_gate():
         "_tabVisible must consult computed display so a launcher hidden by "
         "the cascade OR the game-trim CSS can never be landed on."
     )
-    # The C30 fallback contract is unchanged.
-    assert "if (!_tabVisible(activeTab)) activeTab = 'account';" in open_fn
+    # The not-visible fallback lands a non-admin player on Appearance (J1-14), `account` last resort.
+    assert "if (!_tabVisible(activeTab)) activeTab = _tabVisible('appearance') ? 'appearance' : 'account';" in open_fn
     # syncAdminVisibility (which applies the cascade) runs before resolution.
     assert open_fn.index("syncAdminVisibility();") < open_fn.index("_tabVisible"), (
         "open() must apply the cascade before resolving the landing tab."
@@ -233,3 +233,33 @@ def test_smoke_block_is_anchored_after_the_last_existing_check():
     tail = smoke[g13:smoke.index("browser.close()")]
     assert tail.count("# G13 (gating cascades") <= 1
     assert "check(" in tail and "def main" not in tail
+
+
+def test_j1_14_player_lands_on_appearance_not_account():
+    """J1-14 (UX audit): a non-admin player who opens Settings should land on Appearance (look/feel),
+    not Account. The markup default-active tab is admin-only `services` (hidden for a player), so the
+    fallback decides — it used to drop zero-data players on `account` (password/2FA/photo). Now it
+    lands on Appearance. (Behaviour verified headless: a non-admin gear-open shows the Appearance panel.)"""
+    js = _read(SETTINGS_JS)
+    assert "window._isAdmin ? 'services' : 'appearance'" in js          # the non-admin default
+    assert "_tabVisible('appearance') ? 'appearance' : 'account'" in js  # the not-visible fallback
+    assert "activeTab = 'account'" not in js                            # the old hard fallback is gone
+
+
+def test_j1_07_game_build_curates_the_appearance_visibility_toggles():
+    """J1-07 (UX audit): the Appearance > visibility toggles are inherited-WORKSPACE controls a Big
+    Brother player doesn't need (several even surface the OOC model concept). The game build hides the
+    workspace rows + the whole Chat-Bar card, keeping only the in-fiction toggles (Theme / Welcome /
+    Text-only Emojis / Thinking / Sensitive Blur). Verified headless: 5 visible (was 16)."""
+    css = _read(os.path.join(FRONTEND, "static", "css", "game-trim.css"))
+    # the workspace rows are hidden in the game build, by their data-ui-key (same :has() pattern)
+    for key in ("sidebar-brand", "sidebar-search", "sidebar-new-chat", "sessions-section",
+                "models-section", "user-bar", "sidebar-settings-btn", "chat-meta"):
+        assert f'.vis-row:has(input[data-ui-key="{key}"])' in css, key
+    assert 'body[data-game-build] [data-vis-card="chat-bar"]' in css      # the whole Chat-Bar card
+    # the in-fiction toggles are NOT in the hide list (kept)
+    for keep in ("tool-theme", "text-emojis", "show-thinking", "sensitive-blur", "welcome-text"):
+        assert f'data-ui-key="{keep}"]' not in css, keep
+    # the markup tags the Chat-Bar card so the rule can target it
+    html = _read(os.path.join(FRONTEND, "static", "index.html"))
+    assert 'data-vis-card="chat-bar"' in html

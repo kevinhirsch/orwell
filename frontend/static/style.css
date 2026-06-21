@@ -5938,7 +5938,7 @@ body.bg-pattern-perlin-flow {
       color: color-mix(in srgb, var(--fg) 40%, transparent);
     }
     .vis-icon-text {
-      font-size: 10px;
+      font-size: var(--fs-2xs);
       font-weight: 700;
       font-family: inherit;
       letter-spacing: -0.5px;
@@ -6002,14 +6002,20 @@ body.bg-pattern-perlin-flow {
     }
     .vis-hint {
       /* UX audit J1-28: was 30% alpha (~2.68:1, WCAG 1.4.3 fail) — lift to ~5:1 so toggle
-         descriptions are legible. Font-size stays 10px: bumping it to the --fs-2xs floor
-         reflowed the Appearance panel and overflowed the nowrap danger-zone "Reset" button
-         at 390px (responsive_matrix). The sub-floor size is a pre-existing main condition,
-         tracked as a backlog item; this change is contrast-only (no layout effect). */
-      font-size: 10px;
+         descriptions are legible. J1-14 makes the Appearance panel a player's default
+         Settings landing, so its text must clear the --fs-2xs legibility floor (the old
+         10px sat below it). The hint lives inside a flex .vis-label that wraps, so the bump
+         reflows nothing horizontally; the danger-zone "Reset" the prior note blamed is in the
+         Account panel (its own white-space:nowrap;flex-shrink:0;), not measured here. */
+      font-size: var(--fs-2xs);
       color: color-mix(in srgb, var(--fg) 62%, transparent);
       font-weight: 400;
       margin-left: 2px;
+    }
+    /* keep an inline <code> in a hint (e.g. "re-open with /settings") at the floor too —
+       a relative code size would drop it back below --fs-2xs. */
+    .vis-hint code {
+      font-size: inherit;
     }
     /* Settings toggle — admin-only lock indicator */
     .ui-vis-lock {
@@ -13743,7 +13749,7 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
   background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
   color: var(--accent, var(--red));
 }
-.theme-opacity-label { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+.theme-opacity-label { font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.02em; }
 .theme-opacity-wrap > svg { flex-shrink: 0; opacity: 0.7; }
 .theme-opacity-wrap input[type="range"] {
   width: 92px;
@@ -36298,6 +36304,22 @@ body.theme-frosted .modal-header {
   background-image: none !important;
   backdrop-filter: blur(24px) !important;
   -webkit-backdrop-filter: blur(24px) !important;
+}
+/* UX audit (frosted "gray bar behind the Peek button"): the header's OWN
+   backdrop-filter above re-samples and re-blurs the modal-content root's
+   ALREADY-frosted glass, so the top strip composites to a flatter, mismatched
+   shade — a visible band across the title area (worst behind the otherwise-empty
+   Peek button). This is the SAME failure the A6 fix (below) cured for the kit
+   titlebar (.ow-titlebar): the element carrying backdrop-filter must be the panel
+   ROOT, with the header transparent OVER it. The base rule keeps the blur for the
+   full-workspace tool modals (Calendar/Tasks/…), whose tall bodies scroll under a
+   sticky header and want the masking. In the GAME BUILD those tool modals are gone
+   — the only frosted headers are Settings + Theme — so drop the header's own
+   filter and let the single .modal-content root backdrop render the whole modal
+   (header included) as one cohesive glass surface. No band, no gray bar. */
+body[data-game-build].theme-frosted .modal-header {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 /* A6 [frosted-top fix]: the kit titlebar (.ow-titlebar) is NOT sticky and the
    kit body does not scroll under it — the bar sits flush at the very top of the

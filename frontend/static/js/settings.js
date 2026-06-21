@@ -5439,8 +5439,11 @@ export function open(tab) {
   };
   let activeTab = tab
     || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab
-    || (window._isAdmin ? 'services' : 'account');
-  if (!_tabVisible(activeTab)) activeTab = 'account';
+    || (window._isAdmin ? 'services' : 'appearance');
+  // J1-14: a non-admin player who opens Settings wants look/feel first, not account management.
+  // The markup default-active tab is admin-only `services`; for a player it's not visible, so land
+  // on Appearance (not Account — the old fallback dropped zero-data players onto password/2FA/photo).
+  if (!_tabVisible(activeTab)) activeTab = _tabVisible('appearance') ? 'appearance' : 'account';
   // Always apply the selection so the matching panel shows (the markup default is
   // `services`, which a non-admin must not see).
   modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === activeTab));
