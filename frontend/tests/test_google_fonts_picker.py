@@ -203,6 +203,35 @@ def test_clear_returns_to_a_builtin_offline_font():
     assert "GOOGLE_FONT_LINK_ID" in body and "link.remove()" in body
 
 
+# ── the CSP must allow the load (else the whole picker is broken at runtime) ────
+# Regression: the picker was fully built + source-tested, but the Content-Security-
+# Policy never allowed the Google Fonts hosts — so a selected `gf:` font's <link>
+# (fonts.googleapis.com) and its .woff2 files (fonts.gstatic.com) were blocked and
+# silently fell back to system fonts. Source pins can't catch that; assert the real
+# response header from the middleware.
+
+def test_csp_allows_the_google_fonts_hosts():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from core.middleware import SecurityHeadersMiddleware
+
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/")
+    def _root():
+        return {"ok": True}
+
+    csp = TestClient(app).get("/").headers["content-security-policy"]
+    # the stylesheet host must be in style-src; the font-file host in font-src.
+    style = re.search(r"style-src[^;]*", csp).group(0)
+    font = re.search(r"font-src[^;]*", csp).group(0)
+    assert "https://fonts.googleapis.com" in style, "the gf: <link> stylesheet host must be allowed"
+    assert "https://fonts.gstatic.com" in font, "the gf: .woff2 font host must be allowed"
+    # the offline built-ins keep working — 'self' stays in both directives.
+    assert "'self'" in style and "'self'" in font
+
+
 # ── the privacy disclosure ────────────────────────────────────────────────────
 
 def test_privacy_note_near_the_picker():

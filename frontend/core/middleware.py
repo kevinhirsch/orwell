@@ -143,8 +143,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                "font-src 'self' https://cdn.jsdelivr.net; "
+                # fonts.googleapis.com serves the opt-in Google-font stylesheet the
+                # theme picker injects (a <link rel=stylesheet>); fonts.gstatic.com
+                # serves the actual .woff2 files it references. Both are required or a
+                # selected `gf:` font is blocked at runtime and silently falls back to
+                # the offline built-ins. The four built-in fonts stay fully offline
+                # ('self'); the Google option is an explicit, privacy-disclosed opt-in.
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+                "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
                 "img-src 'self' data: blob:; "
                 "media-src 'self' blob:; "
                 "connect-src 'self'; "
