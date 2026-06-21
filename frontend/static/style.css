@@ -6079,13 +6079,17 @@ body.bg-pattern-sparkles {
       border: 1px solid var(--border);
       color: var(--fg);
       border-radius: 6px;
-      padding: 3px 12px;
+      /* S8-1 (audit): the dismiss button was ~18px tall — below the 36px coarse-pointer
+         tap-target floor. Give it a real min-height + roomier padding. */
+      padding: 8px 14px;
+      min-height: 36px;
       cursor: pointer;
       font-family: inherit;
       font-size: 0.72rem;
       opacity: 0.85;
       transition: opacity 0.15s, background 0.15s;
     }
+    @media (hover: none) and (pointer: coarse) { .tour-hint-dismiss { min-height: 44px; } }
     .tour-hint-dismiss:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
 
     /* SVG dance: cursor approaches title bar, drags right, modal snaps to a

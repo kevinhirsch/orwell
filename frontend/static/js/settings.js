@@ -5305,10 +5305,31 @@ function syncAdminVisibility() {
 /* ═══════════════════════════════════════════
    PUBLIC API
    ═══════════════════════════════════════════ */
+// S7-1 (audit / WCAG 2.4.3 + 2.1.2): trap focus inside the settings modal while open —
+// focus moves in on open, Tab/Shift+Tab cycle within it, and focus returns to the trigger
+// on close. (Escape-to-close already exists in initAll's keydown handler.)
+let _settingsPrevFocus = null;
+const _SETTINGS_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function _settingsFocusables() {
+  if (!modalEl) return [];
+  return Array.from(modalEl.querySelectorAll(_SETTINGS_FOCUSABLE)).filter(
+    (e) => e.offsetParent !== null && getComputedStyle(e).visibility !== 'hidden');
+}
+function _settingsTrapKeydown(e) {
+  if (e.key !== 'Tab' || !modalEl || modalEl.classList.contains('hidden')) return;
+  const f = _settingsFocusables();
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1], active = document.activeElement;
+  if (!modalEl.contains(active)) { e.preventDefault(); first.focus(); return; }
+  if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+}
+
 export function open(tab) {
   if (!initialized) initAll();
   syncAppearanceCheckboxes();
-  if (modalEl.classList.contains('hidden')) {
+  const _wasHidden = modalEl.classList.contains('hidden');
+  if (_wasHidden) {
     resetWindowPlacement();
   }
   modalEl.classList.remove('hidden');
@@ -5339,10 +5360,22 @@ export function open(tab) {
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }
+  if (_wasHidden) {
+    _settingsPrevFocus = document.activeElement;
+    document.addEventListener('keydown', _settingsTrapKeydown, true);
+    const firstStop = modalEl.querySelector('[data-settings-tab].active') || _settingsFocusables()[0];
+    if (firstStop) { try { firstStop.focus(); } catch (_) {} }
+  }
 }
 
 export function close() {
   if (!modalEl) return;
+  // S7-1: drop the focus trap and return focus to whatever opened the modal.
+  document.removeEventListener('keydown', _settingsTrapKeydown, true);
+  if (_settingsPrevFocus && typeof _settingsPrevFocus.focus === 'function') {
+    try { _settingsPrevFocus.focus(); } catch (_) {}
+  }
+  _settingsPrevFocus = null;
   // Always clear the appearance-tab body class so the rest of the app
   // doesn't keep its dimmed state if the modal got closed mid-tab.
   document.body.classList.remove('settings-appearance-open');
