@@ -1,0 +1,25 @@
+[Unit]
+Description=orwell ops trigger — web-requested public deployment (0068 "Connect to the internet"; flag watch)
+# The seam that lets the admin "Public deployment" card connect/disconnect the public tunnel: the
+# front-end runs inside the E85-hardened orwell-frontend.service (User=orwell, empty
+# CapabilityBoundingSet=) and structurally CANNOT edit data/.env, apt-install cloudflared, enable a
+# systemd service, or restart the FE. The sanctioned pattern (identical to orwell-ops-update.path,
+# G19b): the web tier writes a FLAG FILE under data/ops/ (the one tree it already owns) and this
+# root-side path unit reacts by starting the oneshot runner, which appends its output to
+# data/ops-public-deployment.log — the same data/*.log surface the status page already tails live.
+# Paste token → Connect → run → watch.
+
+[Path]
+# EXISTENCE-only trigger: the flag's CONTENT is deliberately ignored — never read, parsed, or
+# executed — so the web tier can request "apply/disconnect public deployment", never "a command".
+# The action + non-secret config + the connector token are SEPARATE side-input files
+# (public-deployment.json, cloudflared-token) the fixed script reads itself; nothing the web tier
+# writes is interpolated into a command. Only the one fixed script wired into
+# orwell-ops-public-deployment.service ever runs. The runner removes the flag FIRST; PathExists=
+# re-evaluates when the service deactivates, so a clean run does not re-trigger, while a request
+# landing DURING a run earns exactly one follow-up run.
+PathExists=/opt/orwell/data/ops/public-deployment-requested
+Unit=orwell-ops-public-deployment.service
+
+[Install]
+WantedBy=multi-user.target

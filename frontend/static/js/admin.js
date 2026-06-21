@@ -2473,12 +2473,189 @@ function initHealthLogs() {
   load();  // live rows on open — the card is a health surface, not a form
 }
 
+/* ── Public deployment (0068) — the "Connect to the internet" operator console ──
+   Mirrors initHealthLogs: load + render the public-exposure posture + a green/amber
+   security checklist, drive the Connect wizard (apply → poll ops-status), and the
+   Disconnect button. The connector TOKEN is WRITE-ONLY — it is sent on apply and is
+   never rendered back (status reports installed/active/url, never the token). */
+function initPublicDeployment() {
+  const card = el('adm-public-deployment-card');
+  if (!card) return;  // not rendered (non-admin DOM) — nothing to wire
+
+  const statusEl = el('adm-pubdep-status');
+  const checklistEl = el('adm-pubdep-checklist');
+  const wizardEl = el('adm-pubdep-wizard');
+  const toggleBtn = el('adm-pubdep-connect-toggle');
+  const applyBtn = el('adm-pubdep-apply');
+  const disconnectBtn = el('adm-pubdep-disconnect');
+  const domainsInput = el('adm-pubdep-domains');
+  const originsInput = el('adm-pubdep-origins');
+  const tokenInput = el('adm-pubdep-token');
+  const progressEl = el('adm-pubdep-progress');
+  const msgEl = el('adm-pubdep-msg');
+
+  let pollTimer = null;
+
+  const badge = (ok, text) =>
+    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,170,60,.16)'};color:${ok ? '#3cb46e' : '#e0a83c'};">${esc(text)}</span>`;
+
+  const row = (label, valueHtml) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+      <div class="admin-toggle-label">${esc(label)}</div>
+      <div class="admin-toggle-sub" style="text-align:right;">${valueHtml}</div>
+    </div>`;
+
+  function renderStatus(d) {
+    const t = d.tunnel || {};
+    const rows = [];
+    rows.push(row('Internet exposure', badge(!!d.enabled, d.enabled ? 'PUBLIC' : 'LAN-ONLY')));
+    rows.push(row('Front-end bind', `<span class="admin-toggle-sub">${esc(d.bindHost || '?')}</span>`));
+    const hosts = Array.isArray(d.allowedHosts) ? d.allowedHosts : [];
+    rows.push(row('Allowed hosts', hosts.length ? `<span class="admin-toggle-sub">${esc(hosts.join(', '))}</span>` : badge(false, 'NONE')));
+    let tunnelVal = badge(!!t.installed, t.installed ? 'INSTALLED' : 'NOT INSTALLED');
+    tunnelVal += ' ' + badge(!!t.active, t.active ? 'ACTIVE' : 'INACTIVE');
+    rows.push(row('Cloudflare tunnel', tunnelVal));
+    if (t.publicUrl) {
+      rows.push(row('Public URL', `<a href="${esc(t.publicUrl)}" target="_blank" rel="noopener">${esc(t.publicUrl)}</a>`));
+    }
+    if (statusEl) statusEl.innerHTML = rows.join('');
+
+    // The green/amber security checklist (each is a posture boolean from the status route).
+    const checks = [
+      ['Authentication on', !!d.authEnabled],
+      ['Secure cookies', !!d.secureCookies],
+      ['Host pinned', !!d.hostPinned],
+    ];
+    if (checklistEl) {
+      checklistEl.innerHTML = checks.map(([label, ok]) =>
+        row(label, badge(ok, ok ? 'OK' : 'CHECK'))).join('');
+    }
+  }
+
+  async function load() {
+    if (msgEl) { msgEl.textContent = 'Checking…'; msgEl.className = ''; }
+    try {
+      const res = await fetch('/api/admin/public-deployment-status', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Failed'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      renderStatus(data);
+      // Reflect a prior apply's progress (if the ops file remembers one).
+      if (data.lastApply) renderProgress(data.lastApply);
+      if (msgEl) { msgEl.textContent = `Checked ${new Date().toLocaleTimeString()}.`; msgEl.className = 'admin-toggle-sub'; }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    }
+  }
+
+  function renderProgress(s) {
+    if (!progressEl) return;
+    if (!s) { progressEl.innerHTML = ''; return; }
+    const step = (s.step != null && s.total) ? `${s.step}/${s.total} · ` : '';
+    let cls = 'admin-toggle-sub';
+    let label = s.message || (s.running ? 'Working…' : (s.ok ? 'Done.' : ''));
+    if (s.error) { cls = 'admin-error'; label = s.error; }
+    else if (s.ok && !s.running) { cls = 'admin-toggle-sub'; }
+    progressEl.innerHTML = `<div class="${cls}">${esc(step + (label || ''))}</div>`;
+  }
+
+  // Poll the shared ops-status endpoint for the "public-deployment" action until it settles.
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/admin/ops-status', { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        const s = data && data.actions ? data.actions['public-deployment'] : null;
+        renderProgress(s);
+        if (s && !s.running) {
+          clearInterval(pollTimer); pollTimer = null;
+          load();  // refresh posture once the apply settles
+        }
+      } catch (_) { /* a transient poll error is non-fatal — keep polling */ }
+    }, 2000);
+  }
+
+  async function apply() {
+    const domains = (domainsInput && domainsInput.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const allowedOrigins = (originsInput && originsInput.value || '').trim() || null;
+    const tunnelToken = (tokenInput && tokenInput.value || '').trim() || null;
+    if (!domains.length) {
+      if (msgEl) { msgEl.textContent = 'Enter at least one domain.'; msgEl.className = 'admin-error'; }
+      return;
+    }
+    if (applyBtn) applyBtn.disabled = true;
+    if (msgEl) { msgEl.textContent = 'Connecting…'; msgEl.className = 'admin-toggle-sub'; }
+    try {
+      const res = await fetch('/api/admin/public-deployment/apply', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domains, allowedOrigins, tunnelToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Apply failed.'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      if (tokenInput) tokenInput.value = '';  // never keep the token around in the DOM
+      if (data.started) {
+        if (msgEl) { msgEl.textContent = 'Applying — this restarts the front-end to take effect.'; msgEl.className = 'admin-toggle-sub'; }
+        startPolling();
+      } else {
+        if (msgEl) { msgEl.textContent = data.error || 'Could not start the apply.'; msgEl.className = 'admin-error'; }
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    } finally {
+      if (applyBtn) applyBtn.disabled = false;
+    }
+  }
+
+  async function disconnect() {
+    if (disconnectBtn) disconnectBtn.disabled = true;
+    if (msgEl) { msgEl.textContent = 'Disconnecting…'; msgEl.className = 'admin-toggle-sub'; }
+    try {
+      const res = await fetch('/api/admin/public-deployment/disconnect', {
+        method: 'POST', credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Disconnect failed.'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      if (data.started) {
+        if (msgEl) { msgEl.textContent = 'Disconnecting — returning to LAN-only.'; msgEl.className = 'admin-toggle-sub'; }
+        startPolling();
+      } else {
+        if (msgEl) { msgEl.textContent = data.error || 'Could not start the disconnect.'; msgEl.className = 'admin-error'; }
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    } finally {
+      if (disconnectBtn) disconnectBtn.disabled = false;
+    }
+  }
+
+  if (toggleBtn && wizardEl) {
+    toggleBtn.addEventListener('click', () => {
+      wizardEl.hidden = !wizardEl.hidden;
+      toggleBtn.textContent = wizardEl.hidden ? 'Connect to the internet' : 'Hide wizard';
+    });
+  }
+  if (applyBtn) applyBtn.addEventListener('click', apply);
+  if (disconnectBtn) disconnectBtn.addEventListener('click', disconnect);
+  load();  // live posture on open — the card is a status surface, not a form
+}
+
 /* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, initPublicDeployment, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }

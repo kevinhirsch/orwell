@@ -1,0 +1,16 @@
+# Pangolin "Newt" connector for Orwell — feature 0067 / ADR 0007 (self-hosted-control alternative, Option B).
+#
+# Runs on the ORIGIN host (the LXC). Dials OUT to your Pangolin VPS over WireGuard — the LXC opens
+# no inbound ports. In the Pangolin dashboard, register a single HTTP resource targeting the
+# front-end (127.0.0.1:8080, matching ORWELL_PORT) and attach an auth gate (SSO / PIN / password /
+# email allow-list). Do NOT register the engine — leaving it unregistered keeps it unreachable.
+
+services:
+  newt:
+    image: fosrl/newt
+    container_name: newt
+    restart: unless-stopped
+    environment:
+      - PANGOLIN_ENDPOINT=https://pangolin.hiorwell.com
+      - NEWT_ID=<your-newt-id>
+      - NEWT_SECRET=<your-newt-secret>

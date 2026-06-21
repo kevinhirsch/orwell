@@ -112,6 +112,15 @@ app.add_middleware(
     ],
 )
 
+# ========= TRUSTED HOST (Host-header pin) =========
+# Pins the Host header to ALLOWED_HOSTS (feature 0067 / ADR 0007). Defaults to ["*"]
+# (accept any Host) so dev / trusted-LAN deployments are unaffected; a public deploy sets
+# ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com to reject Host-header attacks. The
+# public-profile boot guard below refuses to start if this is left unset under ORWELL_PUBLIC.
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from core.middleware import allowed_hosts_from_env
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts_from_env(os.environ))
+
 # ========= SECURITY HEADERS MIDDLEWARE =========
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -165,6 +174,14 @@ AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() != "false"
 LOCALHOST_BYPASS = os.getenv("LOCALHOST_BYPASS", "false").lower() == "true"
 if LOCALHOST_BYPASS:
     logger.warning("LOCALHOST_BYPASS is enabled, loopback requests bypass authentication. Do not expose this instance to a network.")
+
+# Public-profile fail-closed guard (feature 0067 / ADR 0007): if ORWELL_PUBLIC is set
+# (an internet-facing deployment), refuse to boot with an unsafe security posture — auth
+# off, localhost-bypass on, insecure cookies, or an unpinned Host header — instead of
+# silently serving the game in the clear. No-op when ORWELL_PUBLIC is unset, so the
+# default / trusted-LAN start path is byte-identical.
+from core.middleware import assert_public_profile_safe
+assert_public_profile_safe(os.environ)
 
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
@@ -606,6 +623,14 @@ app.include_router(setup_admin_update_reset_routes())
 # latest status so the status page renders a live timeline that survives the services restart.
 from routes.admin_ops_status_routes import setup_admin_ops_status_routes
 app.include_router(setup_admin_ops_status_routes())
+
+# Admin Public deployment ("Connect to the internet", feature 0068 / ADR 0007) — the operator
+# console over the 0067 public-exposure floor. Apply VALIDATES the proposed public profile with
+# assert_public_profile_safe (fail closed → 400, writing nothing), then drops the non-secret config
+# + a transient mode-0600 cloudflared connector token + the existence-only flag the root ops watcher
+# consumes (same privilege-safe seam as Update). The token is write-only and NEVER echoed by any GET.
+from routes.admin_public_deployment_routes import setup_admin_public_deployment_routes
+app.include_router(setup_admin_public_deployment_routes())
 
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The

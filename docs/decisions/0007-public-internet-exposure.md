@@ -1,9 +1,12 @@
 # 0007 — Public internet exposure of the player tier (hiorwell.com) over HTTPS
 
-> **Status:** **Proposed** (PO direction 2026-06-20: *"we bought hiorwell.com and want to get this on
+> **Status:** **Accepted** (PO direction 2026-06-20: *"we bought hiorwell.com and want to get this on
 > the internet… needs HTTPS and internet-grade security now; thinking Pangolin + a VPS, or Cloudflare,
-> IDK"*). The **option-independent hardening** (below) is accepted and binding; the **exposure-layer
-> choice** awaits owner confirmation (see [Open / to confirm](#open--to-confirm)).
+> IDK"*). The **option-independent hardening floor** is **BUILT** (feature
+> [`0067`](../features/0067-public-internet-exposure.md)); the **exposure layer** is confirmed
+> **Cloudflare Tunnel + Access** (owner, 2026-06-20) — the `deploy/expose/cloudflared/` kit + the INSTALL
+> runbook ship it as the default, with Pangolin-on-VPS and plain-VPS-Caddy kept as documented
+> alternatives. Remaining: the real-host smoke of the exposed path (folds into 0010).
 > **Source:** PO direction, 2026-06-20 (the "get it on the internet" thread) + the deploy/security
 > reconnaissance summarised in [feature 0067](../features/0067-public-internet-exposure.md).
 > **Builds on:** the existing Proxmox-LXC deploy (`deploy/`, `docs/INSTALL.md`), the network-edge
@@ -72,8 +75,11 @@ These hold no matter which front in §B is chosen. None of them touch the engine
 4. **Host header pinned + edge security headers.** Add `TrustedHostMiddleware` (allowed hosts from
    env, default the domain) so Host-header attacks are rejected; the terminator adds **HSTS**
    (`max-age≥31536000; includeSubDomains` once fully HTTPS) and keeps the existing security headers.
-5. **Brute-force protection on the one credential endpoint.** Defense in depth: an app-level
-   login throttle/lockout **and** an edge rate-limit on `/api/auth/login`.
+5. **Brute-force protection on the credential endpoint, made correct behind the tunnel.** The FE
+   already throttles login (per-IP); behind a tunnel every request arrives from `127.0.0.1`, so the
+   throttle is keyed on the **real client IP** resolved from the trusted forwarding header
+   (`CF-Connecting-IP`/`X-Forwarded-For`), not one global bucket — plus the edge auth gate (Access)
+   in front. (Per-username lockout is deliberately avoided — it enables a targeted-lockout DoS.)
 6. **Host hardening + backups.** ufw `default deny incoming` (only SSH from a trusted source + 80/443,
    or *nothing inbound* under a tunnel), key-only SSH, `unattended-upgrades`, fail2ban (`sshd`), keep
    the E85 systemd sandboxing, and schedule `orwell-backup.sh` **off-host** with a tested restore.
@@ -169,11 +175,11 @@ smoke.
 
 ## Open / to confirm
 
-- **The exposure-layer pick is the owner's call** (privacy/control **vs.** managed DDoS/WAF + least
-  ops). The recommendation is **Cloudflare Tunnel + Access** for launch-now; **Pangolin on a hardened
-  VPS** is the equal-footing self-hosted alternative the owner leaned toward; the **hybrid** (Pangolin/
-  Caddy origin fronted by Cloudflare, origin firewalled to CF IPs) is the when-DDoS-matters switch.
-  Feature 0067 builds the option-independent floor regardless; the front-specific kit follows the pick.
+- ✅ **The exposure-layer pick is resolved (owner, 2026-06-20): Cloudflare Tunnel + Access** — fastest
+  to internet-grade now (free DDoS/WAF + email-OTP login wall + zero inbound ports). **Pangolin on a
+  hardened VPS** and **plain VPS + Caddy** stay documented as the self-hosted-control alternatives, and
+  the **hybrid** (a self-hosted origin fronted by Cloudflare, origin firewalled to CF IPs) is the
+  when-DDoS-matters switch. Feature 0067 built the option-independent floor + the Cloudflare kit.
 - **Auth-gate-in-front strength:** whether to require an *edge* identity gate (Access / Pangolin SSO)
   **in addition** to the app's own login, or rely on the app login alone behind TLS + rate-limit. (For a
   single/low-N user base, an edge email-OTP allow-list is cheap defense-in-depth and recommended.)

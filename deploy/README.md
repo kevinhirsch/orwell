@@ -9,9 +9,13 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 ```
  LXC (Debian)
    ├─ orwell-engine.service     Node:   npm start  -> MCP server on 127.0.0.1:${ORWELL_ENGINE_PORT}
-   └─ orwell-frontend.service   Python: uvicorn app:app on 0.0.0.0:${ORWELL_PORT}
+   └─ orwell-frontend.service   Python: uvicorn app:app on ${ORWELL_BIND_HOST}:${ORWELL_PORT}  (loopback by default)
    data: /opt/orwell/data       .env (secrets) + the save (SQLite + souls); preserved across updates
 ```
+
+> **Putting it on the internet?** The FE binds **loopback by default** (feature 0067 / ADR 0007) — a
+> public deploy puts a TLS-terminating reverse proxy / tunnel in front (Cloudflare Tunnel is the
+> recommended option). See [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (hiorwell.com)`.
 
 ## Recommended specs
 

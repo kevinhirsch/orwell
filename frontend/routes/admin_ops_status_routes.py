@@ -33,6 +33,7 @@ _OPS_ACTIONS = {
     "update": "ops-update.log",
     "factory-reset": "ops-factory-reset.log",
     "update-reset": "ops-update-reset.log",   # the future Update+Reset combo (file may not exist)
+    "public-deployment": "ops-public-deployment.log",  # 0068 Connect/Disconnect apply progress
 }
 
 

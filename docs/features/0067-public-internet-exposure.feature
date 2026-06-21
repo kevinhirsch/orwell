@@ -48,11 +48,12 @@ Feature: Public internet exposure of the player tier over HTTPS
     Then it is rejected
     And a request for the configured domain is accepted
 
-  Scenario: The login endpoint resists brute force
-    Given repeated failed logins for one account from one address
-    Then further attempts are throttled with a cooldown
-    And the throttle is keyed per account and address, not global
-    And a correct login is unaffected
+  Scenario: The login throttle keys on the real client address behind the tunnel
+    Given the app is behind a reverse proxy or tunnel
+    Then the login throttle keys on the real client address from the trusted forwarding header
+    And it is not collapsed into one global bucket for every visitor
+    And two different real clients get independent throttle buckets
+    And a forwarding header is ignored when proxy trust is off, so a directly exposed app is not spoofable
 
   Scenario: The Vault Wall and cross-user isolation are unchanged by exposure
     Then no outward surface can read the Vault

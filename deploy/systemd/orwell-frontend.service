@@ -40,10 +40,18 @@ WorkingDirectory=/opt/orwell/frontend
 # Default port (audit E85): the EnvironmentFile is optional (-), so a box without data/.env must
 # still expand ${ORWELL_PORT} — EnvironmentFile values override this default when present.
 Environment=ORWELL_PORT=8080
+# Bind LOOPBACK by default (feature 0067 / ADR 0007): on a public deploy the FE is reached by a
+# LOCAL reverse proxy / tunnel connector (cloudflared, Caddy, Pangolin Newt) — NEVER the open
+# network. Set ORWELL_BIND_HOST=0.0.0.0 in data/.env only for a deliberate trusted-LAN deploy
+# with no proxy in front. The EnvironmentFile value overrides this default when present.
+Environment=ORWELL_BIND_HOST=127.0.0.1
 EnvironmentFile=-/opt/orwell/data/.env
 # The orwell app reads ORWELL_ENGINE_MCP_URL (from the EnvironmentFile) to reach the engine's
 # MCP server (frontend/INTEGRATION.md). The UI port comes from ORWELL_PORT.
-ExecStart=/opt/orwell/frontend/.venv/bin/uvicorn app:app --host 0.0.0.0 --port ${ORWELL_PORT}
+# --proxy-headers + --forwarded-allow-ips: trust X-Forwarded-* ONLY from the local connector
+# (127.0.0.1) so the app sees the real client scheme/IP behind the tunnel/proxy. For a VPS that
+# proxies in over WireGuard, override the trusted IP to the proxy's address in the unit/.env.
+ExecStart=/opt/orwell/frontend/.venv/bin/uvicorn app:app --host ${ORWELL_BIND_HOST} --port ${ORWELL_PORT} --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3
 
