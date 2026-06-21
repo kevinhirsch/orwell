@@ -93,8 +93,32 @@ against fresh telemetry before any claim — a code fix landing is not verificat
 
 ---
 
+## Rig status (Phase 1) — VALIDATED end-to-end (2026-06-21)
+Engine :8765 (rebuilt from synced main) healthy · FE :7000 auth + `engine:true` · admin
+`audit-admin` · OpenRouter endpoint registered (340 models) · default model
+`deepseek/deepseek-v4-pro` confirmed · Playwright+chromium sandboxed in `.audit-telemetry/`.
+**Capture→vision loop proven:** `.audit-telemetry/cap_login.mjs` captured `/login` at desktop
+(1440×900) + mobile (iPhone-13 descriptor, DPR3); PNGs read back via vision. Still to build for the
+full per-state cycle: two-window parity + DOM MutationObserver/event log + video→filmstrip + the A/B
+diff (extend `docs/audits/playtest-harness/lib.mjs` + this pattern).
+
+**Sync discipline (operator note: main moves fast, parallel auditors):** re-`git fetch origin main`
+and merge **before each state's capture**; rebuild engine if `src/` moved, restart FE if `frontend/`
+moved. Currently synced to `093da44` (= origin/main `106b9ad` + my Phase-0 commit). Re-synced at:
+State-1 standup.
+
 ## Live findings (this run) — appended as captured
-*(none yet — Phase 1 rig standup in progress; State 1 capture next.)*
+*Provisional (to harden in the full State-1 fan-out — not yet final triage):*
+- **F-S1-A** `[POLISH]` 👁 VIEWED — 2× `console.error: 401 Unauthorized` on the **unauthenticated**
+  `/login` page (an authed XHR fires pre-auth). Evidence: `shots/state1/login-{desktop,mobile}.meta.json`.
+  Root cause TBD — 401 is not a `requestfailed`, so add response-URL logging to name the endpoint.
+  Mechanism hypothesis (unconfirmed): a poller/session-probe (`/api/...`) runs before the auth gate.
+- **F-S1-B** `[POLISH]` 👁 VIEWED (calibrating) — login **password** field shows a right-side glyph
+  while empty (appears to be an eye-slash reveal toggle on mobile — possibly the S1-4 fix already
+  landed) **and** the **username** field shows a small dot glyph while empty. Affordance ambiguity.
+  Evidence: `shots/state1/login-{desktop,mobile}.png`. Needs focus/hover/click-behavior capture
+  before finalizing (differential: recommended eye-toggle fix vs. residual clear-X vs. validation dot).
+- **No-overflow (good, VIEWED):** `/login` reflows clean at both viewports (`overflow:null`).
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
