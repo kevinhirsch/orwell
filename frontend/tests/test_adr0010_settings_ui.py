@@ -56,7 +56,7 @@ def test_init_reads_and_writes_every_token_economy_key():
 def test_keys_present_in_default_settings():
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["reasoning_budget"] == {
-        "narration": "medium", "utility-extraction": "low",
+        "narration": "medium", "utility-extraction": "off",  # "off" = genuine disable (reasoning:{enabled:false})
         "casting": "medium", "background-authoring": "low",
     }
     assert DEFAULT_SETTINGS["openrouter_provider"] == {}

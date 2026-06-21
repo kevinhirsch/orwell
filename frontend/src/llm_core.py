@@ -592,11 +592,28 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
                            ignored for the rest — safe to always send);
       • other direct providers → only when the model is a known thinking model (else omit, so a plain
                            chat model is byte-identical and never 400s on an unknown field).
-    No-op without a policy/effort. Shared by the streaming and non-streaming builders."""
-    if not (policy and isinstance(policy, dict)):
+    EXPLICIT OFF is a genuine disable, not an omission: when a call class resolves to effort
+    "off" the policy carries ``reasoning is None``. OMITTING the field would let a reasoning model
+    (DeepSeek-V*/o-series) fall back to its provider DEFAULT (often ON) — so "off" would silently
+    NOT be a cost floor. Instead we actively send ``reasoning: {"enabled": false}`` to OpenRouter
+    (the unified form documented as "whether reasoning is enabled"; verified upstream via
+    ``debug.echo_upstream_body`` — ADR 0010). OpenAI o-series reasoning is intrinsic and cannot be
+    disabled, so we leave it untouched there.
+
+    No-op without a policy (no call class ⇒ byte-identical). Shared by the streaming and
+    non-streaming builders."""
+    if not (policy and isinstance(policy, dict)) or "reasoning" not in policy:
         return
     reasoning = policy.get("reasoning")
-    eff = (reasoning or {}).get("effort") if isinstance(reasoning, dict) else None
+    # Explicit OFF: a call class was resolved but chose no reasoning. Actively disable it for a
+    # reasoning model rather than omitting (which leaves the provider default ON).
+    if reasoning is None:
+        if provider == "openai" and _uses_max_completion_tokens(model):
+            return  # o-series reasoning is intrinsic — cannot be turned off; leave the default
+        if provider == "openrouter" or _supports_thinking(model):
+            payload["reasoning"] = {"enabled": False}
+        return
+    eff = reasoning.get("effort") if isinstance(reasoning, dict) else None
     if not eff:
         return
     if provider == "openai" and _uses_max_completion_tokens(model):

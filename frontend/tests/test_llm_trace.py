@@ -73,6 +73,26 @@ def test_record_writes_full_io_to_file_and_ring(data_dir, monkeypatch):
     assert "the system prompt" in last["args"]
 
 
+def test_record_over_soft_ceiling_is_written_in_full(data_dir, monkeypatch):
+    # "Preserve ALL I/O — and I mean all": a record larger than the soft observability
+    # threshold is written LOSSLESSLY, never truncated/dropped.
+    _enable(monkeypatch)
+    monkeypatch.setattr(llm_trace, "_MAX_RECORD_BYTES", 100)  # force the over-ceiling path
+    big_prompt = "X" * 5000
+    big_reply = "Y" * 5000
+    llm_trace.record_llm_call(
+        kind="stream", model="m1",
+        messages=[{"role": "system", "content": big_prompt},
+                  {"role": "user", "content": "hi"}],
+        response={"text": big_reply, "reasoning": "Z" * 5000}, ok=True)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    # Full content survives — no {"truncated": True} sentinel, no clipping.
+    assert rec["request"]["messages"][0]["content"] == big_prompt
+    assert rec["response"]["text"] == big_reply
+    assert rec["response"]["reasoning"] == "Z" * 5000
+    assert "truncated" not in rec["request"] and "truncated" not in rec["response"]
+
+
 def test_record_is_noop_when_disabled(data_dir, monkeypatch):
     _enable(monkeypatch, on=False)
     llm_trace.record_llm_call(kind="call", model="x",
