@@ -299,6 +299,14 @@ Lead findings J2-01…06 above stand. Specialist IDs: FJ (flows), IA (ia), IF (i
 ### NEEDS RE-CAPTURE (after rig fix — force chat scroll/repaint before each shot)
 Transcript-dependent items to (re)assess on true captures: narration quality/voice & any in-bubble OOC leak; the operator-aside scrub (looked OK in the one element-shot); pre-token wait feedback sufficiency (IF-01/IF-04 residual); whether premiere "meet-the-house" intros narrate well; J2-07 cue-leak across more turns; CA-02 composer model-picker (verify NON-admin build hides it — likely admin-rig).
 
+**Rig-fix outcome (J2-CI follow-up):** A full-page headless screenshot composites the `#chat-history` scroll
+container only when it actually *scrolls* (overflow) — `scroll_into_view_if_needed()` no-ops when content fits, so
+short casting turns still capture blank. **Reliable method adopted: an ELEMENT screenshot of `#chat-history`** (saved
+to `runs/<tag>/.../transcript/*.chat.png`), which always renders (proven: 12,930 light px). Banked in `rig.py` for
+J3/J4. **Transcript evidence already sufficient** to assess J2: the element-screenshot shows rich in-character
+narration (producer "Isaiah"), masked "👁 Big Brother" sender, and the operator-aside correctly inside the collapsed
+"thinking" accordion (scrub OK); DOM probes confirmed J2-07 (cue-as-You-message). No further full re-capture needed for J2.
+
 ## Journey progress
 
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings logged; gated remediation set #1 (9 fixes incl. launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged to main in PR #449** (CI green). Deferred to later sets: J1-25 (cast-photo modal trap), J1-22, and the visual/IA backlog (J1-01/02/04/05/06/09/10/12/14/17/20/23/24/30/31/32/33/34).
