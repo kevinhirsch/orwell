@@ -1925,13 +1925,13 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
 - **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
   + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
 
-**To verify (observed but not yet confirmed as defects):**
+**Verified CLEAR (checked live on the post-merge / post-F8 build — not defects):**
+- **LW13** ✅ CLEAR. Reasoning renders in the collapsed "View thinking process" accordion (by design); the
+  eviction-narration message **bodies were clean** (no reasoning leak). F8 (#435) holds; 0 page errors.
+- **LW14** ✅ CLEAR. An evicted (pre-jury) player is offered **no decision card** (confirmed live — card is `None`).
+
+**Still to verify:**
 - **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
-  follow-ups) — should dismiss once premiere ends. Re-confirm live.
-- **LW13** [verify] **Reasoning/thinking text** appeared in the message-text extraction during the PRE-F8 run.
-  F8 (#435, "reply-only body buffer") landed for exactly this class; re-verify post-F8 that reasoning never reaches
-  the public bubble body in the game build (CLAUDE.md hard rule).
-- **LW14** [verify] **An evicted (pre-jury) player must never be offered a decision card** in the continuing house
-  weeks. Week-3 noms observed were NPCs (likely fine), but confirm the out-player surface arms no card.
-- **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the forced belt) each round; with
-  a heavy under-caller the comp leans on the L39b forced advance — confirm #420's fewer rounds keep this acceptable.
+  follow-ups) — should dismiss once premiere ends. Needs a FRESH game at premiere to re-confirm.
+- **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the L39b forced belt) each round;
+  weeks 1–2 completed acceptably with #420's fewer rounds — keep an eye on it over longer runs.
