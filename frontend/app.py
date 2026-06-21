@@ -624,6 +624,14 @@ app.include_router(setup_admin_update_reset_routes())
 from routes.admin_ops_status_routes import setup_admin_ops_status_routes
 app.include_router(setup_admin_ops_status_routes())
 
+# Admin Public deployment ("Connect to the internet", feature 0068 / ADR 0007) — the operator
+# console over the 0067 public-exposure floor. Apply VALIDATES the proposed public profile with
+# assert_public_profile_safe (fail closed → 400, writing nothing), then drops the non-secret config
+# + a transient mode-0600 cloudflared connector token + the existence-only flag the root ops watcher
+# consumes (same privilege-safe seam as Update). The token is write-only and NEVER echoed by any GET.
+from routes.admin_public_deployment_routes import setup_admin_public_deployment_routes
+app.include_router(setup_admin_public_deployment_routes())
+
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The
 # routers are still built (codex borrows memory_router below) but not mounted.
