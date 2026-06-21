@@ -106,7 +106,7 @@
     // SR focus to <body>. Skip the rebuild when nothing changed; only a real change (the Vault
     // unseal) re-renders. The full body teardown then happens at most twice (recap, then unsealed).
     const sig = JSON.stringify({ w: recap.winner && recap.winner.name, wk: recap.weeksPlayed,
-      h: (recap.highlights || []).length, u: !!unsealed });
+      h: (recap.highlights || []).length, u: !!unsealed, p: recap.placement, m: recap.margin });
     if (sig === _lastSig && _body.childNodes.length) { showPanel(true); return; }
     _lastSig = sig;
     _body.replaceChildren();
@@ -114,6 +114,31 @@
     // J5-09: the winner is the panel's apex — give it real typographic weight, not the same
     // 13px/0.9 as a mid-season highlight line.
     if (recap.winner) _body.appendChild(el("div", "margin-bottom:10px;font-size:1.1rem;font-weight:700;letter-spacing:-0.02em", "👑 " + recap.winner.name + " won the season (week " + recap.weeksPlayed + ")."));
+
+    // J5-18: the player's OWN result is the payoff for the most common outcome (a losing player) —
+    // the panel headlined only the winner. Surface the player's placement (and, if they sat in the
+    // Final 2, the jury margin) with real weight, right under the crown. Route-provided & PUBLIC
+    // (placement + margin are post-season facts); absent ⇒ silently skipped (fail-open).
+    if (recap.placement) {
+      // winner | runner-up | jury | evicted — winner is already the apex line above, so don't double it.
+      const PLACE = {
+        "runner-up": "You finished 2nd — runner-up.",
+        jury: "You finished in the jury.",
+        evicted: "You were evicted before jury.",
+      };
+      const line = PLACE[recap.placement];
+      if (line) {
+        const result = el("div",
+          "margin-bottom:10px;padding:8px 10px;border-radius:8px;font-size:1rem;font-weight:600;background:var(--accent-soft, rgba(109,74,255,0.14));border-left:3px solid var(--accent, #6d4aff)",
+          line);
+        // Finalists lost (or won) the jury by a margin — name it. margin = winner's lead in votes.
+        if (recap.placement === "runner-up" && typeof recap.margin === "number" && recap.margin > 0) {
+          result.appendChild(el("div", "margin-top:4px;font-size:0.85rem;font-weight:400;opacity:0.85",
+            "Lost the jury vote by " + recap.margin + (recap.margin === 1 ? " vote." : " votes.")));
+        }
+        _body.appendChild(result);
+      }
+    }
 
     const list = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85");
     for (const h of (recap.highlights || []).slice(-12)) list.appendChild(el("li", "", h));

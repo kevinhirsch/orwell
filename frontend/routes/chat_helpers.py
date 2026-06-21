@@ -162,7 +162,20 @@ async def _fetch_game_state(user, *, retry: bool):
 # and the lull-based stall-nudge misses a ceremony narrated in rich prose (not a lull) AND fires
 # only next turn (it cannot un-narrate). So we RESOLVE the beat for real BEFORE the model's turn and
 # hand it the engine's outcome to voice ("facts to voice, never scripts to recite", ADR 0003).
-_CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"})
+# R4-01 (real-LLM finding): the FINALE is a long STAGED engine sequence (F2 opening statements →
+# each finalist answers all 9 jurors → the jury vote revealed one juror at a time → winner crowned),
+# decided deterministically by advanceGame exactly like the eviction-vote reveal. With the real model
+# the GM under-calls advanceGame through the ~29-beat finale, so the game LOOPS at moment=jury-finale
+# / phase="finale" and never crowns a winner — the same under-call that bites the eviction reveal,
+# which only progresses BECAUSE "eviction" is in this set. The engine reports phase="finale" for every
+# staged finale beat (GameSessionAdapter.syncProjection → s.beat, which liveSeason sets to "finale";
+# "jury-finale" is the MOMENT string, not the phase), so adding "finale" here gives the finale the
+# same one-beat-per-turn auto-advance. The staged reveal is preserved: the belt advances exactly ONE
+# beat per turn, the (week:phase) runway signature stays constant across the finale (no spurious
+# re-hold mid-reveal, just like the eviction reveal), and the pending-decision guard still skips any
+# beat where the player owes a decision (finale-statement / finale-answer / juror-vote surface as
+# status.pending → their card leads, never auto-resolved).
+_CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction", "finale"})
 
 # OWNER RULING (2026-06-18): "the engine should make ALL game decisions; the LLM can narrate (and
 # propose influencing characteristics for the weights) — but that's it." So the COMPETITIONS are

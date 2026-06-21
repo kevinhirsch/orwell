@@ -458,6 +458,22 @@ def setup_orwell_routes() -> APIRouter:
             # finish-detection point — log the public outcome once the season is over (idempotent).
             if isinstance(recap, dict) and recap.get("finished"):
                 await _capture_season_outcome(user)
+                # J5-18: surface the PLAYER's own payoff — their final placement and (if a finalist)
+                # the jury margin — alongside the winner the panel already headlines. Both are PUBLIC
+                # post-season facts (the same fields the seasons ledger captures via _derive_placement
+                # / _last_finale_margin, reused here). Vault-free, player-scoped, fail-open: any error
+                # simply omits the fields and the panel falls back to the winner-only headline.
+                try:
+                    state = await orwell_engine.get_game_state(user=user)
+                    if isinstance(state, dict):
+                        player = state.get("player") if isinstance(state.get("player"), dict) else {}
+                        player_name = (player or {}).get("name")
+                        recap["placement"] = _derive_placement(state, recap, player_name)
+                        margin = _last_finale_margin(user)
+                        if margin is not None:
+                            recap["margin"] = margin
+                except Exception as e:  # never let the player-payoff enrichment break the recap route
+                    logger.info(f"[orwell] recap placement enrichment skipped: {e}")
             _clear_warn("recap")
             return {"recap": recap}
         except Exception as e:
