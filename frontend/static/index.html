@@ -52,6 +52,20 @@
         var ac = c.red || '#e06c75';
         var fav = document.querySelector("link[rel='icon']");
         if (fav) fav.href = 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/><circle cx='16' cy='16' r='4.5' fill='" + ac + "'/></svg>");
+        // S6-4: luminance-aware text color for accent-backed CTAs, set from the
+        // very first paint (theme.js re-derives the same value once it boots).
+        // White-on-accent is only ~3.2:1 on the brand red; pick near-white or
+        // near-dark by whichever clears the higher WCAG contrast. Mirrors
+        // onAccentColor() in static/js/color/hex.js — keep the two in sync.
+        (function(){
+          function _lin(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}
+          function _lum(hex){var h=hex.replace('#','');if(h.length!==6)return null;
+            return 0.2126*_lin(parseInt(h.substr(0,2),16))+0.7152*_lin(parseInt(h.substr(2,2),16))+0.0722*_lin(parseInt(h.substr(4,2),16));}
+          function _cr(a,b){var hi=Math.max(a,b),lo=Math.min(a,b);return (hi+0.05)/(lo+0.05);}
+          var al=_lum(ac);var on='#ffffff';
+          if(al!==null){var dark=_lum('#10151b');var light=_lum('#ffffff');on=_cr(al,dark)>_cr(al,light)?'#10151b':'#ffffff';}
+          s.setProperty('--on-accent', on);
+        })();
         // Derive syntax highlighting colors from theme
         function h2hsl(hex) {
           hex = hex.replace('#','');

@@ -1876,3 +1876,62 @@ the real-host smoke, R3, the browser-render validations, A11, MVP-002 remain exa
 it is a *new* refinement record plus its implementation. Its standing claim is the **litmus test**
 in the ADR: any future sync or consequence change must keep the open set recordable,
 consequenceable, recallable, and narratable in full while only ever constraining the closed set.
+
+## 2026-06-20/21 — live-LLM walkthrough audit (casting → weeks 1–2) — fixes MERGED + open log
+
+Pre-launch end-to-end pass driving the **real FE + real engine + a real LLM** (`deepseek-v4-pro`
+via OpenRouter) under headless Playwright — the path the automated gates structurally can't exercise
+(they stub the LLM). Drove casting → premiere → **week 1 (player won HOH) → week 2 (player nominated,
+veto not won, player EVICTED pre-jury)**. Per the owner directive, **every** observation is logged
+below (fixed + open + minor), no matter how small. Most are rooted in the documented
+**model-under-calls-progression-tools** failure class.
+
+- **#411** (State-1 UX) — themed the casting/headshot file input; silenced dropped voice-probe 404s. *MERGED.*
+- **#415** (game-start / premiere) — casting framing tells the model the **headshot is on file** so it
+  finalizes; **`createCharacter` finalize fallback** + premiere **`markHouseguestMet` auto-belt**. *MERGED.*
+- **#420** (staged-comp pacing, owner ruling) — **fewer/bigger rounds** (`STAGED_TARGET_ROUNDS`, ~4–8/comp
+  vs ~14) + **only round 1 binds** (`binding` flag; later rounds non-binding flavor). Presentation-only;
+  `stagedTrajectoryNeutral` + UAT green. *MERGED.*
+- **#434** (decision-card arming) — a **silent forced-advance** (FE error-correction when the model
+  under-calls `advanceGame`) progressed the engine onto a new player pending but armed **no card** in the
+  open page (only a reload did). Fix: arm from `gameStatus` at turn-end + don't let a lingering "✓ Locked
+  in" card suppress the next round. *MERGED.* **Live-verified:** a complete week 1 (HOH crown → noms →
+  veto comp → veto ceremony/replacement → eviction → week 2) ran with **0 page errors** and no board desync.
+
+### Complete issue log (LW = live-walkthrough; every observation)
+
+**Fixed + merged this session:**
+- **LW1** [#411] Unstyled native OS file input on the casting/headshot gate + Settings profile picture.
+- **LW2** [#411] Dropped voice-vertical 404s (`/api/stt/stats`, `/api/tts/stats`) on first paint under the game build.
+- **LW3** [#415] Game wouldn't reliably START — the model under-called `createCharacter` (looped asking for a
+  photo already on file). Fix: casting framing says the headshot is handled + a `createCharacter` finalize fallback.
+- **LW4** [#415] Premiere meet-everyone progression (`markHouseguestMet` auto-belt) — defense-in-depth for under-callers.
+- **LW5** [#420] Staged comp ran ~14 elimination rounds (slog). Fix: batched to ~4–8 (`STAGED_TARGET_ROUNDS`).
+- **LW6** [#420] Per-round comp cards read as binding when only round 1 binds. Fix: `binding` flag + flavor presentation.
+- **LW7** [#434] Decision card did NOT arm after a silent forced-advance — player stranded with no card (reload-only).
+  Fix: arm from `gameStatus` at turn-end.
+- **LW8** [#434] A lingering "✓ Locked in" (`.odec-done`) card suppressed the NEXT round's card during its 4s fade.
+
+**Open (carry forward):**
+- **LW9** [open · low-med] **Stale model PROSE after a silent forced-advance.** Narrated "ten houseguests still in"
+  while the engine had 7. The card/board show engine truth (#434); only the prose drifts (ADR-0005 open-set seam).
+  Candidate: a post-silent-advance re-narration nudge, or extend the 0065 desync guard to catch a stale still-in count.
+- **LW10** [open · med] **Pre-jury player eviction has no terminal-recap surface.** The player was voted out week 2
+  (status=`evicted`, `finished:false`); the 0048 retrospective only fires on SEASON finish (winner crowned), so the
+  evictee gets only the model's prose, and can keep nudging the house forward **one week per turn** (observed →
+  week 3) with no clean "your season is over → skip to results" affordance. 0046 specifies a *terminal recap*.
+  The model handled it gracefully in prose ("the door has sealed… let me fast-forward"), but there is no real
+  fast-forward and no structured recap at the player's own exit. *Largest open UX gap found this session.*
+- **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
+  + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
+
+**Verified CLEAR (checked live on the post-merge / post-F8 build — not defects):**
+- **LW13** ✅ CLEAR. Reasoning renders in the collapsed "View thinking process" accordion (by design); the
+  eviction-narration message **bodies were clean** (no reasoning leak). F8 (#435) holds; 0 page errors.
+- **LW14** ✅ CLEAR. An evicted (pre-jury) player is offered **no decision card** (confirmed live — card is `None`).
+
+**Still to verify:**
+- **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
+  follow-ups) — should dismiss once premiere ends. Needs a FRESH game at premiere to re-confirm.
+- **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the L39b forced belt) each round;
+  weeks 1–2 completed acceptably with #420's fewer rounds — keep an eye on it over longer runs.

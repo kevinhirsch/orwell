@@ -65,7 +65,7 @@
         border: 1px solid var(--border, #355a66); background: rgba(255,255,255,.05); color: inherit;
         font: inherit;
       }
-      #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: #fff; }
+      #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
       #${CARD_ID} textarea {
         width: 100%; min-height: 72px; box-sizing: border-box; margin-top: .2rem;
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
@@ -74,7 +74,7 @@
       #${CARD_ID} .odec-row { display: flex; align-items: center; gap: .6rem; margin-top: .65rem; }
       #${CARD_ID} .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
-        background: var(--accent, #e06c75); color: #fff; font: inherit;
+        background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
       #${CARD_ID} .odec-note { opacity: .65; font-size: .78em; flex: 1; }

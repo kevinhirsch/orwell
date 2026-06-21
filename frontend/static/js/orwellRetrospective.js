@@ -149,7 +149,7 @@
     } else {
       const open = el("button", [
         "margin-top:4px", "padding:6px 10px", "border-radius:8px", "cursor:pointer",
-        "background:var(--accent, #6d4aff)", "color:#fff", "border:none", "font-size:12.5px",
+        "background:var(--accent, #6d4aff)", "color:var(--on-accent, #fff)", "border:none", "font-size:12.5px",
       ].join(";"), "🔐 Open the Producer's Vault");
       open.addEventListener("click", async () => {
         try {
