@@ -348,6 +348,26 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
 
 ---
 
+## 2.11 Current-main regression checks (2026-06-21, Lane B continuation)
+
+- **ADR-0008 two-tab concurrent convergence — VERIFIED-FIXED** (see §2.5): the `_streamSessionId`-never-reset
+  residual is fixed + gated; live harness shows A==B==reload converged.
+- **Vault Wall (#1 mandate) — RE-VERIFIED CLEAN on current main (live player-channel scan).** `getGameState`,
+  `getVisibleStateFor(player)`, `seasonRecap` scanned live: **0 numeric secret leaks** (no
+  trust/affinity/threat/emotional/volatility/aptitude/privateStrategy number crosses); **every one of the 31
+  player-visible events has the player IN its witness set (0 off-screen NPC-to-NPC leaks); 0 hidden/offScreen-
+  flagged events reach the player.** `npc:N` appears only as bare ids in `witnessSet` (an id-list, FE-resolved
+  to names) — not prose. **Negative control:** the engine-only `resolveCompetition` is **rejected** on the
+  player channel. The Vault Wall holds after all the main churn (ADR 0009, 0066, A1 modal, etc.).
+- **F-S4-C (502 rendered as a GM bubble) — repro CONFOUNDED, deferred with a note.** The chat.js error path
+  (`:1118` `typewriterInto(holder…)` where `holder` is `msg msg-ai`) still types a stream error into the GM
+  bubble *by code*, but a clean live repro is blocked by game state: the audit-admin game is parked at a
+  pending comp-round decision card, which gates the free-text send, so the stubbed 502 never surfaced as a
+  visible message (the game-build agent loop / decision gating may also intercept it). **Recommendation:**
+  re-test on a game NOT at a pending decision (a normal conversational turn); if it reproduces, render the
+  error as `msg-system` (the quiet left-border notice already exists) not the GM bubble. Not chased now
+  (polish; the game-state confound makes it non-trivial). F-S4-D (silent truncation) likewise deferred.
+
 ## 3. Close-out verdict
 
 **All states swept** (S1 instantiation · S2 onboarding · S3 core-loop + concurrency · S3b seeded parity ·
