@@ -138,3 +138,22 @@ body[data-game-build] div:has(> button[data-wipe-kind="gallery"]),
 body[data-game-build] div:has(> button[data-wipe-kind="calendar"]) {
   display: none !important;
 }
+
+/* J1-07 (UX audit): the Appearance > visibility toggles are inherited-WORKSPACE controls a Big
+   Brother player doesn't need — the game's own chrome is already curated by this trim, several
+   surface OUT-OF-CHARACTER concepts (Models / "Model name & export"), and a couple are footguns in
+   a game (hiding the Settings cog, search, new-chat over a single-session game). Hide the workspace
+   rows + the whole Chat-Bar card (More Tools / Agent-Chat / Attach Files — all workspace). KEEP the
+   toggles that change the in-fiction chat: Theme, Welcome Message, Text-only Emojis, Thinking
+   Process, Sensitive Blur. Same :has() pattern as above; the full workspace keeps every toggle. */
+body[data-game-build] .vis-row:has(input[data-ui-key="sidebar-brand"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="sidebar-search"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="sidebar-new-chat"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="sessions-section"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="models-section"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="user-bar"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="sidebar-settings-btn"]),
+body[data-game-build] .vis-row:has(input[data-ui-key="chat-meta"]),
+body[data-game-build] [data-vis-card="chat-bar"] {
+  display: none !important;
+}
