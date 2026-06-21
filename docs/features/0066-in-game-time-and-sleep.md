@@ -30,14 +30,17 @@ bedtime** (never auto-slept). A simple time-of-day graphic surfaces in the HUD.
 
 **In:**
 - The five-phase `TimeOfDay` model + character-driven bedtimes + the awake-set predicate (pure).
+- **The awake set wired into the LIVING house** — the off-screen society pairs only houseguests still
+  up (the night owls scheme on; an early-to-bed houseguest, or a turned-in player, misses it), and the
+  player's `whereabouts` + approaches thin as the house empties. Calibration-safe by the flag gate (off
+  ⇒ identity awake set ⇒ byte-identical), and no new shared-stream rng (bedtimes are deterministic off
+  static stats), so the juryReach golden spine is unmoved.
 - A hidden, bounded sleep→competition penalty (symmetric; never protective).
 - The player's bedtime lever (`turnIn`) and their own qualitative rest cue.
 - Vault-free `timeOfDay` + player `restStatus` projections; the HUD clock + rest cue.
 - **Opt-in** via `ORWELL_TIME_OF_DAY` (default off) so the seeded calibration spine is byte-identical.
 
 **Out (clean follow-ups):**
-- Wiring the time-driven **awake set into the off-screen society pairing** (calibration-sensitive —
-  must isolate its own RNG stream like L21/L24; deferred to protect the juryReach golden spine).
 - NPC fatigue bleeding into **next-day social volatility**; a compounding fatigue meter (ADR 0006
   Phase-2 extensions).
 - Per-social-turn clock advance (today the clock moves on each `advanceGame`).
@@ -79,6 +82,10 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 - `tests/unit/timeOfDaySession.test.ts` — end-to-end through the adapter (flag on): the clock surfaces
   and advances; `restStatus` appears; the bedtime lever rolls to morning; **NPC sleep never leaks**;
   and the whole feature is **dormant when off**.
+- `tests/unit/timeOfDaySociety.test.ts` — the awake set wired into the living house: the house thins
+  monotonically at night (whereabouts + approaches + the society occupancy show only the awake), the
+  off-screen society pairs only houseguests still up, and it is **byte-identical when off** (the identity
+  awake set). The juryReach golden gate + `movementStreamIsolation` stay green.
 - The full fast suite stays green (the dependency-cruiser Vault-Wall + vault-sentinel + replayability
   + persistence all unchanged): the opt-in guarantees the juryReach/UAT calibration spine is unmoved.
 
@@ -95,7 +102,10 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 - Engine: `src/engine/liveSeason.ts` (state + `advanceClock`/`playerTurnIn`/`restOf`),
   `src/domain/competitionOutcome.ts` + `src/domain/temperatureConstants.ts` (the sleep term).
 - Adapter: `src/adapters/engine/GameSessionAdapter.ts` (the opt-in clock advance, `restOf`, `turnIn`,
-  the `timeOfDay`/`restStatus` projections).
+  the `timeOfDay`/`restStatus` projections, and the social economy — `awakeNow`/`awakeAmong` filtering
+  `societyOccupancy`/`whereabouts`/`socialInitiatives`).
+- Engine: `src/composition/orchestrator.ts` — the off-screen tick routes the living NPCs through
+  `awakeAmong`, so the night's society pairs only houseguests still up.
 - Port + seam: `src/ports/GameSession.ts`, `src/surfaces/tools/registry.ts`, `src/adapters/mcp/McpServer.ts`.
 - FE: `frontend/static/js/orwellStatusPanel.js` (the clock chip + the player's rest cue).
 - **Deploy:** set `ORWELL_TIME_OF_DAY=1` on the engine service to turn the feature on.

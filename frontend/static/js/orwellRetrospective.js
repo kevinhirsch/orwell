@@ -119,8 +119,15 @@
         vaultWrap.appendChild(t);
       }
       const story = el("ul", "margin:6px 0;padding-left:18px;opacity:0.8;font-size:12.5px");
+      // S6-3 (audit): hiddenStory[].type can be a raw internal pathway id (e.g.
+      // "overheard:offscreen:strategy:…"); never surface it verbatim — show its leading channel
+      // segment in prose. Clean enum values ("confessional", "overheard") pass through unchanged.
+      const humanizeStoryType = (t) => {
+        const head = String(t || "").split(/[:|/]/)[0].replace(/[_-]+/g, " ").trim().toLowerCase();
+        return head || "note";
+      };
       for (const h of (unsealed.hiddenStory || []).slice(-40)) {
-        story.appendChild(el("li", "", "[" + h.type + "] " + h.content));
+        story.appendChild(el("li", "", "[" + humanizeStoryType(h.type) + "] " + h.content));
       }
       vaultWrap.appendChild(story);
       // E12: eviction ballots were anonymous all season ("a vote to evict …"); the retrospective is
@@ -142,7 +149,7 @@
     } else {
       const open = el("button", [
         "margin-top:4px", "padding:6px 10px", "border-radius:8px", "cursor:pointer",
-        "background:var(--accent, #6d4aff)", "color:#fff", "border:none", "font-size:12.5px",
+        "background:var(--accent, #6d4aff)", "color:var(--on-accent, #fff)", "border:none", "font-size:12.5px",
       ].join(";"), "🔐 Open the Producer's Vault");
       open.addEventListener("click", async () => {
         try {

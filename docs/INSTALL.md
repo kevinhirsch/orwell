@@ -56,6 +56,12 @@ Fine-grained PATs cap at one year: rotate with `bash /opt/orwell/deploy/orwell-u
 
 After editing: `systemctl restart orwell-engine orwell-frontend`.
 
+> **Changing the UI port?** Use `orwell change-port <port>` (below) rather than hand-editing
+> `ORWELL_PORT`. Moving to a privileged port (**<1024, e.g. 80**) needs a systemd
+> `CAP_NET_BIND_SERVICE` drop-in — the hardened front-end runs unprivileged and can't otherwise
+> bind below 1024 — and moving back above 1024 removes it. The script handles that hinge (and the
+> restart + verify) for you; a hand-edit to `80` alone would leave the front-end unable to bind.
+
 ---
 
 ## Control panel — the `orwell` command
@@ -64,7 +70,7 @@ Inside the container, **`orwell`** opens a whiptail menu over every maintenance 
 remember script paths or flags:
 
 ```bash
-orwell            # menu: update · doctor · backup · restore · reset (game/oobe/factory) · readiness
+orwell            # menu: update · doctor · backup · restore · change-port · reset (game/oobe/factory) · readiness
 ```
 
 It dispatches to the scripts below, collecting input through dialogs (a deploy-token password box,
@@ -75,6 +81,7 @@ the menu — handy over SSH or in scripts:
 orwell update             # = orwell-update.sh        orwell doctor --status
 orwell update-reset --yes # update, THEN OOBE reset — KEEP the API-key / LLM config (fail-closed)
 orwell backup             # orwell restore [FILE]     orwell ready
+orwell change-port 80     # change the UI port — handles to/from :80 (the CAP_NET_BIND_SERVICE drop-in) + restart
 orwell reset-game --yes   # destructive: --yes required off the menu
 orwell reset-oobe --yes   # back to OOBE, KEEP the API-key / LLM config
 orwell reset-factory --yes

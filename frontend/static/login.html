@@ -182,6 +182,11 @@
   .toggle a:hover { text-decoration: underline; }
   .pw-wrapper { position: relative; margin-bottom: 1rem; }
   .pw-wrapper input:not(.remember-check) { padding-right: 2.5rem; margin-bottom: 0; }
+  /* S1-4 (audit): hide the browser-native password reveal/clear glyphs (Edge ::-ms-reveal /
+     ::-ms-clear). The custom .pw-toggle is the single reveal affordance — the native control
+     was a confusing duplicate (and rendered an ambiguous clear glyph on the empty field). */
+  .pw-wrapper input::-ms-reveal,
+  .pw-wrapper input::-ms-clear { display: none; }
   .pw-toggle {
     position: absolute; right: 8px; top: 50%;
     /* +1px on the centering offset nudges the eye icon down 1px so it

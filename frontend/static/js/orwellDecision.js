@@ -65,7 +65,7 @@
         border: 1px solid var(--border, #355a66); background: rgba(255,255,255,.05); color: inherit;
         font: inherit;
       }
-      #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: #fff; }
+      #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
       #${CARD_ID} textarea {
         width: 100%; min-height: 72px; box-sizing: border-box; margin-top: .2rem;
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
@@ -74,7 +74,7 @@
       #${CARD_ID} .odec-row { display: flex; align-items: center; gap: .6rem; margin-top: .65rem; }
       #${CARD_ID} .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
-        background: var(--accent, #e06c75); color: #fff; font: inherit;
+        background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
       #${CARD_ID} .odec-note { opacity: .65; font-size: .78em; flex: 1; }
@@ -164,7 +164,7 @@
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
     x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", () => { _userDismissed = true; removeCard(); });
+    x.addEventListener("click", () => { _userDismissed = true; _dismissedSig = _sig(pending); removeCard(); });
     head.appendChild(x);
     card.appendChild(head);
     // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
@@ -176,6 +176,7 @@
       e.preventDefault();
       e.stopPropagation();
       _userDismissed = true;
+      _dismissedSig = _sig(pending);
       removeCard();
     });
 
@@ -323,6 +324,7 @@
       cancel.textContent = "Cancel — stay in the house";
       cancel.addEventListener("click", async () => {
         _userDismissed = true;
+        _dismissedSig = _sig(pending);
         try {
           await fetch("/api/orwell/self-eviction/cancel", { method: "POST", credentials: "same-origin" });
         } catch (_) { if (window.OrwellReport) window.OrwellReport.fail("self-evict", "cancel-post", _); }
@@ -347,6 +349,7 @@
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
         _userDismissed = true;   // this pending is handled — stop any boot re-assert loop
+        _dismissedSig = _sig(pending);
         // G15: a bound decision mutates the game — nudge every panel through the
         // shared debounced dispatcher NOW, not at the next 20–30s poll.
         if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind);
@@ -385,6 +388,13 @@
   // route's cached `pending` — the engine's own legal-options view. Without this,
   // refreshing mid-decision left the player with no card and no signal.
   let _userDismissed = false;   // set when the player explicitly dismisses (×/Escape)
+  // F2 (audit): the signature of the pending the player dismissed, so a later `gamechanged`
+  // (or the status re-poll) re-arms a genuinely NEW decision but NEVER re-shoves the SAME card
+  // the player just waved away to decide in conversation.
+  let _dismissedSig = null;
+  const _sig = (p) => (p && p.kind)
+    ? p.kind + "|" + ((p.options || []).map((o) => o && o.id).join(",")) + "|" + (p.prompt || "")
+    : "";
   async function rearmFromStatus() {
     try {
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -392,7 +402,10 @@
       const st = await r.json();
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
       if (!pending) return;
-      _userDismissed = false;   // a fresh pending arrived — honor it again
+      // F2: don't re-nag the EXACT card the player dismissed — a `gamechanged` / re-poll of the
+      // SAME pending must stay dismissed; only a genuinely DIFFERENT pending re-arms.
+      if (_userDismissed && _sig(pending) === _dismissedSig) return;
+      _userDismissed = false;   // a fresh (different) pending arrived — honor it again
       // The game build mounts #chat-history ASYNCHRONOUSLY and then renders the session's
       // history INTO it after DOMContentLoaded — a boot rearm that fired early either had
       // no host or got wiped when the history re-rendered, so a refresh mid-decision left
@@ -402,6 +415,12 @@
       let stable = 0;
       for (let i = 0; i < 25 && !_userDismissed; i++) {
         const host = document.getElementById("chat-history");
+        // A lingering "✓ Locked in" (.odec-done) card from the PRIOR decision must not block a NEW
+        // pending from arming (audit 2026-06-20): the next round's card could otherwise be suppressed
+        // by the done-card still holding CARD_ID during its 4s fade. Treat it as absent so the fresh
+        // decision card replaces it; a LIVE (not-done) card is left alone (stable branch below).
+        const _doneCard = document.getElementById(CARD_ID);
+        if (_doneCard && _doneCard.classList.contains("odec-done")) _doneCard.remove();
         if (host && !document.getElementById(CARD_ID)) {
           window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
           stable = 0;
@@ -416,6 +435,28 @@
     document.addEventListener("DOMContentLoaded", rearmFromStatus, { once: true });
   } else { rearmFromStatus(); }
   window.addEventListener("orwell:gamechanged", rearmFromStatus);
+  // S4-1 (E2E audit) — the structural escape hatch: a pending player decision must be reachable
+  // WITHOUT the chat agent ever dispatching it. `orwell:gamechanged` fires only on a LOCAL
+  // game-mutating tool, so a pending that surfaces with no such event in this tab (the model
+  // narrated past it without calling submitDecision, another device advanced, a missed tool call)
+  // would otherwise sit unreachable until a reload. Poll the engine's own `pending` on a slow
+  // cadence as a backstop. This deliberately does NOT call rearmFromStatus (which clears
+  // _userDismissed) — it surfaces a pending ONLY when the player hasn't dismissed it and no card
+  // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
+  setInterval(async () => {
+    try {
+      if (_userDismissed) return;                      // respect an explicit dismissal
+      if (document.getElementById(CARD_ID)) return;    // a card is already showing
+      if (!document.getElementById("chat-history")) return;
+      const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const st = await r.json();
+      const pending = st && st.pending && st.pending.kind ? st.pending : null;
+      if (pending && !document.getElementById(CARD_ID)) {
+        window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
+      }
+    } catch (_) { /* fail open — the conversation path always remains */ }
+  }, 15000);
 
   window.addEventListener("orwell:pending", (e) => {
     try {
