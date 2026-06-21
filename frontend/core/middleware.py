@@ -158,3 +158,66 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none'"
             )
         return response
+
+
+# ========= PUBLIC-DEPLOYMENT PERIMETER (feature 0067 / ADR 0007) =========
+# Self-contained config helpers (no app/db imports) so they unit-test in isolation —
+# matching `is_cors_preflight` above, which is "pure so it can be unit-tested without
+# standing up the app."
+
+def _env_truthy(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def allowed_hosts_from_env(env=None) -> list:
+    """The Host-header allow-list for Starlette's TrustedHostMiddleware.
+
+    Reads ALLOWED_HOSTS (comma-separated). Defaults to ["*"] (accept any Host) so
+    dev / trusted-LAN deployments are byte-identical to before. A public deployment
+    MUST set ALLOWED_HOSTS to its domain(s) — e.g. "hiorwell.com,www.hiorwell.com" —
+    so Host-header attacks are rejected (feature 0067 / ADR 0007).
+    """
+    env = os.environ if env is None else env
+    raw = (env.get("ALLOWED_HOSTS") or "").strip()
+    if not raw:
+        return ["*"]
+    hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    return hosts or ["*"]
+
+
+def assert_public_profile_safe(env=None) -> None:
+    """Fail closed for an internet-facing deployment (feature 0067 / ADR 0007).
+
+    When the public profile is selected (ORWELL_PUBLIC truthy) this raises
+    RuntimeError — NAMING every offending setting — rather than letting the app
+    boot and silently serve the game in the clear or with authentication off. It is
+    a no-op when ORWELL_PUBLIC is unset, so the default / single-tenant start path
+    is unchanged. app.py calls it at module load, so an unsafe public posture means
+    the process exits non-zero instead of starting.
+
+    Unsafe ⇔ any of:
+      - AUTH_ENABLED=false        authentication disabled (require_admin short-circuits)
+      - LOCALHOST_BYPASS=true     loopback auth bypass enabled
+      - SECURE_COOKIES != true    session cookies would not be marked Secure over HTTPS
+      - ALLOWED_HOSTS unset/"*"   the Host header is not pinned to your domain
+    """
+    env = os.environ if env is None else env
+    if not _env_truthy(env.get("ORWELL_PUBLIC")):
+        return
+    problems = []
+    if (env.get("AUTH_ENABLED", "true") or "").strip().lower() == "false":
+        problems.append("AUTH_ENABLED=false (authentication disabled)")
+    if _env_truthy(env.get("LOCALHOST_BYPASS")):
+        problems.append("LOCALHOST_BYPASS=true (loopback auth bypass enabled)")
+    if (env.get("SECURE_COOKIES", "false") or "").strip().lower() != "true":
+        problems.append("SECURE_COOKIES is not 'true' (session cookies would not be marked Secure)")
+    if allowed_hosts_from_env(env) == ["*"]:
+        problems.append("ALLOWED_HOSTS is unset (the Host header is not pinned to your domain)")
+    if problems:
+        raise RuntimeError(
+            "Refusing to start an ORWELL_PUBLIC (internet-facing) deployment with an unsafe "
+            "security posture:\n  - " + "\n  - ".join(problems) + "\n"
+            "Fix these in data/.env (AUTH_ENABLED=true, LOCALHOST_BYPASS=false, SECURE_COOKIES=true, "
+            "ALLOWED_HOSTS=<your-domain>) — or unset ORWELL_PUBLIC for a trusted-LAN deployment. "
+            "See docs/INSTALL.md -> Public deployment (hiorwell.com)."
+        )
