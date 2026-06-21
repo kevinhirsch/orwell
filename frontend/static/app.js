@@ -2248,9 +2248,13 @@ function initializeEventListeners() {
       const w = inputTop.clientWidth;
       // Hide model picker
       pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
-      // Hide placeholder text
+      // Hide placeholder text. Restore to the build-correct default the server
+      // rendered (data-default-placeholder — "Message Orwell…" in the full
+      // workspace, "Say or do something…" in the game build), never a hardcoded
+      // string, so the responsive collapse can't reintroduce the app-name copy.
       if (textarea) {
-        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : 'Message Orwell...');
+        const _restore = textarea.dataset.defaultPlaceholder || 'Message Orwell...';
+        textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : _restore);
       }
       // Hide entire bottom toolbar (tools, mode toggle) — only send button remains
       if (inputBottom) {

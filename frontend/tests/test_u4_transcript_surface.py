@@ -142,6 +142,36 @@ def test_d6_game_build_serves_no_jsdelivr():
         assert "cdn.jsdelivr.net" not in r.text, "the game build must not reference a CDN (D6/W8)"
 
 
+def test_j1_02_game_build_composer_placeholder_is_in_voice():
+    """UX audit J1-02: the composer placeholder named the APP ("Message Orwell…"),
+    out-of-voice for an immersive house — the player speaks to the houseguests /
+    Big Brother, not "Orwell". The game-build serve swaps it to an in-voice prompt;
+    the full inherited workspace keeps the app copy."""
+    # Source pins (auth-independent): the swap, the build-default restore target, and
+    # the responsive handler restoring from it rather than a hardcoded string.
+    app_py = (FE / "app.py").read_text(encoding="utf-8")
+    assert 'html.replace("Message Orwell...", "Say or do something…")' in app_py
+    html = (FE / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'data-default-placeholder="Message Orwell..."' in html, (
+        "the textarea needs a build-default restore target the server can swap."
+    )
+    app_js = (FE / "static" / "app.js").read_text(encoding="utf-8")
+    assert "dataset.defaultPlaceholder" in app_js, (
+        "the responsive placeholder-hide must restore from the build default, not a "
+        "hardcoded 'Message Orwell...' that would reintroduce the app-name copy."
+    )
+    # Served-HTML check when the index serves (game build is on by default).
+    import importlib
+    from fastapi.testclient import TestClient
+    client = TestClient(importlib.import_module("app").app)
+    r = client.get("/", headers={"host": "127.0.0.1"})
+    if r.status_code == 200 and 'id="message"' in r.text:
+        from src.settings import game_build_enabled
+        if game_build_enabled():
+            assert "Say or do something…" in r.text
+            assert 'placeholder="Message Orwell..."' not in r.text
+
+
 # ── E94 (FE half): first-class attach + attachments ride game turns ──────────
 
 def test_e94_composer_paperclip_is_first_class_under_game_build():
