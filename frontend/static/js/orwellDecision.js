@@ -164,7 +164,7 @@
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
     x.setAttribute("aria-label", "Dismiss");
-    x.addEventListener("click", () => { _userDismissed = true; removeCard(); });
+    x.addEventListener("click", () => { _userDismissed = true; _dismissedSig = _sig(pending); removeCard(); });
     head.appendChild(x);
     card.appendChild(head);
     // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
@@ -176,6 +176,7 @@
       e.preventDefault();
       e.stopPropagation();
       _userDismissed = true;
+      _dismissedSig = _sig(pending);
       removeCard();
     });
 
@@ -323,6 +324,7 @@
       cancel.textContent = "Cancel — stay in the house";
       cancel.addEventListener("click", async () => {
         _userDismissed = true;
+        _dismissedSig = _sig(pending);
         try {
           await fetch("/api/orwell/self-eviction/cancel", { method: "POST", credentials: "same-origin" });
         } catch (_) { if (window.OrwellReport) window.OrwellReport.fail("self-evict", "cancel-post", _); }
@@ -347,6 +349,7 @@
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
         _userDismissed = true;   // this pending is handled — stop any boot re-assert loop
+        _dismissedSig = _sig(pending);
         // G15: a bound decision mutates the game — nudge every panel through the
         // shared debounced dispatcher NOW, not at the next 20–30s poll.
         if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind);
@@ -385,6 +388,13 @@
   // route's cached `pending` — the engine's own legal-options view. Without this,
   // refreshing mid-decision left the player with no card and no signal.
   let _userDismissed = false;   // set when the player explicitly dismisses (×/Escape)
+  // F2 (audit): the signature of the pending the player dismissed, so a later `gamechanged`
+  // (or the status re-poll) re-arms a genuinely NEW decision but NEVER re-shoves the SAME card
+  // the player just waved away to decide in conversation.
+  let _dismissedSig = null;
+  const _sig = (p) => (p && p.kind)
+    ? p.kind + "|" + ((p.options || []).map((o) => o && o.id).join(",")) + "|" + (p.prompt || "")
+    : "";
   async function rearmFromStatus() {
     try {
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
@@ -392,7 +402,10 @@
       const st = await r.json();
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
       if (!pending) return;
-      _userDismissed = false;   // a fresh pending arrived — honor it again
+      // F2: don't re-nag the EXACT card the player dismissed — a `gamechanged` / re-poll of the
+      // SAME pending must stay dismissed; only a genuinely DIFFERENT pending re-arms.
+      if (_userDismissed && _sig(pending) === _dismissedSig) return;
+      _userDismissed = false;   // a fresh (different) pending arrived — honor it again
       // The game build mounts #chat-history ASYNCHRONOUSLY and then renders the session's
       // history INTO it after DOMContentLoaded — a boot rearm that fired early either had
       // no host or got wiped when the history re-rendered, so a refresh mid-decision left

@@ -1144,6 +1144,38 @@ def setup_orwell_routes() -> APIRouter:
             logger.warning(f"[orwell] next-season failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
+    @router.post("/conclude-season")
+    async def orwell_conclude_season(request: Request):
+        """LW10 (audit 2026-06-21): when the PLAYER has been evicted PRE-JURY — their game is over but
+        the house plays on — fast-forward the deterministic season to its crowned winner so the player
+        lands on the (working) post-season retrospective (0048) + 'new season' hand-off, rather than
+        nudging the house forward one week at a time with no terminal signal (0046's 'terminal recap').
+        Player-reachable for the caller's OWN out-game only: gated on player.status == 'evicted' (a juror
+        keeps their finale vote, so they are NOT swept here). Idempotent once the season is over."""
+        user = _current_user(request)
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+            if not isinstance(state, dict) or not state.get("started"):
+                return JSONResponse(status_code=409, content={"started": False, "error": "no season to conclude"})
+            if state.get("finished") or state.get("moment") == "post-season":
+                return {"finished": True, "alreadyOver": True}  # idempotent — the retrospective already gates
+            player = state.get("player") or {}
+            if player.get("status") != "evicted":
+                return JSONResponse(status_code=409, content={
+                    "error": "the season can only be concluded early once the player has been evicted pre-jury"})
+            # The player is OUT (no player decision pends), so drive the deterministic loop to the crown
+            # in ONE engine call — auto-resolving each remaining NPC ceremony with legal defaults.
+            res = await orwell_engine.advance_to_finale(user=user)
+            # Restart-door hygiene: refresh the FE-cached pending so no stale card rides into the recap.
+            try:
+                orwell_engine.remember_pending(await orwell_engine.game_status(user=user), user=user)
+            except Exception:
+                pass
+            return {"finished": True, "result": res}
+        except Exception as e:
+            logger.warning(f"[orwell] conclude-season failed: {e}")
+            return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
+
     @router.post("/reset-progress")
     async def orwell_reset_progress(body: ResetProgressRequest, request: Request):
         """Feature 0057: the settings 'red zone' — wipe progress toward the CURRENT season and start

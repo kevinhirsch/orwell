@@ -54,6 +54,7 @@ Non-interactive subcommands:
   orwell backup                  snapshot engine + front-end data to <app>/backups
   orwell restore [FILE]          restore a backup (newest if FILE is omitted)
   orwell ready                   readiness check (engine + front-end + an LLM)
+  orwell change-port <port>      change the UI port (handles to/from :80 — the cap drop-in)
   orwell update-reset --yes      update (pull + rebuild) THEN OOBE reset, KEEP the API-key/LLM config
   orwell reset-game --yes        new season — clears games, keeps accounts + config
   orwell reset-oobe --yes        OOBE reset — back to first-run, KEEP the API-key/LLM config
@@ -158,6 +159,21 @@ do_doctor() {
 do_backup() { run "Backup" bash "${DEPLOY_DIR}/orwell-backup.sh"; }
 do_ready()  { run "Readiness" bash "${DEPLOY_DIR}/orwell-ready.sh"; }
 
+do_change_port() {
+  # Change the front-end UI port (ORWELL_PORT), reconciling the privileged-port (<1024)
+  # CAP_NET_BIND_SERVICE drop-in. Dispatches to orwell-change-port.sh; nothing re-implemented here.
+  if ! tui_active; then
+    [[ -n "${1:-}" ]] || die "change-port needs a port: orwell change-port <port> [--yes|--no-restart|--dry-run]"
+    run "Change UI port → $1" bash "${DEPLOY_DIR}/orwell-change-port.sh" "$@"; return $?
+  fi
+  local cur port
+  cur="$(sed -n 's/^ORWELL_PORT=//p' "${APP_DIR}/data/.env" 2>/dev/null | tail -n1)"; cur="${cur:-8080}"
+  port=""
+  wt_input port "Change the front-end (UI) port.\n\nCurrent: ${cur}\n\nEnter the new port (1–65535; 80 = standard HTTP). Moving to/from a privileged port (<1024) is handled automatically." "$cur" || return 0
+  [[ -n "$port" ]] || { wt_msgbox "No port entered — unchanged."; return 0; }
+  run "Change UI port → ${port}" bash "${DEPLOY_DIR}/orwell-change-port.sh" "$port" --yes
+}
+
 do_restore() {
   local dir="${APP_DIR}/backups" sel f; local -a list args
   if ! tui_active; then
@@ -211,6 +227,7 @@ case "${1:-}" in
   backup)               do_backup;             exit $? ;;
   restore)       shift; do_restore "$@";       exit $? ;;
   ready)                do_ready;              exit $? ;;
+  change-port)   shift; do_change_port "$@";   exit $? ;;
   reset-game)    shift; do_reset_game "$@";    exit $? ;;
   reset-oobe)    shift; do_reset_oobe "$@";    exit $? ;;
   reset-factory) shift; do_reset_factory "$@"; exit $? ;;
@@ -234,6 +251,7 @@ while :; do
     update-reset  "Update + Reset (update, then OOBE; KEEP API keys)" \
     doctor        "Diagnose & repair the services" \
     ready         "Readiness check (engine + FE + LLM)" \
+    change-port   "Change the UI port (to/from :80)" \
     backup        "Back up game + user data" \
     restore       "Restore from a backup" \
     reset-game    "New season (keeps accounts + config)" \
@@ -246,6 +264,7 @@ while :; do
     update-reset)  do_update_reset ;;
     doctor)        do_doctor ;;
     ready)         do_ready ;;
+    change-port)   do_change_port ;;
     backup)        do_backup ;;
     restore)       do_restore ;;
     reset-game)    do_reset_game ;;
