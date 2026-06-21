@@ -492,9 +492,20 @@ def setup_orwell_routes() -> APIRouter:
         """The Vault-free presence read (0049/C28): the player's room, who is in it, and who is in
         each ADJACENT room — the AMBIENT ground for lingering play (ADR 0003 §4/§7: it augments the
         chat; moving/milling/talking stay prose). Fails OPEN: {whereabouts: null} on any error or
-        pre-game, so the page never blocks on it."""
+        pre-game, so the page never blocks on it.
+
+        ADR 0009 (D1) — the per-turn occupancy FREEZE: serve the snapshot THIS turn's prose was grounded
+        in (plus the FE's own narrated moves), so the gadget never rearranges to a newer off-screen
+        reshuffle than the scene the player just read. `freeze_view` falls back to this live read whenever
+        the FE is not fully confident, so it can never show a houseguest in a wrong room."""
         try:
-            return {"whereabouts": await orwell_engine.whereabouts(user=_current_user(request))}
+            _user = _current_user(request)
+            _live = await orwell_engine.whereabouts(user=_user)
+            try:
+                from routes.chat_helpers import freeze_view
+                return {"whereabouts": freeze_view(_user, _live)}
+            except Exception:
+                return {"whereabouts": _live}
         except Exception as e:
             logger.warning(f"[orwell] whereabouts failed: {e}")
             return {"whereabouts": None}
