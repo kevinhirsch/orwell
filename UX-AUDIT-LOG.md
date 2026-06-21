@@ -182,15 +182,19 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | J1-27 | Singleton SR `role=status aria-live=polite` live region for portrait status | `orwellHeadshot.js` |
 | J1-08 | File input → themed `<label>` button + visually-hidden native input (kills "No fil…chosen") | `orwellHeadshot.js` |
 | J1-18 | Settings gear `aria-label="Settings"` | `index.html` |
-| J1-29 | Loader `role=status` + SR text + `prefers-reduced-motion` guard on the wave | `index.html` |
+| J1-29 | Loader `role=status aria-label="Loading the house"` (attribute name, **no injected child node**) + `prefers-reduced-motion` guard on the wave | `index.html` |
 | J1-21 | Composer placeholder contrast 35%→60% alpha (~4.7:1) | `style.css` |
-| J1-28 | `.vis-hint` toggle-desc 30%→62% alpha (~5:1) + `10px`→`--fs-2xs` (clears the type floor) | `style.css` |
+| J1-28 | `.vis-hint` toggle-desc 30%→62% alpha (~5:1). **Contrast-only** — the `10px`→`--fs-2xs` floor bump reflowed the panel; deferred (sub-floor ships on `main` too). | `style.css` |
+| **J1-35** | **NEW** (found during validation): danger-zone "Reset" button nowrap-overflows at 390px (`space-between` flex row, default `flex-shrink:1` squeezed it below its content) → `flex-shrink:0`. Borderline on `main`; any index.html perturbation tipped it. | `index.html` |
 
 **Deferred — needs scoped work (NOT in this set):**
 - **J1-25** (cast-photo dialog focus-trap/`aria-modal`/inert) — LAUNCH-BLOCKING a11y, but forcing the whole `.ow-*` window kit modal would break the floating-window/lingering model; needs a per-window `modal` option. → next gated set.
 - **J1-22** (hide tok/s meta strip in game build), **J1-01/J1-02** (model slug + composer voice), **J1-04/J1-23** (cast-photo scrim), **J1-06** (theme scoping), **J1-14** (settings default tab), **J1-05/J1-09/J1-10/J1-12/J1-17/J1-20/J1-24/J1-30/J1-31/J1-32/J1-33/J1-34** → Phase-4 backlog / later gated sets.
 
-**Validation (this set):** FE suite vs my changes — **1663 passed, 2 failed (pytest)**; **browser-smoke 8 failed** BUT clean signals hold (no broken JS, no uncaught page errors, send-path clean). **Attribution: the same 2 pytest + the browser failures reproduce on the PRE-CHANGE baseline** (stash-compare) — artifacts of the shared dev `frontend/data/` (a casting game in progress + the OpenRouter endpoint) which the engine-down/zero-data smoke assumes absent. **Not regressions.** CI's `frontend` job runs the gate on a clean checkout = the authoritative green check. Visual re-capture of the fixed surfaces is the post-merge validation step.
+**Validation (this set):**
+- Local pytest **1663 passed**; the 2 pytest + the browser-smoke failures **reproduce on the pre-change baseline** (stash-compare) — artifacts of the shared dev `frontend/data/` (a casting game in progress + the OpenRouter endpoint) the engine-down/zero-data smoke assumes absent. **Not regressions** (confirmed clean on CI's clean checkout).
+- **CI clean checkout caught a real regression**: `responsive_matrix` `phone-390+settings nowrap-overflow: Reset`. Binary-searched it to index.html (pure `main` passes 3/3; my other files innocent — matrix passes with them). Root cause = J1-35 (borderline `flex-shrink` squeeze), not the a11y attrs. **Fixed** with `flex-shrink:0`; matrix now **43 pass · 0 FAIL** locally (2 runs). J1-29 reworked to an attribute-only `aria-label` (no child node) as defense-in-depth.
+- Post-merge: visual re-capture of the fixed surfaces is the remaining validation step.
 
 ## Journey progress
 
