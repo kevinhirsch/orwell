@@ -641,6 +641,15 @@ async def move_to(room: str, expected_beat_seq: int | None = None, user: str | N
     return await _call("moveTo", args, user=user)
 
 
+async def move_houseguest(houseguest_id: str, room: str, user: str | None = None):
+    """ADR 0009 — RECORD a NARRATED NPC relocation: the engine moves houseguest ``houseguest_id`` into
+    ``room`` in the OPEN occupancy (so the board agrees with the prose — no visible historic conflict),
+    never the calibration-neutral baseline, and only for a LEGAL move. Returns the HouseguestMoveResult
+    ``{status: moved|noop|illegal, whereabouts}``. The FE records this from the narration (the
+    ``_auto_move_npc`` belt); the player's own movement stays ``move_to``. Vault-free."""
+    return await _call("moveHouseguest", {"id": houseguest_id, "room": room}, user=user)
+
+
 async def premiere_intros(user: str | None = None):
     """PREMIERE ONLY (#380): the meet-everyone progress — who's met + who's STILL to introduce before
     the first HOH, each with their OBSERVABLE public persona (Vault-free; no soul/number). ``None``
