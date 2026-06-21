@@ -359,6 +359,12 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
   flagged events reach the player.** `npc:N` appears only as bare ids in `witnessSet` (an id-list, FE-resolved
   to names) — not prose. **Negative control:** the engine-only `resolveCompetition` is **rejected** on the
   player channel. The Vault Wall holds after all the main churn (ADR 0009, 0066, A1 modal, etc.).
+- **Cross-user isolation (#1-mandate first-class guarantee) — RE-VERIFIED CLEAN on current main (live, two
+  users).** Two engine sandboxes (`audit-admin` with a started game + a fresh `audit-user-iso-b`) are fully
+  isolated: B's `preSeedCast` (seed 99887766) warmed a DISTINCT 15-NPC cast sharing **0 names** with A's
+  roster; B's preSeed left A's roster **byte-unchanged**; **B's header never returns A's game**; the no-header
+  "default" routes to its OWN separate sandbox (not A's). No call for one user returns another user's game —
+  secret or not. Holds after the main churn.
 - **F-S4-C (502 rendered as a GM bubble) — repro CONFOUNDED, deferred with a note.** The chat.js error path
   (`:1118` `typewriterInto(holder…)` where `holder` is `msg msg-ai`) still types a stream error into the GM
   bubble *by code*, but a clean live repro is blocked by game state: the audit-admin game is parked at a
