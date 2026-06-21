@@ -330,11 +330,24 @@ Scope authorized by the owner ("include the finalize fix in this set"). Six conf
 - **J2-17** (themed-accent CTA contrast 3.29:1), **J2-18** (mobile FAB overlaps tutorial) — per-theme / responsive-fiddly; need a token-level on-color solution + responsive testing.
 - **Design-level:** J2-05/09 cast IA, J2-10 premiere staging, J2-13 tutorial affordance, J2-15 avatar identity → Phase-4 backlog.
 
+## Journey 3 — capture-phase findings (lead, live-LLM walkthrough, IN PROGRESS)
+
+**Status: CAPTURING** (run `b7tiic1vg`, desktop/normal, deepseek-v4-pro). Game live at week 1 / premiere.
+
+| ID | Sev | Status | Finding |
+|---|---|---|---|
+| J3-01 | MED (corroboration) | VIEWED | **`tok/s` telemetry strip visible in every AI bubble in-game.** `26.9 tok/s \| icons \| 17%` confirmed in J3 transcript shot `17-06-meet-hg1.chat.png`. Corroborates J2-14 (J2 was element-screenshot only; J3 reproduces live on desktop/normal). |
+| J3-02 | — (negative) | VERIFIED CLEAR | **J2-07 (production cue as "You" bubble) does NOT reproduce on a clean session.** Full clean-slate walk: no `(Production cue…)` messages appear in `#chat-history`. Both guarded paths (`_hideUserBubble`, history-render skip) are working. J2-07 likely requires a pre-existing session with a cue already in history; clean-session path clear. |
+| J3-03 | — (positive) | VERIFIED | **Narration quality excellent: rich, immersive, no leaks.** Premiere narration (shots 05/06) is vivid and in-character — distinct HG personalities (Tamara: São Paulo stylist, theatrical energy; 6 HGs named with room geography). No model slug, no OOC leaks, no reasoning in reply body. J2-08 fix confirmed: chat title is "Casting interview", not model slug. |
+| J3-04 | — (positive) | VERIFIED | **Premiere tutorial card present and correct.** Rhythm guide visible with "Got it" dismiss, per J2-12 fix. |
+
+*More findings appended as capture progresses through HOH → noms → veto → eviction.*
+
 ## Journey progress
 
-- [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings logged; gated remediation set #1 (9 fixes incl. launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged to main in PR #449** (CI green). Deferred to later sets: J1-25 (cast-photo modal trap), J1-22, and the visual/IA backlog (J1-01/02/04/05/06/09/10/12/14/17/20/23/24/30/31/32/33/34).
-- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — **CAPTURE + FAN-OUT DONE; TRIAGED.** Matrix (4 walks) + 3 spot checks + 5 specialists consolidated. **⚠️ J2-CI: the headline "blank/void game" from 4/5 specialists is a HEADLESS CAPTURE ARTIFACT (the chat renders fine for real users) — CA-06 called it; lead confirmed via element-screenshot + pixel + scroll-into-view proof.** Net valid findings: **J2-01…J2-20** (finalize non-determinism, createCharacter-not-sent, name-ask, cast-surface duplication, mobile roster, production-cue LIVE leak, model-id title leak, premiere hard-cut, holding-card 1.52:1 contrast, SR tutorial, tok/s in-game, etc.). **TODO before remediation:** (1) fix the rig (force `#chat-history` scroll/repaint before each shot) + re-capture transcript-dependent items; (2) two-window parity; (3) re-sync to current main; (4) consolidate → gated remediation set.
-- [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)**
+- [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings; gated remediation set #1 (9 fixes: launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged PR #449** (CI green).
+- [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
+- [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — **CAPTURING** (in progress)
 - [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
