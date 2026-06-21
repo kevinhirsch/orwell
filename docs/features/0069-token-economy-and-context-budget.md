@@ -1,9 +1,11 @@
 # 0069 — Token economy: a metered LLM boundary, a reasoning budget & non-degrading context tiering
 
-**Status:** 📝 Spec only · **gate: FE pytest** (a recorded deviation from the BDD-default, matching
+**Status:** ✅ Built (2026-06-21) · **gate: FE pytest** (a recorded deviation from the BDD-default, matching
 0066/0033/0036/0055 — the `.feature` is the spec of record; the executable gate is the front-end pytest
-suite named under Definition of Done, because the behaviour is entirely FE/adapter and is exercised
-through `llm_core.py` / `agent_loop.py`, not a new Cucumber world).
+suite, because the behaviour is entirely FE/adapter and is exercised through `llm_core.py` / `agent_loop.py`,
+not a new Cucumber world). Shipped all four slices A→D + the admin cost surface; gates live at
+`frontend/tests/test_adr0010_{vault_free_ledger,token_policy,context_tiering,usage_meter,reasoning_budget,routing,tiering_wiring,admin_token_economy}.py`
+with the full FE suite green. Speculative levers (D tiering, the high-token provider-pin) are opt-in/off-by-default.
 **Executable spec:** [`0069-token-economy-and-context-budget.feature`](./0069-token-economy-and-context-budget.feature)
 **Provenance:** ADR [`0010`](../decisions/0010-token-economy-architecture.md) (token economy as
 architecture); the 2026-06-21 cost investigation (DeepSeek V4 Pro via OpenRouter).

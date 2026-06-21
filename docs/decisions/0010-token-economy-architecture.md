@@ -1,8 +1,11 @@
 # 0010 — Token economy as architecture: a metered LLM boundary, a reasoning budget, cache-friendly prompts, and non-degrading context tiering
 
-> **Status:** **Proposed** (2026-06-21; the open questions were **ratified by the owner 2026-06-21** —
-> see *Owner rulings* — and the per-class reasoning budget gained an admin-settings requirement; mechanism
-> to be built BDD/TDD-first as feature 0069).
+> **Status:** **Accepted — BUILT** (2026-06-21, feature 0069). Owner rulings ratified 2026-06-21 (see
+> *Owner rulings*). All four slices shipped FE-only (A meter → B reasoning budget → C cache-friendly
+> routing → D non-degrading tiering) + the admin cost surface; gated by `frontend/tests/test_adr0010_*.py`
+> with the full FE suite green. The speculative levers (D tiering, the high-token provider-pin) ship
+> **opt-in/off-by-default** (byte-identical until enabled); per-session stickiness + the reasoning budget
+> are on for game turns.
 > **Source:** The 2026-06-21 cost investigation against the live game (DeepSeek V4 Pro via OpenRouter):
 > the OpenRouter request logs show a steady stream of small-input / large-output narration calls, and a
 > code trace found the spend is (a) **half-measured** — the usage envelope OpenRouter already returns is
