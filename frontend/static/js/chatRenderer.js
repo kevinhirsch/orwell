@@ -10,7 +10,7 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
-import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS } from './orwellToolBeats.js';
 import { detectOocAside } from './orwellOocAside.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -1996,7 +1996,10 @@ export function addMessage(role, content, modelName, metadata) {
         // must merge/connect as if there were no text bubble (no dangling has-top).
         const _renderedTxt = txt && !_gbSkipIntermediateText;
         const roundTools = toolsByRound[roundNum] || [];
-        if (roundTools.length > 0) {
+        // ADR 0011 — pure context-read beats render no chip in the game build (mirror of the live
+        // path): a re-opened transcript must not re-paint a wall of identical "Production notes" rows.
+        const _visibleTools = isGameBuild() ? roundTools.filter(ev => !orwellBeatIsSilent(ev.tool)) : roundTools;
+        if (_visibleTools.length > 0) {
           // Reuse previous thread if no text separated us (merge consecutive tool rounds)
           let threadWrap = null;
           if (!_renderedTxt && lastWrap && lastWrap.classList.contains('agent-thread')) {
@@ -2009,7 +2012,7 @@ export function addMessage(role, content, modelName, metadata) {
             box.appendChild(threadWrap);
           }
           const _gbBeat = isGameBuild();
-          for (const ev of roundTools) {
+          for (const ev of _visibleTools) {
             const ok = (ev.exit_code === 0 || ev.exit_code == null);
             // C14/C19 immersion: in the game build a recognised engine/agent tool
             // renders as a quiet production beat — label + status only, never its raw
@@ -2069,6 +2072,10 @@ export function addMessage(role, content, modelName, metadata) {
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }
+          // ADR 0011 — cap the reload rail (mirror of the live backstop): keep the most recent
+          // ORWELL_MAX_VISIBLE_BEATS chips, drop older overflow (no live timers on reload nodes).
+          { const _rn = threadWrap.querySelectorAll('.agent-thread-node');
+            for (let _ri = 0; _ri < _rn.length - ORWELL_MAX_VISIBLE_BEATS; _ri++) _rn[_ri].remove(); }
           // Check if next round has text — extend line down to connect. In the
           // game build, an intermediate next-round text bubble is skipped (L6b),
           // so only connect down when that next text bubble will actually render

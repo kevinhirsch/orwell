@@ -70,11 +70,19 @@ class EngineToolError(RuntimeError):
     ``transient`` flags an EMPTY 200 body (no ``result`` and no structured ``error``) — the engine
     answered oddly mid-restart, so the retry loop SHOULD give it another try (Issue 1)."""
 
-    def __init__(self, message: str, status: int | None = None, transient: bool = False):
+    def __init__(self, message: str, status: int | None = None, transient: bool = False,
+                 code: str | None = None, beat_seq: int | None = None, board: dict | None = None):
         super().__init__(message)
         self.status = status
         self.no_game = "no active game" in (message or "").lower()
         self.transient = transient
+        # 0065 Part A / audit A-S5: the engine's STRUCTURED error fields, when present. A 409
+        # `stale-beat` carries `code:"stale-beat"`, the current `beatSeq`, and the Vault-free `board`
+        # (HttpMcpServer.send). Surfacing them lets the stale-beat reconcile key off a stable machine
+        # code + numeric beatSeq instead of parsing the human-readable message (no wording-drift risk).
+        self.code = code
+        self.beat_seq = beat_seq
+        self.board = board
 
 
 # --- last-error tracking: VISIBLE error reporting for "engine up but erroring" -----------------
@@ -178,12 +186,24 @@ async def _post_tool_once(path: str, name: str, args: dict | None, user: str | N
                           timeout=timeout if timeout is not None else _TIMEOUT)
     if r.status_code >= 400:
         err = None
+        body = None
         try:
-            err = r.json().get("error")
+            body = r.json()
+            err = body.get("error")
         except Exception:
-            err = None
+            err, body = None, None
         if err is not None:
-            exc = EngineToolError(err, status=r.status_code)  # engine answered with a reason
+            # audit A-S5: carry the engine's STRUCTURED fields (`code`/`beatSeq`/`board`) through so
+            # the stale-beat reconcile keys off a stable machine code, not the message prose. Absent
+            # fields ⇒ None ⇒ the existing message-marker fallback still applies (byte-identical).
+            body = body if isinstance(body, dict) else {}
+            _bseq = body.get("beatSeq")
+            exc = EngineToolError(
+                err, status=r.status_code,
+                code=body.get("code"),
+                beat_seq=_bseq if (isinstance(_bseq, int) and not isinstance(_bseq, bool)) else None,
+                board=body.get("board") if isinstance(body.get("board"), dict) else None,
+            )  # engine answered with a reason
             raise exc
         r.raise_for_status()  # no structured body → a transport/proxy failure (engine down)
     data = r.json()

@@ -1541,6 +1541,28 @@ def _player_turn_is_lull(messages) -> bool:
     return len(s) <= _LULL_SHORT_CHARS
 
 
+def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat_key) -> bool:
+    """ADR 0011 — did a concurrent PEER advance the beat during this turn?
+
+    True iff the engine's CURRENT beat key `(week, phase, moment)` differs from the one the model was
+    FRAMED on this turn AND this turn fired no progression tool itself — i.e. SOMEONE moved the beat,
+    but not the model, so a serialized peer (another device's turn, or its decision-card submit) did.
+
+    This is the signal the beat-BLIND staleness clock lacks: it lets the loop tell "I (the model)
+    failed to advance" from "a peer advanced," so a lull turn does not re-fire the advance / forced-
+    advance nudge against a beat that already moved (the two-tab "20-step loop").
+
+    Pure + total. Unknown keys (None) ⇒ False — fail toward NOT suppressing (a missed suppression is
+    recoverable next turn; a wrong suppression could freeze a genuine single-tab stall). In single-tab
+    play the beat key changes ONLY when this turn progresses, so this is always False and the stall-
+    nudge behaves byte-identically (the seeded UAT / calibration gates are single-tab)."""
+    if progressed:
+        return False
+    if framed_beat_key is None or current_beat_key is None:
+        return False
+    return current_beat_key != framed_beat_key
+
+
 # ── Consequence-loop error-correction (record social play → move the weights) ─────────
 # Owner ruling (feature 0055): the politicking IS the game — substantive social play MUST fold
 # into the hidden relationship/perception weights. In live play the GM reliably UNDER-calls the
@@ -3622,6 +3644,35 @@ async def stream_agent_loop(
                         logger.warning(
                             f"[orwell] error-correction state fetch failed: "
                             f"{type(_e).__name__}: {_e}".rstrip(': '))
+                    # ── ADR 0011 — peer-advance detection (the two-tab "20-step loop" fix). ──────────
+                    # The staleness clock (_TURNS_SINCE_PROGRESS, above) is beat-BLIND: it counts turns
+                    # where THIS turn fired no progression tool and CANNOT tell "I (the model) failed to
+                    # advance" from "a concurrent PEER advanced the beat" (another device's decision-card
+                    # submit or turn — neither runs through this turn's serialized loop). Under two tabs
+                    # that conflation SPINS the loop: every lull turn re-fires the advance / forced-advance
+                    # nudge against a beat a peer already moved. So compare the engine's CURRENT beat key
+                    # (`_beat_key_at_read`) to the one the model was FRAMED on this turn (stashed by
+                    # apply_game_framing): if it MOVED and this turn did NOT progress it, a PEER did —
+                    # reset the staleness clock and SUPPRESS the advance nudge (the moved beat re-grounds
+                    # next turn via the existing desync spine). Single-tab: the beat key changes ONLY when
+                    # this turn progresses, so `_peer_advanced` is always False and behavior is byte-
+                    # identical (the seeded UAT / calibration gates are single-tab). Respects the 0064
+                    # Messenger ruling — server-side signal correctness only, NO client lock/spectator.
+                    _peer_advanced = False
+                    try:
+                        from routes import chat_helpers as _ch_peer
+                        _framed_beat_key = _ch_peer._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                        if _peer_advanced_since_framing(_progressed, _framed_beat_key, _beat_key_at_read):
+                            _peer_advanced = True
+                            if owner:
+                                _TURNS_SINCE_PROGRESS[owner] = 0
+                                _ADVANCE_STALL_LEVEL.pop(owner, None)
+                            logger.info(
+                                f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
+                                f"{_beat_key_at_read} with no progression this turn — suppressing "
+                                f"stall nudge, round {round_num} user={owner}")
+                    except Exception:
+                        _peer_advanced = False
                     # ── PREMIERE auto-mark belt (#380): the model narrated introductions but
                     # under-calls markHouseguestMet, so the meet-everyone list never empties and the
                     # premiere can't reach its first HOH. Mark any still-to-meet houseguest just
@@ -3696,7 +3747,7 @@ async def stream_agent_loop(
                     # nudge → another narration) ONLY when nothing visible has been shown yet, where a
                     # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
                     # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
-                    if _want_advance and _phase in _ADVANCE_PHASES:
+                    if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:

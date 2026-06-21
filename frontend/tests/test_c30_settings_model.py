@@ -71,9 +71,10 @@ def test_services_and_ai_tabs_are_admin_only():
 
 def test_non_admin_default_tab_is_not_an_llm_tab():
     js = _read("static/js/settings.js")
-    # open() falls non-admins to `account`, never the markup-default `services`.
-    assert "window._isAdmin ? 'services' : 'account'" in js
-    assert "if (!_tabVisible(activeTab)) activeTab = 'account';" in js
+    # open() falls non-admins to `appearance` (look/feel) — never the markup-default `services`, and
+    # never an LLM/AI tab (J1-14: players want look/feel, not account management or model config).
+    assert "window._isAdmin ? 'services' : 'appearance'" in js
+    assert "_tabVisible('appearance') ? 'appearance' : 'account'" in js
 
 
 def test_keybinds_saved_via_per_user_prefs_not_admin_settings():
