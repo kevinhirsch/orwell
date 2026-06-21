@@ -1778,6 +1778,102 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
         return False
 
 
+# ADR 0009 — the NPC counterpart of _auto_move_player. The SAME under-call class bites houseguest
+# movement: the model narrates "Marcus heads to the kitchen" but never calls moveHouseguest, so the
+# engine's OPEN presence layer still has Marcus in his seeded room and the whereabouts gadget snaps
+# him back — the chat↔board location desync the player sees. So when the turn's narration clearly
+# walked a houseguest somewhere and the model did NOT record it, the FE GUARANTEES the move: a
+# constrained extraction proposes the {id, room} relocations and we call move_houseguest ourselves,
+# folding each legal narrated move into the OPEN occupancy so the board agrees with the prose. The
+# ENGINE is the authority — it refuses the player, a non-existent houseguest, the diary room, and any
+# unwalkable/unknown room (returning "illegal"), and no-ops a move to the same room — so we only ever
+# RELAY a move the narration made; the engine decides if it's legal. Bounded (one extraction, a few
+# moves), fail-open, Vault-free (whereabouts is a Vault-free projection). Model-driven moveHouseguest
+# always wins (the `_npc_moved` gate short-circuits this belt). Cost note: this adds one extraction
+# call on a turn whose narration carries movement language — a future optimization could fold it into
+# the _auto_move_player extraction (one call returning both the player's and the houseguests' moves).
+_MAX_NPC_MOVE_NUDGES_PER_TURN = 1  # at most one NPC-move extraction per finishing turn
+_MAX_NPC_MOVES_PER_TURN = 4        # …relocating at most a handful of houseguests from it
+
+
+async def _auto_move_npc(narration, last_user, house, endpoint_url, model, headers, owner) -> int:
+    """GUARANTEE whereabouts cohesion for the HOUSEGUESTS (ADR 0009), mirroring _auto_move_player for
+    the player. When the turn's narration walked one or more houseguests to new rooms but the model
+    never called moveHouseguest, a constrained extraction proposes the {id, room} moves and we record
+    them ourselves — so the engine's open presence layer matches what the chat just said and the
+    whereabouts gadget stops snapping NPCs back to their seeded room. The engine OWNS the move (it
+    refuses the player / a non-existent houseguest / the diary room / an unwalkable room and no-ops a
+    same-room move); we only relay moves the narration clearly made, and count only the ones the
+    engine actually applied ("moved"). Fail-open: any hiccup just skips (next turn re-grounds against
+    the board). Whereabouts is a Vault-free projection, so nothing secret is touched. Returns the
+    number of houseguest moves the engine applied."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = "\n".join(f'{h.get("id")} = {h.get("name")}'
+                           for h in house if h.get("id") and h.get("name"))
+        if not roster:
+            return 0
+        rooms = ", ".join(r for r in _HOUSE_ROOMS if r != "diary-room")  # NPCs never walk the player's DR
+        msgs = [
+            {"role": "system", "content":
+                "Decide which OTHER houseguests (NOT the player) walked to a new room in this Big "
+                "Brother scene, and where each one ended up. Reply IMMEDIATELY with ONLY a JSON object "
+                "— no analysis, no thinking, no prose, no code fence:\n"
+                '{"moves":[{"id":"<houseguest id from the roster>","room":"<one of the room ids>"}]}\n'
+                f"Room ids: {rooms}.\n"
+                "Include a houseguest ONLY when the scene clearly walks THEM to that room (\"Marcus "
+                "heads to the kitchen\", \"she wanders out back\", \"they slip into the bedroom\"). Map "
+                "loose names to the closest id (\"out back\"/\"yard\" → backyard, \"lounge\"/\"couch\" "
+                "→ living-room, \"bedroom\" → bedroom-a, \"HOH\" → hoh-room). Do NOT include the player. "
+                'If no houseguest clearly moved, reply {"moves":[]}.'},
+            {"role": "user", "content":
+                f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
+                f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        # Room for a reasoning model to think THEN emit the moves JSON (see _auto_record_scene).
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1500, timeout=45)
+        obj = _last_json_object_with_key(raw or "", "moves")
+        if obj is None:
+            logger.info(f"[orwell] auto-move-npc: no parseable JSON (len={len(raw or '')})")
+            return 0
+        valid = {h.get("id") for h in house}
+        seen: set[str] = set()
+        picks: list[tuple[str, str]] = []
+        for mv in (obj.get("moves") or []):
+            if not isinstance(mv, dict):
+                continue
+            hid, room = mv.get("id"), mv.get("room")
+            if not isinstance(hid, str) or hid not in valid or hid in seen:
+                continue
+            if not isinstance(room, str) or room not in _HOUSE_ROOMS or room == "diary-room":
+                continue
+            seen.add(hid)
+            picks.append((hid, room))
+            if len(picks) >= _MAX_NPC_MOVES_PER_TURN:
+                break
+        if not picks:
+            return 0
+        recorded = 0
+        for hid, room in picks:
+            try:
+                res = await _oe.move_houseguest(hid, room, user=owner)
+                # The engine is the authority: count only an APPLIED move ("moved"); "noop"/"illegal"
+                # are legitimate (already there / not a legal move) and simply don't count.
+                if isinstance(res, dict) and res.get("status") == "moved":
+                    recorded += 1
+            except Exception as e:
+                logger.warning(f"[orwell] auto move_houseguest failed for {hid}: "
+                               f"{type(e).__name__}: {e}".rstrip(': '))
+        if recorded:
+            logger.info(f"[orwell] auto-moved {recorded} houseguest(s) user={owner}")
+        return recorded
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-move-npc failed: {_e}")
+        return 0
+
+
 async def _auto_mark_premiere_intros(narration, owner) -> int:
     """PREMIERE (#380) — GUARANTEE the meet-everyone gate progresses. The premiere prompt has the
     producer introduce all 15 houseguests (calling markHouseguestMet each time) before the first
@@ -2815,6 +2911,7 @@ async def stream_agent_loop(
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
     _turn_move_nudges = 0  # L21/L24 auto-move belt: at most one auto-move per finishing turn
+    _turn_npc_move_nudges = 0  # ADR 0009 NPC auto-move belt: at most one per finishing turn
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
@@ -3350,6 +3447,7 @@ async def stream_agent_loop(
                 _progressed = bool(_tool_names & _PROGRESSION_TOOLS)
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
                 _moved = bool(_tool_names & _MOVE_TOOLS)  # L21/L24: did the model call moveTo itself?
+                _npc_moved = "moveHouseguest" in _tool_names  # ADR 0009: did it move a houseguest itself?
                 # SOCIAL RUNWAY (the never-fast-forward fix): the framing layer may be DELIBERATELY
                 # holding a social runway for this user — a ceremony just resolved and the next is
                 # held a few turns so the player can scheme. Those turns are intentional lingering,
@@ -3424,6 +3522,16 @@ async def stream_agent_loop(
                 _want_move = ((not _moved)
                               and _turn_move_nudges < _MAX_MOVE_NUDGES_PER_TURN
                               and bool(_MOVE_SIGNAL_RE.search(_last_user_for_move)))
+                # ADR 0009 NPC auto-move belt: the turn's NARRATION walked one or more houseguests to a
+                # room but the model never called moveHouseguest, so the engine's open presence still has
+                # them in their seeded room and the whereabouts gadget snaps them back. Gated on a cheap
+                # movement-language pre-filter over the WHOLE turn's narration (where NPCs move) and the
+                # per-turn cap. NOT gated on `_progressed`/`_is_lull` (a houseguest can drift off on any
+                # turn). The constrained extraction (moves:[] when none moved) is the real gatekeeper.
+                # Model-driven moveHouseguest always wins (`_npc_moved` short-circuits).
+                _want_npc_move = ((not _npc_moved)
+                                  and _turn_npc_move_nudges < _MAX_NPC_MOVE_NUDGES_PER_TURN
+                                  and bool(_MOVE_SIGNAL_RE.search(_turn_narration)))
                 # NPC-approach nudge (0036/0049): the house lives between the player's beats — NPCs play
                 # THEIR game and come to the player, not only the other way around. With the "Wants a
                 # word" notification panel removed (owner ruling 2026-06-18 — that intent must never reach
@@ -3439,7 +3547,7 @@ async def stream_agent_loop(
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_deal or _want_move or _want_approach or _want_reapproach:
+                if _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
                     try:
@@ -3486,6 +3594,17 @@ async def stream_agent_loop(
                         _turn_move_nudges += 1  # once per turn
                         await _auto_move_player(_turn_narration, _last_user_for_move,
                                                 endpoint_url, model, headers, owner)
+                    # ── ADR 0009 NPC auto-move belt (also a pure persist side effect, never a re-prompt).
+                    # The narration walked one or more houseguests to a room but the model never called
+                    # moveHouseguest, so the engine's open presence would snap them back. A constrained
+                    # extraction proposes the {id, room} relocations and we record the legal ones — the
+                    # board agrees with the prose (no visible historic conflict). Runs alongside the
+                    # player belt, before the advance/post-season branches, so it lands even on a turn
+                    # that also advances a beat. Model-driven moveHouseguest wins (`_npc_moved` gate).
+                    if _want_npc_move:
+                        _turn_npc_move_nudges += 1  # once per turn
+                        await _auto_move_npc(_turn_narration, _last_user_for_move,
+                                             _house, endpoint_url, model, headers, owner)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
                     # off into free chat. Count their off-finale turns; once they've taken a couple,
                     # have the producer re-invite OUT OF FICTION to the next season (escalating,
@@ -4193,7 +4312,8 @@ async def stream_agent_loop(
             stale_before=_ledger_stale_before,
             nudges_fired=(_turn_advance_nudges + _turn_approach_nudges
                           + _turn_narrate_nudges + _turn_reapproach_nudges + _intent_nudge_count),
-            auto_backfills=(_turn_record_nudges + _turn_deal_nudges + _turn_move_nudges),
+            auto_backfills=(_turn_record_nudges + _turn_deal_nudges + _turn_move_nudges
+                            + _turn_npc_move_nudges),
         )
 
     # If the response is completely empty and no tools were executed,
