@@ -39,7 +39,7 @@ class _FakeClient:
         return _FakeStreamCM(self._captured, json)
 
 
-def _capture(monkeypatch, *, session_id=None, pin_provider=False):
+def _capture(monkeypatch, *, session_id=None, pin_provider=False, provider_opts=None):
     from src import llm_core as lc
     captured: dict = {}
     monkeypatch.setattr(lc, "_get_http_client", lambda: _FakeClient(captured))
@@ -50,7 +50,8 @@ def _capture(monkeypatch, *, session_id=None, pin_provider=False):
     async def drive():
         async for _ in lc.stream_llm(OR_URL, "deepseek/deepseek-v4-pro",
                                      [{"role": "user", "content": "x"}],
-                                     session_id=session_id, pin_provider=pin_provider):
+                                     session_id=session_id, pin_provider=pin_provider,
+                                     provider_opts=provider_opts):
             pass
 
     asyncio.get_event_loop().run_until_complete(drive())
@@ -110,3 +111,65 @@ def test_loop_passes_canonical_session_id(monkeypatch):
     assert cap.get("session_id") == "canon-xyz"
     # pin is off by default (threshold 0) — availability preserved.
     assert cap.get("pin_provider") is False
+
+
+# ── admin-supplied OpenRouter `provider` routing object (merged with the pin) ──────
+
+def test_admin_provider_object_is_sent(monkeypatch):
+    p = _capture(monkeypatch, provider_opts={"sort": "throughput"})
+    assert p.get("provider") == {"sort": "throughput"}
+
+
+def test_admin_provider_object_with_order_and_max_price(monkeypatch):
+    opts = {"order": ["deepinfra/turbo"], "max_price": {"prompt": 1, "completion": 2}}
+    p = _capture(monkeypatch, provider_opts=opts)
+    assert p.get("provider") == opts
+
+
+def test_pin_overlays_allow_fallbacks_on_admin_object(monkeypatch):
+    p = _capture(monkeypatch, provider_opts={"order": ["deepinfra"], "allow_fallbacks": True},
+                 pin_provider=True)
+    assert p["provider"]["order"] == ["deepinfra"]
+    assert p["provider"]["allow_fallbacks"] is False  # the high-token pin wins for big prompts
+
+
+def test_non_dict_provider_opts_ignored(monkeypatch):
+    p = _capture(monkeypatch, provider_opts="garbage")
+    assert "provider" not in p
+
+
+def test_loop_passes_admin_provider_object(monkeypatch):
+    from src import agent_loop as al
+    from src import orwell_game_session as gs
+
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+
+    def fake_get_setting(key, default=None):
+        if key == "openrouter_provider":
+            return {"sort": "throughput"}
+        return default
+
+    monkeypatch.setattr(al, "get_setting", fake_get_setting)
+    monkeypatch.setattr(gs, "get_game_session", lambda user: "canon-1")
+    import src.tool_index as ti
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)
+
+    cap: dict = {}
+
+    async def fake_stream(candidates, messages, **kwargs):
+        cap.update(kwargs)
+        yield 'data: {"delta": "hi"}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    async def drive():
+        async for _ in al.stream_agent_loop(
+            OR_URL, "deepseek/deepseek-v4-pro",
+            [{"role": "system", "content": "n"}, {"role": "user", "content": "u"}],
+            max_rounds=1, game_mode="game", owner="tester",
+        ):
+            pass
+
+    asyncio.get_event_loop().run_until_complete(drive())
+    assert cap.get("provider_opts") == {"sort": "throughput"}

@@ -2954,6 +2954,7 @@ async def stream_agent_loop(
     # prompt pins the cache-warm provider. Resolved once for game/casting turns; absent for chat.
     _canon_session_id = session_id
     _pin_threshold = 0
+    _provider_opts = None
     if _call_class:
         try:
             from src import orwell_game_session as _gs
@@ -2964,6 +2965,9 @@ async def stream_agent_loop(
             _pin_threshold = int(get_setting("token_pin_threshold_tokens", 0) or 0)
         except (TypeError, ValueError):
             _pin_threshold = 0
+        # ADR 0010 slice C: the admin OpenRouter `provider` routing object (base routing config).
+        _po = get_setting("openrouter_provider", {})
+        _provider_opts = _po if (isinstance(_po, dict) and _po) else None
     # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
     # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
     # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
@@ -3116,6 +3120,7 @@ async def stream_agent_loop(
             policy=_token_policy,
             session_id=_canon_session_id,
             pin_provider=(_pin_threshold > 0 and last_round_input_tokens >= _pin_threshold),
+            provider_opts=_provider_opts,
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")

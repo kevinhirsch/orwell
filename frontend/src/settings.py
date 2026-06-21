@@ -144,6 +144,15 @@ DEFAULT_SETTINGS = {
     # away, so history is kept (mandate #4) instead of lost to lossy compaction. Costs more on long
     # games (watch the token-economy meter); only helps on large-context models.
     "context_tiering_enabled": False,
+    # ADR 0010 / feature 0069 slice C — an OpenRouter `provider` routing object sent on live-game
+    # calls (https://openrouter.ai/docs/guides/routing/provider-selection). A free-form dict of the
+    # documented fields — e.g. {"sort": "throughput"}, {"order": ["deepinfra/turbo"],
+    # "allow_fallbacks": false}, {"only": ["deepinfra"]}, {"max_price": {"prompt": 1, "completion": 2}},
+    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Default {} = OpenRouter's
+    # normal price-based load balancing. Edit at runtime via POST /api/settings (admin). It is the BASE
+    # routing config; the high-token pin (token_pin_threshold_tokens) overlays allow_fallbacks=false on
+    # large prompts. Only applied for OpenRouter-routed game turns; a non-dict value is ignored.
+    "openrouter_provider": {},
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell

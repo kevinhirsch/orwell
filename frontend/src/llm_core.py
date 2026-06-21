@@ -1324,7 +1324,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                      tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None,
-                     session_id: Optional[str] = None, pin_provider: bool = False):
+                     session_id: Optional[str] = None, pin_provider: bool = False,
+                     provider_opts: Optional[Dict] = None):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
@@ -1403,8 +1404,15 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             # fallback. Small calls leave fallbacks on for availability.
             if session_id:
                 payload["user"] = session_id
+            # ADR 0010 slice C: an admin-supplied OpenRouter `provider` routing object (order/sort/only/
+            # ignore/max_price/zdr/data_collection/quantizations/…) is the BASE; the high-token pin
+            # overlays allow_fallbacks=false so a large prompt stays on the cache-warm provider. Either
+            # alone, or merged. A non-dict provider_opts is ignored.
+            _prov = dict(provider_opts) if isinstance(provider_opts, dict) else {}
             if pin_provider:
-                payload["provider"] = {"allow_fallbacks": False}
+                _prov["allow_fallbacks"] = False
+            if _prov:
+                payload["provider"] = _prov
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
