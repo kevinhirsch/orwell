@@ -81,9 +81,12 @@
           -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
         }
         #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
-        #orwell-onboarding .ob-hold .ob-hold-sub { opacity: .7; font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
+        /* J2-11: opacity:.7 over the inherited dim color rendered the tagline/tip at ~1.5:1 (WCAG
+           1.4.3 FAIL). Use an explicit ~82% of --fg so it clears 4.5:1 on every house theme. */
+        #orwell-onboarding .ob-hold .ob-hold-sub { color: color-mix(in srgb, var(--fg, #fff) 82%, transparent);
+          font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
         #orwell-onboarding .ob-steps { text-align: left; margin: 1rem 0 .2rem; padding: 0; list-style: none;
-          font-size: .8rem; line-height: 1.6; opacity: .85; }
+          font-size: .8rem; line-height: 1.6; color: color-mix(in srgb, var(--fg, #fff) 88%, transparent); }
         #orwell-onboarding .ob-steps li { margin: .15rem 0; }
         #orwell-onboarding .ob-steps .ob-step-n { display: inline-block; width: 1.4rem; font-weight: 700;
           color: var(--brand-color, var(--red, #e06c75)); }

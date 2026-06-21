@@ -3857,10 +3857,17 @@ async def stream_agent_loop(
                     # name-only `ready` — name+photo alone minted a default-archetype "floater" (the mobile
                     # bug). Absent on an older engine ⇒ treat as False (never force on a missing signal).
                     _finalizable = bool(_casting and _casting.get("finalizable"))
+                    # J2-01: a player who EXPLICITLY asks to start ("I'm ready / put me in the
+                    # house") must not be deflected indefinitely. When the interview is genuinely
+                    # finalizable, an explicit readiness signal forces THIS turn (the model already
+                    # had its un-forced chance this round and chose not to finalize) instead of
+                    # requiring the full ~3-lull escalation; a mere short/disengaged lull still gets
+                    # the gentler ramp. Still gated on engine `finalizable` (never mints a floater).
+                    _explicit_ready = bool(_LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
                     if _ready:
                         _clv = _CASTING_STALL_LEVEL.get(owner, 0)
                         _CASTING_STALL_LEVEL[owner] = _clv + 1
-                        if _clv >= _CASTING_FORCE_LEVEL and _finalizable:
+                        if _finalizable and (_clv >= _CASTING_FORCE_LEVEL or _explicit_ready):
                             try:
                                 from src.tool_implementations import do_create_character
                                 _cres = await do_create_character("{}", owner=owner)
