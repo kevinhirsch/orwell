@@ -30,6 +30,23 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 
 ---
 
+## Product-owner decisions PENDING (PO list)
+
+Items surfaced by the audits and deliberately **NOT auto-fixed** because they are product-owner
+**judgment calls** (taste / tradeoffs), not defects. Full context for each lives in the LW log
+(live-walkthrough section below). When decided, record the call in the rulings list under this and
+strike the item.
+
+- **PO-1 — Eviction-night length (LW11).** The eviction night runs long: the staged secret-ballot
+  reveal (vote by vote) plus the player's goodbye-message authoring. It could be batched/trimmed like
+  the staged competitions (#420), or kept as-is. *Tradeoff:* the comp rounds were repetitive filler
+  (rightly batched), but the eviction reveal + goodbyes are a **core dramatic beat** — the vote-by-vote
+  tension is the week's payoff, so trimming risks flattening the most dramatic moment. *Implementer's
+  lean:* keep it, unless live play shows it dragging. If trimmed, it's presentation-only engine work
+  (the eviction sub-loop in `liveSeason.ts`), mirroring the comp-batching pattern.
+
+---
+
 ## Product-owner rulings recorded this session (2026-06-10)
 
 1. **NPC names must be realistic** — "determined based on what could be a real name." The
@@ -1920,13 +1937,6 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
   shows a **"🚪 Evicted — your season is over · See how it ends"** surface (`orwellNewSeason.js`, reusing the post-season
   window). Tests: `test_lw10_conclude_season.py` (gating + idempotency) + live-verified (surface renders, button POSTs).
 
-**Open (carry forward):**
-- **LW9** [open · low-med] **Stale model PROSE after a silent forced-advance.** Narrated "ten houseguests still in"
-  while the engine had 7. The card/board show engine truth (#434); only the prose drifts (ADR-0005 open-set seam).
-  Candidate: a post-silent-advance re-narration nudge, or extend the 0065 desync guard to catch a stale still-in count.
-- **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
-  + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
-
 **Verified CLEAR (checked live — not defects):**
 - **LW13** ✅ CLEAR. Reasoning renders in the collapsed "View thinking process" accordion (by design); the
   eviction-narration message **bodies were clean** (no reasoning leak). F8 (#435) holds; 0 page errors.
@@ -1957,5 +1967,6 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
   list has been eliminated; voice ONLY this set" — directly countering the stale-history failure. Tests in
   `test_pending_barrier.py` (grounding present for comp-round, absent for non-comp). *Prompt-grounding, not a
   guarantee: a non-compliant model could still drift — can't be fully gate-verified (no real-LLM in the gates).*
-- **LW11** [open · minor — likely acceptable] eviction night runs long, but the staged secret-ballot reveal + the
-  player goodbyes are a CORE dramatic beat (unlike the comp's repetitive rounds); length here is largely intended.
+- **LW11** → **moved to the PO list as PO-1** (eviction-night length — a product-owner judgment call: batch/trim
+  the staged secret-ballot reveal like the comps, or keep the core drama). See "Product-owner decisions PENDING
+  (PO list)" near the top of this ledger.
