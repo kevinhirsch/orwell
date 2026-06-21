@@ -634,6 +634,14 @@ import { isNarrow } from './platform.js';
     // ADR 0012 §2.4: set if the server tells this (loser-of-the-bind) window the run lives under a
     // DIFFERENT canonical session id; converged onto in the finally (never mid-stream).
     let _adoptCanonicalAfterStream = null;
+    // ADR 0012 (GAP 2 — error-path consistency): set when this turn rendered a LIVE model error (e.g.
+    // "Error 503"). The agent loop persists a FRIENDLY fallback ("The model returned an empty
+    // response…") instead, so a peer/reload shows that text while the sender shows the raw error — two
+    // windows, different text (the closest thing to the original "each window typing different
+    // responses" complaint, on the error path). The finally FORCE-reconciles the sender's bubble to
+    // the persisted message so the live + persisted + peer views all converge to ONE string. The
+    // immediate live error feedback is kept; only the SETTLED state is reconciled.
+    let _streamHadError = false;
     // P1 (OOBE cutover): set when createCharacter paints the inline "finalizing" indicator this
     // turn, so the first house-entry narration token can clear it (and the finally can safety-net).
     let _orwellFinalizingActive = false;
@@ -1468,6 +1476,11 @@ import { isNarrow } from './platform.js';
                 console.error('Stream error:', errMsg);
                 if (spinner && spinner.element) spinner.destroy();
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
+                // ADR 0012 (GAP 2): keep the immediate live feedback, but mark the turn so the finally
+                // FORCE-reconciles this bubble to the persisted fallback — the agent loop saves a
+                // friendly message (not the raw "Error 503"), so the sender must end on the SAME
+                // persisted text a peer/reload shows (no two-windows-different-text on errors).
+                _streamHadError = true;
                 break;
               }
               if (json.delta || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
@@ -3326,7 +3339,32 @@ import { isNarrow } from './platform.js';
       // was a permanent local guess that drifted from other tabs. Deferred so the finally settles first.
       // (Now that _streamSessionId is cleared above, the setTimeout(0) callback sees hasActiveStream=false
       // and the deferred reconcile actually rebuilds.)
-      try { setTimeout(() => { try { flushPendingReconcile(streamSessionId); } catch (_) {} }, 0); } catch (_) {}
+      // ADR 0012 (GAP 2): an error turn rendered the raw model error live, but the agent loop persists
+      // a friendly fallback. Force the reconcile below to do a CONTENT rebuild (not just the id adopt)
+      // so the sender's settled bubble becomes the SAME persisted text a peer/reload shows. softReload
+      // is async + the fallback persists right before [DONE], so it's on disk by the time this runs.
+      // softReloadHistory self-guards the forced rebuild (it only fires when the server actually has an
+      // assistant message to converge to) so a hard fail that persisted NOTHING keeps its live error
+      // feedback — we don't need the client to have observed the message_saved event (which a same-chunk
+      // error→[DONE] can skip past the break).
+      if (_streamHadError) _forceRebuild.add(streamSessionId);
+      // ADR 0012 (GAP 1): a PEER's run-started arrived for this session while THIS stream was in
+      // flight, so the observer's `!hasActiveStream` guard deferred the live attach. Our stream has
+      // now settled (_streamSessionId cleared above ⇒ hasActiveStream is false), so RE-ATTEMPT the
+      // attach: subscribe() replays the peer run's buffer then live-tails, mirroring its turn in
+      // lockstep instead of waiting on a later poll (the transient one-window-behind ±1). CHAINED
+      // after the reconcile's softReloadHistory settles, so the peer's user turn is adopted first and
+      // its reply attaches on top (matching sessionSync's "rebuild lands before the live bubble"
+      // ordering). flushPendingPeerResume is a no-op in the common case (no peer resume deferred).
+      try {
+        setTimeout(() => {
+          try {
+            Promise.resolve(flushPendingReconcile(streamSessionId)).then(function () {
+              try { flushPendingPeerResume(streamSessionId); } catch (_) {}
+            });
+          } catch (_) {}
+        }, 0);
+      } catch (_) {}
       // ADR 0012 §2.4: a loser-of-the-bind window POSTed under its own per-tab id but the run lived
       // under the canonical game session (server `canonical_session` event). Now that the stream has
       // settled, converge onto canonical so this window's history/SSE/HUD re-key onto the shared game
@@ -3666,6 +3704,22 @@ import { isNarrow } from './platform.js';
    */
   // ADR 0008: sessions that DIVERGED while a stream was in flight — reconciled when it ends.
   const _pendingReconcile = new Set();
+  // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): a PEER's run-started arrived for the
+  // canonical session while THIS window's OWN POST stream for that same session was still in flight,
+  // so the observer's `!hasActiveStream(id)` guard suppressed the live `resumeStream` attach. The peer
+  // run is durable (chained as the current `_RUNS[canonical]`, still `has_run` within the evict grace),
+  // so we DON'T drop the invitation — we record it here and RE-ATTEMPT the attach the moment our own
+  // stream settles (the finally below). subscribe() replays the peer run's buffer (or its tail) then
+  // live-tails, so the deferred attach mirrors the peer turn in lockstep instead of waiting on a later
+  // poll/reconcile (the transient one-window-behind offset the 50× smoke caught).
+  const _pendingPeerResume = new Set();
+  // ADR 0012 (GAP 2): sessions whose NEXT softReloadHistory must FORCE the seq-ordered rebuild even if
+  // the rendered id-order looks "converged". The error path adopts the live error bubble to the
+  // persisted message's {id, seq} (so the divergence check passes) but its CONTENT is still the raw
+  // "Error 503", not the persisted friendly fallback — only a content rebuild makes the sender match
+  // the peer. The convergence short-circuit is about avoiding flicker on a NORMAL turn; on an error we
+  // accept the one rebuild to guarantee identical settled text.
+  const _forceRebuild = new Set();
   function _historyMsgText(msg) {
     if (typeof msg.content === 'string') return msg.content;
     if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
@@ -3737,14 +3791,27 @@ import { isNarrow } from './platform.js';
     }
 
     // 2) DIVERGENCE CHECK — rendered id order vs. server seq order.
+    // ADR 0012 (GAP 2): an error turn forces ONE content rebuild — the error bubble may already carry
+    // the persisted message's {id, seq} (so the id-order is "converged") while showing the raw error
+    // text, not the persisted fallback. Consume the one-shot flag so subsequent reloads are normal.
+    // SELF-GUARD: only honor the force when the server actually has at least as many messages as are
+    // rendered — i.e. there IS a persisted message to converge to. A hard fail that persisted NOTHING
+    // (server has fewer messages) keeps its live error bubble rather than the rebuild erasing it.
+    let _forced = _forceRebuild.delete(sessionId);
+    const renderedCount = box.querySelectorAll('.msg').length;
+    if (_forced && visible.length < renderedCount) _forced = false;
     const renderedIds = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
     const serverIds = visible.map(_serverMsgId).filter(Boolean);
     const converged = renderedIds.length === serverIds.length &&
       renderedIds.every((v, i) => v === serverIds[i]);
-    if (converged) { _pendingReconcile.delete(sessionId); return; }
+    if (converged && !_forced) { _pendingReconcile.delete(sessionId); return; }
 
-    // 3) DIVERGED — defer past a live stream, else rebuild to the authoritative order.
-    if (hasActiveStream(sessionId)) { _pendingReconcile.add(sessionId); return; }
+    // 3) DIVERGED (or forced) — defer past a live stream, else rebuild to the authoritative order.
+    if (hasActiveStream(sessionId)) {
+      _pendingReconcile.add(sessionId);
+      if (_forced) _forceRebuild.add(sessionId);   // re-arm the one-shot force for the deferred flush
+      return;
+    }
     _pendingReconcile.delete(sessionId);
 
     const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
@@ -3765,14 +3832,46 @@ import { isNarrow } from './platform.js';
     }
   }
 
-  /** ADR 0008: flush a reconcile deferred because a stream was in flight (called at stream end). */
+  /** ADR 0008: flush a reconcile deferred because a stream was in flight (called at stream end).
+   * Returns the softReloadHistory promise so callers can sequence work AFTER the rebuild settles
+   * (the GAP-1 peer-resume chains on it so the peer's user turn is adopted before its reply attaches). */
   export function flushPendingReconcile(sessionId) {
     const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-    if (!id) return;
+    if (!id) return Promise.resolve();
     // Always run once at stream end: the adopt pass alone (cheap, no churn) gives the sender
     // read-your-writes even when nothing diverged; if it DID diverge, this does the rebuild.
     _pendingReconcile.delete(id);
-    try { softReloadHistory(id); } catch (_) {}
+    try { return Promise.resolve(softReloadHistory(id)).catch(function () {}); } catch (_) { return Promise.resolve(); }
+  }
+
+  /**
+   * ADR 0012 (GAP 1): note a peer's run-started that we couldn't attach to LIVE because our own
+   * stream was in flight, so the stream-end finally can RE-ATTEMPT the attach. Called from
+   * sessionSync's run-started handler. Idempotent (a Set); no-op if no resume seam exists.
+   */
+  export function deferPeerResume(sessionId) {
+    if (!sessionId) return;
+    _pendingPeerResume.add(sessionId);
+  }
+
+  /**
+   * ADR 0012 (GAP 1): flush a peer-resume deferred because OUR stream was in flight (called at
+   * stream end). Now that our stream has settled, attach to the canonical run so we mirror the peer's
+   * turn LIVE. resumeStream's own guards make this safe + idempotent: it no-ops if another reader is
+   * already live for the session (hasActiveStream) and replays a just-finished run's buffer within the
+   * evict grace; if the run is already gone, softReloadHistory has the settled message anyway.
+   */
+  export function flushPendingPeerResume(sessionId) {
+    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+    if (!id) return;
+    if (!_pendingPeerResume.has(id)) return;
+    _pendingPeerResume.delete(id);
+    // Only attach if we're still viewing this session and nothing else is already rendering it live.
+    const onIt = !sessionModule || !sessionModule.getCurrentSessionId ||
+                 sessionModule.getCurrentSessionId() === id;
+    if (!onIt) return;
+    if (hasActiveStream(id)) return;          // a newer stream took over — it owns the render
+    try { resumeStream(id); } catch (_) {}
   }
 
   /**
@@ -5501,6 +5600,8 @@ import { isNarrow } from './platform.js';
     hasActiveStream,
     softReloadHistory,
     flushPendingReconcile,
+    deferPeerResume,
+    flushPendingPeerResume,
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on

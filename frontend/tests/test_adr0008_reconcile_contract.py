@@ -56,9 +56,11 @@ def test_history_api_exposes_id_and_seq():
 def test_soft_reload_history_adopts_then_rebuilds_only_on_divergence():
     src = _read("static", "js", "chat.js")
     assert "ADOPT PASS" in src, "the cheap adopt pass (no churn) must be present"
-    # The divergence guard: the full innerHTML rebuild must be gated, never unconditional.
-    assert "const converged =" in src and "if (converged)" in src, \
-        "a rebuild must only run when the rendered order diverges from the server seq order"
+    # The divergence guard: the full innerHTML rebuild must be gated, never unconditional. (ADR 0012
+    # GAP 2 added a one-shot `_forced` bypass for the error path — `converged && !_forced` — so the
+    # rebuild still only runs when DIVERGED or explicitly forced, never unconditionally.)
+    assert "const converged =" in src and "if (converged && !_forced)" in src, \
+        "a rebuild must only run when the rendered order diverges (or is force-reconciled on error)"
     assert "_pendingReconcile" in src, "a live stream must DEFER its reconcile, not stomp the stream"
     assert "flushPendingReconcile" in src, "the deferred reconcile must flush at stream end"
 
@@ -83,6 +85,18 @@ def test_stream_end_resets_stream_session_id_so_deferred_reconcile_can_flush():
     src = _read("static", "js", "chat.js")
     assert "if (_streamSessionId === streamSessionId) _streamSessionId = null;" in src, \
         "the foreground stream's finally must reset _streamSessionId so hasActiveStream clears at stream end"
+
+
+def test_stream_end_reset_ordering_lets_deferred_peer_resume_attach():
+    # ADR-0012 GAP-1 builds on the same reset seam: the deferred PEER-resume (flushPendingPeerResume)
+    # also relies on hasActiveStream() clearing at stream end. So the finally MUST clear _streamSessionId
+    # BEFORE it schedules flushPendingPeerResume — otherwise the deferred attach short-circuits on its
+    # own hasActiveStream guard and the peer turn never renders live (the ±1 the 50× smoke caught).
+    src = _read("static", "js", "chat.js")
+    reset_at = src.index("if (_streamSessionId === streamSessionId) _streamSessionId = null;")
+    flush_at = src.index("flushPendingPeerResume(streamSessionId)")
+    assert reset_at < flush_at, \
+        "the finally must reset _streamSessionId BEFORE re-attempting the deferred peer-resume"
 
 
 def test_renderer_stamps_seq_and_client_id_on_bubbles():
