@@ -1978,6 +1978,8 @@ export function addMessage(role, content, modelName, metadata) {
           wrap.appendChild(body);
           wrap.dataset.raw = txt;
           if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
+          if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
+          if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
           box.appendChild(wrap);
           lastWrap = wrap;
           if (!firstMsgAi) firstMsgAi = wrap;
@@ -2179,6 +2181,8 @@ export function addMessage(role, content, modelName, metadata) {
 
     wrap.dataset.raw = text;
     if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
+    if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
+    if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
     // Prepend sources box if saved in metadata
     var sourcesPrefix = '';
     var findingsSuffix = '';

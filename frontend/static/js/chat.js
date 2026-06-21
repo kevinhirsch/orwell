@@ -689,9 +689,16 @@ import { isNarrow } from './platform.js';
           }
         }
       }
+      // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
+      // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
+      // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
+      const _clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now() + '-' + Math.random().toString(36).slice(2)));
       let _userMsgEl = null;
       if (!skipBubble) {
         _userMsgEl = addMessage('user', userDisplay, null, _pendingAttachInfo ? { attachments: _pendingAttachInfo } : null);
+        if (_userMsgEl) _userMsgEl.dataset.clientMsgId = _clientMsgId;
       }
       messageInput.value = '';
       messageInput.style.height = '';
@@ -844,6 +851,7 @@ import { isNarrow } from './platform.js';
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      fd.append('client_msg_id', _clientMsgId);  // ADR 0008: optimistic temp id for bubble adoption
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
       // Auto-save & send active doc ID so the backend sees latest content
       if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
@@ -3196,6 +3204,11 @@ import { isNarrow } from './platform.js';
       // and arms the card. Debounced + idempotent (coalesces with any per-tool dispatch this turn);
       // a no-op outside the game build (orwellGameChanged is undefined there).
       if (window.orwellGameChanged) window.orwellGameChanged('turn-settled');
+      // ADR 0008: read-your-writes. The turn has persisted, so reconcile the sender's optimistic
+      // bubbles to the authoritative {id, seq} log (the adopt pass is cheap + flicker-free; it only
+      // rebuilds if a PEER also wrote during this turn). Was: the sender never re-fetched, so its DOM
+      // was a permanent local guess that drifted from other tabs. Deferred so the finally settles first.
+      try { setTimeout(() => { try { flushPendingReconcile(streamSessionId); } catch (_) {} }, 0); } catch (_) {}
       // Always clean up research tracking regardless of background state
       _researchingStreamIds.delete(streamSessionId);
       if (_researchingStreamIds.size === 0) {
@@ -3514,11 +3527,45 @@ import { isNarrow } from './platform.js';
    * (its own live view is authoritative). Preserves the message input; only
    * touches #chat-history, and only auto-scrolls if already near the bottom.
    */
+  // ADR 0008: sessions that DIVERGED while a stream was in flight — reconciled when it ends.
+  const _pendingReconcile = new Set();
+  function _historyMsgText(msg) {
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
+    return '';
+  }
+  function _isSkippableUserPrompt(text) {
+    const t = (text || '').trim();
+    return t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
+      t.startsWith('Your previous response was interrupted.') ||
+      t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain') ||
+      // OOBE hand-off cues are the producers reaching out — never the player's own words.
+      // sendHiddenCue() hides them live; on a history reload / cross-device load the persisted
+      // user turn must stay hidden too, or it surfaces as a "You" bubble and breaks immersion
+      // (UX audit J1-03). Match the "(Production cue …)" envelope.
+      t.toLowerCase().startsWith('(production cue');
+  }
+  function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
+
+  /**
+   * ADR 0008 — render-and-reconcile to the authoritative seq-ordered log.
+   *
+   * The chat conversation is a FE-replicated log; the audit (S3-RACE) proved two tabs diverge
+   * under concurrent writes because the sender was optimistic-only and a busy tab dropped the
+   * peer's events. This reconciles every tab to the server's `seq` total order WITHOUT a blanket
+   * full rebuild:
+   *   1. ADOPT PASS — stamp the canonical {id, seq} onto already-rendered bubbles (matching by db
+   *      id OR the optimistic client-temp id). Gives the sender read-your-writes with zero churn.
+   *   2. DIVERGENCE CHECK — if the rendered id order already equals the server seq order, return
+   *      (no flicker in the overwhelming common case).
+   *   3. Only when DIVERGED: defer if a stream is live (don't stomp it), else do the clean
+   *      seq-ordered rebuild — identical to a manual reload, which the audit proved converges.
+   */
   export async function softReloadHistory(sessionId) {
     if (!sessionId) return;
     const isCurrent = () => !sessionModule || !sessionModule.getCurrentSessionId ||
       sessionModule.getCurrentSessionId() === sessionId;
-    if (!isCurrent() || hasActiveStream(sessionId)) return;
+    if (!isCurrent()) return;
 
     let data;
     try {
@@ -3526,36 +3573,50 @@ import { isNarrow } from './platform.js';
       if (!res.ok) return;
       data = await res.json();
     } catch (_) { return; }
-    // Re-check after the await: the user may have navigated, or a local stream
-    // may have started, while we were fetching.
-    if (!isCurrent() || hasActiveStream(sessionId)) return;
+    if (!isCurrent()) return;
 
     const box = document.getElementById('chat-history');
     if (!box) return;
-    const msgs = data.history || [];
     const modelName = data.model || null;
+    // Authoritative seq-ordered log (the API orders by seq), minus the continuation/instruction
+    // prompts the live view never shows.
+    const visible = (data.history || [])
+      .filter(m => !(m.role === 'user' && _isSkippableUserPrompt(_historyMsgText(m))));
+
+    // 1) ADOPT PASS — no DOM churn.
+    const byId = new Map(), byClient = new Map();
+    box.querySelectorAll('.msg').forEach((el) => {
+      if (el.dataset.dbId) byId.set(el.dataset.dbId, el);
+      if (el.dataset.clientMsgId) byClient.set(el.dataset.clientMsgId, el);
+    });
+    for (const msg of visible) {
+      const sid = _serverMsgId(msg);
+      const cid = msg.metadata && msg.metadata.client_msg_id;
+      const el = (sid && byId.get(sid)) || (cid && byClient.get(cid)) || null;
+      if (el) {
+        if (sid) { el.dataset.dbId = sid; byId.set(sid, el); }
+        if (msg.seq != null) el.dataset.seq = String(msg.seq);
+      }
+    }
+
+    // 2) DIVERGENCE CHECK — rendered id order vs. server seq order.
+    const renderedIds = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
+    const serverIds = visible.map(_serverMsgId).filter(Boolean);
+    const converged = renderedIds.length === serverIds.length &&
+      renderedIds.every((v, i) => v === serverIds[i]);
+    if (converged) { _pendingReconcile.delete(sessionId); return; }
+
+    // 3) DIVERGED — defer past a live stream, else rebuild to the authoritative order.
+    if (hasActiveStream(sessionId)) { _pendingReconcile.add(sessionId); return; }
+    _pendingReconcile.delete(sessionId);
+
     const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
     const prevScrollTop = box.scrollTop;
-
     box.classList.add('no-animate');
     box.innerHTML = '';
-    for (const msg of msgs) {
-      let content = '';
-      if (typeof msg.content === 'string') content = msg.content;
-      else if (Array.isArray(msg.content)) content = msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
-      if (msg.role === 'user') {
-        const t = content.trim();
-        if (t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
-            t.startsWith('Your previous response was interrupted.') ||
-            t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain') ||
-            // OOBE hand-off cues are the producers reaching out — never the player's own words.
-            // sendHiddenCue() hides them live; on a history reload / cross-device load the
-            // persisted user turn must stay hidden too, or it surfaces as a "You" bubble and
-            // breaks immersion (UX audit J1-03). Match the "(Production cue …)" envelope.
-            t.toLowerCase().startsWith('(production cue')) continue;
-      }
-      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
-      chatRenderer.addMessage(msg.role, markdownModule.renderContent(content), modelName, meta);
+    for (const msg of visible) {
+      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : { _fromHistory: true };
+      chatRenderer.addMessage(msg.role, markdownModule.renderContent(_historyMsgText(msg)), modelName, meta);
     }
     box.classList.remove('no-animate');
     if (nearBottom) {
@@ -3565,6 +3626,16 @@ import { isNarrow } from './platform.js';
       // Reader was scrolled up — keep their place (new content was appended below).
       box.scrollTop = prevScrollTop;
     }
+  }
+
+  /** ADR 0008: flush a reconcile deferred because a stream was in flight (called at stream end). */
+  export function flushPendingReconcile(sessionId) {
+    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+    if (!id) return;
+    // Always run once at stream end: the adopt pass alone (cheap, no churn) gives the sender
+    // read-your-writes even when nothing diverged; if it DID diverge, this does the rebuild.
+    _pendingReconcile.delete(id);
+    try { softReloadHistory(id); } catch (_) {}
   }
 
   /**
@@ -5270,6 +5341,7 @@ import { isNarrow } from './platform.js';
     _appendViewReportLink,
     hasActiveStream,
     softReloadHistory,
+    flushPendingReconcile,
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on

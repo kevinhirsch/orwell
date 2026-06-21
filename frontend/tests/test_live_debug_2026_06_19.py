@@ -86,10 +86,13 @@ def test_l12_pin_gadget_loaded_and_ordered():
 
 def test_l13_rail_supports_drag_reorder():
     js = _read("static", "js", "orwellGadgetRail.js")
-    # HTML5 drag-and-drop reorder of the rail's gadgets
-    assert "dragstart" in js
-    assert "dragover" in js
-    assert "drop" in js
+    # Reorder happens in an explicit EDIT mode (iOS-jiggle / HASS-dashboard style), entered by a
+    # long-press OR the header's Rearrange button — NOT a persistent hover grip (which overlapped +
+    # blocked gadget content). One unified gesture for touch + mouse via Pointer Events.
+    assert "data-edit" in js                                # the edit-mode flag on the rail
+    assert "gadget-rail-rearrange" in js                    # the discoverable Rearrange/Done toggle
+    assert "pointerdown" in js and "pointermove" in js and "pointerup" in js   # touch+mouse drag
+    assert "dragstart" not in js and "dragover" not in js   # the old touch-broken HTML5 DnD is gone
     # persisted order, per-user, like the rail's existing persisted layout
     assert "orwell-gadget-order" in js
     # the public reorder seam
@@ -98,10 +101,13 @@ def test_l13_rail_supports_drag_reorder():
 
 def test_l13_reorder_keeps_accessibility():
     js = _read("static", "js", "orwellGadgetRail.js")
-    # a real focusable handle (button) with a label, and keyboard reorder
-    assert "grail-drag" in js
+    # No persistent overlay grip (it covered content). The Rearrange control + gadgets carry labels,
+    # and keyboard reorder (↑/↓ on a focused gadget in edit mode) is preserved.
+    assert ".grail-drag {" not in js                        # the old absolute overlay-grip button is gone
     assert "aria-label" in js
     assert "ArrowUp" in js and "ArrowDown" in js
+    # reduced-motion users get a steady outline instead of the wiggle
+    assert "prefers-reduced-motion" in js
     # Escape is NOT handled per-surface (flows through ui.js's arbiter — F3 ratchet)
     assert '"Escape"' not in js and "'Escape'" not in js
 

@@ -198,42 +198,26 @@
   }
   .pw-toggle:hover { color: var(--fg); background: none; }
   .pw-toggle svg { display: block; }
-  .remember-toggle {
-    position: absolute !important; right: 13px; top: 50%; transform: translateY(-50%);
-    background: none; border: none; padding: 2px; cursor: pointer;
-    width: 14px !important; height: 14px !important; display: flex !important;
-    align-items: center; justify-content: center;
-    font-size: 0; margin: 0; color: transparent;
+  /* S1-A: the "Remember me" choice is a VISIBLE, labelled row. It used to be an
+     unlabelled 14×14 dot overlaying the username field (no signifier — read as a
+     stray status glyph — and below the 44px coarse-pointer tap floor). The whole
+     row is now the hit target; the JS still toggles #rememberToggle by mode and
+     reads #remember.checked, so the auth flow is unchanged. */
+  .remember-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin: 0 0 1rem; cursor: pointer; min-height: 24px;
+    font-size: 0.85rem; color: color-mix(in srgb, var(--fg) 70%, transparent);
+    user-select: none;
   }
-  /* Visually hide the native checkbox but keep it in the accessibility tree
-     and keyboard-focusable (display:none would drop it from tab order). It
-     overlays the dot so a click/tap still toggles it. */
-  .remember-toggle .remember-check {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%; margin: 0;
-    opacity: 0; cursor: pointer;
+  .remember-row .remember-check {
+    width: 16px; height: 16px; min-width: 16px; margin: 0;
+    accent-color: var(--red); cursor: pointer;
   }
-  .remember-toggle .remember-check:focus-visible + .remember-dot {
-    outline: 2px solid var(--red); outline-offset: 2px;
-  }
-  .remember-toggle .remember-dot {
-    display: block; width: 10px; height: 10px; min-width: 10px; min-height: 10px;
-    border-radius: 50%;
-    border: 2px solid color-mix(in srgb, var(--fg) 25%, transparent);
-    background: transparent;
-    transition: all 0.15s;
-  }
-  .remember-toggle .remember-check:checked + .remember-dot {
-    border-color: transparent;
-    background: color-mix(in srgb, var(--fg) 40%, transparent);
-  }
-  .remember-toggle:hover .remember-dot {
-    border-color: color-mix(in srgb, var(--fg) 40%, transparent);
-  }
+  .remember-row:hover { color: var(--fg); }
   .logo-eye { width: 1.6rem; height: 1.6rem; margin-right: 0.4rem; vertical-align: -0.15em; color: var(--red); }
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
-    font-size: 0.7rem; opacity: 0.25;
+    font-size: 0.7rem; opacity: 0.6; /* S1-B: 0.25 was 1.89:1 (AA fail); 0.6 -> ~4.43:1 */
     font-family: 'Fira Code', monospace;
     pointer-events: none; user-select: none;
   }
@@ -265,10 +249,6 @@
     <label for="username">Username</label>
     <div class="pw-wrapper">
       <input id="username" name="username" type="text" required autofocus autocomplete="username">
-      <label class="remember-toggle" id="rememberToggle" title="Remember me">
-        <input type="checkbox" class="remember-check" id="remember" checked aria-label="Remember me">
-        <span class="remember-dot" aria-hidden="true"></span>
-      </label>
     </div>
 
     <label for="password">Password</label>
@@ -278,6 +258,11 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
       </button>
     </div>
+
+    <label class="remember-row" id="rememberToggle">
+      <input type="checkbox" class="remember-check" id="remember" checked>
+      <span>Remember me</span>
+    </label>
 
     <div id="confirmGroup" style="display:none">
       <label for="confirmPassword">Confirm Password</label>

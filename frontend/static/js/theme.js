@@ -643,14 +643,33 @@ function _prefersReducedMotion() {
   catch (_) { return false; }
 }
 
+// BG-1 / A5: under reduced-motion, don't leave canvas-only patterns BLANK — run the
+// generator but settle it to a STILL frame. We bound requestAnimationFrame to a finite
+// SYNCHRONOUS burst so the particle field builds up off-paint and then freezes: the
+// texture is preserved (no dead background on telescreen/perlin-flow, embers, etc.) with
+// ZERO ongoing motion. rAF is restored immediately after, so nothing keeps animating.
+function _bgStaticInit(initFn) {
+  const realRaf = window.requestAnimationFrame.bind(window);
+  let n = 0;
+  window.requestAnimationFrame = function (cb) {
+    if (n++ < 90) { try { cb(performance.now()); } catch (_) {} }
+    return 0;
+  };
+  try { initFn(); } finally { window.requestAnimationFrame = realRaf; }
+}
+
 export function applyBgPattern(pattern) {
   const p = pattern || 'none';
   document.body.classList.remove(..._BG_CLASSES);
   // Clean up any canvas backgrounds
   document.querySelectorAll('#synapse-canvas, #rain-canvas, #constellations-canvas, #perlin-flow-canvas, #petals-canvas, #sparkles-canvas, #embers-canvas').forEach(c => c.remove());
   if (p !== 'none') document.body.classList.add('bg-pattern-' + p);
-  // Reduced-motion: keep the static CSS base, skip the animated canvas generator.
-  if (_CANVAS_PATTERNS[p] && !_prefersReducedMotion()) _CANVAS_PATTERNS[p]();
+  // Reduced-motion: render a STILL frame of the canvas pattern (not a blank canvas) so
+  // canvas-only backgrounds (perlin-flow, embers, …) keep their texture with zero motion (BG-1).
+  if (_CANVAS_PATTERNS[p]) {
+    if (_prefersReducedMotion()) _bgStaticInit(_CANVAS_PATTERNS[p]);
+    else _CANVAS_PATTERNS[p]();
+  }
   // Hide sliders that do nothing on static patterns.
   const hide = _STATIC_PATTERNS.has(p);
   const ig = document.getElementById('theme-bg-intensity-group');

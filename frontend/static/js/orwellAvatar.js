@@ -23,7 +23,9 @@
     let present = false;
     try {
       const r = await fetch("/api/orwell/avatar", { credentials: "same-origin", cache: "no-store" });
-      present = r.ok;
+      // 200 = an avatar PNG is present; 204 = none set (S1-2). Treat only a real
+      // 200 as present so the no-avatar case stays a clean no-op.
+      present = r.status === 200;
     } catch (_) { present = false; }
     const url = present ? "/api/orwell/avatar?t=" + Date.now() : null;
     TARGETS.forEach((id) => {
