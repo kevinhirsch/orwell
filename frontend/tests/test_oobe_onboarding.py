@@ -391,7 +391,9 @@ def test_first_week_pacing_is_no_scripted_rails():
 def test_premiere_tutorial_still_frames_the_first_week_lightly():
     # The FE premiere card (L31) is the light-touch companion: it sets the weekly-rhythm
     # expectation in week 1 without replacing the chat. Still present, still week-1 gated.
+    # J3-09: tutorial now names the 15-HG gate instead of "Meet the house" as a rhythm phase.
     js = _read("static", "js", "orwellPremiereTutorial.js")
     assert "week === 1" in js
-    for beat in ("Meet the house", "HOH", "Nominations", "Veto", "Eviction"):
+    assert "fifteen houseguests" in js  # the gate condition
+    for beat in ("HOH", "Nominations", "Veto", "Eviction"):
         assert beat in js

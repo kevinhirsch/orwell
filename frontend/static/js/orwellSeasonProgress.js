@@ -93,6 +93,7 @@
     bar.id = BAR_ID;
     bar.setAttribute("role", "progressbar");
     bar.setAttribute("aria-label", "Season progress");
+    bar.setAttribute("aria-description", "Advances as houseguests are evicted");
     bar.setAttribute("aria-valuemin", "0");
     bar.setAttribute("aria-valuemax", "100");
     const fill = document.createElement("div");

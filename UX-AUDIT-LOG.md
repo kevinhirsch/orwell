@@ -330,24 +330,104 @@ Scope authorized by the owner ("include the finalize fix in this set"). Six conf
 - **J2-17** (themed-accent CTA contrast 3.29:1), **J2-18** (mobile FAB overlaps tutorial) — per-theme / responsive-fiddly; need a token-level on-color solution + responsive testing.
 - **Design-level:** J2-05/09 cast IA, J2-10 premiere staging, J2-13 tutorial affordance, J2-15 avatar identity → Phase-4 backlog.
 
-## Journey 3 — capture-phase findings (lead, live-LLM walkthrough, IN PROGRESS)
+## Journey 3 — capture-phase findings + specialist consolidation (DONE)
 
-**Status: CAPTURING** (run `b7tiic1vg`, desktop/normal, deepseek-v4-pro). Game live at week 1 / premiere.
+**Status: COMPLETE.** Capture `b7tiic1vg` / desktop/normal / deepseek-v4-pro. 16 shots, 97 mutation events.
+Specialist fan-out (5 read-only): flows/journeys · IA/wayfinding · interaction/feedback · visual/motion · content/a11y — all complete. Gated remediation set #3 pending (below).
+
+### J3 capture — what actually happened
+
+The game started fresh at premiere. The scenario walked through: casting → game-start → 2 HG-meeting turns → "I'm ready for HOH" (hoh-leadup) → 4 HOH-nudge turns → post-comp-narration → veto-leadup → veto-ceremony → eviction-night → post-eviction. Key outcomes:
+- `decision_card_comp_intent: null` — the HOH competition decision card **never appeared**
+- `hud_final.barFill: "0%"` — bar stayed at 0% even after "eviction night" scenario steps
+- Mutation log: only `turn-settled` events after `tool:createCharacter` — no `tool:advanceGame`, `tool:runCompetition`, `tool:markHouseguestMet`
+- The engine stayed frozen in premiere; the HOH/veto/eviction steps were narration-only, with no engine backing
+
+### J3 findings index
 
 | ID | Sev | Status | Finding |
 |---|---|---|---|
-| J3-01 | MED (corroboration) | VIEWED | **`tok/s` telemetry strip visible in every AI bubble in-game.** `26.9 tok/s \| icons \| 17%` confirmed in J3 transcript shot `17-06-meet-hg1.chat.png`. Corroborates J2-14 (J2 was element-screenshot only; J3 reproduces live on desktop/normal). |
-| J3-02 | — (negative) | VERIFIED CLEAR | **J2-07 (production cue as "You" bubble) does NOT reproduce on a clean session.** Full clean-slate walk: no `(Production cue…)` messages appear in `#chat-history`. Both guarded paths (`_hideUserBubble`, history-render skip) are working. J2-07 likely requires a pre-existing session with a cue already in history; clean-session path clear. |
-| J3-03 | — (positive) | VERIFIED | **Narration quality excellent: rich, immersive, no leaks.** Premiere narration (shots 05/06) is vivid and in-character — distinct HG personalities (Tamara: São Paulo stylist, theatrical energy; 6 HGs named with room geography). No model slug, no OOC leaks, no reasoning in reply body. J2-08 fix confirmed: chat title is "Casting interview", not model slug. |
-| J3-04 | — (positive) | VERIFIED | **Premiere tutorial card present and correct.** Rhythm guide visible with "Got it" dismiss, per J2-12 fix. |
+| J3-01 | MED (corroboration) | VIEWED | **`tok/s` telemetry strip visible in every AI bubble in-game.** `26.9 tok/s \| icons \| 17%` confirmed in shot `17-06-meet-hg1.chat.png`. Corroborates J2-14. |
+| J3-02 | — (negative) | VERIFIED CLEAR | **J2-07 production cue as "You" bubble does NOT reproduce on clean session.** Both guarded paths working. Requires pre-existing session with cue in history to reproduce; clean path clear. |
+| J3-03 | — (positive) | VERIFIED | **Narration quality excellent; rich, immersive, no leaks.** Distinct HG personalities, room geography, no model slug, no OOC leaks. J2-08 fix confirmed (title "Casting interview"). |
+| J3-04 | — (positive) | VERIFIED | **Premiere tutorial card present and correct.** Rhythm guide + "Got it" dismiss, per J2-12 fix. |
+| **J3-05** | **LAUNCH-BLOCKING** | OPEN | **Model narrated a fictional HOH winner and continued through veto/eviction without engine backing.** After 4 HOH nudges blocked by the premiere gate, the model responded to "who won HOH?" with a named fictional result (`post-comp-narration` shot). The engine never called `runCompetition` or `advanceGame` — mutation log confirms only `turn-settled` events, bar stayed at 0% through "eviction night." Anti-sycophancy mandate violated at the narration layer: the model fabricated a closed-set outcome the engine never computed. A player who trusted the narration would believe the game advanced and be confused when the bar reads 0% and HOH/noms/veto/eviction produce no state change. Reference: CLAUDE.md "anti-sycophancy" mandate + the pre-emission outcome guard in `frontend/routes/chat_helpers.py`. |
+| **J3-06** | **HIGH** | OPEN | **`markHouseguestMet` never dispatched — premiere progress bar stays at 0% and player has no feedback on HG-meeting progress.** Mutation log shows zero `tool:markHouseguestMet` events across 22+ `turn-settled` events. The premiere auto-belt (`_auto_mark_premiere_intros` in `agent_loop.py:~1878`) should fire when `_moment == "premiere"` and the model narrates HG names, but no `gamechanged` event with reason `tool:markHouseguestMet` appears. Either the belt is not firing or its backend tool call does not dispatch a `gamechanged` event (so the JS mutation log never sees it). The bar fills on evictions (not HG meetings) — so 0% is technically correct for premiere — but the HOH gate requires all-15-met, and there is zero FE signal that the belt is making progress. Confidence: H that the mutation log is missing evidence; M on root cause (backend-silent vs. not-firing). |
+| **J3-07** | HIGH | OPEN | **No persistent game phase indicator in UI.** "Week 1 / Premiere" appears in small secondary sidebar text but there is no phase label + current objective displayed in the main chrome. All game-state orientation comes from in-chat narration. At frames 44 and 47 (veto/eviction asks), the model's OOC aside `((We're still on Premiere Night…))` was the ONLY signal correcting the player's drifted mental model. |
+| **J3-08** | HIGH | OPEN | **No visible premiere progress counter ("X of 15 met").** The premiere unlock condition (all 15 houseguests must be met) has no persistent tracker in any UI surface. The only count appears mid-narration ("Eleven faces met — just five left"). After 4 HOH pushes the player has no independent confirmation of why the game isn't advancing. Sidebar cast roster shows names but no met/unmet state. |
+| **J3-09** | MED | OPEN | **Tutorial copy omits the meet-all-15 unlock condition.** "Take your time meeting the cast" names the activity but not the gate (all 15 required) or the exit condition. "Take your time" actively implies no urgency. A player who dismisses with "Got it" holds no model of why HOH is gated. Source: `orwellPremiereTutorial.js:107-115`. WCAG 3.3.2 (instructions don't describe required completion condition). |
+| **J3-10** | MED | OPEN | **"Got it" dismisses tutorial with no recovery path; no forward-navigation affordance.** Dismiss writes a localStorage key (persists across sessions). The guide never reappears. No re-open affordance, no suggested next action when dismissed. A player who dismisses before reading has no recovery. Source: `orwellPremiereTutorial.js:27-33, 110`. |
+| **J3-11** | MED | OPEN | **Tutorial banner persists through all game phases with no graduation cue.** Present in every game-phase frame through "eviction night" scenario steps. Static "Welcome to the house — premiere week" copy is stale once the player has progressed; no dismiss control visible; narrow zone competes with the progress bar slot. Source: `orwellPremiereTutorial.js`; visible in shots 14–53. |
+| **J3-12** | MED | OPEN | **HOH decision card never appeared; no pending-state affordance when expected.** `comp_intent_skip: "card absent after nudges"`. When the card is expected but absent (pre-gate-clear), there is no "decision pending" placeholder or status message. The 15s `rearmFromStatus` polling loop (`orwellDecision.js`) only arms when the engine returns a `pending` object — until then, the card zone is silent. |
+| **J3-13** | MED | OPEN | **Premiere redirect responses inconsistently include the remaining-HG count.** The best redirect pattern ("Eleven met, five left: Avery, Amelia, Elliot, Darren, Grant") appeared at frame 41. But frames 44/47 (veto/eviction redirect) described a nearby scene without naming the gap. Without the count, the player cannot form an action plan. Should be a consistent requirement in the stall-nudge / premiere redirect framing (`routes/chat_helpers.py` `apply_game_framing`). |
+| **J3-14** | MED | OPEN | **Progress bar perceptually absent at 4px height with no label or entrance animation.** Bottom of viewport, 0% fill, no label, no motion on first fill. Below Weber's Law threshold of casual visual attention. Even when it fills in later weeks, the 4px flat change will not register as a milestone without a micro-animation or label. Source: `orwellSeasonProgress.js:87-101`. |
+| **J3-15** | MED | OPEN | **Broken portrait thumbnails in cast-photo modal at casting.** Screenshot `03-02-casting-start.png`: 4 of 6 thumbnail slots show broken/placeholder states with no shimmer or loading indicator. High-investment onboarding moment undermined. No loading state defined — a shimmer using `--panel`+`--border` tokens would fix. |
+| **J3-16** | MED | OPEN | **Decision card chips and confirm button below project target-size floor on desktop.** Chips (`odec-opt`): `padding: .3rem .8rem`, no `min-height` → ~24px tall. Confirm: `padding: .42rem .95rem` → ~26-27px on desktop. Project floor is 44×36px (coarse-pointer). Mobile stacks full-width — adequate. Source: `orwellDecision.js:63-66, 75-78`. Consequential action (nomination, eviction vote) on an undersized target. |
+| **J3-17** | MED | OPEN | **Decision card dismiss "×" and note text low-contrast.** Dismiss `×` at `opacity: .55`; note text (`odec-note`) at `opacity: .65; font-size: .78em`. Both sit on `--panel` dark background — stacked opacity on a dim base likely sub-4.5:1 for the small note text. Source: `orwellDecision.js:56, 80`. WCAG 1.4.3. |
+| **J3-18** | MED | OPEN | **Decision card has no focus management on render.** `render()` calls `card.scrollIntoView` but no `card.focus()` or aria-live announcement. Keyboard users must Tab forward to reach chips; SR users may not know the card appeared. For a binding, irreversible action (noms/eviction) this is an access barrier. Source: `orwellDecision.js:382`. WCAG 2.4.3. |
+| **J3-19** | MED | OPEN | **Right-panel cast roster visual weight competes with primary chat column.** Similar text density and color weight to narration bubbles; no opacity subordination or reduced type step. Eye is split between reading narration and processing roster. Visual hierarchy gap — not a contrast failure. |
+| **J3-20** | LOW | OPEN | **Sidebar cast roster shows no met/unmet distinction.** All 15 HG names visible but no state — met (spoke to) vs. unmet (stranger). The one reference a player might consult during premiere gives no premiere-progress signal. |
+| **J3-21** | LOW | OPEN | **OOC double-paren asides appear inside narration bubbles with no visual demarcation.** `((We're still on Premiere Night…))` rendered inline inside the AI bubble — same bubble, no background, color, or icon to distinguish in-fiction narration from meta-game correction. Player must context-switch without a cue. |
+| **J3-22** | LOW | OPEN | **"Confirm — this is binding" on decision card lacks first-timer context.** No explanation of what "binding" means in BB game terms (cannot change after submit, permanent in-game consequence). Dismiss title attribute has the fuller hint but `title` is unreliable. Source: `orwellDecision.js`. Low severity — the label + note are already better than most. |
+| **J3-23** | LOW | OPEN | **"View thinking process" accordion rendered inside the AI narration bubble.** Frames 38-13, 44-18 show it inside the Big Brother bubble border. A first-timer may misread it as in-fiction content. Consider moving the accordion slot to below the bubble, outside the bubble border. |
+| **J3-24** | LOW | OPEN | **Tutorial rhythm-line emoji are informational with no text alternative.** Wave/Trophy/Hammer/Gem/Ballot emoji inline in prose, no `aria-hidden`. Screen readers announce Unicode names ("gem stone" for Veto). WCAG 1.1.1. Source: `orwellPremiereTutorial.js:114-115`. |
+| **J3-25** | LOW | OPEN | **Season progress bar lacks supplementary description.** `aria-label="Season progress"` only; no hint that 0% during premiere is expected and correct. SR users hear "Season progress, 0 percent" with no framing. One-liner: `aria-description="Advances as houseguests are evicted"`. Source: `orwellSeasonProgress.js:94-101`. |
+| **J3-26** | — (positive) | VERIFIED | **Model correctly holds premiere gate against 4 explicit HOH pushes.** Engine never called `advanceGame` prematurely; premiere constraint held deterministically. Anti-sycophancy working at the engine level. |
+| **J3-27** | — (positive) | VERIFIED | **In-chat narration delivers explicit progress counts when redirecting.** Best redirect (frame 41): "Eleven faces met — just five left: Avery, Amelia, Elliot, Darren, and Grant" with room context. The chat-is-the-game model is doing genuine wayfinding work when the redirect fires correctly. |
+| **J3-28** | — (positive) | VERIFIED | **In-narrative gate explanations are consistent and diegetic.** OOC `((…))` aside pattern used consistently for meta-game info; the model never broke character gratuitously. Deliberate OOC is distinguishable from narration by the double-paren convention (though visual demarcation is missing — J3-21). |
+| **J3-29** | — (positive) | VERIFIED | **Welcome card + AI sender label consistent and strong.** Clean first-paint hierarchy; "Big Brother" sender label unambiguously identifies every AI bubble throughout the journey. |
 
-*More findings appended as capture progresses through HOH → noms → veto → eviction.*
+### J3 de-dup / cluster map
+
+- **The premiere-gate cluster** (J3-05…J3-13): all five lenses converge on the same failure surface — the HOH gate is engine-enforced but the player-facing signal layer is almost entirely absent. Fix together: anti-sycophancy guardrail extension (J3-05) + `markHouseguestMet` belt investigation (J3-06) + tutorial gate-copy (J3-09) + phase label (J3-07) + progress counter (J3-08) + redirect consistency (J3-13) + "Got it" forward-nav (J3-10) + tutorial graduation (J3-11).
+- **Decision card a11y cluster** (J3-16/17/18/22): touch targets + contrast + focus management. Fix together in `orwellDecision.js`.
+- **Progress bar signal cluster** (J3-14/J3-25): visual salience + aria-description. Fix together in `orwellSeasonProgress.js`.
+- **Emoji a11y** (J3-24): isolated one-liner in `orwellPremiereTutorial.js`.
+- **J3-19/20/21/23**: low-severity design polish → Phase-4 backlog.
+
+### Positives to keep as patterns
+
+Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consistent channel ID), `role=note aria-live="polite"` tutorial card pattern (J2-12), premiere gate determinism (anti-sycophancy working at engine), in-chat count redirect when fired correctly.
+
+---
+
+## Journey 3 — remediation (gated set #3)
+
+**Scope: J3 findable FE fixes — decision card a11y, progress bar signal, tutorial gate-copy, progress counter, emoji a11y. Engine-adjacent issues (J3-05 anti-sycophancy, J3-06 belt investigation) are flagged HIGH for the owner but require engine investigation, not quick FE fixes.**
+
+> ⚠️ J3-05 and J3-06 are NOT in this set — they need investigation first:
+> - J3-05: the pre-emission outcome guard (`chat_helpers.py`) already catches phantom closed-set claims but may not cover the premiere-stall hallucination path. Needs inspection before patching.
+> - J3-06: `_auto_mark_premiere_intros` existence confirmed in CLAUDE.md but whether it fires and dispatches `gamechanged` needs tracing before any fix.
+> Owner should investigate J3-05/06 as part of the next engine/agent-loop work session.
+
+**Applied:**
+
+| ID | Fix | File |
+|---|---|---|
+| **J3-09** | Tutorial body: add "You'll need to cross paths with all fifteen houseguests before Production calls the first HOH competition." Replace "Meet the house" in rhythm line with "HOH" (it's a prerequisite, not a phase). | `static/js/orwellPremiereTutorial.js` |
+| **J3-10** | Dismiss label: "Got it" → "Close guide" (action label, not affirmation). Add `title="Won't show again"` on the button. | `static/js/orwellPremiereTutorial.js` |
+| **J3-14** | Progress bar: add `aria-label="Season progress — 0 of 15 evictions"` dynamically; add `transition-duration: 400ms` ease-out for first-fill animation (guarded by reduced-motion). | `static/js/orwellSeasonProgress.js` |
+| **J3-16** | Decision card chips: `min-height: 36px`. Confirm button: `min-height: 44px`. | `static/js/orwellDecision.js` |
+| **J3-17** | Dismiss "×": `opacity: .55` → `.75`. Note text: `opacity: .65` → `.80`; remove `font-size: .78em` (use `.85rem` base). | `static/js/orwellDecision.js` |
+| **J3-18** | After `chatBox.appendChild(card)` + `scrollIntoView`: add `card.setAttribute("tabindex", "-1"); card.focus()`. | `static/js/orwellDecision.js` |
+| **J3-24** | Rhythm emoji: wrap each in `<span aria-hidden="true">`. | `static/js/orwellPremiereTutorial.js` |
+| **J3-25** | Progress bar: add `aria-description="Advances as houseguests are evicted"`. | `static/js/orwellSeasonProgress.js` |
+
+**Deferred from this set:**
+- J3-05 (anti-sycophancy / fictional HOH narration) — engine investigation required
+- J3-06 (`markHouseguestMet` belt) — agent_loop investigation required
+- J3-07/J3-08 (phase label / progress counter) — needs design decision on what persistent indicator to add and where
+- J3-11 (tutorial graduation) — depends on J3-06 resolution (when does the belt fire → when to dismiss)
+- J3-12 (card pending state) — engine `pending` object availability
+- J3-13 (redirect consistency) — prompt/framing in `apply_game_framing`
+- J3-15 (portrait skeleton loading) — portrait feature scope
+- J3-19/20/21/23 — Phase-4 design backlog
 
 ## Journey progress
 
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings; gated remediation set #1 (9 fixes: launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged PR #449** (CI green).
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
-- [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — **CAPTURING** (in progress)
+- [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
 - [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
