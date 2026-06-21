@@ -1106,7 +1106,7 @@
     <div class="chat-input-bar">
       <div class="chat-input-top">
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
-        <textarea id="message" placeholder="Message Orwell..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
+        <textarea id="message" placeholder="Message Orwell..." data-default-placeholder="Message Orwell..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
@@ -1629,6 +1629,53 @@
           <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><span aria-hidden="true" style="opacity:0.6;flex-shrink:0">🌙</span>In-Game Time &amp; Sleep<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-timeOfDayToggle" checked><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">A live in-game clock (morning to late night): the house thins as houseguests turn in for the night, staying up late dulls the next competition, and a "Nightfall" gadget shows who's still up. Applies to the live game immediately - no restart.</div>
+          </div>
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><span aria-hidden="true" style="opacity:0.6;flex-shrink:0">📊</span>Token Economy<span style="flex:1"></span></h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Control model token spend on live-game turns (ADR 0010). Reasoning effort per call class is the dominant cost lever; the OpenRouter provider object steers routing &amp; caching; tiering trades cost to keep a long game's memory. Applies immediately - no restart. Watch spend at <code>/api/admin/token-economy</code>.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Narration reasoning</label>
+                <select id="set-reasoningNarration" class="settings-select" style="width:120px;">
+                  <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Extraction reasoning</label>
+                <select id="set-reasoningExtract" class="settings-select" style="width:120px;">
+                  <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Casting reasoning</label>
+                <select id="set-reasoningCasting" class="settings-select" style="width:120px;">
+                  <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Authoring reasoning</label>
+                <select id="set-reasoningAuthoring" class="settings-select" style="width:120px;">
+                  <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Spend alert (USD / game)</label>
+                <input id="set-tokenSpendAlert" type="text" inputmode="decimal" placeholder="0 = off" class="settings-select" style="width:120px;">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Pin provider above (tokens)</label>
+                <input id="set-tokenPinThreshold" type="text" inputmode="numeric" placeholder="0 = off" class="settings-select" style="width:120px;">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Context tiering (keep history)</label>
+                <label class="admin-switch"><input type="checkbox" id="set-contextTieringToggle"><span class="admin-slider"></span></label>
+              </div>
+              <div class="settings-row" style="align-items:flex-start;">
+                <label class="settings-label">OpenRouter provider (JSON)</label>
+                <textarea id="set-openrouterProvider" class="settings-select" style="width:220px;height:60px;font-family:monospace;font-size:var(--fs-xs);" placeholder='{"sort": "throughput"}'></textarea>
+              </div>
+              <div id="set-tokenEconomyMsg" style="font-size:var(--fs-xs);color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
           </div>
           <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Image Generation<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-imgEnabledToggle" checked><span class="admin-slider"></span></label></h2>

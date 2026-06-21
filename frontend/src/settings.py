@@ -117,6 +117,42 @@ DEFAULT_SETTINGS = {
     # in src/context_budget.py.
     "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
+    # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
+    # reasoning budget. Maps a call class to a reasoning effort; empty {} means
+    # "use the code defaults in src.token_policy". Valid classes are exactly
+    # token_policy.CALL_CLASSES ("narration", "utility-extraction", "casting",
+    # "background-authoring"); valid efforts are token_policy.valid_efforts()
+    # ("off", "low", "medium", "high"). Read via get_setting("reasoning_budget", {})
+    # and passed into token_policy.resolve_token_policy(); an unknown class/effort
+    # there falls back to the class default, so a partial/garbage map is safe. Edit
+    # it at runtime via POST /api/settings (admin only) — e.g.
+    # {"reasoning_budget": {"narration": "high", "utility-extraction": "off"}}.
+    "reasoning_budget": {},
+    # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
+    # 0.0 = alert off. Compared against the running per-session cost total via
+    # orwell_token_ledger.check_soft_alert (strictly-over semantics).
+    "token_spend_alert_usd": 0.0,
+    # ADR 0010 / feature 0069 slice C — the high-token provider-PIN threshold (input tokens).
+    # 0 = off (default; fallbacks always on => byte-identical routing). When > 0, a live-game
+    # request whose recent input exceeds it asks OpenRouter to pin the (cache-warm) provider with
+    # no fallback, so a large prompt never cold-cache-misses on a fallback; small calls keep
+    # fallbacks on for availability. Per-session stickiness (the `user` field) is always on.
+    "token_pin_threshold_tokens": 0,
+    # ADR 0010 / feature 0069 slice D — opt-in non-degradation context tiering. False (default) keeps
+    # the lean budget (auto-derived, capped at agent_input_token_hard_max) => byte-identical. True lets
+    # a long game GROW its input budget toward the model window (~0.85x) BEFORE older turns are trimmed
+    # away, so history is kept (mandate #4) instead of lost to lossy compaction. Costs more on long
+    # games (watch the token-economy meter); only helps on large-context models.
+    "context_tiering_enabled": False,
+    # ADR 0010 / feature 0069 slice C — an OpenRouter `provider` routing object sent on live-game
+    # calls (https://openrouter.ai/docs/guides/routing/provider-selection). A free-form dict of the
+    # documented fields — e.g. {"sort": "throughput"}, {"order": ["deepinfra/turbo"],
+    # "allow_fallbacks": false}, {"only": ["deepinfra"]}, {"max_price": {"prompt": 1, "completion": 2}},
+    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Default {} = OpenRouter's
+    # normal price-based load balancing. Edit at runtime via POST /api/settings (admin). It is the BASE
+    # routing config; the high-token pin (token_pin_threshold_tokens) overlays allow_fallbacks=false on
+    # large prompts. Only applied for OpenRouter-routed game turns; a non-dict value is ignored.
+    "openrouter_provider": {},
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell

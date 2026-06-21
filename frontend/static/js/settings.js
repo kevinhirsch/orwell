@@ -709,6 +709,75 @@ async function initTimeOfDaySettings() {
   });
 }
 
+/* ── Token Economy (ADR 0010) ── */
+async function initTokenEconomySettings() {
+  const rNarr = el('set-reasoningNarration');
+  if (!rNarr) return;
+  const reasoningEls = [
+    [el('set-reasoningNarration'), 'narration'],
+    [el('set-reasoningExtract'), 'utility-extraction'],
+    [el('set-reasoningCasting'), 'casting'],
+    [el('set-reasoningAuthoring'), 'background-authoring'],
+  ];
+  const spendAlert = el('set-tokenSpendAlert');
+  const pinThreshold = el('set-tokenPinThreshold');
+  const tieringToggle = el('set-contextTieringToggle');
+  const providerJson = el('set-openrouterProvider');
+  const msg = el('set-tokenEconomyMsg');
+
+  function setMsg(text, ok) {
+    if (!msg) return;
+    msg.textContent = text || '';
+    msg.style.color = ok === false ? 'var(--danger, #c0392b)' : 'color-mix(in srgb, var(--fg) 45%, transparent)';
+  }
+
+  async function post(patch) {
+    try {
+      await fetch('/api/auth/settings', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      setMsg('Saved', true);
+    } catch (e) { setMsg('Save failed', false); }
+  }
+
+  try {
+    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    const s = await res.json();
+    const rb = (s.reasoning_budget && typeof s.reasoning_budget === 'object') ? s.reasoning_budget : {};
+    reasoningEls.forEach(([elx, cls]) => { if (elx) elx.value = rb[cls] || ''; });
+    if (spendAlert) spendAlert.value = s.token_spend_alert_usd ? String(s.token_spend_alert_usd) : '';
+    if (pinThreshold) pinThreshold.value = s.token_pin_threshold_tokens ? String(s.token_pin_threshold_tokens) : '';
+    if (tieringToggle) tieringToggle.checked = !!s.context_tiering_enabled;
+    if (providerJson) {
+      providerJson.value = (s.openrouter_provider && typeof s.openrouter_provider === 'object'
+        && Object.keys(s.openrouter_provider).length)
+        ? JSON.stringify(s.openrouter_provider, null, 2) : '';
+    }
+  } catch (e) { console.warn('Failed to load token-economy settings', e); }
+
+  // reasoning_budget is a per-class dict: rebuild it from the four selects on any change.
+  function saveReasoning() {
+    const rb = {};
+    reasoningEls.forEach(([elx, cls]) => { if (elx && elx.value) rb[cls] = elx.value; });
+    post({ reasoning_budget: rb });
+  }
+  reasoningEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveReasoning); });
+
+  if (spendAlert) spendAlert.addEventListener('change', () => post({ token_spend_alert_usd: parseFloat(spendAlert.value) || 0 }));
+  if (pinThreshold) pinThreshold.addEventListener('change', () => post({ token_pin_threshold_tokens: parseInt(pinThreshold.value, 10) || 0 }));
+  if (tieringToggle) tieringToggle.addEventListener('change', () => post({ context_tiering_enabled: tieringToggle.checked }));
+  if (providerJson) providerJson.addEventListener('change', () => {
+    const raw = (providerJson.value || '').trim();
+    if (!raw) { post({ openrouter_provider: {} }); return; }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { setMsg('Invalid JSON — not saved', false); return; }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) { setMsg('Must be a JSON object — not saved', false); return; }
+    post({ openrouter_provider: parsed });
+  });
+}
+
 /* ── Vision ── */
 async function initVisionSettings() {
   const vlSel = el('set-vlModelSelect');
@@ -2312,6 +2381,7 @@ function initAll() {
   initUtilityModel();
   initImageSettings();
   initTimeOfDaySettings();
+  initTokenEconomySettings();
   initVisionSettings();
   initTtsSettings();
   initSttSettings();

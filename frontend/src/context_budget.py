@@ -76,3 +76,74 @@ def compute_input_token_budget(
         return max(1, min(scaled, hard_max))
 
     return configured if configured > 0 else default
+
+
+# Slice D / ADR 0010 Decision D — the ceiling the lean budget is allowed to
+# *escalate* to before lossy compaction kicks in. Owner ruling 2: opt-in, grow
+# toward ~0.85× of the model window so a long-context model uses its capacity to
+# keep the full conversation (non-degradation, mandate #4) instead of summarizing
+# detail away. Tunable; the default stays byte-identical (escalation is off).
+DEFAULT_TIER_CEILING = 0.85
+
+
+def _coerce_int(value: object) -> int:
+    """Best-effort int coercion that never raises (garbage/None -> 0)."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_ceiling(ceiling: object, *, fallback: float = DEFAULT_TIER_CEILING) -> float:
+    """Clamp the tier ceiling into (0, 1]; non-finite/<=0 -> fallback; >1 -> 1.0."""
+    try:
+        c = float(ceiling)
+    except (TypeError, ValueError):
+        return fallback
+    # NaN / inf are non-finite (NaN fails every comparison -> caught here).
+    if not (c == c) or c in (float("inf"), float("-inf")):
+        return fallback
+    if c <= 0:
+        return fallback
+    if c > 1:
+        return 1.0
+    return c
+
+
+def escalate_budget(
+    lean_budget: int,
+    needed_tokens: int,
+    context_length: int,
+    *,
+    enabled: bool = False,
+    ceiling: float = DEFAULT_TIER_CEILING,
+) -> int:
+    """Slice D: the non-degradation backup. Default (``enabled=False``) -> returns
+    ``lean_budget`` UNCHANGED (byte-identical to today). When enabled AND the needed
+    context exceeds the lean budget AND the model window is large enough to help,
+    escalate the budget UP toward the window (to ``int(context_length*ceiling)``), so
+    we grow into the big window BEFORE lossy compaction instead of summarizing detail
+    away (ADR 0010 Decision D, owner ruling 2).
+
+    Never returns less than ``lean_budget``; never exceeds ``int(context_length*ceiling)``;
+    clamps a bad ceiling into (0, 1]; unknown/zero ``context_length`` -> ``lean_budget``
+    unchanged. Pure and side-effect-free.
+    """
+    lean = _coerce_int(lean_budget)
+    needed = _coerce_int(needed_tokens)
+    window = _coerce_int(context_length)
+    c = _coerce_ceiling(ceiling)
+
+    # Opt-out (the default) and the unknown-window case are both exact no-ops: the
+    # lean budget stands, so the bill + behaviour are byte-identical to today.
+    if not enabled or window <= 0:
+        return lean
+
+    # No need to grow if the lean budget already covers the needed context.
+    if needed <= lean:
+        return lean
+
+    cap = int(window * c)
+    # Grow toward the window, but only as far as actually needed, and never below
+    # the lean floor (cap could be < lean on a tiny window).
+    return max(lean, min(needed, cap))

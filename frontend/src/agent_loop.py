@@ -1773,7 +1773,8 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
         ]
         # Room for a reasoning model to think THEN emit the tiny room JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1200, timeout=45)
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         raw = raw or ""
         # The JSON may sit after a reasoning block — scan the WHOLE response, take the LAST object
         # carrying a "room" key (reasoning models emit the answer last).
@@ -1857,7 +1858,8 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
         ]
         # Room for a reasoning model to think THEN emit the moves JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1500, timeout=45)
+                                   temperature=0.1, max_tokens=1500, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         obj = _last_json_object_with_key(raw or "", "moves")
         if obj is None:
             logger.info(f"[orwell] auto-move-npc: no parseable JSON (len={len(raw or '')})")
@@ -2013,7 +2015,8 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # reads the `reasoning`/`thinking` field, so the answer is recoverable even when the model
         # routes everything there.)
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.2, max_tokens=1500, timeout=45)
+                                   temperature=0.2, max_tokens=1500, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         raw = raw or ""
         # The JSON may sit after a reasoning block OR inside it — take the LAST object carrying
         # withIds (reasoning models emit the answer last). The object may now NEST a `consequence`
@@ -2110,7 +2113,8 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         ]
         # Room for a reasoning model to think THEN emit the deal JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1200, timeout=45) or ""
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
         obj = None
         for cand in reversed(re.findall(r"\{[^{}]*\"struck\"[^{}]*\}", raw, re.DOTALL)):
             try:
@@ -2468,6 +2472,7 @@ async def _run_verifier_subagent(
             url=endpoint_url, model=model,
             messages=[{"role": "user", "content": prompt}],
             headers=headers, temperature=0.0, max_tokens=600, timeout=60,
+            call_class="utility-extraction",
         )
     except Exception as e:
         logger.warning(f"[agent] verifier subagent failed: {e}")
@@ -2851,7 +2856,7 @@ async def stream_agent_loop(
     _t3 = time.time()
     try:
         from src.context_compactor import trim_for_context
-        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX
+        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, escalate_budget
         from src.settings import is_setting_overridden
 
         soft_budget = int(get_setting("agent_input_token_budget", 6000) or 0)
@@ -2877,6 +2882,13 @@ async def stream_agent_loop(
                 is_setting_overridden("agent_input_token_budget"),
                 hard_max=hard_max,
             )
+            # ADR 0010 slice D (opt-in non-degradation tier): before trimming older turns AWAY, grow
+            # the budget toward the model window so a long game keeps its history instead of losing it
+            # to lossy compaction. Default off ⇒ effective_budget unchanged ⇒ byte-identical.
+            if get_setting("context_tiering_enabled", False):
+                effective_budget = escalate_budget(
+                    effective_budget, before_trim_tokens, context_length, enabled=True,
+                )
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
@@ -2915,6 +2927,10 @@ async def stream_agent_loop(
     _verifier_instruction = _extract_last_user_message(messages)
     real_input_tokens = 0   # Accumulated real usage from API
     real_output_tokens = 0
+    real_cached_tokens = 0       # ADR 0010 meter: cached-prompt tokens (cheap reads)
+    real_reasoning_tokens = 0    # ADR 0010 meter: reasoning/thinking tokens (the cost driver)
+    real_cost = 0.0              # ADR 0010 meter: authoritative per-request cost (usage.cost)
+    _usage_provider = None       # ADR 0010 meter: which provider served (cache stickiness)
     last_round_input_tokens = 0  # Last round's input tokens (for context % peak)
     has_real_usage = False
     backend_gen_tps = 0      # backend-reported true gen speed (llama.cpp timings)
@@ -2946,6 +2962,39 @@ async def stream_agent_loop(
     # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
+    # ADR 0010 slice B: resolve the per-call-class token policy ONCE for game turns (live-game
+    # narration or the casting interview). It carries the reasoning budget — admin-overridable via the
+    # `reasoning_budget` setting — that each narration LLM call then sends. Non-game platform chat
+    # resolves no policy ⇒ byte-identical (no reasoning override on the general assistant).
+    _call_class = "casting" if game_mode == "casting" else ("narration" if _is_live_game else None)
+    _token_policy = None
+    if _call_class:
+        try:
+            from src.token_policy import resolve_token_policy
+            _token_policy = resolve_token_policy(
+                _call_class, {"reasoning_budget": get_setting("reasoning_budget", {})}
+            )
+        except Exception:
+            _token_policy = None
+    # ADR 0010 slice C: the canonical game session (0064) is the cache-stickiness key (every device's
+    # turns converge on it), and the high-token provider-pin threshold (0 = off) decides when a large
+    # prompt pins the cache-warm provider. Resolved once for game/casting turns; absent for chat.
+    _canon_session_id = session_id
+    _pin_threshold = 0
+    _provider_opts = None
+    if _call_class:
+        try:
+            from src import orwell_game_session as _gs
+            _canon_session_id = (_gs.get_game_session(owner) if owner else None) or session_id
+        except Exception:
+            _canon_session_id = session_id
+        try:
+            _pin_threshold = int(get_setting("token_pin_threshold_tokens", 0) or 0)
+        except (TypeError, ValueError):
+            _pin_threshold = 0
+        # ADR 0010 slice C: the admin OpenRouter `provider` routing object (base routing config).
+        _po = get_setting("openrouter_provider", {})
+        _provider_opts = _po if (isinstance(_po, dict) and _po) else None
     # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
     # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
     # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
@@ -3095,6 +3144,10 @@ async def stream_agent_loop(
             prompt_type=prompt_type if round_num == 1 else None,
             tools=all_tool_schemas if all_tool_schemas else None,
             timeout=agent_stream_timeout,
+            policy=_token_policy,
+            session_id=_canon_session_id,
+            pin_provider=(_pin_threshold > 0 and last_round_input_tokens >= _pin_threshold),
+            provider_opts=_provider_opts,
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
@@ -3160,6 +3213,16 @@ async def stream_agent_loop(
                         round_input = u.get("input_tokens", 0)
                         real_input_tokens += round_input
                         real_output_tokens += u.get("output_tokens", 0)
+                        # ADR 0010 meter: accumulate the rest of the envelope per round.
+                        real_cached_tokens += u.get("cached_tokens", 0) or 0
+                        real_reasoning_tokens += u.get("reasoning_tokens", 0) or 0
+                        if u.get("cost") is not None:
+                            try:
+                                real_cost += float(u.get("cost") or 0)
+                            except (TypeError, ValueError):
+                                pass
+                        if u.get("provider"):
+                            _usage_provider = u.get("provider")
                         last_round_input_tokens = round_input
                         has_real_usage = True
                         # Backend-reported TRUE generation speed (llama.cpp
@@ -4451,6 +4514,35 @@ async def stream_agent_loop(
     )
     metrics["requested_model"] = requested_model
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
+
+    # ADR 0010 (the token-economy meter): one Vault-free token/cost entry per live-game turn — the
+    # full envelope (input/cached/reasoning/output tokens, cost, context %, provider) the admin watches
+    # and the soft spend-alert reads. Keyed by the CANONICAL game session (0064) so every device's
+    # turns aggregate into one game. Fail-open — observability never hurts a turn; no player surface
+    # ever sees these numbers. (Casting/utility-call metering is a follow-on.)
+    if _is_live_game and owner:
+        try:
+            from src import orwell_token_ledger as _tl
+            try:
+                from src import orwell_game_session as _gs
+                _canon_session = _gs.get_game_session(owner) or session_id
+            except Exception:
+                _canon_session = session_id
+            _tl.record_turn(
+                owner,
+                session=_canon_session,
+                turn_id=session_id,
+                call_class="narration",
+                input_tokens=real_input_tokens,
+                cached_tokens=real_cached_tokens,
+                reasoning_tokens=real_reasoning_tokens,
+                output_tokens=real_output_tokens,
+                cost=real_cost,
+                context_percent=metrics.get("context_percent", 0),
+                provider=_usage_provider,
+            )
+        except Exception as _tl_err:
+            logger.debug(f"[orwell] token-ledger record failed: {_tl_err}")
 
     # Teacher-escalation: inline takeover visible in the chat stream.
     # The student just finished; if Tier 1 flags failure, the teacher

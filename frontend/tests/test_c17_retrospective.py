@@ -105,4 +105,8 @@ def test_engine_client_shares_one_async_client():
 
 def test_game_trim_css_is_stripped_when_the_build_is_off():
     src = open(os.path.join(FRONTEND, "app.py"), encoding="utf-8").read()
-    assert "game-trim" in src and "else:" in src.split("data-game-build")[1][:400]
+    # After the game-build body injection, the serve must carry a build-OFF `else:`
+    # branch that strips game-trim.css. Asserted on the post-injection tail (not a
+    # tight char window) so adding game-build handling above the else can't break it.
+    after = src.split('data-game-build="1"', 1)[1]
+    assert "game-trim" in src and "else:" in after and "game-trim" in after

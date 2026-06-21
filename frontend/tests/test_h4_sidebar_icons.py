@@ -175,6 +175,32 @@ def test_rail_normalizes_cloned_icon_size_in_css():
     )
 
 
+# ── 3b. accessible name (WCAG 4.1.2) ───────────────────────────────────────
+
+def test_rail_buttons_get_an_accessible_name():
+    """The rail buttons are icon-only (they ship no glyph and no text), so a bare
+    `title` is their only name — and `title` is not a reliable accessible name.
+    syncRailIcons must mirror a real NAME into aria-label, on the same single-source
+    rule as the icon: the expanded source row's name first (its aria-label or title),
+    the button's own title as the fallback for the glyph-owning entries (delete ✕ /
+    open-document). Verified at runtime: on a natural load #rail-search / new-session
+    / theme / settings / delete-session all expose an aria-label."""
+    js = _read(LAYOUT_JS)
+    sync = js[js.index("export function syncRailIcons"):js.index("function _initRailIconSource")]
+    assert "setAttribute('aria-label'" in sync, (
+        "syncRailIcons must set aria-label on the rail buttons — title alone is not "
+        "a reliable accessible name (WCAG 4.1.2)."
+    )
+    # name derives from the source row first (single-source), own title as fallback.
+    assert "src.getAttribute('aria-label') || src.title" in sync
+    assert "btn.title" in sync, "glyph-owning buttons (delete ✕) fall back to their own title."
+    # the sweep covers EVERY rail button, not only the paired ones.
+    assert "querySelectorAll('.icon-rail-btn')" in sync
+    # every static button already ships a title for the sweep to mirror.
+    for bid, tag in _rail_buttons():
+        assert 'title="' in tag, f"#{bid} needs a title for syncRailIcons to mirror into aria-label."
+
+
 # ── 4. the runtime gate ────────────────────────────────────────────────────
 
 def test_browser_smoke_carries_the_h4_runtime_gate():
