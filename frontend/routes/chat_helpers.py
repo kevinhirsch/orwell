@@ -578,6 +578,14 @@ def freeze_view(user, live):
 # model-driven through the tool seam (no FE-issued call exists), so there is nothing to wire for it.
 _LAST_BEAT_SEQ: dict = {}
 
+# ADR 0011 — the beat key (week, phase, moment) the model was FRAMED on for the user's current turn,
+# stashed by apply_game_framing (zero extra engine read — framing already holds the game state). The
+# agent loop compares it to the engine's CURRENT beat at end-of-turn: if the beat MOVED but this turn
+# fired no progression tool, a concurrent PEER (another device's turn/decision) advanced it — so the
+# stall-nudge must NOT fire (it would re-advance a beat that already moved). Single-tab: the beat key
+# changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
+_LAST_FRAMED_BEAT_KEY: dict = {}
+
 # Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
 # (the ledger hook, feature 0065 Part D, is a separate slice; this counter is its data source).
 _STALE_BEAT_REJECTIONS = 0
@@ -641,6 +649,12 @@ def _is_stale_beat_error(exc) -> bool:
         return False
     if getattr(exc, "status", None) != 409:
         return False
+    # audit A-S5 / 0065 Part A: prefer the engine's STABLE machine `code` over the human-readable
+    # message. The thin client now surfaces the structured 409 body (`code`/`beatSeq`); the message
+    # marker is only a FALLBACK for an older engine / a test stub. So a wording drift in
+    # StaleBeatError.message can no longer silently turn reconcile fail-closed.
+    if getattr(exc, "code", None) == "stale-beat":
+        return True
     return _STALE_BEAT_MARKER in (str(exc) or "").lower()
 
 
@@ -654,13 +668,20 @@ async def _handle_stale_beat(user, exc) -> None:
     global _STALE_BEAT_REJECTIONS
     try:
         _STALE_BEAT_REJECTIONS += 1
-        # The fresh beatSeq is in the message — "…(now N)…". Parse it as a first refresh.
-        m = _STALE_BEAT_NOW_RE.search(str(exc) or "")
-        if m and user is not None:
-            try:
-                _LAST_BEAT_SEQ[user] = int(m.group(1))
-            except (TypeError, ValueError):
-                pass
+        # The fresh beatSeq: prefer the STRUCTURED field (audit A-S5 — the thin client now surfaces
+        # the 409 body's `beatSeq`); fall back to parsing the message marker "…(now N)…" only when it
+        # is absent (older engine / test stub). Decoupling reconcile from prose closes the wording-
+        # drift fail-closed across the whole concurrency path.
+        _structured_seq = getattr(exc, "beat_seq", None)
+        if isinstance(_structured_seq, int) and not isinstance(_structured_seq, bool) and user is not None:
+            _LAST_BEAT_SEQ[user] = _structured_seq
+        else:
+            m = _STALE_BEAT_NOW_RE.search(str(exc) or "")
+            if m and user is not None:
+                try:
+                    _LAST_BEAT_SEQ[user] = int(m.group(1))
+                except (TypeError, ValueError):
+                    pass
         # Re-read the live board to reconcile precisely (also refreshes last-seen from the reads).
         await _capture_beat_signature(user)
         # Stash a re-ground so the NEXT turn pins the model back to the moved board (reuse the spine).
@@ -1388,6 +1409,12 @@ async def apply_game_framing(
         # memory is the store recalled, never the chat remembered). Subsequent turns in the
         # same session get the live phase moment as before.
         moment = game_state.get("moment")
+        # ADR 0011: stash the FRAMING beat key (the beat the model is grounded on THIS turn) so the
+        # agent loop can distinguish a concurrent PEER's advance from the model under-calling — the
+        # two-tab "20-step loop" fix. Engine's raw fields (NOT the RE_ENTRY display moment). Zero extra
+        # read (game_state already in hand); Vault-free; fail-open (absent ⇒ the loop check is inert).
+        if user is not None and moment is not None:
+            _LAST_FRAMED_BEAT_KEY[user] = (game_state.get("week"), game_state.get("phase"), moment)
         if session_id is not None and session_id not in _SESSION_GAME_FRAMED:
             moment = RE_ENTRY_MOMENT
         try:
