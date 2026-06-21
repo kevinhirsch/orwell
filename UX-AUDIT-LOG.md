@@ -731,3 +731,29 @@ Multi-week probe (`j6_multiweek`): the loop advanced week 2 → week 3 (real evi
 - **The genuine residual (narrow, MED):** during the multi-beat reveal the real model sometimes **re-prompts the player to cast an eviction vote already submitted** (`ask_user: "You're in the Diary Room casting your eviction vote… who do you vote to evict?"`). It's confusing but **non-blocking** — the pre-resolve belt advances the reveal regardless. The right fix is **prompt-side** (the eviction-reveal moment prompt should tell the model the player's vote is in and to narrate/advance the reveal, not re-collect a vote), not a pacing change. Same family as the casting "headshot already on file" framing fix.
 
 **Severity:** MED (a confusing model re-prompt on eviction night), **not** HIGH and **not** launch-blocking — the prior HIGH framing was based on the probe's mis-measurement of the intended staging. The live game was unstuck to week 4 for continued testing.
+
+---
+
+## Real-LLM season-transition continuity (R4/R5) — the "black-ops-prestige" model
+
+**Owner design clarification (2026-06-21):** each season is a **totally new existence — the persona is ERASED**; the **only** thing that carries across seasons is an **incremented level/season number** (like CoD Black Ops *prestige*). The continuity test verifies exactly that: meta-counter persists, everything else is wiped.
+
+### Finding R4-01 — the FINALE doesn't complete with the real model (long staged sequence, model loops) · MED–HIGH · OPEN
+The real-LLM finale probe (`j6_finale`) stalled at `moment=jury-finale` (week 14, `finished=false`, no winner) after 12 turns; the retrospective never appeared. Driving `advanceGame` directly completed it cleanly in ~29 beats → **winner crowned (the player, Audit Probe 2, won 7–2)**, so **the engine is healthy.** The finale is a long *intended* staged sequence — F2 opening statements → each finalist answers all 9 jurors (`finale-answer` per juror) → the jury vote revealed one juror at a time → winner. The real model **under-drives it and loops** ("let me check the game state… we haven't reached the vote yet"), partly aggravated by the probe pushing "read the votes" early (the model correctly resisted). **Same family as R3-01:** check whether the finale phase is covered by `_pre_resolve_npc_ceremony`'s per-turn auto-advance (`_CEREMONY_RESOLVE_PHASES`) — if the `finale`/`jury-finale` phase isn't in that set, it relies entirely on the model's under-called `advanceGame` and won't reliably finish. **Do NOT** roll-through in one turn (it would wreck the staged reveal, like R3-01). Positive: **J5-18 live check passed** — the narration referenced the player's own standing (`placementNarrated=true`).
+
+### Finding R5-01 — the post-season hand-off offers "Keep this houseguest", contradicting the prestige model · HIGH (design conflict) · OPEN (owner ruling)
+`orwellNewSeason.js` renders two buttons: **"Keep this houseguest"** (`data-keep="1"` → feature 0056, `next-season {keep:true}` carries the prior CHARACTER) and "Recast from scratch" (`data-keep="0"`). Under the owner's stated model (*persona erased, totally new existence, only the level number carries*), the **keep path should not exist** — it carries a persona across the prestige boundary. **Recommend** removing the keep affordance (and the `keep:true` path) so every season is a clean recast; flagged for an owner ruling since it removes shipped functionality (0056).
+
+### Transition mechanics — VERIFIED prestige-correct (recreate path)
+Triggered `POST /api/orwell/next-season {keep:false, confirm:true}` from the finished season 1 (player won). Engine/ledger truth, before → after:
+
+| Property | Before (S1) | After (S2) | Prestige-correct? |
+|---|---|---|---|
+| season counter (ledger `default`) | 1 | **2** | ✅ the one carry-over |
+| `/api/orwell/season` (player-facing) | — | `{"season":2}` (the "Season 2" chip shows past S1) | ✅ visible |
+| engine moment | `post-season` | **`character-creation`** (fresh casting) | ✅ persona erased |
+| player record | `Audit Probe 2` | **`None`** | ✅ erased |
+| cast | Paul Pierce, Sage Hahn, … | **`[]`** (regenerated fresh) | ✅ new existence |
+| season-1 leakage | — | none (`started=false`) | ✅ clean |
+
+The recreate path is exactly the black-ops-prestige model. **Season-2 playthrough (casting → premiere → end of day 1) with the real model: in progress** (`j6_season2`) — re-validates the R1-01 premiere belt fix holds *across* the transition.
