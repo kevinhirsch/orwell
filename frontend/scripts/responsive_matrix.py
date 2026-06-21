@@ -20,6 +20,17 @@ Engine-staged surfaces (status HUD, decision card, …) are exercised when an
 engine is reachable (ORWELL_MATRIX_ENGINE=url) or buildable; otherwise the run
 covers the page chrome (composer, sidebar, settings, theme modal) — still the
 S1/S5/S9 regression net. Usage:  python3 scripts/responsive_matrix.py
+
+J5-19 — the ENDGAME mobile sweep (opt-in). stage_game() only creates a fresh
+(turn-0) game, so the endgame surfaces (#orwell-retro self-gates on
+recap.finished; the endgame decision card needs a live finale pending) never
+render under the default run — leaving the endgame mobile UX asserted by
+source-string tests only. Set ORWELL_MATRIX_FINISH=1 (with a reachable engine)
+to fast-forward the staged season to FINISHED via the engine's player-channel
+advanceGame/submitDecision loop, then mount #orwell-retro + the endgame decision
+card and re-run the SAME overlap/tap/crowding sweep at the phone tiers. It is
+guarded (off by default; no-op without an engine or a started game) and fail-
+soft, so it can never change the default fresh-game run.
 """
 import os
 import subprocess
@@ -33,6 +44,17 @@ FE_DIR = Path(__file__).resolve().parents[1]
 PORT = int(os.environ.get("ORWELL_MATRIX_PORT", "8893"))
 FE = f"http://127.0.0.1:{PORT}"
 ENGINE_URL = os.environ.get("ORWELL_MATRIX_ENGINE", "")
+# J5-19 opt-in: drive the staged game to a FINISHED season so the endgame surfaces
+# (#orwell-retro, the endgame decision card) actually RENDER at the phone viewports — they
+# self-gate on recap.finished / a live finale pending and never appear on a fresh turn-0 game,
+# so the default stage_game() run measures ZERO endgame layout. Off by default (it needs a
+# reachable engine and mutates the shared sandbox); CI/operators set ORWELL_MATRIX_FINISH=1.
+FINISH_SEASON = os.environ.get("ORWELL_MATRIX_FINISH", "") not in ("", "0", "false", "no")
+# The user identity the FE asserts to the engine. The matrix boots the FE anonymous
+# (AUTH_ENABLED=false) → the FE sends NO X-Orwell-User header → the engine routes to its
+# single-tenant "default" sandbox. To drive THAT SAME game directly we must match: send no
+# user header too (override with ORWELL_MATRIX_USER only if the FE is wired multi-user).
+MATRIX_USER = os.environ.get("ORWELL_MATRIX_USER", "")
 
 # width, height, coarse-pointer?
 VIEWPORTS = [
@@ -100,8 +122,120 @@ def stage_game():
         return False
 
 
+def _engine_tool(name, args=None):
+    """Call a player-channel engine tool the SAME way the FE does (POST /player/call, no model
+    cost — the engine narrator is the deterministic Echo). Returns the parsed `result` (or None).
+    Fail-soft: any transport/JSON error → None, so this can never break the matrix run."""
+    try:
+        headers = {"Content-Type": "application/json"}
+        if MATRIX_USER:
+            headers["X-Orwell-User"] = MATRIX_USER
+        r = httpx.post(f"{ENGINE_URL}/player/call",
+                       json={"name": name, "args": args or {}}, headers=headers, timeout=60)
+        if r.status_code != 200:
+            return None
+        return (r.json() or {}).get("result")
+    except Exception:
+        return None
+
+
+# The autoResolve mapping mirrors the committed fast-forward harness
+# (docs/audits/playtest-harness/s4ff.mjs autoResolve) — pick the cheapest legal answer for every
+# pending kind so the loop reaches a finale/finished state deterministically. No content authoring:
+# the engine owns every outcome; these are throwaway picks purely to advance the closed-set loop.
+def _auto_resolve(p):
+    kind = p.get("kind")
+    opts = p.get("options") or []
+
+    def opt(i):
+        return opts[i]["id"] if len(opts) > i and isinstance(opts[i], dict) else None
+
+    if kind == "nominations":
+        return {"kind": kind, "choice": [opt(0), opt(1)]}
+    if kind == "veto-decision":
+        return {"kind": kind, "use": False}
+    if kind in ("comp-intent", "comp-round"):
+        return {"kind": kind, "intent": "compete"}
+    if kind == "houseguests-choice":
+        return {"kind": kind, "vote": opt(0)}
+    if kind == "replacement":
+        return {"kind": kind, "replacement": opt(0)}
+    if kind in ("eviction-vote", "tie-break", "final-eviction", "juror-vote"):
+        return {"kind": kind, "vote": opt(0)}
+    if kind == "goodbye-message":
+        return {"kind": kind, "vote": opt(0), "statement": "Take care."}
+    if kind == "finale-statement":
+        return {"kind": kind, "statement": "I played my own game."}
+    if kind == "finale-answer":
+        appeals = p.get("appeals") or ["own-game"]
+        return {"kind": kind, "appeal": appeals[0]}
+    if kind == "juror-question":
+        return {"kind": kind, "statement": "What was your biggest move?"}
+    if kind == "self-evict":
+        # Never volunteer the player out of the game during a fast-forward.
+        return None
+    return {"kind": kind}
+
+
+# A finale-family pending is where the high-stakes endgame decision card lives (final eviction, the
+# juror vote, the finalist statement, …). We capture the LAST such pending seen while driving so the
+# audit can render a real endgame decision card even after the game has finished (the card renders
+# purely from its Vault-free PendingDecisionView detail — measuring it needs no live game).
+_FINALE_KINDS = {"final-eviction", "finale-statement", "finale-answer",
+                 "juror-question", "juror-vote", "goodbye-message", "tie-break"}
+
+
+def finish_game():
+    """Drive the staged game to a FINISHED season via the engine's player channel (opt-in,
+    fail-soft, idempotent). Returns (finished: bool, endgame_pending: dict|None) — the latter is
+    the last finale-family pending observed, so the audit can also render the endgame decision card.
+
+    Guarded three ways so it can NEVER perturb the default run:
+      • only when ORWELL_MATRIX_FINISH is set AND an engine URL is configured;
+      • only if a started game is actually present (else it is a no-op);
+      • every engine call is fail-soft (a transport error simply ends the loop).
+    """
+    if not (FINISH_SEASON and ENGINE_URL):
+        return False, None
+    gs = _engine_tool("getGameState")
+    if not (isinstance(gs, dict) and gs.get("started")):
+        return False, None  # nothing to finish — leave the matrix run untouched
+    finished = bool(gs.get("finished"))
+    endgame_pending = None
+    consec_fail = 0
+    for _ in range(4000):  # generous bound; a real season ends in well under this
+        adv = _engine_tool("advanceGame")
+        if not isinstance(adv, dict):
+            consec_fail += 1
+            if consec_fail > 5:
+                break
+            continue
+        consec_fail = 0
+        if adv.get("finished"):
+            finished = True
+            break
+        p = adv.get("pending")
+        if not p:
+            continue
+        if p.get("kind") in _FINALE_KINDS:
+            endgame_pending = p  # remember the latest endgame card for the audit
+        decision = _auto_resolve(p)
+        if decision is None:  # e.g. self-evict — do not resolve; just keep advancing
+            continue
+        sub = _engine_tool("submitDecision", decision)
+        if not isinstance(sub, dict):
+            consec_fail += 1
+            if consec_fail > 5:
+                break
+            continue
+        if sub.get("finished"):
+            finished = True
+            break
+    return finished, endgame_pending
+
+
 GAME_SURFACES = ["#orwell-status", "#orwell-presence",
-                 "#orwell-retro", "[id*='ofin']", "[class*='odec']"]
+                 "#orwell-retro", "#orwell-decision-card", "[id*='ofin']", "[class*='odec']"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
 
@@ -197,11 +331,65 @@ def _intersects(a, b):
                 a["y"] + a["height"] - pad <= b["y"] or b["y"] + b["height"] - pad <= a["y"])
 
 
+def mount_endgame_card(page, endgame_pending):
+    """Render the endgame decision card by dispatching the engine's own Vault-free pending detail
+    over the `orwell:pending` window event (exactly how chat.js arms it). The card renders from the
+    detail alone — no live game is needed to MEASURE its layout (the matrix never clicks Confirm).
+    Returns True if a card mounted. Fail-soft."""
+    if not endgame_pending:
+        return False
+    try:
+        import json as _json
+        page.evaluate(
+            "(p) => window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: p } }))",
+            endgame_pending if isinstance(endgame_pending, dict) else _json.loads(_json.dumps(endgame_pending)),
+        )
+        page.wait_for_timeout(600)  # let the card's entrance animation settle
+        return bool(page.query_selector("#orwell-decision-card"))
+    except Exception:
+        return False
+
+
+def remove_endgame_card(page):
+    """Tear the decision card back down so the next sub-pass measures a surface in ISOLATION — the
+    live finale card and the post-season retro never co-exist in a real game (one is live, one is
+    finished), so measuring them together would manufacture a false cross-surface overlap."""
+    try:
+        page.evaluate("(document.getElementById('orwell-decision-card')||{remove(){}}).remove()")
+    except Exception:
+        pass
+
+
+def mount_retro(page):
+    """Build+show #orwell-retro via its headless seam (window._orwellRetroEnsure, mirrored from the
+    other panels). On a finished season its own 30s poll fills the body (winner headline, highlights,
+    the 44px 'Open the Vault' button); we wait for one tick so the tap sweep sees the real button.
+    Returns True if the panel mounted visible. Fail-soft."""
+    try:
+        page.evaluate("typeof window._orwellRetroEnsure === 'function' && window._orwellRetroEnsure()")
+        page.wait_for_timeout(1500)
+        # The earlier card pass may have force-hidden the panel (display:none) to isolate the card;
+        # clear that so the panel is its natural self for the retro measurement. (Its own poll would
+        # restore it on the next 30s tick, but the matrix can't wait that long.)
+        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='')")
+        el = page.query_selector("#orwell-retro")
+        return bool(el and el.is_visible())
+    except Exception:
+        return False
+
+
 def main():
     from playwright.sync_api import sync_playwright
     proc = boot_fe()
     with_game = stage_game()
     print(f"== matrix: game surfaces {'STAGED' if with_game else 'absent (no engine — chrome-only run)'}")
+    # J5-19 (opt-in): drive the staged season to a finished/endgame state so the endgame surfaces
+    # actually render at the phone viewports. No-op + fail-soft unless ORWELL_MATRIX_FINISH is set and
+    # the engine is reachable with a started game — it can never alter the default fresh-game run.
+    finished, endgame_pending = (finish_game() if with_game else (False, None))
+    if FINISH_SEASON:
+        print(f"== matrix: endgame {'FINISHED' if finished else 'not reached'}"
+              f"{' (endgame card captured)' if endgame_pending else ''}")
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
@@ -211,6 +399,22 @@ def main():
                 page = ctx.new_page()
                 page.goto(FE, wait_until="domcontentloaded")
                 audit_page(page, vp_name, w, h, coarse, with_game)
+
+                # J5-19: the endgame mobile sweep — only the phone tiers, only when a finished/endgame
+                # season was actually reached. The endgame decision card (live finale) and the
+                # post-season retro never co-exist in a real game, so each is mounted + measured in
+                # ISOLATION by the SAME overflow/overlap/tap/crowding sweep — covering endgame UX that
+                # was previously asserted by source-string tests only, never a viewport render.
+                if (finished or endgame_pending) and vp_name in ("phone-390", "tiny-320"):
+                    if mount_endgame_card(page, endgame_pending):
+                        # On a finished season the retro panel may already be self-visible from its
+                        # own background poll; hide it for THIS pass so the live-card layout is
+                        # measured alone (the two are never simultaneous in a real game).
+                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='none')")
+                        audit_page(page, vp_name + "+endgame-card", w, h, coarse, with_game)
+                        remove_endgame_card(page)
+                    if mount_retro(page):
+                        audit_page(page, vp_name + "+retro", w, h, coarse, with_game)
 
                 # G6: the settings tab rail keeps its LEFT orientation in any
                 # modal wider than the 480 token (explicit user preference);
