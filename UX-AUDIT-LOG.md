@@ -224,6 +224,7 @@ findings (valid vs. artifact-invalidated) follow under "J2 specialist consolidat
 |---|---|---|---|
 | J2-01 | LAUNCH-BLOCKING (candidate) | VIEWED | **Casting finalize is non-deterministic — the model can deflect an explicit player readiness signal and keep interviewing, so the season fails to start.** Identical cooperative answers + "I'm ready, put me in the house": one run deflected ("you skipped the question again"), state stayed `character-creation` (never started); other runs finalized at turn-4 / persona / ready1. The FE safety-net (`agent_loop.py` `_CASTING_FORCE_LEVEL = len(_CASTING_NUDGES) = 2`) needs ~3 readiness *lull* turns to FORCE `createCharacter`; a single "put me in the house" only NUDGES. |
 | J2-02 | HIGH (root-cause of J2-01) | VIEWED | **`createCharacter` is dropped from the tools actually SENT to the model during casting** — present in `relevant_tools` (candidate pool) but absent from `tool_names` in `[agent-debug]`. It IS in `ORWELL_GAME_TOOLS`, passed as `pinned_tools` when `engine_available` (`chat_routes.py:1190`) and unioned into `_relevant_tools` (`agent_loop.py:2560`), yet filtered out of the final schema. So the finalize NUDGES ("call createCharacter NOW") are unactionable; only the deterministic force (model-bypassing) can start the season. |
+| ~~J2-02~~ | **INVALIDATED** (log artifact) | RESOLVED | **NOT A BUG — a log-truncation misread.** `agent_loop.py:3032` logs `tool_names={_tool_names_sent[:15]}` (insertion order) and `relevant_tools={sorted(...)[:15]}` (alphabetical). `createCharacter` ("c…") shows in the *sorted* relevant_tools[:15] but sits at **index 23** of the actually-sent game-tool slice — past the `[:15]` cutoff. Verified by importing `FUNCTION_TOOL_SCHEMAS`+`ORWELL_GAME_TOOLS`: `createCharacter` HAS a schema AND is in the sent set. **The model HAS the tool during casting; it just under-calls it.** ⇒ the real J2-01 fix is the FE finalize-fallback threshold (force sooner on an explicit "I'm ready" + engine-`finalizable`), NOT adding a tool. |
 | J2-03 | LOW (content) | VIEWED | **Casting front-loads the name ask; a biography-first answer is re-asked every turn.** Producer asks "what do the feeds call you?" right after the photo and re-asks until a literal name is given (a rich "I'm a bartender from Chicago" loops). Model handles it gracefully (escalating mild exasperation — good in-fiction, steelman), but a player answering naturally can loop 1–3 turns before realizing only a *name* advances. |
 | J2-04 | LOW (IA/a11y — needs confirm) | OPEN | **Two cast-roster controls with overlapping matchers; the icon-rail mirror `#rail-cast` is present-but-HIDDEN while the sidebar is expanded.** `[id*='cast']` resolves to 2 elements (`#rail-cast` hidden mirror *first* in DOM order + the visible `#sidebar-cast-btn`). Player clicks the visible one fine — but verify the hidden mirror is `aria-hidden`/not tab-focusable, else SR/keyboard users hit a dead control. Confirm in responsive captures. |
 | J2-05 | MEDIUM (mobile IA) | VIEWED | **Cast roster unreachable on mobile without first opening the nav drawer.** At the premiere on 390px, `#sidebar-cast-btn` (a `div[role=button]` in the sidebar) is `:hidden` — the mobile sidebar is collapsed by default, so the "who's who" reference is hamburger → drawer → Cast (≥2 taps, off-screen). Reproduced: mobile/normal reached premiere (`house:15`) but the roster step could not run (button not visible). Same pattern as J1-12 (mobile settings/theme behind drawer). Steelman: drawer-nav is standard mobile IA — but the cast reference is *most* needed on mobile precisely while meeting 15 strangers. |
@@ -306,6 +307,28 @@ to `runs/<tag>/.../transcript/*.chat.png`), which always renders (proven: 12,930
 J3/J4. **Transcript evidence already sufficient** to assess J2: the element-screenshot shows rich in-character
 narration (producer "Isaiah"), masked "👁 Big Brother" sender, and the operator-aside correctly inside the collapsed
 "thinking" accordion (scrub OK); DOM probes confirmed J2-07 (cue-as-You-message). No further full re-capture needed for J2.
+
+## Journey 2 — remediation applied (gated set #2)
+
+Scope authorized by the owner ("include the finalize fix in this set"). Six confirmed-clean fixes:
+
+| ID | Fix | File |
+|---|---|---|
+| **J2-01** | Casting finalize: an EXPLICIT readiness signal ("I'm ready / put me in the house") + engine-`finalizable` now force-finalizes that turn instead of needing ~3 lulls (a mere short/disengaged lull keeps the gentle ramp; still gated on `finalizable`, never mints a floater). | `src/agent_loop.py` |
+| **J2-08** | Game build no longer shows the raw model slug as the chat title — `materializePendingSession` names the session "Casting interview" under `data-game-build` (mirrors the sidebar-list guard) instead of `${modelBase} ${time}`. | `static/js/sessions.js` |
+| **J2-11** | Onboarding holding-card tagline/tip raised from ~1.5:1 to ≥4.5:1 — explicit `color-mix(--fg 82–88%)` instead of `opacity:.7` over an inherited dim color (WCAG 1.4.3). | `static/js/orwellOnboarding.js` |
+| **J2-12** | Premiere tutorial card gets `aria-live="polite"` so screen-reader users are told the journey's key expectation-setter appeared (no focus theft; stays a `role=note`). | `static/js/orwellPremiereTutorial.js` |
+| **J2-19** | Sidebar cast control gets `aria-label="Cast — the houseguests"` (parity with the rail twin; 4.1.2). | `static/js/orwellCast.js` |
+| **J2-20** | Premiere tutorial dismiss fade guarded by `@media (prefers-reduced-motion: reduce)` (2.3.3). | `static/js/orwellPremiereTutorial.js` |
+
+**Validation:** JS `node --check` + `py_compile` clean; FE pytest **1765 passed / 2 failed** — the 2 (`test_h2b_all_model_pools`, `test_h2h3_settings`) are the SAME environmental failures as the J1 baseline (model-pool/image-subset assertions against the dev OpenRouter endpoint), NOT regressions; CI's clean checkout passes them. Casting/finalize/onboarding/premiere suites (87 tests) all green.
+
+**Deferred from this set (need more work — NOT shipped):**
+- **J2-02** — INVALIDATED (log-truncation artifact; createCharacter IS sent). No fix needed.
+- **J2-07** — production-cue-as-"You"-bubble: both known render paths (live `_hideUserBubble`, `softReloadHistory` skip) ARE guarded; my probe likely hit a pre-existing-session state. Needs clean-session reproduction to find the leaking path before fixing.
+- **J2-14** (tok/s in-game), **J2-16** (red focus border on benign cards) — judgment calls (is the telemetry/red intended?) — owner ruling needed.
+- **J2-17** (themed-accent CTA contrast 3.29:1), **J2-18** (mobile FAB overlaps tutorial) — per-theme / responsive-fiddly; need a token-level on-color solution + responsive testing.
+- **Design-level:** J2-05/09 cast IA, J2-10 premiere staging, J2-13 tutorial affordance, J2-15 avatar identity → Phase-4 backlog.
 
 ## Journey progress
 
