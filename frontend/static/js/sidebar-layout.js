@@ -38,8 +38,16 @@ export function initSidebarLayout(Storage, opts) {
 
   function _syncRailSideCore() {
     const sidebar = document.getElementById('sidebar');
+    const isRight = !!(sidebar && sidebar.classList.contains('right-side'));
+    // SINGLE SOURCE OF TRUTH for the layout side: the gadget dock is the nav sidebar's
+    // PAIR on the OPPOSITE edge. Mirror it here (sidebar-right ⟹ dock-left) so BOTH swap
+    // entry points — the ⇄ dock button and a shift-click on the hamburger — move BOTH
+    // columns together and the hamburger always follows the sidebar. Before this, ⇄ slid
+    // the sidebar over via flex `order` but left its hamburger stranded over the relocated
+    // dock (the "sideways caret under the hamburger" overlap). Runs even with no icon rail.
+    if (isRight) document.body.setAttribute('data-gadget-side', 'left');
+    else document.body.removeAttribute('data-gadget-side');
     if (!iconRail) return;
-    const isRight = sidebar.classList.contains('right-side');
     const sidebarHidden = sidebar.classList.contains('hidden');
     const railHidden = iconRail.classList.contains('rail-hidden');
     const isMobileMini = iconRail.classList.contains('mobile-mini');
@@ -84,6 +92,20 @@ export function initSidebarLayout(Storage, opts) {
     document.getElementById('sidebar').classList.add('right-side');
   }
   syncRailSide();
+
+  // The ONE layout-side swap: flip the nav sidebar to the other edge. _syncRailSideCore
+  // mirrors the gadget dock to the OPPOSITE edge and moves the hamburger with it, so the
+  // ⇄ dock button and a shift-click on the hamburger both swap BOTH columns cleanly (no
+  // stranding). The ⇄ button (orwellGadgetRail) calls this so there is ONE swap path.
+  function toggleSidebarSide() {
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+    sidebar.classList.toggle('right-side');
+    try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, sidebar.classList.contains('right-side') ? 'right' : 'left'); } catch (_) {}
+    syncRailSide();
+    if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+  }
+  try { window._orwellToggleSidebarSide = toggleSidebarSide; } catch (_) {}
 
   // In-sidebar toggle button — same behavior as hamburger
   const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -145,10 +167,7 @@ export function initSidebarLayout(Storage, opts) {
       e.stopPropagation();
       const sidebar = document.getElementById('sidebar');
       if (e.shiftKey) {
-        sidebar.classList.toggle('right-side');
-        Storage.set(Storage.KEYS.SIDEBAR_SIDE, sidebar.classList.contains('right-side') ? 'right' : 'left');
-        syncRailSide();
-        if (documentModule && documentModule.swapSide) documentModule.swapSide();
+        toggleSidebarSide();   // the ONE swap path (mirrors the dock + moves the hamburger)
         return;
       }
 
