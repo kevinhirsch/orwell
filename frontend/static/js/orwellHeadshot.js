@@ -43,7 +43,16 @@
         width: 480px; max-width: min(92vw, 480px);
         z-index: 1000;  /* above the slotted HUD, below true modals */
       }
-      #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px))); }
+      /* R1 (audit resp-F1): on the narrow sheet tier the slot host pins left:0/right:0 to make a
+         full-width sheet; the desktop fixed width + max-width fought that and left a one-sided ~26-31px
+         right gutter. Drop them <=768px so the sheet goes flush edge-to-edge. */
+      @media (max-width: 768px) {
+        #${ID} { width: auto; max-width: none; }
+      }
+      /* R4 (audit resp-F2): dvh tracks the keyboard-shrunk mobile viewport so the lowest exit
+         ("Skip for now") stays above the fold; vh first as the fallback for engines without dvh. */
+      #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px)));
+        max-height: min(62dvh, calc(100dvh - var(--ow-headshot-top-clear, 120px))); }
       /* the ONE instruction lives in the window body — no duplicate banner/placeholder copy */
       #${ID} .hs-lead { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5;
         color: color-mix(in srgb, var(--fg, #cfd8e3) 88%, transparent); }
@@ -377,14 +386,21 @@
     // lift so the composer docks normally (never hangs mid-screen) and the splash tips
     // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
     try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
+    // R7 (audit anim-F4): the box now owns the splash suppression — drop the welcome→box HANDOFF
+    // bridge class (set by orwellOnboarding on welcome-dismiss to keep the splash hidden through the
+    // gap). Continuity holds: ow-onboarding-bridge out, ow-casting-headshot-open in, no flash.
+    try { document.body.classList.remove("ow-onboarding-bridge"); } catch (_) {}
     // Compose the kit. No close/minimize chrome — the two EXITS are in the body (finalize a photo
     // or "Skip for now"), so there is no half-open dead state. It rides the "top-center" slot so it
     // is a horizontally-centered dialog the player can DRAG out of the way (the grip is live), but
     // it is NOT resizeable (a fixed-size onboarding box). The kit owns the chrome, titlebar, focus,
-    // and the .ow-* family; the slot owns centering + the persisted drag offset.
+    // and the .ow-* family; the slot owns centering (the box re-centers — no persisted offset, D1).
     _win = window.OrwellWindowKit.create({
       id: ID, title: "Your Cast Photo", icon: CAST_ICON,
-      slot: "top-center", slotKey: "castphoto", role: "dialog",
+      // D1 (audit resp/anim-F5): a one-time onboarding dialog must ALWAYS re-center — no slotKey (so
+      // a drag persists no slot offset) and persistLayout:false (so it neither syncs its geometry via
+      // 0064 nor re-applies a past/cross-device position). The player can still nudge it this session.
+      slot: "top-center", role: "dialog", persistLayout: false,
       minimizable: false, closable: false, draggable: true, resizable: false,
       minWidth: 320, minHeight: 240,
       content: body, focus: true,
@@ -408,6 +424,7 @@
   // the producers acknowledge and continue the interview. Returns true so the studio stops
   // repainting its own "finalized" state behind the teardown.
   function onCastingHeadshotChosen() {
+    _photoHandledLocally = true;   // R5: the player acted — never re-trap them on a lagged POST
     teardownWindow();
     recordPhotoStep("uploaded");
     try {
@@ -420,16 +437,23 @@
   // Idempotent + fail-open: the photo is optional, so a failed POST must never wedge the interview —
   // the engine also drops "castPhoto" from `missing` once the portrait intake is finalized, so an
   // uploaded photo still clears even if this call hiccups. The resume cue fires regardless.
-  function recordPhotoStep(status) {
+  function recordPhotoStep(status, attempt) {
+    attempt = attempt || 0;
     try {
       fetch("/api/orwell/casting/photo", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: status }),
-      }).then(() => {
+      }).then(function (r) {
+        if (r && !r.ok) throw new Error("casting/photo " + r.status);
         // Nudge every surface to re-read state.casting (the box closes everywhere on the next route).
         try { if (window.orwellGameChanged) window.orwellGameChanged("casting-photo:" + status); } catch (_) {}
-      }).catch(function () {});
+      }).catch(function () {
+        // R5 (audit anim-F2): a failed/lagged POST left castPhoto in `missing`. Retry with backoff so
+        // the step still clears engine-side; meanwhile the _photoHandledLocally latch keeps the box
+        // closed so the player is never trapped behind it.
+        if (attempt < 3) setTimeout(function () { recordPhotoStep(status, attempt + 1); }, 800 * (attempt + 1));
+      });
     } catch (_) { /* fail open */ }
   }
 
@@ -438,6 +462,7 @@
   // never re-prompts. Then resume the interview. (No portrait was set; the player can still add one
   // later via Settings → Account.)
   function onCastingPhotoSkipped() {
+    _photoHandledLocally = true;   // R5: the player acted — never re-trap them on a lagged POST
     teardownWindow();
     recordPhotoStep("skipped");
     try {
@@ -450,6 +475,11 @@
     if (_win) { try { _win.destroy(); } catch (_) {} _win = null; }
     const el = document.getElementById(ID);
     if (el) el.remove();
+    // R6 (audit anim-F3): clear the splash-suppression class HERE, not only in unmount(). The
+    // skip/finalize exits call teardownWindow() directly; without this the welcome splash stayed
+    // pinned opacity:0 in the gap before the next route()→unmount() (and indefinitely if the box
+    // wrongly re-mounted on a failed POST — now prevented by the R5 latch).
+    try { document.body.classList.remove("ow-casting-headshot-open"); } catch (_) {}
   }
 
   function unmount() {
@@ -473,6 +503,11 @@
   // alive through the whole pre-game window (set true while pre-game, false once a season starts),
   // so the box pops the moment the producer turn lands even if no event reaches this tab.
   let _maybePregame = true;
+  // R5 (audit anim-F2): a session-local latch set the moment the player uploads OR skips the cast
+  // photo. route() consults it so a lagged/failed recordPhotoStep POST (the engine still lists
+  // castPhoto in `missing`) cannot re-mount the box and TRAP the player. Resets on reload — if the
+  // engine genuinely never cleared the step, the box reappears next load and they can act again.
+  let _photoHandledLocally = false;
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
@@ -499,6 +534,13 @@
     if (!photoWanted) {
       // The cast-photo step is handled (uploaded or skipped, here or on another device) — close the
       // box everywhere. Don't re-fire any cue: the resume cue fires once at finalize/skip time.
+      unmount();
+      return;
+    }
+    if (_photoHandledLocally) {
+      // R5 (audit anim-F2): the player already uploaded/skipped this session; the engine just hasn't
+      // dropped castPhoto from `missing` yet (a lagged/failed POST — recordPhotoStep is retrying).
+      // Keep the box CLOSED rather than re-mounting it on top of the player — never a trap.
       unmount();
       return;
     }

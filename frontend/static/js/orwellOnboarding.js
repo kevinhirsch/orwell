@@ -249,6 +249,18 @@
     const dismiss = () => {
       markWelcomeSeen();
       uninertBackground();
+      // R7 (audit anim-F4): BRIDGE the welcome→cast-photo-box handoff. Removing the welcome overlay
+      // un-hides the empty-state splash (brand + tagline) for the ~120-180ms before the box mounts,
+      // a visible flash. A transient body class keeps the splash suppressed across that gap; the box
+      // clears it on mount (then its own ow-casting-headshot-open continues the suppression), and a
+      // fallback timer clears it if the box never mounts (photo already handled / no producer turn).
+      try {
+        document.body.classList.add("ow-onboarding-bridge");
+        clearTimeout(window._owOnboardingBridgeTimer);
+        window._owOnboardingBridgeTimer = setTimeout(function () {
+          try { document.body.classList.remove("ow-onboarding-bridge"); } catch (_) {}
+        }, 4000);
+      } catch (_) {}
       el.remove();
       // The welcome modal is gone. OOBE re-sequence: dismissing the welcome IS the proceed —
       // onProceed opens the fresh interview session and fires the producers' kickoff. The photo

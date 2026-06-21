@@ -207,10 +207,20 @@ body.bg-pattern-synapse {
     linear-gradient(90deg, color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3.5% * var(--bg-effect-intensity, 1)), transparent) 1px, transparent 1px);
   background-size: 24px 24px; background-attachment: fixed;
 }
-body.bg-pattern-perlin-flow,
 body.bg-pattern-petals,
 body.bg-pattern-sparkles {
   /* canvas-only backgrounds */
+}
+/* R3 (audit anim-F1): a FAINT static phosphor base under the perlin-flow canvas. Present the instant
+   the bg-pattern class is set (the head-script arms it at first paint), so there is no bare-bg window
+   before the animated canvas spawns at the end of theme init — and it doubles as the reduced-motion
+   "static or off" fallback (where the canvas never spawns). The canvas overlays this seamlessly. */
+body.bg-pattern-perlin-flow {
+  background-image:
+    radial-gradient(120% 80% at 50% 0%,
+      color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3% * var(--bg-effect-intensity, 1)), transparent) 0%,
+      transparent 60%);
+  background-attachment: fixed;
 }
 
 

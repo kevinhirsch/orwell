@@ -107,7 +107,11 @@ export function makeWindowDraggable(modal, options = {}) {
   const enableTouch = options.enableTouch !== false;
   const enableDock = options.enableDock !== false && !!modal;
 
-  header.style.cursor = 'move';
+  // R2 (audit resp-F4): below the mobileSkip tier the drag is disabled (the mousedown/touchstart
+  // handlers early-return), so don't paint an INLINE cursor:move — it would beat the responsive CSS
+  // and lie on touch. Leave the cursor to CSS there (the kit sets it to default ≤768). Desktop keeps
+  // the inline move cursor exactly as before.
+  if (!(mobileSkip > 0 && window.innerWidth <= mobileSkip)) header.style.cursor = 'move';
   header.style.userSelect = 'none';
 
   // Edge/corner resize. Every draggable window also becomes resizable — the

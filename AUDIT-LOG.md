@@ -520,5 +520,30 @@ Optional polish: **R7** (anim-F4 handoff bridge class), **R8** (resp-F6 hamburge
 Owner decision: **D1** (resp-F5/anim-F5) — should the one-time OOBE cast-photo box persist/sync its drag
 geometry across reloads+devices for the season? *(Recommend: opt it out — it's a transient dialog.)*
 
+### ✅ State 6 — remediation APPLIED & VERIFIED (owner authorized R1–R8 + D1=opt-out)
+All applied; JS syntax clean; targeted FE tests green; before/after VIEWED in-browser (real modules,
+stubbed state, fresh contexts — the shared game untouched):
+- **R5 [BLOCK] — FIXED & VERIFIED:** skip + a 500'd `casting/photo` POST + 3 re-routes → box stays
+  CLOSED, splash not pinned (`boxPresent=False, splashPinned=False`). Session latch `_photoHandledLocally`
+  + `recordPhotoStep` retry-with-backoff. `orwellHeadshot.js`.
+- **R6 — VERIFIED** (with R5): `teardownWindow()` now clears `ow-casting-headshot-open` (splash returns).
+- **R1 — VERIFIED:** mobile sheet flush full-width at 390px (`left=0 right=390 width=390 rightGutter=0`).
+  Narrow-tier `width:auto;max-width:none`. `orwellHeadshot.js`.
+- **R2 — VERIFIED:** mobile titlebar `cursor='default'` + empty tooltip (was `move`); desktop drag intact
+  (a/b VERDICT still all-PASS). Root: `windowDrag.js` no longer paints inline `cursor:move` ≤mobileSkip
+  (the inline was beating CSS) + kit media query + JS tooltip gate. `windowDrag.js`/`orwellWindow.js`.
+- **R3 — VERIFIED:** head-script synthesizes `bgPattern:'perlin-flow'` (class at first paint) + a faint
+  static phosphor base for `body.bg-pattern-perlin-flow` (also the reduced-motion fallback); canvas still
+  spawns (`#perlin-flow-canvas` present). `index.html` + `style.css`.
+- **R4 — applied:** `vh`→`dvh` (vh fallback) on the box + kit body max-heights. `orwellHeadshot.js`/`orwellWindow.js`.
+- **R7 — applied:** welcome→box handoff bridge class `ow-onboarding-bridge` (set on dismiss + 4s fallback,
+  cleared on box mount) pins the splash across the gap. `orwellOnboarding.js`+`game-trim.css`+`orwellHeadshot.js`.
+- **R8 — VERIFIED (visual):** narrow sheet top now clears the live hamburger bottom + GAP (no 6px overlap).
+  `orwellSlots.js` `narrowTopBase()`.
+- **D1 — VERIFIED:** the cast-photo box is `persistLayout:false` + no `slotKey` → it ALWAYS re-centers and
+  a drag writes NO layout (the dragged 240,232 did NOT overwrite the stored centered entry; box opens
+  centered cx=720). New kit `persistLayout` option + `_emit` funnel. `orwellWindow.js`+`orwellHeadshot.js`.
+- **No regressions:** a/b (centered/draggable/not-resizeable) + d (perlin) repros still all-PASS.
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input

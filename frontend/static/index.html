@@ -25,7 +25,13 @@
       // theme.js boots). An explicit saved choice always wins (t stays as-is).
       // Keep in sync with theme.js DEFAULT_THEME + the telescreen palette.
       if (!t || !t.colors) {
-        t = { name: 'telescreen', frosted: true,
+        // R3 (audit anim-F1): include telescreen's default bgPattern so the head-script arms the
+        // bg-pattern-perlin-flow CLASS at first paint (below) — otherwise the signature background
+        // only appears once theme.js's applyBgPattern runs at the END of _initWithSync (after an
+        // awaited /api/prefs/theme read), which under a slow read pops in ~1.8s AFTER the app loader
+        // clears, leaving a bare bg. The class brings the static phosphor base (style.css) up front;
+        // the animated canvas overlays it when it spawns. Keep in sync with THEME_DEFAULT_PATTERN.
+        t = { name: 'telescreen', frosted: true, bgPattern: 'perlin-flow',
               colors: { bg:'#101418', fg:'#d7e9ee', panel:'#151c22', border:'#2a3e4a', red:'#56c8e8' },
               house: true };
       }

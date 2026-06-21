@@ -116,8 +116,25 @@
   // Now the slot engine stacks every visible top-slot panel as a full-width
   // sheet by MEASURED height (the same rule it applies on desktop), one
   // column across both top slots; bottom slots keep their own narrow CSS.
+  // R8 (audit resp-F6): on the narrow tier a top sheet must clear the mobile header CHROME (the
+  // hamburger button), not just sit at the desktop TOP_BASE-8 (44px), which overlapped the menu
+  // button by a few px. Track the LIVE hamburger bottom + GAP when it's shown (it already sits below
+  // any top safe-area inset / notch, so clearing it inherently respects the inset); fall back to the
+  // flush-under-header constant when there's no hamburger.
+  function narrowTopBase() {
+    let base = TOP_BASE - 8;
+    try {
+      const hb = document.getElementById("hamburger-btn");
+      if (hb && getComputedStyle(hb).display !== "none") {
+        const r = hb.getBoundingClientRect();
+        if (r.height > 0) base = Math.max(base, Math.round(r.bottom) + GAP);
+      }
+    } catch (_) {}
+    return base;
+  }
+
   function restackNarrowSheets() {
-    let cursor = TOP_BASE - 8; // sheets sit flush under the app header
+    let cursor = narrowTopBase(); // sheets sit below the mobile header chrome (R8)
     for (const name of ["top-left", "top-center", "top-right"]) {
       for (const entry of slots[name]) {
         const el = entry.el;
