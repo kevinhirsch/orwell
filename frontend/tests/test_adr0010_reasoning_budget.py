@@ -71,9 +71,18 @@ def test_reasoning_fires_for_the_live_model_via_openrouter(monkeypatch):
     assert p.get("reasoning") == {"effort": "medium"}
 
 
-def test_reasoning_omitted_when_policy_says_off(monkeypatch):
+def test_reasoning_off_is_a_genuine_disable_on_openrouter(monkeypatch):
+    # "off" (policy reasoning is None) must ACTIVELY disable reasoning on a reasoning model —
+    # OMITTING the field would leave the provider default (often ON), so "off" would not be a
+    # cost floor. OpenRouter unified form: reasoning:{"enabled": false}.
     p = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro", policy={"reasoning": None})
-    assert "reasoning" not in p
+    assert p.get("reasoning") == {"enabled": False}
+
+
+def test_reasoning_off_left_untouched_for_openai_o_series(monkeypatch):
+    # o-series reasoning is intrinsic and cannot be disabled — we leave the default (no field).
+    p = _capture_payload(monkeypatch, OAI_URL, "o3-mini", policy={"reasoning": None})
+    assert "reasoning" not in p and "reasoning_effort" not in p
 
 
 def test_no_policy_is_byte_identical_no_reasoning(monkeypatch):

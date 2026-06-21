@@ -120,18 +120,23 @@ DEFAULT_SETTINGS = {
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
     # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
     # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1): narration &
-    # casting = medium (quality-sensitive, player-facing), utility-extraction &
-    # background-authoring = low (minimal — constrained JSON / background flavor).
+    # casting = medium (quality-sensitive, player-facing), background-authoring =
+    # low (background flavor), and **utility-extraction = off** — pure JSON
+    # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
+    # trace showed its reasoning tokens wasted.
     # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
-    # token_policy.valid_efforts() ("off", "low", "medium", "high"). NOTE: "off"
-    # OMITS the reasoning field, which lets a reasoning model fall back to its
-    # (often higher) DEFAULT — so it is NOT a cost floor; "low" is the guaranteed
-    # minimal. A class absent from the map uses the token_policy code default.
-    # Read via get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
+    # token_policy.valid_efforts() ("off", "low", "medium", "high"). NOTE: "off" is
+    # now a GENUINE disable, not an omission — token_policy resolves it and
+    # llm_core._apply_reasoning_budget actively sends `reasoning:{"enabled":false}`
+    # to OpenRouter (verified upstream via debug.echo_upstream_body), so a reasoning
+    # model can no longer fall back to its (higher) default. "off" IS a real cost
+    # floor now; "low" is the lowest non-zero effort. A class absent from the map
+    # uses the token_policy code default. Read via
+    # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
     # edit per class at runtime via the Token Economy settings card or POST /api/settings.
     "reasoning_budget": {
         "narration": "medium",
-        "utility-extraction": "low",
+        "utility-extraction": "off",
         "casting": "medium",
         "background-authoring": "low",
     },
