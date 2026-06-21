@@ -397,10 +397,16 @@
     // and the .ow-* family; the slot owns centering (the box re-centers — no persisted offset, D1).
     _win = window.OrwellWindowKit.create({
       id: ID, title: "Your Cast Photo", icon: CAST_ICON,
-      // D1 (audit resp/anim-F5): a one-time onboarding dialog must ALWAYS re-center — no slotKey (so
-      // a drag persists no slot offset) and persistLayout:false (so it neither syncs its geometry via
-      // 0064 nor re-applies a past/cross-device position). The player can still nudge it this session.
-      slot: "top-center", role: "dialog", persistLayout: false,
+      // Two audit lanes converge on this dialog:
+      //  • A1/J1-25 (Lane A): modal:true — aria-modal + focus-trap + inert background + a backdrop
+      //    scrim, so focus can't escape into the chat and the live narration recedes behind a dim
+      //    instead of competing for figure.
+      //  • D1 + State-5/6 (Lane B): the player's explicit ask — it must be MOVEABLE (draggable) but
+      //    NOT resizeable, centered (top-center slot), and ALWAYS re-center (no slotKey + persistLayout
+      //    false ⇒ a drag persists no offset and never syncs geometry across reloads/devices).
+      // The result is a centered, draggable MODAL that re-centers. The two in-body exits (finalize /
+      // "Skip for now") are the only ways out.
+      slot: "top-center", role: "dialog", persistLayout: false, modal: true,
       minimizable: false, closable: false, draggable: true, resizable: false,
       minWidth: 320, minHeight: 240,
       content: body, focus: true,

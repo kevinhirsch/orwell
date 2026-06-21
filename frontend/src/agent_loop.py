@@ -1814,6 +1814,8 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
                            for h in house if h.get("id") and h.get("name"))
         if not roster:
             return 0
+        _roster_names = {h.get("id"): h.get("name")
+                         for h in house if h.get("id") and h.get("name")}
         rooms = ", ".join(r for r in _HOUSE_ROOMS if r != "diary-room")  # NPCs never walk the player's DR
         msgs = [
             {"role": "system", "content":
@@ -1856,6 +1858,10 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
         if not picks:
             return 0
         recorded = 0
+        try:
+            from routes import chat_helpers as _ch
+        except Exception:
+            _ch = None
         for hid, room in picks:
             try:
                 res = await _oe.move_houseguest(hid, room, user=owner)
@@ -1863,6 +1869,10 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
                 # are legitimate (already there / not a legal move) and simply don't count.
                 if isinstance(res, dict) and res.get("status") == "moved":
                     recorded += 1
+                    # ADR 0009 (D1): fold this engine-confirmed move into the per-turn occupancy freeze
+                    # so the gadget shows the move the player just read (preserves D2). Best-effort.
+                    if _ch is not None:
+                        _ch.freeze_record_npc_move(owner, hid, room, _roster_names.get(hid))
             except Exception as e:
                 logger.warning(f"[orwell] auto move_houseguest failed for {hid}: "
                                f"{type(e).__name__}: {e}".rstrip(': '))
@@ -3457,6 +3467,16 @@ async def stream_agent_loop(
                 _recorded = bool(_tool_names & _RECORD_TOOLS)
                 _moved = bool(_tool_names & _MOVE_TOOLS)  # L21/L24: did the model call moveTo itself?
                 _npc_moved = "moveHouseguest" in _tool_names  # ADR 0009: did it move a houseguest itself?
+                # ADR 0009 (D1): the model moved a houseguest itself this turn — the FE has only a display
+                # string for its args (not the structured {id, room}), so the per-turn freeze can't
+                # reflect it. Mark the freeze not-confident so the gadget defers to LIVE engine truth this
+                # turn (no wrong room). A player re-center (model moveTo) is caught by the room compare.
+                if _npc_moved:
+                    try:
+                        from routes import chat_helpers as _chf
+                        _chf.freeze_mark_model_moved(owner)
+                    except Exception:
+                        pass
                 # SOCIAL RUNWAY (the never-fast-forward fix): the framing layer may be DELIBERATELY
                 # holding a social runway for this user — a ceremony just resolved and the next is
                 # held a few turns so the player can scheme. Those turns are intentional lingering,

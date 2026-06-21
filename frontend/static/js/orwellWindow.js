@@ -35,6 +35,18 @@ const Z_CEIL = 980;          //   (modalManager's 300s), below modals (1000+)
 let _zTop = Z_BASE;
 const _stack = [];           // open, un-minimized kit windows, bottom → top
 
+// ── opt-in modal tier (audit J1-25 / J1-23) ────────────────────────────────
+// A kit window created with `modal:true` becomes a PROPER modal dialog: a backdrop
+// scrim + a focus-trap + an inert background + aria-modal — the welcome-modal pattern
+// (orwellOnboarding.js) generalized onto the kit, WITHOUT forcing it on the floating/
+// lingering windows. This is exactly the "per-window `modal` option" the UX audit
+// deferred J1-25 to (UX-AUDIT-LOG.md:191): the cast-photo dialog let focus escape into
+// the chat and floated over live narration with no scrim. It sits at the modal tier
+// (the legacy .modal family is 1000+): the scrim just under, the window just above, so
+// a modal kit window clears the kit band (500-980) AND its own scrim.
+const Z_MODAL_SCRIM = 1000;
+const Z_MODAL = 1001;
+
 const REDUCED = () =>
   !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -86,6 +98,19 @@ function ensureCss() {
       border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--win-border, var(--border, #355a66)));
       box-shadow: 0 12px 36px rgba(0,0,0,.5);
     }
+    /* ── J1-25 / J1-23: the opt-in modal backdrop ─────────────────────────────
+       Mounted behind a modal:true window. The dim restores figure/ground (the dialog
+       is the figure, the page recedes — closing J1-04/J1-23 where the cast-photo card
+       floated over live narration with no backdrop); with the focus-trap + inert
+       background + aria-modal the JS adds, the window is a proper modal dialog.
+       reduced-motion strips the fade. */
+    .ow-scrim {
+      position: fixed; inset: 0; z-index: ${Z_MODAL_SCRIM};
+      background: var(--ow-scrim-bg, rgba(0,0,0,.55));
+      animation: ow-scrim-in .18s ease-out;
+    }
+    @keyframes ow-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+    /* the scrim's reduced-motion strip rides the shared A7 block below (one @media) */
     .ow-titlebar {
       display: flex; align-items: center; gap: .4rem;
       padding: .45rem .55rem .35rem .7rem;
@@ -135,7 +160,7 @@ function ensureCss() {
     .ow-anim-minimize { animation: ow-minimize .27s cubic-bezier(.5,-0.2,.4,1) forwards; }
     .ow-anim-close { animation: ow-close .18s cubic-bezier(.45,.05,.55,.95) forwards; }
     @media (prefers-reduced-motion: reduce) {
-      .ow-anim-open, .ow-anim-minimize, .ow-anim-close { animation: none; }
+      .ow-anim-open, .ow-anim-minimize, .ow-anim-close, .ow-scrim { animation: none; }
     }
     /* ── 0054 Phase 2 — DOCKED kit mode ───────────────────────────────────────
        A docked window mounts its WHOLE element as a child of #gadget-rail-body
@@ -333,7 +358,7 @@ export class OrwellWindow {
       // box, audit D1) sets it false so it ALWAYS re-centers — never carrying a dragged offset
       // across reloads or devices for the season.
       persistLayout: true,
-      dockable: false, defaultDocked: false }, opts);
+      dockable: false, defaultDocked: false, modal: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
     this.opener = null;
@@ -352,8 +377,12 @@ export class OrwellWindow {
     el.className = 'ow-window' + (docked ? ' ow-docked' : '');
     el.setAttribute('data-ow-window', '');
     if (docked) el.setAttribute('data-ow-docked', '');
-    el.setAttribute('role', this.o.role);
+    // J1-25: a modal window is a dialog whose background it PROMISES is inert (the
+    // aria-modal contract) — default the role up to 'dialog' and stamp aria-modal.
+    const role = (this.o.modal && this.o.role === 'complementary') ? 'dialog' : this.o.role;
+    el.setAttribute('role', role);
     el.setAttribute('aria-label', this.o.title);
+    if (this.o.modal) el.setAttribute('aria-modal', 'true');
     const tb = document.createElement('div');
     tb.className = 'ow-titlebar';
     tb.setAttribute('tabindex', '0');
@@ -570,6 +599,71 @@ export class OrwellWindow {
     this._persist(this.el.getBoundingClientRect());
   }
 
+  // ── J1-25 modal chrome (the per-window `modal` option) ─────────────────────
+  // Mounts the backdrop scrim, makes the rest of the page inert (the aria-modal
+  // promise), and traps Tab inside the window. Mirrors the welcome modal's
+  // exemplary pattern (orwellOnboarding.js), which the audit calls out as the one
+  // to reuse. Single-modal by design (the cast-photo flow opens one at a time).
+  _mountModalChrome() {
+    if (this._scrim) return;
+    const scrim = document.createElement('div');
+    scrim.className = 'ow-scrim';
+    scrim.setAttribute('data-ow-scrim', this.o.id);
+    scrim.style.zIndex = String(Z_MODAL_SCRIM);
+    // Insert behind the (already-mounted) window so DOM order matches the z order.
+    document.body.insertBefore(scrim, this.el);
+    this._scrim = scrim;
+    this._inertBackground();
+    this._trapFocus();
+  }
+
+  _unmountModalChrome() {
+    if (this._scrim) { try { this._scrim.remove(); } catch (_) {} this._scrim = null; }
+    this._uninertBackground();
+  }
+
+  // aria-modal is a PROMISE to assistive tech that the rest of the page is inert —
+  // enforce it (audit J1-25). Everything except the window + its scrim goes inert;
+  // the exact set is remembered so teardown restores only what we changed.
+  _inertBackground() {
+    this._inerted = [];
+    Array.from(document.body.children).forEach((n) => {
+      if (n === this.el || n === this._scrim || n.tagName === 'SCRIPT' || n.tagName === 'STYLE') return;
+      if (!n.inert) { try { n.inert = true; this._inerted.push(n); } catch (_) {} }
+    });
+  }
+
+  _uninertBackground() {
+    (this._inerted || []).forEach((n) => { try { n.inert = false; } catch (_) {} });
+    this._inerted = [];
+  }
+
+  // Keep Tab inside the window so focus can't escape into the (inert) page — the
+  // J1-25 defect was "focus escapes into chat; Escape landed on body". Listener is
+  // bound to the AbortController so teardown removes it.
+  _trapFocus() {
+    this.el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const all = this.el.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const f = Array.prototype.filter.call(all, (n) => !n.disabled && (n.offsetParent !== null || n === document.activeElement));
+      if (!f.length) { e.preventDefault(); return; }       // nothing focusable → stay put
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }, { signal: this.ac.signal });
+  }
+
+  // Move focus INTO the dialog on open (first focusable in the body, else the
+  // titlebar) so it lands inside the modal, never on body (J1-25).
+  _focusIntoModal() {
+    try {
+      const f = this.el.querySelector(
+        '.ow-body button, .ow-body [href], .ow-body input, .ow-body select, .ow-body textarea, .ow-body [tabindex]:not([tabindex="-1"])');
+      (f || this.titlebar).focus();
+    } catch (_) {}
+  }
+
   open(opener) {
     if (this.el && this.el.isConnected) { this.restore(); return this; }
     this.opener = opener || document.activeElement || null;
@@ -612,8 +706,12 @@ export class OrwellWindow {
       return this;
     }
     if (!REDUCED()) { el.classList.add('ow-anim-open'); setTimeout(() => el.classList.remove('ow-anim-open'), 220); }
+    // J1-25: a modal window mounts its backdrop scrim + inerts the background + traps
+    // focus BEFORE the raise (which pins it to the modal tier above the scrim).
+    if (this.o.modal) this._mountModalChrome();
     this.raise();
-    if (this.o.focus) this.titlebar.focus();
+    if (this.o.modal) this._focusIntoModal();
+    else if (this.o.focus) this.titlebar.focus();
     // 0064 Part F: apply a synced layout seed from another device once layout settles. min/dock/size
     // also restore via localStorage (the kit's existing load); this additionally covers POSITION and
     // keeps a just-opened window consistent with a change made elsewhere while it was closed.
@@ -628,14 +726,20 @@ export class OrwellWindow {
 
   raise() {
     if (!this.el || this._docked) return;  // a docked window has no z-band / focus stack
-    if (_zTop >= Z_CEIL) { // renormalize the band
-      _zTop = Z_BASE;
-      for (const w of _stack) { w.el.style.zIndex = String(++_zTop); }
-    }
-    this.el.style.zIndex = String(++_zTop);
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     _stack.push(this);
+    // J1-25: a modal window is pinned to the modal tier (just above its scrim), never
+    // the kit band — and it is excluded from the band renormalization below.
+    if (this.o.modal) {
+      this.el.style.zIndex = String(Z_MODAL);
+    } else {
+      if (_zTop >= Z_CEIL) { // renormalize the band (modal windows stay pinned)
+        _zTop = Z_BASE;
+        for (const w of _stack) { if (!w.o.modal && w.el) w.el.style.zIndex = String(++_zTop); }
+      }
+      this.el.style.zIndex = String(++_zTop);
+    }
     for (const w of _stack) w.el && w.el.classList.toggle('ow-focused', w === this);
   }
 
@@ -763,6 +867,7 @@ export class OrwellWindow {
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     _byId.delete(this.o.id);  // 0064: drop from the live registry
+    this._unmountModalChrome();  // J1-25: remove the scrim + un-inert the page (no-op if not modal)
     saveParked(this.o.id, false); // F2 (G16): a closed window forgets its parked state
     this.ac.abort();
     const opener = this.opener;
