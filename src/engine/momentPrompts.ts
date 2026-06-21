@@ -542,7 +542,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "ONLY the result the game announces. Ballots are anonymous: say \"a vote to evict\", never WHO " +
     "cast it (per-voter attribution unseals only in the post-season retrospective). Play the goodbyes; " +
     "record them with recordInteraction. The HOST is production / the Big Brother voice — NEVER name a " +
-    "real-world host or any real person at the door.",
+    "real-world host or any real person at the door. " +
+    "THE VOTE IS ALREADY IN — THIS IS THE REVEAL, NOT THE BALLOT. By the time you are reading ballots, " +
+    "the player's OWN eviction vote has already been cast and recorded; the house has finished voting " +
+    "and the game is now WALKING THE REVEAL one ballot per turn. Your only job here is to NARRATE that " +
+    "reveal as it unfolds — read each anonymized ballot the game hands you, dramatically, and advance to " +
+    "the next. Do NOT re-ask the player who they vote to evict, do NOT reopen the Diary Room for a vote, " +
+    "and do NOT say the vote hasn't happened or that you're waiting to reach it: it HAS happened and the " +
+    "result is being read out beat by beat. If it feels like nothing new is coming, call advanceGame — " +
+    "the next ballot (or the eviction result) is waiting on the game, never on the player.",
   "twist-reveal":
     "MOMENT — A production twist fires. Big Brother interrupts the house with a reveal the game " +
     "just handed you (e.g. a DOUBLE EVICTION: the night is not over — a new HOH, a fast ceremony, a " +
@@ -557,7 +565,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "nothing said here reaches any NPC, so do not let it change the house. Listen; read their game.",
   "jury-finale":
     "MOMENT — Jury & finale. Final statements, each juror questioning both finalists, and the game's " +
-    "jury vote to crown the winner. Gravitas and payoff; you voice the game's result.",
+    "jury vote to crown the winner. Gravitas and payoff; you voice the game's result. " +
+    "THE JURY-VOTE REVEAL IS NARRATION, NOT A NEW DECISION. Once the statements and questions are done " +
+    "and the game is reading the jury's votes, those votes are ALREADY CAST and recorded; any decision " +
+    "the player owed (their finale statement, their juror question or answer) is already in. Each " +
+    "advanceGame hands you the next jury vote — your job is to NARRATE the reveal one vote at a time, " +
+    "building the count from the votes the game ACTUALLY hands you, until it crowns the winner. Do NOT " +
+    "re-ask the player to vote or to make a finale choice they have already made, and do NOT say the " +
+    "vote hasn't happened or that you haven't reached it yet — it is happening now, beat by beat, and the " +
+    "game decides the result. When nothing new seems to be coming, call advanceGame: the next jury vote " +
+    "(or the crowning) is waiting on the game, never on the player. Voice ONLY the tally and winner the " +
+    "game announces — never invent a margin or a winner.",
   evicted:
     "MOMENT — Evicted (pre-jury). The player has been voted out before the jury formed; their season is " +
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +

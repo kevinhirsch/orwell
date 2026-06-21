@@ -2079,6 +2079,74 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
+# player's answers AS THEY LAND with updateCasting," but it reliably UNDER-CALLS it — and unlike every
+# other under-call-prone seam (recordInteraction/makeDeal/moveTo/markHouseguestMet, each belted),
+# casting had NO belt. A skipped updateCasting means the player's name/backstory/motivation never reach
+# the engine: casting never becomes `ready`, the finalize fallback can't engage, and the interview
+# DEADLOCKS — the producer re-asks for a name the player already gave (audit 2026-06-21, a live drive).
+# So when updateCasting was NOT called on an engaged casting turn, extract what the player just gave and
+# record it ourselves. Conservative — only fields the player genuinely stated; the extraction is the
+# gatekeeper (records nothing on a question / chit-chat / refusal), and a bare name still fills it.
+# Error-correct the omission; NEVER engine-author the interview (the producer's words stay the model's).
+_CASTING_RECORD_FIELDS = ("playerName", "backstory", "motivation", "privateStrategy", "interviewNotes")
+
+
+async def _auto_record_casting(last_user, narration, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE casting answers reach the engine when the model under-calls updateCasting. A constrained
+    extraction proposes the casting fields the player just stated; we call updateCasting ourselves so the
+    interview can reach `ready`/`finalizable` instead of deadlocking. Fail-closed: any hiccup just skips
+    (the finalize nudge/fallback below still apply). Mirrors _auto_record_scene (0055)."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        if not (last_user or "").strip():
+            return False
+        msgs = [
+            {"role": "system", "content":
+                "Extract any Big Brother CASTING-interview answers the player just gave, to put on the "
+                "casting form. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no thinking, no "
+                "prose, no code fence. Inside \"fields\", include ONLY the keys the player ACTUALLY "
+                "stated THIS turn; omit every key they did not give. Never invent or infer beyond what "
+                "they plainly said.\n"
+                '{"fields":{'
+                '"playerName":"<the name they gave for the casting form>",'
+                '"backstory":"<who they are / their life, if given>",'
+                '"motivation":"<why they want to play, if given>",'
+                '"privateStrategy":"<their game plan / how they intend to play, if given>",'
+                '"interviewNotes":"<one concise note for anything else recordable they said>"'
+                "}}\n"
+                'A bare name ("Devon Hale") still fills playerName. If they gave nothing recordable '
+                '(a question, chit-chat, a refusal), reply {"fields":{}}.'},
+            {"role": "user", "content":
+                f"THE PRODUCER JUST SAID:\n{(narration or '')[:700]}\n\n"
+                f"THE PLAYER REPLIED:\n{(last_user or '')[:900]}\n\nJSON:"},
+        ]
+        # Room for a reasoning model to think THEN emit the tiny JSON (see _auto_record_scene).
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
+        obj = _last_json_object_with_key(raw, "fields")
+        if obj is None:
+            logger.info(f"[orwell] auto-casting: no parseable JSON (len={len(raw)})")
+            return False
+        fields = obj.get("fields")
+        if not isinstance(fields, dict):
+            return False
+        clean = {k: v.strip() for k, v in fields.items()
+                 if k in _CASTING_RECORD_FIELDS and isinstance(v, str) and v.strip()}
+        if not clean:
+            return False
+        res = await _oe.update_casting(clean, user=owner)
+        if isinstance(res, dict) and not res.get("error"):
+            logger.info(f"[orwell] auto-recorded casting fields={sorted(clean)} user={owner}")
+            return True
+        return False
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-casting failed: {_e}")
+        return False
+
+
 # A STRUCK DEAL (0039) is a structured commitment, not just a scene: the model reliably narrates one
 # ("you have my word", a final-two, a no-nominate pact) but skips makeDeal, so the deal binds no one,
 # never reconciles against later noms/votes, and the deals surface stays empty. _auto_record_scene
@@ -4014,6 +4082,19 @@ async def stream_agent_loop(
                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                     continue
             elif game_mode == "casting":
+                # ── Casting auto-record belt: GUARANTEE the player's answers reach the engine. The
+                # model is told to record them AS THEY LAND with updateCasting but reliably under-calls
+                # it; with no belt the interview DEADLOCKS (the producer re-asks for a name the player
+                # already gave, casting never reaches `ready`, and the finalize fallback below can't
+                # engage). When updateCasting was NOT called on an engaged turn, extract what the player
+                # just gave and record it ourselves — then fall through so the finalize path sees the
+                # new state THIS turn. Model-driven recording wins (skipped when updateCasting fired).
+                _cast_recorded_this_turn = "updateCasting" in {
+                    (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
+                if not _cast_recorded_this_turn and _emitted_visible and owner is not None:
+                    await _auto_record_casting(
+                        _extract_last_user_message(messages), cleaned_round,
+                        endpoint_url, model, headers, owner)
                 # ── Casting finalize fallback (the game won't START): the model under-calls
                 # createCharacter. If casting is finalizable (engine ready) AND the player signalled
                 # readiness but the model didn't finalize this turn, nudge — then, past the rungs,

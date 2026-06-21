@@ -30,6 +30,20 @@
   };
   const COMP_INTENTS = ["compete", "throw", "play-safe"];
 
+  // J5-20: the genuinely high-stakes, irreversible decision kinds — evicting someone, naming
+  // nominees, crowning the winner. These bind a person's fate (theirs or the player's game),
+  // so the card must carry a RISK signal that a low-stakes comp-intent/comp-round must NOT —
+  // those only set how the player plays a comp, and never end anyone's game. Driven off this
+  // single set so "which kinds are weighty" lives in one place (matches SINGLE_PICK_FIELD's
+  // role as the canonical kind→behavior map).
+  const HIGH_STAKES_KINDS = new Set([
+    "eviction-vote",
+    "final-eviction",
+    "juror-vote",
+    "nominations",
+  ]);
+  const isHighStakes = (kind) => HIGH_STAKES_KINDS.has(kind);
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -51,6 +65,7 @@
     st.id = "orwell-decision-css";
     st.textContent = `
       #${CARD_ID} {
+        position: relative; /* J5-21: anchors the absolutely-positioned dismiss × in the corner */
         margin: .6rem auto; max-width: 640px; border-radius: 12px; padding: .8rem .9rem;
         background: var(--panel, #111); color: var(--fg, #9cdef2);
         border: 1px solid var(--accent, var(--red, #e06c75));
@@ -68,8 +83,34 @@
       @media (prefers-reduced-motion: reduce) { #${CARD_ID} { animation: none; transition: none; } }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
-      #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
+         END of the card's DOM so it is the LAST thing a keyboard user Tabs to — the decision options
+         and Confirm come first (WCAG 2.4.3 focus order: a binding-decision surface must not put
+         "skip this" ahead of the actual choice). Visual position is unchanged; only tab order moves.
+         The 44×44 tap target + descriptive aria-label are preserved below. */
+      #${CARD_ID} .odec-x { position: absolute; top: .35rem; right: .35rem; cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
       #${CARD_ID} .odec-x:hover { opacity: .9; }
+      /* J5-20: a high-stakes, irreversible decision (eviction/noms/jury vote) wears a risk skin —
+         an eviction-red border + a faint red wash so it never reads as a low-stakes comp chip. The
+         tint is token-driven (--color-error / --red across the house themes). Color is NEVER the
+         only signal: the .odec-risk-badge below carries the same "binding / irreversible" meaning in
+         text + an icon for colorblind + SR users (the badge is what AT announces). */
+      #${CARD_ID}.odec-risk {
+        border-color: var(--color-error, var(--red, #e06c75));
+        background:
+          linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent)),
+          var(--panel, #111);
+      }
+      #${CARD_ID}.odec-risk .odec-opt[aria-pressed="true"] { border-color: var(--color-error, var(--red, #e06c75)); background: var(--color-error, var(--red, #e06c75)); }
+      #${CARD_ID}.odec-risk .odec-confirm { background: var(--color-error, var(--red, #e06c75)); }
+      #${CARD_ID} .odec-risk-badge {
+        display: inline-flex; align-items: center; gap: .3rem; margin-left: .4rem;
+        padding: .08rem .45rem; border-radius: 999px; font-size: .68rem; font-weight: 700;
+        letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+        color: var(--color-error, var(--red, #e06c75));
+        border: 1px solid color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 60%, transparent);
+        background: color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 12%, transparent);
+      }
       #${CARD_ID} .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
       #${CARD_ID} .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
@@ -188,9 +229,22 @@
     // card's own dismiss-only handler (the global arbiter stands down on this marker).
     card.setAttribute("data-ow-escape-scope", "");
 
+    // J5-20: a high-stakes kind wears the risk skin (red border/wash) AND a textual "binding /
+    // irreversible" badge — never color alone. The badge text rides in the title's aria-label
+    // (set via the card's existing aria-label + the visible badge) so colorblind + SR users get
+    // the same weight signal sighted users get from the tint.
+    const risk = isHighStakes(kind);
+    if (risk) card.classList.add("odec-risk");
+
     const head = document.createElement("div");
     head.className = "odec-head";
-    head.innerHTML = `<span class="odec-title">${esc(titleFor(kind))}</span>`;
+    // J5-20: append the risk badge after the title — "⚠ Irreversible" carries the stakes in
+    // text + an icon, so the signal survives without color (the SR companion to the red tint).
+    head.innerHTML = `<span class="odec-title">${esc(titleFor(kind))}</span>`
+      + (risk ? `<span class="odec-risk-badge" role="note">⚠ Irreversible — binding</span>` : "");
+    // J5-21: the dismiss × is created here (so the keydown/Escape handler can reference it) but is
+    // NOT appended to the head — it is appended to the card LAST (after the row) so it falls last in
+    // tab order. CSS positions it absolutely back into the top-right corner.
     const x = document.createElement("button");
     x.className = "odec-x"; x.type = "button"; x.textContent = "×";
     x.title = "Dismiss — you can decide in conversation instead";
@@ -198,7 +252,6 @@
     // context as sighted users who hover. "Dismiss" alone gives no intent signal.
     x.setAttribute("aria-label", "Dismiss — decide in conversation instead");
     x.addEventListener("click", () => { _userDismissed = true; _dismissedSig = _sig(pending); removeCard(); });
-    head.appendChild(x);
     card.appendChild(head);
     // F11 (DWE audit): Escape while the card holds focus = the × path — dismiss
     // only, NEVER a submit (the prose path stays open; #233's "Escape is the
@@ -397,6 +450,12 @@
     err.setAttribute("aria-live", "assertive");
     err.setAttribute("aria-atomic", "true");
     card.appendChild(err);
+
+    // J5-21: append the dismiss × LAST so it is the final tab stop — the options/textarea and Confirm
+    // (built above) come first. CSS (position:absolute, top/right) keeps it visually in the corner;
+    // Escape-to-dismiss still works via the card-scoped keydown handler above. Focus-on-mount below
+    // targets the card itself (tabindex=-1), unaffected by DOM order.
+    card.appendChild(x);
 
     confirm.addEventListener("click", async () => {
       const payload = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto);
