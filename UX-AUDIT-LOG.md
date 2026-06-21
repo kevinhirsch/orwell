@@ -40,7 +40,42 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 | J1-12 | J1 | UX REFACTOR BACKLOG | VIEWED | Mobile: settings + theme reachable only via hamburger→drawer→gear (extra steps; gear/theme not directly visible) |
 | J1-13 | J1 | HIGH-PRIORITY POLISH | VIEWED | Cold-load loader window not yet visually verified; first paint is a long dark hold before welcome (status-visibility) |
 
-*(Specialist passes append J1-14+. Severity may be re-triaged after consolidation.)*
+### J1 consolidated additions (5 specialists, de-duped) — J1-14…J1-34
+
+| ID | Sev | Status | Finding (principle → consequence) | Evidence / source |
+|---|---|---|---|---|
+| J1-14 | HIGH | VIEWED | Settings opens to **Account** tab, not Appearance (recognition/Hick) — wrong default for a zero-data player who wants look/feel. | flows-F3, visual-F8; `desktop/normal/shots/06-settings.png` |
+| J1-15 | BACKLOG | VIEWED | **Redundant dual theme paths** (standalone `#tool-theme-btn` popup + Settings→Appearance "Theme" row + Shortcuts "Open Theme") — Tesler. | flows-F2; `07-theme-picker.png`, `06-settings-appearance.png` |
+| J1-16 | LAUNCH-BLOCKING | VIEWED | **Session auto-titled "Casting Interview Production Cue"** in sidebar + header — the leaked cue propagates into a persistent player-facing label (match-to-real-world). Part of the J1-03 cluster but distinct (persists beyond transcript). | IA-F1, interaction-F3, content-#1; header/sidebar crops |
+| J1-17 | BACKLOG | VIEWED | **Heavyweight Account IA** (Logout/Change Password/2FA) for "Unknown/User" single-player — enterprise furniture mismatched to task. | IA-F5; `06-settings-account.png` |
+| J1-18 | HIGH | VIEWED | **Settings gear has no `aria-label`** (only `title`); icon-only nav recognition load (theme btn has aria-label, gear doesn't — inconsistent). WCAG 4.1.2. | IA-F3, content-#9; `index.html:1012` vs `:1009` |
+| J1-19 | BACKLOG | VIEWED | **Duplicate profile-photo entry points** (casting card + Settings→Account) with near-identical copy — consistency/which-is-canonical. | IA-F6; `06-settings-account.png` |
+| J1-20 | HIGH | VIEWED | **Under-animated marquee beats** — welcome entrance, welcome→casting, narration reveal are hard cuts/pop-ins (no staging/streaming); reduced-motion therefore only trivially compliant. Peak-end + game-feel. | visual-F3, interaction; frames `f_0003→f_0004`, `f_0037→f_0039`, narration mass flat from `f_0040` |
+| J1-21 | HIGH | VIEWED | **Composer placeholder "Message Orwell…" contrast ~2.79:1** — WCAG 1.4.3 FAIL. | content-#5, visual-F4; `08-composer-empty.png` (sampled) |
+| J1-22 | HIGH | VIEWED | **Streaming meta strip "tok/s · ⟳ 12%" contrast ~1.5–2:1** + tiny — the only "producers working / progress" feedback is near-invisible; also an OOC artifact in-fiction. WCAG 1.4.3. | visual-F4, interaction-F7, content-#8; `05-casting-kickoff.png` meta-row |
+| J1-23 | HIGH | VIEWED | **No scrim / triple-stacked overlays** — cast-photo card (and theme popup over it) have no backdrop dim, so live narration competes for figure status; Settings modal proves the scrim exists. Gestalt figure/ground. | visual-F1/F6, interaction-F4/F8; `f_0041`, `f_0080`, `07-theme-picker.png`; contrast `f_0061` |
+| J1-24 | BACKLOG | VIEWED | **Theme swatch dots vanish on dark tiles** (the feed/midnight) + abstract 3-dot preview undersells themes. Signifier quality. | visual-F7; `07-theme-picker.png` |
+| J1-25 | LAUNCH-BLOCKING | VIEWED | **Cast Photo dialog: no `aria-modal`, no focus trap, background not inert** — focus escapes into chat (confirmed: mobile Escape landed on `body`). Welcome modal does this correctly — reuse it. WCAG 2.1.2/4.1.2. | content-#4; `orwellWindow.js:340-341`; `mobile/normal/mutation-event-log.jsonl` t=16743 |
+| J1-26 | LAUNCH-BLOCKING | VIEWED | **Cast-photo portrait/library tiles are non-semantic clickable `<div>`s** (no role/tabindex/key handler/name) — keyboard- & SR-only players cannot pick/regenerate a portrait in OOBE. WCAG 2.1.1/4.1.2. | content-#3; `orwellHeadshot.js:272, 227` |
+| J1-27 | HIGH | VIEWED | **Cast-photo status messages have no live region** ("Generating…/Upload failed/photo service offline" silent to SR). WCAG 4.1.3. | content-#6; `orwellHeadshot.js:242, 298` |
+| J1-28 | HIGH | VIEWED | **Settings helper/description text contrast ~2.68:1** — WCAG 1.4.3 FAIL (toggle descriptions unreadable for low-vision). | content-#2; `06-settings-appearance.png` (sampled) |
+| J1-29 | HIGH | VIEWED | **Loader: ~6s near-black, no spinner/skeleton/status text, no `role=status`/`aria-live`, ASCII-wave ignores reduced-motion.** H1 + WCAG 4.1.3 + 2.3.3. (Extends J1-13.) | interaction-F1, content-#10, visual-F9; `index.html:285-298`; `f_0001-0003`; trace 1555→7424ms |
+| J1-30 | HIGH | VIEWED | **No "producers are thinking" pre-token state** between dismiss (7703ms) and first token — reads as lag after the player's only deliberate action. H1/Doherty. | interaction-F5; mutation-log gap 7703→11544ms |
+| J1-31 | BACKLOG | VIEWED | **Welcome CTA: weak/inconsistent `:focus-visible` ring + empty `aria`** on the journey's first interactive element. WCAG 2.4.7/4.1.2 (minor — visible text mitigates). | interaction-F6; `trace.json` welcome_ctas `aria:""`; `f_0015` vs `04-welcome-overlay.png` |
+| J1-32 | BACKLOG | VIEWED | **Redundant cast-photo lead** — title "Your Cast Photo" then body "**Your cast photo.** Upload…". Content concision. | content-#11; `orwellHeadshot.js:346` |
+| J1-33 | BACKLOG | VIEWED | **Vocabulary drift** — Settings/Shortcuts say "sessions/conversations/Toggle Window" vs in-app "Chats". Consistency. | content-#12; `06-settings-shortcuts.png` |
+| J1-34 | HIGH | VIEWED | **Casting-kickoff cognitive overload (composite)** — long live stream + leaked "You" cue + floating 4-option photo card overlapping the text, all at once, no lead-in. Sweller extraneous load at the marquee moment. | interaction-F4; `05-casting-kickoff.png` |
+
+**Positives confirmed (keep as patterns):** welcome modal a11y is exemplary (`role=dialog`+`aria-modal`+focus-trap+inert+initial-focus, `orwellOnboarding.js:110-130,233,264-269`); `#chat-history` is `role=log aria-live=polite` with `aria-busy` gating the stream (`index.html:1064`, `chat.js:1117/3189`); two-window same-viewport parity is pixel-identical (0.0% — deterministic); welcome copy + "Meet the producers" CTA are strong, on-voice; mobile DPR2 is crisp.
+
+### De-dup / cluster map
+- **The kickoff-cue cluster** (the #1 launch-blocker, all 5 lenses): **J1-03** (visible "You" bubble) + **J1-16** (auto-title) + content-#1 + interaction-F2/F3 + IA-F1 → fix together.
+- **Cast-photo surface cluster:** J1-04/J1-23 (scrim) + J1-25 (modal a11y) + J1-26 (tile semantics) + J1-27 (live region) + J1-08 (file clip) + J1-32 (lead) + J1-34 (overload) → fix together.
+- **Contrast cluster:** J1-11 (welcome 2ndary — re-measured **PASS ~7.35:1**, drop) + J1-21 (placeholder FAIL) + J1-22 (meta FAIL) + J1-28 (settings helper FAIL).
+- **OOC-artifact cluster:** J1-01 (model slug) + J1-22 (tok/s) + content-#8 (version/"Unknown/User").
+- **Loader cluster:** J1-13 + J1-29.
+- **Theme cluster:** J1-06 + IA-F4 (GPT/claude) + J1-24 (swatches) + J1-15 (dual paths).
+- **Note:** J1-11 (welcome secondary contrast) was a *visual estimate*; content-a11y re-measured it at **~7.35:1 (PASS)** → **downgraded/closed**, no longer a finding. Differential resolved in favor of "not a defect."
 
 ---
 
@@ -135,6 +170,31 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
   - LW13/LW14 verified clear; LW2–LW8 fixed.
 - **#436 WCAG/polish cluster** touched `settings.js, style.css, orwellStatusPanel.js, orwellRetrospective.js, login.html`. My J1 captures predate it → reconcile any settings/contrast finding against current source.
 - Last integrated main: `ae12c5c` (will re-fetch before remediation + each new journey).
+
+## Journey 1 — remediation applied (gated set #1)
+
+**Applied (status → FIXED, awaiting re-capture):**
+| ID | Fix | File(s) |
+|---|---|---|
+| J1-03 | Skip `(Production cue …)` user turns in history render (live hide already via `sendHiddenCue`) | `chat.js` |
+| J1-16 | Auto-title skips cue/control turns → titles from first real player message | `chat_helpers.py` |
+| J1-26 | Portrait candidate + library tiles → real `<button>`s (`aria-label`/`aria-pressed`, focus-visible, focus-within reveal of delete) | `orwellHeadshot.js` |
+| J1-27 | Singleton SR `role=status aria-live=polite` live region for portrait status | `orwellHeadshot.js` |
+| J1-08 | File input → themed `<label>` button + visually-hidden native input (kills "No fil…chosen") | `orwellHeadshot.js` |
+| J1-18 | Settings gear `aria-label="Settings"` | `index.html` |
+| J1-29 | Loader `role=status aria-label="Loading the house"` (attribute name, **no injected child node**) + `prefers-reduced-motion` guard on the wave | `index.html` |
+| J1-21 | Composer placeholder contrast 35%→60% alpha (~4.7:1) | `style.css` |
+| J1-28 | `.vis-hint` toggle-desc 30%→62% alpha (~5:1). **Contrast-only** — the `10px`→`--fs-2xs` floor bump reflowed the panel; deferred (sub-floor ships on `main` too). | `style.css` |
+| **J1-35** | **NEW** (found during validation): danger-zone "Reset" button nowrap-overflows at 390px (`space-between` flex row, default `flex-shrink:1` squeezed it below its content) → `flex-shrink:0`. Borderline on `main`; any index.html perturbation tipped it. | `index.html` |
+
+**Deferred — needs scoped work (NOT in this set):**
+- **J1-25** (cast-photo dialog focus-trap/`aria-modal`/inert) — LAUNCH-BLOCKING a11y, but forcing the whole `.ow-*` window kit modal would break the floating-window/lingering model; needs a per-window `modal` option. → next gated set.
+- **J1-22** (hide tok/s meta strip in game build), **J1-01/J1-02** (model slug + composer voice), **J1-04/J1-23** (cast-photo scrim), **J1-06** (theme scoping), **J1-14** (settings default tab), **J1-05/J1-09/J1-10/J1-12/J1-17/J1-20/J1-24/J1-30/J1-31/J1-32/J1-33/J1-34** → Phase-4 backlog / later gated sets.
+
+**Validation (this set):**
+- Local pytest **1663 passed**; the 2 pytest + the browser-smoke failures **reproduce on the pre-change baseline** (stash-compare) — artifacts of the shared dev `frontend/data/` (a casting game in progress + the OpenRouter endpoint) the engine-down/zero-data smoke assumes absent. **Not regressions** (confirmed clean on CI's clean checkout).
+- **CI clean checkout caught a real regression**: `responsive_matrix` `phone-390+settings nowrap-overflow: Reset`. Binary-searched it to index.html (pure `main` passes 3/3; my other files innocent — matrix passes with them). Root cause = J1-35 (borderline `flex-shrink` squeeze), not the a11y attrs. **Fixed** with `flex-shrink:0`; matrix now **43 pass · 0 FAIL** locally (2 runs). J1-29 reworked to an attribute-only `aria-label` (no child node) as defense-in-depth.
+- Post-merge: visual re-capture of the fixed surfaces is the remaining validation step.
 
 ## Journey progress
 
