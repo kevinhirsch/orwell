@@ -1,8 +1,11 @@
 # 0068 — Admin "Public deployment / Connect to the internet" (UI-driven exposure)
 
-**Status:** 📝 **Spec only** · **gate (planned): FE (pytest) + scripts (deploy)** — a recorded deviation
-from the BDD-default (like 0066/0067): the behaviour is admin-UI + ops + host config, gated by the FE
-pytest suite and the deploy-script lints, not a new Cucumber world. The TS engine is **unchanged**.
+**Status:** 🚧 **Built · follow-on owed (host smoke)** · **gate: FE (pytest) + scripts (deploy)** — a
+recorded deviation from the BDD-default (like 0066/0067): the behaviour is admin-UI + ops + host config,
+gated by the FE pytest suite (`test_public_deployment_routes.py` · `test_public_deployment_ui.py` ·
+`test_public_deployment_ops.py`) and the deploy-script lints (`opsPrivateRepo.test.ts`), not a new
+Cucumber world. The TS engine is **unchanged**. Built in three lanes (routes / deploy-ops / UI). Owed:
+the real-host smoke of an actual Cloudflare token → Connect (folds into 0010).
 **Executable spec:** [`0068-admin-public-deployment.feature`](./0068-admin-public-deployment.feature)
 **Provenance:** ADR [`0007`](../decisions/0007-public-internet-exposure.md) (public exposure) + feature
 [`0067`](./0067-public-internet-exposure.md) (the hardening floor this drives); PO direction 2026-06-21
