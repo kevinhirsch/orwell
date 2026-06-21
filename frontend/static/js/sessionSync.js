@@ -70,7 +70,18 @@
       // A device sent a message: reconcile its (just-persisted) user turn, then — if WE are idle —
       // attach to the live reply. Sequential so the rebuild lands before the live bubble appends.
       Promise.resolve(cm.softReloadHistory && cm.softReloadHistory(id)).then(function () {
-        if (id === currentSession() && cm.resumeStream && !(cm.hasActiveStream && cm.hasActiveStream(id))) {
+        if (id !== currentSession() || !cm.resumeStream) return;
+        // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): if WE are mid-stream for this same
+        // (canonical) session — our OWN concurrent POST is in flight — `hasActiveStream(id)` is true,
+        // so we MUST NOT resume now (that would double-render our own run). But the peer's run is
+        // durable (it chained as the current `_RUNS[canonical]`, still resumable within the evict
+        // grace), so DON'T drop the invitation: defer it, and chat.js's stream-end finally RE-ATTEMPTS
+        // the attach the moment our stream settles → we mirror the peer's turn LIVE instead of catching
+        // up only on a later poll/reconcile (the one-window-behind offset the 50× smoke caught). When
+        // we're idle, attach immediately (the original fast path).
+        if (cm.hasActiveStream && cm.hasActiveStream(id)) {
+          if (cm.deferPeerResume) cm.deferPeerResume(id);
+        } else {
           cm.resumeStream(id);
         }
       });

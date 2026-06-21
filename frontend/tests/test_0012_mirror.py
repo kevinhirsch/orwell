@@ -380,3 +380,95 @@ def test_chat_resume_gate_uses_has_run_not_is_active():
     stricter is_active — otherwise a just-finished run 404s the mirroring window."""
     src = _read("routes", "chat_routes.py")
     assert "if not agent_runs.has_run(session_id):" in src
+
+
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+# GAP 1 — the ±1 cross-tab live-attach lag: a peer's run-started must RELIABLY attach, even when
+# OUR own concurrent POST stream is in flight (so the `!hasActiveStream` guard would suppress it).
+# Fix: defer the peer-resume and RE-ATTEMPT it the moment our own stream settles (perfect lock-step).
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_session_sync_defers_peer_resume_when_own_stream_active():
+    """sessionSync's run-started handler: when WE are mid-stream for the same (canonical) session, it
+    must NOT resume immediately (that double-renders our own run) — it DEFERS the attach instead of
+    dropping it. Dropping it was the root cause of the transient one-window-behind ±1 (the observer
+    only caught up on a later poll). The idle fast path (resume now) is preserved."""
+    src = _read("static", "js", "sessionSync.js")
+    # idle → resume immediately; busy (our own stream live) → defer (don't drop).
+    assert "if (cm.hasActiveStream && cm.hasActiveStream(id)) {" in src
+    assert "if (cm.deferPeerResume) cm.deferPeerResume(id);" in src
+    assert "cm.resumeStream(id);" in src, "the idle fast path still attaches live immediately"
+
+
+def test_chat_stream_end_reattempts_the_deferred_peer_resume():
+    """chat.js: the stream-end finally must RE-ATTEMPT the deferred peer-resume once our own stream
+    settles (_streamSessionId cleared ⇒ hasActiveStream false), so we mirror the peer's turn LIVE
+    instead of waiting on a later reconcile. The peer run is durable (chained as the current
+    _RUNS[canonical], resumable within the evict grace), so the deferred attach replays then tails."""
+    src = _read("static", "js", "chat.js")
+    assert "export function deferPeerResume(sessionId)" in src
+    assert "export function flushPendingPeerResume(sessionId)" in src
+    # the finally re-attempts the deferred peer-resume (sequenced AFTER the reconcile flush).
+    assert "flushPendingPeerResume(streamSessionId)" in src
+    # and the deferred-resume seam is exported on chatModule so sessionSync can reach it.
+    assert "deferPeerResume," in src and "flushPendingPeerResume," in src
+
+
+def test_flush_peer_resume_guards_against_double_render_and_wrong_session():
+    """flushPendingPeerResume must only attach when we're still on the session AND nothing else is
+    already rendering it live (hasActiveStream) — resumeStream's own guards make it idempotent, but
+    the flush also short-circuits so a newer own-stream that took over keeps ownership of the render."""
+    src = _read("static", "js", "chat.js")
+    body = src.split("export function flushPendingPeerResume", 1)[1].split("export function", 1)[0]
+    assert "_pendingPeerResume.has(id)" in body, "no-op unless a peer resume was actually deferred"
+    assert "hasActiveStream(id)" in body, "don't attach if a newer stream already owns the live render"
+    assert "resumeStream(id)" in body
+
+
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+# GAP 2 — error-path consistency: on a model error the live SENDER shows the raw error ("Error 503")
+# while the agent loop persists a FRIENDLY fallback (a peer/reload shows that). Two windows, different
+# text. Fix: after the live error settles, the sender FORCE-reconciles its bubble to the persisted
+# message so live + persisted + peer all converge to ONE string (live feedback kept; only SETTLED
+# state reconciled).
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_error_path_forces_reconcile_to_persisted_message():
+    """chat.js: an SSE error marks the turn so the stream-end finally FORCES a content rebuild (not
+    just the id-adopt) of the sender's bubble to the persisted fallback — otherwise the error bubble
+    keeps the raw 'Error 503' while a peer/reload shows the friendly message (two windows diverge)."""
+    src = _read("static", "js", "chat.js")
+    # the error handler still gives immediate live feedback AND marks the turn.
+    assert "typewriterInto(roundHolder.querySelector('.body'), errMsg);" in src
+    assert "_streamHadError = true;" in src
+    # the finally arms the one-shot forced rebuild for this session.
+    assert "if (_streamHadError) _forceRebuild.add(streamSessionId);" in src
+
+
+def test_force_rebuild_is_honored_and_self_guarded_in_soft_reload():
+    """softReloadHistory must (a) bypass the 'converged' short-circuit when forced (the error bubble
+    may already carry the persisted {id, seq} but show the wrong CONTENT), and (b) SELF-GUARD so a
+    hard fail that persisted NOTHING (server has fewer messages than rendered) keeps its live error
+    bubble rather than the rebuild erasing it. The force is one-shot (consumed per reload)."""
+    src = _read("static", "js", "chat.js")
+    assert "let _forced = _forceRebuild.delete(sessionId);" in src, "one-shot consume of the force flag"
+    assert "if (_forced && visible.length < renderedCount) _forced = false;" in src, \
+        "self-guard: don't force-erase a live error bubble with no server replacement"
+    assert "if (converged && !_forced)" in src, "forced reload bypasses the converged short-circuit"
+    # if a live stream forces us to defer, the one-shot force must be RE-ARMED for the deferred flush.
+    assert "if (_forced) _forceRebuild.add(sessionId);" in src
+
+
+def test_pre_stream_provider_error_persists_friendly_fallback_not_raw_error():
+    """The reconcile TARGET: confirm what the agent loop persists on a model error. The pre-stream
+    503 (and the empty-response case) yield a FRIENDLY fallback — NOT the raw 'Error 503' — and that
+    is the single string both windows must converge to. _empty_response_fallback is the source."""
+    from src.agent_loop import _empty_response_fallback
+    # empty content + no tools → the friendly fallback (yielded AND persisted as full_response).
+    final, chunk = _empty_response_fallback("", "", [])
+    assert "empty response" in final.lower(), "the persisted/peer text is the friendly fallback"
+    assert "Error 503" not in final, "the raw provider error is NEVER the persisted text"
+    assert chunk and "delta" in chunk, "the fallback is also streamed as a delta (so a fresh window sees it)"
+    # real content is untouched (no fallback) — the error path is the ONLY divergence source here.
+    final2, chunk2 = _empty_response_fallback("real narration", "", [])
+    assert final2 == "real narration" and chunk2 is None
