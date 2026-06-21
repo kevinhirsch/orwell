@@ -1,7 +1,10 @@
 # 0009 — Location & movement: one source of truth, recorded movement, narration grounding
 
-> **Status:** **Proposed — direction ratified by PO (2026-06-21)**; mechanism to be built
-> BDD/TDD-first. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
+> **Status:** **Accepted — built BDD/TDD-first (2026-06-21).** D2 (record movement for everyone), D3
+> (hard-fold: the location grounding barrier + the pre-emission impossible-claim guard), and D4 (the
+> dual-map contract + its calibration-neutrality guard) are shipped (PRs #454/#455/#456/#458/#459 + the
+> D4 guard). **D1** (one occupancy snapshot per turn — the temporal-skew polish) remains the open
+> increment. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
 > (1) the model **narrates the open texture** (who moves where) and the engine **records** it — the
 > engine keeps only the seeded baseline for calibration; the acceptance test is simply *consistent and
 > dynamic*. (2) Enforcement is **hard-fold** under an overriding constraint — **NO visible historic
@@ -117,6 +120,19 @@ snapshot skew:
 - **Risk — calibration:** the D2 fold must not perturb seeded outcomes. Bounding mutation to the
   open `presence` map (D4) keeps `presenceBase` / society pairing / seeded comps byte-identical;
   guard with byte-identity tests in the `stagedTrajectoryNeutral` spirit.
+  - **Built guard + finding (2026-06-21):** the D4 guard is `tests/unit/recordHouseguestMoveCalibration.test.ts`
+    — it proves the *dual-map contract* directly: `recordHouseguestMove` mutates only the OPEN occupancy
+    (`occupancy()`), leaves the CLOSED `presenceBase` (`societyOccupancy()`) **byte-identical**, and a
+    subsequent `presenceTick`'s BASE pass draws the shared calibration rng the **same number of times** and
+    yields a byte-identical base occupancy. *Why this, and not a full-season byte-identity run:* the engine's
+    seeded gates (juryReach / movementStreamIsolation / UAT) run a FIXED advance sequence and never
+    interleave aux mutations. Interleaving ANY aux commit — `recordInteraction`, `makeDeal`, the long-shipped
+    player-move belt `moveTo`/`movePlayer`, even a bare `beatSeq` bump — shifts the global seeded stream
+    relative to that fixed sequence (verified: all of them, including a no-op, perturb a free-running passive
+    season identically). That is a pre-existing, accepted property of *every* aux belt, not of this fold:
+    `recordHouseguestMove` is byte-for-byte the same commit class as `moveTo`. So the fold-specific
+    guarantee that matters — and the one tested — is that the open mutation never reaches the closed
+    calibration occupancy.
 - **Risk — surface area:** a new NPC-move command/beat + an FE belt + a location checkpoint. Mitigated
   by reusing the established `moveTo` / `_auto_move_player` / `_pending_barrier_directive` /
   beat-signature patterns rather than inventing new ones.
