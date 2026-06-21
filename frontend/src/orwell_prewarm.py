@@ -164,7 +164,7 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
 
     def _on_done() -> None:
         # Whole-cast authoring finished (success OR failure): release the fallback gate ONLY.
-        # ADR 0012 — do NOT force-open a per-NPC gate that never fired: an NPC the model couldn't
+        # ADR 0013 — do NOT force-open a per-NPC gate that never fired: an NPC the model couldn't
         # author must get NO photo (a seeded/un-authored face would mismatch the real, authored text).
         # The portrait backfill shoots it if/when its authoring actually lands.
         st.author_done.set()
@@ -223,7 +223,7 @@ async def warm_next_season(user: Optional[str] = None, *, engine=None, authoring
         st.npc_event(str(hid)).set()
 
     def _on_done() -> None:
-        # ADR 0012 — release the whole-cast gate ONLY; never force-open an un-authored NPC's gate
+        # ADR 0013 — release the whole-cast gate ONLY; never force-open an un-authored NPC's gate
         # (no photo without model authoring — the backfill shoots it once authoring lands).
         st.author_done.set()
 
@@ -305,7 +305,7 @@ async def warm_portraits(user: Optional[str] = None, *, portraits=None,
     st.portraits_started = True
 
     async def _shoot_one(entry, gate: asyncio.Event) -> None:
-        # ADR 0012 — a face shoots ONLY when its houseguest is actually MODEL-AUTHORED (its own gate
+        # ADR 0013 — a face shoots ONLY when its houseguest is actually MODEL-AUTHORED (its own gate
         # fires via _on_authored). If whole-cast authoring ends without THIS NPC authored, do NOT
         # shoot: a seeded/un-authored identity must never get a photo (it would mismatch the real,
         # authored text later). No photo now; the portrait backfill shoots it if/when authoring lands.
@@ -329,7 +329,7 @@ async def warm_portraits(user: Optional[str] = None, *, portraits=None,
             mine_wait.cancel()
         if gate.is_set():
             portraits.kickoff_generation([entry], user)
-        # else: whole-cast done (or a hang) without THIS NPC authored — intentionally NO photo (ADR 0012).
+        # else: whole-cast done (or a hang) without THIS NPC authored — intentionally NO photo (ADR 0013).
 
     async def _run() -> None:
         tasks = []
