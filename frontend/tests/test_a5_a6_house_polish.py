@@ -53,17 +53,26 @@ def test_a5_every_house_theme_has_a_particle_pattern():
 
 
 def test_a5_animated_particles_honor_prefers_reduced_motion():
-    # A5 (ruling #18): the animated canvas generators must NOT spawn under
-    # prefers-reduced-motion (static or off). applyBgPattern gates the canvas
-    # init on the live media query; the static CSS base layer still paints.
+    # A5 (ruling #18) + BG-1: under prefers-reduced-motion the canvas particle layers must
+    # have NO ONGOING MOTION. Originally the canvas was skipped entirely — but that left the
+    # canvas-only patterns (e.g. the default telescreen->perlin-flow) with a dead/blank
+    # background (operator-reported). It now renders a STATIC frame instead (texture, zero
+    # motion) via _bgStaticInit, which bounds requestAnimationFrame to a finite synchronous
+    # burst and then RESTORES the real rAF — so nothing keeps animating after the settle.
     js = _read("static", "js", "theme.js")
     body = re.search(r"export function applyBgPattern\(pattern\) \{(.*?)\n\}", js, re.S).group(1)
     assert "_prefersReducedMotion()" in body, \
         "applyBgPattern must consult prefers-reduced-motion before starting the canvas generator"
-    assert re.search(r"_CANVAS_PATTERNS\[p\]\s*&&\s*!_prefersReducedMotion\(\)", body), \
-        "the animated canvas init must be skipped when reduced motion is requested"
-    helper = re.search(r"function _prefersReducedMotion\(\) \{(.*?)\n\}", js, re.S).group(1)
-    assert "prefers-reduced-motion" in helper and "matchMedia" in helper
+    assert "_bgStaticInit(" in body, \
+        "under reduced motion the canvas pattern must render a STATIC frame (via _bgStaticInit), not a blank canvas"
+    helper = re.search(r"function _bgStaticInit\(initFn\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "requestAnimationFrame" in helper, "_bgStaticInit must intercept requestAnimationFrame to settle the field"
+    assert re.search(r"window\.requestAnimationFrame\s*=\s*realRaf", helper), \
+        "_bgStaticInit must RESTORE the real requestAnimationFrame so nothing keeps animating after the settle"
+    assert re.search(r"n\+\+\s*<\s*\d+", helper), \
+        "_bgStaticInit must BOUND the synchronous burst to a finite number of frames (no continuous motion)"
+    rm = re.search(r"function _prefersReducedMotion\(\) \{(.*?)\n\}", js, re.S).group(1)
+    assert "prefers-reduced-motion" in rm and "matchMedia" in rm
 
 
 def test_a5_house_particles_are_kept_subtle():

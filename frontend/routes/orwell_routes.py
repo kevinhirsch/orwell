@@ -789,7 +789,10 @@ def setup_orwell_routes() -> APIRouter:
         the initial. Player-channel: a user's OWN avatar only."""
         p = orwell_portraits.user_avatar_path(_current_user(request))
         if p is None:
-            return Response(status_code=404)
+            # 204 (not 404) when unset: the UI uses this purely as a presence
+            # probe, and a 404 logs a console/resource error on every load
+            # (S1-2). 204 carries the same "no avatar" signal without the noise.
+            return Response(status_code=204)
         return FileResponse(str(p), media_type="image/png",
                             headers={"Cache-Control": "no-cache"})
 
