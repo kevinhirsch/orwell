@@ -424,6 +424,10 @@ export class GameSessionRegistry {
     // returns only the public summary (winner NAME, weeks, placement); it reads no Vault, and each
     // driven beat commits through the SAME checkpointed `onPersist` a live decision does.
     sb.admin.setFastForwardProvider(() => sb.session.advanceToFinale());
+    // ADR 0006: the FE settings switch flips the in-game clock at runtime through this Vault-free delegate
+    // — a process-global override on the engine adapter (no restart). The composition layer is the legal
+    // seam to reach the adapter (the OUTWARD admin surface never imports it; dependency-cruiser holds).
+    sb.admin.setTimeOfDayDelegate((enabled) => GameSessionAdapter.setTimeOfDayEnabled(enabled));
     sb.syncAdmin();
   }
 
