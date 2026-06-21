@@ -107,12 +107,16 @@
     card.innerHTML =
       '<div class="opt-hd">' +
         '<span class="opt-ttl">Welcome to the house — premiere week</span>' +
-        '<button type="button" class="opt-dismiss" aria-label="Dismiss the premiere guide">Got it</button>' +
+        '<button type="button" class="opt-dismiss" title="Won\'t show again" aria-label="Dismiss the premiere guide">Close guide</button>' +
       '</div>' +
-      '<div>Take your time meeting the cast — talk to anyone, wander any room; the house keeps ' +
-      'playing around you. Production walks you through this first week:</div>' +
-      '<div class="opt-rhythm">\u{1F44B} Meet the house → \u{1F3C6} HOH → \u{1F528} Nominations ' +
-      '→ \u{1F48E} Veto → \u{1F5F3}️ Eviction.</div>';
+      '<div>Talk to anyone, wander any room — the house keeps playing around you. ' +
+      'You\'ll need to cross paths with all fifteen houseguests before Production calls the first HOH competition.</div>' +
+      '<div class="opt-rhythm">' +
+        '<span aria-hidden="true">\u{1F3C6}</span> HOH → ' +
+        '<span aria-hidden="true">\u{1F528}</span> Nominations → ' +
+        '<span aria-hidden="true">\u{1F48E}</span> Veto → ' +
+        '<span aria-hidden="true">\u{1F5F3}️</span> Eviction.' +
+      '</div>';
     bar.parentNode.insertBefore(card, bar);
     _mounted = true;
     card.querySelector(".opt-dismiss").addEventListener("click", function () { dismiss(card); });
