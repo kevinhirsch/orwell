@@ -107,5 +107,29 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 - Engine: `src/composition/orchestrator.ts` — the off-screen tick routes the living NPCs through
   `awakeAmong`, so the night's society pairs only houseguests still up.
 - Port + seam: `src/ports/GameSession.ts`, `src/surfaces/tools/registry.ts`, `src/adapters/mcp/McpServer.ts`.
-- FE: `frontend/static/js/orwellStatusPanel.js` (the clock chip + the player's rest cue).
-- **Deploy:** set `ORWELL_TIME_OF_DAY=1` on the engine service to turn the feature on.
+- FE: `frontend/static/js/orwellStatusPanel.js` (the clock chip + the player's rest cue);
+  `frontend/static/js/orwellNightStatus.js` (the "Nightfall" gadget — phase indicator + who's turned in).
+- **Toggle (PR #460):** an "In-Game Time & Sleep" settings switch (default ON) flips it on the live
+  engine at runtime via the admin `setTimeOfDay` tool (no restart) — re-applied on FE boot. The
+  `ORWELL_TIME_OF_DAY` env var is the boot default the switch overrides.
+
+## 9. Open decisions for the owner (Phase-2 extensions — deferred, on the PO review list)
+
+Built and shipped: the clock, the sleep→competition penalty, the bedtime lever, the social economy
+(the house thins; night owls scheme on), the settings switch, and the Nightfall gadget. Deliberately
+deferred per ADR 0006 — **for owner review before scheduling**:
+
+1. **NPC next-day social fatigue.** Today rest only bites in `resolveCompetition`. The extension: a
+   tired houseguest reads crankier / more volatile / more error-prone in the *next day's* social scenes
+   (not just comps). Calibration-sensitive — fold it on an isolated stream like the comp term.
+2. **A compounding multi-night fatigue meter.** Today rest is a single-night read (last night's latest
+   phase). The extension: consecutive late nights *accumulate* a deeper deficit (and recover on early
+   nights), so a sustained night-owl strategy costs more over a week. Most realistic; biggest surface.
+3. **Per-conversation clock advance.** Today the clock advances per `advanceGame` beat (~5/week). The
+   extension: advance it as the player *lingers/plays* within a beat, so "a day has finite scheming
+   time" is felt turn-by-turn (the PO's original "how long each conversation takes" ask). Pacing-only;
+   must never rush an engaging scene (ADR 0003 / the lull rule).
+
+Open *tuning* (not new scope): the sleep-penalty magnitude (`outcome.sleepPenalty ~0.15`), the archetype
+bedtime spread (`SLEEP.earlySleeperBelow` / `nightOwlAbove`), and whether to flip the env default ON now
+that the settings switch ships.
