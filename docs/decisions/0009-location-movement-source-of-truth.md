@@ -1,7 +1,12 @@
 # 0009 — Location & movement: one source of truth, recorded movement, narration grounding
 
-> **Status:** **Proposed** (investigation-driven; PO to ratify the direction; mechanism to be built
-> BDD/TDD-first). Captures the refactor target for player + NPC room-location tracking.
+> **Status:** **Proposed — direction ratified by PO (2026-06-21)**; mechanism to be built
+> BDD/TDD-first. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
+> (1) the model **narrates the open texture** (who moves where) and the engine **records** it — the
+> engine keeps only the seeded baseline for calibration; the acceptance test is simply *consistent and
+> dynamic*. (2) Enforcement is **fold-first**: a legal narrated move is recorded into `presence`
+> immediately; **re-ground** only the impossible (an evicted houseguest, a non-existent/unreachable
+> room, two-places-at-once).
 > **Source:** The 2026-06-21 live-walkthrough audit symptom — *the chat-narrated location of the
 > player & NPCs is inconsistent with the sidebar location gadget* — plus a three-lane investigation
 > (engine model · FE surfaces · root-cause repro against the live game).
@@ -80,12 +85,14 @@ snapshot skew:
   the model failed to record — so "Carson heads to the kitchen" actually moves Carson and the gadget
   agrees. Mutation is on the **open set** (`presence`) only; the seeded `presenceBase` calibration
   stream is untouched (see Risks).
-- **D3 — Enforce location narration (a location barrier/checkpoint).** Extend the grounding family:
-  surface the engine `whereabouts` as an enforceable per-turn fact (mirror the `comp-round` clamp in
-  `_pending_barrier_directive`), and add a post-turn reconciliation (mirror the beat-signature
-  checkpoint) that, when prose places/moves people contrary to `whereabouts`, either **re-grounds**
-  the next turn or **folds** the narrated move into `presence` (the D2 belt) so the engine agrees with
-  the prose.
+- **D3 — Reconcile narration to the board, FOLD-FIRST (PO ruling 2026-06-21).** When prose places or
+  moves people contrary to `whereabouts`, **hard-fold** the narrated move into `presence` (the D2
+  path) so the engine immediately agrees with the story — the model authors the open texture, the
+  engine records it. Fall back to **re-ground** (correct the model next turn; mirror the
+  beat-signature checkpoint + surface `whereabouts` as an enforceable per-turn fact like the
+  `comp-round` clamp in `_pending_barrier_directive`) **only** for narration that cannot be folded
+  into a legal state: an evicted houseguest, a non-existent/unreachable room, or someone in two
+  places at once. A legal move always folds; only the impossible is re-grounded.
 - **D4 — Pin the dual-map contract (ADR 0005).** Make explicit that `presence` is the **open**,
   player-facing/narratable occupancy (the gadget + narration + the D2 fold bind here) and
   `presenceBase` is the **closed**, calibration-neutral occupancy (seeded society pairing binds here).
@@ -128,14 +135,16 @@ snapshot skew:
 - **Calibration neutrality** — the D2 fold leaves seeded outcomes byte-identical (society pairing,
   comps, votes), in the `stagedTrajectoryNeutral.test.ts` spirit.
 
-## Open questions for the product owner
+## Owner rulings (resolved 2026-06-21)
 
-1. **Who decides NPC movement?** Model-narrated-then-recorded (the model wanders NPCs as the scene
-   wants; the belt records it) vs engine-seeded (the tick decides; the model must narrate to match).
-   The ADR-0003/0005 lean is *model narrates the open texture, recorded; engine keeps the seeded
-   baseline for calibration* — but it's a design call.
-2. **Enforcement strength** for D3: soft re-ground next turn, or hard-fold the narrated move into
-   `presence` immediately (so the engine always concedes to plausible prose)?
+1. **Who decides NPC movement?** → **The model narrates the open texture** (who wanders where); the
+   **engine records it** and keeps only the seeded baseline for calibration. The acceptance test is
+   simply *consistent and dynamic* (PO: *"ultimately doesn't matter as long as it's consistent and
+   dynamic"*). Confirms the ADR-0003/0005 lean.
+2. **Enforcement strength (D3)?** → **Fold-first.** A legal narrated move is recorded into `presence`
+   immediately (the engine concedes to plausible prose); **re-ground** only the impossible (an
+   evicted houseguest, a non-existent/unreachable room, two-places-at-once) — there is nothing legal
+   to fold.
 
 ## Key files
 
