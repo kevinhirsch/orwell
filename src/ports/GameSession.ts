@@ -1031,6 +1031,45 @@ export interface PreSeedCastView {
   refused?: "in-progress" | "over";
 }
 
+/**
+ * 0065 (advance-warm) — pre-warm the NEXT season's cast DURING the current season's finale, into a
+ * per-user HOLDING STORE that survives the sandbox rotation. Unlike `preSeedCast` (which warms onto
+ * the live adapter's pre-game store and is REFUSED while a season runs), this generates a fresh cast
+ * off a NEW seed into a registry-level buffer the cutover ADOPTS — the active season is untouched.
+ *
+ * Optionally authors ONE houseguest of the held cast (the FE deep-author write-back, mirroring
+ * `recordCastProfile`): when `profile` is present this call seals that profile onto the held cast
+ * (PUBLIC/HIDDEN split) instead of (re)generating. A `houseguestId`-only authoring call against a
+ * not-yet-warmed buffer first warms it.
+ */
+export interface PreSeedNextSeasonReq {
+  /** Optional explicit seed (tests/replays). Default: mint + persist a NEW season seed for the held cast. */
+  seed?: number;
+  /**
+   * Optional deep-author write-back for ONE houseguest of the held cast — same split/seal as
+   * `recordCastProfile`, but it lands on the NEXT-season holding store, never the active season.
+   */
+  profile?: RecordCastProfileReq;
+}
+
+/** The Vault-free held next-season cast (0065 advance-warm) — same roster shape as `PreSeedCastView`. */
+export interface PreSeedNextSeasonView {
+  /** True once the next-season cast is warmed into the holding store. */
+  warmed: boolean;
+  /** The NEW season seed the held cast was generated off (the one the cutover will adopt). */
+  seed: number;
+  /** The Vault-free public roster — the same observable facets as `GameStateView.house` (no player). */
+  house: HouseguestCard[];
+  /** Portrait prompts (0051) built from the held PUBLIC facets — NPCs only. */
+  portraitPrompts: PortraitPromptEntry[];
+  /** True when this call returned an ALREADY-held cast (idempotent re-call) rather than warming afresh. */
+  alreadyWarmed?: boolean;
+  /** When `profile` was supplied: the authoring outcome (field NAMES only, never a hidden value). */
+  authored?: RecordCastProfileResult;
+  /** Set when the next-season cast could NOT be warmed (no active season to advance-warm from). */
+  refused?: "no-active-season";
+}
+
 export interface GameSession {
   /** Run OOBE and start a new game; returns the Vault-free state. */
   createCharacter(req: CreateCharacterReq): GameStateView;
@@ -1040,6 +1079,14 @@ export interface GameSession {
    * survives a restart). `createCharacter` ADOPTS the warmed cast (same seed) at finalize. Vault-free.
    */
   preSeedCast(req: PreSeedCastReq): PreSeedCastView;
+  /**
+   * 0065 (advance-warm) — pre-warm the NEXT season's cast DURING the current season's finale, into a
+   * per-user holding store that survives the cutover rotation (`preSeedCast` is refused mid-season;
+   * this is its mid-season counterpart). Generates a fresh cast off a NEW seed without touching the
+   * active season; the confirmed next-season cutover ADOPTS it. Optionally authors one houseguest of
+   * the held cast (the FE deep-author write-back). Vault-free out. Composed by the registry.
+   */
+  preSeedNextSeason(req: PreSeedNextSeasonReq): PreSeedNextSeasonView;
   /**
    * Record casting-interview answers as they land (0050) — any subset of fields, callable any
    * number of times pre-game. Returns where the interview stands (known / missing / next / ready);

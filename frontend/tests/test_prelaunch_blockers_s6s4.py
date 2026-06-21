@@ -15,6 +15,13 @@ advanced) with no `orwell:gamechanged` in this tab, the card was unreachable. Fi
 slow periodic status poll surfaces the engine's own `pending` as a backstop. It must
 be dismissal-aware — surfacing only when the player hasn't dismissed and no card is
 already up — so it never re-nags a waved-away card.
+
+F-S4-C — a pre-stream non-200 (gateway/proxy 502, 4xx, 409) on /api/chat_stream was
+typewritten straight into the already-mounted GM bubble (`msg msg-ai` + a `.role`
+"Big Brother" label), so a raw "Error 502 / upstream model error" read as in-game
+narration — an immersion break. Fix: on the error path, reclassify the idle holder to
+the quiet out-of-character `.msg-system` style AND drop its `.role` label (rebuild the
+body), then frame a generic connection failure instead of the raw upstream string.
 """
 import os
 import re
@@ -84,4 +91,42 @@ def test_backstop_is_dismissal_aware_and_does_not_renag():
     assert "rearmFromStatus" not in body, (
         "the poll must NOT call rearmFromStatus (it resets _userDismissed → would re-nag); it arms "
         "directly only when not dismissed and no card is up."
+    )
+
+
+# ── F-S4-C: a stream/connection error is a SYSTEM notice, not GM narration ────
+
+def _chat_error_path(js):
+    """The `if (!res.ok) { … }` block in the chat-stream sender — the pre-stream
+    non-200 handler that renders the failure into the mounted holder."""
+    i = js.find("if (!res.ok) {")
+    assert i != -1, "could not locate the `if (!res.ok)` error path in chat.js"
+    # Grab a generous window: the handler returns within ~50 lines (the F-S4-C comment is long).
+    return js[i:i + 3400]
+
+
+def test_stream_error_reclassifies_holder_to_system_not_gm_bubble():
+    js = _read("chat.js")
+    body = _chat_error_path(js)
+    assert "holder.className = 'msg msg-system'" in body, (
+        "a pre-stream non-200 must reclassify the GM holder to the quiet `.msg-system` style "
+        "so it doesn't read as in-game narration (F-S4-C)."
+    )
+    # The role label ("Big Brother") must be dropped — a system notice has no houseguest author.
+    assert 'holder.innerHTML = \'<div class="body"></div>\'' in body, (
+        "the error path must rebuild the holder body (dropping the `.role` GM label) so nothing "
+        "attributes the connection failure to a houseguest."
+    )
+
+
+def test_stream_error_frames_generic_failure_not_raw_upstream():
+    js = _read("chat.js")
+    body = _chat_error_path(js)
+    assert "your message didn't go through" in body, (
+        "the error path must frame a generic, actionable connection failure rather than typing the "
+        "raw upstream `Error 502 / upstream model error` string into the chat (F-S4-C)."
+    )
+    # The helpful tool-mode-switch copy is preserved (not clobbered by the generic reframe).
+    assert "/Chat mode/i.test(errText)" in body, (
+        "the generic reframe must NOT overwrite the tool-mode-switch guidance (it matches /Chat mode/i)."
     )

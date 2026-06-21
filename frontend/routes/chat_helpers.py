@@ -578,7 +578,7 @@ def freeze_view(user, live):
 # model-driven through the tool seam (no FE-issued call exists), so there is nothing to wire for it.
 _LAST_BEAT_SEQ: dict = {}
 
-# ADR 0010 — the beat key (week, phase, moment) the model was FRAMED on for the user's current turn,
+# ADR 0011 — the beat key (week, phase, moment) the model was FRAMED on for the user's current turn,
 # stashed by apply_game_framing (zero extra engine read — framing already holds the game state). The
 # agent loop compares it to the engine's CURRENT beat at end-of-turn: if the beat MOVED but this turn
 # fired no progression tool, a concurrent PEER (another device's turn/decision) advanced it — so the
@@ -1409,7 +1409,7 @@ async def apply_game_framing(
         # memory is the store recalled, never the chat remembered). Subsequent turns in the
         # same session get the live phase moment as before.
         moment = game_state.get("moment")
-        # ADR 0010: stash the FRAMING beat key (the beat the model is grounded on THIS turn) so the
+        # ADR 0011: stash the FRAMING beat key (the beat the model is grounded on THIS turn) so the
         # agent loop can distinguish a concurrent PEER's advance from the model under-calling — the
         # two-tab "20-step loop" fix. Engine's raw fields (NOT the RE_ENTRY display moment). Zero extra
         # read (game_state already in hand); Vault-free; fail-open (absent ⇒ the loop check is inert).

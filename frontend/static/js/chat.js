@@ -1115,6 +1115,20 @@ import { isNarrow } from './platform.js';
             Storage.setJSON(Storage.KEYS.TOGGLES, _st);
           }
         }
+        // F-S4-C (audit): a stream/connection error is a SYSTEM notice, NOT the GM's voice. The pre-created
+        // bubble is `msg msg-ai` (Big Brother) WITH a GM `.role` label, so typing a raw "Error 502 / upstream
+        // model error" into it read as in-game narration (immersion break). Reclassify it to the quiet
+        // `.msg-system` style (left-border, no GM avatar) AND drop the `.role` label so nothing attributes the
+        // failure to a houseguest; frame a generic connection failure out-of-character (the helpful tool-mode-
+        // switch message set above keeps its own copy). The error path returns right after, so rebuilding the
+        // idle holder is side-effect-free.
+        try {
+          holder.className = 'msg msg-system';
+          holder.innerHTML = '<div class="body"></div>';
+        } catch (_) {}
+        if (!/Chat mode/i.test(errText)) {
+          errText = `⚠ Connection error (${res.status}) — your message didn't go through. Try again.`;
+        }
         typewriterInto(holder.querySelector('.body'), errText);
         enableResearchBtn();
         return;
@@ -1983,6 +1997,42 @@ import { isNarrow } from './platform.js';
                   _chatBox.appendChild(note);
                   try { note.scrollIntoView({ block: 'end', behavior: 'smooth' }); } catch (_) { uiModule.scrollHistory && uiModule.scrollHistory(); }
                 }
+              } else if (json.type === 'truncated') {
+                // F-S4-D: the reply was cut off by the model's OUTPUT token cap (finish_reason "length"),
+                // not the step limit — it stopped mid-sentence. Offer a Continue affordance (mirrors
+                // rounds_exhausted) so the player can resume instead of the truncation passing silently.
+                // Appended to the chat-history container (bottom), NOT the message body — the body is
+                // re-rendered at stream finalize, which would wipe a note placed inside it.
+                const _chatBox = document.getElementById('chat-history');
+                if (!_isBg && _chatBox) {
+                  const _old = _chatBox.querySelector('.response-truncated');
+                  if (_old) _old.remove();
+                  const note = document.createElement('div');
+                  note.className = 'stopped-indicator response-truncated';
+                  const label = document.createElement('span');
+                  label.className = 'rounds-exhausted-label';
+                  label.textContent = 'The response was cut off before it finished.';
+                  note.appendChild(label);
+                  const contBtn = document.createElement('button');
+                  contBtn.className = 'continue-btn';
+                  contBtn.title = 'Continue the response';
+                  contBtn.textContent = 'Continue ▸';
+                  const _holder = currentHolder;
+                  contBtn.addEventListener('click', () => {
+                    note.remove();
+                    _hideUserBubble = true;
+                    _pendingContinue = _holder;
+                    const msgInput = uiModule.el('message');
+                    if (msgInput) {
+                      msgInput.value = 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.';
+                      const sb = document.querySelector('.send-btn');
+                      if (sb) sb.click();
+                    }
+                  });
+                  note.appendChild(contBtn);
+                  _chatBox.appendChild(note);
+                  try { note.scrollIntoView({ block: 'end', behavior: 'smooth' }); } catch (_) { uiModule.scrollHistory && uiModule.scrollHistory(); }
+                }
               } else if (json.type === 'model_actual') {
                 if (!_isBg && holder) {
                   holder._requestedModel = json.requested_model || holder._requestedModel || modelName;
@@ -2132,7 +2182,7 @@ import { isNarrow } from './platform.js';
                 // Track tool name for contextual spinner labels
                 _lastToolName = json.tool || '';
 
-                // ADR 0010 — drop pure context-read beats in the game build (see orwellToolBeats):
+                // ADR 0011 — drop pure context-read beats in the game build (see orwellToolBeats):
                 // they change nothing the player witnessed and otherwise stack as a wall of identical
                 // "Production notes" chips on a long / concurrent-re-ground turn. No chip, no thread
                 // node; currentToolBubble=null so the paired tool_output is skipped (the next real
@@ -2185,7 +2235,7 @@ import { isNarrow } from './platform.js';
                 node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">\u25B6</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
                 // Expand/collapse via delegated click handler (init at module bottom).
                 threadWrap.appendChild(node);
-                // ADR 0010 — cap the rail (backstop; a normal turn never hits it). Keep the most
+                // ADR 0011 — cap the rail (backstop; a normal turn never hits it). Keep the most
                 // recent ORWELL_MAX_VISIBLE_BEATS nodes; drop older overflow. The running node is the
                 // newest (never dropped); the dropped ones are solidified (timers cleared on
                 // tool_output — we clear defensively anyway).
@@ -3225,10 +3275,21 @@ import { isNarrow } from './platform.js';
       // and arms the card. Debounced + idempotent (coalesces with any per-tool dispatch this turn);
       // a no-op outside the game build (orwellGameChanged is undefined there).
       if (window.orwellGameChanged) window.orwellGameChanged('turn-settled');
+      // ADR 0008 fix (audit 2026-06-21): the foreground reader loop has ENDED, so clear _streamSessionId.
+      // It was set on stream START (~L603) and previously NEVER reset, so hasActiveStream() stayed
+      // permanently true for this session — which made flushPendingReconcile's softReloadHistory re-defer
+      // FOREVER (the chat.js:3619 `if (hasActiveStream(sessionId))` guard). Net effect: a tab that had sent
+      // even one turn could NEVER live-reconcile a peer's concurrent write to that session until a reload
+      // (the two-tabs-streaming-concurrently residual the ADR-0008 live verification found). Guarded to
+      // `=== streamSessionId` so a newer stream's session isn't cleared by a late-settling old finally;
+      // a backgrounded stream stays covered by _backgroundStreams in hasActiveStream.
+      if (_streamSessionId === streamSessionId) _streamSessionId = null;
       // ADR 0008: read-your-writes. The turn has persisted, so reconcile the sender's optimistic
       // bubbles to the authoritative {id, seq} log (the adopt pass is cheap + flicker-free; it only
       // rebuilds if a PEER also wrote during this turn). Was: the sender never re-fetched, so its DOM
       // was a permanent local guess that drifted from other tabs. Deferred so the finally settles first.
+      // (Now that _streamSessionId is cleared above, the setTimeout(0) callback sees hasActiveStream=false
+      // and the deferred reconcile actually rebuilds.)
       try { setTimeout(() => { try { flushPendingReconcile(streamSessionId); } catch (_) {} }, 0); } catch (_) {}
       // Always clean up research tracking regardless of background state
       _researchingStreamIds.delete(streamSessionId);

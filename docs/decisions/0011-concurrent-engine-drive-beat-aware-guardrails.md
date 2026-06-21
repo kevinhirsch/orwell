@@ -1,4 +1,4 @@
-# 0010 — Concurrent engine-drive: beat-aware guardrails (no client turn-lock)
+# 0011 — Concurrent engine-drive: beat-aware guardrails (no client turn-lock)
 
 > **Status:** **Accepted — BUILT (2026-06-21; pending the pre-launch `/diff` review).** Root-caused in
 > the pre-launch playtest audit (see `AUDIT-LOG.md` §2.11 / `S3-LOOP`) by three convergent read-only
@@ -6,7 +6,7 @@
 > freakout moments with two concurrent sessions … stuck in a 20-step agent loop"* + *"too much of the LLM
 > is rendered in the FE."* Implemented **FE-only (the engine is untouched)** across three slices: the
 > beat-aware guardrail (the core), the A-S5 structured-409 hardening, and the per-round render-bounding.
-> Verified: the full FE suite green (1853), a new permanent gate (`frontend/tests/test_adr0010_concurrent_loop.py`).
+> Verified: the full FE suite green (1853), a new permanent gate (`frontend/tests/test_adr0011_concurrent_loop.py`).
 > **Source:** **S3-LOOP** — the two-concurrent-session loop spin, distinct from S3-RACE/ADR 0008 (which was
 > the FE chat *log* divergence, already BUILT).
 > **Builds on:** feature 0064 (the **Messenger model** — any device types anytime; a turn-lock/spectator
@@ -130,7 +130,7 @@ engine change. Any tab may still SEND anytime and turns still serialize (0064 un
 - **Vault Wall + cross-user isolation untouched** (the only field crossing is the Vault-free beat key).
 - **Single-tab play is byte-identical** — the seeded UAT / calibration / juryReach gates do not move (the
   peer-advance branch is provably inert without a peer).
-- **Verification (binding):** `frontend/tests/test_adr0010_concurrent_loop.py` — the pure peer-advance helper
+- **Verification (binding):** `frontend/tests/test_adr0011_concurrent_loop.py` — the pure peer-advance helper
   (detect on a peer move; inert on self-progress / unchanged / unknown keys), the framing stash + gate +
   clock-reset wiring pins, the A-S5 structured-409 reconcile (incl. a drifted message + the legacy fallback),
   and the FE silent-beat / rail-cap pins. Plus the full FE suite (1853).

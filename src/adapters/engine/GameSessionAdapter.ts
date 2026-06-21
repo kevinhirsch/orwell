@@ -6,6 +6,7 @@ import type {
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
+  PreSeedNextSeasonReq, PreSeedNextSeasonView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
@@ -370,6 +371,20 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0065 (advance-warm) — the NEXT-season warm delegate, wired by the registry (mirrors `onRestart`).
+   * `preSeedCast` warms onto THIS adapter's pre-game store and is refused while a season runs; the
+   * next-season warm must instead land in a per-user buffer that OUTLIVES the cutover rotation (this
+   * adapter is discarded at reset). The registry owns that buffer + the scratch generation/authoring,
+   * so the adapter just routes the call out. Absent on a standalone adapter (tests/fixtures) — there
+   * the call falls back to an in-process detached generation (no buffer to survive, but fully testable).
+   */
+  private onNextSeasonWarm?: (req: PreSeedNextSeasonReq) => PreSeedNextSeasonView;
+
+  setOnNextSeasonWarm(fn: (req: PreSeedNextSeasonReq) => PreSeedNextSeasonView): void {
+    this.onNextSeasonWarm = fn;
+  }
+
+  /**
    * One persisted commit per player mutation (audit E3): a beat used to fire `onPersist` mid-method
    * (a broken deal inside the tally) and again at the end — and since the commit hook can SWAP the
    * sandbox on a fault, the old instance kept executing against rolled-back state. Mutations run
@@ -568,6 +583,17 @@ export class GameSessionAdapter implements GameSession {
    * hidden deep layer + private orientations (sealed at warm time; never projected).
    */
   private prewarm: PrewarmCast | null = null;
+
+  /**
+   * 0065 (advance-warm) — the per-user NEXT-season holding store, mirrored onto the LIVE sandbox so it
+   * is DURABLE (it persists in this sandbox's snapshot and survives an engine restart mid-finale). The
+   * registry owns the working/scratch copy + the cutover adoption; this field is the durable mirror it
+   * writes through `holdNextSeasonWarm` (and reads back via `takeNextSeasonWarm` on a resume). It is
+   * INVISIBLE to active play — no view/projection/portrait/moment path reads it — exactly like `prewarm`.
+   * Cleared at the cutover (the registry adopts it into the fresh sandbox, then drops the buffer). Holds
+   * the hidden deep layer (engine-only, like `prewarm`); the snapshot never crosses the wall.
+   */
+  private nextSeasonWarm: PrewarmCast | null = null;
 
   /**
    * The engine-only HIDDEN seeded relationship layer (0059): sparse pre-game ties + showmances, sealed
@@ -1191,6 +1217,10 @@ export class GameSessionAdapter implements GameSession {
       // 0065 — a pre-warmed (possibly FE-authored) cast is durable pre-game state: persist it so a
       // half-warmed cast resumes after a restart rather than re-warming from scratch. Cleared on adoption.
       ...(this.prewarm ? { prewarm: cloneSession(this.prewarm) } : {}),
+      // 0065 (advance-warm) — the durable NEXT-season holding store mirror. Persisted so an advance-warm
+      // begun during the finale survives an engine restart and is adopted at the cutover. Engine-only
+      // (the snapshot never crosses the wall); cleared once the cutover consumes it.
+      ...(this.nextSeasonWarm ? { nextSeasonWarm: cloneSession(this.nextSeasonWarm) } : {}),
       // 0058: the engine-only HIDDEN deep layer — persisted so an ACTIVATED thread stays activated and
       // the Day-1 perception re-seeds identically. ENGINE-ONLY (the snapshot never crosses the wall).
       ...(Object.keys(this.deepProfiles).length ? { deepProfiles: cloneSession(this.deepProfiles) } : {}),
@@ -1318,6 +1348,10 @@ export class GameSessionAdapter implements GameSession {
     // 0065 — restore a half-warmed (possibly FE-authored) cast so author/portrait warm resume rather than
     // re-warming from scratch. Engine-only; absent on all prior saves and once the season has started.
     this.prewarm = core.prewarm ? cloneSession(core.prewarm) : null;
+    // 0065 (advance-warm) — restore the durable NEXT-season holding store mirror so an advance-warm begun
+    // during the finale survives the restart and is still adopted at the cutover. Engine-only; absent on
+    // all prior saves and once the cutover consumed it.
+    this.nextSeasonWarm = core.nextSeasonWarm ? cloneSession(core.nextSeasonWarm) : null;
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
@@ -2299,6 +2333,114 @@ export class GameSessionAdapter implements GameSession {
       house: npcs.map((n) => this.castCard(n)),
       portraitPrompts: this.castPortraitPrompts(npcs, portraitStyleAnchor),
     };
+  }
+
+  /**
+   * 0065 (advance-warm) — pre-warm the NEXT season's cast DURING the current season's finale, into a
+   * per-user HOLDING STORE that survives the cutover. `preSeedCast` is refused mid-season (it warms
+   * onto THIS adapter, which is discarded at reset); this is its mid-season counterpart.
+   *
+   * When the registry has wired `onNextSeasonWarm`, the call routes OUT to the registry, which owns the
+   * survivor buffer + the scratch generation/authoring. Standalone (no registry — tests/fixtures), this
+   * falls back to a detached in-process generation so the seam is fully testable without a registry: a
+   * throwaway scratch `GameSessionAdapter` runs the SAME `preSeedCast`/`recordCastProfile` machinery, and
+   * its Vault-free view is returned. Either way the ACTIVE season (`this.house`, every projection) is
+   * untouched — the warm never reads or writes the live game. Vault-free out.
+   */
+  preSeedNextSeason(req: PreSeedNextSeasonReq): PreSeedNextSeasonView {
+    if (this.onNextSeasonWarm) return this.onNextSeasonWarm(req);
+    // Standalone fallback: warm a detached scratch in process (no buffer to survive a reset here — that
+    // is the registry's job — but the generation + authoring + Vault-free view are exercised identically).
+    const scratch = new GameSessionAdapter();
+    return scratch.warmNextSeasonScratch(req);
+  }
+
+  /**
+   * 0065 (advance-warm) — the scratch-side warm used by the registry's per-user holding-store adapter
+   * (and the standalone fallback above). The scratch is a FRESH adapter with no live house, so the
+   * existing pre-game machinery applies verbatim: `preSeedCast` generates the player-INDEPENDENT cast
+   * off a NEW seed into `this.prewarm`, and an optional `profile` deep-authors ONE houseguest of it via
+   * `recordCastProfile` — both landing on the holding store, never on any live season. Returns the same
+   * Vault-free roster shape `preSeedCast` does (no secret crosses; the scratch has no Vault hooks wired,
+   * so the hidden layer simply rides in `this.prewarm` until the cutover re-seals it into the new sandbox).
+   */
+  warmNextSeasonScratch(req: PreSeedNextSeasonReq): PreSeedNextSeasonView {
+    const warm = this.preSeedCast({ ...(req.seed !== undefined ? { seed: req.seed } : {}) });
+    if (!warm.warmed) {
+      // A scratch adapter has no live house, so preSeedCast cannot refuse "in-progress"/"over" — this is
+      // purely defensive (a future refusal would surface as a Vault-free decline, never a throw).
+      return { warmed: false, seed: warm.seed, house: [], portraitPrompts: [], refused: "no-active-season" };
+    }
+    let authored: RecordCastProfileResult | undefined;
+    if (req.profile) authored = this.recordCastProfile(req.profile);
+    return {
+      warmed: true, seed: warm.seed,
+      house: warm.house, portraitPrompts: warm.portraitPrompts,
+      ...(warm.alreadyWarmed ? { alreadyWarmed: true } : {}),
+      ...(authored ? { authored } : {}),
+    };
+  }
+
+  /**
+   * 0065 (advance-warm) — read the scratch adapter's holding store so the registry can (a) persist it on
+   * the LIVE sandbox's snapshot for engine-restart durability and (b) hand it to the fresh sandbox at the
+   * cutover. A deep clone (the registry must not alias the scratch's live arrays). Null until a warm runs.
+   */
+  exportHeldPrewarm(): PrewarmCast | null {
+    return this.prewarm ? cloneSession(this.prewarm) : null;
+  }
+
+  /**
+   * 0065 (advance-warm) — the registry writes the freshly-warmed next-season cast THROUGH the LIVE
+   * sandbox so it is DURABLE (persisted in this sandbox's snapshot, surviving an engine restart). A deep
+   * clone in; persisted on the next commit. Invisible to active play (no projection reads it). `null`
+   * clears the durable mirror (e.g. after the cutover consumed it).
+   */
+  holdNextSeasonWarm(store: PrewarmCast | null): void {
+    this.nextSeasonWarm = store ? cloneSession(store) : null;
+  }
+
+  /** 0065 (advance-warm) — the durable next-season warm mirror, deep-cloned out (rehydrates the registry's buffer on resume). Null if none. */
+  takeNextSeasonWarm(): PrewarmCast | null {
+    return this.nextSeasonWarm ? cloneSession(this.nextSeasonWarm) : null;
+  }
+
+  /**
+   * 0065 (advance-warm) — inject a held next-season cast onto THIS (fresh, pre-game) sandbox's pre-game
+   * store at the cutover, so the immediately-following `createCharacter` ADOPTS it exactly as it adopts a
+   * same-session `preSeedCast` warm. Refused if a season is already running here (the cutover always
+   * injects into a clean sandbox; this guards the invariant).
+   *
+   * The held cast was warmed on a DETACHED scratch adapter with NO Vault/soul hooks wired, so its hidden
+   * layer was never sealed into a Vault or indexed for recall. The same-session `preSeedCast` warm seals
+   * at warm time (this sandbox's hooks fire), and `createCharacter`'s adopt branch relies on that. So on a
+   * cross-sandbox advance-warm we re-create that precondition HERE: seal the held hidden layer into THIS
+   * fresh sandbox's Vault + re-index each NPC's deep-profile/orientation note into its soul recall — so
+   * the 0048 retrospective unsealing + full-fidelity recall behave byte-identically to a same-session warm.
+   */
+  adoptHeldPrewarm(store: PrewarmCast): boolean {
+    if (this.house) return false; // never overwrite a live season's cast
+    const held = cloneSession(store);
+    this.prewarm = held;
+    // Seal the held hidden layer into THIS sandbox's Vault (engine-only audit copy) — the scratch sealed
+    // nowhere. Idempotent into a fresh, empty Vault; mirrors what seedDeepProfiles/seedDiversity seal.
+    this.onSealProfiles?.(
+      Object.entries(held.deepProfiles).map(([id, profile]) => ({ id: id as EntityId, profile })),
+      held.storyThreads,
+    );
+    const orientations = Object.entries(held.privateOrientations)
+      .map(([id, orientation]) => ({ id: id as EntityId, orientation }));
+    if (orientations.length) this.onSealPrivateOrientations?.(orientations);
+    // Re-index each NPC's hidden notes into THIS sandbox's soul recall index (the scratch's soul.memory
+    // arrays rode in on the cloned NPCs, but were indexed in the scratch's soul store, not here). The
+    // notes are already PRESENT in each NPC's soul.memory; this only (re)indexes them for semantic recall.
+    for (const n of held.npcs) {
+      const profile = held.deepProfiles[n.id];
+      if (profile) this.soul?.recordToSoul(n.id, deepProfileToVaultContent(n.id, profile));
+      const orientation = held.privateOrientations[n.id];
+      if (orientation) this.soul?.recordToSoul(n.id, privateOrientationToVaultContent(n.id, orientation));
+    }
+    return true;
   }
 
   /**

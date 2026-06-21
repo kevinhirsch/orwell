@@ -41,6 +41,15 @@
     } catch (_) { return null; }
   }
 
+  // 0065 Phase 2: fire the next-season PORTRAIT warm. Best-effort, fail-open; the server endpoint is
+  // idempotent AND gated off the Phase-1 char-data warm (declines until authoring ran, then waits for
+  // it to finish) — exactly how startup gates portraits off cast authoring.
+  function _warmNextSeasonPortraits() {
+    try {
+      fetch("/api/orwell/warm-portraits", { method: "POST", credentials: "same-origin" }).catch(() => {});
+    } catch (_) {}
+  }
+
   // The post-season gate: the engine's terminal state. moment === "post-season" is the same
   // signal the season retrospective / the engine's own gate uses (0048). We read it from the
   // Vault-free /state projection — never anything secret.
@@ -149,6 +158,13 @@
       // This is a genuine season RESTART — arm the fresh-session split (the initial first-season
       // onboarding never reaches here, so it stays ONE continuous conversation).
       destroy();
+      // 0065 Phase 2 — IMAGE WARM at the next-season CONFIRM: now that the player has committed to the
+      // next season, kick the portrait warm. It is GATED OFF Phase 1 (the finale-day char-data warm)
+      // server-side — `warm_portraits` declines until author warm has run, then waits for it to fully
+      // finish before shooting a single face — exactly as STARTUP gates images off cast authoring.
+      // Best-effort, fail-open: a decline (no Phase-1 warm) just leaves the route's own portrait
+      // generation to own the faces.
+      _warmNextSeasonPortraits();
       try { window._orwellMarkRestart && window._orwellMarkRestart(); } catch (_) {}
       try { window._orwellFreshSession && window._orwellFreshSession(); } catch (_) {}
       try { window.orwellGameChanged && window.orwellGameChanged("next-season"); } catch (_) {}

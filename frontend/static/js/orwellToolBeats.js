@@ -63,7 +63,7 @@ export function orwellBeat(tool) {
   return (tool && ORWELL_TOOL_BEATS[tool]) || null;
 }
 
-// ADR 0010 — PURE CONTEXT-READ beats. The model fires these to GROUND itself (read the board, the
+// ADR 0011 — PURE CONTEXT-READ beats. The model fires these to GROUND itself (read the board, the
 // room, a houseguest's read); they change NOTHING the player witnessed, carry no public outcome, and
 // on a long / concurrent-re-ground turn they stack as a wall of identical "📋 Production notes" rows —
 // the operator's "too much LLM rendered in the FE" garbage. In the game build BOTH render paths skip
@@ -79,7 +79,7 @@ export function orwellBeatIsSilent(tool) {
   return ORWELL_SILENT_BEATS.has(tool);
 }
 
-// ADR 0010 — the per-turn beat-rail BACKSTOP. Even after silent beats are dropped and the loop's
+// ADR 0011 — the per-turn beat-rail BACKSTOP. Even after silent beats are dropped and the loop's
 // beat-aware staleness fix lands, a pathological turn must never stack an unbounded column of chips.
 // Both render paths keep the most recent N solidified beats and drop older overflow. Generous on
 // purpose — a normal turn (a handful of beats) never hits it; this is a safety net, not a budget.

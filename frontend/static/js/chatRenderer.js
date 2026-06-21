@@ -1996,7 +1996,7 @@ export function addMessage(role, content, modelName, metadata) {
         // must merge/connect as if there were no text bubble (no dangling has-top).
         const _renderedTxt = txt && !_gbSkipIntermediateText;
         const roundTools = toolsByRound[roundNum] || [];
-        // ADR 0010 — pure context-read beats render no chip in the game build (mirror of the live
+        // ADR 0011 — pure context-read beats render no chip in the game build (mirror of the live
         // path): a re-opened transcript must not re-paint a wall of identical "Production notes" rows.
         const _visibleTools = isGameBuild() ? roundTools.filter(ev => !orwellBeatIsSilent(ev.tool)) : roundTools;
         if (_visibleTools.length > 0) {
@@ -2072,7 +2072,7 @@ export function addMessage(role, content, modelName, metadata) {
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }
-          // ADR 0010 — cap the reload rail (mirror of the live backstop): keep the most recent
+          // ADR 0011 — cap the reload rail (mirror of the live backstop): keep the most recent
           // ORWELL_MAX_VISIBLE_BEATS chips, drop older overflow (no live timers on reload nodes).
           { const _rn = threadWrap.querySelectorAll('.agent-thread-node');
             for (let _ri = 0; _ri < _rn.length - ORWELL_MAX_VISIBLE_BEATS; _ri++) _rn[_ri].remove(); }

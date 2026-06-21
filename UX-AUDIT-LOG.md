@@ -691,3 +691,32 @@ Lenses: **content-a11y (CA)**, **visual-motion (VM)**, **transient-animation (TR
 **Validation:** 19 new source-pinned tests in `tests/test_j5_endgame_a11y.py` — 19/19 passed. Full FE suite **1834 passed** (1 pre-existing flaky `test_h2b_all_model_pools` — passes in isolation, unrelated). Live re-capture confirmed the retrospective renders clean (0 errors), unseal button now **44px** (was 32px), winner line at apex weight.
 
 **Deferred (recorded above):** J5-18 (player placement in retrospective — high-value follow-up; needs the GET route to surface `_derive_placement`/`_last_finale_margin`), J5-19 (responsive-matrix finished-season fixture — test-infra), J5-20/21/22/24 (design/polish), J5-23 (no-fix design ruling).
+---
+
+## Real-LLM deep pass (R1) — the premiere soft-lock (LAUNCH-BLOCKING)
+
+**Date:** 2026-06-21 · **Rig:** `j6_realllm` desktop/normal · **Model:** deepseek/deepseek-v4-pro (OpenRouter, real) · the one seam every automated gate stubs the LLM for, so it can't see this.
+
+### Finding R1-01 — the meet-everyone gate never progresses with the real model → player soft-locked at premiere · **LAUNCH-BLOCKING** · FIXED
+
+- **Symptom (engine oracle, not FE render):** after the real model narrated meeting ~13 houseguests across 3 turns, `premiereIntros` reported **`metCount: 1 of 16, complete: false`**. The game stayed in `moment: premiere` across every turn; the first HOH (gated on all-met) was unreachable. The model narrates richly but **under-calls the engine tools** — and it isn't even sent `markHouseguestMet` (confirmed in `[agent-debug] tool_names`), so the FE belt is the *only* mechanism that can register intros.
+- **Root cause (FE, `src/agent_loop.py`):** the compensating belt `_auto_mark_premiere_intros` early-returned on `if not narration or not owner`. The **anonymous / localhost-bypass / single-tenant** path — the deploy default — resolves `owner=None` (the engine maps a missing user header to its one `default` sandbox). The sibling belts (`_auto_record_scene`, `_auto_move_player`) pass `None` straight through and work; only the premiere belt refused, so it **silently never ran** for that whole class of deploy. FE-log proof: the sibling belts fired (`auto-recorded scene … user=None`) but there was **zero** `auto-marked premiere intro` activity, and the E22 fallback-digest guard fired every turn (a turn narrated with no engine write).
+- **Why no gate caught it:** every automated gate stubs the LLM (`Echo`/`DeterministicNarrator`), which doesn't reproduce the under-call; and the belt's failure is silent (fail-open, early-return). Only a real-LLM run against engine truth exposes it. This is precisely the J3-05/J3-06/J4-06/J4-18 cluster, now **root-caused** with the real model.
+- **Fix:** relax the guard to `if not narration` — tolerate a `None` owner exactly as the sibling belts do (the engine maps it to `default`). 2 regression tests in `tests/test_premiere_meet_everyone.py` (belt marks named intros with `owner=None`; only missing narration is a no-op).
+- **Validation:** unit 7/7; full FE suite 1837 passed (1 pre-existing flaky, unrelated). **Live end-to-end re-run in progress** to confirm the premiere clears and the game reaches HOH with the fix.
+
+### Positives confirmed (real model)
+- **Narration fidelity is strong** (deepseek-v4-pro): in-character producer voice, no model-slug/OOC leaks in the public bubble, the reasoning split held (thinking stayed in the accordion). The model is a good narrator — the gap is purely the engine-tool *under-call*, which the FE belts exist to error-correct.
+- `_auto_record_scene` (the 0055 consequence belt) **did** fire on the social turn (`kind=bonding`), so the consequence loop works for an anonymous owner — it was specifically the premiere belt that had the `owner` guard bug.
+
+### Finding R1-02 — the FULL weekly loop holds end-to-end with the real model · VERIFIED (positive)
+
+Continuation probe (`j6_weekloop`) drove the live game from `hoh-competition` through a complete weekly cycle with deepseek-v4-pro, confirming each decision card via the real `/api/orwell/decision` seam. **Moment path:** `hoh-competition → (staged comp rounds) → nominations → veto-competition → veto-ceremony → eviction → (eviction-vote) → (goodbye-message) → week-2 hoh-competition`. Engine truth: **Keith Bell nominated → voted out → goodbye messages folded (incl. the player's *warm* tone) → evicted → week 2** (14 active / 1 evicted; `seasonRecap` shows the full sequence). `advanceGame` fired throughout, the comp-round / eviction-vote / goodbye-message cards surfaced + submitted, and the 0064 `sync:game-updated` server-push fired on mutations. With the premiere belt fix (R1-01), **the game is playable through a complete weekly loop with the real model.**
+
+### Finding R2-01 — non-binding comp-round: clicking the pre-selected chip deselects it and disables Confirm · POLISH · OPEN
+
+On a non-binding (flavor) staged comp-round the card pre-selects "compete" and enables Confirm ("Push through this round") for one-click pass-through. But the chips keep single-select **toggle** semantics, so a player who taps the already-selected "compete" chip **deselects** it → Confirm goes disabled with no explanation. (Surfaced when the probe's generic fill clicked the pre-selected chip — CARD 01/03 came back `still-disabled`.) The intended path is to confirm without touching the chips, but tapping the only lit chip is a natural move. **Fix candidate:** on a single-pick card, clicking the sole selected chip should be a no-op (stay selected) rather than toggle off; or a non-binding comp-round should keep Confirm enabled regardless. Low severity (the card re-arms and the loop recovers).
+
+### Finding R2-02 — the eviction-night staging leans on the forced-advance belt · NOTE (working as designed)
+
+The eviction phase needed several turns and the FE forced-advance escalation (L39b) to push through — one turn fired a burst of 9 `advanceGame` calls. It DID progress (the guardrail caught the model's under-call and drove the staged eviction to completion), so this is the error-correction working, not a defect — but it confirms the eviction-night staging depends on the forced-advance belt with the real model, the same family as the premiere belt. Worth keeping an eye on if that belt is ever changed.

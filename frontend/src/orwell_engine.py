@@ -405,6 +405,23 @@ async def pre_seed_cast(seed: int | None = None, user: str | None = None) -> dic
     return await _call("preSeedCast", args, user=user)
 
 
+async def pre_seed_next_season(seed: int | None = None, profile: dict | None = None,
+                               user: str | None = None) -> dict:
+    """Feature 0065 (advance-warm): pre-warm the NEXT season's cast DURING the current season's finale,
+    off a NEW seed, into a per-user HOLDING STORE that survives the cutover rotation. Unlike
+    ``pre_seed_cast`` (which is REFUSED while a season runs), this generates the next cast WITHOUT
+    touching the active season; the confirmed next-season cutover ADOPTS it. Optionally deep-authors ONE
+    held houseguest (``profile`` = the same shape ``record_cast_profile`` takes) — the write-back lands on
+    the HOLDING store, never the live cast. Returns ``{ warmed, seed, house, portraitPrompts, authored?,
+    alreadyWarmed?, refused? }`` — the Vault-free roster + cast portrait prompts. Idempotent; durable."""
+    args: dict = {}
+    if seed is not None:
+        args["seed"] = seed
+    if profile is not None:
+        args["profile"] = profile
+    return await _call("preSeedNextSeason", args, user=user)
+
+
 async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
     becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the

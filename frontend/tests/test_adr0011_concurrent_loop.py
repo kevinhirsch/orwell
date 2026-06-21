@@ -1,4 +1,4 @@
-"""ADR 0010 — the concurrent two-tab agent-loop fix (the "20-step loop" / "freakout").
+"""ADR 0011 — the concurrent two-tab agent-loop fix (the "20-step loop" / "freakout").
 
 Two tabs on one game serialize their turns (0064 Messenger single-flight), but the agent loop's
 per-turn staleness clock is beat-BLIND: it counts turns where THIS turn fired no progression tool
@@ -131,7 +131,7 @@ def test_handle_stale_beat_refreshes_from_structured_beat_seq(monkeypatch):
     async def _noop(_user):
         return None
     monkeypatch.setattr(ch, "_capture_beat_signature", _noop)
-    user = "adr0010-test-user"
+    user = "adr0011-test-user"
     ch._LAST_BEAT_SEQ.pop(user, None)
     # the fresh beatSeq is in the STRUCTURED field, NOT the message ("now N" absent)
     exc = EngineToolError("the write was refused", status=409, code="stale-beat", beat_seq=99)
@@ -146,7 +146,7 @@ def test_handle_stale_beat_falls_back_to_message_marker(monkeypatch):
     async def _noop(_user):
         return None
     monkeypatch.setattr(ch, "_capture_beat_signature", _noop)
-    user = "adr0010-test-user-2"
+    user = "adr0011-test-user-2"
     ch._LAST_BEAT_SEQ.pop(user, None)
     # no structured beat_seq → parse the legacy "(now N)" marker
     exc = EngineToolError("stale write refused (now 13)", status=409)

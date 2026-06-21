@@ -21,6 +21,7 @@ import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
 import type { UserSaveStore } from "../ports/UserSaveStore";
+import type { PreSeedNextSeasonReq, PreSeedNextSeasonView } from "../ports/GameSession";
 import { SNAPSHOT_VERSION, snapshotCompatible } from "../engine/sessionSnapshot";
 import type { SessionSnapshot } from "../engine/sessionSnapshot";
 
@@ -369,6 +370,17 @@ export class GameSessionRegistry {
   private readonly snapshotCache = new Map<string, SnapshotCacheEntry>();
 
   /**
+   * 0065 (advance-warm) — the per-user NEXT-season HOLDING STORE that survives the sandbox rotation. The
+   * cutover (`resetUser`) discards the running sandbox's adapter, so a next-season warm CANNOT live there;
+   * it lives HERE, at the registry/per-user level. Each entry is a DETACHED scratch `GameSessionAdapter`
+   * (no live house, no Vault/soul hooks) used purely as a pre-game cast buffer — NOT a second running game
+   * (the "one active game per user" invariant holds: this hosts no gameplay, only a warmed cast). At the
+   * confirmed cutover the scratch's `PrewarmCast` is injected into the FRESH sandbox and the buffer is
+   * dropped. Mirrored onto the LIVE sandbox's snapshot for engine-restart durability (rehydrated on resume).
+   */
+  private readonly nextSeasonScratch = new Map<string, GameSessionAdapter>();
+
+  /**
    * An optional durable store (0030) makes the live game survive an engine restart:
    * `sandboxFor` recalls the user's saved game on first build, and every mutation
    * saves it. With no store, the registry is purely in-memory (the prior behavior).
@@ -395,6 +407,58 @@ export class GameSessionRegistry {
   }
 
   /**
+   * 0065 (advance-warm) — the per-user NEXT-season warm orchestrator (wired into each sandbox's
+   * `onNextSeasonWarm`). Generates/authors a fresh next-season cast into a DETACHED scratch adapter that
+   * survives the cutover rotation, then DURABLY mirrors it onto the live sandbox so it survives an engine
+   * restart too. The ACTIVE season is never read or mutated — the scratch is a standalone pre-game adapter.
+   *
+   * Idempotent: the scratch is created once per user and re-warmed idempotently (`preSeedCast` returns the
+   * already-warmed cast on a seed-less re-call; an authoring call lands on the held cast). Rehydrates the
+   * scratch from the live sandbox's durable mirror on the first call after a resume.
+   */
+  private warmNextSeason(user: string, req: PreSeedNextSeasonReq): PreSeedNextSeasonView {
+    let scratch = this.nextSeasonScratch.get(user);
+    if (!scratch) {
+      scratch = new GameSessionAdapter();
+      // Rehydrate from the durable mirror if an advance-warm was begun before a restart (so a resume
+      // continues the same held cast rather than re-warming a different seed).
+      const held = this.sandboxes.get(user)?.session.takeNextSeasonWarm();
+      if (held) scratch.adoptHeldPrewarm(held);
+      this.nextSeasonScratch.set(user, scratch);
+    }
+    const view = scratch.warmNextSeasonScratch(req);
+    // Mirror the freshly-warmed (possibly authored) holding store onto the LIVE sandbox so it persists in
+    // this sandbox's snapshot and survives an engine restart. CRUCIAL: this is NOT a gameplay beat — it
+    // must NOT bump `beatSeq` (the closed-set sync counter the FE reconciles on) or run the non-degradation
+    // checkpoint, or a BACKGROUND advance-warm would look like a board mutation to the player's client and
+    // trip a phantom desync. So it does NOT route through `commit`: it sets the durable mirror, invalidates
+    // the R3 snapshot cache (so the next read re-exports the mirror), and BLIND-saves (0030) — leaving the
+    // active season's beatSeq + every player-facing projection byte-identical (the NO-EARLY-CUTOVER gate).
+    const store = scratch.exportHeldPrewarm();
+    const live = this.sandboxes.get(user);
+    if (live && store) {
+      live.session.holdNextSeasonWarm(store);
+      this.invalidateSnapshot(user); // R3 — the durable mirror changed; the next export must recompute
+      this.saveUser(user);           // durable save (0030) WITHOUT a beat bump / integrity checkpoint
+    }
+    return view;
+  }
+
+  /**
+   * 0065 (advance-warm) — CAPTURE the held next-season cast at the START of the cutover, BEFORE the dead
+   * sandbox is discarded. Prefers the live scratch buffer; falls back to the dead sandbox's durable mirror
+   * (a resume that never re-warmed in this process still adopts the cast it warmed before the restart).
+   * Always CONSUMES the scratch buffer (a partial/failed warm must not strand a stale store onto a later
+   * season). Returns the captured store (or null), for `resetUser` to inject into the fresh sandbox.
+   */
+  private captureNextSeasonWarm(user: string): SessionSnapshot["nextSeasonWarm"] | null {
+    const scratch = this.nextSeasonScratch.get(user);
+    const store = scratch?.exportHeldPrewarm() ?? this.sandboxes.get(user)?.session.takeNextSeasonWarm() ?? null;
+    this.nextSeasonScratch.delete(user);
+    return store;
+  }
+
+  /**
    * Wire the per-user hooks every sandbox needs (B41/B58): the commit hook (checkpoint-then-save),
    * the live admin mirror, the REAL admin reset delegate, the ONE restart door for the player
    * channel, and the Vault-free health provider.
@@ -417,6 +481,10 @@ export class GameSessionRegistry {
       const fresh = this.resetUser(user);
       return fresh.session.createCharacter(req);
     });
+    // 0065 (advance-warm) — the NEXT-season warm routes to the registry-level holding store (the running
+    // sandbox can't host it; it's discarded at the cutover). The scratch buffer + durable mirror live
+    // here; `createCharacter`/`resetUser` adopt it at the cutover. The ACTIVE season is never touched.
+    sb.session.setOnNextSeasonWarm((req) => this.warmNextSeason(user, req));
     sb.admin.setHealthProvider(() => this.healthProvider?.(user) ?? null);
     // L38: the God-Mode "fast-forward to finale (debug)" lever DRIVES the live session to a crowned
     // winner (auto-resolving the player's pendings with legal defaults) so the post-season Vault
@@ -582,10 +650,18 @@ export class GameSessionRegistry {
     // G12: the dead season's queued (derived) soul-index work must not crowd the shared
     // breathing lane the new season seeds through — discard it with the sandbox it served.
     this.sandboxes.get(user)?.engine.soul.discardPending();
+    // 0065 (advance-warm) — CAPTURE any held next-season cast BEFORE the dead sandbox is dropped (the
+    // scratch buffer lives here; the durable mirror rides on the dead sandbox still in the map). This is
+    // the cutover the advance-warm was prepared for. Captured now; injected onto the fresh sandbox below.
+    const advanceWarm = this.captureNextSeasonWarm(user);
     this.saveStore?.resetUser?.(user); // rotate the dead season's saves off the live path (R1)
     this.onReset?.(user); // invalidate the orchestrator's baseline/health/rng for this user (E1)
     const sb = buildUserSandbox(user);
     this.wireHooks(user, sb);
+    // 0065 (advance-warm) — ADOPT the captured cast onto the FRESH (clean, pre-game) sandbox so the
+    // immediately-following `createCharacter` ships the warmed (FE-authored) cast. The fresh sandbox's
+    // own durable mirror starts clean — the advance-warm is consumed exactly once at its cutover.
+    if (advanceWarm) sb.session.adoptHeldPrewarm(advanceWarm);
     this.sandboxes.set(user, sb);
     this.snapshotCache.delete(user); // R3 — free the dead season's pinned export before season 2
     this.bumpRev(user); // R3 — a fresh season's clean sandbox; any cached export is dead-season state

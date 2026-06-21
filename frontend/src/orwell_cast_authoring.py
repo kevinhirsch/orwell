@@ -298,10 +298,16 @@ def _delta_text(chunk) -> str:
 
 
 async def run_authoring(cast: list[dict], owner: Optional[str],
-                        on_authored: Optional[Callable[[str], None]] = None) -> int:
+                        on_authored: Optional[Callable[[str], None]] = None,
+                        write: Optional[WriteFn] = None) -> int:
     """Resolve the live deps and author the cast. Silent no-op (returns 0) if no model resolves.
     No player identity is threaded in — NPC storylines are authored player-independent.
-    `on_authored(houseguest_id)` fires per successful write-back (per-NPC portrait gating, #7)."""
+    `on_authored(houseguest_id)` fires per successful write-back (per-NPC portrait gating, #7).
+
+    `write` overrides the write-back sink (default: `record_cast_profile` onto the active/pre-game cast).
+    The 0065 advance-warm passes a sink that routes through `pre_seed_next_season(profile=…)` so the
+    authored profile lands on the NEXT-season HOLDING store — NEVER the live cast (mid-season,
+    `record_cast_profile` would author the running house, the wrong cast)."""
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
         logger.debug("[cast-authoring] no utility model — keeping the seeded floor")
@@ -311,12 +317,13 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     async def _write(profile: dict) -> dict:
         return await orwell_engine.record_cast_profile(profile, user=owner)
 
-    return await author_cast(cast, llm_fn, _write, on_authored)
+    return await author_cast(cast, llm_fn, write or _write, on_authored)
 
 
 def kickoff_authoring(cast: list[dict], owner: Optional[str],
                       then: Optional[Callable[[], None]] = None,
-                      on_authored: Optional[Callable[[str], None]] = None) -> None:
+                      on_authored: Optional[Callable[[str], None]] = None,
+                      write: Optional[WriteFn] = None) -> None:
     """Fire-and-forget: author the cast in the background BEFORE portraits (the authored physical
     facet feeds the portrait prompt — pipeline order), then call `then` (e.g. the portrait kickoff)
     REGARDLESS of authoring success, so the picture still generates from the seeded facets if the
@@ -329,7 +336,7 @@ def kickoff_authoring(cast: list[dict], owner: Optional[str],
     gate-release can never hang."""
     async def _runner():
         try:
-            await run_authoring(cast, owner, on_authored)
+            await run_authoring(cast, owner, on_authored, write)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"[cast-authoring] background run failed: {e}")
         finally:

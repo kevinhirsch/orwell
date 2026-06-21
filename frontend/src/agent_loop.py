@@ -1542,7 +1542,7 @@ def _player_turn_is_lull(messages) -> bool:
 
 
 def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat_key) -> bool:
-    """ADR 0010 — did a concurrent PEER advance the beat during this turn?
+    """ADR 0011 — did a concurrent PEER advance the beat during this turn?
 
     True iff the engine's CURRENT beat key `(week, phase, moment)` differs from the one the model was
     FRAMED on this turn AND this turn fired no progression tool itself — i.e. SOMEONE moved the beat,
@@ -1919,7 +1919,15 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
     (the engine no-ops a re-mark), and fail-open. This KEEPS the designed meet-everyone feature
     intact (the gate, its test, the tutorial); it only guarantees the introductions REGISTER so the
     premiere can reach its first HOH. Returns the number newly marked."""
-    if not narration or not owner:
+    # NB: `owner` may legitimately be None on the anonymous / localhost-bypass / single-tenant
+    # path (the engine maps a missing user to its one "default" sandbox — exactly what the sibling
+    # belts _auto_record_scene / _auto_move_player rely on by passing None straight through). The
+    # old `or not owner` guard silently dead-lettered THIS belt for that whole class of deploy: the
+    # model under-calls markHouseguestMet, the belt that's supposed to compensate never ran, the
+    # meet-everyone gate never progressed, and the player was soft-locked at premiere (confirmed in
+    # a real-LLM run — metCount stayed 1/16 while ~13 intros were narrated). Tolerate a None owner;
+    # only a missing narration is a real no-op.
+    if not narration:
         return 0
     try:
         from src import orwell_engine as _oe
@@ -3000,7 +3008,14 @@ async def stream_agent_loop(
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
 
+    # F-S4-D: the finish_reason of the round currently being consumed (from llm_core's `finish` event).
+    # "length" ⇒ the model's OUTPUT was cut off by the token cap (a truncated reply), distinct from the
+    # round-cap exhaustion above. Reset each round; after the loop, the terminal round's value drives a
+    # `truncated` Continue affordance so a cut-off reply doesn't just stop mid-sentence with no signal.
+    _round_finish_reason = None
+
     for round_num in range(1, max_rounds + 1):
+        _round_finish_reason = None
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
@@ -3134,6 +3149,11 @@ async def stream_agent_loop(
                     elif data.get("type") == "tool_calls":
                         native_tool_calls = data.get("calls", [])
                         logger.info(f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)")
+                    elif data.get("type") == "finish":
+                        # F-S4-D: the round's terminal finish_reason (from llm_core). Recorded, not
+                        # forwarded — the UI signal is the post-loop `truncated` event, fired once per
+                        # turn only when the FINAL round was cut off by the token cap (reason "length").
+                        _round_finish_reason = data.get("reason")
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         actual_model = u.get("model") or actual_model
@@ -3624,7 +3644,7 @@ async def stream_agent_loop(
                         logger.warning(
                             f"[orwell] error-correction state fetch failed: "
                             f"{type(_e).__name__}: {_e}".rstrip(': '))
-                    # ── ADR 0010 — peer-advance detection (the two-tab "20-step loop" fix). ──────────
+                    # ── ADR 0011 — peer-advance detection (the two-tab "20-step loop" fix). ──────────
                     # The staleness clock (_TURNS_SINCE_PROGRESS, above) is beat-BLIND: it counts turns
                     # where THIS turn fired no progression tool and CANNOT tell "I (the model) failed to
                     # advance" from "a concurrent PEER advanced the beat" (another device's decision-card
@@ -3648,7 +3668,7 @@ async def stream_agent_loop(
                                 _TURNS_SINCE_PROGRESS[owner] = 0
                                 _ADVANCE_STALL_LEVEL.pop(owner, None)
                             logger.info(
-                                f"[orwell] ADR0010 peer-advance: beat moved {_framed_beat_key} -> "
+                                f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
                                 f"{_beat_key_at_read} with no progression this turn — suppressing "
                                 f"stall nudge, round {round_num} user={owner}")
                     except Exception:
@@ -4371,6 +4391,13 @@ async def stream_agent_loop(
     if _exhausted_rounds:
         logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
         yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
+    # F-S4-D: the FINAL round was cut off by the output token cap (finish_reason "length"), not the
+    # round cap — the reply stopped mid-sentence. Surface a Continue affordance so the player can resume
+    # instead of the truncation passing silently. Suppressed when rounds_exhausted already fired (that
+    # affordance covers it) so the client never shows two stacked Continue prompts for one turn.
+    elif _round_finish_reason == "length":
+        logger.info("[agent] final round truncated by the output token cap — emitting truncated")
+        yield f'data: {json.dumps({"type": "truncated"})}\n\n'
 
     # BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): now the live-game turn has
     # finished, compare its FULL narration against the engine board's before→after delta. If the

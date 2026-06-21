@@ -105,13 +105,13 @@ L18 (engine hang on fallback-digest), L31/L28b/L37/L39/L40/L35/L45.
 | F-S2-B | State 2 | POLISH | ROOT-CAUSED (deferred) | 2× console 404 (inherited deep-research poller + finished-stream status probe) — feature-gate off in the game build. |
 | S3-PAR | State 3 | n/a | **PARITY HOLDS at rest (VIEWED)** | Two-window same-identity: shared engine/HUD reconciles via SSE/`beatSeq` to engine truth (both lanes). |
 | **S3-RACE / ADR 0008** | State 3 | ~~BLOCK~~ | **VERIFIED-FIXED (BUILT on main)** | Concurrent-write cross-tab CHAT divergence (render-layer; engine + persisted log correct). Both lanes independently root-caused (no `seq`; optimistic sender; `hasActiveStream` peer-drop). **Implemented per ADR 0008** (per-session `seq` + render/reconcile-by-id + `{id,seq}` dedup + completion broadcast; gates `test_adr0008_*`). Landed `5e3a2f3`. |
-| **S3-LOOP / ADR 0010** | State 3 | **BLOCK** | **FIX-APPLIED (awaiting /diff gate)** | Concurrent two-tab AGENT-LOOP spin (~20 rounds) + unbounded per-round FE render. Beat-blind guardrail staleness mis-reads a peer's *serialized* advance as this user's under-call → nudge/forced-advance cascade; loop-breaker blind to it; per-round bubbles/chips never pruned. **Distinct from S3-RACE** (which was the chat LOG). §2.11. |
+| **S3-LOOP / ADR 0011** | State 3 | **BLOCK** | **FIX-APPLIED (awaiting /diff gate)** | Concurrent two-tab AGENT-LOOP spin (~20 rounds) + unbounded per-round FE render. Beat-blind guardrail staleness mis-reads a peer's *serialized* advance as this user's under-call → nudge/forced-advance cascade; loop-breaker blind to it; per-round bubbles/chips never pruned. **Distinct from S3-RACE** (which was the chat LOG). §2.11. |
 | **S3-CORE** | State 3 | ~~BLOCK~~ | **VERIFIED-FIXED (live)** | Model-bypasses-engine / cast-invention does NOT reproduce: 14-turn live week-1 loop, engine advanced 14/14, 0 leaks, 0 genuine inventions, narration↔engine fidelity held. Fix family effective. |
 | S3b | State 3b | n/a | **PASS (VIEWED)** | Seeded deep-casting parity: narrated facets == engine seed exactly (3 HGs deep-probed); structural single-source guarded (`appearanceConsistency`). |
 | S4-RESOLVE | State 4 | n/a | **PASS (live)** | Full game → crowned NPC winner; player→jury; interactive finale juror path fired; retrospective renders ordered per-juror reveal. |
 | S4-VAULT-RETRO | State 4 | n/a | **PASS — Wall holds at its one opening** | 0048 unseal reveals STORY not NUMBERS: 2037–2087 hidden beats / 13 types, 13 wks per-voter ballots, **0 numeric leaks**, secret-ballot anonymized all season, `npc:N` only in `id` leaves. |
 | S4-1 | State 4 | ~~BLOCK~~ | **VERIFIED-FIXED (code+live)** | Stuck-player (narrated past a pending) fixed by `rearmFromStatus` + the 15s `/status` pending "escape hatch". |
-| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). Polish: 502 voiced as a GM bubble (F-S4-C); truncated stream stops silently (F-S4-D); mid-stream reload reconciles (F-S4-E ✅). |
+| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). 502-as-GM-bubble (F-S4-C) **FIXED** → `msg-system` notice; silent mid-sentence truncation (F-S4-D) **FIXED** → `finish:length` → `Continue ▸`; mid-stream reload reconciles (F-S4-E ✅). |
 | S4-2 | State 4 | POLISH | partial | `/status` carries `finished+winner` (✓) but `/recap`+`/finale` still return null winner post-finish. Non-blocking (FE recovers via retrospective). |
 | F-S4-F | State 4 | LATENT | ROOT-CAUSED | Resume-path name DRIFT ("Luke→Lake Fleming") on a mid-stream-reload-resumed turn — resume-context-specific (clean play = exact); ties to ADR 0008 resumable-stream context. New gate recommended. |
 | **State 5** | OOBE | mixed | **VERIFIED-FIXED** | Operator OOBE reports: particles (=BG-1/OBS-1 Lane B), cast-photo box movable-not-resizeable, welcome re-shows after backend reset. §2.8. |
@@ -203,6 +203,28 @@ the `hasActiveStream` suppression); Phase C permanent gates. Landed `5e3a2f3`.
 > *Remaining (both lanes): a live concurrent-write browser re-run with real-model turns is the one open
 > verification; the convergence foundation is proven by the interleaved-writers gate + the reload-reconcile.*
 
+**ADR-0008 LIVE VERIFICATION — RUN (2026-06-21, Lane B, real `-pro` model, two tabs/one session).** The
+open item above is now driven (`.audit-telemetry/adr0008_{parity,diag,bothactive}.py`):
+- ✅ **Data integrity FIXED (the original blocker is resolved):** the persisted log is seq-ordered + correct;
+  a fresh reload ALWAYS reconciles to the full `A-0,B-0,A-1,B-1` order; no accumulation, no corruption.
+- ✅ **Idle-tab live reconcile WORKS:** with tab A idle, a write in tab B reaches A over SSE and A reconciles
+  (`softReloadHistory` fires, A renders B's message) — the original `hasActiveStream`-drop bug is fixed for an
+  idle receiver. Same-session confirmed (both tabs sid `901b04da`), so NOT a session-split confound.
+- ✅ **RESIDUAL ROOT-CAUSED + FIXED (owner authorized the fix):** when **two tabs of the same session stream
+  turns CONCURRENTLY**, the first-active tab did **not** converge to the peer's concurrent write — it stayed
+  diverged (VIEWED at +0.5s and **+15s**, no reload). **Root cause (clean):** `_streamSessionId` is SET on
+  stream start (`chat.js:603`) but was **NEVER reset to null**, so `hasActiveStream()`
+  (`_streamSessionId === sessionId`, `chat.js:159`) stayed permanently true for the last-streamed session —
+  so the deferred reconcile re-deferred FOREVER at the `chat.js:3619 if (hasActiveStream(sessionId))` guard,
+  and a tab that had sent even one turn could never live-reconcile a peer's write to that session until a
+  reload. (This is why the idle-tab diagnostic — tab A never sent — DID reconcile.) **Fix:** the foreground
+  reader's `finally` now clears it — `if (_streamSessionId === streamSessionId) _streamSessionId = null;`
+  (guarded so a late finally can't clobber a newer stream; background streams stay covered by
+  `_backgroundStreams`). **VERIFIED:** the same two-tab interleaved harness now shows **A == B == reload,
+  converged across both iters**; the instrumented both-active test shows A picks up the peer's write at
+  settle. New source-pin gate `test_adr0008_reconcile_contract::test_stream_end_resets_stream_session_id…`;
+  ADR-0008 suite 15 passed. FE-only, no engine/Vault impact.
+
 **S3-CORE (prior blocker) — VERIFIED-FIXED (live).** 14-turn `-pro` week-1 loop (hoh-comp → noms → veto-comp
 → veto-ceremony → eviction): engine advanced **14/14**, **0 leaks**, **0 genuine cast inventions** (the
 `invented` flags were all `<conjunction>+roster-first-name` regex false positives), narration↔engine truth
@@ -256,8 +278,8 @@ reachable without the chat agent dispatching it (fail-open, no re-nag).
 `EventSource` auto-reconnect + capped backoff + 1.5s re-bind; AI timeout server-side (client stall watchdog
 deliberately disabled). Injected 3 faults on `/api/chat_stream`: **every case** no engine desync (beatSeq
 stable), no crash, no stuck spinner, composer re-enabled. Polish residue: **F-S4-C** 502 rendered as a GM
-bubble (should be a system/error notice); **F-S4-D** truncated stream stops silently mid-sentence (surface a
-"message interrupted — retry" affordance); **F-S4-E** mid-stream reload **reconciles** (✅, corroborates ADR
+bubble (**FIXED** → `msg-system` notice); **F-S4-D** truncated stream stopped silently mid-sentence
+(**FIXED** → a `Continue ▸` affordance); **F-S4-E** mid-stream reload **reconciles** (✅, corroborates ADR
 0008's reload-reconcile). **S4-2 (partial):** `/recap`+`/finale` still return null winner post-finish (non-
 blocking — FE recovers via the retrospective). One client-side corroboration of ADR 0008 defect #4: the
 client `message-added` SSE listener exists but the streaming path never fired it server-side (now addressed
@@ -327,7 +349,7 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
 
 ---
 
-## 2.11 State 3 (REOPENED) — the concurrent two-tab AGENT-LOOP spin · S3-LOOP / proposed ADR 0010 · BLOCK · ROOT-CAUSED
+## 2.11 State 3 (REOPENED) — the concurrent two-tab AGENT-LOOP spin · S3-LOOP / ADR 0011 · BLOCK · FIX-APPLIED
 
 **Operator (2026-06-21, post-close-out):** *"consistent freakout moments with two concurrent sessions … stuck in a
 20-step agent loop"*; separately *"too much of the LLM is rendered in the FE."* Three read-only specialists
@@ -433,11 +455,57 @@ session / CI). **Consolidated FE-only fix BUILT + green** (full FE suite **1853 
 `_LAST_FRAMED_BEAT_KEY` stash (chat_helpers) + `_peer_advanced_since_framing` suppression + clock reset (agent_loop),
 single-tab byte-identical; (2) **A-S5** structured-409 reconcile (orwell_engine + chat_helpers); (3) per-round render
 bound — silent context-read beats + a rail cap, both live (`chat.js`) + reload (`chatRenderer.js`). Captured as
-**ADR 0010**; gate `frontend/tests/test_adr0010_concurrent_loop.py` (16 tests). NARR-2 (default-on Thinking accordion):
+**ADR 0011**; gate `frontend/tests/test_adr0011_concurrent_loop.py` (16 tests). NARR-2 (default-on Thinking accordion):
 owner ruling **keep on**. Deferred (noted in ADR): the loop-breaker total-cap, the bubble-unmount, the cold-start
 two-session window.
 
 ---
+## 2.12 Current-main regression checks (2026-06-21, Lane B continuation)
+
+- **ADR-0008 two-tab concurrent convergence — VERIFIED-FIXED** (see §2.5): the `_streamSessionId`-never-reset
+  residual is fixed + gated; live harness shows A==B==reload converged.
+- **Vault Wall (#1 mandate) — RE-VERIFIED CLEAN on current main (live player-channel scan).** `getGameState`,
+  `getVisibleStateFor(player)`, `seasonRecap` scanned live: **0 numeric secret leaks** (no
+  trust/affinity/threat/emotional/volatility/aptitude/privateStrategy number crosses); **every one of the 31
+  player-visible events has the player IN its witness set (0 off-screen NPC-to-NPC leaks); 0 hidden/offScreen-
+  flagged events reach the player.** `npc:N` appears only as bare ids in `witnessSet` (an id-list, FE-resolved
+  to names) — not prose. **Negative control:** the engine-only `resolveCompetition` is **rejected** on the
+  player channel. The Vault Wall holds after all the main churn (ADR 0009, 0066, A1 modal, etc.).
+- **Cross-user isolation (#1-mandate first-class guarantee) — RE-VERIFIED CLEAN on current main (live, two
+  users).** Two engine sandboxes (`audit-admin` with a started game + a fresh `audit-user-iso-b`) are fully
+  isolated: B's `preSeedCast` (seed 99887766) warmed a DISTINCT 15-NPC cast sharing **0 names** with A's
+  roster; B's preSeed left A's roster **byte-unchanged**; **B's header never returns A's game**; the no-header
+  "default" routes to its OWN separate sandbox (not A's). No call for one user returns another user's game —
+  secret or not. Holds after the main churn.
+- **F-S4-C (502 rendered as a GM bubble) — FIXED.** Root cause (code-read): the chat-stream sender's
+  pre-stream non-200 branch (`chat.js` `if (!res.ok)`) typewrote the raw upstream error into `holder`, which
+  was mounted as `msg msg-ai` **with a `.role` "Big Brother" label** — so a gateway/proxy failure read as
+  in-game narration (immersion break). **Fix:** reclassify the idle holder to the quiet out-of-character
+  `.msg-system` style (`style.css:9056`) **and** rebuild its body to drop the `.role` GM label, then frame a
+  generic, actionable failure (`⚠ Connection error (NNN) — your message didn't go through. Try again.`) — the
+  tool-mode-switch copy (matched by `/Chat mode/i`) keeps its own message. **Verification:** `node --check`;
+  source-pinned by `tests/test_prelaunch_blockers_s6s4.py` (two F-S4-C tests read the literal error-path
+  slice — the file's standing posture: "CI can't drive the live stack here, so we pin the WIRING"). A live
+  in-game repro stays blocked environmentally (the audit fixture user has no active in-game session —
+  `sendMode='newchat'` — so the send routes through the casting/new-chat path, not the in-game branch the fix
+  targets; the 502 stub fires ×1, confirming the rig, just on the wrong branch). *(Sibling note, not chased:
+  the casting/new-chat stream-error path appears to swallow the 502 with no visible notice — a separate
+  surface.)*
+- **F-S4-D (a truncated reply stopped silently mid-sentence) — FIXED.** Root cause (code-read): a reasoning
+  model (DeepSeek-V4) bills its hidden chain-of-thought against the SAME output budget as the visible reply,
+  so a heavy-thinking turn can hit the token cap and stop the answer mid-sentence — and the streaming path
+  never inspected `finish_reason` (`llm_core.py:1644`, comment-only), so the cut-off passed with **no signal**
+  (the only "incomplete" affordance was the *round-cap* `rounds_exhausted`, a different thing). **Fix** (mirrors
+  `rounds_exhausted`): `llm_core` captures the terminal `finish_reason` and emits a `{"type":"finish","reason"}`
+  event at `[DONE]`; `agent_loop` records it per round and, after the loop, emits `{"type":"truncated"}` iff the
+  FINAL round ended on `"length"` (suppressed when `rounds_exhausted` already fired — no double affordance); the
+  `finish` event is consumed, never leaked. `chat.js` renders `truncated` as a quiet `.stopped-indicator`
+  "cut off … `Continue ▸`" note appended to the history container (NOT the GM body bubble). Also raised the
+  Anthropic-adapter `max_tokens` fallback off the reasoning-truncating **4096 → 8192** (a configured preset
+  still wins). **Verified:** the agent-loop behaviour is driven for real (`tests/test_fs4d_truncation.py` — a
+  fake length-finish stream through the real `stream_agent_loop` ⇒ a `truncated` event; a normal `stop` ⇒ none;
+  the `finish` event is not leaked), the `llm_core`/`chat.js`/Anthropic-fallback legs source-pinned; `node
+  --check` + `py_compile` + the full FE suite green.
 
 ## 3. Close-out verdict
 
@@ -447,19 +515,29 @@ isolation, secret-ballot anonymization, retrospective story-not-numbers, narrati
 decision-card escape hatch, seeded-casting grounding, and the OOBE/cast-photo flow are all **verified clean
 on the live build**.
 
-- **Launch-blockers: ONE REOPENED (2026-06-21) — S3-LOOP / ADR 0010** (the concurrent two-tab agent-loop spin,
+- **Launch-blockers: ONE REOPENED (2026-06-21) — S3-LOOP / ADR 0011** (the concurrent two-tab agent-loop spin,
   §2.11) — a NEW mechanism the prior close-out did not test (the guardrail lattice under a concurrent writer).
   ROOT-CAUSED; fix + ADR gated. **Prior blockers stay retired:** S3-RACE/ADR 0008 (chat divergence) **BUILT**
   (`5e3a2f3`); S3-CORE (engine-bypass/cast-invention), S4-1 (stuck player), S1-1 (text-over-text), and the
   State-6 skip-trap (R5) all **VERIFIED-FIXED**.
 - **Polish backlog — fixes applied this campaign (FE-only, verified):** S1-2 (avatar 204), S1-A, S1-B, S1-C,
   BG-1+OBS-1 (background, both mechanisms), F-S2-A (cast-photo opacity), State-5 (particles / draggable box /
-  welcome re-show), State-6 R1–R8 + D1.
+  welcome re-show), State-6 R1–R8 + D1, **F-S4-C (502 → `msg-system`, not a GM bubble)**, **F-S4-D (silent
+  truncation → `Continue ▸`; Anthropic max_tokens 4096→8192)**.
 - **Remaining (non-blocking, tracked):** a live concurrent-write two-tab re-run with real-model turns (the one
-  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-C/D (error-as-GM-bubble, silent
-  truncation); F-S4-F + the resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
+  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-F + the
+  resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
   S1-5, S1-1L, S2-1, F-S2-B; the §2.10 architecture latents; and the State-5 same-tab-F5 welcome edge
   (needs a server-side per-game nonce). The refactor roadmap is `docs/REFACTOR-ROADMAP.md`.
+- **Token-economy / truncation follow-ons (from the F-S4-D / PR #481 discussion) — tracked in `0069` §3 +
+  ADR `0010`** (runtime-editable per-class output cap; model-aware reasoning sizing folding in the Anthropic
+  fallback; the "which-cap-is-biting" `appliedMaxTokens`+`finishReason` envelope fields; chat-mode `Continue ▸`
+  parity). **Two audit siblings still open here:** (a) **F-S4-C sibling** — the casting/new-chat stream-error
+  path appears to swallow a 502 with **no visible notice** (the in-game branch is fixed; this is a separate
+  surface, not yet VIEWED end-to-end); (b) **reasoning-channel-split latent** — if a model misroutes its
+  *answer* into the `thinking` channel, the public bubble can look empty/truncated (the body renders only the
+  reply buffer; the JSON extractors already recover from `reasoning`, the main bubble does not). Both
+  non-blocking; capture-then-decide.
 
 ---
 
@@ -483,7 +561,7 @@ on the live build**.
   out 3 read-only specialists (consistency-parity / narration-fidelity / transient-animation) on the live code;
   convergent root cause = the **beat-blind per-turn guardrail cascade** (`agent_loop.py:3464-3525`) mis-reading a
   peer's serialized advance as this user's under-call, spinning the loop to `agent_max_rounds=20`, the FE rendering
-  every round unbounded. Captured as §2.11 + proposed **ADR 0010**; consolidated FE fix gated.
+  every round unbounded. Captured as §2.11 + proposed **ADR 0011**; consolidated FE fix gated.
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
