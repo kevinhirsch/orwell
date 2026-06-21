@@ -510,10 +510,14 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
   byte-stable; no number ever crosses to the player.
 
 **Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative):
-- **Calibration tuning — the largest open game-feel lever.** Passive players coast to Final 2 and lose
-  there; data in `docs/audits/2026-06-19-calibration-data.md`; the next step lowers `JURY_WEIGHTS.gameRespect`
-  (~0.9→0.6–0.7) and re-runs the instrument + the permanent `tests/property/juryReach.property.test.ts`
-  `EARNED_WINS` guard (finale wins must be comp-earned).
+- **Calibration tuning — re-measured 2026-06-21, primary goal MET; no change pending.** The
+  `JURY_WEIGHTS.gameRespect` 0.9→0.7 drop (PR #364) + engine evolution flipped the old inversion: on
+  current main a 30-seed instrument run shows **active wins 20% vs passive 7%** (F2-blowouts 50% vs 63%) —
+  playing the game now converts. **Do NOT lower `gameRespect` further** (0.65 would over-correct a solved
+  problem). Residual (optional, low-pri): passive still *reaches* F2 about as often (a reach-side lever,
+  `decisionConstants.juryManagementWeight` / audit #4, if desired) — reads as emergent realism, not a
+  defect. The `tests/property/juryReach.property.test.ts` `EARNED_WINS` guard stays the permanent gate.
+  Re-measurement + the stale-doc flags: `docs/audits/2026-06-21-session-observations.md`.
 - **0022** (MVP-2, deferred) and **0059** (hidden seeded relationships, spec only) — the unbuilt specs.
 - **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
   during the private-repo flip).
