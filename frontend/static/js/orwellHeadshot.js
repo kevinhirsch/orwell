@@ -541,6 +541,11 @@
     if (document.getElementById(PILL_ID)) return;           // pill already shown
     const hist = document.getElementById("chat-history");
     if (!hist) return;
+    // Inject the pill CSS BEFORE the button is in the DOM — otherwise it paints once with default
+    // browser styling (a small, left-aligned plain button) and only snaps to the centered accent
+    // pill when ensureCss() later runs from the box mount. ensureCss() is idempotent, so calling it
+    // here costs nothing on repeat and kills that "two looks" flash. (live walkthrough, 2026-06-21)
+    ensureCss();
     const wrap = document.createElement("div");
     wrap.id = PILL_ID;
     const btn = document.createElement("button");
@@ -616,5 +621,26 @@
   setInterval(function () {
     if (_win || document.getElementById(ID) || _maybePregame) { route(); }
   }, 4000);
+
+  // IMMEDIATE reveal (live walkthrough, 2026-06-21): the producer's opener calls no game-mutating
+  // tool, so `orwell:gamechanged` never fires for it — the pill used to wait out the 4s poll, so the
+  // message sat there button-less for up to four seconds ("it thinks too hard before serving the
+  // button"). Watch the chat transcript instead: a TRAILING debounce means route() fires ~400ms
+  // after the LAST streamed token — i.e. the instant the producer's message settles, not mid-stream —
+  // so the "Choose Your Character" button follows the message like a prompt in its own body. Cheap
+  // and self-limiting: it only schedules while pre-game, and disconnects once a season starts.
+  (function watchTranscriptForOpener() {
+    const hist = document.getElementById("chat-history");
+    if (!hist || typeof MutationObserver === "undefined") return;
+    let t = null;
+    const obs = new MutationObserver(function () {
+      if (!_maybePregame) { obs.disconnect(); return; }   // season underway ⇒ stop watching
+      if (_win || document.getElementById(ID) || document.getElementById(PILL_ID)) return; // box/pill up already
+      if (t) clearTimeout(t);
+      t = setTimeout(route, 400);                          // fire after the stream settles
+    });
+    obs.observe(hist, { childList: true, subtree: true, characterData: true });
+  })();
+
   ready(route);
 })();
