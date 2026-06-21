@@ -480,7 +480,45 @@ animation specialist finishes reading these files):
   one-time OOBE dialog persist/sync its drag geometry across reloads+devices for the season at all? (My
   draggable change enabled this.) Candidate: opt the cast-photo box out of geometry persistence.
 
-### 🔍 transient-animation — IN FLIGHT
+### ✅ transient-animation — RETURNED
+Both headline changes are **fundamentally sound** (VIEWED across the full lifecycle): perlin canvas
+spawns cleanly, honors reduced-motion exactly, tears down with zero orphans even under 30ms rapid
+cycling, never escapes z:0; the OOBE chain has a single open animation (no double-anim), Escape-dismiss
+leaves no orphan, and the box centers (cx=720) + drags (420px) on a clean layout. Findings:
+- **A-F2 — [BLOCK]:** **"Skip for now" is not durable.** On a failed/lagged `POST /api/orwell/casting/photo`
+  the engine keeps `castPhoto` in `missing`, so the 4s poll / `orwell:gamechanged` re-fire `route()`→
+  `mount()` and the box **re-appears — the player is trapped** with the welcome splash hidden. Root:
+  `onCastingPhotoSkipped` (`orwellHeadshot.js:440`) tears down + `recordPhotoStep` swallows the error
+  (`:429`), and `route()` decides purely from engine state with **no local skip latch**. Pre-existing (not
+  my change), but a real player-trap on a flaky connection.
+- **A-F3 — [LATENT]:** `teardownWindow()` (`orwellHeadshot.js:449`) does NOT clear
+  `body.ow-casting-headshot-open` (only `unmount():457` does) → the welcome splash stays pinned `opacity:0`
+  in the gap between teardown and the next `route()→unmount()`. Compounds A-F2 (one-liner fix).
+- **A-F1 — [LATENT]:** perlin canvas **pops in after** the app-loader scrim under a slow `/api/prefs/theme`
+  read (~1.8s bare telescreen bg; loader-REMOVE t=1015ms vs perlin-MOUNT t=2849ms). The first-paint
+  head-script synthesizes telescreen colors but **no `bgPattern`**, so the static class isn't present until
+  `applyBgPattern` runs at the end of `_initWithSync` (after an awaited `_loadFromServer`). Adjacent to my
+  State-5 perlin fix (timing). Fast loopback masks it.
+- **A-F4 — [POLISH]:** ~120–180ms welcome→box handoff splash flash (welcome removed → full-opacity splash →
+  box covers it). `ow-onboarding` cleared before the box mounts.
+- **A-F5 — working-as-designed + the SAME design Q as responsive-F5; the specialist REPAIRED the
+  `orwell_layout.json` confound back to centered `{x:480,y:52}` (cleanup DONE).**
+
+### 📋 State 6 — consolidated remediation plan (reconciled across all three specialists)
+Mine / found-blockers to fix (all clearly-correct, low-risk):
+- **R1** (resp-F1): gate `#orwell-headshot` `max-width` to the wide tier so the mobile sheet goes flush
+  (kills the ~26–31px right gutter). — `orwellHeadshot.js` / `orwellSlots.js`.
+- **R2** (resp-F4, kit): under `≤768px` set `.ow-titlebar{cursor:default}` + omit the "Drag to move" tooltip
+  below `mobileSkip` (every kit window benefits). — `orwellWindow.js`.
+- **R3** (anim-F1): synthesize the default theme's `bgPattern` in the first-paint head-script so the static
+  `bg-pattern-perlin-flow` class is present pre-boot (no bare-bg race). — `index.html`.
+- **R4** (resp-F2/anim): `vh`→`dvh` (vh fallback) on the box body max-heights. — `orwellHeadshot.js` (+ kit).
+- **R5** (anim-F2 **[BLOCK]**): a local skip/finalize latch that suppresses re-mount until a state read
+  confirms `castPhoto` cleared; stop silently swallowing the `recordPhotoStep` failure. — `orwellHeadshot.js`.
+- **R6** (anim-F3): clear `ow-casting-headshot-open` in `teardownWindow()` too (compounds R5). — `orwellHeadshot.js`.
+Optional polish: **R7** (anim-F4 handoff bridge class), **R8** (resp-F6 hamburger overlap / safe-area).
+Owner decision: **D1** (resp-F5/anim-F5) — should the one-time OOBE cast-photo box persist/sync its drag
+geometry across reloads+devices for the season? *(Recommend: opt it out — it's a transient dialog.)*
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
