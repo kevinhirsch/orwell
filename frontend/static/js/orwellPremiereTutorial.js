@@ -69,8 +69,8 @@
       ".orwell-premiere-tutorial .opt-dismiss { margin-left: auto; flex-shrink: 0; cursor: pointer;" +
       "  background: color-mix(in srgb, var(--fg) 9%, transparent);" +
       "  border: 1px solid color-mix(in srgb, var(--fg) 24%, transparent); color: inherit;" +
-      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 24px;" +
-      "  padding: 0 .55rem; }" +
+      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 36px;" + // J4-15: project tap floor
+      "  padding: 0 .75rem; }" +
       ".orwell-premiere-tutorial .opt-dismiss:hover, .orwell-premiere-tutorial .opt-dismiss:focus-visible {" +
       "  background: color-mix(in srgb, var(--fg) 16%, transparent); }" +
       ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }" +
@@ -122,11 +122,24 @@
     card.querySelector(".opt-dismiss").addEventListener("click", function () { dismiss(card); });
   }
 
+  // J5-16 (J4-27): the card is content-gated to week 1 but was only ever MOUNTED — never removed.
+  // Once the season advanced it kept rendering its "premiere week" banner all the way to the finale.
+  // Actively remove it whenever the game is no longer in the premiere window.
+  function removeTutorial() {
+    const card = document.getElementById("orwell-premiere-tutorial");
+    if (card) card.remove();
+    _mounted = false;
+  }
+
   async function refresh() {
-    if (!isGameBuild() || hasDismissed()) return;
+    if (!isGameBuild()) return;
     const status = await jgetSafe("/api/orwell/status");
     const state = await jgetSafe("/api/orwell/state");
-    if (isPremiereWeek(status, state)) mount();
+    if (isPremiereWeek(status, state)) {
+      if (!hasDismissed()) mount();
+    } else {
+      removeTutorial();
+    }
   }
 
   const ready = (fn) =>

@@ -429,7 +429,7 @@ Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consiste
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
 - [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
 - [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 28 findings (J4-01…J4-28). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label) **merged PR #470** (CI green). Gated remediation set #5 (7 fixes: J4-08 confirm label / J4-09 alert region / J4-10 contrast / J4-11 tap target / J4-12 describedby / J4-13 copy / J4-14 aria-describedby) **merged PR #473** (CI green). J4-22/25 closed (dup). Deferred: J4-04/05/06/07/15…21/23/24/26/27/28 → Phase-4 backlog / engine work queue.
-- [x] **J5 — The ENDGAME (eviction → jury → Final 2 → finale → retrospective/unsealing)** — CAPTURE DONE; specialist fan-out IN FLIGHT. Real season fast-forwarded to completion (week 13, winner crowned, player evicted-to-jury). Captured the endgame decision cards (`goodbye-message`, `juror-question`, `juror-vote`), the finale projection, and the retrospective + Vault-unseal surfaces. Confirmed gated #4/#5 fixes hold in the endgame context. Findings + gated set #6 below.
+- [x] **J5 — The ENDGAME (eviction → jury → Final 2 → finale → retrospective/unsealing)** — DONE: 24 findings (J5-01…J5-24) across 5 specialists. Real season fast-forwarded to completion (week 13, player evicted-to-jury). Gated remediation set #6 (17 fixes: 2 launch-blocking textarea-card a11y items + figure/ground + chip contrast + motion + 2 real bugs + retrospective hierarchy/headings/contrast/tap + finale a11y + tutorial graduation). Deferred: J5-18 (player placement — high-value follow-up), J5-19 (responsive-matrix fixture), J5-20/21/22/24 (design/polish), J5-23 (no-fix). Confirmed gated #4/#5 hold in the endgame + the Wall holds.
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
 
@@ -616,6 +616,67 @@ The retrospective shows **per-juror FINALE vote attribution** ("X votes for Eli 
 - **L-g (corroborates J4-27):** the **"premiere week" tutorial card is still rendered at the week-13 finale** (visible in shot `01-02`) — content-driven visibility never graduates.
 - **L-h (Tab order):** first Tab from the focused card lands on the **dismiss ×** (it's first in DOM) — a keyboard user reaches "skip this binding decision" before the options (WCAG 2.4.3).
 
-### Findings index (J5) + remediation (gated set #6)
+### Findings index (J5) — 5-specialist consolidation (de-duped)
 
-*Pending specialist synthesis — fan-out in flight (content-a11y, transient-animation, social-game, visual-motion, responsive-crossplatform).*
+Lenses: **content-a11y (CA)**, **visual-motion (VM)**, **transient-animation (TR)**, **social-game (SG)**, **responsive-crossplatform (RX)**. Convergent findings carry every lens that found them.
+
+| ID | Lens(es) | Sev | Status | One-line |
+|---|---|---|---|---|
+| J5-01 | CA · SG | LAUNCH-BLOCKING | FIXED | Textarea cards (`juror-question`, `finale-statement`, `goodbye-message`) showed the generic note **"never read from prose"** (announced via `aria-describedby`) directly above a **prose textarea** — instructs SR users NOT to use the only input |
+| J5-02 | CA | LAUNCH-BLOCKING | FIXED | The three endgame `<textarea>`s have **no accessible name** (`aria-label`/`labelledby` null) — placeholder-only (WCAG 4.1.2) |
+| J5-03 | VM · TR | HIGH | FIXED | Decision card has **no `box-shadow`** — the only window-like surface missing figure/ground; even when crowning the winner it reads as a narration block (the `--win-shadow` token existed, unused) |
+| J5-04 | CA | HIGH | FIXED | Chip border `--border` on the dark chip fill is **~2.25:1** — below WCAG 1.4.11's 3:1 for the UI-component boundary that is the only way to make the pick |
+| J5-05 | VM · TR | HIGH | FIXED | Decision card has **no entrance/transition** — binding decisions pop in and flip to "✓ Locked in" as silent text swaps (peak-end fail) |
+| J5-06 | TR | HIGH-if-triggered (LATENT) | FIXED | A confirmed card's **un-cleared `setTimeout(removeCard, 4000)`** + removal-by-id can **delete a freshly-armed next decision card** (back-to-back endgame decisions trigger it) |
+| J5-07 | CA | HIGH | FIXED | Retrospective section labels are `<strong>`, not headings — invisible to SR heading navigation (WCAG 1.3.1) |
+| J5-08 | CA · VM · SG | HIGH | FIXED | Vault unseal button: dark-ink `--on-accent` on the purple accent ≈ **3.56:1** (WCAG 1.4.3 fail) **and** 32px tall (below the 44px tap floor) |
+| J5-09 | VM · SG | HIGH | FIXED | Retrospective hierarchy: winner line has no apex weight (same 13px/0.9 as a mid-season highlight); the per-voter "how the votes really fell" payoff renders **last**, below the 40-line confessional dump |
+| J5-10 | TR | HIGH | FIXED | Retrospective `replaceChildren()`-rebuilds its **whole body every 30s** with no scroll/focus preservation — snaps a reader to the top, drops focus to `<body>`, on terminal immutable content |
+| J5-11 | CA | POLISH | FIXED | Hidden-story entries render as `[confessional] …` — reads as debug metadata, not producer-voice prose |
+| J5-12 | CA · TR | HIGH | FIXED | `orwellFinalizing.js`'s **infinite pulse ignores `prefers-reduced-motion`** (runs 30–60s; WCAG 2.2.2) |
+| J5-13 | CA | HIGH | FIXED | Finale move buttons (`.ofin-btn`) ~27px tall at `.74rem` — below the tap floor at the most time-pressured moment |
+| J5-14 | CA | MED | FIXED | Finale finalist tally is a bare number with **no accessible name** (WCAG 4.1.2) |
+| J5-15 | CA | MED | FIXED | Finale stage label is not a live region — stage transitions (incl. "the votes are read") aren't announced |
+| J5-16 | VM · IA | HIGH | FIXED | The **"premiere week" tutorial still renders at the week-13 finale** — content-gated to week 1 but only ever mounted, never removed (corroborates J4-27); also lifts its dismiss button 24→36px (J4-15) |
+| J5-17 | CA | POLISH | FIXED | `finale-statement` card title ("Finale — your statement…") didn't match the finale panel's "Opening statements" vocabulary |
+| J5-18 | SG | HIGH (common case) | DEFERRED | The retrospective never states the **player's own placement or the jury margin** — headlines only the winner; the most common outcome (losing player on jury) reads as audience to someone else's story. Placement IS already computed server-side (`_derive_placement` / `_last_finale_margin`) but feeds the seasons ledger, not the payoff window |
+| J5-19 | RX | LAUNCH-BLOCKING (coverage) | DEFERRED | The CI **responsive-matrix never advances past a fresh game** (`stage_game()` only POSTs `new-game`), so the endgame surfaces are rendered at **zero mobile viewports** by any gate; the existing endgame tests are source-string checks, not viewport renders |
+| J5-20 | VM | MED | DEFERRED | `juror-vote` chips are visually identical to a comp-intent chip — crowning the winner has no risk signal (design-level) |
+| J5-21 | CA | MED | DEFERRED | Dismiss × is the **first Tab stop** on a binding card (operability preserved; reorder deferred) |
+| J5-22 | CA | POLISH | DEFERRED | Decision-card error copy "your move wasn't allowed" is system-language |
+| J5-23 | SG | LATENT (design ruling) | NOFIX | Player-juror's question is scoreless free-text while a player-finalist's answers are engine-scored — defensible BB fidelity (the juror's power is the vote); flagged for a product ruling, not a defect |
+| J5-24 | CA | POLISH | DEFERRED | Retrospective window `aria-label` includes the 📼 emoji, read verbatim ("video cassette …") by SR |
+
+**Verified WORKING (steelman — keep as patterns):** the Wall holds at the endgame (per-voter **weekly** attribution unseals only post-season; the finale jury tally is public, as designed); **jury management is genuinely wired** (goodbye-message tone folds into the evictee's `manner` → jury lean); gated #4/#5 a11y fixes hold across every endgame card kind (one renderer); the `OrwellWindow` kit is an exemplary reduced-motion baseline; the vault unseal delivers real off-screen drama with no slug leaks.
+
+**Caveats for the lead (re-probe targets):**
+- **The narrated finale + losing-player jury-seat arc in CHAT were NOT exercised** (the fast-forward used EchoNarrator + direct-engine drive). SG/TR-1's "the crowning has no ceremony" stands *structurally* (no FE reveal beat), but the lived feel depends on the narration the harness skipped → a **real-LLM J5** (CLAUDE.md "Live (real-LLM) manual testing") is the right next probe, and would also resolve whether J5-18 is a window gap or covered by narration.
+- **Telemetry method:** `_capture_card` reloads per card, so the mutation log only retained the final session — drive consecutive endgame cards in one page session next time to capture mount/unmount timestamps.
+
+### Journey 4 — remediation (gated set #6)
+
+**Scope:** the J5 endgame surfaces — decision card (endgame kinds), retrospective, finale, finalizing indicator, premiere tutorial. 17 fixes across 5 files; all low-risk source edits, source-pinned-tested. The two LAUNCH-BLOCKING content items + the strongest HIGH a11y/contrast/tap/motion items + two real bugs (J5-06 timer, J5-10 churn).
+
+| Fix | File | J5 Finding |
+|---|---|---|
+| Per-kind notes for textarea cards (affirm prose; tone-binds; blank-to-pass) | `static/js/orwellDecision.js` | J5-01 |
+| `aria-label` on the 3 endgame textareas | `static/js/orwellDecision.js` | J5-02 |
+| `box-shadow: var(--win-shadow)` on the card | `static/js/orwellDecision.js` | J5-03 |
+| Chip border `color-mix` toward `--fg` (≥3:1 in dark) | `static/js/orwellDecision.js` | J5-04 |
+| `@keyframes odec-in` entrance + done-state transition, reduced-motion-guarded | `static/js/orwellDecision.js` | J5-05 |
+| Tracked + identity-checked `_doneTimer` (cancel on re-arm) | `static/js/orwellDecision.js` | J5-06 |
+| `<strong>` → `<h3>` vault section headings | `static/js/orwellRetrospective.js` | J5-07 |
+| Unseal button `color:#fff` + `min-height:44px` + 13px | `static/js/orwellRetrospective.js` | J5-08 |
+| Winner-line apex weight + reorder votes above hidden-story | `static/js/orwellRetrospective.js` | J5-09 |
+| `_lastSig` render-signature guard (skip redundant 30s rebuilds) | `static/js/orwellRetrospective.js` | J5-10 |
+| Prose annotation (drop `[brackets]`) on hidden-story | `static/js/orwellRetrospective.js` | J5-11 |
+| `prefers-reduced-motion` guard on the finalizing pulse | `static/js/orwellFinalizing.js` | J5-12 |
+| `.ofin-btn` `min-height:36px` + `.82rem` | `static/js/orwellFinale.js` | J5-13 |
+| Finalist tally `aria-label` ("N votes") | `static/js/orwellFinale.js` | J5-14 |
+| Stage label `aria-live="polite"` | `static/js/orwellFinale.js` | J5-15 |
+| `removeTutorial()` graduation past week 1 + dismiss 24→36px | `static/js/orwellPremiereTutorial.js` | J5-16 / J4-27 / J4-15 |
+| `finale-statement` title → "Opening statement — address the jury" | `static/js/orwellDecision.js` | J5-17 |
+
+**Validation:** 19 new source-pinned tests in `tests/test_j5_endgame_a11y.py` — 19/19 passed. Full FE suite **1834 passed** (1 pre-existing flaky `test_h2b_all_model_pools` — passes in isolation, unrelated). Live re-capture confirmed the retrospective renders clean (0 errors), unseal button now **44px** (was 32px), winner line at apex weight.
+
+**Deferred (recorded above):** J5-18 (player placement in retrospective — high-value follow-up; needs the GET route to surface `_derive_placement`/`_last_finale_margin`), J5-19 (responsive-matrix finished-season fixture — test-infra), J5-20/21/22/24 (design/polish), J5-23 (no-fix design ruling).

@@ -47,6 +47,13 @@
         0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 55%, transparent); }
         70% { box-shadow: 0 0 0 .5rem color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 0%, transparent); }
         100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 0%, transparent); }
+      }
+      /* J5-12: the pulse runs unbounded (until the first narration token, 30–60s on a slow model) —
+         strip the entrance + the infinite pulse for prefers-reduced-motion (WCAG 2.2.2). The dot
+         stays a static colour indicator, still meaningful. */
+      @media (prefers-reduced-motion: reduce) {
+        #${ID} { animation: none; }
+        #${ID} .ow-fin-dot { animation: none; }
       }`;
     document.head.appendChild(s);
   }
