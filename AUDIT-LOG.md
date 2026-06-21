@@ -452,7 +452,35 @@ after turn one. The comment's "purely local, no desync risk" is accurate. *(LATE
 safety depends on onboarding never gaining an `orwell:gamechanged` listener; if one is ever added the
 `started===false` early-return must stay the first gate — worth a one-line comment, not a fix.)*
 
-### 🔍 responsive-cross-platform · transient-animation — IN FLIGHT
+### ✅ responsive-cross-platform — RETURNED
+The `top-center` slot change is **structurally sound**: across 390/375/360/320px the box reflows to a
+top sheet with **zero horizontal overflow, no clipping** (WCAG 1.4.10 holds), all three action buttons
+≥44px (2.5.5/2.5.8 pass), never covers the composer. Actionable items (mine to fix; HELD until the
+animation specialist finishes reading these files):
+- **F1 — should-fix (mine):** the mobile "sheet" isn't full-width — `#orwell-headshot { max-width:
+  min(92vw,480px) }` (`orwellHeadshot.js:43`) fights the narrow sheet host's `left:0;right:0`
+  (`orwellSlots.js:119-134`), leaving a one-sided **~26–31px dead right gutter** at every mobile width
+  (left-pinned, not flush). Not a clip (no overflow) — but defeats the sheet intent. Fix: gate/relax the
+  `max-width` to the wide tier (or `restackNarrowSheets` sets `max-width:none` on narrow entries).
+- **F4 — should-fix (kit-level; surfaced by my change):** the titlebar keeps `cursor:move`
+  (`orwellWindow.js:91`) + tooltip "Drag to move · arrows to nudge" (`orwellWindow.js:345`) on touch
+  where drag is dead (`windowDrag.js:349-350`, `mobileSkip:768`) — a misleading affordance. Fix at the
+  KIT (`≤768px` → `cursor:default`, omit the tooltip below `mobileSkip`) so every kit window benefits.
+- **F2 — nit (mine + kit):** body max-heights use fixed `vh`/`100vh` not `dvh` (`orwellHeadshot.js:46`,
+  `orwellWindow.js:114`); on a keyboard-shrunk viewport the lowest exit "Skip for now" sits ~10px below
+  the fold (reachable by internal scroll — `overflow:auto`, so not a block). Fix: `vh`→`dvh` (vh fallback).
+- **F6 — nit (existing):** sheet top `TOP_BASE−8=44` overlaps the mobile hamburger by a 44×6px strip
+  (tap centroid at y28 never occluded — visual only). Harden later via live-header-bottom + safe-area inset.
+- **F3 — working as intended:** touch can't move the box on the mobile sheet tier (drag works ≥769) — by
+  design; the sheet owns the top region, nothing to move it out of the way of. Do NOT add a touch handle.
+- **F5 — working as intended + a design Q + a CLEANUP (mine):** desktop centering is fine on a clean user
+  (cx=720); my earlier off-center reading was a **confound** — `repro_ab.py`'s drag PERSISTED a layout via
+  0064 sync into `frontend/data/orwell_layout.json` (`orwell-headshot {x:4,y:412}`), replayed every load.
+  → **Cleanup:** remove that stale entry so audit-admin's box re-centers. → **Design Q for owner:** should a
+  one-time OOBE dialog persist/sync its drag geometry across reloads+devices for the season at all? (My
+  draggable change enabled this.) Candidate: opt the cast-photo box out of geometry persistence.
+
+### 🔍 transient-animation — IN FLIGHT
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
