@@ -57,42 +57,52 @@ def test_markdown_scrubs_plain_content_reasoning_preamble():
     assert "scrubReasoningPreamble(" in gated
 
 
-def test_live_path_suppresses_intermediate_agent_rounds_in_game_build():
+# L6c (2026-06-21) SUPERSEDES L6b: a multi-round agent turn (the casting interview, a multi-beat
+# scene) narrates real player-facing dialogue across several rounds; the old "only the FINAL round
+# renders" rule lost all but the last ("4 answers go away" — prod casting loop). The discriminator
+# is now CONTENT (a round that produced visible narration persists; only an empty tool-only round is
+# hidden), not POSITION. The reasoning-preamble scrub (processWithThinking) still strips planning.
+
+def test_l6c_narration_round_with_following_tool_is_kept_live():
+    """A round that produced visible narration renders even when a tool follows it; only an EMPTY
+    tool-only round is hidden. The old unconditional game-build hide at the tool_start finalize is
+    gone — game + non-game share one content-driven rule."""
     chat = _read("static", "js", "chat.js")
-    # tool_start finalize: an intermediate round (a tool now follows its text) is
-    # hidden in the game build instead of rendering the planning text.
     fin = chat[chat.index("Finalize current text bubble (only once per round)"):]
     fin = fin[:fin.index("Track tool name for contextual spinner labels")]
-    assert "isGameBuild()" in fin
+    # the old unconditional game-build hide is REMOVED from this block
+    assert "if (isGameBuild()) {" not in fin
+    # a round with visible narration renders the reply (one shared rule, no game gate)
+    assert "if (dt.trim())" in fin
+    assert "markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt))" in fin
+    # only an empty round is hidden (the else branch survives)
     assert "roundHolder.style.display = 'none';" in fin
-    # agent_step: when a NEW round starts, the previous round was intermediate —
-    # hide it in the game build.
+
+
+def test_l6c_agent_step_hides_previous_round_only_when_empty():
+    """Starting a new agent round hides the previous bubble ONLY when it rendered no narration
+    (stripToolBlocks empty); a narration round persists. The old unconditional isGameBuild()-gated
+    hide is gone."""
+    chat = _read("static", "js", "chat.js")
     step = chat[chat.index("} else if (json.type === 'agent_step') {"):]
     step = step[:step.index("New round: create fresh AI bubble")]
-    assert "isGameBuild() && roundHolder" in step
+    assert "!stripToolBlocks(roundReplyText).trim()" in step
     assert "roundHolder.style.display = 'none';" in step
+    # the old unconditional game-build hide string is gone
+    assert "if (isGameBuild() && roundHolder) {" not in step
 
 
-def test_reload_path_renders_only_final_narration_round_in_game_build():
+def test_l6c_reload_renders_every_narration_round_not_just_last():
+    """Reload parity: chatRenderer no longer skips intermediate text rounds in the game build;
+    every round with text renders (empty tool-only rounds carry no txt and are skipped)."""
     renderer = _read("static", "js", "chatRenderer.js")
-    # the reconstruction skips an intermediate text round's bubble in the game build
-    assert "_gbSkipIntermediateText = isGameBuild() && !isLastTextRound" in renderer
+    # the intermediate-skip is disabled (no longer gated on !isLastTextRound)
+    assert "_gbSkipIntermediateText = isGameBuild() && !isLastTextRound" not in renderer
+    assert "const _gbSkipIntermediateText = false" in renderer
+    # every non-empty round still gates on txt (empty rounds skipped)
     assert "if (txt && !_gbSkipIntermediateText)" in renderer
-    # the thread connectors key off whether a text bubble actually rendered
-    assert "_renderedTxt = txt && !_gbSkipIntermediateText" in renderer
-
-
-def test_non_game_build_intermediate_rounds_unchanged():
-    # The non-game build still renders every round's text (the suppression is gated).
-    chat = _read("static", "js", "chat.js")
-    fin = chat[chat.index("Finalize current text bubble (only once per round)"):]
-    fin = fin[:fin.index("Track tool name for contextual spinner labels")]
-    # the non-game branch still does the normal processWithThinking render
-    assert "else if (dt.trim())" in fin
-    assert "markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt))" in fin
-    renderer = _read("static", "js", "chatRenderer.js")
-    # the skip flag is the ONLY game-gated branch on the bubble — non-game renders txt
-    assert "isGameBuild() && !isLastTextRound" in renderer
+    # isLastTextRound is retained for source/findings placement (not deleted)
+    assert "isLastTextRound" in renderer
 
 
 # ── L7 ───────────────────────────────────────────────────────────────────────── #

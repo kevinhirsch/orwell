@@ -2160,15 +2160,15 @@ import { isNarrow } from './platform.js';
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
                   const dt = stripToolBlocks(roundReplyText);  // F8: reply-only (reasoning → accordion)
-                  // L6b (game build): a tool now follows this round's text, so it
-                  // is an INTERMEDIATE agent round — its free text is the model's
-                  // planning ("Looking at the roster… npc:1 … Let me stay in
-                  // character"), NOT narration. Suppress the whole bubble; only the
-                  // FINAL round (the final-render block) shows the player narration.
-                  // Fail-open to hiding. Non-game build is UNCHANGED.
-                  if (isGameBuild()) {
-                    roundHolder.style.display = 'none';
-                  } else if (dt.trim()) {
+                  // L6c (supersedes L6b): a round that produced VISIBLE narration is the player's
+                  // dialogue (the casting interviewer's lines, a scene beat) — KEEP it even when a
+                  // tool follows. Only a truly-EMPTY tool-only round is hidden. The old L6b rule hid
+                  // every intermediate round in the game build, which structurally lost a multi-line
+                  // interview ("4 answers go away" — prod casting loop). `dt` is reply-only (reasoning
+                  // → accordion) and game-build scrubbed by processWithThinking (scrubReasoningPreamble
+                  // strips planning preambles / raw npc:<id>), so a planning round still scrubs down
+                  // (often to empty → hidden) without losing real narration. Game + non-game identical.
+                  if (dt.trim()) {
                     var _body3 = roundHolder.querySelector('.body');
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
@@ -2663,13 +2663,12 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // L6b (game build): a NEW agent round is starting, so whatever the
-                // PREVIOUS round rendered is an INTERMEDIATE round — followed by
-                // another assistant round — i.e. the model's planning, not the
-                // final narration. Suppress that bubble (the live render may have
-                // already painted its text). The FINAL round's narration is shown
-                // by the final-render block. Non-game build is UNCHANGED.
-                if (isGameBuild() && roundHolder) {
+                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
+                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
+                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
+                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
+                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
+                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
                   roundHolder.style.display = 'none';
                 }
                 // Mark thread as connected to bubble below

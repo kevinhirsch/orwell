@@ -198,26 +198,11 @@ class SessionManager:
         session.history.append(message)
         session.message_count = len(session.history)
 
+        # ADR 0012: the `message-added` completion broadcast now fires inside `_persist_message`
+        # (the shared persist primitive), so EVERY persist path publishes exactly once — including
+        # the streaming save path (ChatSession.add_message → _persist_message) that previously
+        # bypassed this method's broadcast (the dead leg). Do not re-publish here.
         self._persist_message(session_id, message)
-
-        # ADR 0008: a completion broadcast. Today only `run-started` fires (turn START), so a tab that
-        # missed it — or the SENDER, which is optimistic-only — never learns the canonical {id, seq} of a
-        # persisted message and the conversations drift. Publishing message-added with the authoritative
-        # {id, seq} (+ the optimistic client_msg_id so a sender can adopt its own temp bubble) lets every
-        # tab reconcile by id. Tiny, Vault-free payload (ids/seq/types only — never content). Best-effort:
-        # a publish failure must never break a persist; lazy import avoids any import-time cycle.
-        try:
-            from src import session_events as _se
-            _md = message.metadata or {}
-            if _md.get("_db_id") is not None:
-                _se.publish(session_id, "message-added", {
-                    "id": _md.get("_db_id"),
-                    "seq": _md.get("_seq"),
-                    "role": message.role,
-                    "client_msg_id": _md.get("client_msg_id"),
-                })
-        except Exception:
-            pass
 
     def _persist_message(self, session_id: str, message: ChatMessage):
         """Persist a single message to the database."""
@@ -292,6 +277,25 @@ class SessionManager:
             # authoritative-order render paths (ADR 0008).
             message.metadata['_db_id'] = msg_id
             message.metadata['_seq'] = assigned_seq
+
+            # ADR 0008 + ADR 0012: the completion broadcast fires HERE, in the shared persist
+            # primitive, so EVERY persist path publishes exactly once — including the streaming save
+            # path (ChatSession.add_message → _persist_message), which previously bypassed the
+            # broadcast in SessionManager.add_message (the dead leg that left two windows drifting
+            # until a late poll/reconcile). The authoritative {id, seq} (+ the optimistic
+            # client_msg_id so a sender adopts its own temp bubble) lets every window reconcile by id.
+            # Tiny, Vault-free payload (ids/seq/types only — never content). Best-effort: a publish
+            # failure must never break a persist; lazy import avoids any import-time cycle.
+            try:
+                from src import session_events as _se
+                _se.publish(session_id, "message-added", {
+                    "id": msg_id,
+                    "seq": assigned_seq,
+                    "role": message.role,
+                    "client_msg_id": message.metadata.get("client_msg_id"),
+                })
+            except Exception:
+                pass
 
             logger.debug(f"Persisted message to session {session_id}")
 

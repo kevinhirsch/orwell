@@ -6,6 +6,9 @@ coverage/
 *.sqlite3
 .DS_Store
 .cucumber-cache/
+# Python virtualenvs (e.g. a root-level .venv created for FE test runs) — never committed.
+.venv/
+venv/
 # Durable game saves (feature 0030) — runtime data, never committed.
 .orwell-data/
 /data/
