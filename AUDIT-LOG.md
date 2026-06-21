@@ -110,7 +110,7 @@ L18 (engine hang on fallback-digest), L31/L28b/L37/L39/L40/L35/L45.
 | S4-RESOLVE | State 4 | n/a | **PASS (live)** | Full game → crowned NPC winner; player→jury; interactive finale juror path fired; retrospective renders ordered per-juror reveal. |
 | S4-VAULT-RETRO | State 4 | n/a | **PASS — Wall holds at its one opening** | 0048 unseal reveals STORY not NUMBERS: 2037–2087 hidden beats / 13 types, 13 wks per-voter ballots, **0 numeric leaks**, secret-ballot anonymized all season, `npc:N` only in `id` leaves. |
 | S4-1 | State 4 | ~~BLOCK~~ | **VERIFIED-FIXED (code+live)** | Stuck-player (narrated past a pending) fixed by `rearmFromStatus` + the 15s `/status` pending "escape hatch". |
-| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). Polish: 502 voiced as a GM bubble (F-S4-C); truncated stream stops silently (F-S4-D); mid-stream reload reconciles (F-S4-E ✅). |
+| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). 502-as-GM-bubble (F-S4-C) **FIXED** → `msg-system` notice; truncated stream stops silently (F-S4-D, deferred); mid-stream reload reconciles (F-S4-E ✅). |
 | S4-2 | State 4 | POLISH | partial | `/status` carries `finished+winner` (✓) but `/recap`+`/finale` still return null winner post-finish. Non-blocking (FE recovers via retrospective). |
 | F-S4-F | State 4 | LATENT | ROOT-CAUSED | Resume-path name DRIFT ("Luke→Lake Fleming") on a mid-stream-reload-resumed turn — resume-context-specific (clean play = exact); ties to ADR 0008 resumable-stream context. New gate recommended. |
 | **State 5** | OOBE | mixed | **VERIFIED-FIXED** | Operator OOBE reports: particles (=BG-1/OBS-1 Lane B), cast-photo box movable-not-resizeable, welcome re-shows after backend reset. §2.8. |
@@ -365,14 +365,20 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
   roster; B's preSeed left A's roster **byte-unchanged**; **B's header never returns A's game**; the no-header
   "default" routes to its OWN separate sandbox (not A's). No call for one user returns another user's game —
   secret or not. Holds after the main churn.
-- **F-S4-C (502 rendered as a GM bubble) — repro CONFOUNDED, deferred with a note.** The chat.js error path
-  (`:1118` `typewriterInto(holder…)` where `holder` is `msg msg-ai`) still types a stream error into the GM
-  bubble *by code*, but a clean live repro is blocked by game state: the audit-admin game is parked at a
-  pending comp-round decision card, which gates the free-text send, so the stubbed 502 never surfaced as a
-  visible message (the game-build agent loop / decision gating may also intercept it). **Recommendation:**
-  re-test on a game NOT at a pending decision (a normal conversational turn); if it reproduces, render the
-  error as `msg-system` (the quiet left-border notice already exists) not the GM bubble. Not chased now
-  (polish; the game-state confound makes it non-trivial). F-S4-D (silent truncation) likewise deferred.
+- **F-S4-C (502 rendered as a GM bubble) — FIXED.** Root cause (code-read): the chat-stream sender's
+  pre-stream non-200 branch (`chat.js` `if (!res.ok)`) typewrote the raw upstream error into `holder`, which
+  was mounted as `msg msg-ai` **with a `.role` "Big Brother" label** — so a gateway/proxy failure read as
+  in-game narration (immersion break). **Fix:** reclassify the idle holder to the quiet out-of-character
+  `.msg-system` style (`style.css:9056`) **and** rebuild its body to drop the `.role` GM label, then frame a
+  generic, actionable failure (`⚠ Connection error (NNN) — your message didn't go through. Try again.`) — the
+  tool-mode-switch copy (matched by `/Chat mode/i`) keeps its own message. **Verification:** `node --check`;
+  source-pinned by `tests/test_prelaunch_blockers_s6s4.py` (two F-S4-C tests read the literal error-path
+  slice — the file's standing posture: "CI can't drive the live stack here, so we pin the WIRING"). A live
+  in-game repro stays blocked environmentally (the audit fixture user has no active in-game session —
+  `sendMode='newchat'` — so the send routes through the casting/new-chat path, not the in-game branch the fix
+  targets; the 502 stub fires ×1, confirming the rig, just on the wrong branch). F-S4-D (silent truncation)
+  remains deferred. *(Sibling note, not chased: the casting/new-chat stream-error path appears to swallow the
+  502 with no visible notice — a separate surface.)*
 
 ## 3. Close-out verdict
 
@@ -387,10 +393,10 @@ on the live build**.
   all **VERIFIED-FIXED**.
 - **Polish backlog — fixes applied this campaign (FE-only, verified):** S1-2 (avatar 204), S1-A, S1-B, S1-C,
   BG-1+OBS-1 (background, both mechanisms), F-S2-A (cast-photo opacity), State-5 (particles / draggable box /
-  welcome re-show), State-6 R1–R8 + D1.
+  welcome re-show), State-6 R1–R8 + D1, **F-S4-C (502 → `msg-system`, not a GM bubble)**.
 - **Remaining (non-blocking, tracked):** a live concurrent-write two-tab re-run with real-model turns (the one
-  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-C/D (error-as-GM-bubble, silent
-  truncation); F-S4-F + the resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
+  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-D (silent truncation); F-S4-F + the
+  resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
   S1-5, S1-1L, S2-1, F-S2-B; the §2.10 architecture latents; and the State-5 same-tab-F5 welcome edge
   (needs a server-side per-game nonce). The refactor roadmap is `docs/REFACTOR-ROADMAP.md`.
 

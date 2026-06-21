@@ -1115,6 +1115,20 @@ import { isNarrow } from './platform.js';
             Storage.setJSON(Storage.KEYS.TOGGLES, _st);
           }
         }
+        // F-S4-C (audit): a stream/connection error is a SYSTEM notice, NOT the GM's voice. The pre-created
+        // bubble is `msg msg-ai` (Big Brother) WITH a GM `.role` label, so typing a raw "Error 502 / upstream
+        // model error" into it read as in-game narration (immersion break). Reclassify it to the quiet
+        // `.msg-system` style (left-border, no GM avatar) AND drop the `.role` label so nothing attributes the
+        // failure to a houseguest; frame a generic connection failure out-of-character (the helpful tool-mode-
+        // switch message set above keeps its own copy). The error path returns right after, so rebuilding the
+        // idle holder is side-effect-free.
+        try {
+          holder.className = 'msg msg-system';
+          holder.innerHTML = '<div class="body"></div>';
+        } catch (_) {}
+        if (!/Chat mode/i.test(errText)) {
+          errText = `⚠ Connection error (${res.status}) — your message didn't go through. Try again.`;
+        }
         typewriterInto(holder.querySelector('.body'), errText);
         enableResearchBtn();
         return;
