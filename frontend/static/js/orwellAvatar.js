@@ -23,7 +23,8 @@
     let present = false;
     try {
       const r = await fetch("/api/orwell/avatar", { credentials: "same-origin", cache: "no-store" });
-      present = r.ok;
+      // 204 ⇒ no avatar set (not an error, no console 404) → show the initial.
+      present = r.ok && r.status !== 204;
     } catch (_) { present = false; }
     const url = present ? "/api/orwell/avatar?t=" + Date.now() : null;
     TARGETS.forEach((id) => {

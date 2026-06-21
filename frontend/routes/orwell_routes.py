@@ -785,11 +785,15 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/avatar")
     async def orwell_user_avatar(request: Request):
-        """The account's circle profile pic (G27) — the finalized headshot. 404 ⇒ the UI shows
+        """The account's circle profile pic (G27) — the finalized headshot. 204 ⇒ the UI shows
         the initial. Player-channel: a user's OWN avatar only."""
         p = orwell_portraits.user_avatar_path(_current_user(request))
         if p is None:
-            return Response(status_code=404)
+            # 204 (not 404) when no avatar is set: both consumers (orwellAvatar.js fetch +
+            # orwellHeadshot.js CSS background-image) treat "no avatar" as the initial, and a
+            # 204 is not an error status — so it avoids a console 404 on every page load
+            # (audit S1-2 / F-S1-C). orwellAvatar.js guards on r.status !== 204.
+            return Response(status_code=204)
         return FileResponse(str(p), media_type="image/png",
                             headers={"Cache-Control": "no-cache"})
 
