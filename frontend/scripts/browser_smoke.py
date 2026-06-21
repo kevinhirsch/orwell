@@ -1371,13 +1371,16 @@ def main() -> int:
             check(l12b.get("hidden") is True and l12b.get("flag") is None,
                   f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
 
-            # L13: the rail gadgets are drag-reorderable and the order PERSISTS. Each
-            # gadget carries a keyboard-focusable drag handle; the controller's reorder
-            # seam (the live path is HTML5 drag-and-drop) persists the sequence per-user
-            # and lays the gadgets out by inline `order`.
+            # L13: the rail gadgets reorder and the order PERSISTS. Reorder now happens in an
+            # explicit edit mode (iOS-jiggle / HASS-dashboard style) — a labeled header toggle
+            # enters a mode where gadgets wiggle and become keyboard-focusable for ↑/↓ reorder,
+            # and the WHOLE gadget is pointer-draggable (touch + mouse). NO persistent overlay grip
+            # (it covered content). The controller's reorder seam persists the sequence per-user.
             l13 = page.evaluate("""() => {
               const body = document.getElementById('gadget-rail-body');
-              if (!body) return { ok: false, why: 'no-body' };
+              const rail = document.getElementById('gadget-rail');
+              if (!body || !rail) return { ok: false, why: 'no-body' };
+              rail.setAttribute('data-collapsed', 'false');
               if (window._orwellStatusEnsure) window._orwellStatusEnsure();
               // a synthetic second gadget so there's something to reorder past
               let probe = document.getElementById('orwell-l13-probe');
@@ -1395,17 +1398,26 @@ def main() -> int:
               const after = window.OrwellGadgetRail.currentOrder();
               const user = (document.body && document.body.dataset.user) || '';
               const saved = localStorage.getItem('orwell-gadget-order:' + user);
+              // Edit mode: the header toggle is labeled; entering it makes the gadgets
+              // keyboard-focusable; no overlay grip covers content.
+              const btn = document.getElementById('gadget-rail-rearrange');
+              const rearrangeLabeled = !!(btn && btn.getAttribute('aria-label'));
+              if (btn) btn.click();
+              const editOn = rail.getAttribute('data-edit') === 'true';
+              const focusable = Array.prototype.every.call(body.children,
+                c => !c.id || c.getAttribute('tabindex') === '0');
+              const noOverlayGrip = body.querySelectorAll('.grail-drag').length === 0;
+              if (btn) btn.click();  // exit edit mode (cleanup)
               return { ok: true, reversed: after.join() === before.slice().reverse().join(),
                        saved: !!saved, savedHasProbe: !!saved && saved.indexOf('orwell-l13-probe') !== -1,
-                       handles: body.querySelectorAll('.grail-drag[draggable="true"]').length,
-                       handleHasLabel: !!(body.querySelector('.grail-drag') &&
-                         body.querySelector('.grail-drag').getAttribute('aria-label')) };
+                       rearrangeLabeled, editOn, focusable, noOverlayGrip };
             }""")
             check(l13.get("ok") is True and l13.get("reversed") is True
                   and l13.get("saved") is True and l13.get("savedHasProbe") is True,
-                  f"L13: rail gadgets drag-reorder and the order persists ({l13})")
-            check((l13.get("handles") or 0) >= 1 and l13.get("handleHasLabel") is True,
-                  f"L13: every gadget has a labeled, draggable, keyboard-focusable handle ({l13})")
+                  f"L13: rail gadgets reorder and the order persists ({l13})")
+            check(l13.get("rearrangeLabeled") is True and l13.get("editOn") is True
+                  and l13.get("focusable") is True and l13.get("noOverlayGrip") is True,
+                  f"L13: rearrange mode — labeled toggle, keyboard-focusable gadgets, no overlay grip ({l13})")
             # clean up the synthetic probe so it can't bleed into later assertions
             page.evaluate("""() => {
               const p = document.getElementById('orwell-l13-probe'); if (p) p.remove();

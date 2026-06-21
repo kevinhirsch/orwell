@@ -1,9 +1,16 @@
 # 0008 — Cross-tab/-device chat conversation consistency (an authoritative ordered message log)
 
-> **Status:** **Proposed** (root-caused in the 2026-06-21 pre-launch playtest audit — see
+> **Status:** **Accepted — BUILT** (2026-06-21; root-caused in the pre-launch playtest audit — see
 > `AUDIT-LOG.md` §S3-RACE / §2.4; PO direction 2026-06-21: *"if we need to refactor deeply to make this
-> part ROCK SOLID I wouldn't be opposed… it's a huge issue that there's no tolerance for"*). Awaiting
-> implementation authorization.
+> part ROCK SOLID I wouldn't be opposed… it's a huge issue that there's no tolerance for"*, then *"finish
+> the audit first, then implement"*). Implemented FE-only across two phases: **Phase A** — the authoritative
+> per-session `seq` (schema + backfill migration + seq-ordered reads + the `message-added` completion
+> broadcast); **Phase B** — render-/reconcile-by-id (optimistic temp id → canonical `{id, seq}` adoption,
+> divergence-gated rebuild, deferred-past-a-live-stream), the optimistic temp-id round-trip, and dropping
+> the blanket `hasActiveStream` suppression in `sessionSync`. **Phase C** — the permanent gates
+> (`frontend/tests/test_adr0008_chat_seq.py` + `…_reconcile_contract.py`). Verified: migration applied to
+> the live DB (dense backfill, UNIQUE index), full FE suite green (1688), `/api/history` serves `{id, seq}`
+> seq-ordered, clean browser runtime.
 > **Source:** **S3-RACE** — the two-window concurrent-write parity investigation (audit 2026-06-21):
 > looped reproduction (**10/10 iterations diverge**, accumulating), the engine perfectly consistent
 > throughout, and a reload that reconciles (render-layer, persisted log intact).
@@ -113,6 +120,10 @@ Vault-free SSE-payload property (`seq` is closed-set-ish metadata, never content
 
 ## Open / to confirm
 
-- **Implementation authorization** (the refactor touches the session schema + the chat render/sync core).
-- The exact `seq` assignment site (in `_persist_message` under the session lock vs. at the `agent_runs`
-  commit) — pinned during implementation so it rides the existing per-session serialization.
+- **Done:** implementation authorization granted ("finish the audit first, then implement"); the `seq`
+  assignment was pinned to **`_persist_message`** — `MAX(seq)+1` under the SQLite write lock, with the
+  `UNIQUE(session_id, seq)` index as the race backstop (IntegrityError → recompute + retry).
+- **Remaining (verification):** a live two-tab **concurrent-write** browser re-run with real model turns
+  (the audit's `s3raceloop` against the fixed FE) — the convergence is proven at the persistence layer
+  (the interleaved-writers gate) and the render layer executes clean + is contract-pinned, but the
+  end-to-end browser re-run is best done via CI's `frontend` job or a dedicated session with a fresh game.

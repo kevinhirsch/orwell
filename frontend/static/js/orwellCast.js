@@ -60,6 +60,9 @@
     btn.setAttribute("role", "button");
     btn.setAttribute("tabindex", "0");
     btn.title = "Cast — the houseguests";
+    // J2-19: give SR users the same descriptive name as the icon-rail twin (`#rail-cast` carries
+    // aria-label="Cast — the houseguests"); without it the accessible name is just the text "Cast".
+    btn.setAttribute("aria-label", "Cast — the houseguests");
     btn.style.display = "none"; // shown while a game is active
     btn.innerHTML = `
       <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>

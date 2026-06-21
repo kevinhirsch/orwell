@@ -68,7 +68,7 @@
     var t = document.getElementById("gadget-rail-toggle");
     if (t) { t.setAttribute("aria-expanded", c ? "false" : "true");
       t.title = c ? "Expand the control room" : "Collapse the control room"; }
-    if (c) syncStrip();  // entering collapsed mode: make sure the strip matches the gadgets
+    if (c) { exitEdit(); syncStrip(); }  // collapsing: leave edit mode (if any) + match the strip
   }
   function applySide(side) {
     if (side === "left") document.body.setAttribute("data-gadget-side", "left");
@@ -275,54 +275,125 @@
     reorder(order);
   }
 
-  var DRAG_MIME = "text/orwell-gadget";
-  var _dragId = null;
+  // ── Rearrange ("edit") mode — iOS jiggle / Home-Assistant dashboard-edit, for touch + mouse ──
+  // The old per-gadget hover grip floated over each gadget's bottom-left and BLOCKED its content
+  // (and HTML5 drag-and-drop never worked on touch). Instead: a deliberate edit mode you ENTER
+  // (long-press a gadget, or the header's ⠿ Rearrange button), in which gadgets WIGGLE and the
+  // WHOLE gadget is grab-draggable via Pointer Events (one code path for touch + mouse). Content
+  // interaction is suspended while editing (you're rearranging, not using, the gadgets). Exit with
+  // the Done toggle, Escape, or a tap outside. Keyboard a11y: in edit mode gadgets are focusable and
+  // ↑/↓ move them. No persistent overlay ⇒ the overlap is gone by construction.
+  var _edit = false;
+  var _editBtn = document.getElementById("gadget-rail-rearrange");
+  var _drag = null;                                   // active drag { id, el, pointerId }
+  var _lp = null, _lpTimer = null;                    // long-press arming
+  var LP_MS = 480, MOVE_TOL = 10;
 
-  function decorate(el) {
-    if (!el || !el.id || el.querySelector(":scope > .grail-drag")) return;
-    var handle = document.createElement("button");
-    handle.type = "button";
-    handle.className = "grail-drag";
-    handle.setAttribute("draggable", "true");
-    handle.setAttribute("aria-label", "Reorder this gadget (drag, or arrow keys)");
-    handle.title = "Drag to reorder · ↑/↓ to move";
-    handle.textContent = "⠿";
-    handle.addEventListener("dragstart", function (e) {
-      _dragId = el.id;
-      el.classList.add("grail-dragging");
-      try { e.dataTransfer.setData(DRAG_MIME, el.id); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
-    });
-    handle.addEventListener("dragend", function () {
-      el.classList.remove("grail-dragging");
-      _dragId = null;
-      Array.prototype.forEach.call(body.children, function (c) { c.classList.remove("grail-drop-into"); });
-    });
-    // keyboard reorder (accessible): arrows move the gadget; focus is preserved.
-    handle.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowUp") { e.preventDefault(); nudge(el.id, -1); handle.focus(); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); nudge(el.id, 1); handle.focus(); }
-    });
-    el.insertBefore(handle, el.firstChild);
+  function _canEdit() { return rail.getAttribute("data-collapsed") !== "true" && gadgets().length > 1; }
 
-    // the gadget is a drop target for another gadget's handle
-    el.addEventListener("dragover", function (e) {
-      if (_dragId == null || _dragId === el.id) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
-      el.classList.add("grail-drop-into");
-    });
-    el.addEventListener("dragleave", function () { el.classList.remove("grail-drop-into"); });
-    el.addEventListener("drop", function (e) {
-      el.classList.remove("grail-drop-into");
-      var id = _dragId;
-      try { id = e.dataTransfer.getData(DRAG_MIME) || _dragId; } catch (_) {}
-      if (!id || id === el.id) return;
-      e.preventDefault();
-      // drop AFTER the target if the pointer is in its lower half, else before
-      var r = el.getBoundingClientRect();
-      moveRelative(id, el.id, e.clientY > r.top + r.height / 2);
-    });
+  function enterEdit() {
+    if (_edit || !_canEdit()) return;
+    _edit = true;
+    rail.setAttribute("data-edit", "true");
+    if (_editBtn) { _editBtn.setAttribute("aria-pressed", "true"); _editBtn.title = "Done rearranging"; }
+    gadgets().forEach(function (el) { el.tabIndex = 0; });
   }
+  function exitEdit() {
+    if (!_edit) return;
+    _edit = false;
+    rail.removeAttribute("data-edit");
+    if (_editBtn) { _editBtn.setAttribute("aria-pressed", "false"); _editBtn.title = "Rearrange gadgets"; }
+    _clearDrag();
+    gadgets().forEach(function (el) { el.removeAttribute("tabindex"); el.classList.remove("grail-dragging"); });
+  }
+  function toggleEdit() { _edit ? exitEdit() : enterEdit(); }
+  if (_editBtn) _editBtn.addEventListener("click", function (e) { e.stopPropagation(); toggleEdit(); });
+
+  function _gadgetOf(node) {
+    while (node && node !== body && node.parentNode !== body) node = node.parentNode;
+    return (node && node.parentNode === body && node.id) ? node : null;
+  }
+  function _gadgetFromPoint(x, y) {
+    var g = _gadgetOf(document.elementFromPoint(x, y));
+    if (g) return g;
+    // Pointer is in a gap (inter-gadget margin / rail padding) — resolve to the nearest gadget by
+    // vertical center so a drop between gadgets still reorders.
+    var best = null, bestD = Infinity;
+    Array.prototype.forEach.call(body.children, function (c) {
+      if (!c.id) return;
+      var r = c.getBoundingClientRect();
+      var d = Math.abs((r.top + r.bottom) / 2 - y);
+      if (d < bestD) { bestD = d; best = c; }
+    });
+    return best;
+  }
+  function _clearDropHints() {
+    Array.prototype.forEach.call(body.children, function (c) { c.classList.remove("grail-drop-into"); });
+  }
+  function _clearDrag() {
+    if (_drag) {
+      try { _drag.el.releasePointerCapture(_drag.pointerId); } catch (_) {}
+      _drag.el.classList.remove("grail-dragging");
+    }
+    _clearDropHints();
+    _drag = null;
+  }
+  function _beginDrag(el, e) {
+    _drag = { id: el.id, el: el, pointerId: e.pointerId };
+    el.classList.add("grail-dragging");
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+
+  body.addEventListener("pointerdown", function (e) {
+    if (e.button != null && e.button > 0) return;       // primary button / touch / pen only
+    var el = _gadgetOf(e.target);
+    if (!el) return;
+    if (_edit) { _beginDrag(el, e); return; }            // already editing → grab to drag
+    // Not editing: arm a long-press, but never hijack a tap on a real control.
+    if (e.target.closest('button, a, input, textarea, select, label, [role="button"], [contenteditable]')) return;
+    _lp = { x: e.clientX, y: e.clientY };
+    clearTimeout(_lpTimer);
+    _lpTimer = setTimeout(function () { _lpTimer = null; if (_lp) { _lp = null; enterEdit(); } }, LP_MS);
+  });
+  body.addEventListener("pointermove", function (e) {
+    if (_lp && (Math.abs(e.clientX - _lp.x) > MOVE_TOL || Math.abs(e.clientY - _lp.y) > MOVE_TOL)) {
+      clearTimeout(_lpTimer); _lpTimer = null; _lp = null;   // moved → a scroll, not a long-press
+    }
+    if (!_drag) return;
+    e.preventDefault();
+    var over = _gadgetFromPoint(e.clientX, e.clientY);
+    _clearDropHints();
+    if (over && over !== _drag.el) over.classList.add("grail-drop-into");
+  });
+  function _endPointer(e) {
+    if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+    _lp = null;
+    if (!_drag) return;
+    var over = _gadgetFromPoint(e.clientX, e.clientY);
+    if (over && over !== _drag.el && over.id) {
+      var r = over.getBoundingClientRect();
+      moveRelative(_drag.id, over.id, e.clientY > r.top + r.height / 2);
+    }
+    _clearDrag();
+  }
+  body.addEventListener("pointerup", _endPointer);
+  body.addEventListener("pointercancel", function () {
+    if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+    _lp = null; _clearDrag();
+  });
+  // Keyboard reorder while editing (accessible): arrows move the focused gadget; Esc leaves.
+  body.addEventListener("keydown", function (e) {
+    if (!_edit) return;
+    var el = _gadgetOf(e.target);
+    if (!el) return;
+    if (e.key === "ArrowUp") { e.preventDefault(); nudge(el.id, -1); el.focus(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); nudge(el.id, 1); el.focus(); }
+  });
+  // Leave edit mode on a pointer down outside the rail (iOS: tap the wallpaper). Escape is NOT
+  // handled here — it flows through ui.js's single arbiter (F3 ratchet); Done / tap-outside exit.
+  document.addEventListener("pointerdown", function (e) {
+    if (_edit && !rail.contains(e.target)) exitEdit();
+  }, true);
 
   function ensureDragCss() {
     if (document.getElementById("grail-drag-css")) return;
@@ -330,34 +401,42 @@
     st.id = "grail-drag-css";
     st.textContent =
       ".gadget-rail-body > * { position: relative; }" +
-      // the grip lives bottom-left so it never overlaps a gadget's own header
-      // controls (the status HUD chevron, the cast-pin buttons — all top-right).
-      // Revealed on gadget hover / keyboard focus so it stays unobtrusive.
-      ".grail-drag { position: absolute; bottom: 2px; left: 2px; z-index: 2;" +
-      "  width: 22px; height: 22px; min-width: 22px; padding: 0; line-height: 1;" +
-      "  display: inline-flex; align-items: center; justify-content: center;" +
-      "  border: none; background: transparent; color: var(--fg, #9cdef2); opacity: 0;" +
-      "  cursor: grab; border-radius: 5px; font-size: .85rem; transition: opacity .12s ease; }" +
-      ".gadget-rail-body > *:hover > .grail-drag, .grail-drag:focus-visible { opacity: .6; }" +
-      ".grail-drag:hover, .grail-drag:focus-visible { opacity: .95 !important; background: color-mix(in srgb, var(--fg) 14%, transparent); }" +
-      ".grail-drag:active { cursor: grabbing; }" +
-      ".grail-dragging { opacity: .5; }" +
-      ".grail-drop-into { outline: 2px dashed color-mix(in srgb, var(--accent, #e06c75) 70%, transparent); outline-offset: -2px; }" +
+      // EDIT MODE: a gentle iOS-style wiggle + grab affordance; gadget CONTENT goes inert so a drag
+      // never taps into a gadget. No persistent overlay — nothing covers content during normal use.
+      '.gadget-rail[data-edit="true"] .gadget-rail-body > * {' +
+      "  animation: grail-wiggle .34s ease-in-out infinite; cursor: grab;" +
+      "  touch-action: none; -webkit-user-select: none; user-select: none; }" +
+      // stagger the wiggle so they don't move in lockstep (more alive / iOS-like)
+      '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(2n) { animation-delay: -.11s; }' +
+      '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(3n) { animation-delay: -.21s; }' +
+      '.gadget-rail[data-edit="true"] .gadget-rail-body > * > * { pointer-events: none; }' +
+      ".grail-dragging { animation: none !important; opacity: .92; cursor: grabbing;" +
+      "  transform: scale(1.03); z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }" +
+      ".grail-drop-into { outline: 2px dashed color-mix(in srgb, var(--accent, #e06c75) 75%, transparent);" +
+      "  outline-offset: -2px; border-radius: 10px; }" +
+      "@keyframes grail-wiggle { 0%,100% { transform: rotate(-.55deg); } 50% { transform: rotate(.55deg); } }" +
       // a brief highlight when a collapsed strip icon focuses its gadget
       ".grail-focus-flash { animation: grail-focus-flash .9s ease; }" +
       "@keyframes grail-focus-flash { 0%,100% { box-shadow: none; } 20%,60% {" +
       "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #e06c75) 60%, transparent); } }" +
-      // the collapsed icon-strip has no gadgets to reorder; hide the handle there
-      ".gadget-rail[data-collapsed=\"true\"] .grail-drag { display: none; }";
+      // reduced motion: no wiggle — a steady dashed outline signals 'editable' instead.
+      "@media (prefers-reduced-motion: reduce) {" +
+      '  .gadget-rail[data-edit="true"] .gadget-rail-body > * { animation: none;' +
+      "    outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -2px; } }" +
+      // the collapsed icon-strip is never editable here
+      '.gadget-rail[data-collapsed="true"] .gadget-rail-body > * { animation: none; }';
     document.head.appendChild(st);
   }
 
   function decorateAll() {
     if (!body) return;
     ensureDragCss();
-    gadgets().forEach(decorate);
     applyOrder();
     syncStrip();
+    // If the rail collapsed or dropped below 2 gadgets while editing, leave edit mode cleanly.
+    if (_edit && !_canEdit()) exitEdit();
+    // Keep gadgets focusable for keyboard reorder while a fresh one mounts mid-edit.
+    if (_edit) gadgets().forEach(function (el) { if (!el.hasAttribute("tabindex")) el.tabIndex = 0; });
   }
 
   // keep handles + order applied as gadgets mount/unmount

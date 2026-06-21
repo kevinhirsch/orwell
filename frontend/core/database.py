@@ -178,13 +178,23 @@ class ChatMessage(Base):
 
     # Timestamp
     timestamp = Column(DateTime, default=utcnow_naive)
-    
+
+    # ADR 0008: a monotonic per-session sequence — the AUTHORITATIVE total order the chat
+    # conversation renders from across tabs/devices. `timestamp` (utcnow, non-unique) ties under
+    # concurrent writes and reorders; `seq` is assigned under the per-session write lock so every
+    # render path can order by it deterministically. Nullable for back-compat (legacy rows are
+    # backfilled from timestamp order by _migrate_add_chat_message_seq_column; new rows always get one).
+    seq = Column(Integer, nullable=True)
+
     # Relationship to Session
     session = relationship("Session", back_populates="messages")
-    
+
     # Indexes - optimized composite
     __table_args__ = (
         Index('ix_messages_session_time', 'session_id', 'timestamp'),  # Composite for efficient message retrieval
+        # ADR 0008: the authoritative order is (session_id, seq); UNIQUE backstops the assignment
+        # against a race (a second writer that computed the same MAX(seq)+1 fails and retries).
+        Index('ix_messages_session_seq', 'session_id', 'seq', unique=True),
     )
 
 class Document(TimestampMixin, Base):
@@ -698,6 +708,49 @@ def _migrate_add_last_message_at_column():
         logging.getLogger(__name__).info("Migrated: added + backfilled 'last_message_at' on sessions")
     except Exception as e:
         logging.getLogger(__name__).warning(f"last_message_at migration failed: {e}")
+
+def _migrate_add_chat_message_seq_column():
+    """ADR 0008: add a monotonic per-session `seq` to chat_messages + backfill existing rows
+    from their timestamp order, then enforce UNIQUE(session_id, seq).
+
+    Idempotent: the column-add is guarded; the backfill only touches rows where `seq` is still
+    NULL (so it never re-numbers a live conversation on a later restart); the unique index is
+    `IF NOT EXISTS`. The backfill assigns a dense 0-based sequence per session by (timestamp, rowid)
+    — rowid breaks the non-unique-timestamp ties that caused the cross-tab reorder, so the result is
+    a clean total order with no unique-index collision."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(chat_messages)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "seq" not in columns:
+            conn.execute("ALTER TABLE chat_messages ADD COLUMN seq INTEGER")
+        # Backfill any NULL seq: a dense per-session 0-based order by (timestamp, rowid).
+        conn.execute(
+            """
+            WITH ordered AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp, rowid) - 1 AS rn
+                  FROM chat_messages
+            )
+            UPDATE chat_messages
+               SET seq = (SELECT rn FROM ordered WHERE ordered.id = chat_messages.id)
+             WHERE seq IS NULL
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_session_seq "
+            "ON chat_messages(session_id, seq)"
+        )
+        conn.commit()
+        conn.close()
+        logging.getLogger(__name__).info("Migrated: added + backfilled 'seq' on chat_messages (ADR 0008)")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"chat_messages.seq migration failed: {e}")
+
 
 def _migrate_add_document_archived_column():
     """Add `archived` to documents (soft-archive flag). Guarded + idempotent."""
@@ -1624,6 +1677,7 @@ def _init_db_inner():
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
+    _migrate_add_chat_message_seq_column()  # ADR 0008: authoritative per-session chat order
     _migrate_add_folder_column()
     _migrate_add_token_columns()
     _migrate_add_mode_column()
