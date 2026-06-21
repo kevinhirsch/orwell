@@ -196,10 +196,144 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 - **CI clean checkout caught a real regression**: `responsive_matrix` `phone-390+settings nowrap-overflow: Reset`. Binary-searched it to index.html (pure `main` passes 3/3; my other files innocent — matrix passes with them). Root cause = J1-35 (borderline `flex-shrink` squeeze), not the a11y attrs. **Fixed** with `flex-shrink:0`; matrix now **43 pass · 0 FAIL** locally (2 runs). J1-29 reworked to an attribute-only `aria-label` (no child node) as defense-in-depth.
 - Post-merge: visual re-capture of the fixed surfaces is the remaining validation step.
 
+## Journey 2 — capture-phase findings (lead, live-LLM walkthrough)
+
+**Status: CAPTURE DONE → SPECIALIST FAN-OUT TRIAGED. ⚠️ MAJOR CAPTURE-INTEGRITY CORRECTION (see J2-CI below).**
+
+> ### ⚠️ J2-CI — Capture-integrity correction: the "blank transcript / void game" is a HEADLESS RIG ARTIFACT, not a product defect
+> **Four of five specialists (interaction IF-01, flows FJ-01, IA IA-01, visual VM-02) independently reported a
+> LAUNCH-BLOCKING "blank casting + premiere transcript — the conversation that IS the game renders nothing."
+> The content-a11y specialist (CA-06) dissented, calling it "most likely a rig scroll/timing artifact" and asked
+> the lead to confirm with a DOM dump. The lead investigated and CA-06 is CORRECT — it is a headless-Chromium
+> capture artifact; the chat renders perfectly for real users.**
+>
+> **Definitive diagnosis (lead, live reproduction on `0583f36`):**
+> 1. DOM probe: `#chat-history` holds visible bubbles (`display:flex`, `visibility:visible`, `opacity:1`, non-zero rects), auto-scrolled to bottom — NOT `display:none` (so the `chat.js:2111` L6b suppression hypothesis is **wrong**).
+> 2. `elementFromPoint` at the chat-stage center returns a real `msg-ai` bubble (render tree + hit-testing intact).
+> 3. Full-page screenshot is blank; **pixel-sample of the chat region = a single uniform color (page bg), 0 light pixels**, while sidebar/header/composer render text normally (300–400 light px). No `backdrop-filter`/`contain`/`content-visibility`/`transform`/overlay on the bubbles (all ruled out by probe).
+> 4. **`element.screenshot()` of one bubble = 12,930 light pixels** (renders fully); **full-page screenshot AFTER `scroll_into_view` = 22,072 light pixels** (content paints once the scroll container is forced to composite).
+> 5. The rendered bubble shows rich, in-character narration (producer "Isaiah" interviewing), masked **"👁 Big Brother"** sender (not the model slug), collapsed "View thinking process" accordion — the operator-aside `"Let me record this with updateCasting…"` is correctly INSIDE the accordion, NOT the visible reply (scrub works).
+>
+> **Root cause:** the `#chat-history` scroll container (`overflow:hidden auto`) does not composite into headless full-page screenshots unless freshly scrolled — so the rig's `settle → shot` captured blank. **Real users see the chat fine.**
+> **Consequence for the audit:** IF-01/FJ-01/IA-01/VM-02 (and the transcript-region parts of others) are **INVALIDATED as product defects**. ALL J2 transcript-region visual evidence is compromised → **rig fix required** (force scroll/repaint before each shot) + **re-capture** of transcript-dependent items. Non-transcript findings (finalize traces, IA/source a11y, mobile roster, non-scroll contrast/motion) remain valid. Credit: CA-06.
+
+The entries below: J2-01…06 are the lead's direct observations (live-LLM); the consolidated, **re-triaged** specialist
+findings (valid vs. artifact-invalidated) follow under "J2 specialist consolidation". Logged as observed.
+
+| ID | Sev | Status | Finding |
+|---|---|---|---|
+| J2-01 | LAUNCH-BLOCKING (candidate) | VIEWED | **Casting finalize is non-deterministic — the model can deflect an explicit player readiness signal and keep interviewing, so the season fails to start.** Identical cooperative answers + "I'm ready, put me in the house": one run deflected ("you skipped the question again"), state stayed `character-creation` (never started); other runs finalized at turn-4 / persona / ready1. The FE safety-net (`agent_loop.py` `_CASTING_FORCE_LEVEL = len(_CASTING_NUDGES) = 2`) needs ~3 readiness *lull* turns to FORCE `createCharacter`; a single "put me in the house" only NUDGES. |
+| J2-02 | HIGH (root-cause of J2-01) | VIEWED | **`createCharacter` is dropped from the tools actually SENT to the model during casting** — present in `relevant_tools` (candidate pool) but absent from `tool_names` in `[agent-debug]`. It IS in `ORWELL_GAME_TOOLS`, passed as `pinned_tools` when `engine_available` (`chat_routes.py:1190`) and unioned into `_relevant_tools` (`agent_loop.py:2560`), yet filtered out of the final schema. So the finalize NUDGES ("call createCharacter NOW") are unactionable; only the deterministic force (model-bypassing) can start the season. |
+| ~~J2-02~~ | **INVALIDATED** (log artifact) | RESOLVED | **NOT A BUG — a log-truncation misread.** `agent_loop.py:3032` logs `tool_names={_tool_names_sent[:15]}` (insertion order) and `relevant_tools={sorted(...)[:15]}` (alphabetical). `createCharacter` ("c…") shows in the *sorted* relevant_tools[:15] but sits at **index 23** of the actually-sent game-tool slice — past the `[:15]` cutoff. Verified by importing `FUNCTION_TOOL_SCHEMAS`+`ORWELL_GAME_TOOLS`: `createCharacter` HAS a schema AND is in the sent set. **The model HAS the tool during casting; it just under-calls it.** ⇒ the real J2-01 fix is the FE finalize-fallback threshold (force sooner on an explicit "I'm ready" + engine-`finalizable`), NOT adding a tool. |
+| J2-03 | LOW (content) | VIEWED | **Casting front-loads the name ask; a biography-first answer is re-asked every turn.** Producer asks "what do the feeds call you?" right after the photo and re-asks until a literal name is given (a rich "I'm a bartender from Chicago" loops). Model handles it gracefully (escalating mild exasperation — good in-fiction, steelman), but a player answering naturally can loop 1–3 turns before realizing only a *name* advances. |
+| J2-04 | LOW (IA/a11y — needs confirm) | OPEN | **Two cast-roster controls with overlapping matchers; the icon-rail mirror `#rail-cast` is present-but-HIDDEN while the sidebar is expanded.** `[id*='cast']` resolves to 2 elements (`#rail-cast` hidden mirror *first* in DOM order + the visible `#sidebar-cast-btn`). Player clicks the visible one fine — but verify the hidden mirror is `aria-hidden`/not tab-focusable, else SR/keyboard users hit a dead control. Confirm in responsive captures. |
+| J2-05 | MEDIUM (mobile IA) | VIEWED | **Cast roster unreachable on mobile without first opening the nav drawer.** At the premiere on 390px, `#sidebar-cast-btn` (a `div[role=button]` in the sidebar) is `:hidden` — the mobile sidebar is collapsed by default, so the "who's who" reference is hamburger → drawer → Cast (≥2 taps, off-screen). Reproduced: mobile/normal reached premiere (`house:15`) but the roster step could not run (button not visible). Same pattern as J1-12 (mobile settings/theme behind drawer). Steelman: drawer-nav is standard mobile IA — but the cast reference is *most* needed on mobile precisely while meeting 15 strangers. |
+| J2-06 | LOW (a11y, minor) | VIEWED | **Portrait-tile delete `×` tap target 36–38px wide** on the cast-photo studio (height 44 OK; width < the app's own `--tap-min:44px` token). Passes WCAG 2.5.8 AA (24×24) but misses the project target and the AAA 2.5.5 44×44. Seen on android-360 (36), tablet-820 (37), landscape (38). Minor — the `×` only appears once portrait candidates exist (not on the skip path). |
+
+**Verified WORKING (steelman / negative findings — do NOT "fix"):** casting profile recording (`updateCasting`) accrues name/backstory/strategy/motivation/persona correctly; the cast roster opens via `#sidebar-cast-btn` and renders all 15 houseguests (`tiles:87`); the premiere is reliably reached with cooperative answers and the premiere tutorial card (`#orwell-premiere-tutorial`) is present; the #457 hardening middleware (TrustedHost / rate-limit) does not break loopback capture (FE root 200 for `127.0.0.1`+`localhost` Hosts). **Spot-check viewports (android-360 / tablet-820 / landscape-844×390):** the pre-game welcome card and cast-photo studio card show **no H/V overflow** (even on the 390px-tall landscape) and primary buttons are ≥44px — the J1 fixes + responsive kit hold on odd viewports (`runs/j2-spot-*` geometry, 0 page-errors).
+
+**Methodology caveats (rig, not product):** Playwright `networkidle` never settles against the app (persistent polling) → use `domcontentloaded` + explicit settle. The J2 `_settle` waits on `chat-history[aria-busy]` + `chatModule.hasActiveStream` (≤45–75s, reasoning model is slow). Finalize timing varies run-to-run (LLM non-determinism) — J2-01 reproduced across ≥2 of the validation walks.
+
+### Detailed entries — J2
+
+#### J2-01 — Casting finalize non-deterministic; explicit readiness can be deflected · LAUNCH-BLOCKING (candidate) · VIEWED
+- **Principle + consequence:** Nielsen *User control & freedom* + Doherty — the single highest-stakes conversion gate (getting INTO the game) can stall *after* the player explicitly asks to start. A player who says "put me in the house" once and is met with another interview question reads it as the game ignoring them; worst case it feels like a soft-lock.
+- **Differential diagnosis:** (a) *scenario artifact* — RULED OUT: reproduced with a cooperative player giving a literal name + full answers; (b) *hard soft-lock* — RULED OUT: the season DOES start eventually (the per-user force counter persists across turns; reached premiere at turn-4 / persona / ready1 in other runs); (c) **model under-call + shallow safety-net escalation** — CONFIRMED: model declines to self-call `createCharacter` (see J2-02) and the deterministic force needs `_clv ≥ 2` (i.e. ~3 readiness lulls).
+- **Evidence:** validation runs v2 (deflected, `started:False`), v3 (finalized turn-4), v4/desktop-normal (finalized at `persona`). `frontend/src/agent_loop.py:3705-3758` (fallback), `:1488-1496` (nudge rungs / force level), `:1528-1541` (`_player_turn_is_lull`).
+- **Confidence:** HIGH it occurs; MEDIUM on frequency (LLM variance). **Severity pending** the specialist read + whether a single readiness push *should* force (product call).
+
+#### J2-02 — `createCharacter` absent from the sent tool schema during casting · HIGH (root-cause) · VIEWED
+- **Principle + consequence:** structural — the narration model is told (by prompt + nudges) to "call createCharacter NOW" but the function is **not in its tool list**, so compliance is impossible; the game can only start via the model-bypassing deterministic force. Brittle, and it defeats the documented "always able to call createCharacter" pinning.
+- **Evidence:** `[agent-debug]` lines — `relevant_tools=[…,'createCharacter',…]` but `tool_names=[…15 tools, NO createCharacter/updateCasting…]`. Pin path: `tool_schemas.py:1740 ORWELL_GAME_TOOLS` (contains it) → `chat_routes.py:1190 pinned_tools=(… if engine_available)` → `agent_loop.py:2560 _relevant_tools.update(pinned_tools)`. The drop is downstream of the union (final schema build: `disabled_tools` filter / schema lookup / cap — TBD).
+- **Next:** code-trace the final schema array construction to find where the pinned game tools are filtered. (Remediation-phase.)
+
+#### J2-03 — Casting front-loads the name ask; biography-first answers loop · LOW (content) · VIEWED
+- **Principle + consequence:** *Match between system and the real world* / input affordance — "what do the feeds call you?" invites a persona answer, but only a literal **name** advances; a natural answer loops 1–3 turns. The model's graceful, in-character re-asking (mild exasperation) is a **steelman positive** (texture, not a break), so this is expectation-setting, not a defect.
+- **Evidence:** producer replies across v1 ("That's a lot of biography and not one syllable of a name"), repeated re-asks until a name lands.
+
+#### J2-04 — Duplicate cast-roster control; hidden icon-rail mirror · LOW (IA/a11y) · OPEN (needs confirm)
+- **Principle + consequence:** consistency + WCAG 4.1.2 — a present-but-hidden duplicate control (`#rail-cast`, `data-rail-source="sidebar-cast-btn"`) sits *first* in DOM order while the visible `#sidebar-cast-btn` is the real target. Sighted pointer users are unaffected; the risk is a hidden-but-focusable dead control for keyboard/SR users.
+- **Evidence:** rig click on `[id*='cast']` resolved to 2 elements, picked the hidden `#rail-cast` (Playwright "element is not visible"). `orwellCast.js:23 BTN_ID="sidebar-cast-btn"` (display toggled by live-poll); `sidebar-layout.js` icon-rail.
+- **Verify:** check `tabindex`/`aria-hidden` on `#rail-cast` while the sidebar is expanded (desktop) in the matrix captures.
+
+#### J2-05 — Cast roster buried behind the mobile drawer at the premiere · MEDIUM (mobile IA) · VIEWED
+- **Principle + consequence:** *Recognition over recall* / accessibility of key info — the cast "who's who" is the player's memory aid for 15 brand-new houseguests, and on mobile it's hidden behind hamburger → drawer (≥2 taps, off-screen) exactly when it's most needed (premiere introductions). On desktop the visible `#sidebar-cast-btn` is one click; mobile loses that.
+- **Evidence:** `j2-mobile-normal` reached `premiere`/`house:15` but `#sidebar-cast-btn:visible` timed out (button `:hidden` in the collapsed mobile sidebar); element is `div[role=button][tabindex=0] id="sidebar-cast-btn" data-a11y-enhanced="1"`. Desktop/normal opened it fine (`tiles:87`).
+- **Relationship:** instance of the J1-12 "mobile key surfaces behind drawer" pattern → consider a premiere-week persistent cast affordance on mobile (Phase-4 backlog candidate).
+- **Confidence:** HIGH (reproduced desktop-vs-mobile).
+
+## J2 specialist consolidation (5 read-only specialists, de-duped + re-triaged against J2-CI)
+
+Five specialists analyzed the 4-combo matrix + FE source. Their findings are triaged below into **VALID**
+(survive the J2-CI capture-artifact correction) and **INVALIDATED** (rested on the blank-transcript artifact).
+Lead findings J2-01…06 above stand. Specialist IDs: FJ (flows), IA (ia), IF (interaction), VM (visual), CA (content/a11y).
+
+### VALID — confirmed product findings (de-duped)
+
+| ID | Sev | Finding (heuristic → consequence) | Evidence |
+|---|---|---|---|
+| **J2-07** | HIGH | **Production cues render as the player's own "You" messages on the LIVE path.** `#chat-history` holds `msg-user` bubbles `"(Production cue — begin the casting interview now…)"` and `"(Production cue — the cast photo step is done…)"` — visible (`display:flex`). J1-03 fixed *history re-render*; the LIVE send path still leaks them. Vault/immersion break (match-to-real-world): the player sees stage-directions as their own dialogue. | lead DOM probe (`#chat-history` children); cf. J1-03/J1-16 |
+| **J2-08 (=CA-01)** | HIGH | **Raw model id `deepseek-v4-pro` is the chat TITLE through all of casting** (header renders outside the scroll container). `sessions.js` materialize auto-names `${modelBase} ${time}` with **no game-build guard** (the sidebar list IS guarded). Immersion/Vault corollary; 100% of players, until narration renames the chat. Same class as J1-01. | shots header (`02/03/04/08/20`); `sessions.js:1833-1834` vs guarded `:352` |
+| **J2-09 (=IA-03/J2-04)** | MED | **Up to four "Cast" surfaces, inconsistent labels** — sidebar "Cast" (`div[role=button]`), right-rail "The House" list, **two** registry rows both titled "The Cast" (`orwellGadgetRail.js:44,47`), + hidden `#rail-cast`; roster reports **87 tiles for 16** houseguests. Findability/Tesler — no single home for "who's who". | `trace.json cast_roster.tiles:87`, `premiere_dom.castBtn`; `orwellGadgetRail.js` |
+| **J2-10 (=VM-01)** | HIGH | **Premiere is a single-frame hard-cut pop-in** — the whole apparatus (House panel, 16-roster, presence, tutorial) materializes in one 250ms tick, **normal AND reduce** (nothing to strip; never authored). Peak-end/game-feel: the season's biggest beat lands with zero weight. Same class as J1-20. | frames f320→f321 (normal), f300→f302 (reduce); no premiere keyframe in source |
+| **J2-11 (=VM-03)** | MED | **Onboarding holding/empty-state copy near-invisible** — "Tip: Just talk…" **1.52:1**, "The house is waiting." **2.23:1** (WCAG 1.4.3 FAIL). The line teaching the whole interaction model is unreadable. (Ironically its low contrast helped *sell* the blank-stage illusion in J2-CI.) | frame f30; sampled ratios; bdf_after.png confirms the card renders |
+| **J2-12 (=CA-03)** | MED | **Premiere tutorial silent to screen readers** — injected `role="note"`, no `aria-live`, no focus move (WCAG 4.1.3). The journey's key expectation-setter is never announced. | `orwellPremiereTutorial.js:97-112` |
+| **J2-13 (=IA-05)** | MED | **Premiere tutorial orients on RHYTHM not ACTION** — names the loop ("Meet the house → HOH → …") but gives no affordance to *do* the first move (meet someone / wander). Gulf-of-execution. | `orwellPremiereTutorial.js:103-109`; shot 23 |
+| **J2-14 (=IF-03/J1-22)** | MED | **`tok/s` meta strip shows in-game** ("36.39 tok/s · … 12%", dim) — OOC developer telemetry under in-character narration; low contrast. Confirmed rendered. | element screenshot `/tmp/elem_bubble.png` (bubble footer) |
+| **J2-15 (=VM-04)** | MED | **16 identical silhouette avatars at premiere** — "meet 15 distinct people" pays off as interchangeable placeholders. Steelman: zero-data, portraits (0051) backfill post-premiere; severity drops if fast. | shot 27 zoom; reduce f576 |
+| **J2-16 (=VM-05)** | LOW-MED | **Red/coral focus border (`--accent #e06c75`) on benign onboarding windows** (cast-photo) reads as a warning/error; red = eviction elsewhere → cross-signal. | shots 03/04; `orwellWindow.js:85,94` |
+| **J2-17 (=VM contrast)** | MED | **"Make AI studio portraits" CTA ~3.29:1** (WCAG 1.4.3 FAIL for normal text). | shot 04 (sampled) |
+| **J2-18 (=IA-07)** | LOW | **Mobile control-room FAB overlaps the premiere tutorial card** content. Responsive overlap (ruling #16). | mobile shots 22/26 |
+| **J2-19 (=CA-04)** | LOW | **Sidebar cast control is a `div[role=button]` with only text-derived name** ("Cast"), terser than its rail twin's `aria-label="Cast — the houseguests"` (4.1.2 parity). | `trace.json castBtn`; `orwellCast.js:57-66` |
+| **J2-20 (=CA-05)** | LOW | **Premiere-tutorial dismiss fade not reduced-motion-guarded** (`transition: opacity .2s`, no `@media reduce`), inconsistent with `orwellCast.js` which guards. | `orwellPremiereTutorial.js:76` |
+| **J2-01 refine (FJ-02/IF-07)** | — | Finalize quantified: **5 turns (3 runs) vs 4 (desktop-reduce)** — non-deterministic; irreversible season start fires with **no confirmation/undo**. Corroborates J2-01. | `state_after_*` across 4 traces |
+| **J2-04 refine (IA-02)** | — | **a11y-phantom RULED OUT**: `#rail-cast` is `display:none`-gated when the sidebar is expanded (removed from tab/AX tree, trace `vis:false`). J2-04 residual = label/duplication only (→ J2-09). | `sidebar-layout.js:58`; trace |
+| **J2-05 corrob (IA-04/FJ-06/IF-06)** | — | Mobile premiere: BOTH cast controls `vis:false`; no on-screen "Cast" label while the tutorial says "meet the cast"; entire house readout behind drawer + generic 📋 FAB. | mobile `trace.json premiere_dom`; `orwellStatusPanel.js:12` |
+
+### INVALIDATED by J2-CI (rested on the headless blank-transcript artifact — NOT product defects)
+- **IF-01** (empty transcript + "no progress feedback") — INVALID re "blank"; a `Processing request ▃▄▅` spinner + `tok/s` DO render. *Residual valid:* real LLM latency (name ~30s; meet-house **48.8–62.8s**) — but feedback exists; re-capture to judge its sufficiency.
+- **FJ-01 / IA-01 / VM-02** (invisible casting+premiere transcript / "void game") — INVALID (artifact).
+- **FJ-03** (dead "Meet the producers" handoff / no producer greeting) — INVALID: the producer opener renders (element screenshot shows producer "Isaiah" narration).
+- **FJ-04** (30–64s "blank-spinner" turns) — latency real, "blank" INVALID (spinner present).
+- **CA-06** — correctly flagged the artifact; resolved as J2-CI.
+
+### NEEDS RE-CAPTURE (after rig fix — force chat scroll/repaint before each shot)
+Transcript-dependent items to (re)assess on true captures: narration quality/voice & any in-bubble OOC leak; the operator-aside scrub (looked OK in the one element-shot); pre-token wait feedback sufficiency (IF-01/IF-04 residual); whether premiere "meet-the-house" intros narrate well; J2-07 cue-leak across more turns; CA-02 composer model-picker (verify NON-admin build hides it — likely admin-rig).
+
+**Rig-fix outcome (J2-CI follow-up):** A full-page headless screenshot composites the `#chat-history` scroll
+container only when it actually *scrolls* (overflow) — `scroll_into_view_if_needed()` no-ops when content fits, so
+short casting turns still capture blank. **Reliable method adopted: an ELEMENT screenshot of `#chat-history`** (saved
+to `runs/<tag>/.../transcript/*.chat.png`), which always renders (proven: 12,930 light px). Banked in `rig.py` for
+J3/J4. **Transcript evidence already sufficient** to assess J2: the element-screenshot shows rich in-character
+narration (producer "Isaiah"), masked "👁 Big Brother" sender, and the operator-aside correctly inside the collapsed
+"thinking" accordion (scrub OK); DOM probes confirmed J2-07 (cue-as-You-message). No further full re-capture needed for J2.
+
+## Journey 2 — remediation applied (gated set #2)
+
+Scope authorized by the owner ("include the finalize fix in this set"). Six confirmed-clean fixes:
+
+| ID | Fix | File |
+|---|---|---|
+| **J2-01** | Casting finalize: an EXPLICIT readiness signal ("I'm ready / put me in the house") + engine-`finalizable` now force-finalizes that turn instead of needing ~3 lulls (a mere short/disengaged lull keeps the gentle ramp; still gated on `finalizable`, never mints a floater). | `src/agent_loop.py` |
+| **J2-08** | Game build no longer shows the raw model slug as the chat title — `materializePendingSession` names the session "Casting interview" under `data-game-build` (mirrors the sidebar-list guard) instead of `${modelBase} ${time}`. | `static/js/sessions.js` |
+| **J2-11** | Onboarding holding-card tagline/tip raised from ~1.5:1 to ≥4.5:1 — explicit `color-mix(--fg 82–88%)` instead of `opacity:.7` over an inherited dim color (WCAG 1.4.3). | `static/js/orwellOnboarding.js` |
+| **J2-12** | Premiere tutorial card gets `aria-live="polite"` so screen-reader users are told the journey's key expectation-setter appeared (no focus theft; stays a `role=note`). | `static/js/orwellPremiereTutorial.js` |
+| **J2-19** | Sidebar cast control gets `aria-label="Cast — the houseguests"` (parity with the rail twin; 4.1.2). | `static/js/orwellCast.js` |
+| **J2-20** | Premiere tutorial dismiss fade guarded by `@media (prefers-reduced-motion: reduce)` (2.3.3). | `static/js/orwellPremiereTutorial.js` |
+
+**Validation:** JS `node --check` + `py_compile` clean; FE pytest **1765 passed / 2 failed** — the 2 (`test_h2b_all_model_pools`, `test_h2h3_settings`) are the SAME environmental failures as the J1 baseline (model-pool/image-subset assertions against the dev OpenRouter endpoint), NOT regressions; CI's clean checkout passes them. Casting/finalize/onboarding/premiere suites (87 tests) all green.
+
+**Deferred from this set (need more work — NOT shipped):**
+- **J2-02** — INVALIDATED (log-truncation artifact; createCharacter IS sent). No fix needed.
+- **J2-07** — production-cue-as-"You"-bubble: both known render paths (live `_hideUserBubble`, `softReloadHistory` skip) ARE guarded; my probe likely hit a pre-existing-session state. Needs clean-session reproduction to find the leaking path before fixing.
+- **J2-14** (tok/s in-game), **J2-16** (red focus border on benign cards) — judgment calls (is the telemetry/red intended?) — owner ruling needed.
+- **J2-17** (themed-accent CTA contrast 3.29:1), **J2-18** (mobile FAB overlaps tutorial) — per-theme / responsive-fiddly; need a token-level on-color solution + responsive testing.
+- **Design-level:** J2-05/09 cast IA, J2-10 premiere staging, J2-13 tutorial affordance, J2-15 avatar identity → Phase-4 backlog.
+
 ## Journey progress
 
-- [ ] **J1 — First launch → main menu / settings / zero-data**
-- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)**
+- [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings logged; gated remediation set #1 (9 fixes incl. launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged to main in PR #449** (CI green). Deferred to later sets: J1-25 (cast-photo modal trap), J1-22, and the visual/IA backlog (J1-01/02/04/05/06/09/10/12/14/17/20/23/24/30/31/32/33/34).
+- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — **CAPTURE + FAN-OUT DONE; TRIAGED.** Matrix (4 walks) + 3 spot checks + 5 specialists consolidated. **⚠️ J2-CI: the headline "blank/void game" from 4/5 specialists is a HEADLESS CAPTURE ARTIFACT (the chat renders fine for real users) — CA-06 called it; lead confirmed via element-screenshot + pixel + scroll-into-view proof.** Net valid findings: **J2-01…J2-20** (finalize non-determinism, createCharacter-not-sent, name-ask, cast-surface duplication, mobile roster, production-cue LIVE leak, model-id title leak, premiere hard-cut, holding-card 1.52:1 contrast, SR tutorial, tok/s in-game, etc.). **TODO before remediation:** (1) fix the rig (force `#chat-history` scroll/repaint before each shot) + re-capture transcript-dependent items; (2) two-window parity; (3) re-sync to current main; (4) consolidate → gated remediation set.
 - [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)**
 - [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
 

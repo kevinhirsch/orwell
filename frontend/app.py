@@ -115,7 +115,7 @@ app.add_middleware(
 # ========= TRUSTED HOST (Host-header pin) =========
 # Pins the Host header to ALLOWED_HOSTS (feature 0067 / ADR 0007). Defaults to ["*"]
 # (accept any Host) so dev / trusted-LAN deployments are unaffected; a public deploy sets
-# ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com to reject Host-header attacks. The
+# ALLOWED_HOSTS=<your-domain> (comma-separate several) to reject Host-header attacks. The
 # public-profile boot guard below refuses to start if this is left unset under ORWELL_PUBLIC.
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from core.middleware import allowed_hosts_from_env

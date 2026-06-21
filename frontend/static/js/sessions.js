@@ -1830,8 +1830,13 @@ export async function materializePendingSession() {
 
   const incognitoChk = document.getElementById('incognito-toggle');
   const isIncognito = incognitoChk && incognitoChk.checked;
+  // J2-08: in the GAME BUILD the player must never see the raw model slug — it surfaces as the
+  // chat title (header) until narration auto-renames the session. Use a diegetic placeholder
+  // instead of `${modelBase} ${time}` (mirrors the sidebar-list `_gameBuild` guard at ~L350).
+  const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
   const base = (pending.modelId || 'model').split('/').pop();
-  const name = isIncognito ? 'Nobody' : `${base} ${new Date().toLocaleTimeString()}`;
+  const name = isIncognito ? 'Nobody'
+    : (_gameBuild ? 'Casting interview' : `${base} ${new Date().toLocaleTimeString()}`);
 
   const fd = new FormData();
   fd.append('name', name);

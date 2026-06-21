@@ -174,7 +174,7 @@ def allowed_hosts_from_env(env=None) -> list:
 
     Reads ALLOWED_HOSTS (comma-separated). Defaults to ["*"] (accept any Host) so
     dev / trusted-LAN deployments are byte-identical to before. A public deployment
-    MUST set ALLOWED_HOSTS to its domain(s) — e.g. "hiorwell.com,www.hiorwell.com" —
+    MUST set ALLOWED_HOSTS to its domain(s) — e.g. "your-domain.example,www.your-domain.example" —
     so Host-header attacks are rejected (feature 0067 / ADR 0007).
     """
     env = os.environ if env is None else env
@@ -219,5 +219,5 @@ def assert_public_profile_safe(env=None) -> None:
             "security posture:\n  - " + "\n  - ".join(problems) + "\n"
             "Fix these in data/.env (AUTH_ENABLED=true, LOCALHOST_BYPASS=false, SECURE_COOKIES=true, "
             "ALLOWED_HOSTS=<your-domain>) — or unset ORWELL_PUBLIC for a trusted-LAN deployment. "
-            "See docs/INSTALL.md -> Public deployment (hiorwell.com)."
+            "See docs/INSTALL.md -> Public deployment."
         )

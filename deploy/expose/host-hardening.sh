@@ -70,5 +70,5 @@ cat <<'EOF'
 
     Also confirm the Orwell FE runs the public profile (it refuses to boot otherwise):
       ORWELL_PUBLIC=1  AUTH_ENABLED=true  LOCALHOST_BYPASS=false  SECURE_COOKIES=true
-      ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com  ALLOWED_ORIGINS=https://hiorwell.com
+      ALLOWED_HOSTS=<your-domain>,www.<your-domain>  ALLOWED_ORIGINS=https://<your-domain>
 EOF

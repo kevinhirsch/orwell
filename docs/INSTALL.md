@@ -142,7 +142,7 @@ npm start                                                # engine — MCP server
 ```
 
 > The FE binds **loopback** by default (feature 0067). For a public deploy, keep it on loopback and
-> put a TLS-terminating proxy / tunnel in front — see **Public deployment (hiorwell.com)** below.
+> put a TLS-terminating proxy / tunnel in front — see **Public deployment (any domain)** below.
 
 Persistent setup: install the units from `deploy/systemd/` and `systemctl enable --now
 orwell-engine orwell-frontend`.
@@ -197,7 +197,7 @@ Updates never touch either data dir (non-degradation, feature 0007).
 
 ---
 
-## Public deployment (hiorwell.com)
+## Public deployment (any domain)
 
 Putting the player tier on the open internet — feature **0067** / ADR **0007**. Two halves: a
 **hardening floor** (below, mandatory) and an **exposure layer** (recommended: **Cloudflare Tunnel +
@@ -216,8 +216,8 @@ ORWELL_PUBLIC=1                                  # arms the fail-closed boot gua
 AUTH_ENABLED=true                                # never disable on a public host
 LOCALHOST_BYPASS=false
 SECURE_COOKIES=true                              # session cookies get the Secure flag (you're behind TLS)
-ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com      # Host-header pin (TrustedHostMiddleware)
-ALLOWED_ORIGINS=https://hiorwell.com             # CORS
+ALLOWED_HOSTS=your-domain.example,www.your-domain.example      # Host-header pin (TrustedHostMiddleware)
+ALLOWED_ORIGINS=https://your-domain.example             # CORS
 # ORWELL_BIND_HOST stays 127.0.0.1 (the default) — the proxy/connector reaches the FE on loopback.
 ```
 
@@ -232,15 +232,15 @@ Outbound-only — the origin opens **zero inbound ports** — with free DDoS + W
 login wall in front. On the LXC:
 
 ```bash
-cloudflared tunnel login                         # pick the hiorwell.com zone
+cloudflared tunnel login                         # pick the your-domain.example zone
 cloudflared tunnel create orwell
-cloudflared tunnel route dns orwell hiorwell.com
+cloudflared tunnel route dns orwell your-domain.example
 sudo cp deploy/expose/cloudflared/config.yml /etc/cloudflared/config.yml   # fill in <TUNNEL-UUID>
 sudo cloudflared service install && sudo systemctl enable --now cloudflared
 ```
 
 Then in the Cloudflare dashboard: enable the **WAF Free Managed Ruleset** + **Bot Fight Mode**, and
-add an **Access** application over `hiorwell.com` (email-OTP allow-list). Self-hosted-control
+add an **Access** application over `your-domain.example` (email-OTP allow-list). Self-hosted-control
 alternatives — **Pangolin on a VPS** (`deploy/expose/pangolin/`) and **plain VPS + Caddy**
 (`deploy/expose/caddy/`) — are in `deploy/expose/README.md`.
 
