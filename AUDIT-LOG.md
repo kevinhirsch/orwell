@@ -100,7 +100,8 @@ The 2026-06-18/19 live runs (DOC-ONLY) are the starting baseline. Open launch-bl
 | S1-1L | State 1 | LATENT | ROOT-CAUSED | Splash-suppression is timing-fragile (TRANS-1): `body.ow-onboarding` set inside `mountWelcome` after the async `route()` chain — a slow engine `/state`/`/models` could let the splash paint before the modal (latent S1-1 regression). Harden: suppress at top of `route()` when `started===false`. |
 | BG-1 | X-cut | POLISH (a11y) | **FIX-APPLIED (verified)** | **Operator report**: animated bg "not rendering". Under `prefers-reduced-motion` the canvas generator was skipped (`theme.js:644`) → the 6 canvas-only patterns (incl. default telescreen→perlin-flow) rendered **fully blank**. Not my change / not the CSP merge (both ruled out). **Fix:** `_bgStaticInit` renders a STATIC frame (bounded+restored rAF; zero motion). Verified; FE suite green. Committed `fbe2124`. |
 | S2 | State 2 | n/a | **PASS (VIEWED)** | Live casting on `deepseek-v4-pro`: producers open first, distinct named producer (Vincent), reactive persona, **no leaks** any turn, reasoning hidden; tight grounding (`casting.ready` on name; `known` accretes playerName→backstory→archetype→strategy→privateStrategy→notes); **finalized on the FIRST readiness cue** (S2-1 didn't bite); move-in = 15 real cast names, none fabricated. |
-| S3-PAR | State 3 | n/a | **PARITY HOLDS (VIEWED)** | Two-window SAME-identity on the LIVE game: CP1 (both load) **byte-identical** (engine `beatSeq:8`, HUD, chat 12/12, 0 JS err). CP2 (turn in A) → B syncs the GM beat via SSE/`beatSeq` (both `beatSeq:16`), no garbage; transient `A=15/B=14` was an **active-tab in-flight beat-chip** that reconciles — re-query shows **both 14, identical line-for-line**. Tabs converge. *(Harsher concurrent-WRITE race = next.)* |
+| S3-PAR | State 3 | n/a | **PARITY HOLDS at rest (VIEWED)** | Two-window SAME-identity, SEQUENTIAL: CP1 both load **byte-identical** (engine `beatSeq:8`, HUD, chat 12/12, 0 JS err). CP2 (turn in A) → B syncs the GM beat via SSE/`beatSeq` (both `beatSeq:16`); transient `A=15/B=14` reconciled to **both 14, identical** on re-query. At rest, fine. |
+| **S3-RACE** | State 3 | **[BLOCK] (likely)** | ROOT-CAUSING | **Concurrent-write race (operator: zero-tolerance, "persistent"): the cross-tab chat render DIVERGES and ACCUMULATES.** Looped (10×): **6/6 iterations diverge**, gap grows 1→6 msgs (A=35/B=30 by it6); even equal-count iters differ in content (`bodyId=false`). **Engine ALWAYS consistent** (beatSeq matches every iter), **0 409s, 0 JS errors** — so purely an **FE cross-tab chat-sync failure** (per-tab optimistic-append + best-effort SSE, no server-ordered authoritative log / no id-dedup / no reconciliation). **Rec: structural refactor** (server-ordered message log, idempotent SSE deltas, render-by-id). Confirming render-layer vs data-layer (reload-reconcile test) + the exact merge defect (specialist trace), then a firm refactor plan. |
 | S1-3 | State 1 | POLISH | DEFERRED→S2 | Raw `<input type=file>` — re-verify on the casting **headshot card** (State 2) + Account/new-season. |
 | S1-P1 | State 1 | n/a | VIEWED (ruled benign) | Two-window SAME-identity parity: only divergence is the **random rotating Tip**, which is covered by the welcome modal (pixel mismatch 0%) → legitimate client-side nondeterminism, **not** a consistency defect. |
 | S1-P2 | State 1 | n/a | VIEWED (ruled benign) | Mobile Settings nav = **horizontal-scroll tab strip** (tabs reachable; "Appea…" peek = affordance). DEFECT_SCAN `offscreen` is a false positive for a scroll container → **legitimate reflow**, not clipping. |
@@ -313,6 +314,40 @@ launch-blockers. Branch synced onto current `main` (merge `9bca2b1`).
   the rem clamp at 390px — operable via the row hit area.
 - **OBS-7 [non-bug] (=TRANS-2):** `modal-minimize-btn` mount-without-unmount = benign boot injection into hidden
   inherited tool modals; audit-instrument noise (the `[class*=modal]` observer SEL).
+
+---
+
+## 2.4 S3-RACE — cross-tab chat divergence under concurrent writes · [BLOCK] · ROOT-CAUSED (deep refactor recommended)
+
+**Symptom (reproduced, looped):** two tabs, same user/session; concurrent writes → the rendered chat
+diverges and **accumulates** (10× loop: **6/6 diverge**, gap 1→6 msgs, `bodyId=false` even at equal counts);
+**engine always consistent** (`beatSeq` matches every iter), **0 409, 0 JS errors**. Operator: persistent, zero-tolerance.
+
+**Root cause (traced, FE-only — the engine/DB are correct & serialized):** the FE chat conversation is a
+*replicated log with no merge discipline*. Three compounding defects:
+1. **No ordering key** — `ChatMessage` (`core/database.py:161-188`) = random `uuid4` id + non-unique
+   `timestamp(utcnow)`; render/reload `ORDER BY timestamp` only (`session_manager.py:143`, `history_routes.py:82`)
+   → tie ambiguity → reorder.
+2. **Sender tab is optimistic-only, never reconciles** — `chat.js:692-694` renders user bubble + streams the
+   reply locally; **no post-`[DONE]` history re-fetch** for an ordinary game turn → the sender's DOM is a
+   permanent local guess.
+3. **Busy tab suppresses the peer's events** — `sessionSync.js:51` `if (hasActiveStream(id)) return` can't
+   distinguish "my echo" from the peer's real `message-added`/`run-started`, so a streaming tab **drops** the
+   events that would tell it the peer wrote; streaming turns publish only `run-started` (`chat_routes.py:1364`),
+   never a completion event → no recovery. Latent: `agent_runs.py:154-164` keeps one `_Run` per session →
+   run-replacement lost-update on `resumeStream`.
+
+Intended model = read-your-writes / convergent server-ordered log (`session_events.py:1-15` says so); violated by
+optimistic-append + at-least-once SSE treated as exactly-once + a suppress-gate that drops the reconcile signal.
+**Permanent until manual reload** (reload re-fetches the correct DB log — pending the reconcile test below).
+
+**Recommended STRUCTURAL fix (operator open to refactor):** make it the id+seq-ordered authoritative log the
+comments already claim: (1) add monotonic per-session `seq` to `ChatMessage` (`UNIQUE(session_id,seq)`, assigned
+under the `agent_runs` serialization), order all render paths + `/api/history` by `seq`; (2) render-by-id,
+reconcile-not-replace (temp id → canonical on `{id,seq}` arrival, insert missing peers in `seq` order);
+(3) replace `hasActiveStream` suppression with `{id,seq}` dedup (process every event); (4) publish `message-added`
++ `seq` on streaming completion, and attach `resumeStream` to a run BY ID. Scope: 1 schema column + 2 render paths
++ the sync handler + 1 broadcast — FE-only, no engine/Vault impact, preserves the tiny-SSE-payload privacy property.
 
 ---
 
