@@ -27,6 +27,16 @@ logger = logging.getLogger(__name__)
 # LLM calls can take minutes, and the casting interview usually outlasts them.
 _AUTHOR_WARM_TIMEOUT = 15 * 60.0
 
+# ── NEXT-SEASON char-data warm (the finale-day trigger) ───────────────────────────────────────
+# TRUE advance-warm (the engine now supports it directly): when the CURRENT season's finale day begins,
+# the FE fires `preSeedNextSeason`, which warms the NEXT season's cast off a NEW seed into a per-user
+# HOLDING STORE (engine registry level + a durable mirror) that survives the sandbox rotation — WITHOUT
+# touching the active season. The FE then deeply authors the held cast in the background (write-back onto
+# the holding store), releasing the author-done gate Phase-2 portraits gate off. The confirmed cutover
+# ADOPTS the held cast. No FE poll-until-the-one-game-sandbox-frees-up is needed any longer; this is a
+# single real warm fired as a fire-and-forget background task. Best-effort, idempotent, fail-soft: no
+# model/provider ⇒ the engine still warms the deterministic floor and the gate releases on it.
+
 
 def _prompt_id(entry) -> Optional[str]:
     """The houseguest id a portrait prompt belongs to (the gating key)."""
@@ -60,6 +70,13 @@ class _Warm:
 
 _STATE: dict[str, _Warm] = {}
 
+# The finale-day next-season warm runs a background poll TASK per user (it must outlive the
+# per-season `_Warm` reset that fires at next-season confirm — the poll is what RE-warms the fresh
+# cast right after the sandbox rotates). Kept in its own registry so `reset()` (a per-season gate
+# drop) never cancels an in-flight finale-day warm; only an explicit `cancel_next_season` / a global
+# reset tears it down.
+_NEXT_SEASON_TASKS: dict[str, "asyncio.Task"] = {}
+
 
 def _key(user: Optional[str]) -> str:
     return user or "default"
@@ -74,11 +91,30 @@ def _state(user: Optional[str]) -> _Warm:
     return st
 
 
+def cancel_next_season(user: Optional[str] = None) -> None:
+    """Tear down a user's armed finale-day next-season warm poll (``user=None`` cancels everyone).
+    Best-effort: a completed/absent task is a no-op."""
+    keys = list(_NEXT_SEASON_TASKS) if user is None else [_key(user)]
+    for k in keys:
+        task = _NEXT_SEASON_TASKS.pop(k, None)
+        if task is not None and not task.done():
+            try:
+                task.cancel()
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+
 def reset(user: Optional[str] = None) -> None:
-    """Drop a user's warm state (a new game / season / factory reset) so the next OOBE warms afresh.
-    ``user=None`` clears everyone (a global reset)."""
+    """Drop a user's per-season warm GATE (a new game / season / factory reset) so the next OOBE warms
+    afresh. ``user=None`` clears everyone (a global reset).
+
+    Note: this clears only the per-season `_Warm` gate, NOT an armed finale-day next-season poll — that
+    poll deliberately OUTLIVES the confirm-time reset so it can re-warm the fresh cast once the sandbox
+    rotates. A GLOBAL reset (``user=None``) does cancel the polls too, since nothing should survive a
+    process-wide wipe."""
     if user is None:
         _STATE.clear()
+        cancel_next_season(None)
     else:
         _STATE.pop(_key(user), None)
 
@@ -140,6 +176,118 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
     return {"warmed": True, "count": len(st.prompts)}
 
 
+async def warm_next_season(user: Optional[str] = None, *, engine=None, authoring=None) -> dict:
+    """The REAL mid-season next-season warm (the engine now supports it directly).
+
+    Calls the engine's ``preSeedNextSeason`` — which warms the NEXT season's cast off a NEW seed into a
+    per-user HOLDING STORE that survives the cutover rotation, WITHOUT touching the active season — then
+    deeply authors the held cast in the BACKGROUND. The authoring write-back is routed through
+    ``pre_seed_next_season(profile=…)`` so each profile lands on the HOLDING store, never the live cast
+    (mid-season, ``record_cast_profile`` would author the running house — the wrong cast). Releases the
+    SAME per-season author-done gate Phase-2 portrait warm (at the next-season confirm) gates off, exactly
+    as the startup warm gates portraits off cast authoring.
+
+    Best-effort, idempotent, fail-soft. No model/provider ⇒ the engine still warms the deterministic
+    floor (the cast is warmed); authoring simply no-ops and the gate releases on the seeded store.
+    Returns ``{warmed, count, refused?}``."""
+    if engine is None:
+        from src import orwell_engine as engine
+    if authoring is None:
+        from src import orwell_cast_authoring as authoring
+    try:
+        res = await engine.pre_seed_next_season(user=user)
+    except Exception as e:  # best-effort: a warm failure must never disturb the finale
+        logger.info("[prewarm] pre_seed_next_season failed: %s", e)
+        return {"warmed": False, "count": 0}
+    if not isinstance(res, dict) or not res.get("warmed"):
+        return {"warmed": False, "count": 0, "refused": (res or {}).get("refused")}
+
+    seed = res.get("seed")
+    st = _state(user)
+    # A NEW next-season seed: drop any stale per-season gate/prompts and warm afresh (the next season's
+    # cast differs from the one we just left). An identical seed already armed ⇒ idempotent no-op.
+    if st.author_started and st.seed == seed:
+        return {"warmed": True, "alreadyWarmed": True, "count": len(st.prompts)}
+    if st.author_started and st.seed != seed:
+        reset(user)
+        st = _state(user)
+    st.seed = seed
+    st.prompts = res.get("portraitPrompts") or []
+    cast = res.get("house") or []
+    st.author_started = True
+    for entry in st.prompts:
+        hid = _prompt_id(entry)
+        if hid:
+            st.npc_event(hid)
+
+    def _on_authored(hid: str) -> None:
+        st.npc_event(str(hid)).set()
+
+    def _on_done() -> None:
+        st.author_done.set()
+        for ev in st.npc_authored.values():
+            ev.set()
+
+    # The next-season authoring write-back sink: route each authored profile through
+    # `pre_seed_next_season(profile=…)` so it lands on the HOLDING store (NOT the live `record_cast_profile`
+    # path, which mid-season would author the running house).
+    async def _write_next_season(profile: dict) -> dict:
+        return await engine.pre_seed_next_season(profile=profile, user=user)
+
+    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored, write=_write_next_season)
+    return {"warmed": True, "count": len(st.prompts)}
+
+
+def prewarm_next_season(user: Optional[str] = None, *, engine=None, authoring=None) -> dict:
+    """PHASE 1 — next-season char-data warm, triggered when the CURRENT season's FINALE DAY begins.
+
+    Fires the REAL mid-season warm (`warm_next_season`) as a best-effort, idempotent, fail-soft BACKGROUND
+    task: the engine warms the NEXT season's cast off a NEW seed into a per-user HOLDING STORE that
+    survives the cutover, the FE deeply authors it in the background (write-back onto the holding store),
+    and the per-season author-done gate Phase-2 portraits read is populated — landing the deep cast data
+    truly IN ADVANCE of when it's needed. Images are a SEPARATE Phase-2 warm fired at the next-season
+    confirm, gated off this one.
+
+    Idempotent per user: a second finale-day call while a warm task is in flight is a no-op. The held
+    cast lives at the ENGINE registry level (it survives the sandbox rotation) + a durable mirror, so the
+    cutover adopts it even across an engine restart — no FE poll-until-the-sandbox-frees-up is needed any
+    longer. No model/provider ⇒ the engine still warms the deterministic floor. Returns ``{armed}``."""
+    if engine is None:
+        from src import orwell_engine as engine
+    if authoring is None:
+        from src import orwell_cast_authoring as authoring
+    k = _key(user)
+    existing = _NEXT_SEASON_TASKS.get(k)
+    if existing is not None and not existing.done():
+        return {"armed": True, "alreadyArmed": True}
+
+    async def _runner():
+        try:
+            await warm_next_season(user, engine=engine, authoring=authoring)
+        except asyncio.CancelledError:  # a global reset / explicit cancel tore the warm down
+            raise
+        except Exception as e:  # pragma: no cover - defensive; warm_next_season already swallows
+            logger.info("[prewarm] next-season warm runner failed: %s", e)
+        finally:
+            # Self-deregister so a later finale (a future season) can arm a fresh warm.
+            if _NEXT_SEASON_TASKS.get(k) is task_ref[0]:
+                _NEXT_SEASON_TASKS.pop(k, None)
+
+    task_ref: list = [None]
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No RUNNING loop (a sync caller / a test driving the loop itself via run_until_complete).
+        try:
+            loop = asyncio.get_event_loop()
+        except Exception:
+            return {"armed": False, "reason": "no-loop"}
+    task = loop.create_task(_runner())
+    task_ref[0] = task
+    _NEXT_SEASON_TASKS[k] = task
+    return {"armed": True}
+
+
 async def warm_portraits(user: Optional[str] = None, *, portraits=None,
                          timeout: float = _AUTHOR_WARM_TIMEOUT) -> dict:
     """PORTRAIT WARM (held until the first interview turn): generate the cast portraits in the background
@@ -188,15 +336,25 @@ async def warm_portraits(user: Optional[str] = None, *, portraits=None,
     return {"started": True}
 
 
+def next_season_armed(user: Optional[str] = None) -> bool:
+    """Whether a finale-day next-season char-data warm poll is currently armed for this user."""
+    task = _NEXT_SEASON_TASKS.get(_key(user))
+    return task is not None and not task.done()
+
+
 def warm_state(user: Optional[str] = None) -> dict:
     """Vault-free introspection for tests / health: whether author + portrait warm have started and
-    whether authoring has finished. No cast content crosses — counts and flags only."""
+    whether authoring has finished, plus whether a finale-day next-season warm is armed. No cast
+    content crosses — counts and flags only."""
+    armed = next_season_armed(user)
     st = _STATE.get(_key(user))
     if st is None:
-        return {"authorStarted": False, "portraitsStarted": False, "authorDone": False, "promptCount": 0}
+        return {"authorStarted": False, "portraitsStarted": False, "authorDone": False,
+                "promptCount": 0, "nextSeasonArmed": armed}
     return {
         "authorStarted": st.author_started,
         "portraitsStarted": st.portraits_started,
         "authorDone": st.author_done.is_set(),
         "promptCount": len(st.prompts),
+        "nextSeasonArmed": armed,
     }

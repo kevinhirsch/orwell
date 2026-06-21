@@ -121,6 +121,23 @@ export interface SessionCore {
     portraitStyleAnchor: string;
   };
   /**
+   * 0065 (advance-warm) — the durable NEXT-season holding-store mirror: the cast pre-warmed DURING the
+   * current season's finale, off a NEW seed, into a per-user buffer that survives the cutover. Persisted
+   * on the LIVE sandbox so an advance-warm begun mid-finale survives an engine restart and is still
+   * adopted at the confirmed cutover. SAME shape as `prewarm` (it IS a held PrewarmCast). ENGINE-ONLY (it
+   * carries the hidden deep layer + private orientations). Absent until an advance-warm runs; cleared once
+   * the cutover consumes it. Absent on all prior saves.
+   */
+  nextSeasonWarm?: {
+    seed: number;
+    npcs: GameHouse["npcs"];
+    deepProfiles: Record<EntityId, DeepProfile>;
+    storyThreads: StoryThread[];
+    privateOrientations: Record<EntityId, import("./diversityConstants").Orientation>;
+    groundedSkinTones: Record<EntityId, string>;
+    portraitStyleAnchor: string;
+  };
+  /**
    * Feature 0060 — the story-thread scheduler's engine-only, HIDDEN bookkeeping: the distinct weeks each
    * houseguest has been nominated (drives the `nominated-twice` trigger) and the count of threads that
    * have ever SURFACED this season (the hard restraint cap, §5). Persisted so both survive a restart

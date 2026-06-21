@@ -53,6 +53,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "recordImageBeat", channel: "player", readsVault: false, description: "Record that an in-character image was shown to the player (0051) — a player-witnessed image-shown event so it has memory ('recorded or it didn't happen'). Returns its id." },
   // FE-driven authoring/pre-warm seams (0058/0065) — NOT model levers (the FE producer-LLM drives them).
   { name: "preSeedCast", channel: "player", readsVault: false, description: "FE-driven (0065): pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting interview ends, so the FE can deeply author it and the portrait prompts read the finished store. Returns the Vault-free roster + the cast portrait prompts; mints + persists the season seed (which createCharacter then adopts). Idempotent; durable. Not a model lever." },
+  { name: "preSeedNextSeason", channel: "player", readsVault: false, description: "FE-driven (0065 advance-warm): pre-warm the NEXT season's cast DURING the current season's finale, off a NEW seed, into a per-user holding store that survives the cutover rotation (preSeedCast is refused mid-season; this is its mid-season counterpart). The ACTIVE season is untouched; the confirmed next-season cutover ADOPTS the held cast. Optionally deep-authors one held houseguest ({ profile }), like recordCastProfile. Returns the Vault-free roster + portrait prompts. Idempotent; durable. Not a model lever." },
   { name: "recordCastProfile", channel: "player", readsVault: false, description: "FE-driven write-back (0058/0065): seal one houseguest's authored §3 profile — the PUBLIC biography + structured physical facet (cross to the player) SPLIT from the HIDDEN secrets/true-goals/weakness/Day-1 read (Vault-sealed). Reports accepted field NAMES only, never a hidden value; refuses a player-mirroring profile. Lands on the pre-warmed cast pre-game, the live house once a season runs. Not a model lever." },
   { name: "recordWorldSnapshot", channel: "player", readsVault: false, description: "FE-driven write-back (0062): freeze the move-in zeitgeist — the PUBLIC, shared real-world flavor the whole cast moved in WITH (an optional subset of public slices: screen/music/sports/news/internet/mood). The FE owns the concrete web-search capture (like the 0051 image port); the engine persists it as the single FROZEN artifact and RECALLS it (never re-searches) all season. Empty slices keep the fallback's value (non-degradation). Public flavor only — no Vault, no game input. Not a model lever." },
 ];
@@ -86,7 +87,9 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // 0058/0065: the cast pre-warm + authoring write-back are FE-driven seams (the producer-LLM authors
   // the cast, the FE pre-warms it before portraits), NOT game-driving levers the GM model pulls — so
   // they stay OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
-  "preSeedCast", "recordCastProfile",
+  // `preSeedNextSeason` (0065 advance-warm) is the same family: an FE-driven finale-day warm of the NEXT
+  // season's cast into the holding store, never a GM lever.
+  "preSeedCast", "preSeedNextSeason", "recordCastProfile",
   // 0062: the move-in zeitgeist write-back is an FE-driven seam (the front-end owns the concrete
   // web-search capture and freezes it onto the season), NOT a game-driving lever the GM model pulls —
   // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).

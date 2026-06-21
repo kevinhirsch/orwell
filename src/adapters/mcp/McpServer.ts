@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -140,6 +140,17 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
       if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
       return;
+    case "preSeedNextSeason":
+      // 0065 (advance-warm): optional explicit seed (tests/replays) + an OPTIONAL `profile` deep-author
+      // write-back (same shape as recordCastProfile — its `houseguestId` is the only structurally-required
+      // field when present; every other field is optional + domain-validated inside the adapter, not here).
+      if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
+      if (args["profile"] !== undefined) {
+        const p = args["profile"];
+        if (typeof p !== "object" || p === null || Array.isArray(p)) refuse("profile", "an object when present");
+        if (!isStr((p as Record<string, unknown>)["houseguestId"])) refuse("profile.houseguestId", "a houseguest id (string)");
+      }
+      return;
     case "recordWorldSnapshot":
       // 0062: the FE zeitgeist write-back. `slices` is OPTIONAL — refuse only if present and not an
       // object (a string/array where an object is expected is the R6 class that dies deep in the merge);
@@ -178,6 +189,10 @@ export class McpServer {
       case "preSeedCast":
         // 0065: pre-warm the player-independent cast before the interview ends (Vault-free roster + prompts out).
         return this.deps.session.preSeedCast(args as unknown as PreSeedCastReq);
+      case "preSeedNextSeason":
+        // 0065 (advance-warm): pre-warm the NEXT season's cast DURING the finale into a survivor holding store
+        // (the active season is untouched; the cutover adopts it). Vault-free roster + prompts out.
+        return this.deps.session.preSeedNextSeason(args as unknown as PreSeedNextSeasonReq);
       case "recordCastProfile":
         // 0058/0065: seal one houseguest's authored §3 profile (PUBLIC/HIDDEN split; never echoes a hidden value).
         return this.deps.session.recordCastProfile(args as unknown as RecordCastProfileReq);
