@@ -199,6 +199,12 @@ export interface GameStateView {
    */
   timeOfDay?: string;
   /**
+   * ADR 0006 — the houseguests who've TURNED IN for the night (the complement of the awake set). Names
+   * only; Vault-free and OBSERVABLE (the bedtime derivation stays hidden). Present only when the clock is
+   * running (absent ⇒ dormant); never includes the player (their night is their own rest cue).
+   */
+  asleep?: NamedRef[];
+  /**
    * The season is OVER — a winner is crowned (audit B6-01). Vault-free (whether the game ended is
    * public). Lets the FE gate the season lifecycle (0057 next-season) and fill the progress bar to
    * 100% without inferring it from `moment`/`phase`. `finished` lives on `AdvanceView`/`SeasonRecap`
@@ -454,6 +460,11 @@ export interface PublicGameStatus {
    * the time-of-day HUD renders; Vault-free; absent pre-game / when the clock isn't running.
    */
   timeOfDay?: string;
+  /**
+   * ADR 0006 — the houseguests who've TURNED IN for the night (see `GameStateView.asleep`). Names only;
+   * Vault-free; present only when the clock is running.
+   */
+  asleep?: NamedRef[];
   /**
    * The in-game DAY within the current HOH week (E58): hoh=1, nominations=2, veto=3,
    * veto-ceremony=4, eviction=5 — the canonical `dayOfWeek(phase)` mapping that already feeds the

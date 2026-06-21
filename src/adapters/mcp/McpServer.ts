@@ -272,6 +272,11 @@ export class McpServer {
         // L38 (admin/God-Mode only — gated by `allows()` above): drive the season to a crowned
         // winner so the post-season retrospective can unseal. Vault-free summary out; reads no Vault.
         return this.deps.admin.advanceToFinale();
+      case "setTimeOfDay":
+        // ADR 0006 (admin/God-Mode only): the FE settings switch flips the in-game clock at runtime.
+        return this.deps.admin.setTimeOfDay(
+          args["enabled"] === true || args["enabled"] === "true" || args["enabled"] === 1 || args["enabled"] === "on",
+        );
       default:
         throw new Error(`unhandled tool "${name}"`);
     }
