@@ -68,9 +68,15 @@ def test_default_still_cancels_inflight_for_plain_chat():
 
 
 def test_chat_route_queues_framed_turns():
-    """Drift pin: the game/casting (framed) path opts into queuing; plain chat does not."""
+    """Drift pin: the game/casting (framed) path opts into queuing; plain chat does not.
+
+    ADR 0012 §3.1 re-keyed the run on the CANONICAL session for framed turns (`run_key`), so the
+    queue flag is now the precomputed `_framed`. The two invariants this pin protects: a framed turn
+    QUEUES (queue=_framed), and a plain chat does NOT (run_key == session for a non-framed turn)."""
     import os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "routes", "chat_routes.py"), encoding="utf-8") as f:
         src = f.read()
-    assert "agent_runs.start(session, _safe_stream(), queue=bool(getattr(ctx, \"framed\", False)))" in src
+    assert 'run_key = (getattr(ctx, "canonical_session", None) or session) if _framed else session' in src
+    assert "agent_runs.start(run_key, _safe_stream(), queue=_framed)" in src
+    assert '_framed = bool(getattr(ctx, "framed", False))' in src

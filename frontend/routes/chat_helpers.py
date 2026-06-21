@@ -1769,6 +1769,12 @@ class ChatContext:
     # preamble SUBSTITUTION on this — a framed casting turn must not stack the producer
     # persona on top of the generic assistant rulebook.
     framed: bool = False
+    # ADR 0012 §3.1: the CANONICAL game session id for this user (first-writer-wins bind), resolved
+    # for a framed game/casting turn. The chat route keys the detached run + run-started/subscribe on
+    # THIS — not the per-tab session — so two windows on one game share ONE authoritative stream (the
+    # Messenger mirror), and a window that POSTed under a different (per-tab) id is told to adopt it.
+    # For a non-framed turn it is just the per-tab session (byte-identical single-window behavior).
+    canonical_session: Optional[str] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────── #
@@ -2347,7 +2353,22 @@ async def build_chat_context(
         game_active=game_active,
         feed_down=feed_down,
         framed=framed,
+        canonical_session=_resolve_canonical_session(user, session_id, framed),
     )
+
+
+def _resolve_canonical_session(user, session_id: str, framed: bool) -> Optional[str]:
+    """ADR 0012 §3.1: the canonical game session to key the shared run on. For a framed game/casting
+    turn it is the first-writer-wins bound session (so every window on the game converges on one
+    run); otherwise the per-tab session (no change). Best-effort — any failure falls back to the
+    per-tab session, so the run is never mis-keyed."""
+    if not framed:
+        return session_id
+    try:
+        from src import orwell_game_session
+        return orwell_game_session.get_game_session(user) or session_id
+    except Exception:
+        return session_id
 
 
 def accumulate_token_usage(session_id: str, metrics: dict):
@@ -2646,6 +2667,22 @@ def save_assistant_response(
         _meta = getattr(_last, "metadata", None)
         if isinstance(_meta, dict):
             return _meta.get("_db_id")
+    except (IndexError, AttributeError):
+        pass
+    return None
+
+
+def _last_message_ts(sess) -> Optional[str]:
+    """ADR 0012 §2.2/§3.3: the SERVER-minted ISO timestamp stamped on the most recently persisted
+    message (`_persist_message` sets `metadata['timestamp']`). Emitted on the `message_saved` event
+    so every window renders the IDENTICAL time string from one server source instead of each minting
+    its own `new Date()` (which drifts window-to-window). Vault-free (a timestamp). None ⇒ the client
+    falls back to "now", matching the prior behavior."""
+    try:
+        _last = sess.history[-1]
+        _meta = getattr(_last, "metadata", None)
+        if isinstance(_meta, dict):
+            return _meta.get("timestamp")
     except (IndexError, AttributeError):
         pass
     return None
