@@ -59,6 +59,26 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     expect(tools.every((t) => t.readsVault === false)).toBe(true);
   });
 
+  it("dispatches moveHouseguest → recordHouseguestMove and validates its args (ADR 0009)", async () => {
+    // Wired + routed: the call returns a HouseguestMoveResult ({status}). On this fresh (no-game)
+    // server the legal-only contract yields "illegal", which proves the dispatch reached
+    // recordHouseguestMove (rather than erroring as an unknown tool).
+    const ok = await fetch(`${base}/player/call`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "moveHouseguest", args: { id: "npc:1", room: "kitchen" } }),
+    });
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as { result?: { status?: string }; status?: string };
+    const result = body.result ?? body;
+    expect(["moved", "noop", "illegal"]).toContain(result.status);
+    // Arg validation mirrors moveTo: a missing/non-string id is a clean 400 allowlist refusal.
+    const bad = await fetch(`${base}/player/call`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "moveHouseguest", args: { room: "kitchen" } }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it("refuses a caller-supplied-stats competition resolution over HTTP (E20 — runCompetition is the one authority)", async () => {
     const res = await fetch(`${base}/player/call`, {
       method: "POST",
