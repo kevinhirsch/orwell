@@ -226,6 +226,25 @@ the model ignores every rung; and a **premiere `markHouseguestMet` auto-belt** k
 meet-everyone gate progressing. These guardrails fire only where the model SKIPS a call — the engine is
 fine; never engine-author content.
 
+**Casting gets a MINIMAL tool contract, and its error-correction must reach turn-end (PR #493, audit
+2026-06-21 — a live-drive deadlock).** Two coupled rules learned the hard way when a real casting
+interview deadlocked (the producer kept re-asking for a name the player had given; the season never
+started):
+- **Pin `ORWELL_CASTING_TOOLS`, not the full `ORWELL_GAME_TOOLS`, during casting** (`src/tool_schemas.py`;
+  chosen in `routes/chat_routes.py` when the turn is *framed, pre-game, feed-up*). Casting only needs
+  `{createCharacter, updateCasting, getGameState, gameStatus}` — the producer narrates as plain text.
+  Handing it the live-season tools (`runCompetition`/`advanceGame`/`submitDecision`/`renderScene`/…) is
+  the **root-cause footgun**: the model spams them round after round, so a turn **never settles into a
+  tool-less round** — and the in-loop casting error-correction (the finalize fallback + the belt) is gated
+  on `if not tool_blocks:`, so it **never runs** and casting deadlocks. (With the manifest trimmed the
+  model self-corrects and records the name itself; the belts then rarely need to fire.)
+- The casting under-call belt is **`_auto_record_casting`** (the casting twin of `_auto_record_scene`):
+  gated on the **still-missing NAME** (not on "updateCasting wasn't called"), so it catches the model
+  recording *other* fields but skipping the name. Because the in-loop branch needs a tool-less round, a
+  **post-loop turn-end safety net** runs the record-then-finalize ONCE regardless of how the round loop
+  exited. When debugging "the game won't start from casting," check the *manifest* first (is it the 4-tool
+  set?), then the belts — and remember the post-round error-correction only runs on a tool-less round.
+
 **Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
 *openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
 the Vault) is engine-dictated — *no dynamism to lose* — while the **open set** (the meaning/texture
