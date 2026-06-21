@@ -117,7 +117,13 @@ def _scrub(obj: Any) -> Any:
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
-            if isinstance(k, str) and re.search(r"authorization|api[-_]?key|token|secret", k, re.IGNORECASE):
+            # ADR 0010: redact secret-shaped keys (authorization / api-key / a raw bearer
+            # `token` / secret) but NEVER the usage COUNT keys, which are all plural
+            # `*_tokens` (prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens).
+            # The singular-`token` negative lookahead `token(?!s)` is the discriminator:
+            # it still catches `token`/`access_token`/`api_token`, but leaves the plural
+            # count fields intact so the token economy meter (0069) records real numbers.
+            if isinstance(k, str) and re.search(r"authorization|api[-_]?key|token(?!s)|secret", k, re.IGNORECASE):
                 out[k] = _REDACTED
             else:
                 out[k] = _scrub(v)

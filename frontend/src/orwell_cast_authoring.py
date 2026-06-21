@@ -267,13 +267,63 @@ async def _resolve_llm_fn(owner: Optional[str]) -> Optional[LlmFn]:
         return None
     candidates = [(url, model, headers)] + (resolve_utility_fallback_candidates(owner=owner) or [])
 
+    # ADR 0010: the background-authoring reasoning budget (admin-overridable). Fail-open.
+    _policy = None
+    try:
+        from src.token_policy import resolve_token_policy
+        from src.settings import get_setting as _gs
+        _policy = resolve_token_policy("background-authoring", {"reasoning_budget": _gs("reasoning_budget", {})})
+    except Exception:
+        _policy = None
+
     async def _fn(messages: list[dict]) -> str:
         parts: list[str] = []
-        async for chunk in stream_llm_with_fallback(candidates, messages, temperature=0.9):
+        _usage: dict = {}
+        async for chunk in stream_llm_with_fallback(candidates, messages, temperature=0.9, policy=_policy):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
             if piece:
                 parts.append(piece)
+                continue
+            # ADR 0010: capture the usage envelope (the trailing 'usage' SSE event) for the meter.
+            s = str(chunk or "")
+            if s.startswith("data:"):
+                _body = s[5:].strip()
+                if _body and _body != "[DONE]":
+                    try:
+                        _d = json.loads(_body)
+                    except (ValueError, TypeError):
+                        _d = None
+                    if isinstance(_d, dict) and _d.get("type") == "usage":
+                        _ud = _d.get("data") or {}
+                        if _ud:
+                            _usage = {
+                                "input_tokens": _ud.get("input_tokens", 0),
+                                "output_tokens": _ud.get("output_tokens", 0),
+                                "cached_tokens": _ud.get("cached_tokens", 0) or 0,
+                                "reasoning_tokens": _ud.get("reasoning_tokens", 0) or 0,
+                                "cost": _ud.get("cost"),
+                                "provider": _ud.get("provider"),
+                            }
+        # ADR 0010: one Vault-free token/cost entry per authoring call, keyed by the canonical game
+        # session so it aggregates with the game's narration spend. Fail-open; never seen by the player.
+        if owner and _usage:
+            try:
+                from src import orwell_token_ledger as _tl
+                _sess = None
+                try:
+                    from src import orwell_game_session as _gs2
+                    _sess = _gs2.get_game_session(owner)
+                except Exception:
+                    _sess = None
+                _tl.record_turn(
+                    owner, session=_sess or owner, turn_id=None, call_class="background-authoring",
+                    input_tokens=_usage.get("input_tokens", 0), cached_tokens=_usage.get("cached_tokens", 0),
+                    reasoning_tokens=_usage.get("reasoning_tokens", 0), output_tokens=_usage.get("output_tokens", 0),
+                    cost=float(_usage.get("cost") or 0), provider=_usage.get("provider"),
+                )
+            except Exception:
+                pass
         return "".join(parts)
 
     return _fn
