@@ -107,18 +107,52 @@ and merge **before each state's capture**; rebuild engine if `src/` moved, resta
 moved. Currently synced to `093da44` (= origin/main `106b9ad` + my Phase-0 commit). Re-synced at:
 State-1 standup.
 
-## Live findings (this run) — appended as captured
-*Provisional (to harden in the full State-1 fan-out — not yet final triage):*
-- **F-S1-A** `[POLISH]` 👁 VIEWED — 2× `console.error: 401 Unauthorized` on the **unauthenticated**
-  `/login` page (an authed XHR fires pre-auth). Evidence: `shots/state1/login-{desktop,mobile}.meta.json`.
-  Root cause TBD — 401 is not a `requestfailed`, so add response-URL logging to name the endpoint.
-  Mechanism hypothesis (unconfirmed): a poller/session-probe (`/api/...`) runs before the auth gate.
-- **F-S1-B** `[POLISH]` 👁 VIEWED (calibrating) — login **password** field shows a right-side glyph
-  while empty (appears to be an eye-slash reveal toggle on mobile — possibly the S1-4 fix already
-  landed) **and** the **username** field shows a small dot glyph while empty. Affordance ambiguity.
-  Evidence: `shots/state1/login-{desktop,mobile}.png`. Needs focus/hover/click-behavior capture
-  before finalizing (differential: recommended eye-toggle fix vs. residual clear-X vs. validation dot).
-- **No-overflow (good, VIEWED):** `/login` reflows clean at both viewports (`overflow:null`).
+## STATE 1 — Initial Instantiation (login · zero-data landing · settings) — findings
+
+**Engine truth at capture:** `moment:character-creation, started:false` (no game). Captured desktop
+1440×900 + mobile iPhone-13 (DPR3); same-identity two-window parity on the landing: **`sameScan=true`**
+(A/B identical — no same-identity divergence on the static landing). Artifacts: `.audit-telemetry/
+shots/state1/`. **Headline: no [BLOCK] in State 1 — the S1-1 launch-blocker is visually fixed.**
+
+### Launch-blocker re-verification
+- **S1-1** (zero-data landing overlap) — ✅ **FIXED visually** (👁 VIEWED `landing-{desktop,mobile}.png`):
+  one clean "Welcome to the house" onboarding card + "Meet the producers" CTA, no text-over-text, good
+  mobile tap target. ⚠️ **LATENT structurally** (logged as F-S1-G): the welcome overlay is not mutually
+  exclusive with the casting/headshot overlays.
+- **S1-4** (login password glyph) — ✅ **RESOLVED** (#436). The visible eye in Chromium is the intended
+  custom `.pw-toggle`; #436 hides the *Edge-native* `::-ms-reveal/::-ms-clear` (Chromium never showed
+  those). `login.html` is served from disk per-request (`app.py:860`) — current code confirmed. *(My
+  earlier provisional F-S1-B was a misread; withdrawn.)*
+
+### State-1 findings (all POLISH / LATENT / NOTE)
+| ID | Sev | 👁 | Finding | Evidence | Mechanism / direction |
+|----|-----|----|---------|----------|----------------------|
+| **F-S1-C** | POLISH | ✅ | `/api/orwell/avatar` returns **404 on every authed load** (2×/load) → console-error noise. The S1-2 avatar-404. | `landing-desktop.meta.json` net log | Return **204/default** when no avatar set; gate the poller in game build. |
+| **F-S1-D** | POLISH | ✅ | **`/api/orwell/state` polled ~13× in ~2.5s** on the zero-data landing (`/status` ~4×, `/models` ~3×) — heavy, pre-game. | `landing-desktop.meta.json` net log | **Traced:** `orwellOnboarding.js:569` fires `prewarm-cast` on landing → engine reports a `generation` record → `orwellCast.js` adaptive `FAST_POLL_MS=3500` engages; **AND ~10 gadget modules each fetch `/state` independently** (no shared coordinator). Each `/state` serializes in the engine's per-user queue (L18-adjacent). Fix: gate the cast fast-poll to a mounted cast window; coalesce gadget `/state` reads behind one shared poller. |
+| **F-S1-E** | POLISH | ✅ | **model-picker button 148×21px** (`#model-picker-btn`, "deepseek-v4-pro") — sub-minimum tap target (WCAG 2.5.5/2.5.8). | `landing-desktop.meta.json` taps | min-height ≥24 (44 coarse-pointer). Confirm on mobile. |
+| **F-S1-F** | POLISH | ✅ | **Settings is occluded by the onboarding scrim (z-index 99999)** on the zero-data landing — `#user-bar-settings` click can't open Settings until onboarding is dismissed. | `settings-desktop-open.png` (onboarding still up after click) | Differential: by-design focus (settings is admin-only) vs. accidental occlusion. Confirm a new player isn't blocked; consider an in-onboarding settings/escape affordance. (Echoes L2.) |
+| **F-S1-G** | LATENT | trace | S1-1 **structural** latent: `#welcome-screen` is an abs-positioned overlay hidden only by `.hidden`; casting/headshot are separate overlays over the same region; soft body-class suppression hides `#welcome-tip/-sub` but **NOT `.welcome-name`**. | `ARCHITECTURE-AS-IS.md` §Seam-3; `style.css:2001`, `orwellHeadshot.js`, `orwellOnboarding.js` | Make welcome ⟂ onboarding/casting by construction (suppress `.welcome-name` too / remove from layout). **Verify in State 2** (headshot mounts mid-interview). |
+| **F-S1-H** | POLISH | ✅ | **2× `console.error: 401`** on the **unauthenticated** `/login` page (an authed XHR fires pre-auth). | `login-{desktop,mobile}.meta.json` | Identify the endpoint (likely a theme/pref fetch pre-auth); gate behind auth or no-op when unauthed. |
+| **F-S1-I** | NOTE | ✅ | Leftover **vendored-workspace copy ships in the game-build DOM** (hidden but present): "Import a file — the AI reads it and suggests candidate memories you can approve"; example preset "build-vllm-wheel"; workspace themes ("claude","GPT","cyberpunk"…) + model "north-mini-code:free". The S1-5 family. | `landing-desktop.meta.json` smells | Strip from the game-build template (low risk; not visible). |
+| **F-S1-J** | NOTE | ✅ | Small **unidentified dot adornment on the empty username field** on `/login`. | `login-desktop.png` | Identify (validation indicator? stray). Minor. |
+| **F-S1-K** | TOOLING | — | Audit instrument: the injected MutationObserver logged **0 mutations** on the landing (FE likely toggles `display` rather than mounting, or an init-script world issue). | `landing-*.meta.json` `audit.mutCount=0` | **Fix the observer for State-2+ transient capture** (not a product bug). Also harden `OVERLAP_SCAN` to exclude ancestor–descendant pairs (it false-positived S1-1) and the copy-smell scan (innerText concatenation across siblings yields spurious double-spaces). |
+
+### Architecture latent items (static-traced from the 3 cartographers — confirm in later states)
+Logged per "log EVERY issue." See `docs/ARCHITECTURE-AS-IS.md` for full traces.
+- **A-S5** `[LATENT·High]` — stale-beat 409 is reconciled by **parsing the error message string** while the engine's structured `{code:"stale-beat",beatSeq,board}` body is discarded → a wording drift turns reconcile into fail-closed. **Confirm in State-3 concurrency.** (`chat_helpers.py:405/474`, `orwell_engine.py`)
+- **A-S4/D2** `[LATENT]` — manual `orwell:gamechanged` dispatch allowlist (`chat.js:2289`) → silent HUD staleness for any unlisted mutating tool.
+- **A-S3** `[LATENT]` — stale-409 on `recordInteraction`/`makeDeal`/`moveTo` is skipped → can drop a scene's only consequence fold (non-degradation tension).
+- **A-render** `[LATENT]` — duplicated live (`chat.js`) vs reload (`chatRenderer.js`) render engines with in-file-documented drift (the central FE maintainability smell).
+- **A-settingsModule** `[LATENT]` — `window.settingsModule` referenced (`orwellOnboarding.js:283`) but never assigned → silent dead fallback.
+- **A-data-user** `[LATENT]` — `body[data-user] || ""` collapses per-user client-storage keys to a shared namespace if the attr is ever absent (client-layer isolation hygiene; not the Vault).
+
+### Model-config baseline (confirmed, narration lens)
+Live game turn sends **no explicit `max_tokens`** (provider default governs ⇒ low main-turn truncation
+risk); **no `reasoning_effort`/`high`/`xhigh` knob wired** anywhere — DeepSeek at default reasoning, FE
+consumes+scrubs reasoning deltas. (`llm_core.py:21/1371`, `agent_loop.py`.)
+
+*Outstanding State-1 coverage to close next turn:* settings tab-by-tab capture (trigger = bottom-left
+user-bar gear; neutralize onboarding first), and identify F-S1-H/F-S1-J endpoints/element.
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
