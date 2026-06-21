@@ -144,3 +144,19 @@ def test_public_seam_exposes_registry_and_live_derivations():
     assert "OrwellGadgetRail" in js
     for member in ("registry", "activeGadgets", "stripGadgets", "focusGadget"):
         assert member in js, member
+
+
+def test_j5_control_room_chrome_meets_touch_tap_target_floor():
+    """J5-01 (Control-Room audit): the kit-window + gadget-rail chrome controls render BELOW
+    the 44px coarse-pointer tap-target floor — rail header buttons 30×32, kit-window dock/min/
+    close 24×32, collapsed-strip icons 38×38. A touch-only (`pointer: coarse`) rule bumps them
+    to 44px; desktop stays compact. (Behaviour verified headless: 44×44 on touch, ~30×32 on a
+    fine pointer. The responsive matrix's touch-floor check doesn't reach these — the rail
+    drawer is closed and the kit windows are unmounted during its run.)"""
+    css = _read("static", "style.css")
+    assert "J5-01" in css                       # the Control-Room tap-target fix marker
+    block = css[css.find("J5-01"):css.find("J5-01") + 1200]
+    assert "@media (hover: none) and (pointer: coarse)" in block
+    for sel in (".gadget-rail-head button", ".ow-controls button", "#gadget-rail-strip"):
+        assert sel in block, sel
+    assert "min-width: 44px" in block and "min-height: 44px" in block
