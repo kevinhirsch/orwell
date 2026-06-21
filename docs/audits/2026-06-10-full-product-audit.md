@@ -1876,3 +1876,31 @@ the real-host smoke, R3, the browser-render validations, A11, MVP-002 remain exa
 it is a *new* refinement record plus its implementation. Its standing claim is the **litmus test**
 in the ADR: any future sync or consequence change must keep the open set recordable,
 consequenceable, recallable, and narratable in full while only ever constraining the closed set.
+
+## 2026-06-20/21 — live-LLM walkthrough audit (casting → week 1 complete) — MERGED + one open item
+
+Pre-launch end-to-end pass driving the **real FE + real engine + a real LLM** (`deepseek-v4-pro`
+via OpenRouter) under headless Playwright — the path the automated gates structurally can't exercise
+(they stub the LLM). Drove casting → premiere → a full first week to completion. Findings, all rooted
+in the documented **model-under-calls-progression-tools** failure class:
+
+- **#411** (State-1 UX) — themed the casting/headshot file input; silenced dropped voice-probe 404s. *MERGED.*
+- **#415** (game-start / premiere) — casting framing tells the model the **headshot is on file** so it
+  finalizes; **`createCharacter` finalize fallback** + premiere **`markHouseguestMet` auto-belt**. *MERGED.*
+- **#420** (staged-comp pacing, owner ruling) — **fewer/bigger rounds** (`STAGED_TARGET_ROUNDS`, ~4–8/comp
+  vs ~14) + **only round 1 binds** (`binding` flag; later rounds non-binding flavor). Presentation-only;
+  `stagedTrajectoryNeutral` + UAT green. *MERGED.*
+- **#434** (decision-card arming) — a **silent forced-advance** (FE error-correction when the model
+  under-calls `advanceGame`) progressed the engine onto a new player pending but armed **no card** in the
+  open page (only a reload did). Fix: arm from `gameStatus` at turn-end + don't let a lingering "✓ Locked
+  in" card suppress the next round. *MERGED.* **Live-verified:** a complete week 1 (HOH crown → noms →
+  veto comp → veto ceremony/replacement → eviction → week 2) ran with **0 page errors** and no board desync.
+
+**Still open (this session):**
+1. **Stale narration after a silent forced-advance.** With a heavy under-caller, the model's *prose* can
+   lag the engine across a silent advance (observed: narrated "ten houseguests still in" while the engine
+   had 7). The decision **card** now shows engine truth (#434), but the narrative text can be momentarily
+   stale until the next turn. This is the open/closed split (ADR 0005) at the narration seam — the closed
+   set is correct; the open prose drifts. Candidate fixes: a post-silent-advance re-narration nudge, or
+   extending the 0065 desync guard to catch a stale board-fact (still-in count) in narration. Lower
+   severity than the card stall (the authoritative state + card are right), but visible.
