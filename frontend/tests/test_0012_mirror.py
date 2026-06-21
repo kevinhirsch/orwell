@@ -337,3 +337,46 @@ def test_g15_single_dispatcher_not_violated_by_canonical_step():
     src = _read("static", "js", "sessions.js")
     assert "new CustomEvent('orwell:gamechanged'" not in src
     assert "new CustomEvent(\"orwell:gamechanged\"" not in src
+
+
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+# ADR 0012 late-attach — a peer must be able to RESUME a run that just FINISHED (replay its buffer)
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+
+import src.agent_runs as _agent_runs
+
+
+def test_finished_run_is_still_resumable_within_grace():
+    """A short turn FINISHES before a peer's run-started→resume arrives. `is_active` is already
+    False, but `has_run` stays True while the run is buffered (evict grace) so the peer can RESUME
+    and REPLAY the turn's tokens (subscribe() replays the buffer then ends). Gating resume on
+    is_active 404'd the mirroring window and forced a reload (the cross-tab 'render on reload, not
+    live' gap the live two-window test caught)."""
+    async def main():
+        async def quick():
+            yield 'data: {"delta": "hi"}\n\n'
+            yield "data: [DONE]\n\n"
+        sid = "adr0012-finished-resumable"
+        _agent_runs._RUNS.pop(sid, None)
+        run = _agent_runs.start(sid, quick())
+        await run.task  # drain to completion
+        # subscribe must still replay the finished run's buffer for a late peer.
+        replayed = []
+        agen = _agent_runs.subscribe(sid)
+        try:
+            async for ev in agen:
+                replayed.append(ev)
+        finally:
+            await agen.aclose()
+        return _agent_runs.is_active(sid), _agent_runs.has_run(sid), "".join(replayed)
+    active, exists, replay = _run(main())
+    assert active is False, "a finished run is no longer 'active'"
+    assert exists is True, "but it is still buffered (has_run) so a late peer can resume+replay it"
+    assert '"delta": "hi"' in replay, "resume of a finished run REPLAYS its buffered tokens"
+
+
+def test_chat_resume_gate_uses_has_run_not_is_active():
+    """Source-pin: the resume route must gate on has_run (run exists, running OR buffered), not the
+    stricter is_active — otherwise a just-finished run 404s the mirroring window."""
+    src = _read("routes", "chat_routes.py")
+    assert "if not agent_runs.has_run(session_id):" in src

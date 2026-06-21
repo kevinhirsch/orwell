@@ -1430,7 +1430,12 @@ def setup_chat_routes(
     @router.get("/api/chat/resume/{session_id}")
     async def chat_resume(request: Request, session_id: str) -> StreamingResponse:
         _verify_session_owner(request, session_id)
-        if not agent_runs.is_active(session_id):
+        # ADR 0012 — allow resuming a run that EXISTS (running OR terminal-but-still-buffered within
+        # the evict grace), not only an actively-running one. A short turn finishes before a peer's
+        # `run-started`→resume arrives; gating on is_active 404'd the mirroring window and forced it to
+        # fall back to a full reload (the cross-tab "render on reload, not live" gap). subscribe()
+        # replays the finished run's buffer then ends, so the peer still mirrors the turn's tokens.
+        if not agent_runs.has_run(session_id):
             raise HTTPException(404, "No active run for this session")
         return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
 
