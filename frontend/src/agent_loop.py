@@ -1751,7 +1751,8 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
         ]
         # Room for a reasoning model to think THEN emit the tiny room JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1200, timeout=45)
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         raw = raw or ""
         # The JSON may sit after a reasoning block — scan the WHOLE response, take the LAST object
         # carrying a "room" key (reasoning models emit the answer last).
@@ -1835,7 +1836,8 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
         ]
         # Room for a reasoning model to think THEN emit the moves JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1500, timeout=45)
+                                   temperature=0.1, max_tokens=1500, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         obj = _last_json_object_with_key(raw or "", "moves")
         if obj is None:
             logger.info(f"[orwell] auto-move-npc: no parseable JSON (len={len(raw or '')})")
@@ -1991,7 +1993,8 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # reads the `reasoning`/`thinking` field, so the answer is recoverable even when the model
         # routes everything there.)
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.2, max_tokens=1500, timeout=45)
+                                   temperature=0.2, max_tokens=1500, timeout=45,
+                                   call_class="utility-extraction", user=owner)
         raw = raw or ""
         # The JSON may sit after a reasoning block OR inside it — take the LAST object carrying
         # withIds (reasoning models emit the answer last). The object may now NEST a `consequence`
@@ -2088,7 +2091,8 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         ]
         # Room for a reasoning model to think THEN emit the deal JSON (see _auto_record_scene).
         raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
-                                   temperature=0.1, max_tokens=1200, timeout=45) or ""
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
         obj = None
         for cand in reversed(re.findall(r"\{[^{}]*\"struck\"[^{}]*\}", raw, re.DOTALL)):
             try:
@@ -2446,6 +2450,7 @@ async def _run_verifier_subagent(
             url=endpoint_url, model=model,
             messages=[{"role": "user", "content": prompt}],
             headers=headers, temperature=0.0, max_tokens=600, timeout=60,
+            call_class="utility-extraction",
         )
     except Exception as e:
         logger.warning(f"[agent] verifier subagent failed: {e}")

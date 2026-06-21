@@ -581,6 +581,29 @@ def _supports_thinking(model: str) -> bool:
     m = model.lower()
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
 
+
+def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Optional[Dict]) -> None:
+    """ADR 0010 slice B: inject the per-call-class reasoning budget into an OpenAI-compatible payload,
+    PROVIDER-AWARE so it fires for the live model and never breaks a non-reasoning one (NOT gated on
+    `_supports_thinking`, whose pattern list predates DeepSeek-V4 and would silently no-op the live
+    narration model):
+      • OpenAI o-series  → `reasoning_effort`;
+      • OpenRouter       → the unified `reasoning` map (applied to reasoners like DeepSeek-V*/o-series,
+                           ignored for the rest — safe to always send);
+      • other direct providers → only when the model is a known thinking model (else omit, so a plain
+                           chat model is byte-identical and never 400s on an unknown field).
+    No-op without a policy/effort. Shared by the streaming and non-streaming builders."""
+    if not (policy and isinstance(policy, dict)):
+        return
+    reasoning = policy.get("reasoning")
+    eff = (reasoning or {}).get("effort") if isinstance(reasoning, dict) else None
+    if not eff:
+        return
+    if provider == "openai" and _uses_max_completion_tokens(model):
+        payload["reasoning_effort"] = eff
+    elif provider == "openrouter" or _supports_thinking(model):
+        payload["reasoning"] = {"effort": eff}
+
 def _convert_openai_content_to_anthropic(content):
     """Convert OpenAI multimodal content blocks to Anthropic format.
 
@@ -1175,25 +1198,74 @@ async def llm_call_async(
     headers: Optional[Dict] = None,
     timeout: int = LLMConfig.STREAM_TIMEOUT,
     max_retries: int = LLMConfig.MAX_RETRIES,
-    prompt_type: Optional[str] = None
+    prompt_type: Optional[str] = None,
+    call_class: Optional[str] = None,
+    user: Optional[str] = None,
+    session: Optional[str] = None,
 ) -> str:
     """Tracing wrapper over the non-streaming utility call (src/llm_trace.py) — records
     the full request + response (or error) for the /admin/status LLM I/O trace, then
-    returns the impl's result unchanged. Best-effort; disabled ⇒ near-zero passthrough."""
+    returns the impl's result unchanged. Best-effort; disabled ⇒ near-zero passthrough.
+
+    ADR 0010: pass ``call_class`` (e.g. "utility-extraction" / "background-authoring") to apply that
+    class's per-class reasoning budget (admin-overridable) AND, with ``user``, record one Vault-free
+    token/cost entry per call to the meter — so utility/background spend shows up alongside narration.
+    Both are fail-open and default-off (no call_class ⇒ byte-identical to before)."""
     from src import llm_trace
+    # ADR 0010: resolve the per-class reasoning budget (fail-open; absent ⇒ no reasoning override).
+    policy = None
+    if call_class:
+        try:
+            from src.token_policy import resolve_token_policy
+            from src.settings import get_setting as _gs
+            policy = resolve_token_policy(call_class, {"reasoning_budget": _gs("reasoning_budget", {})})
+        except Exception:
+            policy = None
+    # Only allocate a usage sink when we will actually meter (call_class + user) — otherwise the impl
+    # stays byte-identical (no usage-accounting request, no capture).
+    _usage: Optional[Dict] = {} if (call_class and user) else None
+
+    def _meter():
+        # ADR 0010: one Vault-free token/cost entry for a metered utility call, keyed by the canonical
+        # game session so it aggregates with the game's narration turns. Fail-open; player never sees it.
+        if not (call_class and user and _usage):
+            return
+        try:
+            from src import orwell_token_ledger as _tl
+            _sess = session
+            if not _sess:
+                try:
+                    from src import orwell_game_session as _gs2
+                    _sess = _gs2.get_game_session(user)
+                except Exception:
+                    _sess = None
+            _tl.record_turn(
+                user, session=_sess or user, turn_id=None, call_class=call_class,
+                input_tokens=_usage.get("input_tokens", 0), cached_tokens=_usage.get("cached_tokens", 0),
+                reasoning_tokens=_usage.get("reasoning_tokens", 0), output_tokens=_usage.get("output_tokens", 0),
+                cost=float(_usage.get("cost") or 0), provider=_usage.get("provider"),
+            )
+        except Exception:
+            pass
+
     if not llm_trace.enabled():
-        return await _llm_call_async_impl(
+        text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
-            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
+            policy=policy, usage_sink=_usage)
+        _meter()
+        return text
     started = time.time()
     try:
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
-            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type)
+            headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
+            policy=policy, usage_sink=_usage)
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
-            max_tokens=max_tokens, response={"text": text}, ok=True,
+            max_tokens=max_tokens, response={"text": text, "usage": _usage or None}, ok=True,
             duration_ms=int((time.time() - started) * 1000))
+        _meter()
         return text
     except Exception as e:
         llm_trace.record_llm_call(
@@ -1212,7 +1284,9 @@ async def _llm_call_async_impl(
     headers: Optional[Dict] = None,
     timeout: int = LLMConfig.STREAM_TIMEOUT,
     max_retries: int = LLMConfig.MAX_RETRIES,
-    prompt_type: Optional[str] = None
+    prompt_type: Optional[str] = None,
+    policy: Optional[Dict] = None,
+    usage_sink: Optional[Dict] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
@@ -1263,6 +1337,12 @@ async def _llm_call_async_impl(
         }
         if _restricts_temperature(model):
             payload.pop("temperature", None)
+        # ADR 0010: per-class reasoning budget on the non-streaming path too (utility-extraction /
+        # background-authoring), + OpenRouter usage accounting so `cost` is returned — but ONLY when a
+        # usage_sink is present (we're metering), so a non-metered call stays byte-identical.
+        _apply_reasoning_budget(payload, provider, model, policy)
+        if provider == "openrouter" and usage_sink is not None:
+            payload["usage"] = {"include": True}
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
@@ -1293,6 +1373,21 @@ async def _llm_call_async_impl(
             logger.info(f"LLM async call to {target_url} succeeded in {duration:.2f}s (attempt {attempt})")
             _clear_host_dead(target_url)
             data = r.json()
+            # ADR 0010: surface the usage envelope for the meter (the caller records it). Non-streaming
+            # OpenAI-compatible providers return it inline; only attach when present.
+            if usage_sink is not None and isinstance(data, dict):
+                _u = data.get("usage") or {}
+                if _u:
+                    _ptd = _u.get("prompt_tokens_details") or {}
+                    _ctd = _u.get("completion_tokens_details") or {}
+                    usage_sink.update({
+                        "input_tokens": _u.get("prompt_tokens", 0),
+                        "output_tokens": _u.get("completion_tokens", 0),
+                        "cached_tokens": _ptd.get("cached_tokens", 0) or 0,
+                        "reasoning_tokens": _ctd.get("reasoning_tokens", 0) or 0,
+                        "cost": _u.get("cost"),
+                        "provider": provider,
+                    })
             try:
                 if provider == "anthropic":
                     response = _parse_anthropic_response(data)
@@ -1374,22 +1469,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         }
         if _restricts_temperature(model):
             payload.pop("temperature", None)
-        # ADR 0010 slice B: send the per-call-class reasoning budget (the dominant cost lever on a
-        # thinking model). Provider-aware so it actually fires for the LIVE model and never breaks a
-        # non-reasoning one (NOT gated on `_supports_thinking`, whose pattern list predates DeepSeek-V4
-        # and would silently no-op the live narration model):
-        #   • OpenAI o-series  → `reasoning_effort`;
-        #   • OpenRouter       → the unified `reasoning` map (applied to reasoners like DeepSeek-V*/
-        #                        o-series, ignored for the rest — safe to always send);
-        #   • other direct providers → only when the model is a known thinking model (else omit, so a
-        #                        plain chat model is byte-identical and never 400s on an unknown field).
-        if policy and policy.get("reasoning"):
-            _eff = (policy.get("reasoning") or {}).get("effort")
-            if _eff:
-                if provider == "openai" and _uses_max_completion_tokens(model):
-                    payload["reasoning_effort"] = _eff
-                elif provider == "openrouter" or _supports_thinking(model):
-                    payload["reasoning"] = {"effort": _eff}
+        # ADR 0010 slice B: send the per-call-class reasoning budget (provider-aware; see helper).
+        _apply_reasoning_budget(payload, provider, model, policy)
         if provider not in {"openrouter", "groq"}:
             payload["stream_options"] = {"include_usage": True}
         elif provider == "openrouter":

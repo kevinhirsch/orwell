@@ -86,6 +86,8 @@ async def _generate(standing: str, week, phase, anchor: str, user: Optional[str]
                 max_tokens=2048,  # headroom for reasoning models; strip_think trims
                 headers=headers,
                 timeout=_LLM_TIMEOUT,
+                call_class="background-authoring",  # ADR 0010: budget + meter this background call
+                user=user,
             ),
             timeout=_LLM_TIMEOUT + 2,
         )
