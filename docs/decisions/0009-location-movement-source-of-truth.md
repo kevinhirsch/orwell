@@ -1,10 +1,12 @@
 # 0009 — Location & movement: one source of truth, recorded movement, narration grounding
 
-> **Status:** **Accepted — built BDD/TDD-first (2026-06-21).** D2 (record movement for everyone), D3
-> (hard-fold: the location grounding barrier + the pre-emission impossible-claim guard), and D4 (the
-> dual-map contract + its calibration-neutrality guard) are shipped (PRs #454/#455/#456/#458/#459 + the
-> D4 guard). **D1** (one occupancy snapshot per turn — the temporal-skew polish) remains the open
-> increment. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
+> **Status:** **Accepted — built BDD/TDD-first (2026-06-21).** ALL increments shipped. D2 (record
+> movement for everyone), D3 (hard-fold: the location grounding barrier + the pre-emission
+> impossible-claim guard), and D4 (the dual-map contract + its calibration-neutrality guard) shipped in
+> PRs #454/#455/#456/#458/#459 + #463. **D1** (one occupancy snapshot per turn — the temporal-skew
+> polish) shipped as a **FE-side per-turn occupancy FREEZE** (NOT the engine `presenceTick` reorder
+> below — see the D1 note for why the reorder was rejected as a calibration footgun). Captures the
+> refactor target for player + NPC room-location tracking. **PO rulings:**
 > (1) the model **narrates the open texture** (who moves where) and the engine **records** it — the
 > engine keeps only the seeded baseline for calibration; the acceptance test is simply *consistent and
 > dynamic*. (2) Enforcement is **hard-fold** under an overriding constraint — **NO visible historic
@@ -83,10 +85,21 @@ Keep `this.presence` as the single source of truth, and **make both narration an
 it** by closing the two leaks (unenforced narration; unrecorded NPC movement) and removing the
 snapshot skew:
 
-- **D1 — One occupancy snapshot per turn.** Re-seat NPCs (`presenceTick`) **before** building the
-  moment prompt, and have the turn response carry the post-tick `whereabouts` the gadget renders, so
-  the model's grounding and the gadget reflect the **same** snapshot. Freeze occupancy for the turn so
-  it never rearranges as the message lands.
+- **D1 — One occupancy snapshot per turn.** *(Originally proposed: re-seat NPCs (`presenceTick`)
+  **before** building the moment prompt. **Rejected** — re-ordering `presenceTick` shifts the shared
+  seeded RNG stream, and the calibration gates run a fixed advance sequence that would NOT catch a
+  live-path break: a calibration footgun. The D4 dual-map guard pins exactly this risk.)* **As built —
+  a FE-side per-turn occupancy FREEZE.** At framing the FE pins the snapshot the turn's prose is
+  grounded in (`freeze_capture_whereabouts`); the whereabouts gadget endpoint serves THAT snapshot
+  (`freeze_view`) with the FE's own narrated NPC moves re-applied (`freeze_record_npc_move`, fed by the
+  D2 belt — preserving D2's visibility), so the off-screen `presenceTick` reshuffle surfaces only on the
+  NEXT turn (alongside the prose that narrates the new arrangement). The board never rearranges as the
+  message lands. **Mitigation — never a houseguest in a WRONG room:** the freeze serves only when the FE
+  issued every move; ANY uncertainty defers to LIVE engine truth (no frozen snapshot; the player
+  re-centered the view, `frozen.room != live.room`; or the MODEL moved a houseguest the FE could not
+  capture, `freeze_mark_model_moved`), and the reconstruction fails toward **omission** (an NPC whose
+  destination is off-view drops out) rather than a wrong-room placement. FE-only, **zero** engine /
+  calibration change. Gate: `frontend/tests/test_adr0009_d1_freeze.py`.
 - **D2 — Record movement for everyone.** Add an NPC-relocation path mirroring the player's
   `moveTo` + `_auto_move_player`: a Vault-free engine command (or a structured "move" the model
   emits) that mutates `this.presence`, **plus an FE auto-belt** that folds a narrated NPC relocation

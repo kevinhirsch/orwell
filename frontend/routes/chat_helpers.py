@@ -432,6 +432,122 @@ _LAST_BEAT_SIG: dict = {}
 _DESYNC_REGROUND: dict = {}
 
 
+# ── ADR 0009 (D1) — the per-turn OCCUPANCY FREEZE for the whereabouts gadget ───────────────── #
+#
+# The gadget polls live presence. But the once-per-turn OFF-SCREEN presenceTick re-seats the house
+# AFTER the moment prompt was built — so the board "rearranges" right as the player finishes reading a
+# scene that was grounded in the PRE-tick occupancy (the D-series root cause #4). The freeze pins the
+# gadget to the snapshot the CURRENT turn's prose was grounded in (captured at framing), then re-applies
+# the narrated moves the FE ITSELF issued this turn (the D2 `_auto_move_npc` belt) so D2's visibility is
+# preserved — while the off-screen reshuffle the FE never issued is held back until the NEXT turn (when
+# the next prose narrates the new arrangement). The same one snapshot now drives the prose grounding and
+# the gadget.
+#
+# MITIGATION — no houseguest is EVER drawn in a WRONG room. The freeze serves only when the FE issued
+# every move and is fully confident; ANY uncertainty falls back to LIVE engine truth:
+#   • no frozen snapshot (pre-game / never framed)            → live;
+#   • the player RE-CENTERED the view (frozen.room != live)   → live (a frozen snapshot can't re-center);
+#   • the MODEL issued a move the FE could not capture        → live (model-driven moveTo/moveHouseguest);
+#   • the reconstruction can't place a houseguest in-view     → OMIT them (they walked off-screen), never
+#                                                               a wrong-room placement.
+# Process-local (like `_LAST_BEAT_SIG`); fail-open everywhere — a restart or any hiccup just shows live.
+_TURN_WHEREABOUTS: dict = {}      # frozen W0 per user — the snapshot this turn's prose was grounded in
+_TURN_NPC_MOVES: dict = {}        # engine-CONFIRMED FE belt NPC moves this turn: [{"id", "room"}, ...]
+_TURN_FREEZE_OK: dict = {}        # False once the model issues a move the FE could not capture
+
+
+def freeze_capture_whereabouts(user, whereabouts) -> None:
+    """At framing (turn start): pin the occupancy this turn's prose is grounded in and reset the per-turn
+    move log + confidence flag. A bad/empty snapshot just clears the freeze (the gadget falls to live)."""
+    key = user or ""
+    if isinstance(whereabouts, dict) and whereabouts.get("room"):
+        _TURN_WHEREABOUTS[key] = whereabouts
+    else:
+        _TURN_WHEREABOUTS.pop(key, None)
+    _TURN_NPC_MOVES[key] = []
+    _TURN_FREEZE_OK[key] = True
+
+
+def freeze_record_npc_move(user, hid, room, name=None) -> None:
+    """The FE NPC auto-move belt applied an engine-CONFIRMED relocation this turn — fold it into the
+    frozen view so the gadget shows the move the player just read (this is what preserves D2). `name`
+    keeps a houseguest who walks INTO view from off-screen labelled correctly (not by raw id)."""
+    if not hid or not room:
+        return
+    mv = {"id": str(hid), "room": str(room)}
+    if name:
+        mv["name"] = str(name)
+    _TURN_NPC_MOVES.setdefault(user or "", []).append(mv)
+
+
+def freeze_mark_model_moved(user) -> None:
+    """The MODEL called a move tool itself this turn (moveHouseguest) — the FE did not capture the
+    specifics, so the freeze can't reflect it. Defer to live engine truth this turn (no wrong room)."""
+    _TURN_FREEZE_OK[user or ""] = False
+
+
+def _reconstruct_frozen(frozen: dict, moves: list) -> dict:
+    """frozen W0 + the FE's engine-confirmed NPC moves, kept inside the fog-of-war view. Each move pulls
+    the houseguest out of wherever the snapshot shows them (one place at a time) and re-seats them at the
+    destination IFF it is the player's room or an adjacent room; a destination OUTSIDE the view drops
+    them (they walked off-screen). Fail toward OMISSION, never a wrong-room placement (the mitigation)."""
+    import copy
+    snap = copy.deepcopy(frozen)
+    player_room = str(snap.get("room") or "")
+    nearby = [nb for nb in (snap.get("nearby") or []) if isinstance(nb, dict)]
+    nearby_by_room = {str(nb.get("room") or ""): nb for nb in nearby}
+    # Remember every known id->name so a houseguest who walks INTO view keeps their real name.
+    name_by_id: dict = {}
+
+    def _index(refs):
+        for r in (refs or []):
+            if isinstance(r, dict) and r.get("id"):
+                name_by_id[str(r["id"])] = str(r.get("name") or "")
+
+    _index(snap.get("present"))
+    for nb in nearby:
+        _index(nb.get("present"))
+
+    def _drop(target_id: str):
+        snap["present"] = [r for r in (snap.get("present") or [])
+                           if str((r or {}).get("id") or "") != target_id]
+        for nb in nearby:
+            nb["present"] = [r for r in (nb.get("present") or [])
+                             if str((r or {}).get("id") or "") != target_id]
+
+    for mv in (moves or []):
+        hid = str((mv or {}).get("id") or "")
+        room = str((mv or {}).get("room") or "")
+        if not hid or not room:
+            continue
+        _drop(hid)  # a houseguest is in exactly one place at a time
+        ref = {"id": hid, "name": str((mv or {}).get("name") or "") or name_by_id.get(hid) or hid}
+        if room == player_room:
+            snap.setdefault("present", []).append(ref)
+        elif room in nearby_by_room:
+            nearby_by_room[room].setdefault("present", []).append(ref)
+        # else: a non-adjacent destination — they left the view (omission, never a wrong-room placement)
+    return snap
+
+
+def freeze_view(user, live):
+    """Return the occupancy the gadget should show: the frozen, prose-grounded board with this turn's
+    FE-issued NPC moves re-applied — or `live` (the engine's whereabouts read, the source of truth)
+    whenever the FE is not fully confident (see the module note). Fail-open: any hiccup returns live."""
+    try:
+        key = user or ""
+        frozen = _TURN_WHEREABOUTS.get(key)
+        if not isinstance(frozen, dict) or not frozen.get("room"):
+            return live  # pre-game / never framed / cleared — fall open to live
+        if not _TURN_FREEZE_OK.get(key, True):
+            return live  # the model moved someone the FE couldn't capture — trust the engine
+        if isinstance(live, dict) and str(live.get("room") or "") != str(frozen.get("room") or ""):
+            return live  # the player re-centered the view — the frozen snapshot can't be re-centered
+        return _reconstruct_frozen(frozen, _TURN_NPC_MOVES.get(key) or [])
+    except Exception:
+        return live
+
+
 # ── 0065 Part A/B — the per-turn LAST-SEEN beatSeq + compare-and-swap wiring ──────────────── #
 #
 # Part A (engine, commit e9c03b4) gives every read/advance/submit result a monotonic `beatSeq`, and
@@ -1307,6 +1423,8 @@ async def apply_game_framing(
             _loc = _whereabouts_barrier_directive(game_state.get("whereabouts"))
             if _loc:
                 gm_prompt = gm_prompt + "\n\n" + _loc
+            # ADR 0009 (D1): pin this same in-memory snapshot as the per-turn occupancy freeze (below).
+            freeze_capture_whereabouts(user, game_state.get("whereabouts"))
         except Exception as e:
             logger.warning("[orwell] location grounding skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
