@@ -35,7 +35,12 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // J5-06: a confirmed card schedules its own 4s self-removal. Track that timer so a NEW card
+  // arming within the window cancels it — otherwise the stale timer fires removeCard() and yanks
+  // the freshly-armed (live, unconfirmed) next decision card out from under the player (TRANS-4).
+  let _doneTimer = null;
   function removeCard() {
+    if (_doneTimer) { clearTimeout(_doneTimer); _doneTimer = null; }
     const old = document.getElementById(CARD_ID);
     if (old) old.remove();
   }
@@ -50,7 +55,17 @@
         background: var(--panel, #111); color: var(--fg, #9cdef2);
         border: 1px solid var(--accent, var(--red, #e06c75));
         font-size: .85rem; line-height: 1.5;
+        /* J5-03: figure/ground — the binding card must lift off the chat stream like every
+           OrwellWindow does. Reuse the kit's shadow token (it is the only interactive surface
+           that was missing it). */
+        box-shadow: var(--win-shadow, 0 8px 32px rgba(0, 0, 0, 0.45));
+        /* J5-05: a brief entrance + a transition on the done-state dim, so a binding decision
+           neither pops in nor flips to "✓ Locked in" as a silent text swap. */
+        animation: odec-in .18s ease-out;
+        transition: opacity .2s ease, border-color .2s ease;
       }
+      @keyframes odec-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) { #${CARD_ID} { animation: none; transition: none; } }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
       #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
@@ -62,7 +77,10 @@
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       #${CARD_ID} .odec-opt {
         cursor: pointer; border-radius: 999px; padding: .3rem .8rem; min-height: 36px;
-        border: 1px solid var(--border, #355a66); background: rgba(255,255,255,.05); color: inherit;
+        /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
+           dark panel — below WCAG 1.4.11's 3:1 for a UI-component boundary. Mix toward --fg so
+           the chip edge is visible in both themes (the chip is the ONLY way to make the pick). */
+        border: 1px solid color-mix(in srgb, var(--border, #355a66) 55%, var(--fg, #9cdef2)); background: rgba(255,255,255,.05); color: inherit;
         font: inherit;
       }
       #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
@@ -129,7 +147,7 @@
       "tie-break": "Tied vote — as HOH, you decide",
       "final-eviction": "Final 3 — you evict, personally",
       "goodbye-message": "Goodbye message — your tone, your words",
-      "finale-statement": "Finale — your statement to the jury",
+      "finale-statement": "Opening statement — address the jury",
       "finale-answer": "Jury question — choose your appeal",
       "juror-question": "Your jury question — ask the finalist",
       "juror-vote": "Your jury vote — crown a winner",
@@ -259,6 +277,7 @@
     if (kind === "finale-statement") {
       textarea = document.createElement("textarea");
       textarea.placeholder = "Your opening statement to the jury…";
+      textarea.setAttribute("aria-label", "Your opening statement to the jury"); // J5-02: placeholders aren't accessible names
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
       confirm.disabled = false; // a statement may be short; engine treats it as flavor
@@ -266,6 +285,7 @@
       // E37: scoreless free text — the player-juror's own question to the finalist.
       textarea = document.createElement("textarea");
       textarea.placeholder = "Your question to the finalist…";
+      textarea.setAttribute("aria-label", "Your question to the finalist"); // J5-02
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
       confirm.disabled = false; // free text; the engine scores nothing here
@@ -274,6 +294,7 @@
       (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
       textarea = document.createElement("textarea");
       textarea.placeholder = "Your goodbye message (optional — the tone is what binds)…";
+      textarea.setAttribute("aria-label", "Your goodbye message (optional)"); // J5-02
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
     } else if (kind === "finale-answer") {
@@ -328,6 +349,16 @@
       note.textContent = pending.binding === false
         ? "No stakes here — your approach was locked in round one. Push through, or dismiss to play it out in conversation."
         : "This sets how you play the comp. Your selection only — never read from prose.";
+    } else if (kind === "juror-question") {
+      // J5-01: this card IS a prose textarea — the generic "never read from prose" note (announced
+      // via aria-describedby) directly contradicted the only input on the card.
+      note.textContent = "Your own words — type your question, then Confirm. Leave it blank to pass.";
+    } else if (kind === "finale-statement") {
+      note.textContent = "Your own words — type your statement to the jury, then Confirm.";
+    } else if (kind === "goodbye-message") {
+      // J5-01: the tone chip binds (the written message is optional) — say so, since Confirm stays
+      // disabled until a tone is picked and nothing else explained why.
+      note.textContent = "Pick a tone — that's what binds. Your written message is optional.";
     } else {
       note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
     }
@@ -389,7 +420,12 @@
           box.dispatchEvent(new Event("input", { bubbles: true }));
           box.focus();
         }
-        setTimeout(removeCard, 4000);
+        _doneTimer = setTimeout(() => {
+          // J5-06: only remove if THIS card is still the lingering done-card — never a card that
+          // re-armed into the same id within the 4s window (removeCard() also clears this timer).
+          if (card.isConnected && card.classList.contains("odec-done")) card.remove();
+          _doneTimer = null;
+        }, 4000);
       } catch (_) {
         if (window.OrwellReport) window.OrwellReport.fail("decision", "submit-post", _); // G11: fail open, never silent
         confirm.disabled = false;

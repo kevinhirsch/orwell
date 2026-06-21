@@ -32,6 +32,7 @@
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 180000); }
   let unsealed = null; // cached after the player opens the Vault
   let _lastRecap = null; // last-good recap (perf/resilience): a transient recap-poll blip must not blank the open panel
+  let _lastSig = null; // J5-10 (TRANS-3): signature of the last render, to skip redundant rebuilds
 
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
@@ -100,9 +101,19 @@
     if (sessionStorage.getItem("orwell-retro-dismissed") === "1") { showPanel(false); return; }
     ensurePanel();
     if (!_body) return;
+    // J5-10 (TRANS-3): the recap is terminal/immutable once the season is finished — re-rendering
+    // the whole body on every 30s poll snapped the reader's scroll to the top and dropped keyboard/
+    // SR focus to <body>. Skip the rebuild when nothing changed; only a real change (the Vault
+    // unseal) re-renders. The full body teardown then happens at most twice (recap, then unsealed).
+    const sig = JSON.stringify({ w: recap.winner && recap.winner.name, wk: recap.weeksPlayed,
+      h: (recap.highlights || []).length, u: !!unsealed });
+    if (sig === _lastSig && _body.childNodes.length) { showPanel(true); return; }
+    _lastSig = sig;
     _body.replaceChildren();
 
-    if (recap.winner) _body.appendChild(el("div", "margin-bottom:6px;opacity:0.9", "👑 " + recap.winner.name + " won the season (week " + recap.weeksPlayed + ")."));
+    // J5-09: the winner is the panel's apex — give it real typographic weight, not the same
+    // 13px/0.9 as a mid-season highlight line.
+    if (recap.winner) _body.appendChild(el("div", "margin-bottom:10px;font-size:1.1rem;font-weight:700;letter-spacing:-0.02em", "👑 " + recap.winner.name + " won the season (week " + recap.weeksPlayed + ")."));
 
     const list = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85");
     for (const h of (recap.highlights || []).slice(-12)) list.appendChild(el("li", "", h));
@@ -110,7 +121,8 @@
 
     const vaultWrap = el("div", "margin-top:8px");
     if (unsealed) {
-      vaultWrap.appendChild(el("strong", "", "🔓 The Producer's Vault"));
+      // J5-07: a real section heading (was <strong>, invisible to SR heading navigation — WCAG 1.3.1).
+      vaultWrap.appendChild(el("h3", "margin:4px 0 4px;font-size:inherit", "🔓 The Producer's Vault"));
       if (unsealed.twists && unsealed.twists.length) {
         const t = el("div", "margin:4px 0;opacity:0.9");
         t.textContent = unsealed.twists.map((x) =>
@@ -118,7 +130,6 @@
         ).join(" · ");
         vaultWrap.appendChild(t);
       }
-      const story = el("ul", "margin:6px 0;padding-left:18px;opacity:0.8;font-size:12.5px");
       // S6-3 (audit): hiddenStory[].type can be a raw internal pathway id (e.g.
       // "overheard:offscreen:strategy:…"); never surface it verbatim — show its leading channel
       // segment in prose. Clean enum values ("confessional", "overheard") pass through unchanged.
@@ -126,16 +137,14 @@
         const head = String(t || "").split(/[:|/]/)[0].replace(/[_-]+/g, " ").trim().toLowerCase();
         return head || "note";
       };
-      for (const h of (unsealed.hiddenStory || []).slice(-40)) {
-        story.appendChild(el("li", "", "[" + humanizeStoryType(h.type) + "] " + h.content));
-      }
-      vaultWrap.appendChild(story);
+      // J5-09 (SOCIAL-3): the per-voter "who really voted against you" reveal is the signature
+      // secret-ballot payoff — render it FIRST (right under the twists), not buried beneath the
+      // up-to-40-line confessional dump.
       // E12: eviction ballots were anonymous all season ("a vote to evict …"); the retrospective is
-      // the ONE place per-voter attribution unseals — the "who really voted against you" payoff.
-      // Names only (the data pairs id+name; a raw id is never rendered).
+      // the ONE place per-voter attribution unseals. Names only (the data pairs id+name; a raw id is never rendered).
       if (unsealed.evictionVotes && unsealed.evictionVotes.length) {
-        vaultWrap.appendChild(el("strong", "display:block;margin-top:8px", "🗳 How the votes really fell"));
-        const votes = el("ul", "margin:6px 0;padding-left:18px;opacity:0.8;font-size:12.5px");
+        vaultWrap.appendChild(el("h3", "display:block;margin:12px 0 4px;font-size:inherit", "🗳 How the votes really fell"));
+        const votes = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85;font-size:12.5px");
         for (const wk of unsealed.evictionVotes) {
           const against = (wk.votes || [])
             .filter((v) => v.votedFor && wk.evictee && v.votedFor.id === wk.evictee.id)
@@ -146,10 +155,19 @@
         }
         vaultWrap.appendChild(votes);
       }
+      const story = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85;font-size:12.5px");
+      for (const h of (unsealed.hiddenStory || []).slice(-40)) {
+        // J5-11: prose annotation, not "[bracketed]" metadata that reads as a debug log.
+        const lbl = humanizeStoryType(h.type);
+        story.appendChild(el("li", "", lbl.charAt(0).toUpperCase() + lbl.slice(1) + " — " + h.content));
+      }
+      vaultWrap.appendChild(story);
     } else {
       const open = el("button", [
-        "margin-top:4px", "padding:6px 10px", "border-radius:8px", "cursor:pointer",
-        "background:var(--accent, #6d4aff)", "color:var(--on-accent, #fff)", "border:none", "font-size:12.5px",
+        // J5-08: contrast — #fff on the purple accent passes 4.5:1 (the computed --on-accent is dark
+        // ink tuned for the brand RED, which fails on this purple). And lift to the 44px tap floor.
+        "margin-top:4px", "padding:10px 14px", "border-radius:8px", "cursor:pointer", "min-height:44px",
+        "background:var(--accent, #6d4aff)", "color:#fff", "border:none", "font-size:13px", "font-family:inherit", "font-weight:600",
       ].join(";"), "🔐 Open the Producer's Vault");
       open.addEventListener("click", async () => {
         try {

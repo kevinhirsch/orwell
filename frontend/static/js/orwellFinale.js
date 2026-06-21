@@ -87,9 +87,11 @@ import * as modalManager from "./modalManager.js";
         #orwell-finale .ofin-reveal b { color: var(--fg, #9cdef2); }
         #orwell-finale .ofin-move { margin-top: .5rem; }
         #orwell-finale .ofin-btn {
-          width: 100%; cursor: pointer; border-radius: 8px; padding: .3rem .5rem; margin: .2rem 0;
+          /* J5-13: lift to the project tap floor (was ~27px) and bump the label off .74rem so the
+             time-pressured finale move buttons are tappable + legible on coarse pointers. */
+          width: 100%; cursor: pointer; border-radius: 8px; padding: .45rem .6rem; margin: .2rem 0; min-height: 36px;
           background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
-          font-family: inherit; font-size: .74rem; text-align: left;
+          font-family: inherit; font-size: .82rem; text-align: left;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
         /* E67/C26 + F3: phones — a full-width top sheet whose POSITION the slot
@@ -103,7 +105,7 @@ import * as modalManager from "./modalManager.js";
           }
         }
       </style>
-      <div class="ofin-stage" id="ofin-stage"></div>
+      <div class="ofin-stage" id="ofin-stage" aria-live="polite"></div>
       <div class="ofin-final" id="ofin-final"></div>
       <div class="ofin-hd" id="ofin-reveal-hd" style="display:none">The votes</div>
       <div id="ofin-reveals"></div>
@@ -166,6 +168,7 @@ import * as modalManager from "./modalManager.js";
       card.className = "ofin-fin";
       const b = document.createElement("b"); b.textContent = nameOf(f);
       const t = document.createElement("span"); t.className = "ofin-tally"; t.textContent = String(tally[f.id] || 0);
+      t.setAttribute("aria-label", String(tally[f.id] || 0) + " votes"); // J5-14: the bare number has no accessible meaning
       card.appendChild(b); card.appendChild(t); finWrap.appendChild(card);
     }
 
