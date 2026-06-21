@@ -415,6 +415,15 @@ on the live build**.
   resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
   S1-5, S1-1L, S2-1, F-S2-B; the §2.10 architecture latents; and the State-5 same-tab-F5 welcome edge
   (needs a server-side per-game nonce). The refactor roadmap is `docs/REFACTOR-ROADMAP.md`.
+- **Token-economy / truncation follow-ons (from the F-S4-D / PR #481 discussion) — tracked in `0069` §3 +
+  ADR `0010`** (runtime-editable per-class output cap; model-aware reasoning sizing folding in the Anthropic
+  fallback; the "which-cap-is-biting" `appliedMaxTokens`+`finishReason` envelope fields; chat-mode `Continue ▸`
+  parity). **Two audit siblings still open here:** (a) **F-S4-C sibling** — the casting/new-chat stream-error
+  path appears to swallow a 502 with **no visible notice** (the in-game branch is fixed; this is a separate
+  surface, not yet VIEWED end-to-end); (b) **reasoning-channel-split latent** — if a model misroutes its
+  *answer* into the `thinking` channel, the public bubble can look empty/truncated (the body renders only the
+  reply buffer; the JSON extractors already recover from `reasoning`, the main bubble does not). Both
+  non-blocking; capture-then-decide.
 
 ---
 
