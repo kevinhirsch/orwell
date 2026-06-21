@@ -35,7 +35,7 @@ def test_narration_defaults_medium_effort():
 
 def test_utility_extraction_defaults():
     pol = resolve_token_policy("utility-extraction")
-    assert pol["reasoning"] == {"effort": "low"}
+    assert pol["reasoning"] is None  # off ⇒ reasoning omitted (pure extraction/classification needs none)
     assert pol["max_tokens"] == 1500
 
 

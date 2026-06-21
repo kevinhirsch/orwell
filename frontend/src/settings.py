@@ -118,16 +118,28 @@ DEFAULT_SETTINGS = {
     "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
-    # reasoning budget. Maps a call class to a reasoning effort; empty {} means
-    # "use the code defaults in src.token_policy". Valid classes are exactly
-    # token_policy.CALL_CLASSES ("narration", "utility-extraction", "casting",
-    # "background-authoring"); valid efforts are token_policy.valid_efforts()
-    # ("off", "low", "medium", "high"). Read via get_setting("reasoning_budget", {})
-    # and passed into token_policy.resolve_token_policy(); an unknown class/effort
-    # there falls back to the class default, so a partial/garbage map is safe. Edit
-    # it at runtime via POST /api/settings (admin only) — e.g.
-    # {"reasoning_budget": {"narration": "high", "utility-extraction": "off"}}.
-    "reasoning_budget": {},
+    # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
+    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1): narration &
+    # casting = medium (quality-sensitive, player-facing), background-authoring =
+    # low (background flavor), and **utility-extraction = off** — pure JSON
+    # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
+    # trace showed its reasoning tokens wasted.
+    # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
+    # token_policy.valid_efforts() ("off", "low", "medium", "high"). NOTE: "off" is
+    # now a GENUINE disable, not an omission — token_policy resolves it and
+    # llm_core._apply_reasoning_budget actively sends `reasoning:{"enabled":false}`
+    # to OpenRouter (verified upstream via debug.echo_upstream_body), so a reasoning
+    # model can no longer fall back to its (higher) default. "off" IS a real cost
+    # floor now; "low" is the lowest non-zero effort. A class absent from the map
+    # uses the token_policy code default. Read via
+    # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
+    # edit per class at runtime via the Token Economy settings card or POST /api/settings.
+    "reasoning_budget": {
+        "narration": "medium",
+        "utility-extraction": "off",
+        "casting": "medium",
+        "background-authoring": "low",
+    },
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
     # 0.0 = alert off. Compared against the running per-session cost total via
     # orwell_token_ledger.check_soft_alert (strictly-over semantics).

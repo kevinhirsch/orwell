@@ -32,7 +32,8 @@ CALL_CLASSES = ("narration", "utility-extraction", "casting", "background-author
 # OpenRouter reasoning form is {"effort": "low"|"medium"|"high"} or omitted.
 _DEFAULT_EFFORT = {
     "narration": "medium",
-    "utility-extraction": "low",
+    "utility-extraction": "off",  # off (not low): pure extraction/classification (moves/deals/scene);
+                                  # the prompts forbid thinking and the 2026-06-21 I/O trace showed it wasted.
     "casting": "medium",
     "background-authoring": "low",
 }
