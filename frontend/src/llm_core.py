@@ -1323,7 +1323,7 @@ async def _llm_call_async_impl(
 async def stream_llm(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
-                     tools: Optional[List[Dict]] = None):
+                     tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
@@ -1372,6 +1372,22 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         }
         if _restricts_temperature(model):
             payload.pop("temperature", None)
+        # ADR 0010 slice B: send the per-call-class reasoning budget (the dominant cost lever on a
+        # thinking model). Provider-aware so it actually fires for the LIVE model and never breaks a
+        # non-reasoning one (NOT gated on `_supports_thinking`, whose pattern list predates DeepSeek-V4
+        # and would silently no-op the live narration model):
+        #   • OpenAI o-series  → `reasoning_effort`;
+        #   • OpenRouter       → the unified `reasoning` map (applied to reasoners like DeepSeek-V*/
+        #                        o-series, ignored for the rest — safe to always send);
+        #   • other direct providers → only when the model is a known thinking model (else omit, so a
+        #                        plain chat model is byte-identical and never 400s on an unknown field).
+        if policy and policy.get("reasoning"):
+            _eff = (policy.get("reasoning") or {}).get("effort")
+            if _eff:
+                if provider == "openai" and _uses_max_completion_tokens(model):
+                    payload["reasoning_effort"] = _eff
+                elif provider == "openrouter" or _supports_thinking(model):
+                    payload["reasoning"] = {"effort": _eff}
         if provider not in {"openrouter", "groq"}:
             payload["stream_options"] = {"include_usage": True}
         elif provider == "openrouter":

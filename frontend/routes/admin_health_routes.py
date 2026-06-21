@@ -436,6 +436,74 @@ def _session_metadata(limit: int = 25) -> dict:
     return out
 
 
+def _token_economy(user: str | None) -> dict:
+    """ADR 0010 / feature 0069 — the admin token-economy view for one user.
+
+    Vault-free / body-free BY CONSTRUCTION: the ledger stores ONLY numbers, short ids,
+    and one known call-class token (no message body, narration, prompt, or engine secret
+    can land in it — enforced in orwell_token_ledger). This helper reads that store and
+    derives a small summary; it never touches the Vault or any transcript.
+
+    Returns the recent ledger entries, a per-session cost total + whether the soft alert
+    (against the admin-set ``token_spend_alert_usd``) is tripped, and an aggregate summary
+    (summed token counts by kind, total cost, latest context-percent). Best-effort — a
+    missing/corrupt store reads as empty numbers, never a 500."""
+    from src import orwell_token_ledger
+    from src.settings import get_setting
+
+    out: dict = {"user": user or "default"}
+    try:
+        threshold = float(get_setting("token_spend_alert_usd", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        threshold = 0.0
+    out["spendAlertThresholdUsd"] = threshold
+
+    entries: list = []
+    try:
+        entries = orwell_token_ledger.get_recent(user, limit=200)
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        entries = []
+    out["entries"] = entries
+
+    # Per-session cost totals + per-session soft-alert state (strictly-over the threshold).
+    sessions: dict = {}
+    for e in entries:
+        sid = e.get("session") or ""
+        if sid and sid not in sessions:
+            try:
+                total = orwell_token_ledger.game_cost_total(user, sid)
+            except Exception:
+                total = 0.0
+            try:
+                alert = orwell_token_ledger.check_soft_alert(user, sid, threshold)
+            except Exception:
+                alert = False
+            sessions[sid] = {"costTotal": total, "softAlert": bool(alert)}
+    out["sessions"] = sessions
+    out["softAlert"] = any(s.get("softAlert") for s in sessions.values())
+
+    # Aggregate summary — summed token counts by kind, total cost, latest context-percent.
+    summary = {
+        "inputTokens": 0, "cachedTokens": 0, "reasoningTokens": 0, "outputTokens": 0,
+        "totalCost": 0.0, "latestContextPercent": None, "turns": len(entries),
+    }
+    for e in entries:
+        for k in ("inputTokens", "cachedTokens", "reasoningTokens", "outputTokens"):
+            try:
+                summary[k] += int(e.get(k) or 0)
+            except (TypeError, ValueError):
+                pass
+        try:
+            summary["totalCost"] += float(e.get("cost") or 0.0)
+        except (TypeError, ValueError):
+            pass
+    if entries:
+        summary["latestContextPercent"] = entries[-1].get("contextPercent")
+    out["summary"] = summary
+    return out
+
+
 async def _bundle_extras(user: str | None) -> dict:
     """Assemble the BEEFED-UP sections of the debug bundle. Each is best-effort and
     Vault-free; the whole assembly is wrapped so the bundle always serializes."""
@@ -525,6 +593,23 @@ def setup_admin_health_routes() -> APIRouter:
                 "images": {"available": False},
                 "error": "health snapshot degraded — recovery actions remain available",
             }
+
+    @router.get("/token-economy")
+    async def admin_token_economy(request: Request, user: str | None = None):
+        """ADR 0010 / feature 0069 — read-only token/cost view for a user (admin-gated).
+
+        Query param ``user`` selects whose ledger to read (default: the current admin /
+        "default"). Vault-free by construction — the ledger holds only numbers/ids; no
+        message body, transcript, or engine secret can be returned. NOT exposed on any
+        player route."""
+        require_admin(request)
+        target = user
+        if not target:
+            try:
+                target = effective_user(request)
+            except Exception:
+                target = None
+        return _token_economy(target)
 
     @router.get("/logs/sources")
     async def admin_log_sources(request: Request):

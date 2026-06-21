@@ -2928,6 +2928,20 @@ async def stream_agent_loop(
     # keyed by game) sets message forcefulness and carries across turns, so repeated stalls
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
+    # ADR 0010 slice B: resolve the per-call-class token policy ONCE for game turns (live-game
+    # narration or the casting interview). It carries the reasoning budget — admin-overridable via the
+    # `reasoning_budget` setting — that each narration LLM call then sends. Non-game platform chat
+    # resolves no policy ⇒ byte-identical (no reasoning override on the general assistant).
+    _call_class = "casting" if game_mode == "casting" else ("narration" if _is_live_game else None)
+    _token_policy = None
+    if _call_class:
+        try:
+            from src.token_policy import resolve_token_policy
+            _token_policy = resolve_token_policy(
+                _call_class, {"reasoning_budget": get_setting("reasoning_budget", {})}
+            )
+        except Exception:
+            _token_policy = None
     # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
     # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
     # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
@@ -3077,6 +3091,7 @@ async def stream_agent_loop(
             prompt_type=prompt_type if round_num == 1 else None,
             tools=all_tool_schemas if all_tool_schemas else None,
             timeout=agent_stream_timeout,
+            policy=_token_policy,
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
