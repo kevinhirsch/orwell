@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional
 
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from .database import Session as DbSession, ChatMessage as DbChatMessage, Document as DbDocument, SessionLocal, utcnow_naive
 from .models import Session, ChatMessage
 
@@ -140,7 +142,7 @@ class SessionManager:
         else:
             db_messages = db.query(DbChatMessage).filter(
                 DbChatMessage.session_id == db_session.id
-            ).order_by(DbChatMessage.timestamp).all()
+            ).order_by(DbChatMessage.seq).all()  # ADR 0008: authoritative order
 
             for db_msg in db_messages:
                 meta = json.loads(db_msg.meta_data) if db_msg.meta_data else {}
@@ -198,6 +200,25 @@ class SessionManager:
 
         self._persist_message(session_id, message)
 
+        # ADR 0008: a completion broadcast. Today only `run-started` fires (turn START), so a tab that
+        # missed it — or the SENDER, which is optimistic-only — never learns the canonical {id, seq} of a
+        # persisted message and the conversations drift. Publishing message-added with the authoritative
+        # {id, seq} (+ the optimistic client_msg_id so a sender can adopt its own temp bubble) lets every
+        # tab reconcile by id. Tiny, Vault-free payload (ids/seq/types only — never content). Best-effort:
+        # a publish failure must never break a persist; lazy import avoids any import-time cycle.
+        try:
+            from src import session_events as _se
+            _md = message.metadata or {}
+            if _md.get("_db_id") is not None:
+                _se.publish(session_id, "message-added", {
+                    "id": _md.get("_db_id"),
+                    "seq": _md.get("_seq"),
+                    "role": message.role,
+                    "client_msg_id": _md.get("client_msg_id"),
+                })
+        except Exception:
+            pass
+
     def _persist_message(self, session_id: str, message: ChatMessage):
         """Persist a single message to the database."""
         db = SessionLocal()
@@ -222,28 +243,55 @@ class SessionManager:
             _content = message.content
             if isinstance(_content, list):
                 _content = json.dumps(_content)
-            db_message = DbChatMessage(
-                id=msg_id,
-                session_id=session_id,
-                role=message.role,
-                content=_content,
-                meta_data=json.dumps(message.metadata) if message.metadata else None,
-                timestamp=msg_time,
-            )
-            db.add(db_message)
-
-            db_session.message_count = len(self.sessions.get(session_id, {}).history) if session_id in self.sessions else 0
+            _meta_json = json.dumps(message.metadata) if message.metadata else None
             _now = datetime.now(timezone.utc)
-            db_session.last_accessed = _now
-            # Clean "last conversation" timestamp — only bumped here on a
-            # real message persist, so it powers an accurate "Last active"
-            # sort that ignores renames / model swaps / mere opens.
-            db_session.last_message_at = _now
+            _mc = len(self.sessions.get(session_id, {}).history) if session_id in self.sessions else 0
 
-            db.commit()
+            # ADR 0008: assign the monotonic per-session `seq` (the authoritative chat order).
+            # MAX(seq)+1 under the SQLite write lock, with the UNIQUE(session_id, seq) index as the
+            # backstop: if a concurrent writer grabbed the same number, the commit raises
+            # IntegrityError and we recompute + retry. Bounded retries; never blocks a real persist.
+            # A fresh DbChatMessage is built per attempt so a rolled-back row is never re-added.
+            assigned_seq = None
+            for _attempt in range(6):
+                _max_seq = (
+                    db.query(func.max(DbChatMessage.seq))
+                    .filter(DbChatMessage.session_id == session_id)
+                    .scalar()
+                )
+                next_seq = 0 if _max_seq is None else int(_max_seq) + 1
+                db_message = DbChatMessage(
+                    id=msg_id,
+                    session_id=session_id,
+                    role=message.role,
+                    content=_content,
+                    meta_data=_meta_json,
+                    timestamp=msg_time,
+                    seq=next_seq,
+                )
+                db.add(db_message)
+                # Re-apply the parent-session bookkeeping each attempt (a rollback expires it).
+                db_session.message_count = _mc
+                db_session.last_accessed = _now
+                # Clean "last conversation" timestamp — only bumped here on a real message persist,
+                # so it powers an accurate "Last active" sort that ignores renames / model swaps / opens.
+                db_session.last_message_at = _now
+                try:
+                    db.commit()
+                    assigned_seq = next_seq
+                    break
+                except IntegrityError:
+                    # Lost the seq race (another writer committed the same seq) — roll back and retry.
+                    db.rollback()
 
-            # Store DB ID on the in-memory message for edit/delete by ID
+            if assigned_seq is None:
+                logger.error("Could not assign chat seq for session %s after retries", session_id)
+                return
+
+            # Store DB ID + seq on the in-memory message for edit/delete by ID and for the
+            # authoritative-order render paths (ADR 0008).
             message.metadata['_db_id'] = msg_id
+            message.metadata['_seq'] = assigned_seq
 
             logger.debug(f"Persisted message to session {session_id}")
 
@@ -303,7 +351,7 @@ class SessionManager:
         try:
             db_messages = db.query(DbChatMessage).filter(
                 DbChatMessage.session_id == session_id
-            ).order_by(DbChatMessage.timestamp).all()
+            ).order_by(DbChatMessage.seq).all()  # ADR 0008: authoritative order
 
             deleted = 0
             for msg in db_messages[keep_count:]:
@@ -357,11 +405,14 @@ class SessionManager:
                              else message.content),
                     meta_data=json.dumps(message.metadata) if message.metadata else None,
                     timestamp=now + timedelta(microseconds=i),
+                    # ADR 0008: an atomic full replace — the index IS the authoritative seq.
+                    seq=i,
                 )
                 db.add(db_message)
                 if message.metadata is None:
                     message.metadata = {}
                 message.metadata["_db_id"] = msg_id
+                message.metadata["_seq"] = i
 
             db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
             if db_session:

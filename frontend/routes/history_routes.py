@@ -60,6 +60,11 @@ def setup_history_routes(session_manager) -> APIRouter:
                 entry = {"role": msg.role, "content": msg.content}
                 if msg.metadata:
                     entry["metadata"] = msg.metadata
+                    # ADR 0008: surface the authoritative {id, seq} so the FE renders/reconciles by id.
+                    if msg.metadata.get("_db_id"):
+                        entry["id"] = msg.metadata["_db_id"]
+                    if msg.metadata.get("_seq") is not None:
+                        entry["seq"] = msg.metadata["_seq"]
                 history_dict.append(entry)
             elif isinstance(msg, dict):
                 if msg.get("metadata", {}).get("hidden"):
@@ -68,8 +73,13 @@ def setup_history_routes(session_manager) -> APIRouter:
                     "role": msg.get("role", ""),
                     "content": msg.get("content", ""),
                 }
-                if msg.get("metadata"):
-                    entry["metadata"] = msg["metadata"]
+                _md = msg.get("metadata")
+                if _md:
+                    entry["metadata"] = _md
+                    if _md.get("_db_id"):
+                        entry["id"] = _md["_db_id"]
+                    if _md.get("_seq") is not None:
+                        entry["seq"] = _md["_seq"]
                 history_dict.append(entry)
 
         # Fallback: load from DB if in-memory is empty
@@ -79,13 +89,13 @@ def setup_history_routes(session_manager) -> APIRouter:
                 db_messages = (
                     db.query(DbChatMessage)
                     .filter(DbChatMessage.session_id == session_id)
-                    .order_by(DbChatMessage.timestamp)
+                    .order_by(DbChatMessage.seq)
                     .all()
                 )
                 import json as _json
                 db_history = []
                 for m in db_messages:
-                    entry = {"role": m.role, "content": m.content}
+                    entry = {"role": m.role, "content": m.content, "id": m.id, "seq": m.seq}
                     meta = {}
                     if m.meta_data:
                         try:
@@ -94,6 +104,11 @@ def setup_history_routes(session_manager) -> APIRouter:
                             meta = {}
                     if m.timestamp and "timestamp" not in meta:
                         meta["timestamp"] = m.timestamp.isoformat() + "Z"
+                    # ADR 0008: carry the authoritative {id, seq} into metadata too, so the
+                    # rebuilt in-memory history (below) re-exposes them on later reads.
+                    meta.setdefault("_db_id", m.id)
+                    if m.seq is not None:
+                        meta.setdefault("_seq", m.seq)
                     if meta:
                         entry["metadata"] = meta
                     db_history.append(entry)
@@ -185,7 +200,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                     indices = sorted(indices, reverse=True)
                     db_messages = db.query(DbChatMessage).filter(
                         DbChatMessage.session_id == session_id
-                    ).order_by(DbChatMessage.timestamp).all()
+                    ).order_by(DbChatMessage.seq).all()
 
                     deleted = 0
                     for idx in indices:
@@ -297,7 +312,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                 db_messages = (
                     db.query(DbChatMessage)
                     .filter(DbChatMessage.session_id == session_id, DbChatMessage.role == 'assistant')
-                    .order_by(DbChatMessage.timestamp.desc())
+                    .order_by(DbChatMessage.seq.desc())
                     .first()
                 )
                 if db_messages:
@@ -352,7 +367,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                 db_msg = (
                     db.query(DbChatMessage)
                     .filter(DbChatMessage.session_id == session_id, DbChatMessage.role == 'assistant')
-                    .order_by(DbChatMessage.timestamp.desc())
+                    .order_by(DbChatMessage.seq.desc())
                     .first()
                 )
                 if db_msg:
@@ -433,7 +448,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                 db_messages = (
                     db.query(DbChatMessage)
                     .filter(DbChatMessage.session_id == session_id)
-                    .order_by(DbChatMessage.timestamp)
+                    .order_by(DbChatMessage.seq)
                     .all()
                 )
                 # Find last two assistant messages in DB
@@ -598,7 +613,7 @@ def setup_history_routes(session_manager) -> APIRouter:
             try:
                 db_msgs = db.query(DbChatMessage).filter(
                     DbChatMessage.session_id == session_id
-                ).order_by(DbChatMessage.timestamp).all()
+                ).order_by(DbChatMessage.seq).all()
 
                 # Delete all but the last keep_count
                 for m in db_msgs[:-keep_count]:
