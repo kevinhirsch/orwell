@@ -174,6 +174,49 @@ def test_barrier_is_fail_open(monkeypatch):
     assert "DESYNC" not in preface[0]["content"].upper()
 
 
+# ── LW9 (audit 2026-06-21): the staged-comp still-in grounding ──────────────── #
+
+def test_comp_round_directive_grounds_the_current_still_in_set():
+    """A staged comp narrows each round; the model reliably narrates a STALE (larger) field from its
+    own history. The barrier must surface the engine's CURRENT still-in set + exact count and tell the
+    model to drop anyone it named earlier who is now gone (roles only — no names)."""
+    pending = {
+        "kind": "comp-round",
+        "by": {"id": "player", "name": "Player"},
+        "prompt": "The field narrows — 3 still standing. Still in with you: HG-A, HG-B.",
+        "round": 4,
+        "stillIn": [
+            {"id": "player", "name": "Player"},
+            {"id": "npc:1", "name": "HG-A"},
+            {"id": "npc:2", "name": "HG-B"},
+        ],
+    }
+    out = chat_helpers._pending_barrier_directive(pending)
+    assert out and "comp-round" in out
+    low = out.lower()
+    assert "narrowed" in low                       # calls out that the field shrank
+    assert "exactly these 3" in low                # the EXACT current count (player + 2 still in)
+    assert "HG-A" in out and "HG-B" in out         # the engine's current still-in names
+    assert "eliminated" in low                     # override stale history
+    assert "do not list" in low
+    assert "desync" in low                         # still forbids advancing past the decision
+
+
+def test_comp_round_without_still_in_is_still_a_valid_barrier():
+    # No stillIn list ⇒ no spurious grounding, but still a forceful barrier.
+    out = chat_helpers._pending_barrier_directive({"kind": "comp-round", "prompt": "Pick your approach."})
+    assert out and "comp-round" in out
+    assert "desync" in out.lower()
+    assert "narrowed" not in out.lower()
+
+
+def test_non_comp_pending_gets_no_still_in_grounding():
+    # A stillIn field on a NON-comp pending must NOT trigger the comp grounding (field-specific).
+    pending = {"kind": "eviction-vote", "prompt": "Vote.", "stillIn": [{"id": "npc:1", "name": "HG-A"}]}
+    out = chat_helpers._pending_barrier_directive(pending)
+    assert out and "narrowed" not in out.lower()
+
+
 # ── source-pin: the wiring stays in apply_game_framing ──────────────────── #
 
 def test_framing_appends_the_barrier_fail_open():

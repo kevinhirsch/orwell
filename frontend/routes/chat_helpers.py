@@ -326,10 +326,27 @@ def _pending_barrier_directive(pending) -> Optional[str]:
     prompt = str(pending.get("prompt") or "").strip()
     hint = _PENDING_KIND_HINTS.get(kind, _PENDING_GENERAL_HINT)
     quoted = f' The engine\'s instruction is: "{prompt}".' if prompt else ""
+    # LW9 (audit 2026-06-21): a STAGED competition NARROWS each round. The model reliably narrates a
+    # STALE still-in set — the earlier, larger field from its OWN conversation history — instead of the
+    # engine's CURRENT one (observed: "ten houseguests still in" when the engine had 7). The live
+    # still-in set is already in the engine prompt, but the model overrides it with memory; surface it
+    # as an EXPLICIT, prominent fact and tell the model to drop anyone it named earlier who is gone.
+    comp_ground = ""
+    still_in = pending.get("stillIn") if isinstance(pending.get("stillIn"), list) else None
+    if kind == "comp-round" and still_in:
+        names = [str((s or {}).get("name") or "").strip() for s in still_in if isinstance(s, dict)]
+        names = [n for n in names if n]
+        if names:
+            comp_ground = (
+                f"\nThe competition has NARROWED. The houseguests STILL IN this round are EXACTLY these "
+                f"{len(names)} (the player included): {', '.join(names)}. Anyone you named in an earlier "
+                f"round who is NOT on this list has already been eliminated — do NOT list them again or "
+                f"state any other number still in; voice ONLY this current set and this exact count."
+            )
     return (
         "STOP — THE GAME IS WAITING ON A PLAYER DECISION (do not narrate past it). The engine "
         f"(the source of truth) is BLOCKED on an unresolved decision of kind `{kind}` that {who} "
-        f"— the player — must make right now.{quoted}\n"
+        f"— the player — must make right now.{quoted}{comp_ground}\n"
         "You are FORBIDDEN from narrating any beat past this decision: do NOT start a new day, run "
         "or announce any competition or its result, hold a new ceremony, evict anyone, advance to "
         "the next week, or skip ahead in time in ANY way. Narrating anything past this decision is "

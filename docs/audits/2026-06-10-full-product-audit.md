@@ -30,6 +30,23 @@ D-batch's layout/lifecycle defects plus the panel/sidebar ruling below (E64).
 
 ---
 
+## Product-owner decisions PENDING (PO list)
+
+Items surfaced by the audits and deliberately **NOT auto-fixed** because they are product-owner
+**judgment calls** (taste / tradeoffs), not defects. Full context for each lives in the LW log
+(live-walkthrough section below). When decided, record the call in the rulings list under this and
+strike the item.
+
+- **PO-1 — Eviction-night length (LW11).** The eviction night runs long: the staged secret-ballot
+  reveal (vote by vote) plus the player's goodbye-message authoring. It could be batched/trimmed like
+  the staged competitions (#420), or kept as-is. *Tradeoff:* the comp rounds were repetitive filler
+  (rightly batched), but the eviction reveal + goodbyes are a **core dramatic beat** — the vote-by-vote
+  tension is the week's payoff, so trimming risks flattening the most dramatic moment. *Implementer's
+  lean:* keep it, unless live play shows it dragging. If trimmed, it's presentation-only engine work
+  (the eviction sub-loop in `liveSeason.ts`), mirroring the comp-batching pattern.
+
+---
+
 ## Product-owner rulings recorded this session (2026-06-10)
 
 1. **NPC names must be realistic** — "determined based on what could be a real name." The
@@ -1911,27 +1928,45 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
 - **LW7** [#434] Decision card did NOT arm after a silent forced-advance — player stranded with no card (reload-only).
   Fix: arm from `gameStatus` at turn-end.
 - **LW8** [#434] A lingering "✓ Locked in" (`.odec-done`) card suppressed the NEXT round's card during its 4s fade.
+- **LW10** [FIXED this session] **Pre-jury player eviction now has a terminal hand-off.** A voted-out pre-jury player
+  was left in limbo (status=`evicted`, `finished:false`) — the 0048 retrospective only fires on SEASON finish, so the
+  evictee got only the model's prose and could nudge the house forward one week at a time (→ week 3) with no terminal
+  signal (0046's *terminal recap*). Fix: a player-reachable **`POST /api/orwell/conclude-season`** (gated on
+  player.status==`evicted`; a juror is NOT swept) drives the deterministic loop to the crown in ONE `advance_to_finale`
+  call → the season reaches post-season → the existing retrospective (0048) + keep/recast hand-off (0057) fire; the FE
+  shows a **"🚪 Evicted — your season is over · See how it ends"** surface (`orwellNewSeason.js`, reusing the post-season
+  window). Tests: `test_lw10_conclude_season.py` (gating + idempotency) + live-verified (surface renders, button POSTs).
 
-**Open (carry forward):**
-- **LW9** [open · low-med] **Stale model PROSE after a silent forced-advance.** Narrated "ten houseguests still in"
-  while the engine had 7. The card/board show engine truth (#434); only the prose drifts (ADR-0005 open-set seam).
-  Candidate: a post-silent-advance re-narration nudge, or extend the 0065 desync guard to catch a stale still-in count.
-- **LW10** [open · med] **Pre-jury player eviction has no terminal-recap surface.** The player was voted out week 2
-  (status=`evicted`, `finished:false`); the 0048 retrospective only fires on SEASON finish (winner crowned), so the
-  evictee gets only the model's prose, and can keep nudging the house forward **one week per turn** (observed →
-  week 3) with no clean "your season is over → skip to results" affordance. 0046 specifies a *terminal recap*.
-  The model handled it gracefully in prose ("the door has sealed… let me fast-forward"), but there is no real
-  fast-forward and no structured recap at the player's own exit. *Largest open UX gap found this session.*
-- **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
-  + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
-
-**Verified CLEAR (checked live on the post-merge / post-F8 build — not defects):**
+**Verified CLEAR (checked live — not defects):**
 - **LW13** ✅ CLEAR. Reasoning renders in the collapsed "View thinking process" accordion (by design); the
   eviction-narration message **bodies were clean** (no reasoning leak). F8 (#435) holds; 0 page errors.
 - **LW14** ✅ CLEAR. An evicted (pre-jury) player is offered **no decision card** (confirmed live — card is `None`).
+- **LW16/LW17** ✅ CLEAR (were fast-forward artifacts). At season finish `/api/orwell/state` reports `moment ==
+  "post-season"`, so the retrospective + new-season surfaces gate correctly; the earlier `visible:false` reads were the
+  OrwellWindow-kit offsetParent quirk (the windows render + are interactive), not a gate failure.
+- **LW18** ✅ CLEAR (test error). `next-season` honors `body.keep` correctly; an earlier curl sent `keepCharacter`
+  (wrong field) so `keep` defaulted true. The full **finished → next-season → SEASON 2 (fresh 16-cast, player active,
+  premiere)** transition was driven end to end (HTTP 200) — "continue into the next season" achieved.
+
+- **LW12** ✅ CLEAR (by design). The premiere "Welcome to the house — premiere week" guide
+  (`orwellPremiereTutorial.js`) gates on **week === 1** (the premiere *week*), not the premiere phase — so it
+  intentionally spans the HOH phase in week 1, is dismissible ("Got it", per-user persisted), and auto-hides in
+  week 2+ / post-season. It is a premiere-*week* guide, not a phase banner; the "lingers into HOH" read conflated
+  phase with week.
 
 **Still to verify:**
-- **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
-  follow-ups) — should dismiss once premiere ends. Needs a FRESH game at premiere to re-confirm.
 - **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the L39b forced belt) each round;
   weeks 1–2 completed acceptably with #420's fewer rounds — keep an eye on it over longer runs.
+
+**Carry-forward open items (lower priority):**
+- **LW9** [MITIGATED this session] stale model PROSE during a staged comp — it narrated a STALE, larger still-in set
+  from its own history ("ten still in" when the engine had 7). Root: the live still-in *is* given each turn (the
+  comp-round pending prompt + the `_pending_barrier_directive` quote it), but the model overrode it with memory.
+  Mitigation (FE, `routes/chat_helpers.py`): the barrier now surfaces the engine's CURRENT still-in set as an
+  EXPLICIT, prominent fact — "still in this round are EXACTLY these N: … anyone you named earlier who is NOT on this
+  list has been eliminated; voice ONLY this set" — directly countering the stale-history failure. Tests in
+  `test_pending_barrier.py` (grounding present for comp-round, absent for non-comp). *Prompt-grounding, not a
+  guarantee: a non-compliant model could still drift — can't be fully gate-verified (no real-LLM in the gates).*
+- **LW11** → **moved to the PO list as PO-1** (eviction-night length — a product-owner judgment call: batch/trim
+  the staged secret-ballot reveal like the comps, or keep the core drama). See "Product-owner decisions PENDING
+  (PO list)" near the top of this ledger.
