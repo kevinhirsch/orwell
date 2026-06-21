@@ -288,15 +288,17 @@ Drove the game to completion via `POST /api/admin/ops/advance-to-finale` (L38 �
 | **F-S4-A** | NOTE (tracked) | ~ | **112 Showmance** hiddenStory entries in one 14-week season — possible volume (the L40 "showmance overload" family). | retrospective type histogram | Entries ≠ distinct showmances (the 0059 staged spark→… emits multiple events per arc), so not necessarily overload — but worth confirming the count maps to a *sparse* set. **Tracked by L40 (◐) / 0059** — not re-investigated. |
 | **F-S4-B** | NOTE | ~ | New-season "season portrait" file control may be the raw `<input type=file>` (S4-3 family; #436 says S1-3 styled via `::file-selector-button` on main — verify it covers this one too). | `postseason-desktop.png` | Confirm the styled file control applies to the new-season card. Minor. |
 
-### Failure modes (the brief's State-4 edge cases)
-- **Session rejoin / reload:** the post-season UI re-renders correctly on a fresh load (the capture
-  itself is a cold load that reconstructed the retrospective + new-season) — rejoin persists. The
-  **mid-game chat-rejoin reconciliation** is exactly what **ADR 0008** covers ("a manual reload
-  reconciles" — the persisted log is intact; live replication is the gap). Not re-tested (ADR-0008-owned).
-- **AI timeout / dropped socket:** hard to induce faithfully without a fault-injection hook. The
-  graceful-degradation paths exist (the FE single-flight E22 fallback, the stall detector + auto-
-  continue, the resumable-stream path) — a focused fault-injection probe is the right way to exercise
-  them (candidate next step; may need a state-injection/endpoint-fault hook per the brief's escape hatch).
+### Failure modes — fault-injection probe (executed) — ✅ graceful degradation
+Injected three faults on `/api/chat_stream` via Playwright. Artifacts: `shots/state4-fault/`.
+**In EVERY case: no engine desync (beatSeq stable on a failed turn), no crash, no stuck spinner,
+composer re-enabled (player can retry).** Strong for launch robustness.
+
+| ID | Sev | 👁 | Finding | Evidence | Mechanism / direction |
+|----|-----|----|---------|----------|----------------------|
+| **F-S4-C** | POLISH | ✅ | **Upstream 502** renders the **raw error text as a "Big Brother" GM message** ("Big Brother … upstream model error") — graceful (no crash/stuck/desync, retry works) but immersion-breaking (error voiced as in-game narration). | `state4-fault/error.png`, `_fault.json` | Render a model/stream error as a distinct **system/error notice**, not a GM bubble. |
+| **F-S4-D** | POLISH | ✅ | **Truncated stream (dropped socket mid-message)** renders the partial content and **silently stops** mid-sentence ("…and then the lights—") — no error, no "interrupted/reconnect" affordance, no completion footer. | `state4-fault/truncate.png`, `_fault.json` | Detect an incomplete stream (no `[DONE]`) and surface a **"message interrupted — reconnect/retry"** affordance. |
+| **F-S4-E** | ✅ GOOD | ✅ | **Mid-stream reload RECONCILES** — the engine completed the turn server-side (`beatSeq 1→15`) and the reload rendered the **full** narration (the "stuck spinner" flag was a false positive — a collapsed admin thinking accordion). Corroborates ADR 0008's "a manual reload reconciles." | `state4-fault/rejoin.png` | (No action — positive result.) |
+| **F-S4-F** | suspected | ✅ | The **rejoin (post-reload-resume) turn drifted two roster names**: "Lake Fleming" / "Nina Howser" vs the real "**Luke Fleming**" / "**Nina Hoover**" — close-but-wrong (name DRIFT, not B4 invention). | `state4-fault/rejoin.png` vs `/state` roster | **Confounded by the rejoin context** (a resumed turn may carry a degraded/partial context → name-grounding slip). Exact-name grounding was perfect in normal play (S3-CORE/B4). **Needs a clean check:** does name drift reproduce in normal play, or only on resume? If resume-specific, it ties to the ADR-0008 / resumable-stream context handling. |
 
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
