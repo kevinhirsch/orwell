@@ -1,6 +1,8 @@
 # 0010 — Token economy as architecture: a metered LLM boundary, a reasoning budget, cache-friendly prompts, and non-degrading context tiering
 
-> **Status:** **Proposed** (2026-06-21; mechanism to be built BDD/TDD-first as feature 0069).
+> **Status:** **Proposed** (2026-06-21; the open questions were **ratified by the owner 2026-06-21** —
+> see *Owner rulings* — and the per-class reasoning budget gained an admin-settings requirement; mechanism
+> to be built BDD/TDD-first as feature 0069).
 > **Source:** The 2026-06-21 cost investigation against the live game (DeepSeek V4 Pro via OpenRouter):
 > the OpenRouter request logs show a steady stream of small-input / large-output narration calls, and a
 > code trace found the spend is (a) **half-measured** — the usage envelope OpenRouter already returns is
@@ -65,19 +67,28 @@ landing as a slice of feature 0069:
 - **A — The metered boundary.** Capture the **whole** usage envelope at `llm_core.py` (input, cached,
   reasoning, output, cost, cost_details, provider, and context-%), thread it through `llm_trace.py`, and
   record it to a **Vault-free per-turn token/cost ledger** (the sibling of `orwell_sync_ledger.py`)
-  surfaced **admin-side only**. This is the "watch the context window" deliverable and the precondition
-  for everything else.
+  surfaced **admin-side only**. A **soft per-game spend alert** (admin-only, warn at a configurable
+  threshold, **no** enforcement) rides on the same ledger. This is the "watch the context window"
+  deliverable and the precondition for everything else.
 - **B — Token policy per call class.** Replace the scattered constants with one resolver that, given a
   **call class** (`narration` · `utility-extraction` · `casting` · `background-authoring`), returns its
   **reasoning effort, output cap, caching posture, and context budget**. Wire `reasoning` into the
   OpenAI-compatible payload and apply the policy per class. Reasoning is governed, never default-by-
   omission; narration **dials down** (it still feeds the "Thinking" accordion — the FE convention), the
-  extraction/utility classes run reasoning **minimal or off**.
+  extraction/utility classes run reasoning **minimal or off**. The per-class **reasoning budget is
+  editable in admin settings at runtime** (read per-request, no restart — the `default_model` /
+  `settings.json` pattern), so the resolver is **settings-backed** and the constants module supplies only
+  the defaults. Ratified efforts: narration = **medium**, utility-extraction = off/minimal, casting =
+  medium, background-authoring = low.
 - **C — Cache-friendly, lean-first assembly.** Make prompt order a contract: the **stable prefix**
   (system + tool schemas + static framing) is assembled first and held **byte-identical** across turns;
-  volatile content (the clock, the per-turn delta, the player's message) goes **last**. Pin provider
-  **stickiness per canonical game session** (`session_id`, keyed off 0064) so the automatic cache stays
-  warm from turn #1. The Anthropic `cache_control` path stays reserved for explicit-cache models.
+  volatile content (the clock, the per-turn delta, the player's message) goes **last**. Provider routing
+  is **tiered**: `session_id` stickiness on **every** call (keyed off the canonical session, 0064);
+  **prefer** cache-capable providers with **fallbacks on** as the default; and **pin** to a cache-capable
+  provider (**no fallback**) **above a high token-count threshold** (reuse the Slice-D large-context
+  threshold), where a cache miss on a large prompt is most expensive — small calls keep full
+  availability, big calls buy a guaranteed hit. The Anthropic `cache_control` path stays reserved for
+  explicit-cache models.
 - **D — Non-degrading context tiering.** Turn the 48K hard cap into a **tier**: the default stays lean
   (recall from the store, not accumulate the chat — ADR 0003), but when a turn genuinely needs more,
   **escalate the budget up toward the model's window** *before* invoking lossy compaction — so mandate
@@ -88,8 +99,9 @@ landing as a slice of feature 0069:
 1. **Measured or unmanaged.** Nothing is optimized that isn't first captured at the one boundary. The
    full envelope is recorded every call (counts + cost + class + context-%), never a subset.
 2. **Token economy is policy, not scattered constants.** Reasoning effort, output cap, caching posture,
-   and context budget are resolved per **call class** from one place — changeable without touching call
-   sites.
+   and context budget are resolved per **call class** from one place — and the **reasoning budget per
+   class is admin-editable at runtime** (settings-backed), changeable without touching call sites or
+   restarting.
 3. **Reasoning is the primary budgeted resource.** It is governed per class and **never** runs at the
    provider default by omission. Narration dials down (keeps the Thinking accordion); utility/extraction
    runs reasoning minimal or off.
@@ -162,20 +174,28 @@ FE/adapter-only ⇒ the gate is the front-end pytest suite (the recorded-deviati
   budget leaves every seeded engine outcome byte-identical (inherent — the engine never sees token
   policy — and asserted as a guard).
 
-## Open questions (PO — to confirm before/while building)
+## Owner rulings (resolved 2026-06-21)
 
-1. **Reasoning-effort per class (tuning, not architecture).** Proposed defaults: narration = **low–
-   medium** (keep a light Thinking trace), utility-extraction = **off/minimal**, casting = **medium**,
-   background-authoring = **low**. Confirm the narration setting in particular — it trades thinking depth
-   (narrative quality) against the dominant cost line.
-2. **Context-tiering ceiling (D).** The lean default stays (`0.60 × window`, cap 48K). Escalation ceiling
-   before lossy compaction — e.g. `0.85 × window` — and whether D is **opt-in** behind a setting/flag
-   (default lean) like 0066's `ORWELL_TIME_OF_DAY`, given it can raise cost on long games.
-3. **Cost surface scope.** Admin-only per-turn + per-game cost/usage is in scope. Is a per-game **budget
-   cap / alert** (warn or soft-stop when a game exceeds $X) wanted now, or a Phase-2 follow-up?
-4. **Provider routing (C).** Stickiness via `session_id` is in scope. Do we also **pin** an allowed
-   provider set (e.g. require a cache-capable DeepSeek host, `allow_fallbacks:false`) to avoid being
-   routed to a non-caching endpoint — accepting reduced availability for predictable cache hits?
+1. **Reasoning-effort per class** → narration = **medium** (keeps a meaningful Thinking trace against the
+   dominant cost line), utility-extraction = **off/minimal**, casting = **medium**, background-authoring =
+   **low**. **New owner requirement (2026-06-21):** the per-class reasoning budget is **editable in admin
+   settings at runtime** (read per-request, no restart — the `default_model` / `settings.json` pattern),
+   not a code constant. The resolver (Decision B) is **settings-backed**; the constants module supplies
+   only the defaults.
+2. **Context tiering (D)** → **opt-in** behind a setting/flag (default = the lean 48K, byte-identical bill
+   + seeded spine), escalating to **~0.85 × window** before any lossy compaction.
+3. **Cost surface** → admin per-turn + per-game cost/usage **plus a soft per-game spend alert now**
+   (admin-only, warn at a configurable threshold, **no** enforcement — never interrupts a game). A
+   **hard cap / soft-stop** stays Phase-2.
+4. **Provider routing (C)** → **tiered**: `session_id` stickiness on **every** call; **prefer**
+   cache-capable providers with **fallbacks on** as the default; and **pin** to a cache-capable provider
+   (**no fallback**) **above a high token-count threshold**, where a cache miss on a large prompt is most
+   expensive (reuse the Slice-D large-context threshold). Small calls keep full availability; big calls
+   buy a guaranteed hit.
+
+**Open *tuning* only (not architecture):** the medium-effort mapping per provider, the ~0.85 ceiling, the
+soft-alert dollar threshold, and the high-token pin threshold — all live in the constants/settings module
+and retune without code change.
 
 ## Traceability
 

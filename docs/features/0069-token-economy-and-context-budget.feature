@@ -46,6 +46,23 @@ Feature: Token economy and context as architecture
     Then every turn pins to one provider for the session
     So that the provider's automatic prompt cache stays warm
 
+  Scenario: Large prompts pin to a cache-capable provider
+    Given a call whose token count is above the high-context threshold
+    Then it is pinned to a cache-capable provider with fallbacks off
+    And a small call keeps fallbacks on for availability
+
+  Scenario: An admin retunes the reasoning budget per call class
+    Given an admin changes the narration reasoning budget in settings
+    When the next narration turn is built
+    Then the new reasoning budget is applied without a restart
+    And the setting is admin-gated and never shown to the player
+
+  Scenario: A soft spend alert is admin-only and never interrupts play
+    Given a game whose accumulated cost crosses the configured threshold
+    Then an admin-only soft alert is raised
+    And the game is never interrupted
+    And the player sees no cost or alert
+
   Scenario: Context grows toward the model's window before anything is summarized away
     Given a turn whose needed context exceeds the lean default budget
     And the model has a large context window
