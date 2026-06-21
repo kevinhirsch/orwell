@@ -244,3 +244,22 @@ def test_j1_14_player_lands_on_appearance_not_account():
     assert "window._isAdmin ? 'services' : 'appearance'" in js          # the non-admin default
     assert "_tabVisible('appearance') ? 'appearance' : 'account'" in js  # the not-visible fallback
     assert "activeTab = 'account'" not in js                            # the old hard fallback is gone
+
+
+def test_j1_07_game_build_curates_the_appearance_visibility_toggles():
+    """J1-07 (UX audit): the Appearance > visibility toggles are inherited-WORKSPACE controls a Big
+    Brother player doesn't need (several even surface the OOC model concept). The game build hides the
+    workspace rows + the whole Chat-Bar card, keeping only the in-fiction toggles (Theme / Welcome /
+    Text-only Emojis / Thinking / Sensitive Blur). Verified headless: 5 visible (was 16)."""
+    css = _read(os.path.join(FRONTEND, "static", "css", "game-trim.css"))
+    # the workspace rows are hidden in the game build, by their data-ui-key (same :has() pattern)
+    for key in ("sidebar-brand", "sidebar-search", "sidebar-new-chat", "sessions-section",
+                "models-section", "user-bar", "sidebar-settings-btn", "chat-meta"):
+        assert f'.vis-row:has(input[data-ui-key="{key}"])' in css, key
+    assert 'body[data-game-build] [data-vis-card="chat-bar"]' in css      # the whole Chat-Bar card
+    # the in-fiction toggles are NOT in the hide list (kept)
+    for keep in ("tool-theme", "text-emojis", "show-thinking", "sensitive-blur", "welcome-text"):
+        assert f'data-ui-key="{keep}"]' not in css, keep
+    # the markup tags the Chat-Bar card so the rule can target it
+    html = _read(os.path.join(FRONTEND, "static", "index.html"))
+    assert 'data-vis-card="chat-bar"' in html
