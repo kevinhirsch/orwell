@@ -428,7 +428,8 @@ Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consiste
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings; gated remediation set #1 (9 fixes: launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged PR #449** (CI green).
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
 - [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
-- [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 28 findings (J4-01…J4-28). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label) **merged PR #470** (CI green). Gated remediation set #5 (7 fixes: J4-08 confirm label / J4-09 alert region / J4-10 contrast / J4-11 tap target / J4-12 describedby / J4-13 copy / J4-14 aria-describedby). J4-22/25 closed (dup). Deferred: J4-04/05/06/07/15…21/23/24/26/27/28 → Phase-4 backlog / engine work queue.
+- [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 28 findings (J4-01…J4-28). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label) **merged PR #470** (CI green). Gated remediation set #5 (7 fixes: J4-08 confirm label / J4-09 alert region / J4-10 contrast / J4-11 tap target / J4-12 describedby / J4-13 copy / J4-14 aria-describedby) **merged PR #473** (CI green). J4-22/25 closed (dup). Deferred: J4-04/05/06/07/15…21/23/24/26/27/28 → Phase-4 backlog / engine work queue.
+- [x] **J5 — The ENDGAME (eviction → jury → Final 2 → finale → retrospective/unsealing)** — CAPTURE DONE; specialist fan-out IN FLIGHT. Real season fast-forwarded to completion (week 13, winner crowned, player evicted-to-jury). Captured the endgame decision cards (`goodbye-message`, `juror-question`, `juror-vote`), the finale projection, and the retrospective + Vault-unseal surfaces. Confirmed gated #4/#5 fixes hold in the endgame context. Findings + gated set #6 below.
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
 
@@ -578,3 +579,43 @@ J4 used a targeted premiere-gate clearing strategy: after `createCharacter`, `/a
 - J4-24 (chips identical no risk signal) — design-level
 - J4-26/27 (phase label / tutorial graduation) — J3-07/J3-11 cluster; needs design decision
 - J4-28 (cast panel signpost) — Phase-4 backlog
+
+---
+
+## Journey 5 — the ENDGAME (capture phase)
+
+**Date:** 2026-06-21 · **Rig run:** `j5` desktop/normal (1440×900) · **Scenario:** `j5_endgame` · **Steps:** 17 · **Frames:** 120 · **Errors:** 0
+
+### Capture method (new, reusable — leverages the committed playtest harness)
+
+The recurring J3/J4 blocker — the LLM under-calls `advanceGame`, so a real-LLM playthrough stalls at HOH and never reaches the endgame — makes a *conversational* drive to the finale impractical. J5 adopts the committed harness's `s4ff.mjs` technique: **drive the ENGINE directly via player-channel `callTool` (EchoNarrator, no LLM cost) on the same engine user the FE renders** (auth-disabled ⇒ engine user `default`), fast-forwarding `advanceGame`/`submitDecision`; at each NEW endgame-class pending, **pause and load the FE** so `rearmFromStatus` (the boot re-arm, ≤5s) renders that *real* card for capture; post-finish, capture the finale + retrospective surfaces. This is the efficient endgame-UX capture path and is banked in `journeys.py:j5_endgame`.
+
+### What J5 reached
+
+- Season fast-forwarded to **completion in 354 iterations**: **winner crowned, week 13**, 9-juror finale.
+- **Player fate: evicted to the JURY** (the most common real outcome — most players don't win) → captured the *losing player's* endgame arc.
+- **Endgame decision cards captured (real, rearm-rendered):** `goodbye-message` (week 1, as a weekly voter), `juror-question` (week 13 finale — the player's own question to a finalist), `juror-vote` (week 13 finale — the player crowns the winner).
+- **Retrospective (0048) captured:** the `📼 The Season, Watched Back` window opened post-season (`role="complementary"`, on-screen, 380×426 top-right), showing the per-juror finale tally, then the **🔓 Open the Producer's Vault** unseal → the off-screen story ("a double-eviction fired in week 12", "[secret thread] …").
+
+### Confirmed working in the endgame context (gated #3/#4/#5 fixes hold — do NOT re-report)
+
+From the live probes on all three endgame cards: `role="form"` ✓ · `aria-describedby="orwell-decision-card-note"` ✓ · card receives focus on mount ✓ · dismiss × **44×44** ✓ (J4-11) · error container `role="alert" aria-live="assertive"` ✓ (J4-09) · chips **36px** / confirm **44px** ✓ (J3-16). The fixes generalize across every decision-card kind, as designed (one renderer).
+
+### Wall integrity (positive — verified)
+
+The retrospective shows **per-juror FINALE vote attribution** ("X votes for Eli Underwood") — correct: the finale jury vote is *public* (the crowning). Per-voter **weekly** eviction attribution appears **only after** the Vault unseal (0048 post-season), never in a live player projection. The Wall holds at the endgame.
+
+### Lead's direct leads (handed to the specialist fan-out for confirmation/depth)
+
+- **L-a (HIGH, content):** the textarea cards (`goodbye-message`, `finale-statement`, `juror-question`) show the generic note **"Your selection only — never read from prose."** directly under a **prose `<textarea>`** — the note contradicts the affordance. (Confirmed in probes for goodbye-message + juror-question.)
+- **L-b (HIGH, a11y):** the endgame `<textarea>`s have **no accessible name** (`aria-label: null`, `aria-labelledby: null`) — placeholder-only (WCAG 4.1.2 / 3.3.2).
+- **L-c (MED):** `juror-question` confirm is **enabled with an empty textarea** — the player's single jury question can submit blank.
+- **L-d (MED):** `goodbye-message` confirm stays disabled until a **tone chip** is picked, with no hint that a tone is required (WCAG 3.3.2; sharper instance of J4-20).
+- **L-e (MED/POLISH):** the retrospective **unseal button is 32px tall** — below the 44px project floor (same class as J4-11).
+- **L-f (corroborates J4-23):** decision card `box-shadow: none` — no figure/ground isolation even when crowning the winner; `--win-shadow` token exists, unapplied.
+- **L-g (corroborates J4-27):** the **"premiere week" tutorial card is still rendered at the week-13 finale** (visible in shot `01-02`) — content-driven visibility never graduates.
+- **L-h (Tab order):** first Tab from the focused card lands on the **dismiss ×** (it's first in DOM) — a keyboard user reaches "skip this binding decision" before the options (WCAG 2.4.3).
+
+### Findings index (J5) + remediation (gated set #6)
+
+*Pending specialist synthesis — fan-out in flight (content-a11y, transient-animation, social-game, visual-motion, responsive-crossplatform).*
