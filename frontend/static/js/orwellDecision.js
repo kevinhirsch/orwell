@@ -256,6 +256,11 @@
       b.addEventListener("click", () => {
         const on = b.getAttribute("aria-pressed") === "true";
         if (on) {
+          // R2-01: comp-round/comp-intent are required single-picks with a pre-selected default
+          // (a non-binding flavor round arms "compete" + enables "Push through"). Re-tapping the
+          // lit chip must NOT clear it — that left Confirm stuck disabled with no cue. Other kinds
+          // keep their toggle-off (e.g. the veto "Don't use" chip legitimately deselects).
+          if (!multi && (kind === "comp-round" || kind === "comp-intent")) return;
           sel = sel.filter((v) => v !== value);
           b.setAttribute("aria-pressed", "false");
         } else {
