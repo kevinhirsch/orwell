@@ -340,5 +340,67 @@ resume (FE-side; ties to ADR 0008 / the resumable-stream handling). *(A metamorp
 `seeded_parity.mjs` harness distilled to "narrated facets ⊆ seeded facets" — is the optional stochastic
 backstop.)*
 
+## State 5 — OOBE / casting polish (operator-reported, post-factory-reset first-open) ✅
+
+Three operator-reported bugs on the first open after a **backend factory reset**. All three
+ROOT-CAUSED, FIXED, and VERIFIED **before/after** with real-chromium telemetry + screenshots
+(`.audit-telemetry/repro_d.py`, `repro_ab.py`; shots `problem-d-{before,after}.png`,
+`problem-ab-{mounted,after-drag}.png`). *(Problem c — "first producer message concurrent with the
+box" — was **retracted by the operator** ("that was my mistake"); the welcome → producers → kickoff →
+ask-photo → box sequence is correct.)*
+
+### ✅ Problem D — animated particle background not rendering on a fresh / factory-reset client
+- 🌳 **Root cause (longstanding, PR #342):** `theme.js` `initThemeUI()` computed the boot pattern as
+  `const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';`
+  — both terms are `saved &&`-guarded, so with **no stored theme** (`saved === null`: brand-new player,
+  cleared localStorage, or post-factory-reset with the server pref also `null`) it fell straight through
+  to `'none'`. The COLORS resolve correctly for the default theme (`saved ? saved.colors : THEMES[DEFAULT_THEME]`,
+  L975), but the PATTERN didn't — so telescreen's signature `perlin-flow` canvas never spawned. The
+  design intent (L47-51) is explicit: a factory-reset / no-stored-theme session resolves to telescreen,
+  whose default pattern is `perlin-flow`. *(NOT the A5 reduced-motion gate `e1ae963` — that only suppresses
+  when reduced-motion is set; the repro confirmed reduced-motion OFF.)*
+- 🚧 **Fix:** resolve the pattern for the ACTIVE theme name (reusing `activeName = saved ? saved.name :
+  DEFAULT_THEME`, L855), exactly like the colors: `(saved && saved.bgPattern) || THEME_DEFAULT_PATTERN[activeName] || 'none'`.
+- ✅ **VERIFIED before/after** (no-saved-theme client, reduced-motion OFF): **before** →
+  `perlinCanvas=False`, no `bg-pattern-*` class (flat dark bg); **after** → `#perlin-flow-canvas` present,
+  `bg-pattern-perlin-flow` class. Unit gates green (`test_a5_a6_house_polish`, `test_0057_ui`,
+  `test_fe_final_batch` — the reduced-motion gate + per-house pattern map untouched).
+
+### ✅ Problems A/B — "Your Cast Photo" box: movable-looking grip but static; must be moveable, not resizeable
+- 🌳 **Root cause:** the box (`orwellHeadshot.js`) was created `draggable:false, resizable:false` on the
+  `top-right` slot, then **hard-pinned viewport-centered with `!important`** (`left:50% … translateX(-50%)
+  !important`). Inline non-important styles lose to `!important` CSS, so the kit's drag (which writes inline
+  `left/top`) could never move it — the titlebar *looked* like a grip (kit chrome) but was dead.
+- 🚧 **Fix (3 files):** (1) `orwellSlots.js` — add a **`top-center`** slot (the `(innerWidth-w)/2` centering
+  branch already exists for `*-center`; added to the registry + the narrow-sheet loop). (2) `orwellHeadshot.js`
+  — `slot:"top-center"`, `draggable:true`, `resizable:false`; **removed the `!important` position pin** (kept
+  width/z-index only). The slot now owns centering + the persisted drag offset; the kit owns the live grip.
+  (3) `tests/test_0064_salvage.py` — re-pinned the gate test from the old `!important`/`translateX(-50%)` to
+  the new `slot:"top-center"` + `draggable:true`/`resizable:false` mechanism.
+- ✅ **VERIFIED on the REAL window** (drove the actual `route()→mount()` via stubbed pre-game casting state):
+  **centered** (cx=720 = viewport center) ✓ · **draggable/grip-live** (`elementAtGrab='ow-title'`,
+  `modal-dragging=True`, moved 480,52 → 240,232 = **420px**) ✓ · **NOT resizeable** (edge-drag dW=dH=0, no
+  `winsize-` key) ✓. Full FE suite: **1743 passed**; the cast-photo gate test green.
+  - 👁 **Repro-artifact noted (not a code bug):** the synthetic harness left the `#orwell-onboarding`
+    welcome overlay (z:99999, `inset:0`) on top of the box, eating the mousedown — because the harness
+    never clicked "Meet the producers". In the real sequence that overlay is `el.remove()`'d on dismiss
+    **before** the box appears mid-interview, so the grip is clear. Removing the stale overlay in the repro
+    (mirroring the real DOM state) made the drag pass.
+
+### ⏸️ Follow-up finding (operator call) — "skipping the welcome" after a backend factory reset
+The operator affirmed the welcome-first sequence is correct, so this is logged, **not** fixed. A **backend**
+factory reset does not clear the **client** `localStorage['orwell-welcome-seen:<user>']`, so a returning
+browser can take `orwellOnboarding.route()`'s `else` branch (welcome already "seen") and skip the welcome on
+the new season's first open — matching the one-off "skipping the welcome" report. The design comment (L561)
+says the welcome should show "on EVERY fresh game/season". **Question for the owner:** should a new-season /
+factory reset call `clearWelcomeSeen()` (client-side) so the welcome re-shows each season? Ambiguous → owner's
+call; no change made.
+
+### Environmental (pre-existing, NOT a regression)
+`test_h2b_all_model_pools::test_runtime_every_model_select_offers_a_subset_of_the_chat_pool` and
+`test_h2h3_settings::test_runtime_image_options_are_a_subset_of_chat_options` fail in THIS reset container
+(Playwright TimeoutError — "runtime" browser tests needing a configured model). **Confirmed pre-existing**:
+they fail identically with my changes stashed. CI fixtures configure a model; not in scope here.
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input

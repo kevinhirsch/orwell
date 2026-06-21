@@ -1316,7 +1316,12 @@ export function initThemeUI() {
   // Font, density, background pattern controls
   const _initFont = (saved && saved.font) || DEFAULT_FONT;
   const _initDensity = (saved && saved.density) || DEFAULT_DENSITY;
-  const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';
+  // The active pattern resolves for the ACTIVE theme name (saved.name OR the DEFAULT_THEME for a
+  // brand-new / factory-reset / no-stored-theme session) — exactly like the colors do (L975). The
+  // old `(saved && THEME_DEFAULT_PATTERN[saved.name])` form dropped to 'none' whenever `saved` was
+  // null, so a fresh player never got the default theme's signature particle background
+  // (telescreen → perlin-flow) until they explicitly picked a theme. activeName is from L855.
+  const _initPattern = (saved && saved.bgPattern) || THEME_DEFAULT_PATTERN[activeName] || 'none';
   const _initEffectColor = (saved && saved.bgEffectColor) || (saved && THEME_DEFAULT_EFFECT_COLOR[saved.name]) || '';
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity

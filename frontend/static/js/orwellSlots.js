@@ -59,7 +59,11 @@
   }
 
   // slot → [{ el, key, draggable }]
-  const slots = { "top-right": [], "top-left": [], "bottom-center": [], "bottom-right": [] };
+  // "top-center" anchors a focused dialog horizontally-centered under the header (the
+  // (window.innerWidth - w) / 2 base branch already handles the centering, same as
+  // bottom-center) — used by the OOBE cast-photo box so it is a centered, draggable
+  // dialog without a per-window !important position hack fighting the slot math.
+  const slots = { "top-right": [], "top-left": [], "top-center": [], "bottom-center": [], "bottom-right": [] };
   let _user = "";
   try { _user = (document.body && document.body.dataset.user) || ""; } catch (_) {}
 
@@ -114,7 +118,7 @@
   // column across both top slots; bottom slots keep their own narrow CSS.
   function restackNarrowSheets() {
     let cursor = TOP_BASE - 8; // sheets sit flush under the app header
-    for (const name of ["top-left", "top-right"]) {
+    for (const name of ["top-left", "top-center", "top-right"]) {
       for (const entry of slots[name]) {
         const el = entry.el;
         if (!visible(el)) continue;

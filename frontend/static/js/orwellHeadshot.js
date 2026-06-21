@@ -30,21 +30,18 @@
     s.id = "orwell-headshot-css";
     s.textContent = `
       /* P1 OOBE overhaul: the pre-game casting headshot is a PROPER OrwellWindow (composes the
-         .ow-* kit). It GATES the chat, so it is mounted non-dismissable (no close/minimize) and
-         stays put until a photo is secured.
-         0064 placement fix: it is the FOCUSED onboarding gate, so it docks as a centered dialog,
-         NOT floating at the top-right slot anchor. The slot system writes inline
-         left/top/right/bottom/transform to stack panels; we override every one with !important
-         (inline non-important loses to important CSS) so the window pins viewport-centered
-         regardless of the slot math. The old rule pinned only the left edge (left:50% with no
-         important transform), which the slot stomped to transform:none and dropped the recenter —
-         that floated it mid-screen at the wrong place. The full transform now centers it. */
+         .ow-* kit). No close/minimize chrome — its two EXITS are in the body (finalize a photo or
+         "Skip for now").
+         Placement: it is a FOCUSED onboarding dialog, so it rides the "top-center" slot — the slot
+         engine centers it horizontally under the header AND owns its drag offset, so it is
+         draggable-but-not-resizeable WITHOUT a per-window !important position pin (the old hack
+         hard-pinned left/top/transform with !important, which beat the drag's inline writes and
+         made the titlebar a dead grip — a movable-looking but static window). Width/z-index here
+         carry NO position props (left/top/transform), so the slot's inline geometry and the drag
+         both apply unobstructed. */
       #${ID} {
         width: 480px; max-width: min(92vw, 480px);
-        left: 50% !important; right: auto !important;
-        top: max(12vh, var(--ow-headshot-top-clear, 88px)) !important; bottom: auto !important;
-        transform: translateX(-50%) !important;
-        z-index: 1000;  /* above the welcome splash + slotted HUD, below true modals */
+        z-index: 1000;  /* above the slotted HUD, below true modals */
       }
       #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px))); }
       /* the ONE instruction lives in the window body — no duplicate banner/placeholder copy */
@@ -381,13 +378,14 @@
     // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
     try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
     // Compose the kit. No close/minimize chrome — the two EXITS are in the body (finalize a photo
-    // or "Skip for now"), so there is no half-open dead state. It is a centered dialog-style box
-    // (CSS pins it horizontally-centered), not draggable/resizable. The kit owns the chrome,
-    // titlebar, focus, and the .ow-* family.
+    // or "Skip for now"), so there is no half-open dead state. It rides the "top-center" slot so it
+    // is a horizontally-centered dialog the player can DRAG out of the way (the grip is live), but
+    // it is NOT resizeable (a fixed-size onboarding box). The kit owns the chrome, titlebar, focus,
+    // and the .ow-* family; the slot owns centering + the persisted drag offset.
     _win = window.OrwellWindowKit.create({
       id: ID, title: "Your Cast Photo", icon: CAST_ICON,
-      slot: "top-right", slotKey: "castphoto", role: "dialog",
-      minimizable: false, closable: false, draggable: false, resizable: false,
+      slot: "top-center", slotKey: "castphoto", role: "dialog",
+      minimizable: false, closable: false, draggable: true, resizable: false,
       minWidth: 320, minHeight: 240,
       content: body, focus: true,
     });
