@@ -120,6 +120,41 @@ describe("0018 — narrative & moment orchestration", () => {
     expect(p).toMatch(/Public showmance/i);
   });
 
+  it("R3-01 — the eviction & finale moments pin the REVEAL: vote already cast, narrate beat-by-beat, never re-ask", () => {
+    // Live-playtest finding (deepseek-v4-pro): during the staged eviction-vote reveal the model
+    // re-prompted the player to vote again ("who do you vote to evict?") for a ballot already cast,
+    // and at the finale looped on "we haven't reached the vote yet". The reveal is NARRATION of an
+    // already-recorded result the engine walks one beat per turn — not a decision to re-collect.
+    const ev = MOMENT_PROMPTS["eviction"]!;
+    // the player's vote is already in — this is the reveal, not the ballot
+    expect(ev).toMatch(/THE VOTE IS ALREADY IN/i);
+    expect(ev).toMatch(/already been cast and recorded/i);
+    // the job is to NARRATE the reveal beat by beat
+    expect(ev).toMatch(/job here is to NARRATE that\s+reveal/i);
+    // never re-ask for the vote / reopen the Diary Room
+    expect(ev).toMatch(/Do NOT re-ask the player who they vote to evict/i);
+    expect(ev).toMatch(/do NOT reopen the Diary Room for a vote/i);
+    // never claim the result hasn't happened — the engine is walking the reveal
+    expect(ev).toMatch(/do NOT say the vote hasn't happened/i);
+
+    const fin = MOMENT_PROMPTS["jury-finale"]!;
+    // the jury-vote reveal is narration, not a new decision
+    expect(fin).toMatch(/THE JURY-VOTE REVEAL IS NARRATION, NOT A NEW DECISION/i);
+    expect(fin).toMatch(/ALREADY CAST and recorded/i);
+    // narrate one vote at a time; never re-ask a finale choice already made
+    expect(fin).toMatch(/NARRATE the reveal one vote at a time/i);
+    expect(fin).toMatch(/Do NOT\s+re-ask the player to vote/i);
+    // never claim the vote hasn't been reached yet (the live-playtest loop shape)
+    expect(fin).toMatch(/do NOT say the vote hasn't happened or that you haven't reached it yet/i);
+
+    // No Vault/secret state introduced: the reveal text references only anonymized ballots, the public
+    // tally, and the public winner — never a voter attribution or any hidden/secret vocabulary.
+    for (const banned of ["soul", "volatility", "hiddenElement", "secret-motive", "who cast it"]) {
+      expect(ev.includes(banned), `eviction reveal must not mention ${banned}`).toBe(false);
+      expect(fin.includes(banned), `finale reveal must not mention ${banned}`).toBe(false);
+    }
+  });
+
   it("the woven context is Vault-free (player card + phase + roster names; no stats/souls)", () => {
     const game = new GameSessionAdapter();
     game.createCharacter({ playerName: "Player One", seed: 4 });
