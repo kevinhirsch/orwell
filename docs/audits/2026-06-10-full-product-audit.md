@@ -1938,8 +1938,24 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
   (wrong field) so `keep` defaulted true. The full **finished → next-season → SEASON 2 (fresh 16-cast, player active,
   premiere)** transition was driven end to end (HTTP 200) — "continue into the next season" achieved.
 
+- **LW12** ✅ CLEAR (by design). The premiere "Welcome to the house — premiere week" guide
+  (`orwellPremiereTutorial.js`) gates on **week === 1** (the premiere *week*), not the premiere phase — so it
+  intentionally spans the HOH phase in week 1, is dismissible ("Got it", per-user persisted), and auto-hides in
+  week 2+ / post-season. It is a premiere-*week* guide, not a phase banner; the "lingers into HOH" read conflated
+  phase with week.
+
 **Still to verify:**
-- **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
-  follow-ups) — should dismiss once premiere ends. Needs a FRESH game at premiere to re-confirm.
 - **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the L39b forced belt) each round;
   weeks 1–2 completed acceptably with #420's fewer rounds — keep an eye on it over longer runs.
+
+**Carry-forward open items (lower priority):**
+- **LW9** [MITIGATED this session] stale model PROSE during a staged comp — it narrated a STALE, larger still-in set
+  from its own history ("ten still in" when the engine had 7). Root: the live still-in *is* given each turn (the
+  comp-round pending prompt + the `_pending_barrier_directive` quote it), but the model overrode it with memory.
+  Mitigation (FE, `routes/chat_helpers.py`): the barrier now surfaces the engine's CURRENT still-in set as an
+  EXPLICIT, prominent fact — "still in this round are EXACTLY these N: … anyone you named earlier who is NOT on this
+  list has been eliminated; voice ONLY this set" — directly countering the stale-history failure. Tests in
+  `test_pending_barrier.py` (grounding present for comp-round, absent for non-comp). *Prompt-grounding, not a
+  guarantee: a non-compliant model could still drift — can't be fully gate-verified (no real-LLM in the gates).*
+- **LW11** [open · minor — likely acceptable] eviction night runs long, but the staged secret-ballot reveal + the
+  player goodbyes are a CORE dramatic beat (unlike the comp's repetitive rounds); length here is largely intended.
