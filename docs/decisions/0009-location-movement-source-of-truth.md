@@ -186,6 +186,28 @@ snapshot skew:
    **pre-emission** and scrubbed/regenerated — **never** corrected on a later turn, which would leave
    the conflict visible in the transcript.
 
+## Open questions (PO)
+
+1. **Engine double-buffer for occupancy display (deferred 2026-06-21; PO to confirm).** D1 shipped
+   **FE-side** (the per-turn freeze above) with **zero engine/calibration change**. The
+   architecturally cleaner alternative — discussed and **deferred, not rejected** — is to split
+   `presence` *in the engine* into a **displayed** map (the gadget + the moment-prompt grounding read
+   this; the D2 belt and player moves write here, visible immediately) and the authoritative **live**
+   map (the off-screen `presenceTick` re-seat writes here, promoted to `displayed` at the next scene).
+   It would handle **model-driven** relocations natively — no FE fog-of-war reconstruction, and no
+   degrade-to-live for the rare turn the model itself moves a houseguest — and would let the gadget and
+   the prose grounding read **one** engine projection. **Why deferred:** it trades shipped, green,
+   zero-risk code for calibration-adjacent engine churn — two presence maps threaded through
+   snapshot/restore/`whereabouts`/witnessing, in the riskiest part of the engine — to solve a problem
+   the FE-freeze already solves. `presenceTick` stays byte-identical by design (the D4 guard pins it),
+   so the risk is *surface area*, not seeded outcomes. The FE-freeze is itself defensible: it never
+   *invents* occupancy (it folds only engine-confirmed moves; any uncertainty defers to live truth), so
+   it is a *presentation-timing* decision — legitimately the FE's job, like the D2 belt and D3 barrier.
+   **Revisit if** (a) live play shows the model relocating houseguests often enough that the one-turn
+   live-view degradation is visibly jarring, or (b) we want the moment-prompt grounding itself to defer
+   the reshuffle in lockstep with the gadget (a single-source-of-truth win the FE-freeze cannot give).
+   Until then the FE-freeze stands.
+
 ## Key files
 
 `src/domain/house.ts` (floor plan) · `src/adapters/engine/GameSessionAdapter.ts`
