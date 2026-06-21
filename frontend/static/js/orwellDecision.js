@@ -402,6 +402,12 @@
       let stable = 0;
       for (let i = 0; i < 25 && !_userDismissed; i++) {
         const host = document.getElementById("chat-history");
+        // A lingering "✓ Locked in" (.odec-done) card from the PRIOR decision must not block a NEW
+        // pending from arming (audit 2026-06-20): the next round's card could otherwise be suppressed
+        // by the done-card still holding CARD_ID during its 4s fade. Treat it as absent so the fresh
+        // decision card replaces it; a LIVE (not-done) card is left alone (stable branch below).
+        const _doneCard = document.getElementById(CARD_ID);
+        if (_doneCard && _doneCard.classList.contains("odec-done")) _doneCard.remove();
         if (host && !document.getElementById(CARD_ID)) {
           window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
           stable = 0;
