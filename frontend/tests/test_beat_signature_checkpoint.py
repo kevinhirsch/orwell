@@ -55,6 +55,7 @@ def test_beat_signature_shape_from_sample_dicts():
         "vetoHolder": "npc:4",
         "vetoUsed": True,
         "evicted": 1,                  # count of non-active house members
+        "evictedNames": [],            # ADR 0009 D3 Part B — names of those out of the house (none named here)
         "finished": False,
     }
 
@@ -65,6 +66,7 @@ def test_beat_signature_is_fail_safe_on_missing_fields():
     assert sig["week"] is None and sig["phase"] is None and sig["pending"] is None
     assert sig["hoh"] is None and sig["noms"] == [] and sig["vetoHolder"] is None
     assert sig["vetoUsed"] is False and sig["evicted"] == 0 and sig["finished"] is False
+    assert sig["evictedNames"] == []  # ADR 0009 D3 Part B — no house ⇒ no out-of-house names
     # Non-dict args also fail safe.
     assert chat_helpers._beat_signature(None, None)["evicted"] == 0
     assert chat_helpers._beat_signature("x", 7)["finished"] is False
