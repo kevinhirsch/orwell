@@ -249,6 +249,18 @@
     const dismiss = () => {
       markWelcomeSeen();
       uninertBackground();
+      // R7 (audit anim-F4): BRIDGE the welcome→cast-photo-box handoff. Removing the welcome overlay
+      // un-hides the empty-state splash (brand + tagline) for the ~120-180ms before the box mounts,
+      // a visible flash. A transient body class keeps the splash suppressed across that gap; the box
+      // clears it on mount (then its own ow-casting-headshot-open continues the suppression), and a
+      // fallback timer clears it if the box never mounts (photo already handled / no producer turn).
+      try {
+        document.body.classList.add("ow-onboarding-bridge");
+        clearTimeout(window._owOnboardingBridgeTimer);
+        window._owOnboardingBridgeTimer = setTimeout(function () {
+          try { document.body.classList.remove("ow-onboarding-bridge"); } catch (_) {}
+        }, 4000);
+      } catch (_) {}
       el.remove();
       // The welcome modal is gone. OOBE re-sequence: dismissing the welcome IS the proceed —
       // onProceed opens the fresh interview session and fires the producers' kickoff. The photo
@@ -539,6 +551,13 @@
 
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
+    // Capture, BEFORE openFreshInterviewSession() (below) can set it, whether THIS tab session has
+    // already opened the casting interview. Used to tell a brand-new pre-game season apart from a
+    // same-session reload so a STALE per-user welcome marker — one left by a prior game that a
+    // BACKEND/host factory reset wiped (those resets run server-side and never reach the FE restart
+    // hooks in settings.js / orwellNewSeason.js) — is cleared and the welcome greets the new season.
+    let _seatTakenBefore = false;
+    try { _seatTakenBefore = sessionStorage.getItem(SEAT_TAKEN_KEY) === "1"; } catch (_) {}
     try {
       const st = await fetchState();
       if (!st || st.started !== false) {
@@ -574,6 +593,16 @@
         try { await openFreshInterviewSession(); } catch (_) {}
         try { if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting(); } catch (_) {}
       };
+      // A genuinely FRESH casting (the engine intake is empty — `casting.known` has no captured
+      // fields) that this tab session never opened is a NEW season (incl. one begun by a backend/
+      // host factory reset, which the FE restart hooks can't see). Clear any stale per-user welcome
+      // marker so the !welcomeSeen() check below greets again. Gated on _seatTakenBefore so the
+      // post-dismiss window (marker just set, the producer turn still in flight) is never mistaken
+      // for a new season — a same-session reload mid-interview keeps the marker and never re-pops.
+      const _intakeEmpty = !!(st && st.casting && Object.keys(st.casting.known || {}).length === 0);
+      if (_intakeEmpty && !_seatTakenBefore && welcomeSeen()) {
+        try { clearWelcomeSeen(); } catch (_) {}
+      }
       if (!welcomeSeen()) {
         mountWelcome(onProceed); // its own modal; on "Meet the producers" it opens the interview
       } else {

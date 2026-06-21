@@ -12,7 +12,7 @@ Contract under test:
     and a fresh call replaces the set;
   • season start uses the finalized pick (no provider), and a RETURNING player keeps their
     face via the persisted avatar;
-  • the routes: studio generate/candidate/finalize, the avatar serve (404→200), and an
+  • the routes: studio generate/candidate/finalize, the avatar serve (204→200), and an
     'exact' upload finalizes at once.
 
 Roles only; PIL real, providers/network faked.

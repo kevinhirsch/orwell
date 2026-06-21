@@ -28,6 +28,7 @@
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { makeWindowResizable } from './windowResize.js';
+import { isNarrow } from './platform.js';
 
 const Z_BASE = 500;          // the window band: above the legacy panel stamps
 const Z_CEIL = 980;          //   (modalManager's 300s), below modals (1000+)
@@ -136,7 +137,10 @@ function ensureCss() {
     }
     .ow-controls button:hover, .ow-controls button:focus-visible,
     .ow-dismiss:hover, .ow-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
-    .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); }
+    /* R4 (audit resp-F2): dvh tracks the dynamic (keyboard/URL-bar-shrunk) mobile viewport so a
+       window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
+       as the fallback for engines without dvh. */
+    .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); max-height: min(70dvh, 560px); }
     /* ── A7 [ruling #19] — the Windows-7 fly-out family ───────────────────────
        The animation CONTRACT exposes DISTINCT minimize vs. close keyframes, both
        DRIVEN (not pure transitions) so the CSS itself names the two motions; the
@@ -176,6 +180,12 @@ function ensureCss() {
     }
     .ow-window.ow-docked > .ow-titlebar { cursor: default; }
     .ow-window.ow-docked > .ow-body { max-height: none; }
+    /* R2 (audit resp-F4): on the mobile sheet tier the kit drag is disabled (windowDrag mobileSkip
+       768), so the titlebar must NOT advertise cursor:move — a dead affordance that lies on touch.
+       The matching "Drag to move" tooltip is suppressed below the same threshold in JS (_build). */
+    @media (max-width: 768px) {
+      .ow-window:not(.ow-docked) > .ow-titlebar { cursor: default; }
+    }
     /* the dock/undock toggle reads as a quieter control than min/close */
     .ow-controls .ow-dock { font-size: .9rem; }
     /* ── loading affordance (perf/resilience) ─────────────────────────────────
@@ -343,6 +353,11 @@ export class OrwellWindow {
     this.o = Object.assign({ slot: 'top-right', role: 'complementary',
       draggable: true, minimizable: true, closable: true, resizable: true,
       minWidth: 240, minHeight: 160, focus: false,
+      // persistLayout (default true): a window's geometry rides the 0064 cross-device layout sync
+      // AND is re-applied from the seed on open. A transient one-shot dialog (the OOBE cast-photo
+      // box, audit D1) sets it false so it ALWAYS re-centers — never carrying a dragged offset
+      // across reloads or devices for the season.
+      persistLayout: true,
       dockable: false, defaultDocked: false, modal: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
@@ -371,7 +386,10 @@ export class OrwellWindow {
     const tb = document.createElement('div');
     tb.className = 'ow-titlebar';
     tb.setAttribute('tabindex', '0');
-    tb.title = (this.o.draggable && !docked) ? 'Drag to move · arrows to nudge' : '';
+    // R2 (audit resp-F4): below the mobileSkip (768) tier the drag is disabled, so don't advertise
+    // "Drag to move" — it would lie on touch (the cursor:move is suppressed by the matching media
+    // query). A window born wide and resized narrow keeps the tooltip; the cursor still corrects.
+    tb.title = (this.o.draggable && !docked && !isNarrow()) ? 'Drag to move · arrows to nudge' : '';
     const title = document.createElement('span');
     title.className = 'ow-title';
     title.textContent = this.o.title;
@@ -449,11 +467,19 @@ export class OrwellWindow {
         // 0064: capture a user resize for cross-device sync (suppressed while APPLYING a remote one).
         onResizeEnd: ({ rect }) => {
           if (this._applyingRemote) return;
-          emitWindowLayout(this.o.id, { w: Math.round(rect.width), h: Math.round(rect.height) });
+          this._emit({ w: Math.round(rect.width), h: Math.round(rect.height) });
         },
       });
     }
     return el;
+  }
+
+  /** 0064/D1: emit a layout change for cross-device sync — suppressed while APPLYING a remote
+   *  change (no echo loop) AND when this window opts OUT of layout persistence (`persistLayout:
+   *  false` — a transient one-shot dialog that must always re-center). One funnel for every site. */
+  _emit(state) {
+    if (this._applyingRemote || this.o.persistLayout === false) return;
+    emitWindowLayout(this.o.id, state);
   }
 
   _persist(rect) {
@@ -463,9 +489,11 @@ export class OrwellWindow {
       this.el.style.left = c.left + 'px'; this.el.style.top = c.top + 'px';
       rect = this.el.getBoundingClientRect();
     }
+    // D1: a non-persistent dialog (persistLayout:false) carries no slot key, so saveDragOffset is a
+    // no-op for it — it re-centers on the next restack instead of remembering a dragged offset.
     if (this._slot) this._slot.saveDragOffset(rect);
-    // 0064: capture the new position for cross-device sync (not while applying a remote change).
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { x: Math.round(rect.left), y: Math.round(rect.top) });
+    // 0064: capture the new position for cross-device sync (gated by _emit).
+    this._emit({ x: Math.round(rect.left), y: Math.round(rect.top) });
   }
 
   /** 0064: apply a layout change that arrived from another of the user's devices. Sets
@@ -644,7 +672,7 @@ export class OrwellWindow {
     if (this.ac.signal.aborted) this.ac = new AbortController();
     const el = this._build();
     _byId.set(this.o.id, this);                                            // 0064: live registry for remote apply
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { open: true }); // 0064: capture open state
+    this._emit({ open: true }); // 0064/D1: capture open state (gated)
     // 0054 Phase 2: a docked window mounts straight into #gadget-rail-body (the
     // rail owns visibility/order/collapse/mobile-drawer). NO slot register, NO
     // dock-chip register, NO z-band raise — docked = no geometry, the F5 invariant
@@ -687,7 +715,9 @@ export class OrwellWindow {
     // 0064 Part F: apply a synced layout seed from another device once layout settles. min/dock/size
     // also restore via localStorage (the kit's existing load); this additionally covers POSITION and
     // keeps a just-opened window consistent with a change made elsewhere while it was closed.
-    try {
+    // D1: a non-persistent dialog ignores any synced seed — it must always open centered, never
+    // re-applying a position dragged in a past session / on another device.
+    if (this.o.persistLayout !== false) try {
       const seed = window._orwellLayoutSeed && window._orwellLayoutSeed[this.o.id];
       if (seed) requestAnimationFrame(() => { if (this.el) this._applyLayout(seed); });
     } catch (_) {}
@@ -716,7 +746,7 @@ export class OrwellWindow {
   minimize() {
     if (!this.el || this._docked) return;  // docked windows live in the rail, no chip dock
     saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { minimized: true });  // 0064
+    this._emit({ minimized: true });  // 0064/D1
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);
     this.el.classList.remove('ow-focused');
@@ -757,7 +787,7 @@ export class OrwellWindow {
     // a dock restore must always yield a VISIBLE window.
     if (getComputedStyle(this.el).display === 'none') this.el.style.display = 'block';
     saveParked(this.o.id, false); // F2 (G16): an explicit restore un-parks durably
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { minimized: false });  // 0064
+    this._emit({ minimized: false });  // 0064/D1
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();
@@ -802,7 +832,7 @@ export class OrwellWindow {
     if (!this.o.dockable) return;
     const next = !this._docked;
     saveDocked(this.o.id, next);
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { docked: next });  // 0064
+    this._emit({ docked: next });  // 0064/D1
     const opener = this.opener;
     // A dock toggle is a RE-HOME, not a dismissal: suppress the consumer's onClose
     // (it resets the module's _win reference — which we keep, since it's the same
@@ -846,7 +876,7 @@ export class OrwellWindow {
     // so skip the consumer's onClose reset and the focus-return (open() refocuses).
     if (this._rehoming) return;
     // 0064: a genuine close (not a dock re-home) syncs the closed state to other devices.
-    if (!this._applyingRemote) emitWindowLayout(this.o.id, { open: false, minimized: false });
+    this._emit({ open: false, minimized: false });
     try { this.o.onClose && this.o.onClose(); } catch (_) {}
     // audit F8: focus returns to the opener
     if (opener && opener.isConnected && typeof opener.focus === 'function') {

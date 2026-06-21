@@ -796,7 +796,7 @@ def setup_orwell_routes() -> APIRouter:
 
     @router.get("/avatar")
     async def orwell_user_avatar(request: Request):
-        """The account's circle profile pic (G27) — the finalized headshot. 404 ⇒ the UI shows
+        """The account's circle profile pic (G27) — the finalized headshot. 204 ⇒ the UI shows
         the initial. Player-channel: a user's OWN avatar only."""
         p = orwell_portraits.user_avatar_path(_current_user(request))
         if p is None:

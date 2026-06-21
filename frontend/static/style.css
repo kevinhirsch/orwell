@@ -207,10 +207,20 @@ body.bg-pattern-synapse {
     linear-gradient(90deg, color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3.5% * var(--bg-effect-intensity, 1)), transparent) 1px, transparent 1px);
   background-size: 24px 24px; background-attachment: fixed;
 }
-body.bg-pattern-perlin-flow,
 body.bg-pattern-petals,
 body.bg-pattern-sparkles {
   /* canvas-only backgrounds */
+}
+/* R3 (audit anim-F1): a FAINT static phosphor base under the perlin-flow canvas. Present the instant
+   the bg-pattern class is set (the head-script arms it at first paint), so there is no bare-bg window
+   before the animated canvas spawns at the end of theme init — and it doubles as the reduced-motion
+   "static or off" fallback (where the canvas never spawns). The canvas overlays this seamlessly. */
+body.bg-pattern-perlin-flow {
+  background-image:
+    radial-gradient(120% 80% at 50% 0%,
+      color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3% * var(--bg-effect-intensity, 1)), transparent) 0%,
+      transparent 60%);
+  background-attachment: fixed;
 }
 
 
@@ -36246,6 +36256,20 @@ body.theme-frosted .ow-window {
   backdrop-filter: blur(24px) saturate(170%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
   border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
+}
+/* F-S2-A (audit 2026-06-21): the pre-game cast-photo dialog (#orwell-headshot) is a GATING window
+   that floats over the LIVE producer interview (the 2026-06-20 re-sequence made the photo optional
+   + non-blocking, so card and narration coexist on screen). Under the frosted theme its 32%-opacity
+   glass let the producer narration BEHIND it bleed through → a text-over-card collision, unreadable
+   on the very first casting beat (worse on mobile). A gating dialog over live content must be OPAQUE
+   — unlike the draggable HUD windows, which frost over content the player WANTS to see. Restore the
+   solid panel fill + drop the backdrop blur for this ONE window (id-specificity beats the rule
+   above); every other .ow-window stays frosted. */
+body.theme-frosted #orwell-headshot.ow-window {
+  background-color: var(--win-bg, var(--panel, #15181f)) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 /* The sidebar header + user bar paint their own opaque --sidebar-bg/--panel.
    Under the frosted theme the sidebar is translucent glass, so those solid

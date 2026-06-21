@@ -95,6 +95,8 @@ body[data-game-build].ow-casting-headshot-open .chat-container.welcome-active .c
 }
 body[data-game-build].ow-onboarding #welcome-screen .welcome-tip,
 body[data-game-build].ow-onboarding #welcome-screen .welcome-sub,
+body[data-game-build].ow-onboarding-bridge #welcome-screen .welcome-tip,
+body[data-game-build].ow-onboarding-bridge #welcome-screen .welcome-sub,
 body[data-game-build].ow-casting-headshot-open #welcome-screen .welcome-tip,
 body[data-game-build].ow-casting-headshot-open #welcome-screen .welcome-sub {
   opacity: 0 !important;
@@ -107,7 +109,10 @@ body[data-game-build].ow-casting-headshot-open #welcome-screen .welcome-sub {
    whole splash out while the cast-photo window is up — one clean container, nothing
    stacked. (The welcome MODAL covers the splash on its own z-layer, so this only needs
    to fire for the image-step window.) It returns the instant the window hands off. */
-body[data-game-build].ow-casting-headshot-open #welcome-screen {
+body[data-game-build].ow-casting-headshot-open #welcome-screen,
+/* R7 (audit anim-F4): the welcome→box handoff bridge keeps the whole splash faded across the
+   ~120-180ms gap between the welcome overlay closing and the cast-photo box mounting (no flash). */
+body[data-game-build].ow-onboarding-bridge #welcome-screen {
   opacity: 0 !important;
   pointer-events: none;
 }

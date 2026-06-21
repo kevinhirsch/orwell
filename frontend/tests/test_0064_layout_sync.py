@@ -134,9 +134,13 @@ def test_kit_captures_and_applies_layout():
     assert "orwell:window-layout" in src              # capture event
     assert "_orwellApplyRemoteLayout" in src          # remote-apply seam
     assert "_applyLayout" in src                      # the per-window applier
-    # capture is wired at the geometry + state seams
+    # capture is wired at the geometry + state seams. The kit funnels every seam through the
+    # _emit() wrapper (which gates on _applyingRemote AND the D1 persistLayout:false opt-out), so the
+    # capture sites are counted as this._emit(...) calls, not raw emitWindowLayout( calls.
     assert "onResizeEnd" in src
-    assert src.count("emitWindowLayout(") >= 5        # persist + resize + min + restore + dock + open/close
+    assert "_emit(state)" in src                      # the single capture funnel
+    assert src.count("this._emit(") >= 5              # persist + resize + min + restore + dock + open/close
+    assert "emitWindowLayout(" in src                 # _emit still delegates to the module emitter
 
 
 def test_layout_sync_module_present_and_registered():

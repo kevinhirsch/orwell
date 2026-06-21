@@ -75,8 +75,13 @@ def test_game_updated_publish_is_best_effort(monkeypatch):
 
 def test_cast_photo_gate_centers_and_syncs_closed():
     src = _read("static", "js", "orwellHeadshot.js")
-    # placement: pinned viewport-centered with !important (the slot stacker can't strand it)
-    assert "!important" in src and "translateX(-50%)" in src
+    # placement: the box rides the "top-center" slot — the slot engine centers it horizontally
+    # under the header AND clamps it into the viewport (the stacker can't strand it), which
+    # replaced the old !important/translateX(-50%) hard-pin. That pin beat the drag's inline
+    # writes, making the titlebar a dead grip; top-center keeps the centering while letting the
+    # box be DRAGGABLE (problem A/B) but NOT resizeable (a fixed-size onboarding box).
+    assert 'slot: "top-center"' in src
+    assert "draggable: true" in src and "resizable: false" in src
     # synced set-state: driven by the server-authoritative finalized bit, closes across devices
     assert "intake.finalized" in src or "finalized" in src
     gate = _read("static", "js", "orwellChatGate.js")

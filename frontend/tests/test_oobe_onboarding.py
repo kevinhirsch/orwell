@@ -248,6 +248,28 @@ def test_welcome_modal_shows_on_every_fresh_season():
     assert "mountWelcome(onProceed)" in route
 
 
+def test_welcome_reshows_after_a_backend_reset_via_fresh_intake():
+    # A BACKEND/host factory reset runs server-side and never reaches the FE restart hooks
+    # (settings.js / orwellNewSeason.js), so the per-user welcome marker can go stale and skip the
+    # welcome on the new season's first open. route() detects a genuinely fresh casting (the engine
+    # intake is empty — casting.known has no captured fields) that THIS tab session never opened
+    # (SEAT_TAKEN captured BEFORE openFreshInterviewSession) and clears the stale marker so the
+    # welcome greets again — without re-popping on a same-session mid-interview reload.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    route = onb[onb.index("async function route"):]
+    # captures the seat state (sessionStorage read) BEFORE the interview is (re)opened this pass
+    assert "_seatTakenBefore" in route
+    assert (route.index("sessionStorage.getItem(SEAT_TAKEN_KEY)")
+            < route.index("await openFreshInterviewSession()"))
+    # the fresh-intake signal is server-derived (casting.known empty), gated by !_seatTakenBefore
+    assert "st.casting.known" in route
+    assert "_intakeEmpty" in route and "!_seatTakenBefore" in route
+    # the stale marker is cleared so the welcome re-shows, BEFORE the !welcomeSeen() gate
+    clear_at = route.index("clearWelcomeSeen()")
+    gate_at = route.index("if (!welcomeSeen())")
+    assert clear_at < gate_at
+
+
 def test_welcome_modal_sequenced_after_the_model_gate():
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
