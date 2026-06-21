@@ -1323,7 +1323,8 @@ async def _llm_call_async_impl(
 async def stream_llm(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
-                     tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None):
+                     tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None,
+                     session_id: Optional[str] = None, pin_provider: bool = False):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
@@ -1396,6 +1397,14 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             # accounting is requested. `stream_options.include_usage` is a no-op on OpenRouter, so ask
             # via OpenRouter's own flag; the streaming parse above reads it back.
             payload["usage"] = {"include": True}
+            # ADR 0010 slice C: per-session stickiness keeps OpenRouter routing to the same
+            # (cache-warm) provider across a game; above the high-token threshold the caller asks to
+            # PIN (no fallback) so a large, expensive-to-recompute prompt never cold-cache-misses on a
+            # fallback. Small calls leave fallbacks on for availability.
+            if session_id:
+                payload["user"] = session_id
+            if pin_provider:
+                payload["provider"] = {"allow_fallbacks": False}
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens

@@ -132,6 +132,18 @@ DEFAULT_SETTINGS = {
     # 0.0 = alert off. Compared against the running per-session cost total via
     # orwell_token_ledger.check_soft_alert (strictly-over semantics).
     "token_spend_alert_usd": 0.0,
+    # ADR 0010 / feature 0069 slice C — the high-token provider-PIN threshold (input tokens).
+    # 0 = off (default; fallbacks always on => byte-identical routing). When > 0, a live-game
+    # request whose recent input exceeds it asks OpenRouter to pin the (cache-warm) provider with
+    # no fallback, so a large prompt never cold-cache-misses on a fallback; small calls keep
+    # fallbacks on for availability. Per-session stickiness (the `user` field) is always on.
+    "token_pin_threshold_tokens": 0,
+    # ADR 0010 / feature 0069 slice D — opt-in non-degradation context tiering. False (default) keeps
+    # the lean budget (auto-derived, capped at agent_input_token_hard_max) => byte-identical. True lets
+    # a long game GROW its input budget toward the model window (~0.85x) BEFORE older turns are trimmed
+    # away, so history is kept (mandate #4) instead of lost to lossy compaction. Costs more on long
+    # games (watch the token-economy meter); only helps on large-context models.
+    "context_tiering_enabled": False,
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell

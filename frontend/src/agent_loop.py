@@ -2829,7 +2829,7 @@ async def stream_agent_loop(
     _t3 = time.time()
     try:
         from src.context_compactor import trim_for_context
-        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX
+        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, escalate_budget
         from src.settings import is_setting_overridden
 
         soft_budget = int(get_setting("agent_input_token_budget", 6000) or 0)
@@ -2855,6 +2855,13 @@ async def stream_agent_loop(
                 is_setting_overridden("agent_input_token_budget"),
                 hard_max=hard_max,
             )
+            # ADR 0010 slice D (opt-in non-degradation tier): before trimming older turns AWAY, grow
+            # the budget toward the model window so a long game keeps its history instead of losing it
+            # to lossy compaction. Default off ⇒ effective_budget unchanged ⇒ byte-identical.
+            if get_setting("context_tiering_enabled", False):
+                effective_budget = escalate_budget(
+                    effective_budget, before_trim_tokens, context_length, enabled=True,
+                )
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
@@ -2942,6 +2949,21 @@ async def stream_agent_loop(
             )
         except Exception:
             _token_policy = None
+    # ADR 0010 slice C: the canonical game session (0064) is the cache-stickiness key (every device's
+    # turns converge on it), and the high-token provider-pin threshold (0 = off) decides when a large
+    # prompt pins the cache-warm provider. Resolved once for game/casting turns; absent for chat.
+    _canon_session_id = session_id
+    _pin_threshold = 0
+    if _call_class:
+        try:
+            from src import orwell_game_session as _gs
+            _canon_session_id = (_gs.get_game_session(owner) if owner else None) or session_id
+        except Exception:
+            _canon_session_id = session_id
+        try:
+            _pin_threshold = int(get_setting("token_pin_threshold_tokens", 0) or 0)
+        except (TypeError, ValueError):
+            _pin_threshold = 0
     # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
     # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
     # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after
@@ -3092,6 +3114,8 @@ async def stream_agent_loop(
             tools=all_tool_schemas if all_tool_schemas else None,
             timeout=agent_stream_timeout,
             policy=_token_policy,
+            session_id=_canon_session_id,
+            pin_provider=(_pin_threshold > 0 and last_round_input_tokens >= _pin_threshold),
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
