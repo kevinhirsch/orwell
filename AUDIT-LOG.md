@@ -261,5 +261,42 @@ code: the prior S3-CORE engine-bypass is fixed/holding, the shared engine/HUD is
 windows, and the decision card is reachable. The one real concurrency defect — the **FE chat-log
 divergence** — is **ADR 0008 (operator-owned)**; movement-grounding refinements are **ADR 0009**.
 
+## STATE 4 — Resolution & endgame (fast-forwarded via the L38 God-Mode lever) — findings
+Drove the game to completion via `POST /api/admin/ops/advance-to-finale` (L38 — reads no Vault).
+14 weeks, `moment:post-season`. Artifacts: `shots/state4/`.
+
+### Verified GOOD (do not regress) — the endgame is excellent
+- **Winner Taylor Wong** (real roster); **player Robin Vale → `status:jury`** — the player-loss /
+  juror path works (0046).
+- **Retrospective Vault-unseal is rich + engine-true: 2037 hiddenStory events** across 13 types —
+  Confessional 492 · Whisper 301 · Conflict 264 · Alliance 224 · Strategy 200 · Bonding 197 ·
+  Showmance 112 · Betrayal 79 · Secret-thread 67 · Surfacing 53 · Hidden-side 39 · Deal 7 · Hidden-tie 2.
+  **The behavioral-fidelity (#1) + non-degradation (#4) mandates are delivered** — the off-screen
+  society accumulated over a full season, never thinned.
+- **E12 secret-ballot per-voter unseal** post-season works (13 weeks of votes with per-voter attribution).
+- **Endgame UI (VIEWED `postseason-desktop.png`, both platforms):** the retrospective window ("📼 The
+  Season, Watched Back") + the "✨ A New Season" keep/recast card render cleanly. **L43 (retro ⊕
+  new-season collision) FIXED** — both stack in the right rail, none off-screen.
+- **Vault Wall HOLDS:** Vault-free projections + leak-free narration throughout play; the Vault
+  unseals **only** post-finish in the retrospective (the one sanctioned reveal, 0048); the God-Mode
+  fast-forward reads no Vault (L38).
+
+### Findings
+| ID | Sev | 👁 | Finding | Evidence | Mechanism / direction |
+|----|-----|----|---------|----------|----------------------|
+| **S4-2** | POLISH (partial) | ✅ | **Stale endgame projections.** `/status` NOW carries `finished:true` + `winner` (bd5e26e landed ✓), but **`/recap` + `/finale` still return empty/None winner post-finish** — the winner only lives in `/retrospective.winner`. | direct route probes post-finish | Residue of the 2026-06-19 S4-2: have `finaleView`/`recap` return the final result (not null) once decided, so every surface agrees. FE recovers via `/state moment:post-season` → retrospective, so non-blocking. |
+| **F-S4-A** | NOTE (tracked) | ~ | **112 Showmance** hiddenStory entries in one 14-week season — possible volume (the L40 "showmance overload" family). | retrospective type histogram | Entries ≠ distinct showmances (the 0059 staged spark→… emits multiple events per arc), so not necessarily overload — but worth confirming the count maps to a *sparse* set. **Tracked by L40 (◐) / 0059** — not re-investigated. |
+| **F-S4-B** | NOTE | ~ | New-season "season portrait" file control may be the raw `<input type=file>` (S4-3 family; #436 says S1-3 styled via `::file-selector-button` on main — verify it covers this one too). | `postseason-desktop.png` | Confirm the styled file control applies to the new-season card. Minor. |
+
+### Failure modes (the brief's State-4 edge cases)
+- **Session rejoin / reload:** the post-season UI re-renders correctly on a fresh load (the capture
+  itself is a cold load that reconstructed the retrospective + new-season) — rejoin persists. The
+  **mid-game chat-rejoin reconciliation** is exactly what **ADR 0008** covers ("a manual reload
+  reconciles" — the persisted log is intact; live replication is the gap). Not re-tested (ADR-0008-owned).
+- **AI timeout / dropped socket:** hard to induce faithfully without a fault-injection hook. The
+  graceful-degradation paths exist (the FE single-flight E22 fallback, the stall detector + auto-
+  continue, the resumable-stream path) — a focused fault-injection probe is the right way to exercise
+  them (candidate next step; may need a state-injection/endpoint-fault hook per the brief's escape hatch).
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
