@@ -162,7 +162,7 @@ def test_warm_portraits_shoots_after_author_warm_finished():
 
 
 def test_portraits_NEVER_shoot_before_authoring_completes():
-    """The load-bearing invariant: hold portraits until authorship is 100% complete."""
+    """The load-bearing invariant: hold a face until ITS houseguest is model-authored (ADR 0012)."""
     eng = _FakeEngine(_WARM_RES)
     auth = _FakeAuthoring(auto_finish=False)  # authoring is in-flight; the gate stays closed
     port = _FakePortraits()
@@ -172,9 +172,9 @@ def test_portraits_NEVER_shoot_before_authoring_completes():
     assert port.calls == 0, "a portrait was shot before authoring finished"
     assert P.warm_state("u1")["authorDone"] is False
 
-    auth.finish()  # authoring completes → the gate opens
+    auth.finish_npc("npc:1")  # ADR 0012: the NPC's OWN authoring (not the whole-cast gate) shoots its face
     _drive()
-    assert port.calls == 1, "the portrait did not shoot once authoring finished"
+    assert port.calls == 1, "the portrait did not shoot once its houseguest was authored"
 
 
 # A two-houseguest cast + two prompts, for the per-NPC gating invariant (#7).
@@ -216,10 +216,11 @@ def test_portraits_gate_PER_NPC_each_face_shoots_only_after_that_npc_is_authored
     assert port.calls == 2
 
 
-def test_portraits_whole_cast_fallback_shoots_an_unauthored_npc_at_authoring_end():
-    """#7 fallback: an NPC the model never authored still gets a face — the whole-cast `then` releases
-    any per-NPC gate that never fired, so its portrait shoots from the seeded facets at authoring-end
-    (without waiting out the full timeout)."""
+def test_portraits_unauthored_npc_gets_NO_face_even_at_authoring_end():
+    """ADR 0012 — an NPC the model never authored gets NO photo (a seeded/un-authored face would
+    mismatch the real, authored text). The whole-cast `then` releases ONLY the fallback gate; it must
+    NOT shoot a never-authored NPC. That NPC's face stays unshot here — the portrait backfill shoots it
+    if/when its authoring actually lands. (Overturns the prior #7 'whole-cast fallback shoots' behavior.)"""
     eng = _FakeEngine(_WARM_RES_2)
     auth = _FakeAuthoring(auto_finish=False)
     port = _FakePortraits()
@@ -233,9 +234,10 @@ def test_portraits_whole_cast_fallback_shoots_an_unauthored_npc_at_authoring_end
     _drive()
     assert port.shot_ids == ["npc:1"]
 
-    auth.finish()  # whole-cast done → the never-fired npc:2 gate opens (the fallback)
+    auth.finish()  # whole-cast done → ADR 0012: the never-authored npc:2 must NOT shoot
     _drive()
-    assert sorted(port.shot_ids) == ["npc:1", "npc:2"], "the unauthored NPC's fallback face never shot"
+    assert port.shot_ids == ["npc:1"], "ADR 0012: an unauthored NPC must NOT get a face"
+    assert "npc:2" not in port.shot_ids
     assert P.warm_state("u1")["authorDone"] is True
 
 
