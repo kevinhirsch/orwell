@@ -121,8 +121,12 @@ bash /opt/orwell/deploy/orwell-factory-reset.sh             # prompts: type RESE
 bash /opt/orwell/deploy/orwell-factory-reset.sh --dry-run   # preview what would be removed
 ```
 
-`data/.env` — including the deploy `GIT_TOKEN` — survives the scrub, so updates keep working
-without a re-prompt.
+`data/.env` — including the deploy `GIT_TOKEN` **and the public-deployment / SSL profile** written
+by the admin **Connect to the internet** wizard (`ORWELL_PUBLIC`, `ALLOWED_HOSTS` /
+`ALLOWED_ORIGINS`, `SECURE_COOKIES`, `AUTH_ENABLED`, …) — survives the scrub, so updates keep
+working without a re-prompt **and a box that was reachable on the internet stays reachable**. The
+`data/ops/` apply record the admin page reads back is preserved too, and the OS-level
+**cloudflared** tunnel/service is never touched.
 
 It stops the services, removes the data, and restarts — the next visit begins at first-run
 onboarding **with an LLM already configured**. This is **identical** to the in-app admin
@@ -152,7 +156,11 @@ operator should never have to re-enter:
 * the **encryption keys** that decrypt them (`frontend/data/.app_key`, `.key`) and the legacy
   `frontend/data/api_keys.json`,
 * and — like every reset — the engine config **`data/.env`** (ports, tokens, the deploy
-  `GIT_TOKEN`, LLM keys), which is **never touched**.
+  `GIT_TOKEN`, LLM keys, **and the public-deployment / SSL profile**: `ORWELL_PUBLIC`,
+  `ALLOWED_HOSTS` / `ALLOWED_ORIGINS`, `SECURE_COOKIES`, `AUTH_ENABLED`, …), which is **never
+  touched**, plus the **`data/ops/` public-deployment apply record**. The OS-level **cloudflared**
+  tunnel is untouched too — so a box that was made **public on the web stays public** across the
+  reset.
 
 So after the reset the app sits at first-run onboarding (account creation / casting) **with an
 LLM already configured**. Same host-aware bridge and flags as the other resets:
@@ -215,9 +223,11 @@ want the new build (no wipe), or the plain **OOBE reset** when you only want a c
 
 The lighter sibling of the factory reset: it removes **only game progression** — every per-user
 engine sandbox (saves, souls, the hidden Vault layer, in-flight casting intake) — and preserves
-**everything else**: `data/.env` (ports, tokens, LLM keys) *and* the entire front-end store
-(accounts, sessions, settings, including the LLM endpoint config). Players keep their logins and
-the box keeps its LLM setup; the next visit starts a brand-new game at the casting interview.
+**everything else**: `data/.env` (ports, tokens, LLM keys, **and the public-deployment / SSL
+profile**) *and* the entire front-end store (accounts, sessions, settings, including the LLM
+endpoint config), plus the **`data/ops/` public-deployment apply record** and the OS-level
+**cloudflared** tunnel. Players keep their logins, the box keeps its LLM setup **and stays public
+on the web if it was**; the next visit starts a brand-new game at the casting interview.
 Same host-aware bridge and flags as the factory reset:
 
 ```bash

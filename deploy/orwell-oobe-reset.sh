@@ -14,8 +14,14 @@
 #   • the LLM-SELECTION settings (which endpoint/model is the default for chat/utility/…),
 #   • the encryption keys that decrypt them (data/.app_key, data/.key) and the legacy
 #     data/api_keys.json — so after the reset an LLM is ALREADY configured.
-#   • the engine config data/.env (ports, tokens, LLM keys) — NEVER touched, like every reset.
-# So after this reset the app sits at OOBE, but an LLM is already wired.
+#   • the engine config data/.env (ports, tokens, LLM keys — AND the public-deployment / SSL
+#     profile written by the "Connect to the internet" wizard: ORWELL_PUBLIC, ALLOWED_HOSTS,
+#     ALLOWED_ORIGINS, SECURE_COOKIES, AUTH_ENABLED, …) — NEVER touched, like every reset.
+#   • the data/ops/ tree (the public-deployment apply record the admin page reads back, plus the
+#     live ops trigger/status dir) — preserved below. The OS-level cloudflared tunnel/service is
+#     never touched either. So a box that was made PUBLIC on the web STAYS public across the reset.
+# So after this reset the app sits at OOBE, but an LLM is already wired — and if the box was
+# reachable on the internet, it still is.
 #
 # The selective FE-store surgery (export model_endpoints + the LLM settings, wipe the rest,
 # rebuild) is done by the quarantined Python helper frontend/scripts/oobe_reset.py; this
@@ -326,11 +332,15 @@ else
 fi
 
 # ── 3. Scrub the engine SAVE dir — the real per-user games (saves + hidden Vault layer) ───────
+# KEEP .env, the model cache, AND data/ops/ — in case the save dir IS the config dir
+# (ORWELL_DATA_DIR=<app>/data). data/ops/ holds the public-deployment apply record + the live ops
+# trigger/status dir, so dropping it would forget the public deployment; step 3b makes the same
+# exclusions when the two dirs differ.
 ops_step 4 "scrubbing game sandboxes (saves, souls, Vault layer)"
 msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
 if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" ! -name models -print0)
+    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" ! -name models ! -name ops -print0)
 else
   warn "engine save dir ${ENGINE_SAVE_DIR} absent — nothing to scrub there"
 fi

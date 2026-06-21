@@ -3,11 +3,14 @@
 # orwell — game reset. Clears ALL game progression — every per-user engine sandbox
 # (saves, souls, the hidden Vault layer, in-flight casting intake) — and NOTHING else.
 #
-# CONFIG IS PRESERVED, all of it: the engine data/.env (ports, tokens, LLM keys) AND the
-# entire front-end store (accounts, sessions, settings — including the LLM endpoint config).
-# Players keep their logins and the box keeps its LLM setup; the next visit simply starts a
-# brand-new game at the casting interview. (Old chat transcripts are kept too — a fresh game
-# session begins on the next visit. For a full wipe back to OOBE use orwell-factory-reset.sh.)
+# CONFIG IS PRESERVED, all of it: the engine data/.env (ports, tokens, LLM keys, AND the
+# public-deployment / SSL profile — ORWELL_PUBLIC, ALLOWED_HOSTS/ORIGINS, SECURE_COOKIES, …),
+# the data/ops/ public-deployment apply record, AND the entire front-end store (accounts,
+# sessions, settings — including the LLM endpoint config). The OS-level cloudflared tunnel is
+# untouched, so a box that was made PUBLIC on the web STAYS public. Players keep their logins and
+# the box keeps its LLM + internet setup; the next visit simply starts a brand-new game at the
+# casting interview. (Old chat transcripts are kept too — a fresh game session begins on the next
+# visit. For a full wipe back to OOBE use orwell-factory-reset.sh.)
 #
 # Run on the Proxmox HOST or inside the container as root:
 #   bash /path/to/orwell-game-reset.sh             # prompts to confirm
@@ -151,7 +154,13 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then ha
 svc_exists() { systemctl list-unit-files "${1}.service" --no-legend 2>/dev/null | grep -q .; }
 
 if [[ "$DRY_RUN" -eq 0 && "$(id -u)" -ne 0 ]]; then
-  if [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* || "$have_systemd" -eq 1 ]]; then
+  # Root is needed to remove data under /opt and to stop/start the systemd services — but NOT for a
+  # self-contained run on non-/opt paths with no orwell-* units present (a CI/dev test). Gate on what
+  # the run will actually touch, not merely on systemd being installed (CI runners have systemd).
+  needs_root=0
+  [[ "$CONFIG_DIR" == /opt/* || "$ENGINE_SAVE_DIR" == /opt/* ]] && needs_root=1
+  if [[ "$have_systemd" -eq 1 ]] && { svc_exists "$ENGINE_SVC" || svc_exists "$FRONTEND_SVC"; }; then needs_root=1; fi
+  if [[ "$needs_root" -eq 1 ]]; then
     die "run as root (sudo): needs to stop services and remove the game saves under ${APP_DIR}."
   fi
 fi
@@ -207,22 +216,24 @@ else
 fi
 
 # ── 2a. Scrub the engine SAVE dir — the per-user games (saves + hidden Vault layer), ──────────
-#       always KEEPING .env in case the save dir and the config dir are the same.
+#       always KEEPING .env AND data/ops/ (the public-deployment apply record + ops trigger dir)
+#       in case the save dir and the config dir are the same.
 msg "scrubbing engine saves in ${ENGINE_SAVE_DIR}"
 if [[ -d "$ENGINE_SAVE_DIR" ]]; then
   while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" ! -name models -print0)
+    < <(find "$ENGINE_SAVE_DIR" -mindepth 1 -maxdepth 1 ! -name "$ENV_KEEP" ! -name models ! -name ops -print0)
 else
   warn "engine save dir ${ENGINE_SAVE_DIR} absent — nothing to scrub there"
 fi
 
 # ── 2b. Also scrub any sandboxes that landed in the CONFIG dir (covers ORWELL_DATA_DIR=<app>/data),
-#       always KEEPING .env (the preserved config). Skipped when it's the same dir as 2a.
+#       always KEEPING .env (the preserved config) and data/ops/ (the public-deployment apply
+#       record + the live ops trigger/status dir). Skipped when it's the same dir as 2a.
 if [[ "$CONFIG_DIR" != "$ENGINE_SAVE_DIR" ]]; then
   msg "scrubbing config dir ${CONFIG_DIR} (keeping ${ENV_KEEP})"
   if [[ -d "$CONFIG_DIR" ]]; then
     while IFS= read -r -d '' entry; do do_rm "$entry"; done \
-      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d ! -name models -print0)
+      < <(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d ! -name models ! -name ops -print0)
   fi
 fi
 
