@@ -170,6 +170,29 @@ def test_l34_a6_kit_titlebar_rides_the_root_frost_no_own_filter():
     assert "blur(" not in rule
 
 
+def test_frosted_game_build_modal_header_drops_own_filter():
+    css = _read("static", "style.css")
+    # UX audit ("gray bar behind the Peek button"): same failure as A6, but on the
+    # modal family. body.theme-frosted .modal-header keeps its own backdrop-filter
+    # (the full-workspace tool modals scroll under a sticky header and want the
+    # masking), which re-blurs the modal-content root's already-frosted glass into a
+    # mismatched band across the title strip. In the GAME BUILD the only frosted
+    # headers are Settings + Theme (no scrolling tool modals), so the header must
+    # drop its own filter and ride the single .modal-content root backdrop.
+    m = re.search(
+        r"body\[data-game-build\]\.theme-frosted \.modal-header\s*\{([^}]*)\}", css, re.S)
+    assert m, "the game-build frosted .modal-header rule must exist"
+    rule = m.group(1)
+    assert "backdrop-filter: none !important;" in rule
+    assert "-webkit-backdrop-filter: none !important;" in rule
+    assert "blur(" not in rule, "the game-build header must NOT re-introduce its own blur"
+    # The base (non-game) rule still carries the blur for the tool modals.
+    base = re.search(r"body\.theme-frosted \.modal-header\s*\{([^}]*)\}", css, re.S)
+    assert base and "backdrop-filter: blur(24px) !important;" in base.group(1), (
+        "the base frosted modal-header keeps its blur — only the game build drops it."
+    )
+
+
 def test_l34_gadget_rail_frosts_too():
     css = _read("static", "style.css")
     block = _frosted_bg_block(css)

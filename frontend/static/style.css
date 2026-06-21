@@ -36305,6 +36305,22 @@ body.theme-frosted .modal-header {
   backdrop-filter: blur(24px) !important;
   -webkit-backdrop-filter: blur(24px) !important;
 }
+/* UX audit (frosted "gray bar behind the Peek button"): the header's OWN
+   backdrop-filter above re-samples and re-blurs the modal-content root's
+   ALREADY-frosted glass, so the top strip composites to a flatter, mismatched
+   shade — a visible band across the title area (worst behind the otherwise-empty
+   Peek button). This is the SAME failure the A6 fix (below) cured for the kit
+   titlebar (.ow-titlebar): the element carrying backdrop-filter must be the panel
+   ROOT, with the header transparent OVER it. The base rule keeps the blur for the
+   full-workspace tool modals (Calendar/Tasks/…), whose tall bodies scroll under a
+   sticky header and want the masking. In the GAME BUILD those tool modals are gone
+   — the only frosted headers are Settings + Theme — so drop the header's own
+   filter and let the single .modal-content root backdrop render the whole modal
+   (header included) as one cohesive glass surface. No band, no gray bar. */
+body[data-game-build].theme-frosted .modal-header {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 /* A6 [frosted-top fix]: the kit titlebar (.ow-titlebar) is NOT sticky and the
    kit body does not scroll under it — the bar sits flush at the very top of the
    panel. Giving it its OWN backdrop-filter (as the modal header above needs) made
