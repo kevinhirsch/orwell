@@ -80,6 +80,8 @@ shared/engine-truth state**, or **a divergence that does not reconcile** *is*.
 | `s1validate.mjs` | State 1 — post-fix re-capture (the validation step): re-checks a specific fix set (e.g. avatar-204 net log, the FOUC first-frame luminance). |
 | `s2cast.mjs` | State 2 — **live casting interview** driver (below). |
 | `s3parity.mjs` · `s3race.mjs` · `s3raceloop.mjs` · `s3reconcile.mjs` | State 3 — the **concurrency suite** (§4). |
+| `s3core.mjs` | State 3 — **core-loop narration FIDELITY** (§5): one clean window, N live turns through a week; per turn captures rendered GM, leak-check, engine truth (phase/hoh/noms/pending/beatSeq), invented-name check vs roster, and whether the engine **advanced**. The oracle: a narrated comp/ceremony OUTCOME must match engine state. |
+| `s4ff.mjs` · `s4fe.mjs` | State 4 — **resolution** (§6): `s4ff` fast-forwards the live sandbox to a crowned winner via **direct engine `callTool`** (model-free, EchoNarrator) scanning every advance + endgame projection through the Vault oracle (incl. secret-ballot anonymization + per-voter-unseal-only-post-season); `s4fe` captures the FE retrospective **window** + DOM Vault scan + the rejoin/SSE edge probes. |
 
 ### Live narration driving (`s2cast.mjs`, the roleplay method)
 
@@ -144,7 +146,52 @@ the peer's events). The structural fix is **ADR 0008** (per-session `seq`; rende
 
 ---
 
-## 5. Secret hygiene (unchanged, restated)
+## 5. The core-loop fidelity method (`s3core.mjs` — re-verifying the S3-CORE blocker)
+
+The prior-art launch-blocker S3-CORE was *"the model bypasses the engine on competition/ceremony resolution
+— narrates a winner without `advanceGame`/`runCompetition`, or invents a houseguest."* It is re-verified by
+driving the **live model** through a full week and, **every turn**, anchoring the rendered narration to the
+**engine truth oracle**:
+
+- One clean authed window; phase-appropriate **in-character** player lines (the player authors their own
+  persona — never a roster/NPC name); a `resolveCard()` that handles any `#orwell-decision-card` that
+  surfaces; `waitDone()` on the streaming completion footer.
+- **Per turn, four oracles:** (1) **leak** — the rendered body (thinking stripped) against the engine/tool
+  machinery regex; (2) **engine truth** — `phase/hoh/noms/pending/beatSeq` from `/api/orwell/{state,status}`,
+  diffed before/after to confirm the engine **advanced** (the "won't `advanceGame`/freeze" half of the bug);
+  (3) **invented-name** — capitalized name-pairs in the narration that are **not** in `house[].name` (the
+  cast-invention half) — *note the false-positive class:* a sentence-initial `And/But/If` + a roster first
+  name (`"And Hazel"`) is **not** an invention; reconcile every flag against the roster before believing it;
+  (4) **fidelity** — eyeball that a narrated OUTCOME (HOH crowned, noms on the block, veto holder) **matches**
+  the engine's `hoh/noms/veto`. *Result this run: 14/14 advanced, 0 leaks, 0 genuine inventions, narration
+  tracked engine truth (HOH surfaced exactly at phase→nominations; "X and Y on the block" == engine `noms`).*
+
+## 6. The resolution method (`s4ff` / `s4fe` — finale/retrospective without burning a full live game)
+
+The finale + 0048 retrospective are weeks of play away. Driving there through the FE on a live model is
+prohibitively expensive, so resolution is audited by **fast-forwarding the live sandbox model-free**:
+
+- **`s4ff` drives the engine directly** — `advanceGame` + `submitDecision(autoResolve(pending))` over
+  `POST /player/call` with `X-Orwell-User: <username>` (no token in the audit config). The engine narrator is
+  `EchoNarrativePort` and resolution is deterministic, so this is a **byte-faithful, model-free** drive of the
+  real closed-set loop (the same protocol as `tests/uat/fullGameUatHarness.ts`, against the *live* sandbox). It
+  plays to a crowned winner, scanning **every** advance result + endgame projection through the Vault oracle.
+- **The endgame Vault oracle has two parts the mid-game one doesn't:** (a) **secret-ballot anonymization** —
+  every player-visible eviction beat must read *"a vote to evict ⟨nominee⟩"*, never *"⟨voter⟩ voted to evict"*;
+  (b) the **retrospective unsealing** (`seasonRetrospective`, the Wall's one sanctioned exception) must reveal
+  the **story, not the numbers** — assert the payload carries narrative (`hiddenStory[]`, `evictionVotes[]`
+  NamedRef pairs) but **zero** raw soul/relationship/stat numbers. **Discriminate `npc:N` by JSON path**: a
+  whole-body `/npc:\d+/` regex floods on the legitimate `{id,name}` NamedRef shape — walk the JSON and confirm
+  every `npc:N` sits under an **`id`** leaf, never under prose/`content`/`name` (that walk is the real test;
+  the flat scan is a false-positive generator).
+- **`s4fe` captures the FE side** — it loads the finished game and confirms the **retrospective window** mounts
+  and renders (winner + ordered per-juror vote reveal), DOM-scans it for numeric/`npc:N` leaks, and runs the
+  edge probes (**session rejoin** = reload a finished game clean; **dropped socket** = native `EventSource`
+  reconnect/backoff in `sessionSync.js`). **Caveat to record:** fast-forwarding teleports the engine ahead of
+  the FE chat (chat sits at week 1) — a **test artifact**, not a defect; flag it so a reader doesn't mistake the
+  desync for a finding.
+
+## 7. Secret hygiene (unchanged, restated)
 
 The OpenRouter key and the admin password live **only** in `.audit-telemetry/.secrets.env`
 (`chmod 600`, git-ignored). The committed scripts read it at runtime and never contain a literal secret;

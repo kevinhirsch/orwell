@@ -102,6 +102,11 @@ The 2026-06-18/19 live runs (DOC-ONLY) are the starting baseline. Open launch-bl
 | S2 | State 2 | n/a | **PASS (VIEWED)** | Live casting on `deepseek-v4-pro`: producers open first, distinct named producer (Vincent), reactive persona, **no leaks** any turn, reasoning hidden; tight grounding (`casting.ready` on name; `known` accretes playerName→backstory→archetype→strategy→privateStrategy→notes); **finalized on the FIRST readiness cue** (S2-1 didn't bite); move-in = 15 real cast names, none fabricated. |
 | S3-PAR | State 3 | n/a | **PARITY HOLDS at rest (VIEWED)** | Two-window SAME-identity, SEQUENTIAL: CP1 both load **byte-identical** (engine `beatSeq:8`, HUD, chat 12/12, 0 JS err). CP2 (turn in A) → B syncs the GM beat via SSE/`beatSeq` (both `beatSeq:16`); transient `A=15/B=14` reconciled to **both 14, identical** on re-query. At rest, fine. |
 | **S3-RACE** | State 3 | **[BLOCK]** | **ROOT-CAUSED → ADR 0008** | **Concurrent-write race (zero-tolerance): cross-tab chat render DIVERGES + ACCUMULATES.** Looped **10/10 diverge** (gap → A=45/B=40); engine ALWAYS consistent (`beatSeq` matches), **0 409, 0 JS err**. **Reconcile test: render-layer** — live diverges (45/47), **RELOAD reconciles (49/49)** → persisted log intact, no data loss. Root cause (FE-only): replicated log, no merge discipline (no `seq` ordering; sender optimistic-only; busy tab suppresses peer events). **Fix = structural refactor → [ADR 0008](docs/decisions/0008-chat-conversation-consistency.md)** (per-session `seq`, render/reconcile-by-id, `{id,seq}` dedup, completion broadcast). FE-only, no engine/Vault impact. **Awaiting authorization to implement.** |
+| **S3-CORE** | State 3 | ~~BLOCK~~ | **VERIFIED-FIXED (live)** | **Prior launch-blocker (model bypasses engine on comp/ceremony resolution; invents cast) does NOT reproduce on current build.** Live `deepseek-v4-pro`, 14 turns through a full week-1 loop (hoh-competition → nominations → veto-competition → veto-ceremony → eviction): **engine advanced EVERY turn** (`advanced:true` 14/14 — the "won't `advanceGame`/freeze" defect is gone); **0 leaks** in the visible body 14/14; **0 genuine cast inventions** (the 5 `invented` flags are all `<conjunction>+roster-first-name` regex false positives — Hazel/Kenji/Evan/Steven all rostered). **Narration ↔ engine truth held**: HOH=Hazel surfaced exactly when engine phase→nominations; "Paige and Frankie are on the block" == engine `noms=[Paige Wu, Frankie Whitaker]`; veto holder "Steven" + medallion narrated at veto-ceremony/eviction in sync. The fix family (forced `advanceGame` L39b, finalize fallbacks, `markHouseguestMet` belt, pre-emission outcome guard) is **effective**. |
+| **S4-RESOLVE** | State 4 | n/a | **PASS (live)** | **Full game to a clean finish.** Fast-forwarded the live sandbox via deterministic engine `callTool` (EchoNarrator, no model cost): **14 weeks → crowned winner Thomas Pearson** (a comp-earned NPC — not story-protected for the player). Player **evicted into the jury** and exercised the **interactive finale juror path** (`juror-question` + `juror-vote` pendings surfaced & resolved). FE **retrospective window renders** the winner + **ordered per-juror vote reveal** ("Hazel votes for Thomas, Kenji votes for…"). No stale-loop, no missing-winner, game always terminates. |
+| **S4-VAULT-RETRO** | State 4 | n/a | **PASS — Wall holds at its one opening** | **The 0048 retrospective unsealing — the Vault's ONE sanctioned exception — reveals the STORY, never the NUMBERS.** Live finished season: **2087 off-screen hidden-story beats** across 13 types (Conflict/Alliance/Whisper/Confessional/Betrayal/Showmance/Deal/Secret-thread/…), all **humanized prose** ("Evan Reeves clashed with Charlie Emerson"); **13 weeks of per-voter unsealed ballots** (voter→votedFor NamedRefs). **Numeric-leak oracle: CLEAN (0)** — no soul float / relationship number / hidden stat / emotional-volatility-aptitude value crosses (the `RetrospectiveView` interface is structurally narrative-only). **Secret-ballot anonymization held ALL SEASON**: 83 player-visible eviction beats all read "a vote to evict ⟨nominee⟩", **0 per-voter attribution** (unseals only post-season). `npc:N` appears only in `id` leaf fields (proven by JSON-path walk), never in prose/name/content. FE retro DOM scan: numeric CLEAN, `npc:N` absent. |
+| **S4-1** | State 4 | ~~BLOCK~~ | **VERIFIED-FIXED (code+live)** | Prior blocker (model narrates past a pending ⇒ player STUCK with no card) is fixed by **two layered backstops** in `orwellDecision.js`: `rearmFromStatus` (reload-survival, hardened vs. the async `#chat-history` mount race) **+ the explicit "S4-1 escape hatch"** (a 15s poll of the engine's authoritative `/api/orwell/status` `pending` that surfaces the card even when the chat agent never dispatched it — another device advanced, a missed tool call — without re-nagging a dismissed card; fail-open). Player can never be permanently stuck. Live s3core corroborated (cards surfaced & resolved). |
+| **S4-EDGE** | State 4 | n/a | **PASS** | **Session rejoin:** reload of a finished game loads clean — chat intact (bodyLen 74.5k), no error screen, **0 JS errors**. **Dropped socket:** `sessionSync.js` SSE = native `EventSource` auto-reconnect + capped exponential backoff (1s→30s) on hard-close + 1.5s re-bind tick — transport-resilient. **AI timeout:** handled server-side (the client stall watchdog is *deliberately disabled* per CLAUDE.md; server-side stall detector + auto-continue supersede it). *Note: the client `message-added` SSE listener exists but the streaming path never fires it server-side — corroborates ADR 0008 defect #4 from the client.* |
 | S1-3 | State 1 | POLISH | DEFERRED→S2 | Raw `<input type=file>` — re-verify on the casting **headshot card** (State 2) + Account/new-season. |
 | S1-P1 | State 1 | n/a | VIEWED (ruled benign) | Two-window SAME-identity parity: only divergence is the **random rotating Tip**, which is covered by the welcome modal (pixel mismatch 0%) → legitimate client-side nondeterminism, **not** a consistency defect. |
 | S1-P2 | State 1 | n/a | VIEWED (ruled benign) | Mobile Settings nav = **horizontal-scroll tab strip** (tabs reachable; "Appea…" peek = affordance). DEFECT_SCAN `offscreen` is a false positive for a scroll container → **legitimate reflow**, not clipping. |
@@ -351,6 +356,75 @@ reconcile-not-replace (temp id → canonical on `{id,seq}` arrival, insert missi
 
 ---
 
+## 2.5 State 4 — Resolution / finale / retrospective + edge cases · ALL PASS
+
+**Method.** The interactive finale + post-season retrospective are weeks of play away; rather than burn
+live-model budget driving there through the FE, the live `auditadmin` sandbox was **fast-forwarded to a
+crowned winner via direct engine `callTool`** (`advanceGame`/`submitDecision` over `POST /player/call`,
+`X-Orwell-User: auditadmin`). The engine narrator is `EchoNarrativePort` and outcomes are deterministic, so
+this is a **byte-faithful, model-free** drive of the real closed-set loop — the same protocol as the
+`fullGameUat` harness, run against the *live* sandbox. Every advance result + endgame projection was scanned
+through the Vault-leak oracle. *(Caveat: this teleports the engine ahead of the FE chat, leaving the chat at
+week 1 — a **test artifact**, not a defect; a natural playthrough narrates to finale.)*
+
+**S4-RESOLVE — the loop terminates correctly.** 14 weeks → winner **Thomas Pearson** (an NPC; the engine
+does not story-protect the player to the crown). The player was **evicted into the jury** and the
+**interactive finale juror path** fired (`juror-question`, `juror-vote` pendings surfaced & resolved). The
+FE **retrospective window renders** the winner + the **ordered per-juror vote reveal**.
+
+**S4-VAULT-RETRO — the Wall holds at its one sanctioned opening.** The 0048 retrospective (`seasonRetrospective`,
+registry `readsVault:false`) is the Wall's single structurally-gated exception, and it unseals the **story, not
+the numbers**:
+- **2087** off-screen hidden-story beats across **13 types** (Conflict/Alliance/Whisper/Confessional/Bonding/
+  Strategy/Surfacing/Showmance/Betrayal/Deal/Secret-thread/Hidden-tie/Hidden-side) — all **humanized prose**, a
+  rich behavioral-fidelity payoff of the NPC-to-NPC life the player never witnessed.
+- **13 weeks** of per-voter unsealed eviction ballots (the "who really voted against you" reveal).
+- **Numeric-leak oracle: CLEAN (0).** The `RetrospectiveView` interface carries only `{winner, hiddenStory[],
+  twists[], evictionVotes[]}` — **no field can carry a raw soul/relationship/stat number**. Confirmed live: no
+  `physical/mental/social/trust/affinity/threat/emotional/volatility/aptitude:<num>` anywhere in the payload.
+- **Secret-ballot anonymization held all season:** 83 player-visible eviction beats all read "a vote to evict
+  ⟨nominee⟩"; **0** per-voter attributions in any live projection (attribution unseals **only** post-season).
+- `npc:N` appears **only under `id` leaf keys** (proven by a JSON-path walk of the live projections: 15/15 in
+  `getGameState`, 185/185 in the retrospective — all `id`, 0 in prose/name/content). The FE rendered-DOM scan
+  of the retrospective window: numeric **CLEAN**, `npc:N` **absent**.
+
+**S4-1 — the stuck-player blocker is fixed (code + live).** `orwellDecision.js` carries two layered backstops so
+a pending decision is reachable **without the chat agent dispatching it**: `rearmFromStatus` (reload-survival,
+hardened against the async `#chat-history` mount race) and the explicit **"S4-1 escape hatch"** — a 15s poll of
+the engine's authoritative `/api/orwell/status` `pending` that mounts the card even if the model narrated past it
+or another device advanced, without re-nagging a dismissed card (fail-open). The live s3core run corroborated
+(decision cards surfaced and resolved every turn).
+
+**S4-EDGE — resilient.** *Session rejoin:* reload of a finished game loads clean (chat intact, no error screen,
+**0 JS errors**). *Dropped socket:* `sessionSync.js` relies on native `EventSource` auto-reconnect + capped
+exponential backoff (1s→30s) on hard-close, plus a 1.5s re-bind tick — transport-resilient. *AI timeout:*
+server-side (the client stall watchdog is **deliberately disabled** per CLAUDE.md; the server stall detector +
+auto-continue loop-breaker supersede it). One corroboration: the client `message-added` SSE listener exists but
+the streaming path **never fires it server-side** — independent confirmation of **ADR 0008 defect #4** (the
+missing completion broadcast) from the client side.
+
+---
+
+## 2.6 Audit close-out — verdict
+
+**All four states swept (S1 instantiation · S2 onboarding · S3 core-loop + concurrency · S4 resolution).**
+Engine-side Vault Wall, cross-user isolation, secret-ballot anonymization, retrospective story-not-numbers,
+narration↔engine fidelity, and the decision-card escape hatch are all **verified clean on the live build**.
+
+- **The ONE launch-blocker:** **S3-RACE** — cross-tab/-device chat divergence under concurrent writes
+  (render-layer only; engine + persisted log are correct). Fix specified in **ADR 0008** (FE-only: per-session
+  `seq` + render/reconcile-by-id + `{id,seq}` dedup + completion broadcast). **Awaiting implementation** (PO has
+  authorized the deep refactor; "finish the audit first, then implement").
+- **Prior-art blockers — all retired:** S3-CORE (engine-bypass/cast-invention) **VERIFIED-FIXED**; S4-1
+  (stuck player) **VERIFIED-FIXED**; S1-1 (text-over-text) **VERIFIED-FIXED**.
+- **Polish backlog (non-blocking, fixes applied this run):** S1-2 (avatar 204), S1-A (Remember-me label),
+  S1-B (version contrast), S1-C (FOUC), BG-1 (reduced-motion static background) — all FIX-APPLIED & verified.
+  Residual [POLISH]/[LATENT]: S1-5 (inherited copy), S1-1L (splash-suppression timing), S1-3 (raw file input).
+
+**Next action:** implement **ADR 0008** + land the permanent two-tab concurrent-write parity gate.
+
+---
+
 ## 3. Changelog
 - 2026-06-20 — Ledger initialized; Phase 0 baseline + premise reconciliation (F1) recorded; prior
   2026-06-18/19 findings carried as the re-verify baseline; environment build kicked off; five
@@ -360,3 +434,13 @@ reconcile-not-replace (temp id → canonical on `{id,seq}` arrival, insert missi
   two-window parity + pixel diff). **State 1 captured & analyzed:** S1-1 & S1-4 verified FIXED; S1-2 / S1-5 /
   S1-A open [POLISH] & root-caused; S1-P1 (parity) & S1-P2 (mobile settings) ruled benign. 2 specialists
   (transient, responsive) dispatched to validate; awaiting merge before the State-1 gate.
+- 2026-06-21 — **State 2 PASS** (live casting, no leaks, tight grounding). **State 3:** parity holds at rest;
+  **S3-RACE [BLOCK]** root-caused (looped 10/10 diverge, render-layer, reload reconciles) → **ADR 0008** drafted;
+  **S3-CORE re-verified VERIFIED-FIXED** (14-turn live week-1 loop: engine advanced 14/14, 0 leaks, 0 cast
+  inventions, narration↔engine fidelity held). **BG-1** reduced-motion background fixed & verified. Playtest
+  methodology doc published (`docs/audits/playtest-harness/2026-06-21-…`).
+- 2026-06-21 — **State 4 ALL PASS** (§2.5): live fast-forward to a crowned winner (14 wks, NPC winner, player→
+  jury, juror path fired); **retrospective unsealing holds the Wall at its one opening** (2087 narrative beats +
+  13 wks per-voter ballots, **0 numeric leaks**); secret ballots anonymized all season; **S4-1 escape hatch**
+  & **S4-EDGE** (rejoin/SSE/timeout) verified. **Audit close-out (§2.6): the lone launch-blocker is S3-RACE →
+  ADR 0008** (FE-only); all prior-art blockers retired. Proceeding to implement ADR 0008.
