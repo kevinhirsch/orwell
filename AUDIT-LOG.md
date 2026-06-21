@@ -162,5 +162,54 @@ consumes+scrubs reasoning deltas. (`llm_core.py:21/1371`, `agent_loop.py`.)
 *Outstanding State-1 coverage to close next turn:* settings tab-by-tab capture (trigger = bottom-left
 user-bar gear; neutralize onboarding first), and identify F-S1-H/F-S1-J endpoints/element.
 
+## STATE 2 — Onboarding / live casting interview (DeepSeek-V4-pro, LIVE) — findings
+Driven **live** on desktop + mobile with a consistent human-authored persona (social-butterfly
+"Robin Vale"). First state exercising real DeepSeek narration. Artifacts:
+`.audit-telemetry/shots/state2-{desktop,mobile,b4}/`.
+
+### Verified GOOD (do not regress)
+- **Casting flow works end-to-end live, both platforms:** producer opener (L5 — producers speak
+  first) → incremental **engine-grounded `updateCasting`** (casting.known populated correctly:
+  playerName→backstory→motivation→personaArchetype→strategyStyle→interviewNotes) → `createCharacter`
+  → premiere move-in (L31 tutorial card + populated 15-NPC roster gadget).
+- **Producer persona is excellent** — sharp, consistent, *perceptive* (caught the persona deflecting
+  the same question 3× — "three different ways to say 'I play nice'"). Real behavioral fidelity.
+- **0 real machinery leaks** (the turn-02 "let me try" flag was an in-character producer line — a
+  false positive of the over-broad `LEAK_RE`, not an operator aside).
+- **Debug-note #1 (mobile casting short-circuit) — ✅ VERIFIED FIXED:** mobile ran a FULL interview
+  (all fields by turn 3), `createCharacter` at turn 5 — **no** force-finalize to floater after
+  name+photo. The `finalizable` floor holds on mobile.
+- **B4 (houseguest invention) — ✅ NOT reproduced** (clean run): narration grounded to the real
+  roster (Andre Barton / Penny Yu / Andres Ware ∈ roster); the only non-roster hits were "Big
+  Brother" (GM) + "Kansas City" (place). The earlier "Gemma Meyer" was a **stale-session test
+  artifact** (engine wiped without resetting the FE session), not a live invention.
+- Desktop casting: **0 console errors** (avatar 204 fix holding).
+
+### Findings
+| ID | Sev | 👁 | Finding | Evidence | Mechanism / direction |
+|----|-----|----|---------|----------|----------------------|
+| **F-S2-A** | **High Polish (near-blocking)** | ✅ desktop+mobile | The gating **"Your Cast Photo" card overlaps the producer narration** — frosted translucency lets the GM text bleed through → collision/unreadable on the **first casting beat**. | `state2-{desktop,mobile}/00-opener.png` | **Traced:** `orwellHeadshot.js:323-368` mounts the card as a non-dismissable gating `OrwellWindow` at `z-index:1000` over `#chat-history` (`:47`); **frosted-default ON (L33/L34)** makes it translucent → the narration behind shows through. **Fix:** a backdrop **scrim** behind the gating window (dim the chat) OR an opaque fill for this gating card. |
+| **S2-1** | POLISH | ✅ | **Model under-finalizes casting** — probes for the optional `privateStrategy` past `finalizable=true` (desktop needed an explicit "lock it in" at turn 6/7; mobile finalized turn 5). | desktop beats 04→06; mobile beats | Structural **"Enter the house"** affordance when `finalizable` (the prior S2-1/S5-1 direction; mirrors the FE's `advanceGame` error-correction). |
+| **F-S2-B** | POLISH | ✅ | **2× console 404 on MOBILE casting** (desktop 0; avatar is 204 now). | `state2-mobile/_beats.json` consErr | A **mobile-specific** resource 404 (apple-touch-icon / PWA manifest / mobile asset). Identify + serve/gate. |
+| **F-S2-C** | NOTE | ~ | Possible narration spelling "Bohemeian" (Bohemian?) in the move-in — low confidence (may be extraction noise). | `state2-b4/_b4.json` tokens | Verify in a clean read; if real, a model spelling slip (minor). |
+
+### Tooling / methodology learnings (logged so future states run cleaner)
+- **`LEAK_RE` is over-broad** — `let me (check\|record\|see\|try)` flags in-character "let me try
+  again". Tighten to operator-aside phrasing ("let me check the game state/the engine/record") so the
+  narration-fidelity gate doesn't false-positive on dialogue.
+- **Engine reset MUST be paired with a fresh FE chat session** — wiping `engine-data` without
+  resetting the FE session shows stale history against the new roster (the "Gemma Meyer" confound).
+  Clean runs start via `#sidebar-new-chat-btn` (README §3).
+- **GOOD resilience (VIEWED):** the model self-recovers from a stale-history/fresh-engine desync —
+  "Whoa, let's back that up. You're still in the casting" — rather than running with stale state.
+- The `OVERLAP_SCAN` / copy-smell instrument still needs the ancestor-descendant + sibling-concat
+  hardening noted in F-S1-K.
+
+### F-S1-G (latent S1-1) — partial resolution
+F-S2-A **is** the "casting overlay over content" case F-S1-G predicted — but it overlaps the GM
+**narration**, not the welcome `.welcome-name` (the onboarding card was dismissed by "Meet the
+producers" before the cast-photo card mounted, so `.welcome-name` co-occupancy wasn't triggered).
+F-S1-G stays a latent structural note; **F-S2-A is its concrete, fixable manifestation.**
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
