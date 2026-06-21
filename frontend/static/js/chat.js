@@ -1997,6 +1997,42 @@ import { isNarrow } from './platform.js';
                   _chatBox.appendChild(note);
                   try { note.scrollIntoView({ block: 'end', behavior: 'smooth' }); } catch (_) { uiModule.scrollHistory && uiModule.scrollHistory(); }
                 }
+              } else if (json.type === 'truncated') {
+                // F-S4-D: the reply was cut off by the model's OUTPUT token cap (finish_reason "length"),
+                // not the step limit — it stopped mid-sentence. Offer a Continue affordance (mirrors
+                // rounds_exhausted) so the player can resume instead of the truncation passing silently.
+                // Appended to the chat-history container (bottom), NOT the message body — the body is
+                // re-rendered at stream finalize, which would wipe a note placed inside it.
+                const _chatBox = document.getElementById('chat-history');
+                if (!_isBg && _chatBox) {
+                  const _old = _chatBox.querySelector('.response-truncated');
+                  if (_old) _old.remove();
+                  const note = document.createElement('div');
+                  note.className = 'stopped-indicator response-truncated';
+                  const label = document.createElement('span');
+                  label.className = 'rounds-exhausted-label';
+                  label.textContent = 'The response was cut off before it finished.';
+                  note.appendChild(label);
+                  const contBtn = document.createElement('button');
+                  contBtn.className = 'continue-btn';
+                  contBtn.title = 'Continue the response';
+                  contBtn.textContent = 'Continue ▸';
+                  const _holder = currentHolder;
+                  contBtn.addEventListener('click', () => {
+                    note.remove();
+                    _hideUserBubble = true;
+                    _pendingContinue = _holder;
+                    const msgInput = uiModule.el('message');
+                    if (msgInput) {
+                      msgInput.value = 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.';
+                      const sb = document.querySelector('.send-btn');
+                      if (sb) sb.click();
+                    }
+                  });
+                  note.appendChild(contBtn);
+                  _chatBox.appendChild(note);
+                  try { note.scrollIntoView({ block: 'end', behavior: 'smooth' }); } catch (_) { uiModule.scrollHistory && uiModule.scrollHistory(); }
+                }
               } else if (json.type === 'model_actual') {
                 if (!_isBg && holder) {
                   holder._requestedModel = json.requested_model || holder._requestedModel || modelName;
