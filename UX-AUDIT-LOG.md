@@ -428,6 +428,94 @@ Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consiste
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings; gated remediation set #1 (9 fixes: launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged PR #449** (CI green).
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
 - [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
-- [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
+- [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 7 findings (J4-01…J4-07). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label). Verified green: all J3-16/17/18/25 fixes confirmed in live capture. Deferred: J4-04/05/06/07 → Phase-4 backlog.
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
+
+---
+
+## Journey 4 — findings
+
+**Date:** 2026-06-21 · **Rig run:** `j4` desktop/normal (1440×900) · **Scenario:** `j4_weekly_loop` · **LLM:** deepseek-v4-pro via OpenRouter · **Steps:** 47 · **Events:** 99 · **Frames:** 1759 · **Errors:** 0
+
+### What J4 captured
+
+J4 used a targeted premiere-gate clearing strategy: after `createCharacter`, `/api/orwell/state` was fetched to get all 15 NPC names; three group intro messages (5 names each) were sent so the auto-belt (`_auto_mark_premiere_intros`) could match names against each turn's narration. After the groups + 1 HOH nudge, the HOH competition started and the comp-intent decision card appeared.
+
+**Verified working (J3 fixes confirmed in live capture):**
+- Chip min-height: 36px ✓ (`minH: "36px"` on all 3 comp-intent chips)
+- Confirm min-height: 44px ✓ (`h: 44, minH: "44px"` on confirm)
+- Dismiss opacity: 0.75 ✓ (was 0.55)
+- Note opacity: 0.8, font-size: ~15px ✓ (was 0.65 / 0.78em)
+- Progress bar `role="progressbar"`, `aria-valuemin/max/now` ✓
+- Progress bar `aria-description="Advances as houseguests are evicted"` ✓ (J3-25)
+- Tutorial copy: "Close guide", "fifteen houseguests", emoji aria-hidden ✓
+
+**Decision card behaviour confirmed:**
+- Confirm is `disabled=true` before any chip selection ✓
+- Confirm enables (`disabled=false`) after chip selection ✓
+- Tab from the card lands on an `odec-opt` button ✓
+- Non-binding comp-round auto-selects "compete" + enables confirm ✓
+- Comp-round note says "Just color…" vs binding round "This sets how you play the comp." ✓
+
+### Findings index (J4)
+
+| ID | Severity | Status | One-line |
+|---|---|---|---|
+| J4-01 | HIGH-PRIORITY POLISH | FIXED | Post-stream `messageInput.focus()` in `chat.js:3232` unconditionally overrides `card.focus()` — focus lands on the composer, not the decision card |
+| J4-02 | HIGH-PRIORITY POLISH | FIXED | Decision card `role="group"` wrong for a binding form — SR users have no landmark cue that this requires action; changed to `role="form"` |
+| J4-03 | HIGH-PRIORITY POLISH | FIXED | Dismiss button `aria-label="Dismiss"` too vague; title says "Dismiss — you can decide in conversation instead"; brought label in line |
+| J4-04 | UX REFACTOR BACKLOG | OPEN | `data-binding` attribute absent on non-binding staged comp-round cards (`c.dataset.binding === null` instead of `"false"`) |
+| J4-05 | OUT-OF-LANE | OPEN | Premiere gate clears (targeted group intro strategy works) but `state_post_intros.moment` is still "premiere" before the HOH nudge; gate progress not surfaced to the player in real-time (J3-07/08 deferred) |
+| J4-06 | OUT-OF-LANE | OPEN | Game remained at `hoh-competition` at end of run — model didn't call `advanceGame` enough times to resolve HOH; same root cause as J3-05 (anti-sycophancy stall) |
+| J4-07 | UX REFACTOR BACKLOG | OPEN | `barFill: "0%"` throughout run; correct (no evictions occurred), but confirms no dynamic update happened — bar will only update when the first eviction fires (expected) |
+
+### J4-01 — Post-stream `messageInput.focus()` overrides decision card focus · HIGH-PRIORITY POLISH · FIXED
+
+- **Principle:** WCAG 2.4.3 (focus order) / Nielsen H1 (visibility of system status). The decision card calls `card.focus()` (J3-18 fix) when it renders, but this focus is immediately overridden.
+- **Root cause:** `chat.js:3226–3234` — when the stream ends and `aria-busy` clears, the post-stream cleanup unconditionally calls `messageInput.focus()` on desktop (non-narrow) viewports. The decision card appears during streaming (the `orwell:pending` event fires from the `advanceGame` tool result mid-stream), gets focused, then loses focus the moment the stream ends.
+- **Evidence:** `decision_card_comp_intent.focused: false` despite `tabindex: "-1"` being set. Mutation log confirms `advanceGame` (t=272175ms) + `orwell:pending` (t=272255ms) fire before the stream settles (t=292892ms). Post-stream focus restoration overwrites the card's focus every time.
+- **Fix:** In `chat.js:3232`, check for a visible decision card before focusing the composer. If a card is present, focus it (re-asserting the J3-18 intent) instead of returning to the composer. The composer is re-focused when the card is confirmed or dismissed.
+- **Confidence:** H.
+
+### J4-02 — `role="group"` wrong for a binding decision card · HIGH-PRIORITY POLISH · FIXED
+
+- **Principle:** WCAG 4.1.2 (name, role, value). `role="group"` groups form controls but is not a form landmark; screen reader users navigating by landmark will never reach the card via landmark nav, and the AT will not announce that this requires a binding response.
+- **Consequence:** Keyboard/SR-only players may not know a binding HOH/nomination/eviction decision is pending; they only know if they happen to Tab into it or read through the entire `role="log"` chat history.
+- **Evidence:** `decision_card_comp_intent.role: "group"` — confirmed in live J4 capture. ARIA best practice for an inline form that requires a submit action: `role="form"` with an accessible name becomes a named form landmark, reachable via AT landmark navigation.
+- **Fix:** `orwellDecision.js:155` — change `card.setAttribute("role", "group")` → `card.setAttribute("role", "form")`. Existing `aria-label` (the title) provides the accessible name.
+- **Confidence:** H.
+
+### J4-03 — Dismiss `aria-label="Dismiss"` does not explain the intent · HIGH-PRIORITY POLISH · FIXED
+
+- **Principle:** WCAG 2.4.6 (headings and labels); content/clarity. The `title` tooltip already says "Dismiss — you can decide in conversation instead" — the right signal. The `aria-label` overrides the title for AT users, giving them only "Dismiss" with no context.
+- **Consequence:** Screen reader users hear "Dismiss, button" and have no cue that they can instead decide through conversation (the main game path). Two players — sighted (tooltip) and non-sighted (aria-label) — hear different things.
+- **Evidence:** `decision_card_comp_intent.dismiss.ariaLabel: "Dismiss"` vs `title: "Dismiss — you can decide in conversation instead"`.
+- **Fix:** `orwellDecision.js:167` — update `aria-label` to match the intent: `"Dismiss — decide in conversation instead"`.
+- **Confidence:** H.
+
+### J4-04 — `data-binding` absent on non-binding comp-round cards · UX REFACTOR BACKLOG · OPEN
+
+- **Root cause:** `orwellDecision.js:273` pre-selects "compete" when `pending.binding === false`, but doesn't set `card.dataset.binding` — the probe reads `c.dataset.binding` as `null` rather than `"false"`. The visual behavior is correct (button says "Push through this round"), but the attribute isn't exposed for external inspection/testing.
+- **Deferred:** Low-severity; the UX is correct. Add `card.dataset.binding = String(pending.binding !== false)` in a future pass.
+
+### J4-05 / J4-06 — Engine progression stall (same root as J3-05) · OUT-OF-LANE · OPEN
+
+- Game never advanced past `hoh-competition` moment; model narrated fictional nominations/veto/eviction without engine backing. `state_final: {moment: "hoh-competition", evicted: 0}`.
+- Deferred: engine-side investigation (J3-05 / anti-sycophancy) + agent loop work queue.
+
+---
+
+## Journey 4 — remediation (gated set #4)
+
+**Scope: J4 FE fixes — post-stream focus, decision card role, dismiss label. Verified: J3-16/17/18/25 fixes confirmed in live capture.**
+
+| Fix | File | J4 Finding |
+|---|---|---|
+| Post-stream: if decision card present, focus card (not composer) | `static/js/chat.js` | J4-01 |
+| Decision card: `role="group"` → `role="form"` | `static/js/orwellDecision.js` | J4-02 |
+| Dismiss `aria-label="Dismiss"` → descriptive | `static/js/orwellDecision.js` | J4-03 |
+
+**Deferred from J4:**
+- J4-04 (`data-binding` attribute) — cosmetic, behavior correct
+- J4-05/06 (engine progression stall) — engine investigation
