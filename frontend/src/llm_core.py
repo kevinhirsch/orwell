@@ -1786,6 +1786,31 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                     _fr = _fr_choices[0].get("finish_reason")
                                     if _fr:
                                         _finish_reason = _fr
+                                # Mid-stream provider error (OpenRouter/OpenAI-compat): once the first token
+                                # is sent the HTTP status is already 200, so a later failure arrives IN-BAND
+                                # — a top-level `error` object and/or a choice finishing with reason "error".
+                                # The loop used to ignore it and close with a silent [DONE], so the partial
+                                # reply ended with no signal and the FE later hid it (the "generates then
+                                # disappears" bug). Surface it as an `event: error` carrying the typed
+                                # `error_type`; flush buffered content first so nothing already produced is
+                                # lost. After real output the fallback wrapper passes this through WITHOUT a
+                                # retry (a mid-stream error can't fail over — headers are committed).
+                                _mid_err = j.get("error") if isinstance(j.get("error"), dict) else None
+                                if _mid_err or _finish_reason == "error":
+                                    for _ev in _format_routed_content(_harmony_router.flush()):
+                                        yield _ev
+                                    _meta = (_mid_err or {}).get("metadata") or {}
+                                    _err_payload = {
+                                        "error": (_mid_err or {}).get("message") or "Provider error mid-stream",
+                                        "status": (_mid_err or {}).get("code") or 502,
+                                        "error_type": _meta.get("error_type") or "provider_unavailable",
+                                        "mid_stream": True,
+                                    }
+                                    if _meta.get("provider_code"):
+                                        _err_payload["provider_code"] = _meta.get("provider_code")
+                                    yield f'event: error\ndata: {json.dumps(_err_payload)}\n\n'
+                                    yield "data: [DONE]\n\n"
+                                    return
                                 chunk_model = j.get("model")
                                 if isinstance(chunk_model, str) and chunk_model.strip():
                                     _actual_model = chunk_model.strip()
