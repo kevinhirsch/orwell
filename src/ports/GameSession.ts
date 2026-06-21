@@ -756,6 +756,20 @@ export interface WhereaboutsView {
 }
 
 /**
+ * ADR 0009 — the outcome of recording a narrated houseguest relocation (`recordHouseguestMove`):
+ *   • `moved`   — the houseguest is now in the room;
+ *   • `noop`    — already there (consistent; nothing changed);
+ *   • `illegal` — an unknown/evicted houseguest, the PLAYER (use `movePlayer`), or an unresolvable /
+ *                 non-walkable room. This is the "impossible claim" set the surface must catch BEFORE
+ *                 emission (never a later-turn correction — the transcript must never show a conflict).
+ * Carries the resulting whereabouts so the caller can re-ground the narrator from engine truth.
+ */
+export interface HouseguestMoveResult {
+  status: "moved" | "noop" | "illegal";
+  whereabouts: WhereaboutsView | null;
+}
+
+/**
  * The per-NPC voicing projection (B65 / ADR 0003 §8 — "people must make sense", structurally).
  * Everything the narrator may draw on to voice ONE houseguest: their stable public persona, where
  * they are and who is with them, what THEY legitimately know (witnessed / told / overheard), their
@@ -1139,6 +1153,16 @@ export interface GameSession {
    * (`stale-beat` / 409, no move) when the board moved under it; absent ⇒ byte-identical to today.
    */
   movePlayer(room: string, expectedBeatSeq?: number): WhereaboutsView | null;
+
+  /**
+   * ADR 0009 — RECORD a narrated houseguest relocation (the model narrates the open texture of who
+   * wanders where; the engine records it, so the board agrees with the prose and there is never a
+   * visible historic conflict). Mutates ONLY the open, player-facing occupancy — never the
+   * calibration-neutral baseline — so every seeded outcome is byte-identical. Legal-moves-only; the
+   * result distinguishes a recorded move from an impossible claim the surface must catch pre-emission.
+   * Vault-free.
+   */
+  recordHouseguestMove(id: EntityId, room: string): HouseguestMoveResult;
 
   /** The season's public arc from the event record (0048) — Vault-free, reproducible, any time. */
   seasonRecap(): SeasonRecapView;
