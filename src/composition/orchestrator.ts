@@ -512,9 +512,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
   // houseguest's hidden element (B50) rarely slips into a scene's hidden content (rare-reveal loop).
   const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
-  const scenes = ids.length >= 2
+  // ADR 0006: at night the house thins — houseguests past their character-driven bedtime have turned in
+  // and leave the off-screen society (the night owls scheme on without them; a turned-in player misses
+  // it). IDENTITY when the clock is off ⇒ the hidden society + the seeded calibration spine are byte-identical.
+  const awakeIds = sandbox.session.awakeAmong(ids);
+  const scenes = awakeIds.length >= 2
     ? richOffscreenStretch({
-        events: sandbox.engine.events, rng, npcs: ids, interactions,
+        events: sandbox.engine.events, rng, npcs: awakeIds, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
         // E45 — motivated, co-present society: partners by tie strength, scenes need co-presence.
         edgeOf: (a, b) => sandbox.engine.relationships.edge(a, b),
