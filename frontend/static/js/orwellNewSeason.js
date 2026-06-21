@@ -32,7 +32,7 @@
   let _win = null;       // the live OrwellWindow instance, or null
   let _busy = false;     // a next-season call is in flight
   let _timer = null;
-  let _open = false;     // whether we believe the panel should be shown
+  let _mode = null;      // which surface is shown: null | "post-season" | "evicted" (LW10)
 
   async function jget(url) {
     try {
@@ -47,6 +47,20 @@
   async function isPostSeason() {
     const st = await jget("/api/orwell/state");
     return !!(st && st.started && st.moment === "post-season");
+  }
+
+  // Which hand-off surface (if any) the game state calls for:
+  //   • "post-season" — the season is OVER (winner crowned): the keep/recast hand-off (0057).
+  //   • "evicted"     — LW10 (audit 2026-06-21): the PLAYER was evicted PRE-JURY but the house plays on.
+  //                     Their game is over; offer a clean "see how it ends" → fast-forward to the recap,
+  //                     instead of leaving them to nudge the house forward a week at a time (0046).
+  // Vault-free /state only. A juror (status "jury") keeps a finale role, so they are NOT swept here.
+  async function gateState() {
+    const st = await jget("/api/orwell/state");
+    if (!st || !st.started) return null;
+    if (st.finished || st.moment === "post-season") return "post-season";
+    if (st.player && st.player.status === "evicted") return "evicted";
+    return null;
   }
 
   // ── the panel body ─────────────────────────────────────────────────────────
@@ -145,33 +159,73 @@
     }
   }
 
+  // LW10: the pre-jury evicted player's terminal hand-off — a clear "your season is over" + a
+  // one-click fast-forward to the finale (POST /api/orwell/conclude-season), which lands them on the
+  // post-season recap + the keep/recast surface above. Reuses the same .ons-* styling as buildBody.
+  function buildEvictedBody() {
+    const wrap = document.createElement("div");
+    wrap.className = "ons-body";
+    wrap.innerHTML = `
+      <div class="ons-lead">You've been evicted — your season is over. The house keeps playing without
+        you. See how it all ends, then walk into a brand-new season.</div>
+      <div class="ons-choices">
+        <button type="button" class="ons-btn ons-btn-primary" id="ons-conclude">See how it ends</button>
+      </div>
+      <div class="ons-hint">Fast-forwards the rest of the season to the finale, then unlocks the recap
+        and a fresh start.</div>
+      <div class="ons-msg" id="ons-msg"></div>`;
+    const msg = wrap.querySelector("#ons-msg");
+    const setMsg = (t, err) => { msg.textContent = t || ""; msg.classList.toggle("ons-err", !!err); };
+    const btn = wrap.querySelector("#ons-conclude");
+    btn.addEventListener("click", async () => {
+      if (_busy) return;
+      _busy = true; btn.disabled = true; setMsg("Playing out the rest of the season…");
+      try {
+        const r = await fetch("/api/orwell/conclude-season", { method: "POST", credentials: "same-origin" });
+        const d = r.ok ? await r.json() : null;
+        if (!r.ok || !d) { setMsg((d && d.error) || "Couldn't conclude the season — try again.", true); _busy = false; btn.disabled = false; return; }
+        // The season is now over → post-season. Let THE shared dispatcher (G15) refresh every surface;
+        // refresh() then swaps this window for the keep/recast hand-off, and the retrospective unlocks.
+        _busy = false;
+        try { window.orwellGameChanged && window.orwellGameChanged("conclude-season"); } catch (_) {}
+        refresh();
+      } catch (e) {
+        if (window.OrwellReport) window.OrwellReport.fail("new-season", "conclude-season", e);
+        setMsg("Couldn't reach the producers — try again.", true); _busy = false; btn.disabled = false;
+      }
+    });
+    return wrap;
+  }
+
   // ── lifecycle ────────────────────────────────────────────────────────────
-  function show() {
-    if (_win || document.getElementById(WIN_ID)) { _open = true; return; }
+  function show(mode) {
+    mode = mode || "post-season";
+    if (_mode === mode && (_win || document.getElementById(WIN_ID))) return;
+    if (_win || document.getElementById(WIN_ID)) destroy(); // a state change: tear down the old surface
     if (!(window.OrwellWindowKit && window.OrwellWindowKit.create)) return; // kit not loaded
-    _open = true;
+    _mode = mode;
+    // Cohesive window-title contract: emoji + a single space + a Title-Case name (matches Cast 🎬 /
+    // Finale 🏆 / Retrospective 📼). ✨ = a fresh start; 🚪 = the evicted-player terminal hand-off.
+    const evicted = mode === "evicted";
     _win = window.OrwellWindowKit.create({
       id: WIN_ID,
-      // Cohesive window-title contract: emoji + a single space + a Title-Case name
-      // (matches the Cast 🎬 / Finale 🏆 / Retrospective 📼 windows). ✨ = a fresh
-      // start (distinct from the Cast clapperboard, which the dock chip keeps below).
-      title: "✨ A New Season",
-      icon: "🎬",
+      title: evicted ? "🚪 Evicted" : "✨ A New Season",
+      icon: evicted ? "🚪" : "🎬",
       slot: "bottom-right",
       slotKey: "new-season",
-      // Persistent: stays until the next season starts. Not closable; minimizable so the player
-      // can tuck it away and keep lingering in the reunion, then bring it back from the dock.
+      // Persistent: stays until the state moves on. Not closable; minimizable so the player can tuck
+      // it away and keep lingering, then bring it back from the dock.
       closable: false,
       minimizable: true,
       draggable: true,
-      content: buildBody(),
+      content: evicted ? buildEvictedBody() : buildBody(),
     });
     _win.open();
     nudge();
   }
 
   function destroy() {
-    _open = false;
+    _mode = null;
     try { if (_win) _win.destroy(); } catch (_) {}
     _win = null;
     const stray = document.getElementById(WIN_ID);
@@ -192,9 +246,10 @@
   }
 
   async function refresh() {
-    const post = await isPostSeason();
-    if (post && !_open) show();
-    else if (!post && _open) destroy();
+    const want = await gateState();   // null | "post-season" | "evicted"
+    if (want === _mode) return;       // already in the right state
+    if (!want) { destroy(); return; }
+    show(want);                       // show() tears down any prior surface before swapping
   }
 
   function start() {

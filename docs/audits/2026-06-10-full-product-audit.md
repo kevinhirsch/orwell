@@ -1911,24 +1911,32 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
 - **LW7** [#434] Decision card did NOT arm after a silent forced-advance — player stranded with no card (reload-only).
   Fix: arm from `gameStatus` at turn-end.
 - **LW8** [#434] A lingering "✓ Locked in" (`.odec-done`) card suppressed the NEXT round's card during its 4s fade.
+- **LW10** [FIXED this session] **Pre-jury player eviction now has a terminal hand-off.** A voted-out pre-jury player
+  was left in limbo (status=`evicted`, `finished:false`) — the 0048 retrospective only fires on SEASON finish, so the
+  evictee got only the model's prose and could nudge the house forward one week at a time (→ week 3) with no terminal
+  signal (0046's *terminal recap*). Fix: a player-reachable **`POST /api/orwell/conclude-season`** (gated on
+  player.status==`evicted`; a juror is NOT swept) drives the deterministic loop to the crown in ONE `advance_to_finale`
+  call → the season reaches post-season → the existing retrospective (0048) + keep/recast hand-off (0057) fire; the FE
+  shows a **"🚪 Evicted — your season is over · See how it ends"** surface (`orwellNewSeason.js`, reusing the post-season
+  window). Tests: `test_lw10_conclude_season.py` (gating + idempotency) + live-verified (surface renders, button POSTs).
 
 **Open (carry forward):**
 - **LW9** [open · low-med] **Stale model PROSE after a silent forced-advance.** Narrated "ten houseguests still in"
   while the engine had 7. The card/board show engine truth (#434); only the prose drifts (ADR-0005 open-set seam).
   Candidate: a post-silent-advance re-narration nudge, or extend the 0065 desync guard to catch a stale still-in count.
-- **LW10** [open · med] **Pre-jury player eviction has no terminal-recap surface.** The player was voted out week 2
-  (status=`evicted`, `finished:false`); the 0048 retrospective only fires on SEASON finish (winner crowned), so the
-  evictee gets only the model's prose, and can keep nudging the house forward **one week per turn** (observed →
-  week 3) with no clean "your season is over → skip to results" affordance. 0046 specifies a *terminal recap*.
-  The model handled it gracefully in prose ("the door has sealed… let me fast-forward"), but there is no real
-  fast-forward and no structured recap at the player's own exit. *Largest open UX gap found this session.*
 - **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
   + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
 
-**Verified CLEAR (checked live on the post-merge / post-F8 build — not defects):**
+**Verified CLEAR (checked live — not defects):**
 - **LW13** ✅ CLEAR. Reasoning renders in the collapsed "View thinking process" accordion (by design); the
   eviction-narration message **bodies were clean** (no reasoning leak). F8 (#435) holds; 0 page errors.
 - **LW14** ✅ CLEAR. An evicted (pre-jury) player is offered **no decision card** (confirmed live — card is `None`).
+- **LW16/LW17** ✅ CLEAR (were fast-forward artifacts). At season finish `/api/orwell/state` reports `moment ==
+  "post-season"`, so the retrospective + new-season surfaces gate correctly; the earlier `visible:false` reads were the
+  OrwellWindow-kit offsetParent quirk (the windows render + are interactive), not a gate failure.
+- **LW18** ✅ CLEAR (test error). `next-season` honors `body.keep` correctly; an earlier curl sent `keepCharacter`
+  (wrong field) so `keep` defaulted true. The full **finished → next-season → SEASON 2 (fresh 16-cast, player active,
+  premiere)** transition was driven end to end (HTTP 200) — "continue into the next season" achieved.
 
 **Still to verify:**
 - **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
