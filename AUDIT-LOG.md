@@ -202,6 +202,26 @@ the `hasActiveStream` suppression); Phase C permanent gates. Landed `5e3a2f3`.
 > *Remaining (both lanes): a live concurrent-write browser re-run with real-model turns is the one open
 > verification; the convergence foundation is proven by the interleaved-writers gate + the reload-reconcile.*
 
+**ADR-0008 LIVE VERIFICATION — RUN (2026-06-21, Lane B, real `-pro` model, two tabs/one session).** The
+open item above is now driven (`.audit-telemetry/adr0008_{parity,diag,bothactive}.py`):
+- ✅ **Data integrity FIXED (the original blocker is resolved):** the persisted log is seq-ordered + correct;
+  a fresh reload ALWAYS reconciles to the full `A-0,B-0,A-1,B-1` order; no accumulation, no corruption.
+- ✅ **Idle-tab live reconcile WORKS:** with tab A idle, a write in tab B reaches A over SSE and A reconciles
+  (`softReloadHistory` fires, A renders B's message) — the original `hasActiveStream`-drop bug is fixed for an
+  idle receiver. Same-session confirmed (both tabs sid `901b04da`), so NOT a session-split confound.
+- ⚠️ **RESIDUAL [should-fix, low-frequency — NOT the original blocker]:** when **two tabs of the same session
+  stream turns CONCURRENTLY**, the first-active tab does **not** converge to the peer's concurrent write — it
+  stays diverged (VIEWED at +0.5s and **+15s**, no reload; tab B correctly shows both). Instrumented: A's
+  `softReloadHistory` fired twice but **both while A was still streaming** (each deferred at chat.js:3619
+  `if (hasActiveStream(sessionId))`), and the stream-end flush (`flushPendingReconcile`, chat.js:3211/3640)
+  did not complete the deferred reconcile in the concurrent-stream case. Likely tied to the ADR's own noted
+  **one-`_Run`-per-session run-replacement** latent (tab B's send replaces tab A's run on the server, so A's
+  stream-end flush path is perturbed). **Persisted stays correct (reload fixes it); no data loss.**
+- **Severity read:** MILD vs the original blocker — the data-integrity blocker (accumulating, persisting
+  garbage) is gone; this residual needs the rare *both tabs of one session actively mid-stream at once* and
+  self-heals on reload / the next idle reconcile. **Operator-owned (it's the ADR-0008 + run-lifecycle code);
+  surfaced for a fix-or-log decision, not a Lane-B drive-by** (the fix touches the delicate run lifecycle).
+
 **S3-CORE (prior blocker) — VERIFIED-FIXED (live).** 14-turn `-pro` week-1 loop (hoh-comp → noms → veto-comp
 → veto-ceremony → eviction): engine advanced **14/14**, **0 leaks**, **0 genuine cast inventions** (the
 `invented` flags were all `<conjunction>+roster-first-name` regex false positives), narration↔engine truth
