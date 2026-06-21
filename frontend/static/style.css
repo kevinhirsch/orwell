@@ -2537,7 +2537,9 @@ body.bg-pattern-sparkles {
       transition: height 0.12s ease-out;
     }
     .chat-input-bar textarea#message::placeholder {
-      color: color-mix(in srgb, var(--fg) 35%, transparent);
+      /* UX audit J1-21: was 35% alpha (~2.79:1, WCAG 1.4.3 fail) — the one hint telling the
+         player where to type. Lift to ~4.7:1 while staying visibly secondary. */
+      color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
     .chat-input-bottom {
       display: flex;
@@ -5983,8 +5985,13 @@ body.bg-pattern-sparkles {
       min-height: 0;
     }
     .vis-hint {
+      /* UX audit J1-28: was 30% alpha (~2.68:1, WCAG 1.4.3 fail) — lift to ~5:1 so toggle
+         descriptions are legible. Font-size stays 10px: bumping it to the --fs-2xs floor
+         reflowed the Appearance panel and overflowed the nowrap danger-zone "Reset" button
+         at 390px (responsive_matrix). The sub-floor size is a pre-existing main condition,
+         tracked as a backlog item; this change is contrast-only (no layout effect). */
       font-size: 10px;
-      color: color-mix(in srgb, var(--fg) 30%, transparent);
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
       font-weight: 400;
       margin-left: 2px;
     }

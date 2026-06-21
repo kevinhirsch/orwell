@@ -3538,7 +3538,12 @@ import { isNarrow } from './platform.js';
     const t = (text || '').trim();
     return t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
       t.startsWith('Your previous response was interrupted.') ||
-      t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain');
+      t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain') ||
+      // OOBE hand-off cues are the producers reaching out — never the player's own words.
+      // sendHiddenCue() hides them live; on a history reload / cross-device load the persisted
+      // user turn must stay hidden too, or it surfaces as a "You" bubble and breaks immersion
+      // (UX audit J1-03). Match the "(Production cue …)" envelope.
+      t.toLowerCase().startsWith('(production cue');
   }
   function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
 
