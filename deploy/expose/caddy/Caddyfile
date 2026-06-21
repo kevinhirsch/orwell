@@ -5,10 +5,10 @@
 # opens no public ports. Only the front-end is ever proxied — the engine is engine-only and is
 # never given a route here. The front-end port must match ORWELL_PORT (installer default 8080).
 #
-# Remember to run the FE public profile: ORWELL_PUBLIC=1, ALLOWED_HOSTS=hiorwell.com,..., and
+# Remember to run the FE public profile: ORWELL_PUBLIC=1, ALLOWED_HOSTS=<your-domain>,..., and
 # SECURE_COOKIES=true (Caddy terminates TLS and forwards X-Forwarded-Proto=https).
 
-hiorwell.com, www.hiorwell.com {
+your-domain.example, www.your-domain.example {
 	encode zstd gzip
 
 	header {
