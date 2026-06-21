@@ -104,6 +104,11 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "moveTo":
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       return;
+    case "moveHouseguest":
+      // ADR 0009 — record a narrated NPC relocation: a houseguest id + a room name (both strings).
+      if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
+      if (!isStr(args["room"])) refuse("room", "a room name (string)");
+      return;
     case "makeDeal":
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
@@ -229,6 +234,9 @@ export class McpServer {
           String(args["room"] ?? ""),
           typeof args["expectedBeatSeq"] === "number" ? args["expectedBeatSeq"] : undefined,
         );
+      case "moveHouseguest":
+        // ADR 0009 — record a narrated NPC relocation (open-set; legal-only). Vault-free result.
+        return this.deps.session.recordHouseguestMove(String(args["id"] ?? ""), String(args["room"] ?? ""));
       // PREMIERE meet-everyone (feature #380 follow-on): read who's still to introduce / mark a meeting.
       case "premiereIntros":
         return this.deps.session.premiereIntros();

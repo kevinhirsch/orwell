@@ -30,6 +30,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "moveTo", channel: "player", readsVault: false, description: "The player WALKS to a room they named ({room}). Valid rooms: kitchen, living room, backyard, bedroom A, bedroom B, HOH room, bathroom, storage room (the diary room is its own beat). Name resolution is FORGIVING — case/space/hyphen-insensitive plus natural aliases (\"living room\"/\"lounge\", \"backyard\"/\"yard\", \"HOH\", \"pantry\"); a bare \"bedroom\" resolves to the player's own bedroom — so it never silently fails. The player is a person — they direct their own movement; call this whenever the player heads somewhere, then voice the new room from the returned whereabouts (the engine holds them there; NPCs move around them)." },
   { name: "premiereIntros", channel: "player", readsVault: false, description: "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; null outside the premiere." },
   { name: "markHouseguestMet", channel: "player", readsVault: false, description: "PREMIERE ONLY (#380): mark a houseguest ({id}) as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere)." },
+  { name: "moveHouseguest", channel: "player", readsVault: false, description: "Record a NARRATED houseguest relocation (ADR 0009): an NPC ({id}) walks to a room ({room}) the narration just sent them to, so the board agrees with the prose (no visible historic conflict). Open-set only — never perturbs seeded outcomes. Room resolution is forgiving (like moveTo); a no-op if they are already there; REFUSED (illegal) for the player (use moveTo), an unknown/evicted houseguest, or a non-walkable/unknown room. Primarily the front-end records this FROM the narration; the model need not call it directly." },
   { name: "seasonRecap", channel: "player", readsVault: false, description: "The season's public arc from the event record (0048): reigns, ceremonies, evictions, deals — Vault-free, stores not memory." },
   { name: "seasonRetrospective", channel: "player", readsVault: false, description: "POST-SEASON ONLY (0048): the finished season's unsealed hidden story — off-screen scheming, confessionals, the twists. Returns null while a season is live (gated on the terminal state in code)." },
   { name: "npcVoice", channel: "player", readsVault: false, description: "The knowledge-bounded voicing projection for ONE active houseguest (B65): persona + room/co-presence + what THEY legitimately know + hunches + organic stances (labels, never numbers). The model cannot voice what they never learned." },
@@ -101,7 +102,12 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // moment fragment (the meet-everyone flow + markHouseguestMet are spelled out there with their
   // who's-left list woven in), NOT always-on base-manifest levers — so they ride the moment, like
   // finaleView rides the finale. Excluding them keeps the base prompt untouched (drift test stays green).
-  "premiereIntros", "markHouseguestMet"]);
+  "premiereIntros", "markHouseguestMet",
+  // ADR 0009: `moveHouseguest` records a NARRATED NPC relocation — primarily an FE/belt-driven lever
+  // (the model narrates the open texture; the engine records it), NOT an always-on base-manifest model
+  // lever, like `turnIn`. Excluding it keeps the base prompt untouched (the manifest↔registry drift test
+  // stays green).
+  "moveHouseguest"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the
