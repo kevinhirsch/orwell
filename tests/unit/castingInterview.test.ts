@@ -42,14 +42,19 @@ describe("the casting-interview moment prompt (0050)", () => {
     expect(prompt).not.toContain("walks into that house");
   });
 
-  // G29 + photo-first OOBE: the producer opens on the cast-photo headshot (the FE 'Casting headshot'
-  // panel) as casting STEP ONE, framed as optional and never blocking the interview/premiere.
-  it("opens the interview on the headshot panel, optionally (casting step #1)", () => {
+  // G29 + photo-first OOBE: the producer opens on the cast-photo headshot as casting STEP ONE,
+  // framed as optional and never blocking the interview/premiere. The control is the in-chat
+  // 'Choose Your Character' button (NOT a side panel) — the prompt must name THAT and never invent
+  // a screen position, so the model stops hallucinating "the panel on your right".
+  it("opens the interview on the cast-photo button, optionally (casting step #1)", () => {
     expect(prompt).toMatch(/headshot/i);
     expect(prompt).toMatch(/cast photo|profile pic/i);
     expect(prompt).toMatch(/optional|NOT required|never block|never gate/i);
     // the photo is the FIRST thing producers ask — the photo-first re-sequence
     expect(prompt).toMatch(/THIS IS WHERE YOU OPEN|step ONE|first ask|before any other question/i);
+    // it points to the REAL control by its exact label, and forbids inventing a screen location
+    expect(prompt).toMatch(/Choose Your Character/);
+    expect(prompt).toMatch(/on your right|invent on-screen|'panel'/i);
   });
 
   // The producer is PROFESSIONAL with a real personality: CALCULATED, strategic humor IS allowed
