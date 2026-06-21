@@ -2986,7 +2986,14 @@ async def stream_agent_loop(
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
 
+    # F-S4-D: the finish_reason of the round currently being consumed (from llm_core's `finish` event).
+    # "length" ⇒ the model's OUTPUT was cut off by the token cap (a truncated reply), distinct from the
+    # round-cap exhaustion above. Reset each round; after the loop, the terminal round's value drives a
+    # `truncated` Continue affordance so a cut-off reply doesn't just stop mid-sentence with no signal.
+    _round_finish_reason = None
+
     for round_num in range(1, max_rounds + 1):
+        _round_finish_reason = None
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
@@ -3120,6 +3127,11 @@ async def stream_agent_loop(
                     elif data.get("type") == "tool_calls":
                         native_tool_calls = data.get("calls", [])
                         logger.info(f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)")
+                    elif data.get("type") == "finish":
+                        # F-S4-D: the round's terminal finish_reason (from llm_core). Recorded, not
+                        # forwarded — the UI signal is the post-loop `truncated` event, fired once per
+                        # turn only when the FINAL round was cut off by the token cap (reason "length").
+                        _round_finish_reason = data.get("reason")
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         actual_model = u.get("model") or actual_model
@@ -4328,6 +4340,13 @@ async def stream_agent_loop(
     if _exhausted_rounds:
         logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
         yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
+    # F-S4-D: the FINAL round was cut off by the output token cap (finish_reason "length"), not the
+    # round cap — the reply stopped mid-sentence. Surface a Continue affordance so the player can resume
+    # instead of the truncation passing silently. Suppressed when rounds_exhausted already fired (that
+    # affordance covers it) so the client never shows two stacked Continue prompts for one turn.
+    elif _round_finish_reason == "length":
+        logger.info("[agent] final round truncated by the output token cap — emitting truncated")
+        yield f'data: {json.dumps({"type": "truncated"})}\n\n'
 
     # BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): now the live-game turn has
     # finished, compare its FULL narration against the engine board's before→after delta. If the

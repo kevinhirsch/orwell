@@ -110,7 +110,7 @@ L18 (engine hang on fallback-digest), L31/L28b/L37/L39/L40/L35/L45.
 | S4-RESOLVE | State 4 | n/a | **PASS (live)** | Full game → crowned NPC winner; player→jury; interactive finale juror path fired; retrospective renders ordered per-juror reveal. |
 | S4-VAULT-RETRO | State 4 | n/a | **PASS — Wall holds at its one opening** | 0048 unseal reveals STORY not NUMBERS: 2037–2087 hidden beats / 13 types, 13 wks per-voter ballots, **0 numeric leaks**, secret-ballot anonymized all season, `npc:N` only in `id` leaves. |
 | S4-1 | State 4 | ~~BLOCK~~ | **VERIFIED-FIXED (code+live)** | Stuck-player (narrated past a pending) fixed by `rearmFromStatus` + the 15s `/status` pending "escape hatch". |
-| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). 502-as-GM-bubble (F-S4-C) **FIXED** → `msg-system` notice; truncated stream stops silently (F-S4-D, deferred); mid-stream reload reconciles (F-S4-E ✅). |
+| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). 502-as-GM-bubble (F-S4-C) **FIXED** → `msg-system` notice; silent mid-sentence truncation (F-S4-D) **FIXED** → `finish:length` → `Continue ▸`; mid-stream reload reconciles (F-S4-E ✅). |
 | S4-2 | State 4 | POLISH | partial | `/status` carries `finished+winner` (✓) but `/recap`+`/finale` still return null winner post-finish. Non-blocking (FE recovers via retrospective). |
 | F-S4-F | State 4 | LATENT | ROOT-CAUSED | Resume-path name DRIFT ("Luke→Lake Fleming") on a mid-stream-reload-resumed turn — resume-context-specific (clean play = exact); ties to ADR 0008 resumable-stream context. New gate recommended. |
 | **State 5** | OOBE | mixed | **VERIFIED-FIXED** | Operator OOBE reports: particles (=BG-1/OBS-1 Lane B), cast-photo box movable-not-resizeable, welcome re-shows after backend reset. §2.8. |
@@ -277,8 +277,8 @@ reachable without the chat agent dispatching it (fail-open, no re-nag).
 `EventSource` auto-reconnect + capped backoff + 1.5s re-bind; AI timeout server-side (client stall watchdog
 deliberately disabled). Injected 3 faults on `/api/chat_stream`: **every case** no engine desync (beatSeq
 stable), no crash, no stuck spinner, composer re-enabled. Polish residue: **F-S4-C** 502 rendered as a GM
-bubble (should be a system/error notice); **F-S4-D** truncated stream stops silently mid-sentence (surface a
-"message interrupted — retry" affordance); **F-S4-E** mid-stream reload **reconciles** (✅, corroborates ADR
+bubble (**FIXED** → `msg-system` notice); **F-S4-D** truncated stream stopped silently mid-sentence
+(**FIXED** → a `Continue ▸` affordance); **F-S4-E** mid-stream reload **reconciles** (✅, corroborates ADR
 0008's reload-reconcile). **S4-2 (partial):** `/recap`+`/finale` still return null winner post-finish (non-
 blocking — FE recovers via the retrospective). One client-side corroboration of ADR 0008 defect #4: the
 client `message-added` SSE listener exists but the streaming path never fired it server-side (now addressed
@@ -376,9 +376,24 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
   slice — the file's standing posture: "CI can't drive the live stack here, so we pin the WIRING"). A live
   in-game repro stays blocked environmentally (the audit fixture user has no active in-game session —
   `sendMode='newchat'` — so the send routes through the casting/new-chat path, not the in-game branch the fix
-  targets; the 502 stub fires ×1, confirming the rig, just on the wrong branch). F-S4-D (silent truncation)
-  remains deferred. *(Sibling note, not chased: the casting/new-chat stream-error path appears to swallow the
-  502 with no visible notice — a separate surface.)*
+  targets; the 502 stub fires ×1, confirming the rig, just on the wrong branch). *(Sibling note, not chased:
+  the casting/new-chat stream-error path appears to swallow the 502 with no visible notice — a separate
+  surface.)*
+- **F-S4-D (a truncated reply stopped silently mid-sentence) — FIXED.** Root cause (code-read): a reasoning
+  model (DeepSeek-V4) bills its hidden chain-of-thought against the SAME output budget as the visible reply,
+  so a heavy-thinking turn can hit the token cap and stop the answer mid-sentence — and the streaming path
+  never inspected `finish_reason` (`llm_core.py:1644`, comment-only), so the cut-off passed with **no signal**
+  (the only "incomplete" affordance was the *round-cap* `rounds_exhausted`, a different thing). **Fix** (mirrors
+  `rounds_exhausted`): `llm_core` captures the terminal `finish_reason` and emits a `{"type":"finish","reason"}`
+  event at `[DONE]`; `agent_loop` records it per round and, after the loop, emits `{"type":"truncated"}` iff the
+  FINAL round ended on `"length"` (suppressed when `rounds_exhausted` already fired — no double affordance); the
+  `finish` event is consumed, never leaked. `chat.js` renders `truncated` as a quiet `.stopped-indicator`
+  "cut off … `Continue ▸`" note appended to the history container (NOT the GM body bubble). Also raised the
+  Anthropic-adapter `max_tokens` fallback off the reasoning-truncating **4096 → 8192** (a configured preset
+  still wins). **Verified:** the agent-loop behaviour is driven for real (`tests/test_fs4d_truncation.py` — a
+  fake length-finish stream through the real `stream_agent_loop` ⇒ a `truncated` event; a normal `stop` ⇒ none;
+  the `finish` event is not leaked), the `llm_core`/`chat.js`/Anthropic-fallback legs source-pinned; `node
+  --check` + `py_compile` + the full FE suite green.
 
 ## 3. Close-out verdict
 
@@ -393,9 +408,10 @@ on the live build**.
   all **VERIFIED-FIXED**.
 - **Polish backlog — fixes applied this campaign (FE-only, verified):** S1-2 (avatar 204), S1-A, S1-B, S1-C,
   BG-1+OBS-1 (background, both mechanisms), F-S2-A (cast-photo opacity), State-5 (particles / draggable box /
-  welcome re-show), State-6 R1–R8 + D1, **F-S4-C (502 → `msg-system`, not a GM bubble)**.
+  welcome re-show), State-6 R1–R8 + D1, **F-S4-C (502 → `msg-system`, not a GM bubble)**, **F-S4-D (silent
+  truncation → `Continue ▸`; Anthropic max_tokens 4096→8192)**.
 - **Remaining (non-blocking, tracked):** a live concurrent-write two-tab re-run with real-model turns (the one
-  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-D (silent truncation); F-S4-F + the
+  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-F + the
   resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
   S1-5, S1-1L, S2-1, F-S2-B; the §2.10 architecture latents; and the State-5 same-tab-F5 welcome edge
   (needs a server-side per-game nonce). The refactor roadmap is `docs/REFACTOR-ROADMAP.md`.

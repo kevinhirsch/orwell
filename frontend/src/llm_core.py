@@ -670,10 +670,16 @@ def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=Fa
     # — don't hard-break every Claude request. OpenAI's own path is left untouched.
     if temperature is not None:
         temperature = max(0.0, min(temperature, 1.0))
+    # F-S4-D: Anthropic REQUIRES an explicit max_tokens, so an unset cap (0) must fall back to a literal.
+    # The old 4096 floor truncated reasoning/long narration mid-reply (a reasoning model burns the budget
+    # thinking, then has little left for the answer). 8192 is supported by every modern Claude model (no
+    # 400 risk) and doubles the headroom; a configured preset cap still wins, and the `finish:length` →
+    # Continue affordance covers whatever still overflows.
+    _anthropic_default_max_tokens = max_tokens if max_tokens and max_tokens > 0 else 8192
     payload = {
         "model": model,
         "messages": chat_messages,
-        "max_tokens": max_tokens if max_tokens and max_tokens > 0 else 4096,
+        "max_tokens": _anthropic_default_max_tokens,
         "temperature": temperature,
     }
     if system_parts:
@@ -1570,6 +1576,11 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
     _harmony_active = False       # sticky: gpt-oss harmony <|channel|> stream detected
     _actual_model = ""
     _actual_model_announced = False
+    # F-S4-D: the terminal finish_reason of the stream. "length" ⇒ the model was CUT OFF by the output
+    # token cap (a truncated reply), as opposed to "stop" (natural end) / "tool_calls" (stopped to act).
+    # Captured across chunks (the final delta carries it) and emitted as a `finish` event at [DONE] so the
+    # agent loop can surface a Continue affordance instead of the reply silently stopping mid-sentence.
+    _finish_reason = None
 
     def _emit_tool_calls():
         """Build the tool_calls event string if any were accumulated."""
@@ -1619,6 +1630,11 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                         tc_event = _emit_tool_calls()
                         if tc_event:
                             yield tc_event
+                        # F-S4-D: surface a terminal `length` finish (the reply was cut off by the token cap)
+                        # so the agent loop can offer a Continue affordance. Only "length" matters to the UI;
+                        # "stop"/"tool_calls" are normal ends. Emitted before [DONE] so it rides the same turn.
+                        if _finish_reason:
+                            yield f'data: {json.dumps({"type": "finish", "reason": _finish_reason})}\n\n'
                         yield "data: [DONE]\n\n"
                         return
 
@@ -1626,6 +1642,13 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                         if data.strip():
                             if data.startswith("{"):
                                 j = json.loads(data)
+                                # F-S4-D: capture the terminal finish_reason wherever it appears (the final
+                                # delta carries it, sometimes alongside the usage chunk). "length" = truncated.
+                                _fr_choices = j.get("choices") or []
+                                if _fr_choices and isinstance(_fr_choices[0], dict):
+                                    _fr = _fr_choices[0].get("finish_reason")
+                                    if _fr:
+                                        _finish_reason = _fr
                                 chunk_model = j.get("model")
                                 if isinstance(chunk_model, str) and chunk_model.strip():
                                     _actual_model = chunk_model.strip()
