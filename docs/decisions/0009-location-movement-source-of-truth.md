@@ -4,9 +4,10 @@
 > BDD/TDD-first. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
 > (1) the model **narrates the open texture** (who moves where) and the engine **records** it — the
 > engine keeps only the seeded baseline for calibration; the acceptance test is simply *consistent and
-> dynamic*. (2) Enforcement is **fold-first**: a legal narrated move is recorded into `presence`
-> immediately; **re-ground** only the impossible (an evicted houseguest, a non-existent/unreachable
-> room, two-places-at-once).
+> dynamic*. (2) Enforcement is **hard-fold** under an overriding constraint — **NO visible historic
+> conflicts**: the transcript must never show prose that contradicts the board. A legal narrated move
+> is recorded into `presence` immediately; an impossible claim is caught **before emission** and
+> scrubbed/regenerated — never a later-turn correction (which would leave the conflict visible).
 > **Source:** The 2026-06-21 live-walkthrough audit symptom — *the chat-narrated location of the
 > player & NPCs is inconsistent with the sidebar location gadget* — plus a three-lane investigation
 > (engine model · FE surfaces · root-cause repro against the live game).
@@ -71,6 +72,10 @@ reaching the data** — not two stores drifting.
 
 ## Decision (proposed)
 
+**Overriding constraint (PO ruling 2026-06-21):** the player must **NEVER see a historic conflict**
+between the narration and the board. Consistency is not *eventual* — it is immediate and permanent in
+the transcript; a contradiction the player can scroll back to is a failure state for this feature.
+
 Keep `this.presence` as the single source of truth, and **make both narration and mutation bind to
 it** by closing the two leaks (unenforced narration; unrecorded NPC movement) and removing the
 snapshot skew:
@@ -85,14 +90,18 @@ snapshot skew:
   the model failed to record — so "Carson heads to the kitchen" actually moves Carson and the gadget
   agrees. Mutation is on the **open set** (`presence`) only; the seeded `presenceBase` calibration
   stream is untouched (see Risks).
-- **D3 — Reconcile narration to the board, FOLD-FIRST (PO ruling 2026-06-21).** When prose places or
-  moves people contrary to `whereabouts`, **hard-fold** the narrated move into `presence` (the D2
-  path) so the engine immediately agrees with the story — the model authors the open texture, the
-  engine records it. Fall back to **re-ground** (correct the model next turn; mirror the
-  beat-signature checkpoint + surface `whereabouts` as an enforceable per-turn fact like the
-  `comp-round` clamp in `_pending_barrier_directive`) **only** for narration that cannot be folded
-  into a legal state: an evicted houseguest, a non-existent/unreachable room, or someone in two
-  places at once. A legal move always folds; only the impossible is re-grounded.
+- **D3 — Hard-fold; NEVER leave a visible historic conflict (PO ruling 2026-06-21).** A **legal**
+  narrated move (a real houseguest to a real, reachable room) is **hard-folded** into `presence` (the
+  D2 path) — the engine concedes to the prose, so the board already agrees by the time the player
+  reads it (the model authors the open texture; the engine records it). An **impossible** claim that
+  cannot be folded into a legal state (an evicted houseguest, a non-existent/unreachable room,
+  two-places-at-once) must be caught **before emission** — extend the 0065 pre-emission guard
+  (`_pre_emission_outcome_guard`) to location and scrub/regenerate so the player **never sees it**.
+  Strong per-turn grounding (surface `whereabouts` as an enforceable fact, like the `comp-round` clamp
+  in `_pending_barrier_directive`) minimizes impossible claims at the source. A next-turn re-ground
+  (the beat-signature checkpoint) survives ONLY as a supplementary belt to stop the model *repeating*
+  an error — **never** as the player-facing fix, because a later correction leaves the original
+  conflict visible in the transcript (the constraint above forbids that).
 - **D4 — Pin the dual-map contract (ADR 0005).** Make explicit that `presence` is the **open**,
   player-facing/narratable occupancy (the gadget + narration + the D2 fold bind here) and
   `presenceBase` is the **closed**, calibration-neutral occupancy (seeded society pairing binds here).
@@ -141,10 +150,12 @@ snapshot skew:
    **engine records it** and keeps only the seeded baseline for calibration. The acceptance test is
    simply *consistent and dynamic* (PO: *"ultimately doesn't matter as long as it's consistent and
    dynamic"*). Confirms the ADR-0003/0005 lean.
-2. **Enforcement strength (D3)?** → **Fold-first.** A legal narrated move is recorded into `presence`
-   immediately (the engine concedes to plausible prose); **re-ground** only the impossible (an
-   evicted houseguest, a non-existent/unreachable room, two-places-at-once) — there is nothing legal
-   to fold.
+2. **Enforcement strength (D3)?** → **Hard-fold, under an overriding "no visible historic conflicts"
+   constraint** (PO: *"Hard-fold… we can't have visible historic conflicts"*). A legal narrated move
+   is recorded into `presence` immediately, so the board agrees by the time the player reads the
+   prose; an impossible claim (evicted houseguest / non-existent room / two-places-at-once) is caught
+   **pre-emission** and scrubbed/regenerated — **never** corrected on a later turn, which would leave
+   the conflict visible in the transcript.
 
 ## Key files
 
