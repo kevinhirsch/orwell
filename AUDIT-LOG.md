@@ -300,5 +300,45 @@ composer re-enabled (player can retry).** Strong for launch robustness.
 | **F-S4-E** | ✅ GOOD | ✅ | **Mid-stream reload RECONCILES** — the engine completed the turn server-side (`beatSeq 1→15`) and the reload rendered the **full** narration (the "stuck spinner" flag was a false positive — a collapsed admin thinking accordion). Corroborates ADR 0008's "a manual reload reconciles." | `state4-fault/rejoin.png` | (No action — positive result.) |
 | **F-S4-F** | suspected | ✅ | The **rejoin (post-reload-resume) turn drifted two roster names**: "Lake Fleming" / "Nina Howser" vs the real "**Luke Fleming**" / "**Nina Hoover**" — close-but-wrong (name DRIFT, not B4 invention). | `state4-fault/rejoin.png` vs `/state` roster | **Confounded by the rejoin context** (a resumed turn may carry a degraded/partial context → name-grounding slip). Exact-name grounding was perfect in normal play (S3-CORE/B4). **Needs a clean check:** does name drift reproduce in normal play, or only on resume? If resume-specific, it ties to the ADR-0008 / resumable-stream context handling. |
 
+## STATE 3b — Seeded deep-casting parity: narrated storyline vs engine SEEDED truth — ✅ PASS
+**Question (PO 2026-06-21):** do the live narrated storylines accurately reflect the engine's
+**seeded** deep-casting characteristics (physical / demeanor / vocation / hometown / age / backstory),
+or do they drift/invent? Fresh seeded game (seed 31337); seeded truth dumped to
+`.audit-telemetry/seeded_profiles.json`; live drive `seeded_parity.mjs`; artifacts `shots/state3b-seeded/`.
+
+### Two layers
+- **STRUCTURAL — grounding is fed + guaranteed.** `momentPrompts.ts` feeds each roster line the seeded
+  **vocation + hometown** (`:701`), the **demeanor** to voice (`:702`), and the **appearance authored
+  from the SAME `physicalCharacteristics` facet the portrait uses** (`physicalFacetToAppearance`, `:645`),
+  plus hard rules: *EXACT names, NEVER invent/rename/substitute* (`:246`) and *appearance once, then
+  behavior* (L23, `:256`). **Tested:** `appearanceConsistency.test.ts` (L29) proves the facet is the
+  **single source** — the prose `appearance` is *derived* from it and cannot contradict, and narration +
+  portrait read the same source. (+ `momentOrchestration` / `deepProfileCoherence` / `postSeasonGrounding`.)
+- **EMPIRICAL — the model HONORS it (VIEWED).** Probed 3 houseguests deeply; **every** facet matched the
+  seed **exactly**:
+  - **Hugo Cabrera** (37, welder, terse): petite/slight ✓ · medium-brown skin ✓ · close-cropped fade ✓ ·
+    even symmetrical face ✓ · freckles-across-nose ✓ · 37 ✓ · terse→"unreadable" ✓.
+  - **Elena Powers** (30, trucker, warm/bubbly): tall/willowy ✓ · fair-warm complexion ✓ · strong
+    cheekbones ✓ · small nose ring ✓ · salt-and-pepper buzzcut ✓ · 30 ✓ · warm→"first to break the ice" ✓.
+  - **Hassan Mercado** (23, escape-room designer, stoic): petite/slight ✓ · warm-tan ✓ · braided dark
+    hair ✓ · sharp angular face ✓ · scar-above-eyebrow ✓ · 23 ✓ · **Peoria IL ✓ · escape-room designer ✓**
+    · stoic→"carries it like armor" ✓.
+  - **Names exact** (`exactNameHits`: Hugo/Elena/Hassan; the only "drift" flag was "West Virginia", a
+    place — a fuzzy false positive). Decision card + roster all real names.
+
+**Verdict: the seeded deep-casting parity HOLDS in normal play** — the deep-profile (0058) +
+`physicalFacetToAppearance` (L28b/L29) work pays off; the narration is a faithful rendering of the seed,
+no drift/invention. This also **confirms the earlier F-S4-F drift was RESUME-CONTEXT-SPECIFIC**, not general.
+
+### The gap that "needs to be tested for"
+The structural single-source parity is already guarded (`appearanceConsistency`), and normal-play fidelity
+is confirmed. **The one untested risk is the RESUMABLE-STREAM RESUME PATH (F-S4-F):** a mid-stream reload
+resumed a turn that drifted "Luke Fleming"→"Lake Fleming" / "Nina Hoover"→"Nina Howser" — a degraded/partial
+context on resume losing name+facet grounding. **Recommended new gate:** assert the resume path
+reconstructs the FULL seeded GAME-CONTEXT roster (exact names + facets) so grounding can't degrade on
+resume (FE-side; ties to ADR 0008 / the resumable-stream handling). *(A metamorphic empirical gate — the
+`seeded_parity.mjs` harness distilled to "narrated facets ⊆ seeded facets" — is the optional stochastic
+backstop.)*
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
