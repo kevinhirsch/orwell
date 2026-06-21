@@ -1374,6 +1374,12 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             payload.pop("temperature", None)
         if provider not in {"openrouter", "groq"}:
             payload["stream_options"] = {"include_usage": True}
+        elif provider == "openrouter":
+            # ADR 0010 (the meter): OpenRouter returns the usage envelope — incl. the authoritative
+            # per-request `cost` plus cached/reasoning details — in the trailing SSE chunk when usage
+            # accounting is requested. `stream_options.include_usage` is a no-op on OpenRouter, so ask
+            # via OpenRouter's own flag; the streaming parse above reads it back.
+            payload["usage"] = {"include": True}
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
@@ -1677,6 +1683,23 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                 if "usage" in j and not _delta_has_output:
                                     u = j["usage"] or {}
                                     _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
+                                    # ADR 0010 (the token-economy meter): surface the rest of the
+                                    # envelope OpenRouter/OpenAI already return — cached-prompt tokens,
+                                    # reasoning tokens (the dominant cost on a thinking model), and the
+                                    # authoritative per-request cost. Only attach when present so non-
+                                    # reporting providers (and the byte-identical paths) are unchanged.
+                                    _ptd = u.get("prompt_tokens_details") or {}
+                                    _ctd = u.get("completion_tokens_details") or {}
+                                    if _ptd.get("cached_tokens") is not None:
+                                        _usage_data["cached_tokens"] = _ptd.get("cached_tokens")
+                                    if _ctd.get("reasoning_tokens") is not None:
+                                        _usage_data["reasoning_tokens"] = _ctd.get("reasoning_tokens")
+                                    if u.get("cost") is not None:
+                                        _usage_data["cost"] = u.get("cost")
+                                    if u.get("cost_details") is not None:
+                                        _usage_data["cost_details"] = u.get("cost_details")
+                                    if provider:
+                                        _usage_data["provider"] = provider
                                     # llama.cpp puts a `timings` block alongside `usage` with the
                                     # TRUE generation speed (predicted_per_second) — pure decode,
                                     # excluding prefill/network. Pass it through so the UI shows the

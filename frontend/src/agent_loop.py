@@ -2893,6 +2893,10 @@ async def stream_agent_loop(
     _verifier_instruction = _extract_last_user_message(messages)
     real_input_tokens = 0   # Accumulated real usage from API
     real_output_tokens = 0
+    real_cached_tokens = 0       # ADR 0010 meter: cached-prompt tokens (cheap reads)
+    real_reasoning_tokens = 0    # ADR 0010 meter: reasoning/thinking tokens (the cost driver)
+    real_cost = 0.0              # ADR 0010 meter: authoritative per-request cost (usage.cost)
+    _usage_provider = None       # ADR 0010 meter: which provider served (cache stickiness)
     last_round_input_tokens = 0  # Last round's input tokens (for context % peak)
     has_real_usage = False
     backend_gen_tps = 0      # backend-reported true gen speed (llama.cpp timings)
@@ -3138,6 +3142,16 @@ async def stream_agent_loop(
                         round_input = u.get("input_tokens", 0)
                         real_input_tokens += round_input
                         real_output_tokens += u.get("output_tokens", 0)
+                        # ADR 0010 meter: accumulate the rest of the envelope per round.
+                        real_cached_tokens += u.get("cached_tokens", 0) or 0
+                        real_reasoning_tokens += u.get("reasoning_tokens", 0) or 0
+                        if u.get("cost") is not None:
+                            try:
+                                real_cost += float(u.get("cost") or 0)
+                            except (TypeError, ValueError):
+                                pass
+                        if u.get("provider"):
+                            _usage_provider = u.get("provider")
                         last_round_input_tokens = round_input
                         has_real_usage = True
                         # Backend-reported TRUE generation speed (llama.cpp
@@ -4400,6 +4414,35 @@ async def stream_agent_loop(
     )
     metrics["requested_model"] = requested_model
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
+
+    # ADR 0010 (the token-economy meter): one Vault-free token/cost entry per live-game turn — the
+    # full envelope (input/cached/reasoning/output tokens, cost, context %, provider) the admin watches
+    # and the soft spend-alert reads. Keyed by the CANONICAL game session (0064) so every device's
+    # turns aggregate into one game. Fail-open — observability never hurts a turn; no player surface
+    # ever sees these numbers. (Casting/utility-call metering is a follow-on.)
+    if _is_live_game and owner:
+        try:
+            from src import orwell_token_ledger as _tl
+            try:
+                from src import orwell_game_session as _gs
+                _canon_session = _gs.get_game_session(owner) or session_id
+            except Exception:
+                _canon_session = session_id
+            _tl.record_turn(
+                owner,
+                session=_canon_session,
+                turn_id=session_id,
+                call_class="narration",
+                input_tokens=real_input_tokens,
+                cached_tokens=real_cached_tokens,
+                reasoning_tokens=real_reasoning_tokens,
+                output_tokens=real_output_tokens,
+                cost=real_cost,
+                context_percent=metrics.get("context_percent", 0),
+                provider=_usage_provider,
+            )
+        except Exception as _tl_err:
+            logger.debug(f"[orwell] token-ledger record failed: {_tl_err}")
 
     # Teacher-escalation: inline takeover visible in the chat stream.
     # The student just finished; if Tier 1 flags failure, the teacher
