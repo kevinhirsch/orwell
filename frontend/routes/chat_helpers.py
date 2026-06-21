@@ -356,6 +356,57 @@ def _pending_barrier_directive(pending) -> Optional[str]:
     )
 
 
+def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
+    """ADR 0009 (D3 Part A) — surface the engine's `whereabouts` as an ENFORCEABLE location fact, the
+    way `_pending_barrier_directive` clamps the comp-round still-in set.
+
+    Root cause #1 of the chat<->board location desync is that room occupancy is grounded by prompt text
+    ONLY, and the model overrides it from its own conversation memory (the same LW9 pattern the
+    comp-round clamp exists for). This restates the CURRENT occupancy prominently and pins the three
+    hard rules that keep the prose foldable into the board with NO visible historic conflict (the PO's
+    overriding constraint, 2026-06-21): an evicted houseguest is GONE, rooms are limited to the floor
+    plan, and a person is in exactly ONE place at a time.
+
+    It DELIBERATELY permits narrated movement — people may wander between rooms during the scene and the
+    engine records it (ADR 0009 D2, the `_auto_move_npc`/`moveHouseguest` path) — so the house stays
+    dynamic; only the IMPOSSIBLE is forbidden. The residual impossible claim that still slips through is
+    caught pre-emission (D3 Part B). Returns None when there is no usable whereabouts (pre-game / the
+    player is out of the house), leaving the turn framed exactly as before."""
+    if not whereabouts or not isinstance(whereabouts, dict):
+        return None
+    room = str(whereabouts.get("room") or "").strip()
+    if not room:
+        return None
+
+    def _names(refs) -> list[str]:
+        return [str((r or {}).get("name") or "").strip()
+                for r in (refs or []) if isinstance(r, dict) and (r or {}).get("name")]
+
+    present = _names(whereabouts.get("present"))
+    nearby_bits = []
+    for nb in (whereabouts.get("nearby") or []):
+        if not isinstance(nb, dict):
+            continue
+        nr = str(nb.get("room") or "").strip()
+        if not nr:
+            continue
+        npresent = _names(nb.get("present"))
+        nearby_bits.append(f"{nr} ({', '.join(npresent) if npresent else 'empty'})")
+    here = ", ".join(present) if present else "no other houseguest"
+    nearby_line = ("\nAdjacent rooms right now: " + "; ".join(nearby_bits) + "."
+                   if nearby_bits else "")
+    return (
+        "LOCATION IS GROUNDED BY THE ENGINE (the source of truth — do not contradict it). Right now "
+        f"the player is in the {room}, with: {here}.{nearby_line}\n"
+        "Houseguests MAY move between rooms during the scene — narrate it naturally and the engine will "
+        "record it — but hold these hard rules so the scene never contradicts the board: (1) NEVER place "
+        "a houseguest who has already been evicted in any room — they have left the house for good; "
+        "(2) NEVER invent a room that is not part of the house; (3) a houseguest is in exactly ONE place "
+        "at a time. Voice only the people who are here or who plausibly walk in from an adjacent room; "
+        "do not silently teleport anyone or empty a room the engine says is occupied."
+    )
+
+
 # ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
 #
 # The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
@@ -531,10 +582,16 @@ def _beat_signature(status: dict, state: dict) -> dict:
     pending = status.get("pending")
     pending_kind = pending.get("kind") if isinstance(pending, dict) else None
     house = state.get("house") if isinstance(state.get("house"), list) else []
-    evicted = sum(
-        1 for h in house
-        if isinstance(h, dict) and (h.get("status") or "active") != "active"
-    )
+    out_of_house = [h for h in house
+                    if isinstance(h, dict) and (h.get("status") or "active") != "active"]
+    evicted = len(out_of_house)
+    # ADR 0009 (D3 Part B): the NAMES of everyone no longer in the house (evicted OR on the jury) —
+    # cached here at turn start so the pre-emission location guard can flag any of them being placed
+    # back in a room WITHOUT a per-sentence engine fetch. Names only; never a hidden field.
+    evicted_names = sorted({
+        str(h.get("name")).strip() for h in out_of_house
+        if isinstance(h.get("name"), str) and str(h.get("name")).strip()
+    })
     return {
         "week": status.get("week"),
         "phase": (status.get("phase") or state.get("phase")),
@@ -544,6 +601,7 @@ def _beat_signature(status: dict, state: dict) -> dict:
         "vetoHolder": _id(veto.get("holder")),
         "vetoUsed": bool(veto.get("used")),
         "evicted": evicted,
+        "evictedNames": evicted_names,
         "finished": bool(state.get("finished")),
     }
 
@@ -757,6 +815,141 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
         return False
     except Exception as e:
         logger.warning("[orwell] pre-emission outcome guard skipped for user=%s: %s", user, _exc_detail(e))
+        return True  # fail-open: never suppress on an error.
+
+
+# ── ADR 0009 (D3 Part B) — the PRE-EMISSION LOCATION guard (evicted-houseguest-in-a-room) ──────── #
+#
+# The location counterpart of the closed-set guard above. The PO's overriding constraint (2026-06-21)
+# is NO visible historic conflict between the prose and the board. A legal narrated MOVE is hard-folded
+# into the board (the D2 `_auto_move_npc`/`moveHouseguest` path), so it is never a conflict. The
+# residual IMPOSSIBLE claim is "a houseguest who has LEFT the house (evicted, or now on the jury) is
+# back in a room" — that can never be folded into a legal state, so it must be caught BEFORE the player
+# sees it (never a later-turn correction, which would leave the conflict visible in the transcript).
+#
+# Scope is DELIBERATELY narrow (the conservatism mandate — a false hold on creative prose is worse than
+# a missed phantom, ADR 0005 #1). The other two impossibility classes from the ruling are handled
+# WITHOUT a scrub, to protect creative prose: a NON-EXISTENT room and TWO-PLACES-AT-ONCE are grounded
+# at the source by the D3-Part-A location barrier (and an invented room is refused by the engine belt,
+# never folded) — aggressively regex-scrubbing them would risk holding legitimate loose room
+# description / sequential movement (which the hard-fold makes legal). The evicted-in-a-room claim is
+# both unambiguously impossible AND reliably detectable, so it is the one we scrub.
+#
+# Reliability: we fire ONLY when an out-of-house NAME is bound (within a tight window) to present-tense
+# IN-SCENE presence language AND a real HOUSE ROOM is named in the sentence. That triple gate keeps
+# the legitimate cases safe: "X was evicted" (no room, no present verb), "X heads to the jury house"
+# (no house room), "I miss X; the kitchen isn't the same" (name not bound to a presence verb), and any
+# past-tense reminiscing all EMIT untouched. Finale phases are skipped entirely (jurors legitimately
+# reappear to vote, 0037). The evicted NAMES come from the cached turn-start signature — no per-sentence
+# engine fetch.
+
+# Present-tense, in-scene presence/entrance language. Bare copulas ("is"/"are") are DELIBERATELY
+# excluded — "X is on the jury" / "X is gone" are legitimate — so only active entrance/occupancy verbs
+# qualify, and only when also bound to a house room (below).
+_EVICTED_PRESENCE_RE = re.compile(
+    r"\b(?:walks?|strolls?|wanders?|heads?|comes?|steps?|saunters?|breezes?|slips?|enters?|joins?|"
+    r"appears?|sidles?|drifts?|pads?|marches?|storms?|bursts?|sweeps?|ambles?|shuffles?|sneaks?|"
+    r"creeps?|returns?|arrives?|sits?|sitting|stands?|standing|leans?|leaning|lounges?|lounging|"
+    r"lingers?|lingering|perched|sprawled|into|in)\b",
+    re.IGNORECASE,
+)
+# The house floor plan as narration words (mirrors src/domain/house.ts; diary-room excluded — the
+# player's isolated OOC channel is never a scene an evictee is placed into).
+_HOUSE_ROOM_WORDS_RE = re.compile(
+    r"\b(?:kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
+    r"hoh[\s-]?room|head of household(?:'s)?(?: room)?|storage[\s-]?room)\b",
+    re.IGNORECASE,
+)
+# How close (chars) an out-of-house name must sit to the presence verb to count as BOUND to it — tight
+# enough that a far co-occurrence ("X was evicted … later someone walks into the kitchen") never trips.
+_EVICTED_BIND_WINDOW = 50
+
+
+def _sentence_places_evicted(sentence: str, evicted_names) -> Optional[str]:
+    """Return the out-of-house houseguest NAME this sentence places back in a house room, or None.
+    The triple gate (a real house room in the sentence + an out-of-house name + that name bound within
+    `_EVICTED_BIND_WINDOW` chars of present-tense presence/entrance language) keeps the legitimate
+    cases — past-tense reference, departure to the jury house, mere mention — untouched."""
+    if not sentence or not evicted_names:
+        return None
+    if not _HOUSE_ROOM_WORDS_RE.search(sentence):
+        return None  # no in-house location named → not an "evicted person IN a room" claim
+    for name in evicted_names:
+        if not isinstance(name, str) or not name.strip():
+            continue
+        variants = [name]
+        first = name.split()[0]
+        if len(first) >= 3 and first != name:
+            variants.append(first)
+        for v in variants:
+            for m in re.finditer(r"\b" + re.escape(v) + r"\b", sentence, re.IGNORECASE):
+                window = sentence[max(0, m.start() - _EVICTED_BIND_WINDOW): m.end() + _EVICTED_BIND_WINDOW]
+                if _EVICTED_PRESENCE_RE.search(window):
+                    return name
+    return None
+
+
+def _text_mentions_evicted_houseguest(user, text: str) -> bool:
+    """Cheap synchronous pre-filter for the location guard: does `text` even name someone who has left
+    the house this game? Reads the cached turn-start signature (no fetch); skips finale phases (jurors
+    legitimately reappear). Keeps creative prose with no out-of-house name off the screening path."""
+    if not text:
+        return False
+    sig = _LAST_BEAT_SIG.get(user)
+    if not sig:
+        return False
+    if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
+        return False
+    low = text.lower()
+    for name in (sig.get("evictedNames") or []):
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if name.lower() in low:
+            return True
+        first = name.split()[0]
+        if len(first) >= 3 and first.lower() in low:
+            return True
+    return False
+
+
+async def screen_streamed_location(user, sentence: str) -> bool:
+    """ADR 0009 (D3 Part B) — verify ONE streamed sentence does not place an EVICTED/jury houseguest
+    back in a house room, BEFORE the player sees it. Returns:
+
+      • True  → EMIT (no out-of-house houseguest is placed in a room; or we are uncertain).
+      • False → HOLD/DROP (an evicted houseguest was placed in a room — an impossible claim) and stash
+                the existing `_DESYNC_REGROUND` next-turn backstop so the model does not repeat it.
+
+    The out-of-house NAMES come from the cached turn-start signature (`_LAST_BEAT_SIG`) — no per-sentence
+    engine fetch. Finale phases are skipped (jurors legitimately reappear to vote). Fail-open by
+    construction: any hiccup returns True (emit)."""
+    try:
+        if not sentence or not sentence.strip():
+            return True
+        sig = _LAST_BEAT_SIG.get(user)
+        if not sig:
+            return True  # no baseline this turn → uncertain, emit.
+        if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
+            return True
+        evicted_names = sig.get("evictedNames") or []
+        if not evicted_names:
+            return True
+        who = _sentence_places_evicted(sentence, evicted_names)
+        if not who:
+            return True
+        _DESYNC_REGROUND[user] = (
+            "RE-GROUND ON THE BOARD — last turn you placed " + who + " in a room, but they have been "
+            "EVICTED and are no longer in the house — an evicted houseguest cannot appear in any room. "
+            "The engine is the source of truth: re-read the live roster and voice only the houseguests "
+            "who are still in the game; never place someone who has left the house back in it."
+        )
+        logger.warning(
+            "[orwell] pre-emission guard HELD an evicted-houseguest-in-a-room claim for user=%s — "
+            "dropped before emission, re-grounding next turn", user,
+        )
+        return False
+    except Exception as e:
+        logger.warning("[orwell] pre-emission location guard skipped for user=%s: %s", user, _exc_detail(e))
         return True  # fail-open: never suppress on an error.
 
 
@@ -1104,6 +1297,18 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _barrier
         except Exception as e:
             logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
+        # ADR 0009 (D3 Part A) — the LOCATION grounding barrier. The same desync class as the pending
+        # barrier, for room occupancy: surface the engine's `whereabouts` as an ENFORCEABLE fact so the
+        # model stops overriding it from memory (root cause #1). Read off the SAME `game_state` snapshot
+        # the moment prompt was built from (`getGameState` carries `whereabouts`) — no extra round-trip,
+        # and the model's grounding + the gadget reflect one snapshot (supports D1). Permits narrated
+        # movement (D2 records it); forbids only the impossible. Best-effort / fail-open.
+        try:
+            _loc = _whereabouts_barrier_directive(game_state.get("whereabouts"))
+            if _loc:
+                gm_prompt = gm_prompt + "\n\n" + _loc
+        except Exception as e:
+            logger.warning("[orwell] location grounding skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
         # re-ground directive the previous turn's post-turn check stashed for this user (the
         # model narrated an outcome the engine never committed — pin it back to the board), then

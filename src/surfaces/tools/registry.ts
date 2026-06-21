@@ -64,6 +64,7 @@ export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
   { name: "manageSandbox", channel: "admin/God Mode", readsVault: false, description: "Sandbox lifecycle for this sandbox only (create | reset | save | load)." },
   { name: "sandboxHealth", channel: "admin/God Mode", readsVault: false, description: "Vault-free sandbox health (B58): week/phase, last advance, integrity status, recent faults, circuit state — metadata only, never game content." },
   { name: "advanceToFinale", channel: "admin/God Mode", readsVault: false, description: "DEBUG (L38): fast-forward THIS sandbox's live season to a crowned winner — drives the deterministic loop, auto-resolving the player's pending decisions with legal defaults, so the post-season retrospective (0048) unseals legitimately. Reads NO Vault; returns only a Vault-free summary (winner name, weeks played, the player's final placement)." },
+  { name: "setTimeOfDay", channel: "admin/God Mode", readsVault: false, description: "ADR 0006: turn the in-game time-of-day clock + nightly sleep economy ON or OFF at runtime (the FE settings switch flips it here — no engine restart). { enabled: boolean }. A process-global override of the ORWELL_TIME_OF_DAY env default; resets on restart (the FE re-applies the persisted setting on boot). Vault-free." },
 ];
 
 export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {

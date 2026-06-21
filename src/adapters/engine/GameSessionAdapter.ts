@@ -1450,7 +1450,7 @@ export class GameSessionAdapter implements GameSession {
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token; Vault-free
       week: this.week,
       phase: this.phase,
-      ...(this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay } : {}), // ADR 0006: the shared, public day-phase
+      ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay, asleep: this.asleepNpcs() ?? [] } : {}), // ADR 0006: the public day-phase + who's turned in (observable)
       day: dayOfWeek(this.phase), // E58: the canonical beat→day index (hoh=1 … eviction=5), or null off-ladder
       hoh: this.card(this.ceremony.hoh),
       nominees: this.ceremony.nominees.map((id) => ({ id, name: this.nameOf(id) })),
@@ -1728,6 +1728,20 @@ export class GameSessionAdapter implements GameSession {
   awakeAmong(ids: readonly EntityId[]): EntityId[] {
     const awake = this.awakeNow();
     return awake ? ids.filter((id) => awake.has(id)) : [...ids];
+  }
+
+  /**
+   * The living houseguests who have TURNED IN for the night (ADR 0006) — the complement of the awake set
+   * among the NPCs. Vault-free and OBSERVABLE (you'd see who's no longer around / an empty bed); the
+   * bedtime DERIVATION stays hidden. `undefined` when the clock is off (dormant) ⇒ the projection omits
+   * the field. The player is never listed — their own night is the `turnIn` lever + their rest cue.
+   */
+  private asleepNpcs(): NamedRef[] | undefined {
+    const awake = this.awakeNow();
+    if (!awake) return undefined;
+    return this.presenceActive()
+      .filter((id) => id !== PLAYER && !awake.has(id))
+      .map((id) => ({ id, name: this.nameOf(id) }));
   }
 
   /**
@@ -2814,7 +2828,22 @@ export class GameSessionAdapter implements GameSession {
    * advances, `timeOfDay` stays undefined, `restOf` returns 0, and every seeded outcome (the juryReach
    * calibration spine, the UAT) is byte-identical to the pre-feature model. The deploy turns it on.
    */
+  /**
+   * ADR 0006 runtime override for the in-game clock. The FE settings switch flips this through the admin
+   * `setTimeOfDay` tool (via the composition delegate) — no engine restart. `null` ⇒ fall back to the
+   * `ORWELL_TIME_OF_DAY` env default, so the seeded golden sims (which set neither) stay OFF and
+   * byte-identical. Process-global + in-memory: a restart resets it to `null` and the FE re-applies the
+   * persisted setting on boot.
+   */
+  private static timeOfDayOverride: boolean | null = null;
+
+  /** Flip the ADR 0006 clock at runtime (admin-only, wired through the composition delegate). `null` ⇒ env. */
+  static setTimeOfDayEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.timeOfDayOverride = enabled;
+  }
+
   private get timeOfDayEnabled(): boolean {
+    if (GameSessionAdapter.timeOfDayOverride !== null) return GameSessionAdapter.timeOfDayOverride;
     const v = process.env.ORWELL_TIME_OF_DAY;
     return v === "1" || v === "true" || v === "on";
   }
@@ -4095,7 +4124,7 @@ export class GameSessionAdapter implements GameSession {
       whereabouts: this.whereabouts(),
       week: this.week,
       phase: this.phase,
-      ...(this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay } : {}), // ADR 0006: the shared, public day-phase
+      ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay, asleep: this.asleepNpcs() ?? [] } : {}), // ADR 0006: the public day-phase + who's turned in
       moment,
       player: {
         id: p.id,
@@ -4107,7 +4136,7 @@ export class GameSessionAdapter implements GameSession {
         status,
         // ADR 0006 §Principle 5: the player's OWN qualitative tiredness (their body is their knowledge) —
         // a cue, never a number, and never any NPC's sleep state. Present only once the clock is running.
-        ...(this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? DAY_START) } : {}),
+        ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? DAY_START) } : {}),
         // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
         // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
         castingCard: {

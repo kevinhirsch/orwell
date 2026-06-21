@@ -30,6 +30,9 @@ def _invalidate_caches():
 # ── Default values ──
 
 DEFAULT_SETTINGS = {
+    # ADR 0006 - the in-game time-of-day clock + nightly sleep economy (the engine's ORWELL_TIME_OF_DAY).
+    # ON by default; the settings switch flips it on the LIVE engine (admin setTimeOfDay) with no restart.
+    "time_of_day_enabled": True,
     "image_gen_enabled": True,
     "image_model": "",
     "image_quality": "medium",

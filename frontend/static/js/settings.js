@@ -689,6 +689,26 @@ async function initImageSettings() {
   });
 }
 
+/* ── In-game time of day & sleep (ADR 0006) ── */
+async function initTimeOfDaySettings() {
+  const toggle = el('set-timeOfDayToggle');
+  if (!toggle) return;
+  try {
+    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    const settings = await res.json();
+    toggle.checked = settings.time_of_day_enabled !== false;
+  } catch (e) { console.warn('Failed to load time-of-day setting', e); }
+  toggle.addEventListener('change', async function () {
+    try {
+      await fetch('/api/auth/settings', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ time_of_day_enabled: toggle.checked }),
+      });
+    } catch (e) { console.warn('Failed to save time-of-day setting', e); }
+  });
+}
+
 /* ── Vision ── */
 async function initVisionSettings() {
   const vlSel = el('set-vlModelSelect');
@@ -2291,6 +2311,7 @@ function initAll() {
   initDefaultChat();
   initUtilityModel();
   initImageSettings();
+  initTimeOfDaySettings();
   initVisionSettings();
   initTtsSettings();
   initSttSettings();
