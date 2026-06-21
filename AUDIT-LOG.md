@@ -211,5 +211,33 @@ F-S2-A **is** the "casting overlay over content" case F-S1-G predicted — but i
 producers" before the cast-photo card mounted, so `.welcome-name` co-occupancy wasn't triggered).
 F-S1-G stays a latent structural note; **F-S2-A is its concrete, fixable manifestation.**
 
+## STATE 3 — Core gameplay loop (IN PROGRESS) — concurrency parity
+Game instantiated via the admin debug door (started, premiere, 15-NPC **diverse** roster — varied
+archetype/age 22–47/ethnicity/demeanor/body, L28 visible; `/api/orwell/state` is **Vault-free** —
+public facets only, no hidden secrets/goals/stats). Two-window **same-identity** parity (two devices,
+same user, same game), one live mutating turn in window A. Artifacts: `shots/state3-parity/`.
+
+### Two-window concurrency parity — ✅ HOLDS (the "garbage" hunt — strong positive)
+- **Shared game-state HUD parity holds:** cp0 (idle) A==B identical; after a live turn in A mutated
+  the engine (`beatSeq 2→11`, met 1→8, moved to kitchen), **Window B reconciled within ~3s**
+  (faster than the 20s poll floor ⇒ the 0064 cross-device push works) and **A==B at the 24s
+  checkpoint**, both matching engine truth. VIEWED both frames: identical roster + presence in the
+  HUD. **The render-corruption / desync "garbage" the brief flagged does NOT reproduce at this beat.**
+- Narration engine-grounded (real roster names; presence panel matches the narration).
+- 2× console errors per window = the **F-S2-B** research-status / stream-status 404s (already logged).
+
+### Findings
+| ID | Sev | 👁 | Finding | Evidence | Mechanism / direction |
+|----|-----|----|---------|----------|----------------------|
+| **F-S3-A** | suspected (confounded) | ~ | Window B's **chat** showed a PREVIOUS game's narration ("Penny Yu", "Andre Barton" — not on this roster) while its HUD showed the current roster → chat-vs-HUD divergence. | `state3-parity/cp2-24s-B.png` | **Confounded:** game created via the debug `new-game` door, which doesn't clear old FE chat sessions, so B sat on a stale session. **Needs clean verify:** does the proper restart (`registry.resetUser` / `next-season`) clear/archive old chat sessions, or do they linger showing stale narration? Ties to the multi-season no-bleed requirement (0004/0007). |
+
+### Still pending for State 3 (next focused chunk)
+- **S3-CORE engine-bypass re-verify (the prior launch-blocker):** drive the live weekly loop
+  (HOH → noms → veto → eviction); does the **pending-decision barrier** (`chat_helpers.py`, #444/#447)
+  now BIND the model to resolve decisions through the engine (no narrate-past-pending, no invented
+  outcome)? This is the highest-value remaining State-3 test.
+- **Decision-card concurrency:** when the engine raises a player pending, does the structured card
+  surface in BOTH windows, and does resolving it in A reflect in B? (The S4-1 escape-hatch + A-S5.)
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
