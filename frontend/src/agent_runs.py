@@ -80,6 +80,16 @@ def is_active(session_id: str) -> bool:
     return bool(r and r.status == "running")
 
 
+def has_run(session_id: str) -> bool:
+    """True if a run EXISTS for this session — running OR terminal-but-still-buffered (within the
+    evict grace). Distinct from is_active (running only): the Messenger-mirror late-attach
+    (ADR 0012) needs a peer to RESUME and REPLAY a run that JUST finished — a short turn often
+    completes before a peer's `run-started`→resume chain arrives, so gating resume on `is_active`
+    404s the very window that should be mirroring it. `subscribe()` replays the buffer then ends for
+    a finished run, so resuming an existing-but-terminal run is safe and idempotent (reconcile-by-id)."""
+    return _RUNS.get(session_id) is not None
+
+
 def get_status(session_id: str) -> Optional[str]:
     r = _RUNS.get(session_id)
     return r.status if r else None

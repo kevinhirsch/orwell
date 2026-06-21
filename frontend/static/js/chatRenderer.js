@@ -1937,12 +1937,13 @@ export function addMessage(role, content, modelName, metadata) {
           if ((roundTexts[rr] || '').trim()) { isLastTextRound = false; break; }
         }
 
-        // L6b (game build): only the FINAL narration round renders on reload. An
-        // intermediate text round (one with a later text round still to come) is
-        // the model's planning preamble ("Looking at the roster… npc:1 … Let me
-        // stay in character"), not narration — skip its bubble entirely. The tool
-        // rounds below still render as production beats. Non-game build is UNCHANGED.
-        const _gbSkipIntermediateText = isGameBuild() && !isLastTextRound;
+        // L6c (supersedes L6b): every NON-EMPTY text round renders on reload — a multi-line
+        // interview / scene accumulates, matching the live path. The old rule kept only the
+        // FINAL narration round, which lost a multi-line casting interview on reload ("4 answers
+        // go away"). Empty tool-only rounds carry no `txt` and are skipped by the guard below;
+        // their tools still render as production beats. `isLastTextRound` is retained for
+        // source/findings placement (web_sources/research/rag) further down. Non-game UNCHANGED.
+        const _gbSkipIntermediateText = false;
 
         if (txt && !_gbSkipIntermediateText) {
           const wrap = document.createElement('div');
