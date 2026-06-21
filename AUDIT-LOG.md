@@ -110,7 +110,7 @@ L18 (engine hang on fallback-digest), L31/L28b/L37/L39/L40/L35/L45.
 | S4-RESOLVE | State 4 | n/a | **PASS (live)** | Full game → crowned NPC winner; player→jury; interactive finale juror path fired; retrospective renders ordered per-juror reveal. |
 | S4-VAULT-RETRO | State 4 | n/a | **PASS — Wall holds at its one opening** | 0048 unseal reveals STORY not NUMBERS: 2037–2087 hidden beats / 13 types, 13 wks per-voter ballots, **0 numeric leaks**, secret-ballot anonymized all season, `npc:N` only in `id` leaves. |
 | S4-1 | State 4 | ~~BLOCK~~ | **VERIFIED-FIXED (code+live)** | Stuck-player (narrated past a pending) fixed by `rearmFromStatus` + the 15s `/status` pending "escape hatch". |
-| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). Polish: 502 voiced as a GM bubble (F-S4-C); truncated stream stops silently (F-S4-D); mid-stream reload reconciles (F-S4-E ✅). |
+| S4-EDGE / F-S4-C/D/E | State 4 | mixed | **VERIFIED** | Rejoin/dropped-socket/AI-timeout graceful (beatSeq stable, composer re-enabled). 502-as-GM-bubble (F-S4-C) **FIXED** → `msg-system` notice; truncated stream stops silently (F-S4-D, deferred); mid-stream reload reconciles (F-S4-E ✅). |
 | S4-2 | State 4 | POLISH | partial | `/status` carries `finished+winner` (✓) but `/recap`+`/finale` still return null winner post-finish. Non-blocking (FE recovers via retrospective). |
 | F-S4-F | State 4 | LATENT | ROOT-CAUSED | Resume-path name DRIFT ("Luke→Lake Fleming") on a mid-stream-reload-resumed turn — resume-context-specific (clean play = exact); ties to ADR 0008 resumable-stream context. New gate recommended. |
 | **State 5** | OOBE | mixed | **VERIFIED-FIXED** | Operator OOBE reports: particles (=BG-1/OBS-1 Lane B), cast-photo box movable-not-resizeable, welcome re-shows after backend reset. §2.8. |
@@ -201,6 +201,28 @@ the `hasActiveStream` suppression); Phase C permanent gates. Landed `5e3a2f3`.
 > source trace (F1/F2/F3) matched ADR 0008's items 1–4 exactly and corroborated the implementation spec.
 > *Remaining (both lanes): a live concurrent-write browser re-run with real-model turns is the one open
 > verification; the convergence foundation is proven by the interleaved-writers gate + the reload-reconcile.*
+
+**ADR-0008 LIVE VERIFICATION — RUN (2026-06-21, Lane B, real `-pro` model, two tabs/one session).** The
+open item above is now driven (`.audit-telemetry/adr0008_{parity,diag,bothactive}.py`):
+- ✅ **Data integrity FIXED (the original blocker is resolved):** the persisted log is seq-ordered + correct;
+  a fresh reload ALWAYS reconciles to the full `A-0,B-0,A-1,B-1` order; no accumulation, no corruption.
+- ✅ **Idle-tab live reconcile WORKS:** with tab A idle, a write in tab B reaches A over SSE and A reconciles
+  (`softReloadHistory` fires, A renders B's message) — the original `hasActiveStream`-drop bug is fixed for an
+  idle receiver. Same-session confirmed (both tabs sid `901b04da`), so NOT a session-split confound.
+- ✅ **RESIDUAL ROOT-CAUSED + FIXED (owner authorized the fix):** when **two tabs of the same session stream
+  turns CONCURRENTLY**, the first-active tab did **not** converge to the peer's concurrent write — it stayed
+  diverged (VIEWED at +0.5s and **+15s**, no reload). **Root cause (clean):** `_streamSessionId` is SET on
+  stream start (`chat.js:603`) but was **NEVER reset to null**, so `hasActiveStream()`
+  (`_streamSessionId === sessionId`, `chat.js:159`) stayed permanently true for the last-streamed session —
+  so the deferred reconcile re-deferred FOREVER at the `chat.js:3619 if (hasActiveStream(sessionId))` guard,
+  and a tab that had sent even one turn could never live-reconcile a peer's write to that session until a
+  reload. (This is why the idle-tab diagnostic — tab A never sent — DID reconcile.) **Fix:** the foreground
+  reader's `finally` now clears it — `if (_streamSessionId === streamSessionId) _streamSessionId = null;`
+  (guarded so a late finally can't clobber a newer stream; background streams stay covered by
+  `_backgroundStreams`). **VERIFIED:** the same two-tab interleaved harness now shows **A == B == reload,
+  converged across both iters**; the instrumented both-active test shows A picks up the peer's write at
+  settle. New source-pin gate `test_adr0008_reconcile_contract::test_stream_end_resets_stream_session_id…`;
+  ADR-0008 suite 15 passed. FE-only, no engine/Vault impact.
 
 **S3-CORE (prior blocker) — VERIFIED-FIXED (live).** 14-turn `-pro` week-1 loop (hoh-comp → noms → veto-comp
 → veto-ceremony → eviction): engine advanced **14/14**, **0 leaks**, **0 genuine cast inventions** (the
@@ -326,6 +348,38 @@ targets; canvas lifecycle clean, honors reduced-motion). Findings reconciled to 
 
 ---
 
+## 2.11 Current-main regression checks (2026-06-21, Lane B continuation)
+
+- **ADR-0008 two-tab concurrent convergence — VERIFIED-FIXED** (see §2.5): the `_streamSessionId`-never-reset
+  residual is fixed + gated; live harness shows A==B==reload converged.
+- **Vault Wall (#1 mandate) — RE-VERIFIED CLEAN on current main (live player-channel scan).** `getGameState`,
+  `getVisibleStateFor(player)`, `seasonRecap` scanned live: **0 numeric secret leaks** (no
+  trust/affinity/threat/emotional/volatility/aptitude/privateStrategy number crosses); **every one of the 31
+  player-visible events has the player IN its witness set (0 off-screen NPC-to-NPC leaks); 0 hidden/offScreen-
+  flagged events reach the player.** `npc:N` appears only as bare ids in `witnessSet` (an id-list, FE-resolved
+  to names) — not prose. **Negative control:** the engine-only `resolveCompetition` is **rejected** on the
+  player channel. The Vault Wall holds after all the main churn (ADR 0009, 0066, A1 modal, etc.).
+- **Cross-user isolation (#1-mandate first-class guarantee) — RE-VERIFIED CLEAN on current main (live, two
+  users).** Two engine sandboxes (`audit-admin` with a started game + a fresh `audit-user-iso-b`) are fully
+  isolated: B's `preSeedCast` (seed 99887766) warmed a DISTINCT 15-NPC cast sharing **0 names** with A's
+  roster; B's preSeed left A's roster **byte-unchanged**; **B's header never returns A's game**; the no-header
+  "default" routes to its OWN separate sandbox (not A's). No call for one user returns another user's game —
+  secret or not. Holds after the main churn.
+- **F-S4-C (502 rendered as a GM bubble) — FIXED.** Root cause (code-read): the chat-stream sender's
+  pre-stream non-200 branch (`chat.js` `if (!res.ok)`) typewrote the raw upstream error into `holder`, which
+  was mounted as `msg msg-ai` **with a `.role` "Big Brother" label** — so a gateway/proxy failure read as
+  in-game narration (immersion break). **Fix:** reclassify the idle holder to the quiet out-of-character
+  `.msg-system` style (`style.css:9056`) **and** rebuild its body to drop the `.role` GM label, then frame a
+  generic, actionable failure (`⚠ Connection error (NNN) — your message didn't go through. Try again.`) — the
+  tool-mode-switch copy (matched by `/Chat mode/i`) keeps its own message. **Verification:** `node --check`;
+  source-pinned by `tests/test_prelaunch_blockers_s6s4.py` (two F-S4-C tests read the literal error-path
+  slice — the file's standing posture: "CI can't drive the live stack here, so we pin the WIRING"). A live
+  in-game repro stays blocked environmentally (the audit fixture user has no active in-game session —
+  `sendMode='newchat'` — so the send routes through the casting/new-chat path, not the in-game branch the fix
+  targets; the 502 stub fires ×1, confirming the rig, just on the wrong branch). F-S4-D (silent truncation)
+  remains deferred. *(Sibling note, not chased: the casting/new-chat stream-error path appears to swallow the
+  502 with no visible notice — a separate surface.)*
+
 ## 3. Close-out verdict
 
 **All states swept** (S1 instantiation · S2 onboarding · S3 core-loop + concurrency · S3b seeded parity ·
@@ -339,10 +393,10 @@ on the live build**.
   all **VERIFIED-FIXED**.
 - **Polish backlog — fixes applied this campaign (FE-only, verified):** S1-2 (avatar 204), S1-A, S1-B, S1-C,
   BG-1+OBS-1 (background, both mechanisms), F-S2-A (cast-photo opacity), State-5 (particles / draggable box /
-  welcome re-show), State-6 R1–R8 + D1.
+  welcome re-show), State-6 R1–R8 + D1, **F-S4-C (502 → `msg-system`, not a GM bubble)**.
 - **Remaining (non-blocking, tracked):** a live concurrent-write two-tab re-run with real-model turns (the one
-  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-C/D (error-as-GM-bubble, silent
-  truncation); F-S4-F + the resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
+  open ADR-0008 verification); S4-2 (`/recap`+`/finale` null winner); F-S4-D (silent truncation); F-S4-F + the
+  resume-path grounding gate; S1-D (gadget poller coalescing — refactor); S1-F/G/H,
   S1-5, S1-1L, S2-1, F-S2-B; the §2.10 architecture latents; and the State-5 same-tab-F5 welcome edge
   (needs a server-side per-game nonce). The refactor roadmap is `docs/REFACTOR-ROADMAP.md`.
 

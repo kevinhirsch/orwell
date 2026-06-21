@@ -642,6 +642,24 @@ def setup_orwell_routes() -> APIRouter:
             logger.info(f"[orwell] warm-portraits failed: {e}")
             return {"started": False}
 
+    @router.post("/prewarm-next-season")
+    async def orwell_prewarm_next_season(request: Request):
+        """PHASE 1 (0065 advance-warm): the FE calls this when the CURRENT season's FINALE DAY begins
+        (the finale starts staging). It fires the REAL mid-season warm in the background: the engine's
+        `preSeedNextSeason` warms the NEXT season's cast DATA (names + deep profiles), NOT images, off a
+        NEW seed into a per-user HOLDING STORE that survives the cutover rotation — WITHOUT touching the
+        active season — and the FE deeply authors it (write-back onto the holding store). The confirmed
+        next-season cutover ADOPTS the held cast, so the deep data is ready truly IN ADVANCE. Idempotent;
+        fail-open. Player-channel (the warm reads only the Vault-free roster). Images are a SEPARATE
+        Phase-2 warm fired at the next-season confirm and gated off this one (warm-portraits)."""
+        user = _current_user(request)
+        try:
+            from src import orwell_prewarm
+            return orwell_prewarm.prewarm_next_season(user)
+        except Exception as e:  # never disturb the finale on a pre-warm hiccup
+            logger.info(f"[orwell] prewarm-next-season failed: {e}")
+            return {"armed": False}
+
     # ── G26/G27: the player's own casting headshot + the account avatar ───────────────────
     # Player-channel (not admin): it sets the PLAYER's OWN portrait and the account's circle
     # avatar — the same exposure as the backfill lever. 'exact' = the cropped photo, finalized

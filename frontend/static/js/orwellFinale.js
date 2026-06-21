@@ -36,6 +36,7 @@ import * as modalManager from "./modalManager.js";
   let timer = null;
   let _staging = false;            // a finale is currently live (drives the poll cadence)
   let _failures = 0;               // C18-style backoff on consecutive errors
+  let _nextSeasonWarmed = false;   // 0065 Phase 1: the finale-day next-season char-data warm fired once
   function _pollDelay() {
     const base = _staging ? POLL_FAST_MS : POLL_SLOW_MS;
     return Math.min(base * Math.pow(2, _failures), 120000);
@@ -239,8 +240,25 @@ import * as modalManager from "./modalManager.js";
       if (_win && _win.setLoading) _win.setLoading(false);
     }
     _staging = !!finale;
+    // 0065 Phase 1 — FINALE DAY BEGINS: the instant a finale starts staging (the current season is
+    // nearing its close), kick the NEXT season's char-data warm so the deep cast profiles are warming
+    // in advance of when they're needed. Fire-and-forget + idempotent server-side (the endpoint just
+    // ARMS a background poll that lands once the player confirms the next season). Once per finale.
+    if (_staging && !_nextSeasonWarmed) {
+      _nextSeasonWarmed = true;
+      _warmNextSeason();
+    }
     if (!finale) { hidePanel(); return; }
     render(finale);
+  }
+
+  // 0065 Phase 1: fire the finale-day next-season char-data warm. Best-effort, fail-open; the server
+  // endpoint is idempotent (a re-fire is a no-op while the poll is armed). Images are a SEPARATE warm
+  // fired at the next-season confirm (orwellNewSeason.js), gated off this one finishing.
+  function _warmNextSeason() {
+    try {
+      fetch("/api/orwell/prewarm-next-season", { method: "POST", credentials: "same-origin" }).catch(() => {});
+    } catch (_) {}
   }
 
   function start() {

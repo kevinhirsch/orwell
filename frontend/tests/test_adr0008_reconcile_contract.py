@@ -72,6 +72,19 @@ def test_sender_reconciles_after_its_own_turn_read_your_writes():
         "the sender must reconcile after its own turn persists (read-your-writes)"
 
 
+def test_stream_end_resets_stream_session_id_so_deferred_reconcile_can_flush():
+    # ADR-0008 LIVE-verification fix (audit 2026-06-21): _streamSessionId is set on stream START but was
+    # NEVER reset, so hasActiveStream() (`_streamSessionId === sessionId || …`) stayed permanently true
+    # for the last-streamed session. The deferred reconcile then RE-DEFERRED forever at the
+    # `if (hasActiveStream(sessionId))` guard, so a tab that had sent even one turn could never
+    # live-reconcile a peer's concurrent write to that session until a reload (the two-tabs-streaming-
+    # concurrently residual, reproduced + fixed live). The foreground reader's finally must clear it —
+    # guarded to `=== streamSessionId` so a newer stream's session isn't clobbered by a late finally.
+    src = _read("static", "js", "chat.js")
+    assert "if (_streamSessionId === streamSessionId) _streamSessionId = null;" in src, \
+        "the foreground stream's finally must reset _streamSessionId so hasActiveStream clears at stream end"
+
+
 def test_renderer_stamps_seq_and_client_id_on_bubbles():
     src = _read("static", "js", "chatRenderer.js")
     assert "wrap.dataset.seq" in src, "rendered bubbles must carry their seq for the divergence check"
