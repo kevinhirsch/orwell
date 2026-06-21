@@ -3204,10 +3204,21 @@ import { isNarrow } from './platform.js';
       // and arms the card. Debounced + idempotent (coalesces with any per-tool dispatch this turn);
       // a no-op outside the game build (orwellGameChanged is undefined there).
       if (window.orwellGameChanged) window.orwellGameChanged('turn-settled');
+      // ADR 0008 fix (audit 2026-06-21): the foreground reader loop has ENDED, so clear _streamSessionId.
+      // It was set on stream START (~L603) and previously NEVER reset, so hasActiveStream() stayed
+      // permanently true for this session — which made flushPendingReconcile's softReloadHistory re-defer
+      // FOREVER (the chat.js:3619 `if (hasActiveStream(sessionId))` guard). Net effect: a tab that had sent
+      // even one turn could NEVER live-reconcile a peer's concurrent write to that session until a reload
+      // (the two-tabs-streaming-concurrently residual the ADR-0008 live verification found). Guarded to
+      // `=== streamSessionId` so a newer stream's session isn't cleared by a late-settling old finally;
+      // a backgrounded stream stays covered by _backgroundStreams in hasActiveStream.
+      if (_streamSessionId === streamSessionId) _streamSessionId = null;
       // ADR 0008: read-your-writes. The turn has persisted, so reconcile the sender's optimistic
       // bubbles to the authoritative {id, seq} log (the adopt pass is cheap + flicker-free; it only
       // rebuilds if a PEER also wrote during this turn). Was: the sender never re-fetched, so its DOM
       // was a permanent local guess that drifted from other tabs. Deferred so the finally settles first.
+      // (Now that _streamSessionId is cleared above, the setTimeout(0) callback sees hasActiveStream=false
+      // and the deferred reconcile actually rebuilds.)
       try { setTimeout(() => { try { flushPendingReconcile(streamSessionId); } catch (_) {} }, 0); } catch (_) {}
       // Always clean up research tracking regardless of background state
       _researchingStreamIds.delete(streamSessionId);
