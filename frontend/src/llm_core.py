@@ -1273,15 +1273,17 @@ async def llm_call_async(
         _meter()
         return text
     started = time.time()
+    _meta: Dict = {}
     try:
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
-            policy=policy, usage_sink=_usage)
+            policy=policy, usage_sink=_usage, meta_sink=_meta)
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
-            max_tokens=max_tokens, response={"text": text, "usage": _usage or None}, ok=True,
-            duration_ms=int((time.time() - started) * 1000))
+            max_tokens=max_tokens, ok=True, duration_ms=int((time.time() - started) * 1000),
+            response={"text": text, "reasoning": _meta.get("reasoning") or "",
+                      "finishReason": _meta.get("finish_reason"), "usage": _usage or None})
         _meter()
         return text
     except Exception as e:
@@ -1304,8 +1306,13 @@ async def _llm_call_async_impl(
     prompt_type: Optional[str] = None,
     policy: Optional[Dict] = None,
     usage_sink: Optional[Dict] = None,
+    meta_sink: Optional[Dict] = None,
 ) -> str:
-    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging.
+
+    ``meta_sink`` (optional): when provided, the parsed response's ``reasoning`` and terminal
+    ``finish_reason`` are written into it so the caller can record them in the I/O trace (G2 —
+    "preserve ALL I/O"). Untouched when absent ⇒ byte-identical."""
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1413,6 +1420,13 @@ async def _llm_call_async_impl(
                 else:
                     msg = data["choices"][0]["message"]
                     response = _openai_message_text(msg)
+                    if meta_sink is not None and isinstance(msg, dict):
+                        _rsn = msg.get("reasoning_content") or msg.get("reasoning") or ""
+                        if _rsn:
+                            meta_sink["reasoning"] = _rsn
+                        _fr0 = (data.get("choices") or [{}])[0].get("finish_reason")
+                        if _fr0:
+                            meta_sink["finish_reason"] = _fr0
                 _set_cached_response(cache_key, response)
                 return response
             except Exception:

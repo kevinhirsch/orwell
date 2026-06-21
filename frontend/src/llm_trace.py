@@ -154,6 +154,7 @@ class StreamAccumulator:
         self.usage: Optional[dict] = None
         self.error: Optional[dict] = None
         self.answered_by: Optional[str] = None
+        self.finish_reason: Optional[str] = None
 
     def observe(self, chunk: str) -> None:
         try:
@@ -181,6 +182,11 @@ class StreamAccumulator:
                         self.tool_calls.append(c)
                 elif t == "usage":
                     self.usage = j.get("data") or j.get("usage")
+                elif t == "finish":
+                    # The terminal finish_reason (F-S4-D): "length" = output-cap cutoff, "error" =
+                    # a mid-stream provider failure. Captured so the trace records WHY a reply ended
+                    # (preserve ALL I/O — the key truncation/cutoff diagnostic).
+                    self.finish_reason = j.get("reason")
                 elif t == "fallback":
                     self.answered_by = j.get("answered_by")
                 elif "delta" in j:
@@ -199,6 +205,7 @@ class StreamAccumulator:
             "usage": self.usage,
             "error": self.error,
             "answeredBy": self.answered_by,
+            "finishReason": self.finish_reason,
         }
 
 
@@ -260,6 +267,7 @@ def record_llm_call(
             "usage": response.get("usage"),
             "answeredBy": response.get("answeredBy"),
             "error": response.get("error"),
+            "finishReason": response.get("finishReason"),
         })
         ts = int(time.time() * 1000)
         record = {
