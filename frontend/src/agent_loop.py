@@ -1499,6 +1499,35 @@ _CASTING_FORCED_NOTE = (
     "back the player's casting card in your producer voice, then walk them through the front door into "
     "the house for the premiere. Voice ONLY what the game now shows — never invent it.")
 
+# 2026-06-21 (prod casting loop): when casting is READY (name on file) but NOT yet `finalizable`
+# (the engine still needs backstory + motivation + a persona/strategy answer), the finalize ladder
+# above is a TRAP — it tells the model casting is COMPLETE and to call createCharacter, but the
+# engine refuses (`createRefused: casting-incomplete`), so the model loops re-acknowledging the name
+# forever (the forced terminal is gated on `finalizable`, which a non-interviewing model never
+# reaches). The SUBSTANCE ladder tells the truth: keep interviewing, record what lands with
+# updateCasting, do NOT finalize yet — driving the intake toward `finalizable`, after which the
+# existing force terminal becomes reachable. Separate per-user counter so the two ladders don't share
+# a rung.
+_CASTING_SUBSTANCE_LEVEL: Dict[str, int] = {}
+# Unconditional safety cap: even the truthful substance nudge must not re-fire forever if the model
+# simply never conducts the interview. Past this many consecutive lull-nudges we STOP nudging and
+# hand the turn back to the player (never mint a floater; the natural interview flow just continues
+# without nudge spam). Reset on a non-lull / progressing turn.
+_CASTING_MAX_ATTEMPTS = 8
+
+
+def _casting_substance_nudge(next_ask: str, missing: list) -> str:
+    """Production note for a name-only (ready, NOT finalizable) intake: steer the model to the
+    engine's own missing coverage and tell it to RECORD what lands with updateCasting — never to
+    finalize (the engine refuses an empty interview). Names the engine's next ask; no fabricated
+    content."""
+    gap = (next_ask or "").strip() or "the rest of who they are and how they'll play"
+    return ("(Production note, not for the player.) Casting is NOT finished — only their name is on "
+            "file. Do NOT call createCharacter yet; the season cannot start until you've actually "
+            "interviewed them. Your next move is to ASK the next thing on the producer's sheet: "
+            f"{gap}. When they answer, file it immediately with updateCasting. Keep the interview "
+            "moving — backstory, why they came, how they plan to play — until casting is complete.")
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -4018,16 +4047,28 @@ async def stream_agent_loop(
                     # requiring the full ~3-lull escalation; a mere short/disengaged lull still gets
                     # the gentler ramp. Still gated on engine `finalizable` (never mints a floater).
                     _explicit_ready = bool(_LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
-                    if _ready:
+                    if _ready and _finalizable:
+                        # The interview is genuinely complete (name + backstory + motivation + a
+                        # persona/strategy answer): nudge, then FORCE the finalize the engine accepts.
                         _clv = _CASTING_STALL_LEVEL.get(owner, 0)
                         _CASTING_STALL_LEVEL[owner] = _clv + 1
-                        if _finalizable and (_clv >= _CASTING_FORCE_LEVEL or _explicit_ready):
+                        if _clv >= _CASTING_FORCE_LEVEL or _explicit_ready:
                             try:
                                 from src.tool_implementations import do_create_character
                                 _cres = await do_create_character("{}", owner=owner)
-                                if isinstance(_cres, dict) and not _cres.get("error") \
-                                        and not _cres.get("createRefused"):
+                                # Fix B: do_create_character serializes the engine view (started /
+                                # createRefused) INSIDE `output`, not as a top-level key — parse it so
+                                # a `createRefused: casting-incomplete` is never misread as success
+                                # (latent until this force became reachable via the substance ladder).
+                                _eng = {}
+                                if isinstance(_cres, dict) and not _cres.get("error"):
+                                    try:
+                                        _eng = json.loads(_cres.get("output") or "{}")
+                                    except Exception:
+                                        _eng = {}
+                                if bool(_eng.get("started")) and not _eng.get("createRefused"):
                                     _CASTING_STALL_LEVEL.pop(owner, None)
+                                    _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
                                     messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
@@ -4043,8 +4084,32 @@ async def stream_agent_loop(
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
+                    elif _ready:
+                        # READY (name on file) but NOT finalizable yet. The OLD ladder told the model
+                        # casting was COMPLETE and to finalize — the engine refuses, so the model loops
+                        # (the prod casting bug). Tell the TRUTH and steer toward the missing interview
+                        # substance; never finalize, never force a tool — this drives toward
+                        # `finalizable`, after which the force terminal above becomes reachable.
+                        _slv = _CASTING_SUBSTANCE_LEVEL.get(owner, 0)
+                        if _slv >= _CASTING_MAX_ATTEMPTS:
+                            # Unconditional cap: we've nudged enough without the interview completing —
+                            # stop spamming and hand the turn back (never mint a floater). A non-lull /
+                            # progressing turn resets the counter so the model gets fresh chances.
+                            logger.info(f"[orwell] casting substance cap reached (L{_slv}) — yielding "
+                                        f"to player, round {round_num} user={owner}")
+                            break
+                        _CASTING_SUBSTANCE_LEVEL[owner] = _slv + 1
+                        _gap = _casting.get("next") or ""
+                        _missing = _casting.get("missing") or []
+                        messages.append({"role": "system",
+                                         "content": _casting_substance_nudge(_gap, _missing)})
+                        logger.info(f"[orwell] casting substance nudge (L{_slv}, missing={_missing}) "
+                                    f"round {round_num} user={owner}")
+                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                        continue
                     elif owner is not None:
                         _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
+                        _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
