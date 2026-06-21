@@ -38,7 +38,10 @@ FE/adapter concern**, and today it is neither observed nor governed as a system:
    ~89% of the per-call bill.** Yet `reasoning` is **only ever parsed from responses, never sent**: the
    OpenAI-compatible payload builder (`llm_core.py:1361-1376`) emits `model/messages/temperature/stream/
    max_tokens/tools` and nothing else, so the model runs at its **default reasoning effort on every
-   beat**.
+   beat**. *(The **symptom** of this — a heavy-thinking turn hitting the output cap and truncating
+   mid-sentence — is handled tactically in PR #481: capture `finish_reason`, surface a `Continue ▸`, and
+   raise a 4096→8192 fallback. This record is the **architectural cure** — govern reasoning per class so
+   the budget isn't eaten, and **record** the `finish`/`finish_reason` signal #481 adds in the meter, A.)*
 3. **Caching is left to chance.** DeepSeek caching on OpenRouter is automatic, prefix-based, and has no
    write premium — but it only hits when the *leading* span of the prompt is byte-identical across
    turns and the same provider serves them. The FE sends **no `session_id` and no provider routing**, so
@@ -204,4 +207,7 @@ and retune without code change.
 - Builds on: ADR 0005 (open-set/FE authority), 0064 (canonical session), 0065 (the Vault-free per-turn
   ledger pattern).
 - Bounded by: the Vault Wall (0001), anti-sycophancy, and **non-degradation** (mandate #4).
+- Relates to: **PR #481** (truncated-reply `Continue ▸` affordance) — the tactical sibling of this
+  record; same root cause (DeepSeek reasoning billed against the visible-reply budget). Slice A should
+  record the `finish`/`finish_reason` signal #481 adds; slice B reduces how often truncation happens.
 - Followed by: feature **0069** (`docs/features/0069-token-economy-and-context-budget.md`), built A→D.

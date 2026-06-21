@@ -148,7 +148,11 @@ flag:     token tiering (D) opt-in (default lean ⇒ byte-identical); meter (A) 
 - Governed by: ADR **0010**; bounded by the Vault Wall (0001), anti-sycophancy, and non-degradation (#4).
 - Builds on: ADR 0003 (lean context), ADR 0005 (open-set/FE authority), 0064 (canonical session →
   `session_id`), 0065 (the Vault-free per-turn ledger pattern, `orwell_sync_ledger.py`).
-- Followed by: the §3 **Out** items (per-game budget caps/alerts; provider pinning).
+- Relates to: **PR #481** (truncated-reply `Continue ▸` affordance) — the tactical sibling; same root
+  cause (DeepSeek reasoning billed against the visible-reply budget). Slice A records the
+  `finish`/`finish_reason` signal #481 adds; slice B reduces how often truncation happens at all.
+- Followed by: the §3 **Out** items (per-game hard caps / interrupting soft-stop; unconditional provider
+  pinning).
 
 ## 8. Implementer handoff & resolved rulings
 
