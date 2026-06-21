@@ -518,6 +518,9 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
   `decisionConstants.juryManagementWeight` / audit #4, if desired) — reads as emergent realism, not a
   defect. The `tests/property/juryReach.property.test.ts` `EARNED_WINS` guard stays the permanent gate.
   Re-measurement + the stale-doc flags: `docs/audits/2026-06-21-session-observations.md`.
+- **ADR 0006 / 0066 Phase-2 — on the PO review list.** Deferred time/sleep extensions: NPC *next-day*
+  social fatigue, a compounding multi-night fatigue meter, and per-conversation clock advance (vs. the
+  current per-beat) — owner decisions in `docs/features/0066-in-game-time-and-sleep.md` §9.
 - **0022** (MVP-2, deferred) and **0059** (hidden seeded relationships, spec only) — the unbuilt specs.
 - **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
   during the private-repo flip).

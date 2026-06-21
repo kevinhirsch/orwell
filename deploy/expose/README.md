@@ -1,9 +1,9 @@
-# deploy/expose/ — putting the player tier on the internet (hiorwell.com)
+# deploy/expose/ — putting the player tier on the internet (any domain)
 
 Reference configs for exposing the **player front-end** over HTTPS with an internet-grade
 perimeter. Governed by **ADR [`0007`](../../docs/decisions/0007-public-internet-exposure.md)** and
 feature **[`0067`](../../docs/features/0067-public-internet-exposure.md)**. Full runbook:
-`docs/INSTALL.md → Public deployment (hiorwell.com)`.
+`docs/INSTALL.md → Public deployment (any domain)`.
 
 ## The rule that makes this safe
 
@@ -15,7 +15,7 @@ narrated gameplay — never secret state, never another user's game.
 
 Before exposing, the FE must run the **public profile** (`docs/INSTALL.md`): `ORWELL_PUBLIC=1`,
 `AUTH_ENABLED=true`, `LOCALHOST_BYPASS=false`, `SECURE_COOKIES=true`,
-`ALLOWED_HOSTS=hiorwell.com,www.hiorwell.com`, `ALLOWED_ORIGINS=https://hiorwell.com`. The app
+`ALLOWED_HOSTS=your-domain.example,www.your-domain.example`, `ALLOWED_ORIGINS=https://your-domain.example`. The app
 **refuses to boot** if any of those is unsafe.
 
 > All targets below use the FE port **8080** (the installer default `ORWELL_PORT`). If you changed
@@ -30,15 +30,15 @@ Cloudflare **Access** (email-OTP / SSO) as a login wall in front of the FE.
 - `cloudflared/config.yml` — the tunnel ingress (FE only; the engine is intentionally absent).
 
 ```bash
-cloudflared tunnel login                       # pick the hiorwell.com zone
+cloudflared tunnel login                       # pick the your-domain.example zone
 cloudflared tunnel create orwell               # writes the UUID + credentials json
-cloudflared tunnel route dns orwell hiorwell.com
+cloudflared tunnel route dns orwell your-domain.example
 # copy cloudflared/config.yml to /etc/cloudflared/config.yml, fill in <TUNNEL-UUID>
 sudo cloudflared service install && sudo systemctl enable --now cloudflared
 ```
 
 Then in the dashboard: enable the **WAF Free Managed Ruleset** + **Bot Fight Mode**, add an
-**Access** application over `hiorwell.com` (email-OTP allow-list), and (optional) **Turnstile** on
+**Access** application over `your-domain.example` (email-OTP allow-list), and (optional) **Turnstile** on
 the login form. Trade-off: a Cloudflare dependency and edge TLS visibility (the edge decrypts to run
 the WAF). Keep large AI media served from the provider's own URLs, not proxied in bulk (CDN terms).
 

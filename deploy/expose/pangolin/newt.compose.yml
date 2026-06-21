@@ -11,6 +11,6 @@ services:
     container_name: newt
     restart: unless-stopped
     environment:
-      - PANGOLIN_ENDPOINT=https://pangolin.hiorwell.com
+      - PANGOLIN_ENDPOINT=https://pangolin.your-domain.example
       - NEWT_ID=<your-newt-id>
       - NEWT_SECRET=<your-newt-secret>
