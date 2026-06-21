@@ -301,7 +301,10 @@ def test_reload_path_applies_production_beats():
     # engine JSON output on every reload (a Vault-Wall / refresh-persistence break).
     js = _read("static", "js", "chatRenderer.js")
     # L42: the import now also pulls orwellBeatOutcome (the Vault-free public-outcome deriver).
-    assert "import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';" in js
+    # (Robust to the import list growing — ADR 0010 added orwellBeatIsSilent / ORWELL_MAX_VISIBLE_BEATS.)
+    assert "from './orwellToolBeats.js'" in js
+    for _name in ("ORWELL_TOOL_BEATS", "orwellBeatOutcome", "isGameBuild"):
+        assert _name in js, _name
     assert "const _gbBeat = isGameBuild();" in js
     assert "const _beat = _gbBeat ? ORWELL_TOOL_BEATS[ev.tool] : null;" in js
     # a production beat suppresses output, screenshot, diff, and raw args, and relabels the pill

@@ -63,6 +63,28 @@ export function orwellBeat(tool) {
   return (tool && ORWELL_TOOL_BEATS[tool]) || null;
 }
 
+// ADR 0010 — PURE CONTEXT-READ beats. The model fires these to GROUND itself (read the board, the
+// room, a houseguest's read); they change NOTHING the player witnessed, carry no public outcome, and
+// on a long / concurrent-re-ground turn they stack as a wall of identical "📋 Production notes" rows —
+// the operator's "too much LLM rendered in the FE" garbage. In the game build BOTH render paths skip
+// them entirely; the meaningful beats (comps, ceremonies, scene logs, deals, moves) still show.
+// (Engine READS only — never a mutation — so dropping the chip loses no player-facing fact.)
+export const ORWELL_SILENT_BEATS = new Set([
+  'getGameState', 'gameStatus', 'getVisibleStateFor', 'getMomentPrompt',
+  'whereabouts', 'socialRead', 'socialInitiatives', 'npcVoice', 'seasonRecap',
+  'inspectNonVaultState', 'sandboxHealth', 'list_models', 'search_chats',
+]);
+
+export function orwellBeatIsSilent(tool) {
+  return ORWELL_SILENT_BEATS.has(tool);
+}
+
+// ADR 0010 — the per-turn beat-rail BACKSTOP. Even after silent beats are dropped and the loop's
+// beat-aware staleness fix lands, a pathological turn must never stack an unbounded column of chips.
+// Both render paths keep the most recent N solidified beats and drop older overflow. Generous on
+// purpose — a normal turn (a handful of beats) never hits it; this is a safety net, not a budget.
+export const ORWELL_MAX_VISIBLE_BEATS = 10;
+
 // L42 — the PUBLIC outcome of a solidified beat (so the chat shows WHAT happened, not a stack of
 // identical "PRODUCTION done" rows). Derived ONLY from the tool RESULT's player-witnessed, Vault-free
 // fields: the resolved beat's `event.content` (a short diegetic sentence the engine already exposes —

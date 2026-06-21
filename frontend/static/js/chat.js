@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -2132,6 +2132,16 @@ import { isNarrow } from './platform.js';
                 // Track tool name for contextual spinner labels
                 _lastToolName = json.tool || '';
 
+                // ADR 0010 — drop pure context-read beats in the game build (see orwellToolBeats):
+                // they change nothing the player witnessed and otherwise stack as a wall of identical
+                // "Production notes" chips on a long / concurrent-re-ground turn. No chip, no thread
+                // node; currentToolBubble=null so the paired tool_output is skipped (the next real
+                // beat re-arms it). The non-game build is unaffected.
+                if (orwellBeatIsSilent(json.tool) && isGameBuild()) {
+                  currentToolBubble = null;
+                  continue;
+                }
+
                 // --- Thread timeline: group tools in a thread container ---
                 let cmd = json.command || '';
                 const chatBox = document.getElementById('chat-history');
@@ -2175,6 +2185,17 @@ import { isNarrow } from './platform.js';
                 node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">\u25B6</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
                 // Expand/collapse via delegated click handler (init at module bottom).
                 threadWrap.appendChild(node);
+                // ADR 0010 — cap the rail (backstop; a normal turn never hits it). Keep the most
+                // recent ORWELL_MAX_VISIBLE_BEATS nodes; drop older overflow. The running node is the
+                // newest (never dropped); the dropped ones are solidified (timers cleared on
+                // tool_output — we clear defensively anyway).
+                const _railNodes = threadWrap.querySelectorAll('.agent-thread-node');
+                for (let _ri = 0; _ri < _railNodes.length - ORWELL_MAX_VISIBLE_BEATS; _ri++) {
+                  const _oldN = _railNodes[_ri];
+                  if (_oldN._waveInterval) clearInterval(_oldN._waveInterval);
+                  if (_oldN._elapsedTicker) clearInterval(_oldN._elapsedTicker);
+                  _oldN.remove();
+                }
                 currentToolBubble = node;
                 // Animate the wave
                 const waveEl = node.querySelector('.agent-thread-wave');
