@@ -12,10 +12,11 @@ tunnel: <TUNNEL-UUID>
 credentials-file: /etc/cloudflared/<TUNNEL-UUID>.json
 
 ingress:
-  # The authenticated player UI — the ONLY public surface.
-  - hostname: hiorwell.com
+  # The authenticated player UI — the ONLY public surface. Replace the hostnames with YOUR
+  # domain(s); add as many as you serve (apex, www, others).
+  - hostname: your-domain.example
     service: http://127.0.0.1:8080
-  - hostname: www.hiorwell.com
+  - hostname: www.your-domain.example
     service: http://127.0.0.1:8080
   # Catch-all: everything else (including the engine, which is deliberately absent above) is refused.
   - service: http_status:404

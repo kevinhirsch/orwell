@@ -15,7 +15,7 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 
 > **Putting it on the internet?** The FE binds **loopback by default** (feature 0067 / ADR 0007) — a
 > public deploy puts a TLS-terminating reverse proxy / tunnel in front (Cloudflare Tunnel is the
-> recommended option). See [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (hiorwell.com)`.
+> recommended option). See [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (any domain)`.
 
 ## Recommended specs
 
