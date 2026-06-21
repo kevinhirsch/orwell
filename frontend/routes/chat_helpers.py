@@ -356,6 +356,57 @@ def _pending_barrier_directive(pending) -> Optional[str]:
     )
 
 
+def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
+    """ADR 0009 (D3 Part A) — surface the engine's `whereabouts` as an ENFORCEABLE location fact, the
+    way `_pending_barrier_directive` clamps the comp-round still-in set.
+
+    Root cause #1 of the chat<->board location desync is that room occupancy is grounded by prompt text
+    ONLY, and the model overrides it from its own conversation memory (the same LW9 pattern the
+    comp-round clamp exists for). This restates the CURRENT occupancy prominently and pins the three
+    hard rules that keep the prose foldable into the board with NO visible historic conflict (the PO's
+    overriding constraint, 2026-06-21): an evicted houseguest is GONE, rooms are limited to the floor
+    plan, and a person is in exactly ONE place at a time.
+
+    It DELIBERATELY permits narrated movement — people may wander between rooms during the scene and the
+    engine records it (ADR 0009 D2, the `_auto_move_npc`/`moveHouseguest` path) — so the house stays
+    dynamic; only the IMPOSSIBLE is forbidden. The residual impossible claim that still slips through is
+    caught pre-emission (D3 Part B). Returns None when there is no usable whereabouts (pre-game / the
+    player is out of the house), leaving the turn framed exactly as before."""
+    if not whereabouts or not isinstance(whereabouts, dict):
+        return None
+    room = str(whereabouts.get("room") or "").strip()
+    if not room:
+        return None
+
+    def _names(refs) -> list[str]:
+        return [str((r or {}).get("name") or "").strip()
+                for r in (refs or []) if isinstance(r, dict) and (r or {}).get("name")]
+
+    present = _names(whereabouts.get("present"))
+    nearby_bits = []
+    for nb in (whereabouts.get("nearby") or []):
+        if not isinstance(nb, dict):
+            continue
+        nr = str(nb.get("room") or "").strip()
+        if not nr:
+            continue
+        npresent = _names(nb.get("present"))
+        nearby_bits.append(f"{nr} ({', '.join(npresent) if npresent else 'empty'})")
+    here = ", ".join(present) if present else "no other houseguest"
+    nearby_line = ("\nAdjacent rooms right now: " + "; ".join(nearby_bits) + "."
+                   if nearby_bits else "")
+    return (
+        "LOCATION IS GROUNDED BY THE ENGINE (the source of truth — do not contradict it). Right now "
+        f"the player is in the {room}, with: {here}.{nearby_line}\n"
+        "Houseguests MAY move between rooms during the scene — narrate it naturally and the engine will "
+        "record it — but hold these hard rules so the scene never contradicts the board: (1) NEVER place "
+        "a houseguest who has already been evicted in any room — they have left the house for good; "
+        "(2) NEVER invent a room that is not part of the house; (3) a houseguest is in exactly ONE place "
+        "at a time. Voice only the people who are here or who plausibly walk in from an adjacent room; "
+        "do not silently teleport anyone or empty a room the engine says is occupied."
+    )
+
+
 # ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
 #
 # The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
@@ -1104,6 +1155,18 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _barrier
         except Exception as e:
             logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
+        # ADR 0009 (D3 Part A) — the LOCATION grounding barrier. The same desync class as the pending
+        # barrier, for room occupancy: surface the engine's `whereabouts` as an ENFORCEABLE fact so the
+        # model stops overriding it from memory (root cause #1). Read off the SAME `game_state` snapshot
+        # the moment prompt was built from (`getGameState` carries `whereabouts`) — no extra round-trip,
+        # and the model's grounding + the gadget reflect one snapshot (supports D1). Permits narrated
+        # movement (D2 records it); forbids only the impossible. Best-effort / fail-open.
+        try:
+            _loc = _whereabouts_barrier_directive(game_state.get("whereabouts"))
+            if _loc:
+                gm_prompt = gm_prompt + "\n\n" + _loc
+        except Exception as e:
+            logger.warning("[orwell] location grounding skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
         # re-ground directive the previous turn's post-turn check stashed for this user (the
         # model narrated an outcome the engine never committed — pin it back to the board), then
