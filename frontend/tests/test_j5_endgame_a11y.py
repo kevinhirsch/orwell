@@ -218,6 +218,19 @@ def test_j5_finale_stage_live_region():
         "the finale stage label must be aria-live so stage transitions are announced"
 
 
+# ── R2-01: re-tapping the pre-selected comp chip must not clear a required single-pick ──
+
+def test_r2_01_comp_chip_retap_is_noop():
+    js = _read("static", "js", "orwellDecision.js")
+    # The deselect branch must guard comp-round/comp-intent so re-tapping the lit chip is a no-op
+    # (a non-binding flavor round pre-selects "compete"; clearing it left Confirm stuck disabled).
+    assert re.search(
+        r'if \(!multi && \(kind === "comp-round" \|\| kind === "comp-intent"\)\)\s*return;', js), \
+        "comp-round/comp-intent must no-op a re-tap of the selected chip (R2-01)"
+    # The veto 'don't use' deselect must NOT be broken — its toggle still lives in the card.
+    assert "Don't use the veto" in js
+
+
 # ── J5-16: the premiere tutorial must graduate (be removed) past week 1 ──
 
 def test_j5_premiere_tutorial_graduates():
