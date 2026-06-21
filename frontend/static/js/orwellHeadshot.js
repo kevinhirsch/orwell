@@ -64,32 +64,39 @@
         display: flex; align-items: center; justify-content: center; font-size: 28px; opacity: .85; }
       .ow-headshot-studio .hs-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
       .ow-headshot-studio .hs-opts { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 8px; }
-      /* Theme the native file control so it stops rendering as the bare OS "Choose File"
-         widget inside the monospace house UI (pre-launch polish). The input keeps its
-         id/handler/accept/aria — this is style only, no behavioral change. The picker
-         button is themed to match .hs-btn-ghost; the filename text inherits the body font. */
-      .ow-headshot-studio #hs-file { font: inherit; font-size: 12px; max-width: 100%;
-        color: color-mix(in srgb, var(--fg, #cfd8e3) 78%, transparent); }
-      .ow-headshot-studio #hs-file::file-selector-button { font: inherit; font-size: 12.5px;
-        padding: 6px 12px; margin-right: 10px; border-radius: 8px; cursor: pointer; font-weight: 400;
-        background: transparent; color: var(--fg, #cfd8e3); border: 1px solid var(--border, #355a66); }
-      .ow-headshot-studio #hs-file::file-selector-button:hover {
-        border-color: var(--brand-color, var(--accent, #4a9)); }
+      /* The file control is a themed BUTTON (a <label for>) over a visually-hidden native
+         input — the bare OS "Choose File / No file chosen" text otherwise clipped to
+         "No fil…chosen" on mobile (UX audit J1-08). The input keeps its id/handler/accept/
+         aria and stays operable; selection state shows in the preview thumbnail. */
+      .ow-headshot-studio .hs-file-native { position: absolute; width: 1px; height: 1px;
+        overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      .ow-headshot-studio .hs-filebtn { display: inline-flex; align-items: center; align-self: flex-start; }
+      /* SR-only live region for portrait status ("Generating…", "Upload failed", offline) — J1-27. */
+      .ow-headshot-studio .hs-live { position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
       .ow-headshot-studio .hs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 2px; }
+      /* Portrait tiles are real <button>s (keyboard/SR operable — UX audit J1-26); reset native chrome. */
       .ow-headshot-studio .hs-cand { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer;
-        border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; }
+        border: 2px solid transparent; background: #0d0f14 center/cover no-repeat;
+        padding: 0; margin: 0; font: inherit; width: 100%; -webkit-appearance: none; appearance: none; }
       .ow-headshot-studio .hs-cand.sel { border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .ow-headshot-studio .hs-cand:focus-visible, .ow-headshot-studio .hs-libpick:focus-visible {
+        outline: 2px solid var(--brand-color, var(--accent, #4a9)); outline-offset: 2px; }
       .ow-headshot-studio .hs-lib { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border, #355a66); }
       .ow-headshot-studio .hs-libstrip { display: flex; gap: 8px; flex-wrap: wrap; }
-      .ow-headshot-studio .hs-libitem { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; cursor: pointer;
+      .ow-headshot-studio .hs-libitem { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden;
         border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; flex: none; }
       .ow-headshot-studio .hs-libitem.cur { border-color: var(--brand-color, var(--accent, #4a9)); }
+      .ow-headshot-studio .hs-libpick { position: absolute; inset: 0; padding: 0; margin: 0; border: none;
+        background: none; cursor: pointer; -webkit-appearance: none; appearance: none; }
       .ow-headshot-studio .hs-libitem img { width: 100%; height: 100%; object-fit: cover; display: block; }
       .ow-headshot-studio .hs-libdel { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 14px;
-        border-radius: 50%; border: none; cursor: pointer; font-size: 12px; padding: 0;
+        border-radius: 50%; border: none; cursor: pointer; font-size: 12px; padding: 0; z-index: 1;
         background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .12s; }
-      .ow-headshot-studio .hs-libitem:hover .hs-libdel { opacity: 1; }
+      /* keyboard/touch users have no hover — reveal the delete on focus-within too. */
+      .ow-headshot-studio .hs-libitem:hover .hs-libdel,
+      .ow-headshot-studio .hs-libitem:focus-within .hs-libdel { opacity: 1; }
       @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }`;
     document.head.appendChild(s);
   }
@@ -106,7 +113,19 @@
     const st = { file: null, fileUrl: null, candidates: [], selected: null, busy: false, library: [] };
     let _msg = "";
     let status = { present: false, finalized: false, mode: null };
-    const msg = (m) => { _msg = m || ""; };
+    // J1-27: a singleton SR live region on <body> (survives render()'s innerHTML rebuilds) so
+    // portrait status — "Generating 3 studio options…", "Upload failed", "photo service offline" —
+    // is announced to screen readers, not just shown visually in the rebuilt .hs-msg nodes.
+    let _live = document.getElementById("hs-live-region");
+    if (!_live) {
+      _live = document.createElement("div");
+      _live.id = "hs-live-region";
+      _live.setAttribute("role", "status");
+      _live.setAttribute("aria-live", "polite");
+      _live.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;";
+      document.body.appendChild(_live);
+    }
+    const msg = (m) => { _msg = m || ""; try { _live.textContent = m || ""; } catch (_) {} };
     const setBusy = (b) => { st.busy = b; render(); };
     const summary = (t) => { try { opts.onSummary && opts.onSummary(t); } catch (_) {} };
     // L3: the host card must stay open while options/results are showing — generated
@@ -224,8 +243,8 @@
       if (!st.library.length) return "";
       return `<div class="hs-lib"><div class="hs-msg" style="margin-bottom:6px">Your headshots — tap one to use it</div>
         <div class="hs-libstrip">${st.library.map((h) =>
-          `<div class="hs-libitem${h.current ? " cur" : ""}" data-pick="${esc(h.id)}" title="${h.current ? "current" : "use this headshot"}">
-             <img src="${esc(h.ref)}" alt="headshot"><button type="button" class="hs-libdel" data-del="${esc(h.id)}" title="Remove" aria-label="Remove">×</button></div>`).join("")}</div></div>`;
+          `<div class="hs-libitem${h.current ? " cur" : ""}">
+             <button type="button" class="hs-libpick" data-pick="${esc(h.id)}" aria-pressed="${h.current ? "true" : "false"}" aria-label="${h.current ? "Current headshot" : "Use this saved headshot"}"><img src="${esc(h.ref)}" alt=""></button><button type="button" class="hs-libdel" data-del="${esc(h.id)}" title="Remove" aria-label="Remove headshot">×</button></div>`).join("")}</div></div>`;
     }
     function wireLibrary() {
       body.querySelectorAll("[data-pick]").forEach((d) => d.addEventListener("click", (e) => {
@@ -268,8 +287,8 @@
       if (st.candidates.length) {
         body.innerHTML = lib + `
           <div>${esc(_msg || "Pick your favorite — or generate 3 more.")}</div>
-          <div class="hs-grid">${st.candidates.map((c) =>
-            `<div class="hs-cand${st.selected === c.index ? " sel" : ""}" data-i="${c.index}"><img src="${esc(c.ref)}" alt="option"></div>`).join("")}</div>
+          <div class="hs-grid">${st.candidates.map((c, _n) =>
+            `<button type="button" class="hs-cand${st.selected === c.index ? " sel" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
           <div class="hs-actions">
             <button type="button" class="hs-btn" id="hs-use" ${st.selected === null ? "disabled" : ""}>Use this one</button>
             <button type="button" class="hs-btn hs-btn-ghost" id="hs-more">Generate 3 more</button>
@@ -289,7 +308,8 @@
         <div class="hs-row">
           <div class="hs-preview" ${previewBg}>${st.fileUrl ? "" : "👤"}</div>
           <div class="hs-opts">
-            <input type="file" id="hs-file" accept="image/*" aria-label="Choose a photo of yourself">
+            <label class="hs-btn hs-btn-ghost hs-filebtn" for="hs-file">${st.file ? "Choose a different photo" : "Choose a photo of yourself"}</label>
+            <input type="file" id="hs-file" class="hs-file-native" accept="image/*" aria-label="Choose a photo of yourself">
             <div class="hs-actions">
               <button type="button" class="hs-btn" id="hs-studio" ${st.file ? "" : "disabled"}>Make AI studio portraits</button>
               <button type="button" class="hs-btn hs-btn-ghost" id="hs-exact" ${st.file ? "" : "disabled"}>Use photo as-is</button>

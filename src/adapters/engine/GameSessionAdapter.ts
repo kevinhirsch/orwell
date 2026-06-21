@@ -2,7 +2,7 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView,
+  FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -17,7 +17,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY, resolveRoom } from "../../domain/house";
+import { HOUSE_ADJACENCY, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -1646,6 +1646,45 @@ export class GameSessionAdapter implements GameSession {
     (this.presenceTenure ??= new Map()).set(me, 0); // a fresh arrival
     this.persist();
     return this.whereabouts();
+  }
+
+  /**
+   * ADR 0009 — RECORD a narrated houseguest relocation (the "fold" path: the model narrates the open
+   * texture of who wanders where; the engine records it so the board agrees with the prose and there
+   * is never a visible historic conflict). Mutates ONLY the open, player-facing `presence` map (and
+   * that NPC's tenure) — NEVER `presenceBase`, the calibration-neutral baseline that feeds the seeded
+   * off-screen society/comp/vote stream — so recording a move is byte-identical for every seeded
+   * outcome (ADR 0005 split-authority; mandate #3). Vault-free.
+   *
+   * LEGAL-MOVES-ONLY (the ADR-0009 D3 contract): the return distinguishes a recorded move from an
+   * IMPOSSIBLE claim the surface must instead catch BEFORE emission —
+   *   • `moved`   — the houseguest is now in `room`;
+   *   • `noop`    — already there (still consistent, nothing to persist);
+   *   • `illegal` — an unknown/evicted houseguest, the PLAYER (their own agency is `movePlayer`), or an
+   *                 unresolvable / non-walkable room (the diary room is a ceremony beat, never a
+   *                 hangout). Never silently mutates on an illegal input.
+   */
+  recordHouseguestMove(id: EntityId, room: string): HouseguestMoveResult {
+    if (!this.house || !this.presence) return { status: "illegal", whereabouts: this.whereabouts() };
+    // The player directs their OWN movement (movePlayer); this path records a NARRATED NPC relocation.
+    if (id === this.house.player.id) return { status: "illegal", whereabouts: this.whereabouts() };
+    // Only an ACTIVE houseguest currently in the live house can be relocated (evicted ⇒ not in presence).
+    const here = this.presence.get(id);
+    if (here === undefined) return { status: "illegal", whereabouts: this.whereabouts() };
+    // Forgiving resolution, then reject the unknown AND the non-walkable so the open occupancy stays
+    // coherent (no one "hangs out" in the diary room — assignRooms/WALKABLE_ROOMS exclude it).
+    const resolved = resolveRoom(room, here);
+    const dest =
+      resolved.kind === "ok" ? resolved.room
+      : resolved.kind === "ambiguous" ? resolved.candidates[0]!
+      : null;
+    if (dest === null || !WALKABLE_ROOMS.includes(dest)) return { status: "illegal", whereabouts: this.whereabouts() };
+    if (here === dest) return { status: "noop", whereabouts: this.whereabouts() };
+    // OPEN set only — `presenceBase` is deliberately NOT touched (calibration neutrality, see above).
+    this.presence.set(id, dest);
+    (this.presenceTenure ??= new Map()).set(id, 0); // a fresh arrival
+    this.persist();
+    return { status: "moved", whereabouts: this.whereabouts() };
   }
 
   /**
