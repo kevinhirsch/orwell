@@ -414,5 +414,45 @@ ask-photo → box sequence is correct.)*
 (Playwright TimeoutError — "runtime" browser tests needing a configured model). **Confirmed pre-existing**:
 they fail identically with my changes stashed. CI fixtures configure a model; not in scope here.
 
+## State 6 — post-OOBE specialist sweep (read-only fan-out; one-writer reconcile) 🔍
+
+Three read-only specialists dispatched on the surfaces State 5 touched + the carried-forward
+consistency launch-blocker. Findings reconciled by the lead; fixes (if any) applied single-threaded.
+
+### ✅ consistency-parity — RETURNED
+
+**Target 1 — ADR 0008 (chat cross-tab "garbage" divergence): NOT-PRESENT (operator-owned).**
+The **ADR document** `docs/decisions/0008-chat-conversation-consistency.md` is merged but status
+**`Proposed` / "awaiting implementation authorization"** — the *implementation* is NOT on the tree
+(matches the owner's "I will implement later"). The divergence is still reproducible **by
+construction**; three [BLOCK]-class root causes survive verbatim (high confidence, source-traced):
+- **F1 — no ordering key.** `ChatMessage` (`frontend/core/database.py:161-188`) has only a random
+  `uuid4` id + a non-unique `timestamp`; every render/history path orders by `timestamp` and the
+  `/api/history` payload carries **no `seq`**. Two near-simultaneous writes tie on `timestamp` →
+  SQLite tie-break unspecified → cross-tab reorder. Intended model (server-ordered convergent log)
+  vs actual (optimistic-append over at-least-once SSE treated as exactly-once).
+- **F2 — busy tab drops peer events.** `sessionSync.js:48-63` `hasActiveStream` gate discards the
+  peer `run-started`/reconcile signal; `softReloadHistory` (`chat.js:3517-3568`) self-guards on the
+  same flag; the streaming game-turn path (`chat_routes.py:1361-1364`) emits only `run-started`,
+  never a completion `message-added` → a tab that missed the one-shot event never converges.
+- **F3 — optimistic sender never reconciles** (`chat.js:692-694`): the user/reply bubbles are a
+  permanent local guess with no temp-id→canonical-`{id,seq}` merge.
+- **Reconciliation/ruling:** **operator owns this** (explicitly deferred). NOT fixed by the audit.
+  The trace above *is* the implementation spec when the owner picks it up (it mirrors ADR 0008's own
+  items 1–4). Do **not** leaf-patch with a `softReloadHistory`-on-DONE (still `timestamp`-ordered +
+  self-guarded — the ADR's own rejected alternative). **Launch-blocker-class, owner-tracked.**
+
+**Target 2 — my State-5 welcome-marker change: WORKING AS INTENDED (verified safe).**
+No bad interaction with 0064 cross-device sync or 0065 `beatSeq`. The marker is `localStorage`
+(per-device, never synced); there is **no `storage` listener** and `orwellOnboarding.js` does **not**
+listen for `orwell:gamechanged`, so a cross-device `game-updated` can't re-fire `route()`. The clear
+is triple-gated (`started===false` early-return at route()'s top → `_intakeEmpty` → pre-call
+`!_seatTakenBefore`), and `casting.known` populates on the first captured answer, closing the window
+after turn one. The comment's "purely local, no desync risk" is accurate. *(LATENT note: the gate's
+safety depends on onboarding never gaining an `orwell:gamechanged` listener; if one is ever added the
+`started===false` early-return must stay the first gate — worth a one-line comment, not a fix.)*
+
+### 🔍 responsive-cross-platform · transient-animation — IN FLIGHT
+
 ## Status legend
 🔍 investigating · 👁 VIEWED · 🌳 ROOT-CAUSED · ✏️ FIX-DRAFTED · 🚧 FIX-APPLIED · ✅ VERIFIED · ⏸️ needs-owner-input
