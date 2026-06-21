@@ -845,6 +845,13 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         # Let client JS/CSS branch on the build honestly (game-framed copy, tips, holding
         # states) instead of guessing from engine reachability.
         html = html.replace("<body", '<body data-game-build="1"', 1)
+        # UX audit J1-02: the composer placeholder names the APP ("Message Orwell…"),
+        # which is out-of-voice in an immersive house — the player speaks to the
+        # houseguests / Big Brother, not "Orwell". Swap to an in-voice prompt that
+        # also signals the chat IS the game (you can speak OR act). Hits both the
+        # visible placeholder and the data-default-placeholder restore target on the
+        # textarea line; the full inherited workspace keeps "Message Orwell…".
+        html = html.replace("Message Orwell...", "Say or do something…")
         # D6/W8: the game build is self-contained — no third-party CDN. KaTeX/Mermaid
         # render workspace math/diagrams the game's narration never produces; the only
         # jsdelivr references die here (and with them the whole origin).
