@@ -1,7 +1,13 @@
 # 0009 — Location & movement: one source of truth, recorded movement, narration grounding
 
-> **Status:** **Proposed** (investigation-driven; PO to ratify the direction; mechanism to be built
-> BDD/TDD-first). Captures the refactor target for player + NPC room-location tracking.
+> **Status:** **Proposed — direction ratified by PO (2026-06-21)**; mechanism to be built
+> BDD/TDD-first. Captures the refactor target for player + NPC room-location tracking. **PO rulings:**
+> (1) the model **narrates the open texture** (who moves where) and the engine **records** it — the
+> engine keeps only the seeded baseline for calibration; the acceptance test is simply *consistent and
+> dynamic*. (2) Enforcement is **hard-fold** under an overriding constraint — **NO visible historic
+> conflicts**: the transcript must never show prose that contradicts the board. A legal narrated move
+> is recorded into `presence` immediately; an impossible claim is caught **before emission** and
+> scrubbed/regenerated — never a later-turn correction (which would leave the conflict visible).
 > **Source:** The 2026-06-21 live-walkthrough audit symptom — *the chat-narrated location of the
 > player & NPCs is inconsistent with the sidebar location gadget* — plus a three-lane investigation
 > (engine model · FE surfaces · root-cause repro against the live game).
@@ -66,6 +72,10 @@ reaching the data** — not two stores drifting.
 
 ## Decision (proposed)
 
+**Overriding constraint (PO ruling 2026-06-21):** the player must **NEVER see a historic conflict**
+between the narration and the board. Consistency is not *eventual* — it is immediate and permanent in
+the transcript; a contradiction the player can scroll back to is a failure state for this feature.
+
 Keep `this.presence` as the single source of truth, and **make both narration and mutation bind to
 it** by closing the two leaks (unenforced narration; unrecorded NPC movement) and removing the
 snapshot skew:
@@ -80,12 +90,18 @@ snapshot skew:
   the model failed to record — so "Carson heads to the kitchen" actually moves Carson and the gadget
   agrees. Mutation is on the **open set** (`presence`) only; the seeded `presenceBase` calibration
   stream is untouched (see Risks).
-- **D3 — Enforce location narration (a location barrier/checkpoint).** Extend the grounding family:
-  surface the engine `whereabouts` as an enforceable per-turn fact (mirror the `comp-round` clamp in
-  `_pending_barrier_directive`), and add a post-turn reconciliation (mirror the beat-signature
-  checkpoint) that, when prose places/moves people contrary to `whereabouts`, either **re-grounds**
-  the next turn or **folds** the narrated move into `presence` (the D2 belt) so the engine agrees with
-  the prose.
+- **D3 — Hard-fold; NEVER leave a visible historic conflict (PO ruling 2026-06-21).** A **legal**
+  narrated move (a real houseguest to a real, reachable room) is **hard-folded** into `presence` (the
+  D2 path) — the engine concedes to the prose, so the board already agrees by the time the player
+  reads it (the model authors the open texture; the engine records it). An **impossible** claim that
+  cannot be folded into a legal state (an evicted houseguest, a non-existent/unreachable room,
+  two-places-at-once) must be caught **before emission** — extend the 0065 pre-emission guard
+  (`_pre_emission_outcome_guard`) to location and scrub/regenerate so the player **never sees it**.
+  Strong per-turn grounding (surface `whereabouts` as an enforceable fact, like the `comp-round` clamp
+  in `_pending_barrier_directive`) minimizes impossible claims at the source. A next-turn re-ground
+  (the beat-signature checkpoint) survives ONLY as a supplementary belt to stop the model *repeating*
+  an error — **never** as the player-facing fix, because a later correction leaves the original
+  conflict visible in the transcript (the constraint above forbids that).
 - **D4 — Pin the dual-map contract (ADR 0005).** Make explicit that `presence` is the **open**,
   player-facing/narratable occupancy (the gadget + narration + the D2 fold bind here) and
   `presenceBase` is the **closed**, calibration-neutral occupancy (seeded society pairing binds here).
@@ -128,14 +144,18 @@ snapshot skew:
 - **Calibration neutrality** — the D2 fold leaves seeded outcomes byte-identical (society pairing,
   comps, votes), in the `stagedTrajectoryNeutral.test.ts` spirit.
 
-## Open questions for the product owner
+## Owner rulings (resolved 2026-06-21)
 
-1. **Who decides NPC movement?** Model-narrated-then-recorded (the model wanders NPCs as the scene
-   wants; the belt records it) vs engine-seeded (the tick decides; the model must narrate to match).
-   The ADR-0003/0005 lean is *model narrates the open texture, recorded; engine keeps the seeded
-   baseline for calibration* — but it's a design call.
-2. **Enforcement strength** for D3: soft re-ground next turn, or hard-fold the narrated move into
-   `presence` immediately (so the engine always concedes to plausible prose)?
+1. **Who decides NPC movement?** → **The model narrates the open texture** (who wanders where); the
+   **engine records it** and keeps only the seeded baseline for calibration. The acceptance test is
+   simply *consistent and dynamic* (PO: *"ultimately doesn't matter as long as it's consistent and
+   dynamic"*). Confirms the ADR-0003/0005 lean.
+2. **Enforcement strength (D3)?** → **Hard-fold, under an overriding "no visible historic conflicts"
+   constraint** (PO: *"Hard-fold… we can't have visible historic conflicts"*). A legal narrated move
+   is recorded into `presence` immediately, so the board agrees by the time the player reads the
+   prose; an impossible claim (evicted houseguest / non-existent room / two-places-at-once) is caught
+   **pre-emission** and scrubbed/regenerated — **never** corrected on a later turn, which would leave
+   the conflict visible in the transcript.
 
 ## Key files
 
