@@ -1460,7 +1460,24 @@ async def auto_name_session(session_manager, sess):
         from src.llm_core import llm_call_async
         from src.task_endpoint import resolve_task_endpoint
 
-        # Find first user message
+        # Find first user message — but NEVER title from an OOBE production cue or a
+        # control message. The casting hand-off auto-sends "(Production cue — …)" as a
+        # hidden user turn; left un-skipped the LLM titles the whole session
+        # "Casting Interview Production Cue" (leaks into the sidebar + header — UX audit
+        # J1-16). Skip cues/control turns and title from the first REAL player message;
+        # if none yet, defer naming (it runs again on the next turn).
+        def _is_control_turn(text: str) -> bool:
+            t = (text or "").strip()
+            low = t.lower()
+            return (
+                low.startswith("(production cue")
+                or t == "Continue where you left off"
+                or t.startswith("Your message was cut off.")
+                or t.startswith("Your previous response was interrupted.")
+                or "[Instruction: Rewrite" in t
+                or "[Instruction: Explain" in t
+            )
+
         first_msg = ""
         for msg in sess.history:
             if msg.role == "user":
@@ -1470,7 +1487,10 @@ async def auto_name_session(session_manager, sess):
                         (i.get("text", "") for i in content if isinstance(i, dict) and i.get("type") == "text"),
                         "",
                     )
-                first_msg = str(content)[:500]
+                content = str(content)
+                if _is_control_turn(content):
+                    continue
+                first_msg = content[:500]
                 break
 
         if not first_msg:
