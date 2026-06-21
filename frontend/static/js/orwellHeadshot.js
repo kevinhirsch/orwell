@@ -387,6 +387,11 @@
     _win = window.OrwellWindowKit.create({
       id: ID, title: "Your Cast Photo", icon: CAST_ICON,
       slot: "top-right", slotKey: "castphoto", role: "dialog",
+      // J1-25 / J1-23: a PROPER modal dialog — aria-modal + focus-trap + inert
+      // background + a backdrop scrim (so it no longer lets focus escape into the
+      // chat, and the live narration recedes behind a dim instead of competing for
+      // figure). The in-body finalize / "Skip for now" are the two exits.
+      modal: true,
       minimizable: false, closable: false, draggable: false, resizable: false,
       minWidth: 320, minHeight: 240,
       content: body, focus: true,

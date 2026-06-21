@@ -295,3 +295,34 @@ def test_retrospective_migrated_onto_the_kit():
     # the only 'fixed' left is in prose, so check for the CSS declaration form.
     assert "position:fixed" not in js.replace(" ", "")  # no inline/css fixed-position rule
     assert "dockable: true" in js
+
+
+# ── A1 / J1-25 — the opt-in per-window modal option ────────────────────────
+# The UX audit deferred its #1 launch-blocker (J1-25: the cast-photo dialog let
+# focus escape into the chat and floated over live narration with no scrim) to a
+# "next gated set" because the kit had no modal capability (UX-AUDIT-LOG.md:191).
+# A1 adds an OPT-IN `modal` option — aria-modal + scrim + inert background +
+# focus-trap — WITHOUT forcing it on the floating/lingering windows. (Behavior is
+# exercised for real in browser_smoke.py; these source-pin the wiring.)
+
+
+def test_sourcepin_a1_kit_has_opt_in_modal_option():
+    js = _read("static", "js", "orwellWindow.js")
+    assert "modal: false" in js                        # the opt-in DEFAULT (off)
+    assert "aria-modal" in js                           # the dialog promise to AT
+    assert "ow-scrim" in js                             # the backdrop dim (J1-23/J1-04)
+    assert "_trapFocus" in js                           # Tab can't escape the dialog
+    assert "_inertBackground" in js                     # the rest of the page goes inert
+    assert "n.inert = true" in js                       # …really inert (not aria-only)
+    # the kit RESTORES on teardown (no stuck scrim / permanently-inert page)
+    assert "_unmountModalChrome" in js
+    assert "_uninertBackground" in js
+
+
+def test_sourcepin_a1_cast_photo_opts_in_roster_does_not():
+    # the cast-photo dialog (the J1-25 surface) opts IN…
+    hs = _read("static", "js", "orwellHeadshot.js")
+    assert "modal: true" in hs
+    # …while the cast ROSTER stays a free-floating, non-modal reference panel
+    cast = _read("static", "js", "orwellCast.js")
+    assert "modal: true" not in cast
