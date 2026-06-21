@@ -11,7 +11,7 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Specs now run
-through **0066** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
+through **0069** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
@@ -33,7 +33,8 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0066**; 0052 — the house themes — shipped FE-side from the audit
+`docs/features/` (through **0069** — 0067/0068 public-internet exposure + ADR 0007, 0069 token economy;
+0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
 backfill, the casting headshot studio + player-uploaded/AI account avatar, portrait variety, and
@@ -509,7 +510,9 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
 - Souls evolve live (`src/engine/emotionalArc.ts`) and bend the competition modifier; `CHARACTER` stays
   byte-stable; no number ever crosses to the player.
 
-**Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative):
+**Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative).
+*A source-verified, tier-organized snapshot of every open item — and which tracker rows are stale — is
+`docs/audits/2026-06-21-open-items-verification.md` (no launch-blockers remain):*
 - **Calibration tuning — re-measured 2026-06-21, primary goal MET; no change pending.** The
   `JURY_WEIGHTS.gameRespect` 0.9→0.7 drop (PR #364) + engine evolution flipped the old inversion: on
   current main a 30-seed instrument run shows **active wins 20% vs passive 7%** (F2-blowouts 50% vs 63%) —
@@ -521,7 +524,9 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
 - **ADR 0006 / 0066 Phase-2 — on the PO review list.** Deferred time/sleep extensions: NPC *next-day*
   social fatigue, a compounding multi-night fatigue meter, and per-conversation clock advance (vs. the
   current per-beat) — owner decisions in `docs/features/0066-in-game-time-and-sleep.md` §9.
-- **0022** (MVP-2, deferred) and **0059** (hidden seeded relationships, spec only) — the unbuilt specs.
+- **0022** (MVP-2, deferred) is the **only** unbuilt spec. *(0059 hidden seeded relationships is **built** —
+  `src/engine/seededRelationships.ts` + `seededRelationships.test.ts`, orientation-aware via 0063; this line
+  previously mis-listed it as spec-only. Reconciled 2026-06-21.)*
 - **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
   during the private-repo flip).
 - **Postgres + pgvector** relational tier — MVP-002 post-launch scale-out (SQLite + sqlite-vec shipped

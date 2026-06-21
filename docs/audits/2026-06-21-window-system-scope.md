@@ -1,8 +1,14 @@
 # Window / Overlay System — Refactor Scope (2026-06-21)
 
-**Status:** SCOPE (precedes a plan; no code yet). **Mode:** read-only architectural pass over the
+**Status:** SCOPE. **Mode:** read-only architectural pass over the
 player-tier front-end window/overlay stack. **Descends from:** the UX Refactor Audit
 (`UX-AUDIT-LOG.md`) and the 2026-06-11 DWE window audit (`docs/audits/2026-06-11-dwe-window-audit.md`).
+
+> **Progress (2026-06-21):** Direction-A steps **A1** (per-window `modal` option — scrim + focus-trap +
+> `inert` + `aria-modal`, closes the **J1-25 launch-blocker**; `f6b9b13`) and **A3** (reset-positions
+> sweep, closes settings F3; `settings.js:1765`) have **SHIPPED**. Still open: **A0** (delete the dead
+> `modalManager` chain-physics), **A2** (single z/focus authority = DWE F9), and Directions **B/C**. See
+> `docs/audits/2026-06-21-open-items-verification.md` (Tier 4).
 
 ## Why this exists (mandate tie-in)
 
@@ -79,7 +85,7 @@ email) carry the entire modalSnap/tileManager apparatus, none of which the game 
 | **P4** | MED | **Four bespoke drag implementations** — window pointer-drag, modal chip/chain (P2), rail edit-mode long-press (PR #438), rail width-resize. The recent grip→edit-mode change fixed the overlay-covers-content bug **structurally** but as a fourth gesture model. | `orwellGadgetRail.js` edit-mode + width-resize |
 | **P5** | MED | **Six geometry persistence schemes + a reset button that misses most** — `settings-wiring-audit.md` F3: "Reset window positions" misses `orwell-slot-offset:*` and `orwell-win-parked:*`; four separate clamp implementations. | `settings-wiring-audit.md` F3; `test_f3_window_ratchet.py:77` |
 | **P6** | LOW | Six near-identical poll/backoff loops across kit-window consumers. | `dwe-window-audit.md:292`; `orwellFinale.js` `_pollDelay` |
-| **P7** | LOW | Prior-audit residue still open (F9 partial, settings F3, refresh-persistence R3 composer-draft privacy). | the three 2026-06-11 audits |
+| **P7** | LOW | Prior-audit residue. **(Update 2026-06-21: settings F3 + refresh-persistence R3 composer-draft have since SHIPPED — `settings.js:1765` sweeps `orwell-slot-offset:*`/`orwell-win-parked:*`, and `orwellComposerDraft.js` persists `{text,drMode,…}`. Only DWE F9-partial remains, = A2 below.)** | the three 2026-06-11 audits |
 
 ## 3. UX-audit finding → pain-point → direction mapping
 
