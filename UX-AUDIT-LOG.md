@@ -196,10 +196,50 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 - **CI clean checkout caught a real regression**: `responsive_matrix` `phone-390+settings nowrap-overflow: Reset`. Binary-searched it to index.html (pure `main` passes 3/3; my other files innocent — matrix passes with them). Root cause = J1-35 (borderline `flex-shrink` squeeze), not the a11y attrs. **Fixed** with `flex-shrink:0`; matrix now **43 pass · 0 FAIL** locally (2 runs). J1-29 reworked to an attribute-only `aria-label` (no child node) as defense-in-depth.
 - Post-merge: visual re-capture of the fixed surfaces is the remaining validation step.
 
+## Journey 2 — capture-phase findings (lead, live-LLM walkthrough)
+
+**Status: CAPTURE IN PROGRESS.** Device matrix running (desktop/mobile × normal/reduce, each reset to true
+zero-data; driver `.audit-telemetry/run_j2_matrix.sh`). The entries below are the **lead's own direct
+observations** from the live-LLM validation walks (OpenRouter `deepseek-v4-pro`); the 5-specialist fan-out over
+the full matrix artifact set will ADD to this. Logged as observed (not deferred to consolidation).
+
+| ID | Sev | Status | Finding |
+|---|---|---|---|
+| J2-01 | LAUNCH-BLOCKING (candidate) | VIEWED | **Casting finalize is non-deterministic — the model can deflect an explicit player readiness signal and keep interviewing, so the season fails to start.** Identical cooperative answers + "I'm ready, put me in the house": one run deflected ("you skipped the question again"), state stayed `character-creation` (never started); other runs finalized at turn-4 / persona / ready1. The FE safety-net (`agent_loop.py` `_CASTING_FORCE_LEVEL = len(_CASTING_NUDGES) = 2`) needs ~3 readiness *lull* turns to FORCE `createCharacter`; a single "put me in the house" only NUDGES. |
+| J2-02 | HIGH (root-cause of J2-01) | VIEWED | **`createCharacter` is dropped from the tools actually SENT to the model during casting** — present in `relevant_tools` (candidate pool) but absent from `tool_names` in `[agent-debug]`. It IS in `ORWELL_GAME_TOOLS`, passed as `pinned_tools` when `engine_available` (`chat_routes.py:1190`) and unioned into `_relevant_tools` (`agent_loop.py:2560`), yet filtered out of the final schema. So the finalize NUDGES ("call createCharacter NOW") are unactionable; only the deterministic force (model-bypassing) can start the season. |
+| J2-03 | LOW (content) | VIEWED | **Casting front-loads the name ask; a biography-first answer is re-asked every turn.** Producer asks "what do the feeds call you?" right after the photo and re-asks until a literal name is given (a rich "I'm a bartender from Chicago" loops). Model handles it gracefully (escalating mild exasperation — good in-fiction, steelman), but a player answering naturally can loop 1–3 turns before realizing only a *name* advances. |
+| J2-04 | LOW (IA/a11y — needs confirm) | OPEN | **Two cast-roster controls with overlapping matchers; the icon-rail mirror `#rail-cast` is present-but-HIDDEN while the sidebar is expanded.** `[id*='cast']` resolves to 2 elements (`#rail-cast` hidden mirror *first* in DOM order + the visible `#sidebar-cast-btn`). Player clicks the visible one fine — but verify the hidden mirror is `aria-hidden`/not tab-focusable, else SR/keyboard users hit a dead control. Confirm in responsive captures. |
+
+**Verified WORKING (steelman / negative findings — do NOT "fix"):** casting profile recording (`updateCasting`) accrues name/backstory/strategy/motivation/persona correctly; the cast roster opens via `#sidebar-cast-btn` and renders all 15 houseguests (`tiles:87`); the premiere is reliably reached with cooperative answers and the premiere tutorial card (`#orwell-premiere-tutorial`) is present; the #457 hardening middleware (TrustedHost / rate-limit) does not break loopback capture (FE root 200 for `127.0.0.1`+`localhost` Hosts).
+
+**Methodology caveats (rig, not product):** Playwright `networkidle` never settles against the app (persistent polling) → use `domcontentloaded` + explicit settle. The J2 `_settle` waits on `chat-history[aria-busy]` + `chatModule.hasActiveStream` (≤45–75s, reasoning model is slow). Finalize timing varies run-to-run (LLM non-determinism) — J2-01 reproduced across ≥2 of the validation walks.
+
+### Detailed entries — J2
+
+#### J2-01 — Casting finalize non-deterministic; explicit readiness can be deflected · LAUNCH-BLOCKING (candidate) · VIEWED
+- **Principle + consequence:** Nielsen *User control & freedom* + Doherty — the single highest-stakes conversion gate (getting INTO the game) can stall *after* the player explicitly asks to start. A player who says "put me in the house" once and is met with another interview question reads it as the game ignoring them; worst case it feels like a soft-lock.
+- **Differential diagnosis:** (a) *scenario artifact* — RULED OUT: reproduced with a cooperative player giving a literal name + full answers; (b) *hard soft-lock* — RULED OUT: the season DOES start eventually (the per-user force counter persists across turns; reached premiere at turn-4 / persona / ready1 in other runs); (c) **model under-call + shallow safety-net escalation** — CONFIRMED: model declines to self-call `createCharacter` (see J2-02) and the deterministic force needs `_clv ≥ 2` (i.e. ~3 readiness lulls).
+- **Evidence:** validation runs v2 (deflected, `started:False`), v3 (finalized turn-4), v4/desktop-normal (finalized at `persona`). `frontend/src/agent_loop.py:3705-3758` (fallback), `:1488-1496` (nudge rungs / force level), `:1528-1541` (`_player_turn_is_lull`).
+- **Confidence:** HIGH it occurs; MEDIUM on frequency (LLM variance). **Severity pending** the specialist read + whether a single readiness push *should* force (product call).
+
+#### J2-02 — `createCharacter` absent from the sent tool schema during casting · HIGH (root-cause) · VIEWED
+- **Principle + consequence:** structural — the narration model is told (by prompt + nudges) to "call createCharacter NOW" but the function is **not in its tool list**, so compliance is impossible; the game can only start via the model-bypassing deterministic force. Brittle, and it defeats the documented "always able to call createCharacter" pinning.
+- **Evidence:** `[agent-debug]` lines — `relevant_tools=[…,'createCharacter',…]` but `tool_names=[…15 tools, NO createCharacter/updateCasting…]`. Pin path: `tool_schemas.py:1740 ORWELL_GAME_TOOLS` (contains it) → `chat_routes.py:1190 pinned_tools=(… if engine_available)` → `agent_loop.py:2560 _relevant_tools.update(pinned_tools)`. The drop is downstream of the union (final schema build: `disabled_tools` filter / schema lookup / cap — TBD).
+- **Next:** code-trace the final schema array construction to find where the pinned game tools are filtered. (Remediation-phase.)
+
+#### J2-03 — Casting front-loads the name ask; biography-first answers loop · LOW (content) · VIEWED
+- **Principle + consequence:** *Match between system and the real world* / input affordance — "what do the feeds call you?" invites a persona answer, but only a literal **name** advances; a natural answer loops 1–3 turns. The model's graceful, in-character re-asking (mild exasperation) is a **steelman positive** (texture, not a break), so this is expectation-setting, not a defect.
+- **Evidence:** producer replies across v1 ("That's a lot of biography and not one syllable of a name"), repeated re-asks until a name lands.
+
+#### J2-04 — Duplicate cast-roster control; hidden icon-rail mirror · LOW (IA/a11y) · OPEN (needs confirm)
+- **Principle + consequence:** consistency + WCAG 4.1.2 — a present-but-hidden duplicate control (`#rail-cast`, `data-rail-source="sidebar-cast-btn"`) sits *first* in DOM order while the visible `#sidebar-cast-btn` is the real target. Sighted pointer users are unaffected; the risk is a hidden-but-focusable dead control for keyboard/SR users.
+- **Evidence:** rig click on `[id*='cast']` resolved to 2 elements, picked the hidden `#rail-cast` (Playwright "element is not visible"). `orwellCast.js:23 BTN_ID="sidebar-cast-btn"` (display toggled by live-poll); `sidebar-layout.js` icon-rail.
+- **Verify:** check `tabindex`/`aria-hidden` on `#rail-cast` while the sidebar is expanded (desktop) in the matrix captures.
+
 ## Journey progress
 
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings logged; gated remediation set #1 (9 fixes incl. launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged to main in PR #449** (CI green). Deferred to later sets: J1-25 (cast-photo modal trap), J1-22, and the visual/IA backlog (J1-01/02/04/05/06/09/10/12/14/17/20/23/24/30/31/32/33/34).
-- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — scenario built (`.audit-telemetry/journeys.py:j2_onboarding`, multi-turn live-LLM); capture pending (recommend `/compact` first).
+- [ ] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — **CAPTURE IN PROGRESS.** Scenario `j2_onboarding` (+ lite `j2_spot`/`j2_premiere_snapshot`) validated through premiere×3; device matrix running (4 reset-fresh live-LLM walks). Lead capture-phase findings **J2-01…J2-04 logged**; 5-specialist fan-out + spot checks + two-window pending.
 - [ ] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)**
 - [ ] **J4 — Resolution & edges (nomination/veto/vote/eviction/finale, meta-progression, empty/loading/error)**
 
