@@ -1913,10 +1913,11 @@ body.bg-pattern-sparkles {
     .gadget-rail-body > #orwell-deals { order: 2; }     /* 0039: your deals */
     .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
     .gadget-rail-body > #orwell-presence { order: 4; }
-    .gadget-rail-body > #orwell-finale { order: 5; }    /* 0054 P2: docked finale */
-    .gadget-rail-body > #orwell-cast { order: 6; }      /* 0054 P2: docked full cast roster */
-    .gadget-rail-body > #orwell-retro { order: 7; }     /* 0054 P2: docked retrospective */
-    /* The collapsed icon strip: a column of up to 7 gadget icons in a 50px-wide rail.
+    .gadget-rail-body > #orwell-night { order: 5; }     /* 0066: nightfall — time of day + who's turned in */
+    .gadget-rail-body > #orwell-finale { order: 6; }    /* 0054 P2: docked finale */
+    .gadget-rail-body > #orwell-cast { order: 7; }      /* 0054 P2: docked full cast roster */
+    .gadget-rail-body > #orwell-retro { order: 8; }     /* 0054 P2: docked retrospective */
+    /* The collapsed icon strip: a column of up to 8 gadget icons in a 50px-wide rail.
        It SCROLLS (min-height:0 inside the flex column gives it a real overflow context)
        so on a short viewport the icons never stack on top of each other — the strip
        scrolls instead of overlapping. flex-shrink:0 on each icon keeps every tap target

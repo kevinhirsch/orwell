@@ -511,6 +511,14 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 val = max(lo, min(val, hi))
             current[key] = val
         _save_settings(current)
+        # ADR 0006: apply an in-game-clock switch flip to the LIVE engine immediately (no restart) —
+        # best-effort, never blocks the settings save (the engine also re-syncs on FE boot).
+        if "time_of_day_enabled" in body:
+            try:
+                from src import orwell_engine
+                await orwell_engine.set_time_of_day(bool(current.get("time_of_day_enabled", True)), user=user)
+            except Exception:
+                pass
         return current
 
     # ---- Integrations CRUD ----

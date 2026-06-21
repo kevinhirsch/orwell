@@ -710,6 +710,13 @@ async def configure_game(settings: dict, user: str | None = None) -> dict:
     return await _admin_call("configure", settings or {}, user=user)
 
 
+async def set_time_of_day(enabled: bool, user: str | None = None) -> dict:
+    """ADR 0006: turn the in-game time-of-day clock + nightly sleep economy ON or OFF on the LIVE
+    engine at runtime (no restart). The FE settings switch flips this; the engine holds a process-global
+    override of the ORWELL_TIME_OF_DAY env default (reset on engine restart — re-applied on FE boot)."""
+    return await _admin_call("setTimeOfDay", {"enabled": bool(enabled)}, user=user)
+
+
 async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict:
     """God Mode: sandbox lifecycle for THIS user's sandbox only (create | reset | save | load)."""
     args: dict = {}
