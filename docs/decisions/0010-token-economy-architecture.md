@@ -200,6 +200,17 @@ FE/adapter-only ⇒ the gate is the front-end pytest suite (the recorded-deviati
 soft-alert dollar threshold, and the high-token pin threshold — all live in the constants/settings module
 and retune without code change.
 
+**Tracked follow-ons (from the F-S4-D / PR #481 truncation discussion, 2026-06-21)** — deeper items the
+tactical fix surfaced, to land **with** the slices (full list + dispositions in feature 0069 §3):
+- the per-class **output cap** (`max_tokens`) gains the **same runtime-editable, settings-backed** treatment
+  ruling #1 gives the reasoning budget (Decision B today makes only reasoning runtime-editable);
+- the **reasoning budget is sized model-aware** — relative to the resolved model's output cap/window so it
+  cannot starve the visible reply (the F-S4-D mechanism), and the Anthropic `max_tokens` fallback (#481's
+  4096→8192 stopgap) **folds into the resolver** instead of staying a hardcoded literal;
+- the Slice-A envelope additionally records the **applied `max_tokens` + `finish_reason`** so an in-season
+  capture pinpoints *which* cap truncated a turn (no live repro);
+- the #481 truncation `Continue ▸` affordance reaches **chat mode** too, or its agent-only scope is recorded.
+
 ## Traceability
 
 - Source: the 2026-06-21 cost investigation (OpenRouter logs + the `llm_core.py`/`agent_loop.py` trace).

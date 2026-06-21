@@ -68,7 +68,35 @@ so long games degrade in *cost*, not *memory*.
 - Any **engine** change. This feature is FE/adapter-only; the closed set (outcomes, seeds, persistence,
   the Vault) is untouched (ADR 0005).
 
-## 4. Design
+### Tracked follow-ons — the F-S4-D / PR #481 truncation discussion (2026-06-21)
+
+PR #481 shipped the **tactical** truncation fix (capture `finish_reason`; surface a `Continue ▸`
+affordance when the final round ends on `length`; bump the Anthropic `max_tokens` fallback 4096→8192).
+The **deeper** items it surfaced are tracked here so they land **with** the slices, not ad hoc:
+
+1. **Configurable per-turn output cap (`max_tokens`).** Slice B makes the per-class **reasoning** budget
+   admin-editable at runtime; extend the **same** settings-backed treatment to the per-class **output
+   cap** so an operator can raise/lower a class's `max_tokens` live (today the output cap folds into the
+   policy as a constant). Same resolver, same `settings.json` read-per-request pattern (no restart), same
+   clamp + admin-gate as the reasoning budget. *(A gap on top of Slice B — B currently makes only
+   reasoning runtime-editable.)*
+2. **Model-aware reasoning budget.** Slice B sends a `reasoning` map per class; **size it relative to the
+   resolved model's output cap/window** so reasoning can't starve the visible reply — the exact F-S4-D
+   mechanism (thinking billed against the same budget as the answer). The resolver reads the model's
+   max-output and reserves visible-reply headroom; and the Anthropic `max_tokens` fallback (the #481
+   4096→8192 stopgap) **folds into the resolver, model-aware**, rather than staying a hardcoded literal.
+   *(Extends Slice B; supersedes the #481 constant.)*
+3. **In-season "which cap is biting" capture.** Slice A records the full envelope; add the **applied
+   `max_tokens`** (the cap actually sent) next to `outputTokens` and the `finish_reason` #481 emits, so a
+   single in-season debug-bundle/ledger row answers *which* cap truncated a turn — provider default vs.
+   the configured per-class cap vs. the Anthropic fallback — **without** a live repro. *(One field on the
+   Slice-A `UsageEnvelope`/ledger; see §5.)*
+4. **Truncation-affordance parity in chat mode.** The #481 `truncated` → `Continue ▸` affordance is
+   **agent-mode only** (`agent_loop`); the non-agent chat path (`chat_routes`) receives the `finish` event
+   but never converts it. Extend the same affordance to chat mode, or record the deliberate agent-only
+   scope. *(Small FE follow-on; the game runs in agent mode, so non-blocking.)*
+
+
 
 - **A — Meter once, at the boundary.** Extend the streaming usage parse (`llm_core.py:1654-1672`) to read
   the whole `usage` object — `prompt_tokens_details.cached_tokens`,
@@ -100,7 +128,9 @@ so long games degrade in *cost*, not *memory*.
 
 ```
 capture:  UsageEnvelope = { inputTokens, cachedTokens, reasoningTokens, outputTokens,
-                            cost, costDetails?, provider?, contextPercent }   (Vault-free; no content)
+                            cost, costDetails?, provider?, contextPercent,
+                            appliedMaxTokens?, finishReason? }   (Vault-free; no content)
+                            -- appliedMaxTokens + finishReason answer "which cap is biting" (follow-on #3)
 class:    CallClass = narration | utility-extraction | casting | background-authoring
 policy:   resolveTokenPolicy(class) -> { reasoning, maxTokens, caching, contextBudget }
                                        (reasoning per class is settings-backed; constants = defaults)
@@ -152,7 +182,9 @@ flag:     token tiering (D) opt-in (default lean ⇒ byte-identical); meter (A) 
   cause (DeepSeek reasoning billed against the visible-reply budget). Slice A records the
   `finish`/`finish_reason` signal #481 adds; slice B reduces how often truncation happens at all.
 - Followed by: the §3 **Out** items (per-game hard caps / interrupting soft-stop; unconditional provider
-  pinning).
+  pinning) and the §3 **Tracked follow-ons** (the F-S4-D/PR #481 deeper items: runtime-editable output
+  cap, model-aware reasoning sizing, the "which-cap-is-biting" envelope fields, chat-mode affordance
+  parity).
 
 ## 8. Implementer handoff & resolved rulings
 
