@@ -2239,6 +2239,48 @@
             </div>
             <div id="adm-health-msg" style="margin-top:6px;"></div>
           </div>
+          <div class="admin-card admin-only" id="adm-public-deployment-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Public deployment</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Connect this deployment to the internet over a Cloudflare tunnel — no SSH, no hand-editing the environment. Account-side steps (domain, tunnel, Access/WAF) stay in Cloudflare's dashboard; Orwell never holds your Cloudflare account credentials.</div>
+
+            <!-- STATUS area -->
+            <div id="adm-pubdep-status" class="settings-gap-top"><div class="admin-empty">Loading…</div></div>
+
+            <!-- SECURITY CHECKLIST -->
+            <div class="admin-toggle-label settings-gap-top" style="margin-top:10px;">Security checklist</div>
+            <div id="adm-pubdep-checklist" class="settings-gap-top"><div class="admin-empty">Loading…</div></div>
+
+            <!-- Controls -->
+            <div class="settings-row settings-row--end settings-gap-top" style="margin-top:10px;">
+              <button class="admin-btn-add" id="adm-pubdep-connect-toggle">Connect to the internet</button>
+              <button class="admin-btn-delete" id="adm-pubdep-disconnect" style="white-space:nowrap;">Disconnect</button>
+            </div>
+
+            <!-- Connect wizard (inline expandable, hidden until the toggle reveals it) -->
+            <div id="adm-pubdep-wizard" class="settings-gap-top" hidden style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+              <div class="admin-toggle-label">Step 1 — set up your Cloudflare account &amp; domain</div>
+              <div class="admin-toggle-sub" style="margin-bottom:8px">Done in the Cloudflare dashboard — Orwell only collects the resulting connector token. Sign up, add your domain (change nameservers at your registrar), then create a <em>remotely-managed</em> tunnel and map its public hostname to <code>http://127.0.0.1:8080</code>. Add Cloudflare Access/WAF for who-can-reach-it controls.</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <a class="admin-btn-add" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Cloudflare sign-up</a>
+                <a class="admin-btn-add" href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener">Zero Trust dashboard (tunnels)</a>
+                <a class="admin-btn-add" href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank" rel="noopener">Tunnel docs</a>
+              </div>
+
+              <div class="admin-toggle-label">Step 2 — paste your connector token &amp; domain(s)</div>
+              <div class="admin-add-form" style="margin-top:6px;">
+                <input id="adm-pubdep-domains" type="text" placeholder="Domain(s) — e.g. play.example.com, www.example.com" autocomplete="off">
+                <input id="adm-pubdep-origins" type="text" placeholder="Allowed origins (optional — defaults to https://<first domain>)" autocomplete="off">
+                <input id="adm-pubdep-token" type="password" placeholder="Cloudflare connector token" autocomplete="off">
+              </div>
+              <div class="admin-toggle-sub" style="margin-top:6px;">The connector token is write-only — it is consumed on the box and never shown back here.</div>
+              <div class="settings-row" style="margin-top:8px;">
+                <button class="admin-btn-add" id="adm-pubdep-apply">Connect</button>
+              </div>
+            </div>
+
+            <div id="adm-pubdep-progress" style="margin-top:8px;"></div>
+            <div id="adm-pubdep-msg" style="margin-top:6px;"></div>
+          </div>
           <div class="admin-card admin-danger-card">
             <h2 style="color:#e55;">Danger Zone</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Irreversible. Each wipe targets one category — pick exactly what you want gone.</div>

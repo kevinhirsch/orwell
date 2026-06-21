@@ -277,6 +277,7 @@ ownership() {
   rm -f "${DATA_DIR}/ops/update-requested"   # a stale pre-install request must not fire mid-install
   rm -f "${DATA_DIR}/ops/factory-reset-requested"  # likewise: no stale OOBE-reset request fires mid-install
   rm -f "${DATA_DIR}/ops/update-reset-requested"   # likewise: no stale Update+Reset request fires mid-install
+  rm -f "${DATA_DIR}/ops/public-deployment-requested"  # likewise: no stale Connect request fires mid-install
   touch "${DATA_DIR}/ops-update.log"
   chmod 644 "${DATA_DIR}/ops-update.log"
   # The OOBE-reset trigger (admin "Factory Reset (OOBE)" button) appends to its own live log,
@@ -287,6 +288,10 @@ ownership() {
   # live log, tailed by the same viewer. Touched, never `install`ed (keep the run history).
   touch "${DATA_DIR}/ops-update-reset.log"
   chmod 644 "${DATA_DIR}/ops-update-reset.log"
+  # The public-deployment trigger (admin "Connect to the internet" wizard, feature 0068) appends to
+  # its own live log, tailed by the same viewer. Touched, never `install`ed (keep the run history).
+  touch "${DATA_DIR}/ops-public-deployment.log"
+  chmod 644 "${DATA_DIR}/ops-public-deployment.log"
 }
 
 systemd_services() {
@@ -310,6 +315,12 @@ systemd_services() {
   # final restart), output appended live to data/ops-update-reset.log.
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.path"    /etc/systemd/system/orwell-ops-update-reset.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-update-reset.service" /etc/systemd/system/orwell-ops-update-reset.service
+  # Same G19b seam for the admin "Connect to the internet" wizard (feature 0068): the web tier drops
+  # the flag data/ops/public-deployment-requested and this root-side PATH unit runs the one fixed
+  # public-deployment script (orwell-ops-public-deployment.sh — .env upsert + cloudflared install/run
+  # + FE restart + token shred), output appended live to data/ops-public-deployment.log.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-public-deployment.path"    /etc/systemd/system/orwell-ops-public-deployment.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-public-deployment.service" /etc/systemd/system/orwell-ops-public-deployment.service
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -356,10 +367,10 @@ EOF
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
   # The ops TRIGGERS are path units (their services are started by the watcher, never enabled).
-  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path
+  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
-  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path
+  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path
 }
 
 login_panel() {
