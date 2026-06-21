@@ -53,7 +53,7 @@
       }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
-      #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .55; font-size: 1rem; }
+      #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; }
       #${CARD_ID} .odec-x:hover { opacity: .9; }
       #${CARD_ID} .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
@@ -61,7 +61,7 @@
       #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       #${CARD_ID} .odec-opt {
-        cursor: pointer; border-radius: 999px; padding: .3rem .8rem;
+        cursor: pointer; border-radius: 999px; padding: .3rem .8rem; min-height: 36px;
         border: 1px solid var(--border, #355a66); background: rgba(255,255,255,.05); color: inherit;
         font: inherit;
       }
@@ -74,10 +74,11 @@
       #${CARD_ID} .odec-row { display: flex; align-items: center; gap: .6rem; margin-top: .65rem; }
       #${CARD_ID} .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
+        min-height: 44px;
         background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
-      #${CARD_ID} .odec-note { opacity: .65; font-size: .78em; flex: 1; }
+      #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
       #${CARD_ID} .odec-err { color: var(--red, #e06c75); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
       /* Narrow: the note must not squeeze into a thin column beside the button —
@@ -380,6 +381,10 @@
 
     chatBox.appendChild(card);
     card.scrollIntoView({ block: "nearest" });
+    // J3-18: move focus to the card so keyboard/SR users know a binding decision appeared.
+    // tabindex=-1 allows programmatic focus without adding the card to the Tab order.
+    card.setAttribute("tabindex", "-1");
+    card.focus();
   }
 
   // chat.js dispatches this from advanceGame/submitDecision tool results.

@@ -39,6 +39,18 @@
     try { window.dispatchEvent(new CustomEvent('orwell:layout-changed', { detail: data || {} })); } catch (_) {}
   }
 
+  // ADR 0008: coalesce a burst of events into one reconcile (softReloadHistory is idempotent).
+  var _recTimers = {};
+  function scheduleReconcile(id) {
+    var cm = chat();
+    if (!cm || !cm.softReloadHistory) return;
+    if (_recTimers[id]) return;                 // already scheduled — fold this event in
+    _recTimers[id] = setTimeout(function () {
+      delete _recTimers[id];
+      if (id === currentSession()) { try { cm.softReloadHistory(id); } catch (_) {} }
+    }, 120);
+  }
+
   function handle(type, data) {
     var id = data && data.session;
     // Board/layout pings are not chat — handle them before the chat-session gate (they ride the
@@ -48,17 +60,22 @@
     if (!id || id !== currentSession()) return;       // not the session we're viewing
     var cm = chat();
     if (!cm) return;
-    if (cm.hasActiveStream && cm.hasActiveStream(id)) return; // our own activity — ignore the echo
 
+    // ADR 0008: process EVERY chat event. The old code bailed here on hasActiveStream(id) — but that
+    // gate could not tell "my own echo" from "the OTHER tab's real write", so a streaming tab DROPPED
+    // the peer's events and never reconciled (the S3-RACE divergence). softReloadHistory is now
+    // id/seq-aware: it adopts our own optimistic bubbles with zero churn, defers past a live stream,
+    // and rebuilds only when genuinely diverged — so reconciling on our own echo is a cheap no-op.
     if (type === 'run-started') {
-      // Another device sent a message: show it, then attach to the live reply.
+      // A device sent a message: reconcile its (just-persisted) user turn, then — if WE are idle —
+      // attach to the live reply. Sequential so the rebuild lands before the live bubble appends.
       Promise.resolve(cm.softReloadHistory && cm.softReloadHistory(id)).then(function () {
         if (id === currentSession() && cm.resumeStream && !(cm.hasActiveStream && cm.hasActiveStream(id))) {
           cm.resumeStream(id);
         }
       });
     } else if (type === 'message-added') {
-      if (cm.softReloadHistory) cm.softReloadHistory(id);
+      scheduleReconcile(id);
     }
   }
 

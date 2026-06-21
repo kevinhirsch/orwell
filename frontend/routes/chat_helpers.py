@@ -1866,11 +1866,16 @@ async def preprocess(
     )
 
 
-def add_user_message(sess, chat_handler, preprocessed: PreprocessedMessage, incognito: bool = False):
+def add_user_message(sess, chat_handler, preprocessed: PreprocessedMessage, incognito: bool = False,
+                     client_msg_id: Optional[str] = None):
     """Add user message to session history and update session name.
     In incognito mode, still add to in-memory history (for conversation context)
     but skip session name update (which would persist)."""
     user_meta = {"attachments": preprocessed.attachment_meta} if preprocessed.attachment_meta else None
+    # ADR 0008: carry the FE's optimistic temp id so the sender can adopt its own user bubble to the
+    # server-assigned {id, seq} on reconcile (temp -> canonical), instead of rendering a duplicate.
+    if client_msg_id:
+        user_meta = {**(user_meta or {}), "client_msg_id": client_msg_id}
     sess.add_message(ChatMessage("user", preprocessed.user_content, metadata=user_meta))
     if not incognito:
         chat_handler.update_session_name_if_needed(sess, preprocessed.text_for_context)
@@ -2024,6 +2029,7 @@ async def build_chat_context(
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
     allow_tool_preprocessing: bool = True,
+    client_msg_id: Optional[str] = None,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -2045,7 +2051,7 @@ async def build_chat_context(
     )
 
     # Add user message to history
-    add_user_message(sess, chat_handler, preprocessed, incognito=incognito)
+    add_user_message(sess, chat_handler, preprocessed, incognito=incognito, client_msg_id=client_msg_id)
 
     # Fire events
     if not incognito:

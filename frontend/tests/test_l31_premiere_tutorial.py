@@ -56,8 +56,10 @@ def test_l31_shows_only_in_premiere_week():
 
 def test_l31_walks_the_weekly_rhythm_without_prompting():
     js = _read("static", "js", "orwellPremiereTutorial.js")
-    # the card names the first-week beats in order (the hand-held rhythm)
-    for beat in ["Meet the house", "HOH", "Nominations", "Veto", "Eviction"]:
+    # J3-09 (UX audit): "Meet the house" is a prerequisite, not a phase in the weekly loop.
+    # The tutorial copy now names the gate ("all fifteen houseguests") and then the four phases.
+    assert "fifteen houseguests" in js, "tutorial must state the 15-houseguest gate condition"
+    for beat in ["HOH", "Nominations", "Veto", "Eviction"]:
         assert beat in js, f"premiere card should name the {beat!r} beat"
     # it mounts itself on game state, never waits for the player to ask
     assert "orwell:gamechanged" in js

@@ -3584,17 +3584,13 @@ function startOrwellApp() {
     });
   }
 
-  // Rail: settings button
+  // Rail: settings button — OPEN Settings directly. The gear is a settings launcher, not a
+  // sidebar-expander: it previously only un-hid the sidebar and scrolled toward the in-sidebar
+  // gear, so on the collapsed rail "the gear that expands the sidebar" never reached Settings.
+  // Mirror the expanded #user-bar-settings (settingsModule.open()) so both gears do the same thing.
   const _railSettings = el('rail-settings');
   if (_railSettings) {
-    _railSettings.addEventListener('click', () => {
-      const sidebar = document.getElementById('sidebar');
-      if (sidebar) sidebar.classList.remove('hidden');
-      syncRailSide();
-      // Scroll to bottom where settings typically are
-      const sidebarInner = document.querySelector('.sidebar-inner');
-      if (sidebarInner) sidebarInner.scrollTo({ top: sidebarInner.scrollHeight, behavior: 'smooth' });
-    });
+    _railSettings.addEventListener('click', () => settingsModule.open());
   }
 
   // Rail: admin button

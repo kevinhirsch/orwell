@@ -437,6 +437,9 @@ def setup_chat_routes(
         allow_web_search = form_data.get("allow_web_search")
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
+        # ADR 0008: the FE's optimistic temp id for THIS turn's user bubble — round-tripped onto the
+        # persisted user message so the sender can adopt its own bubble to the canonical {id, seq}.
+        client_msg_id = form_data.get("client_msg_id")
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         # E24/P7: under the game build the "Nobody"/incognito toggle is inert server-side.
@@ -581,6 +584,7 @@ def setup_chat_routes(
             # index would be useless / unwanted noise.
             agent_mode=(chat_mode == "agent"),
             allow_tool_preprocessing=allow_tool_preprocessing,
+            client_msg_id=client_msg_id,  # ADR 0008: round-trip the optimistic temp id
         )
 
         # The game IS the main chat: when the Orwell engine is reachable, always run
