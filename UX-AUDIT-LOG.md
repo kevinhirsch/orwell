@@ -720,3 +720,15 @@ On a non-binding (flavor) staged comp-round the card pre-selects "compete" and e
 ### Finding R2-02 — the eviction-night staging leans on the forced-advance belt · NOTE (working as designed)
 
 The eviction phase needed several turns and the FE forced-advance escalation (L39b) to push through — one turn fired a burst of 9 `advanceGame` calls. It DID progress (the guardrail caught the model's under-call and drove the staged eviction to completion), so this is the error-correction working, not a defect — but it confirms the eviction-night staging depends on the forced-advance belt with the real model, the same family as the premiere belt. Worth keeping an eye on if that belt is ever changed.
+
+### Finding R3-01 — eviction-night reveal grinds with the real model (model re-prompts instead of advancing) · HIGH · OPEN
+
+Multi-week probe (`j6_multiweek`): the loop advanced week 2 → week 3 (real evictions: Paul Pierce, Keith Bell), proving multi-week stability — **but the eviction phase is a near-stall.** Mechanism, traced to engine + FE-log truth:
+
+- The eviction is a **~9–10-beat reveal** — one anonymized `"a vote to evict X"` per voter — played out *after* the player's `eviction-vote` is submitted. Driving `advanceGame` directly rolls it cleanly in ~10 calls → next week, so **the engine is healthy** (not a deadlock).
+- With the real model, after the player's vote is in, the model **under-calls `advanceGame` during the reveal and instead RE-PROMPTS the player to vote** (`ask_user: "You're in the Diary Room casting your eviction vote… who do you vote to evict?"` — for a vote already cast). The FE pre-resolve / forced-advance belts inch it forward ~1 beat/turn, so week 2 eventually completed, but week 3 ground slowly enough to trip the probe's 4-turn stall detector.
+- Tool bursts confirm the belts firing hard (8–12 `advanceGame` in some turns) interleaved with dead turns where the model re-asks — a grindy, confusing eviction night, the same belt FAMILY as the premiere fix (R1-01) and the R2-02 note.
+
+**Severity:** HIGH (degrades eviction night to a grind + a re-prompt loop), **not** launch-blocking (it does complete; the engine rolls it on its own). **Fix candidates:** (a) FE-lane — a forced roll-through belt that, once the player's eviction-vote is submitted and the engine keeps returning input-free reveal beats, rolls `advanceGame` to the next pending/phase in one turn (analogous to the premiere belt; my lane, low-risk); (b) engine-lane — batch the eviction vote-reveal like the staged comp (`STAGED_TARGET_ROUNDS`); (c) prompt — stop the model re-asking for a vote already cast. Recommend (a). Straddles engine/FE → flagged for an owner ruling on where to fix.
+
+**Probe caveat:** the repetitive identical nudge ("keep things moving") is a worst-case driver (every turn a lull); a real engaged player may fare better — but the model re-prompting for an already-cast vote is real regardless. The live game was unstuck to week 4 for continued testing.
