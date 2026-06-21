@@ -80,6 +80,23 @@ export class AdminPort {
     return this.state.configure(knobs);
   }
 
+  /**
+   * ADR 0006 — flip the in-game clock + sleep economy at runtime (the FE settings switch). The composition
+   * layer wires the delegate to the engine's process-global override (a Vault-free void closure — exactly
+   * like the reset/health/fast-forward delegates above), so this OUTWARD surface never imports the engine
+   * adapter (the dependency-cruiser boundary holds).
+   */
+  private timeOfDayDelegate?: (enabled: boolean) => void;
+
+  setTimeOfDayDelegate(fn: (enabled: boolean) => void): void {
+    this.timeOfDayDelegate = fn;
+  }
+
+  setTimeOfDay(enabled: boolean): AdminVisibleState {
+    this.timeOfDayDelegate?.(enabled);
+    return this.state.getAdminVisibleState();
+  }
+
   /** Manage this sandbox only (create | reset | save | load). A reset re-onboards the REAL game. */
   manageSandbox(op?: SandboxOp): AdminVisibleState {
     const out = this.state.manageSandbox(op);

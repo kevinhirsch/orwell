@@ -1028,6 +1028,18 @@ async def _startup_event():
 
     _startup_tasks.append(asyncio.create_task(_warmup_endpoints()))
 
+    # ADR 0006: re-apply the persisted in-game-clock setting to the engine on boot (the engine's runtime
+    # override resets on restart). Best-effort, fail-soft; never blocks startup.
+    async def _apply_time_of_day():
+        try:
+            from src.settings import load_settings
+            from src import orwell_engine
+            enabled = bool(load_settings().get("time_of_day_enabled", True))
+            await orwell_engine.set_time_of_day(enabled)
+        except Exception as _e:
+            logger.warning("Failed to apply time-of-day setting on boot: %s", _e)
+    _startup_tasks.append(asyncio.create_task(_apply_time_of_day()))
+
     # Keep-alive: ping endpoints every 60 seconds to prevent cold starts
     async def _keepalive_loop():
         while True:

@@ -2179,15 +2179,18 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
         from routes import chat_helpers
     except Exception:
         return text
-    # Cheap synchronous pass first: if NO sentence even mentions a closed-set outcome, emit verbatim
-    # without splitting/awaiting (the common case — and the open-set guarantee in the hot path).
+    # Cheap synchronous pass first: if NO sentence even mentions a closed-set outcome OR an
+    # out-of-house houseguest (ADR 0009 D3 Part B), emit verbatim without splitting/awaiting (the
+    # common case — and the open-set guarantee in the hot path).
     try:
-        if not chat_helpers._sentence_has_closed_set_claim(text):
+        if (not chat_helpers._sentence_has_closed_set_claim(text)
+                and not chat_helpers._text_mentions_evicted_houseguest(owner, text)):
             return text
     except Exception:
         return text
-    # At least one sentence carries closed-set claim language — split and screen sentence-by-sentence,
-    # preserving the original delimiters so non-suspect prose streams byte-identically.
+    # At least one sentence carries closed-set claim language OR names someone out of the house — split
+    # and screen sentence-by-sentence, preserving the original delimiters so non-suspect prose streams
+    # byte-identically.
     parts = re.split(r"(?<=[.!?\n])", text)
     out = []
     for part in parts:
@@ -2195,6 +2198,12 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
             if chat_helpers._sentence_has_closed_set_claim(part):
                 if not await chat_helpers.screen_streamed_outcome(owner, part):
                     continue  # phantom closed-set outcome — DROP this sentence before emission
+            # ADR 0009 (D3 Part B): an evicted/jury houseguest placed back in a house room is an
+            # IMPOSSIBLE claim (it can never be folded into a legal move) — DROP it before the player
+            # sees it (never a later-turn correction, which would leave the conflict visible).
+            if chat_helpers._text_mentions_evicted_houseguest(owner, part):
+                if not await chat_helpers.screen_streamed_location(owner, part):
+                    continue
         except Exception:
             pass  # any screening hiccup falls through to emit (conservatism)
         out.append(part)
