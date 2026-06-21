@@ -53,7 +53,7 @@
       }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
-      #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; }
+      #${CARD_ID} .odec-x { cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
       #${CARD_ID} .odec-x:hover { opacity: .9; }
       #${CARD_ID} .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
@@ -79,7 +79,7 @@
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
       #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
-      #${CARD_ID} .odec-err { color: var(--red, #e06c75); margin-top: .4rem; }
+      #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
       /* Narrow: the note must not squeeze into a thin column beside the button —
          stack it full-width above a full-width Confirm. */
@@ -137,6 +137,12 @@
     }[kind] || "Your decision";
   }
 
+  function confirmLabelFor(kind, binding) {
+    if (kind === "self-evict") return "Confirm — leave the game (final)";
+    if (kind === "comp-round") return binding === false ? "Push through this round" : "Lock in your approach";
+    return "Confirm — this is binding";
+  }
+
   function render(pending) {
     removeCard();
     if (!pending || !pending.kind) return;
@@ -156,6 +162,10 @@
     // via landmark navigation and know a binding decision is required).
     card.setAttribute("role", "form");
     card.setAttribute("aria-label", titleFor(kind));
+    // J4-12: link the card to the instruction note so SR users hear the decision
+    // context + the "your selection only" / irreversibility instruction before
+    // they Tab into options.
+    card.setAttribute("aria-describedby", CARD_ID + "-note");
     // Focused-context-first: while focus is in the card, Escape belongs to the
     // card's own dismiss-only handler (the global arbiter stands down on this marker).
     card.setAttribute("data-ow-escape-scope", "");
@@ -309,13 +319,14 @@
     row.className = "odec-row";
     const note = document.createElement("span");
     note.className = "odec-note";
+    note.id = CARD_ID + "-note";
     if (kind === "self-evict") {
       note.textContent = "This ends and forfeits your game — it cannot be undone.";
     } else if (kind === "comp-round") {
       // 0006 staged-rounds (audit 2026-06-20): the first round sets the binding approach; later rounds
       // are color over an already-decided result, so say so plainly rather than implying fresh stakes.
       note.textContent = pending.binding === false
-        ? "Just color — your approach was locked in the first round. Push through, or dismiss to play it out in conversation."
+        ? "No stakes here — your approach was locked in round one. Push through, or dismiss to play it out in conversation."
         : "This sets how you play the comp. Your selection only — never read from prose.";
     } else {
       note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
@@ -340,6 +351,16 @@
     }
     row.appendChild(confirm);
     card.appendChild(row);
+
+    // J4-09: pre-declare the error region before it might be populated — dynamic
+    // live-region injection is unreliable across AT/browser pairs; a pre-existing
+    // role="alert" ensures all AT pairs announce the error text when it's set.
+    const err = document.createElement("div");
+    err.className = "odec-err";
+    err.setAttribute("role", "alert");
+    err.setAttribute("aria-live", "assertive");
+    err.setAttribute("aria-atomic", "true");
+    card.appendChild(err);
 
     confirm.addEventListener("click", async () => {
       const payload = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto);
@@ -372,13 +393,10 @@
       } catch (_) {
         if (window.OrwellReport) window.OrwellReport.fail("decision", "submit-post", _); // G11: fail open, never silent
         confirm.disabled = false;
-        confirm.textContent = kind === "comp-round" ? "Lock in this round" : "Confirm — this is binding";
-        let err = card.querySelector(".odec-err");
-        if (!err) {
-          err = document.createElement("div");
-          err.className = "odec-err";
-          card.appendChild(err);
-        }
+        // J4-08: restore the correct confirm label — mirrors the initial render,
+        // including the self-evict irreversibility signal and non-binding round phrasing.
+        confirm.textContent = confirmLabelFor(kind, pending.binding);
+        // J4-09: err is pre-declared with role="alert" — set textContent to trigger announcement
         err.textContent = "That didn't go through (your move wasn't allowed, or the feed glitched). Adjust and try again, or decide in conversation.";
       }
     });

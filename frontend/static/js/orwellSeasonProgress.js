@@ -93,12 +93,19 @@
     bar.id = BAR_ID;
     bar.setAttribute("role", "progressbar");
     bar.setAttribute("aria-label", "Season progress");
-    bar.setAttribute("aria-description", "Advances as houseguests are evicted");
     bar.setAttribute("aria-valuemin", "0");
     bar.setAttribute("aria-valuemax", "100");
+    // J4-14: aria-description is a draft ARIA 1.3 attribute with inconsistent AT
+    // support; aria-describedby + a visually-hidden span is the WCAG 1.2-safe path.
+    const desc = document.createElement("span");
+    desc.id = BAR_ID + "-desc";
+    desc.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;";
+    desc.textContent = "Advances as houseguests are evicted";
+    bar.setAttribute("aria-describedby", BAR_ID + "-desc");
     const fill = document.createElement("div");
     fill.className = "osp-fill";
     bar.appendChild(fill);
+    bar.appendChild(desc);
     document.body.appendChild(bar);
     return bar;
   }

@@ -116,6 +116,9 @@
   --select-option-bg: var(--panel);
   --select-option-fg: var(--fg);
   --select-option-active-bg: color-mix(in srgb, var(--red) 16%, var(--panel));
+  /* J4-10: #e06c75 on #fff is ~3.0:1 (WCAG 1.4.3 FAIL for normal text). Use a
+     darker rose that passes 4.5:1 on white (~5.8:1). */
+  --color-error: #b83245;
 }
 
 /* ── Reset & Base ── */

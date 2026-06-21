@@ -428,7 +428,7 @@ Welcome card first-paint (clean hierarchy), "Big Brother" sender label (consiste
 - [x] **J1 — First launch → main menu / settings / zero-data** — DONE: 34 findings; gated remediation set #1 (9 fixes: launch-blockers J1-03/J1-16 + cast-photo a11y + contrast + J1-35 390px hardening) **merged PR #449** (CI green).
 - [x] **J2 — Onboarding → first understanding (casting interview, premiere, meeting houseguests)** — DONE: 20 findings (J2-01…J2-20). ⚠️ J2-CI: blank-transcript was headless artifact, not product defect. Gated remediation set #2 (6 fixes: J2-01/08/11/12/19/20) **merged PR #465** (CI green). Deferred: J2-07/14/16/17/18 + design-level J2-05/09/10/13/15 → Phase-4 backlog.
 - [x] **J3 — Core loop → playing a round (lingering, talking, live narration, reveals)** — DONE: 25 findings (J3-01…J3-25). Gated remediation set #3 (8 fixes: J3-09/10/16/17/18/24/25 + progress bar aria-description). Deferred: J3-05/06 (engine investigation) + J3-07/08/11/12/13/14/15/19/20/21/23 → Phase-4 backlog / engine work queue.
-- [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 7 findings (J4-01…J4-07). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label). Verified green: all J3-16/17/18/25 fixes confirmed in live capture. Deferred: J4-04/05/06/07 → Phase-4 backlog.
+- [x] **J4 — Weekly loop decision-card deep-dive (HOH comp-intent, nominations, veto, eviction-vote)** — DONE: 28 findings (J4-01…J4-28). Gated remediation set #4 (3 fixes: J4-01 focus / J4-02 role / J4-03 dismiss label) **merged PR #470** (CI green). Gated remediation set #5 (7 fixes: J4-08 confirm label / J4-09 alert region / J4-10 contrast / J4-11 tap target / J4-12 describedby / J4-13 copy / J4-14 aria-describedby). J4-22/25 closed (dup). Deferred: J4-04/05/06/07/15…21/23/24/26/27/28 → Phase-4 backlog / engine work queue.
 
 Each journey: capture → fan out to 5 specialists → synthesize/de-dupe → consolidated remediation → **GATE (peer review)** → validate → compact → advance.
 
@@ -460,6 +460,8 @@ J4 used a targeted premiere-gate clearing strategy: after `createCharacter`, `/a
 
 ### Findings index (J4)
 
+#### Gated set #4 (lead capture + J4-01…03 specialist de-dup)
+
 | ID | Severity | Status | One-line |
 |---|---|---|---|
 | J4-01 | HIGH-PRIORITY POLISH | FIXED | Post-stream `messageInput.focus()` in `chat.js:3232` unconditionally overrides `card.focus()` — focus lands on the composer, not the decision card |
@@ -469,6 +471,32 @@ J4 used a targeted premiere-gate clearing strategy: after `createCharacter`, `/a
 | J4-05 | OUT-OF-LANE | OPEN | Premiere gate clears (targeted group intro strategy works) but `state_post_intros.moment` is still "premiere" before the HOH nudge; gate progress not surfaced to the player in real-time (J3-07/08 deferred) |
 | J4-06 | OUT-OF-LANE | OPEN | Game remained at `hoh-competition` at end of run — model didn't call `advanceGame` enough times to resolve HOH; same root cause as J3-05 (anti-sycophancy stall) |
 | J4-07 | UX REFACTOR BACKLOG | OPEN | `barFill: "0%"` throughout run; correct (no evictions occurred), but confirms no dynamic update happened — bar will only update when the first eviction fires (expected) |
+
+#### Gated set #5 (5-specialist consolidation, de-duped)
+
+| ID | Specialist | Severity | Status | One-line |
+|---|---|---|---|---|
+| J4-08 | content/a11y | LAUNCH-BLOCKING | FIXED | Confirm label revert in catch block drops the `self-evict` irreversibility signal — "Confirm — this is binding" replaces "Confirm — leave the game (final)" on error retry |
+| J4-09 | content/a11y | HIGH | FIXED | `.odec-err` has no `role="alert"` / `aria-live` — SR users get no announcement when a submission fails (WCAG 4.1.3) |
+| J4-10 | content/a11y | HIGH | FIXED | `.odec-err` uses `--red` (#e06c75 on #fff ≈ 3.0:1) — WCAG 1.4.3 FAIL in light theme; dark theme passes (6.4:1) |
+| J4-11 | content/a11y + visual | HIGH | FIXED | Dismiss `×` is 32×31px — below the project's 44×36 coarse-pointer floor; WCAG 2.5.5 fail |
+| J4-12 | content/a11y | HIGH | FIXED | Card focus lands on `role="form"` container with no `aria-describedby` to the instruction note — SR user hears title but not the "your selection only" instruction (WCAG 4.1.2) |
+| J4-13 | content/a11y | POLISH | FIXED | "Just color" in non-binding comp-round note is film/TV production jargon; new players may not parse it |
+| J4-14 | content/a11y | POLISH | FIXED | Progress bar uses `aria-description` (draft ARIA 1.3, inconsistent AT support) — replaced with `aria-describedby` + hidden `<span>` |
+| J4-15 | content/a11y | POLISH | OPEN | Premiere tutorial dismiss button `min-height: 24px` is the WCAG 2.5.8 floor, not a safe touch target; project floor is 44×36 |
+| J4-16 | flows | HIGH | OPEN | Dismiss re-arm gap — after dismiss, the `rearmFromStatus` polling loop (15s) re-shows the card if the engine still reports `pending`; player who dismisses to "decide in conversation" gets the card back unexpectedly |
+| J4-17 | flows | HIGH | OPEN | Binding vs non-binding comp-round title is identical ("Competition round — your approach this round") — the only distinction is in the button label and note text; a binding first-round card looks identical to a non-binding flavor round |
+| J4-18 | flows | HIGH | OPEN | Engine stall (J3-05/J4-06) produces zero FE signal — the card disappears, the bar stays at 0%, and there is no "decision processing" or "something went wrong" state; player has no way to know if the game is frozen or just slow |
+| J4-19 | flows | POLISH | OPEN | Post-confirm prefill "I've made my decision — let's see how the house takes it." is prescriptive — it puts words in the player's mouth; an empty box (or prompt-only placeholder) better preserves player voice |
+| J4-20 | interaction | HIGH | OPEN | Disabled confirm has no hint — `opacity: .4; cursor: not-allowed` but no tooltip, no `aria-describedby` on the disabled state, no explanation of why it's disabled or what to do (WCAG 3.3.2 — instructions for user input) |
+| J4-21 | interaction | POLISH | OPEN | No ambient pending indicator post-dismiss — after the player dismisses to decide in conversation, there is no persistent "decision pending" signal anywhere; the only cue is memory |
+| J4-22 | interaction | BACKLOG | CLOSED (J4-08) | Error state confirm button text inconsistency — addressed by the `confirmLabelFor()` fix in J4-08 |
+| J4-23 | visual | HIGH | OPEN | Card has no scrim / figure-ground isolation — the decision card blends into the `#chat-history` background with no shadow, backdrop, or overlay; the `box-shadow` token `--win-shadow` is defined but not applied |
+| J4-24 | visual | HIGH | OPEN | All option chips are visually identical regardless of decision kind — no risk differentiation between a "compete" comp chip and an "eviction vote" chip; eviction stakes are visually indistinguishable from a practice round |
+| J4-25 | visual | POLISH | CLOSED (→ J4-11) | Dismiss button 31×32px below 44px — merged with J4-11 (same finding from two lenses) |
+| J4-26 | IA | HIGH | OPEN | No persistent phase label after card closes — the player sees "Week 1 / HOH competition" only while in the sidebar; once the decision card closes there is no on-screen reminder of where in the week's flow they are (same class as J3-07) |
+| J4-27 | IA | HIGH | OPEN | Tutorial card header "Welcome to the house — premiere week" is stale in non-premiere phases — shows "premiere week" copy during HOH competition; no dynamic graduation (same class as J3-11, now confirmed with live HOH capture) |
+| J4-28 | IA | POLISH | OPEN | No signpost from decision card to cast panel — the nomination/eviction cards show houseguest names but no affordance to open the cast roster for context |
 
 ### J4-01 — Post-stream `messageInput.focus()` overrides decision card focus · HIGH-PRIORITY POLISH · FIXED
 
@@ -516,6 +544,37 @@ J4 used a targeted premiere-gate clearing strategy: after `createCharacter`, `/a
 | Decision card: `role="group"` → `role="form"` | `static/js/orwellDecision.js` | J4-02 |
 | Dismiss `aria-label="Dismiss"` → descriptive | `static/js/orwellDecision.js` | J4-03 |
 
-**Deferred from J4:**
+**Deferred from J4 gated set #4:**
 - J4-04 (`data-binding` attribute) — cosmetic, behavior correct
 - J4-05/06 (engine progression stall) — engine investigation
+
+---
+
+## Journey 4 — remediation (gated set #5)
+
+**Scope:** 5-specialist consolidation: J4-08 (launch-blocking confirm label revert) + J4-09/10/11/12/13/14 (a11y fixes from content/a11y specialist). Closes the top items from all 5 lenses; defers design-level and engine-adjacent items.
+
+| Fix | File | J4 Finding |
+|---|---|---|
+| Add `confirmLabelFor(kind, binding)` helper; use in catch block | `static/js/orwellDecision.js` | J4-08 |
+| Pre-declare `role="alert" aria-live="assertive" aria-atomic="true"` error container in render | `static/js/orwellDecision.js` | J4-09 |
+| `.odec-err` color: `var(--red)` → `var(--color-error, var(--red))`; add `--color-error: #b83245` in `:root.light` | `static/js/orwellDecision.js` + `static/style.css` | J4-10 |
+| `.odec-x` dismiss: add `min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;` | `static/js/orwellDecision.js` | J4-11 |
+| `card.setAttribute("aria-describedby", CARD_ID + "-note")` + `note.id = CARD_ID + "-note"` | `static/js/orwellDecision.js` | J4-12 |
+| "Just color" → "No stakes here" in non-binding comp-round note | `static/js/orwellDecision.js` | J4-13 |
+| Replace `aria-description` with `aria-describedby` + hidden `<span>` on progress bar | `static/js/orwellSeasonProgress.js` | J4-14 |
+
+**Validation:** 13 new source-pinned tests in `tests/test_j4s5_decision_card_a11y.py` — 13/13 passed. Full FE suite: **1814 passed** (0 failures).
+
+**Deferred from gated set #5:**
+- J4-15 (tutorial dismiss tap target 24px) — low-priority polish; separate ticket
+- J4-16 (dismiss re-arm gap) — needs owner decision on re-arm semantics
+- J4-17 (binding badge visual) — design-level; Phase-4 backlog
+- J4-18 (engine stall zero FE signal) — engine investigation (J3-05 / J4-06 cluster)
+- J4-19 (prefill prescriptive) — owner preference call
+- J4-20 (disabled confirm no hint) — requires design for the hint placement
+- J4-21 (ambient pending indicator) — design-level
+- J4-23 (card no scrim) — design-level; Phase-4 backlog
+- J4-24 (chips identical no risk signal) — design-level
+- J4-26/27 (phase label / tutorial graduation) — J3-07/J3-11 cluster; needs design decision
+- J4-28 (cast panel signpost) — Phase-4 backlog
