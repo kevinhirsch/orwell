@@ -137,7 +137,7 @@ import { onNarrowChange } from './platform.js';
           font-size: .72em; font-weight: 700; letter-spacing: .02em;
           background: var(--accent, var(--red, #e06c75)); color: #fff;
         }
-        #orwell-status .os-roster-h { opacity: .55; font-size: .8em; margin: .4rem 0 .15rem; }
+        #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }
         #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
         #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
         #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
@@ -349,6 +349,14 @@ import { onNarrowChange } from './platform.js';
 
     const out = house.filter((h) => h.status !== "active");
     const rows = [];
+    // S3-1: include the player as a roster row while still in the house, so the visible
+    // list matches the "active/total" count (which counts the player as a houseguest) —
+    // otherwise the header read "16/16" above a list of only the 15 NPCs.
+    if (playerActive) {
+      const youName = state.player && state.player.name ? state.player.name : "You";
+      rows.push('<div class="os-hg os-you"><span>' + esc(youName) +
+        '</span><span class="os-seat">you</span></div>');
+    }
     house.filter((h) => h.status === "active").forEach((h) => {
       rows.push('<div class="os-hg"><span>' + esc(h.name) + "</span></div>");
     });
