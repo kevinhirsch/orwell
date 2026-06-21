@@ -2079,6 +2079,37 @@ def main() -> int:
                   f"P1: the ONE cast-photo instruction lives in the window body ({cast_win})")
             check(cast_win.get("skip") is True,
                   f"P1: the OPTIONAL 'Skip for now' affordance is present ({cast_win})")
+            # A1 / J1-25 + J1-23: the cast-photo box is now a PROPER modal dialog. The audit
+            # deferred its #1 launch-blocker (focus escaped into the chat; the card floated over
+            # live narration with no scrim) to "a per-window modal option" — this is it: aria-modal,
+            # a backdrop scrim that covers the viewport (figure/ground), and an INERT background
+            # (the chat behind can't take focus). The scrim/inert lift the instant the box closes.
+            modal_a11y = f4.evaluate("""() => {
+              const el = document.getElementById('orwell-headshot');
+              if (!el) return { ok: false };
+              const scrim = document.querySelector('.ow-scrim[data-ow-scrim="orwell-headshot"]');
+              const sr = scrim ? scrim.getBoundingClientRect() : null;
+              const kids = [...document.body.children];
+              return {
+                ariaModal: el.getAttribute('aria-modal'),
+                role: el.getAttribute('role'),
+                scrim: !!scrim,
+                scrimCovers: !!sr && sr.width >= window.innerWidth - 2 && sr.height >= window.innerHeight - 2,
+                bgInertCount: kids.filter(n => n.inert || n.hasAttribute('inert')).length,
+                dialogInert: el.inert || el.hasAttribute('inert'),
+                scrimInert: !!scrim && (scrim.inert || scrim.hasAttribute('inert')),
+                focusInside: el.contains(document.activeElement),
+              };
+            }""")
+            check(modal_a11y.get("ariaModal") == "true" and modal_a11y.get("role") == "dialog",
+                  f"P1/J1-25: the cast-photo box is a proper modal dialog (aria-modal) ({modal_a11y})")
+            check(modal_a11y.get("scrim") is True and modal_a11y.get("scrimCovers") is True,
+                  f"P1/J1-23: a backdrop scrim covers the viewport behind the cast-photo ({modal_a11y})")
+            check((modal_a11y.get("bgInertCount") or 0) >= 1
+                  and modal_a11y.get("dialogInert") is False and modal_a11y.get("scrimInert") is False,
+                  f"P1/J1-25: the background is inert; the dialog + its scrim are not ({modal_a11y})")
+            check(modal_a11y.get("focusInside") is True,
+                  f"P1/J1-25: focus lands INSIDE the dialog, never on body ({modal_a11y})")
             # SKIP closes the box: the engine drops "castPhoto" from `missing`, so it never re-prompts
             # (and the chat was usable the whole time).
             _photo_wanted["v"] = False
@@ -2086,6 +2117,15 @@ def main() -> int:
             f4.wait_for_timeout(900)
             check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
                   "P1: skipping the cast photo closes the box (the step is optional)")
+            # …and closing tears down ALL the modal chrome (no stuck scrim, no permanently-inert page).
+            post_modal = f4.evaluate("""() => ({
+              scrimGone: !document.querySelector('.ow-scrim[data-ow-scrim="orwell-headshot"]'),
+              bgRestored: [...document.body.children].every(n => !n.inert && !n.hasAttribute('inert')),
+            })""")
+            check(post_modal.get("scrimGone") is True,
+                  "P1/J1-25: closing the cast-photo removes the backdrop scrim")
+            check(post_modal.get("bgRestored") is True,
+                  "P1/J1-25: closing the cast-photo un-inerts the background")
             check(f4.evaluate("sessionStorage.getItem('orwell-interview-open')") == "1",
                   "P1: the fresh-session fence is still set once per interview (F7)")
             f4.close()
