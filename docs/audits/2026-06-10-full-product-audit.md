@@ -1877,12 +1877,14 @@ it is a *new* refinement record plus its implementation. Its standing claim is t
 in the ADR: any future sync or consequence change must keep the open set recordable,
 consequenceable, recallable, and narratable in full while only ever constraining the closed set.
 
-## 2026-06-20/21 — live-LLM walkthrough audit (casting → week 1 complete) — MERGED + one open item
+## 2026-06-20/21 — live-LLM walkthrough audit (casting → weeks 1–2) — fixes MERGED + open log
 
 Pre-launch end-to-end pass driving the **real FE + real engine + a real LLM** (`deepseek-v4-pro`
 via OpenRouter) under headless Playwright — the path the automated gates structurally can't exercise
-(they stub the LLM). Drove casting → premiere → a full first week to completion. Findings, all rooted
-in the documented **model-under-calls-progression-tools** failure class:
+(they stub the LLM). Drove casting → premiere → **week 1 (player won HOH) → week 2 (player nominated,
+veto not won, player EVICTED pre-jury)**. Per the owner directive, **every** observation is logged
+below (fixed + open + minor), no matter how small. Most are rooted in the documented
+**model-under-calls-progression-tools** failure class.
 
 - **#411** (State-1 UX) — themed the casting/headshot file input; silenced dropped voice-probe 404s. *MERGED.*
 - **#415** (game-start / premiere) — casting framing tells the model the **headshot is on file** so it
@@ -1896,11 +1898,40 @@ in the documented **model-under-calls-progression-tools** failure class:
   in" card suppress the next round. *MERGED.* **Live-verified:** a complete week 1 (HOH crown → noms →
   veto comp → veto ceremony/replacement → eviction → week 2) ran with **0 page errors** and no board desync.
 
-**Still open (this session):**
-1. **Stale narration after a silent forced-advance.** With a heavy under-caller, the model's *prose* can
-   lag the engine across a silent advance (observed: narrated "ten houseguests still in" while the engine
-   had 7). The decision **card** now shows engine truth (#434), but the narrative text can be momentarily
-   stale until the next turn. This is the open/closed split (ADR 0005) at the narration seam — the closed
-   set is correct; the open prose drifts. Candidate fixes: a post-silent-advance re-narration nudge, or
-   extending the 0065 desync guard to catch a stale board-fact (still-in count) in narration. Lower
-   severity than the card stall (the authoritative state + card are right), but visible.
+### Complete issue log (LW = live-walkthrough; every observation)
+
+**Fixed + merged this session:**
+- **LW1** [#411] Unstyled native OS file input on the casting/headshot gate + Settings profile picture.
+- **LW2** [#411] Dropped voice-vertical 404s (`/api/stt/stats`, `/api/tts/stats`) on first paint under the game build.
+- **LW3** [#415] Game wouldn't reliably START — the model under-called `createCharacter` (looped asking for a
+  photo already on file). Fix: casting framing says the headshot is handled + a `createCharacter` finalize fallback.
+- **LW4** [#415] Premiere meet-everyone progression (`markHouseguestMet` auto-belt) — defense-in-depth for under-callers.
+- **LW5** [#420] Staged comp ran ~14 elimination rounds (slog). Fix: batched to ~4–8 (`STAGED_TARGET_ROUNDS`).
+- **LW6** [#420] Per-round comp cards read as binding when only round 1 binds. Fix: `binding` flag + flavor presentation.
+- **LW7** [#434] Decision card did NOT arm after a silent forced-advance — player stranded with no card (reload-only).
+  Fix: arm from `gameStatus` at turn-end.
+- **LW8** [#434] A lingering "✓ Locked in" (`.odec-done`) card suppressed the NEXT round's card during its 4s fade.
+
+**Open (carry forward):**
+- **LW9** [open · low-med] **Stale model PROSE after a silent forced-advance.** Narrated "ten houseguests still in"
+  while the engine had 7. The card/board show engine truth (#434); only the prose drifts (ADR-0005 open-set seam).
+  Candidate: a post-silent-advance re-narration nudge, or extend the 0065 desync guard to catch a stale still-in count.
+- **LW10** [open · med] **Pre-jury player eviction has no terminal-recap surface.** The player was voted out week 2
+  (status=`evicted`, `finished:false`); the 0048 retrospective only fires on SEASON finish (winner crowned), so the
+  evictee gets only the model's prose, and can keep nudging the house forward **one week per turn** (observed →
+  week 3) with no clean "your season is over → skip to results" affordance. 0046 specifies a *terminal recap*.
+  The model handled it gracefully in prose ("the door has sealed… let me fast-forward"), but there is no real
+  fast-forward and no structured recap at the player's own exit. *Largest open UX gap found this session.*
+- **LW11** [open · minor/pacing] **Eviction night is long** (~5 min / many turns for the staged secret-ballot reveal
+  + goodbye-message authoring). Candidate pacing trim, akin to the staged-comp batching (#420).
+
+**To verify (observed but not yet confirmed as defects):**
+- **LW12** [verify] **Premiere "welcome/tutorial" box lingers into the HOH phase** (carried from #415's known
+  follow-ups) — should dismiss once premiere ends. Re-confirm live.
+- **LW13** [verify] **Reasoning/thinking text** appeared in the message-text extraction during the PRE-F8 run.
+  F8 (#435, "reply-only body buffer") landed for exactly this class; re-verify post-F8 that reasoning never reaches
+  the public bubble body in the game build (CLAUDE.md hard rule).
+- **LW14** [verify] **An evicted (pre-jury) player must never be offered a decision card** in the continuing house
+  weeks. Week-3 noms observed were NPCs (likely fine), but confirm the out-player surface arms no card.
+- **LW15** [verify · pacing] Staged rounds still depend on the model advancing (or the forced belt) each round; with
+  a heavy under-caller the comp leans on the L39b forced advance — confirm #420's fewer rounds keep this acceptable.
