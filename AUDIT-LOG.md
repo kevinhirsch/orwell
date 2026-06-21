@@ -98,7 +98,7 @@ The 2026-06-18/19 live runs (DOC-ONLY) are the starting baseline. Open launch-bl
 | S1-B | State 1 | POLISH | ROOT-CAUSED | Login version "v4.29" contrast **1.89:1** (AA fail) — `.version-label opacity:0.25` crushes a 9.43:1 pair. Borderline-incidental (decorative build string) but measurable; opacity ~0.6 → 4.43:1. |
 | S1-C | State 1 | POLISH | ROOT-CAUSED | **One-frame full-white FOUC flash** on cold load (narrow `f-001`=100% white → dark `f-002`) — UA blank canvas before dark-theme CSS paints; fix: inline dark bg on `html`/`body` in `index.html` head. |
 | S1-1L | State 1 | LATENT | ROOT-CAUSED | Splash-suppression is timing-fragile (TRANS-1): `body.ow-onboarding` set inside `mountWelcome` after the async `route()` chain — a slow engine `/state`/`/models` could let the splash paint before the modal (latent S1-1 regression). Harden: suppress at top of `route()` when `started===false`. |
-| BG-1 | X-cut | POLISH (a11y) | ROOT-CAUSED | **Operator report**: animated bg "not rendering". Under `prefers-reduced-motion` the canvas generator is skipped (`theme.js:644`) so the 6 **canvas-only** patterns (incl. default telescreen→perlin-flow) render **fully blank** (no static fallback). Not my change / not the CSP merge (both ruled out). Fix: draw one static frame. **Pending operator decision.** |
+| BG-1 | X-cut | POLISH (a11y) | **FIX-APPLIED (verified)** | **Operator report**: animated bg "not rendering". Under `prefers-reduced-motion` the canvas generator was skipped (`theme.js:644`) → the 6 canvas-only patterns (incl. default telescreen→perlin-flow) rendered **fully blank**. Not my change / not the CSP merge (both ruled out). **Fix:** `_bgStaticInit` renders a STATIC frame (bounded+restored rAF; zero motion). Verified; FE suite green. Awaiting `/diff` gate. |
 | S1-3 | State 1 | POLISH | DEFERRED→S2 | Raw `<input type=file>` — re-verify on the casting **headshot card** (State 2) + Account/new-season. |
 | S1-P1 | State 1 | n/a | VIEWED (ruled benign) | Two-window SAME-identity parity: only divergence is the **random rotating Tip**, which is covered by the welcome modal (pixel mismatch 0%) → legitimate client-side nondeterminism, **not** a consistency defect. |
 | S1-P2 | State 1 | n/a | VIEWED (ruled benign) | Mobile Settings nav = **horizontal-scroll tab strip** (tabs reachable; "Appea…" peek = affordance). DEFECT_SCAN `offscreen` is a false positive for a scroll container → **legitimate reflow**, not clipping. |
@@ -279,10 +279,22 @@ launch-blockers. Branch synced onto current `main` (merge `9bca2b1`).
   `<html>`; my html bg can't occlude it; probe confirms canvas present with my change in the served file). NOT
   the CSP merge (purely additive — added `fonts.*`; canvas needs no CSP directive). The merge did not touch
   `theme.js`/`style.css`.
-- **Fix options (a product/a11y posture call — ruling #18 deliberately allowed "static or off"):**
-  (a) under reduced-motion, draw **one static frame** of the particle field (texture, zero motion — the truest
-  reduced-motion); (b) CSS-gradient fallback for canvas-only patterns; (c) leave WAI. **Recommend (a).** Deferred
-  pending operator decision.
+- **Decision (operator):** option (a) — render a **static frame**.
+- **FIX APPLIED (`theme.js`), VERIFIED:** new `_bgStaticInit(initFn)` runs the existing generator but bounds
+  `requestAnimationFrame` to a finite synchronous burst (n<90) then **restores** the real rAF — the particle
+  field builds up *off-paint* and freezes (full texture, **zero ongoing motion**); `applyBgPattern` routes the
+  reduced-motion case through it instead of skipping. Probe (`bgprobe4`/`bgapp`): `reducedMotion:reduce` →
+  canvas **present + drawn** (constellations 3677 px / petals 892 px) and **`animating=false`** (stable across
+  1.6s samples); `no-preference` → still **`animating=true`** (892→1144). `node --check` clean. FE suite green
+  (the A5 source-contract test `test_a5_animated_particles_honor_prefers_reduced_motion` updated to assert the
+  new "static, bounded+restored rAF" contract — passes).
+- **OBS-8 [known minor limitation]:** under reduced-motion, a **window resize** re-inits + clears the canvas
+  (the generator's `resize()` runs, but the frozen draw loop doesn't repaint) → the bg goes blank until the next
+  theme re-apply/reload. Infrequent + recoverable; a clean fix needs per-generator resize-repaint and is left as
+  a follow-up. (The reported issue — blank bg on load — is fixed.)
+- **OBS-9 [info]:** the `auditadmin` account (created via `setup.py`) resolves to `bg-pattern: none` on the app
+  (no particles) — a default-account quirk, not the player default (telescreen→perlin-flow). The fix was
+  validated via the login page, which drives the **same** `theme.js applyBgPattern`.
 
 ### Minor-observations log (per the "log EVERY issue, no matter how small" directive)
 - **OBS-1 [low]:** with no saved theme the bg **pattern is non-deterministic across loads** (observed embers →
