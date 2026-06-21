@@ -162,7 +162,7 @@ def test_warm_portraits_shoots_after_author_warm_finished():
 
 
 def test_portraits_NEVER_shoot_before_authoring_completes():
-    """The load-bearing invariant: hold a face until ITS houseguest is model-authored (ADR 0012)."""
+    """The load-bearing invariant: hold a face until ITS houseguest is model-authored (ADR 0013)."""
     eng = _FakeEngine(_WARM_RES)
     auth = _FakeAuthoring(auto_finish=False)  # authoring is in-flight; the gate stays closed
     port = _FakePortraits()
@@ -172,7 +172,7 @@ def test_portraits_NEVER_shoot_before_authoring_completes():
     assert port.calls == 0, "a portrait was shot before authoring finished"
     assert P.warm_state("u1")["authorDone"] is False
 
-    auth.finish_npc("npc:1")  # ADR 0012: the NPC's OWN authoring (not the whole-cast gate) shoots its face
+    auth.finish_npc("npc:1")  # ADR 0013: the NPC's OWN authoring (not the whole-cast gate) shoots its face
     _drive()
     assert port.calls == 1, "the portrait did not shoot once its houseguest was authored"
 
@@ -217,7 +217,7 @@ def test_portraits_gate_PER_NPC_each_face_shoots_only_after_that_npc_is_authored
 
 
 def test_portraits_unauthored_npc_gets_NO_face_even_at_authoring_end():
-    """ADR 0012 — an NPC the model never authored gets NO photo (a seeded/un-authored face would
+    """ADR 0013 — an NPC the model never authored gets NO photo (a seeded/un-authored face would
     mismatch the real, authored text). The whole-cast `then` releases ONLY the fallback gate; it must
     NOT shoot a never-authored NPC. That NPC's face stays unshot here — the portrait backfill shoots it
     if/when its authoring actually lands. (Overturns the prior #7 'whole-cast fallback shoots' behavior.)"""
@@ -234,9 +234,9 @@ def test_portraits_unauthored_npc_gets_NO_face_even_at_authoring_end():
     _drive()
     assert port.shot_ids == ["npc:1"]
 
-    auth.finish()  # whole-cast done → ADR 0012: the never-authored npc:2 must NOT shoot
+    auth.finish()  # whole-cast done → ADR 0013: the never-authored npc:2 must NOT shoot
     _drive()
-    assert port.shot_ids == ["npc:1"], "ADR 0012: an unauthored NPC must NOT get a face"
+    assert port.shot_ids == ["npc:1"], "ADR 0013: an unauthored NPC must NOT get a face"
     assert "npc:2" not in port.shot_ids
     assert P.warm_state("u1")["authorDone"] is True
 

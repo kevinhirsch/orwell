@@ -1,4 +1,4 @@
-"""ADR 0012 — a cast photo requires a MODEL-AUTHORED identity.
+"""ADR 0013 — a cast photo requires a MODEL-AUTHORED identity.
 
 The portrait warm (`orwell_prewarm.warm_portraits`) must shoot a face ONLY when its houseguest's
 own authoring gate has fired (a real model write-back via `_on_authored`). An NPC the model could
@@ -57,7 +57,7 @@ def test_photo_only_for_model_authored_npc():
     _drive()
     assert set(fake.shot) == {"npc:1", "npc:3"}, \
         f"only model-authored NPCs get a photo (got {fake.shot})"
-    assert "npc:2" not in fake.shot, "an un-authored NPC must get NO photo (ADR 0012)"
+    assert "npc:2" not in fake.shot, "an un-authored NPC must get NO photo (ADR 0013)"
 
 
 def test_no_photo_when_nothing_authored():
