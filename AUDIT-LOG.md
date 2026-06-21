@@ -387,14 +387,26 @@ ask-photo → box sequence is correct.)*
     **before** the box appears mid-interview, so the grip is clear. Removing the stale overlay in the repro
     (mirroring the real DOM state) made the drag pass.
 
-### ⏸️ Follow-up finding (operator call) — "skipping the welcome" after a backend factory reset
-The operator affirmed the welcome-first sequence is correct, so this is logged, **not** fixed. A **backend**
-factory reset does not clear the **client** `localStorage['orwell-welcome-seen:<user>']`, so a returning
-browser can take `orwellOnboarding.route()`'s `else` branch (welcome already "seen") and skip the welcome on
-the new season's first open — matching the one-off "skipping the welcome" report. The design comment (L561)
-says the welcome should show "on EVERY fresh game/season". **Question for the owner:** should a new-season /
-factory reset call `clearWelcomeSeen()` (client-side) so the welcome re-shows each season? Ambiguous → owner's
-call; no change made.
+### ✅ "Skipping the welcome" after a backend factory reset — FIXED (owner authorized "clear on new season")
+- 🌳 **Root cause:** the per-user `localStorage['orwell-welcome-seen:<user>']` reload-debounce is cleared
+  only by the **client-initiated** restart hooks (`settings.js` reset-progress, `orwellNewSeason.js`) via
+  `_orwellMarkRestart → clearWelcomeSeen()`. A **backend/host** factory reset runs server-side and never
+  reaches those hooks, so a returning browser took `route()`'s `else` branch (welcome already "seen") and
+  skipped the welcome on the new season's first open — though the design (L561) says it shows "on EVERY
+  fresh game/season".
+- 🚧 **Fix (`orwellOnboarding.js`):** in `route()`, clear the stale marker when the engine reports a
+  **genuinely fresh casting** (server-derived: `casting.known` has no captured fields) that **this tab
+  session never opened** (`SEAT_TAKEN_KEY` captured **before** `openFreshInterviewSession()` can set it).
+  The server-derived empty-intake signal survives a backend reset (the wiped engine starts empty), and the
+  seat gate kills the post-dismiss race (marker just set + producer turn in flight is **not** mistaken for
+  a new season). No engine change; back-compatible.
+- ✅ **VERIFIED in-browser** (`repro_welcome.py`, stubbed pre-game state + model): **new season / fresh tab**
+  (stale marker, no seat) → welcome **re-shown**, marker **cleared** ✓ · **same-session mid-interview reload**
+  (marker set, seat taken) → welcome **NOT re-popped**, marker kept ✓. New source-pin gate
+  `test_welcome_reshows_after_a_backend_reset_via_fresh_intake`; `test_oobe_onboarding` green (31 passed).
+- 📌 **Known residual edge (documented):** a hard same-tab F5 *immediately* after a backend reset keeps the
+  tab's `sessionStorage` seat flag, so that one path still skips — fully closing it needs a server-side
+  per-game nonce (out of scope for launch-week OOBE polish; the common reopen / new-tab path is fixed).
 
 ### Environmental (pre-existing, NOT a regression)
 `test_h2b_all_model_pools::test_runtime_every_model_select_offers_a_subset_of_the_chat_pool` and
