@@ -163,6 +163,11 @@ build_engine() {
     exit 1
   fi
   npm run build
+  # Production hardening: the engine runs BUNDLED (dist/main.js + the 3 pinned native deps), so the
+  # host needs only the RUNTIME tree after the build. Drop the dev/build chain (esbuild, vitest,
+  # cucumber, …) so the deployed box doesn't carry its advisories (npm audit: all dev-chain — see
+  # README "Dependency advisories"). Non-fatal; an update re-installs it to rebuild.
+  npm prune --omit=dev || echo "WARN: npm prune --omit=dev failed (dev deps remain; harmless)"
 }
 
 prefetch_model() {
@@ -171,8 +176,13 @@ prefetch_model() {
   # deterministic recall if it still can't — the game never breaks on embeddings).
   step "embedding model prefetch (fastembed, pinned — ADR 0004)"
   cd "$APP_DIR"
-  node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" \
-    || echo "WARN: embedding model prefetch failed — the engine will retry at boot and fall back to deterministic recall meanwhile"
+  # A11: filter onnxruntime's harmless LXC `pthread_setaffinity_np … error code: 22` from the visible
+  # output (it can't be silenced via fastembed-js's API; the pool just runs unpinned). Everything
+  # else still surfaces.
+  if ! node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" \
+       2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2); then
+    echo "WARN: embedding model prefetch failed — the engine will retry at boot and fall back to deterministic recall meanwhile"
+  fi
 }
 
 frontend_deps() {

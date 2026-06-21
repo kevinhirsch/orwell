@@ -273,11 +273,23 @@ if ! (npm ci && npm run build); then
   exit 1
 fi
 
+# Production hardening: the host runs the BUNDLED engine (dist/main.js + the 3 pinned native deps),
+# so once the build above is done it needs only the RUNTIME tree. Drop the dev/build chain
+# (esbuild, vitest, cucumber, …) so the deployed box doesn't carry its advisories (npm audit: all
+# dev-chain — see README "Dependency advisories"). Non-fatal; the next update re-installs it to build.
+npm prune --omit=dev || echo "WARN: npm prune --omit=dev failed (dev deps remain; harmless)"
+
 # Refresh the pinned embedding model cache (ADR 0004 / E86a) — a no-op when already cached;
 # non-fatal on failure (the engine falls back to deterministic recall and retries at boot).
 echo "==> embedding model prefetch (no-op when cached)"
-node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/models" \
-  || echo "WARN: embedding model prefetch failed — engine will retry at boot"
+# A11: onnxruntime logs a harmless `pthread_setaffinity_np … error code: 22` (twice) inside an LXC
+# restricted cpuset — the thread pool just runs unpinned (inference unaffected; fastembed-js doesn't
+# expose ORT's intraOpNumThreads to silence it at the source). Filter that one benign stderr line so
+# the update output doesn't look alarming; every other message still surfaces.
+if ! node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/models" \
+     2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2); then
+  echo "WARN: embedding model prefetch failed — engine will retry at boot"
+fi
 
 echo "==> refresh front-end deps"
 ops_progress_step 3 "refreshing front-end deps"
