@@ -1425,6 +1425,32 @@ def main() -> int:
               localStorage.removeItem('orwell-gadget-order:' + u);
             }""")
 
+            # Side-swap (⇄): swaps the dock AND the nav sidebar in LOCKSTEP. The bug was two
+            # unsynced side-systems — ⇄ slid the sidebar over via flex `order` but its hamburger
+            # stayed stranded over the relocated dock (a "sideways caret under the hamburger"
+            # overlap). The fix makes the sidebar side the single source of truth: ⇄ routes
+            # through the sidebar swap and syncRailSide mirrors the dock to the OPPOSITE edge.
+            page.evaluate("""() => { const sb = document.getElementById('sidebar'); if (sb) sb.classList.remove('hidden'); }""")
+            swap = page.evaluate("""() => {
+              const sb = document.getElementById('sidebar');
+              const snap = () => ({ right: sb.classList.contains('right-side'),
+                                    gs: document.body.getAttribute('data-gadget-side') });
+              const before = snap();
+              document.getElementById('gadget-rail-swap').click();
+              const mid = snap();
+              document.getElementById('gadget-rail-swap').click();  // swap back
+              const after = snap();
+              return { before, mid, after };
+            }""")
+            # one ⇄ flips the sidebar side AND mirrors the dock to the opposite edge together
+            check(swap["mid"]["right"] != swap["before"]["right"]
+                  and (swap["mid"]["gs"] == "left") == swap["mid"]["right"],
+                  f"L-swap: ⇄ flips the sidebar side AND mirrors the dock opposite, in sync ({swap})")
+            # a second ⇄ restores the original layout (idempotent round-trip)
+            check(swap["after"]["right"] == swap["before"]["right"]
+                  and swap["after"]["gs"] == swap["before"]["gs"],
+                  f"L-swap: a second ⇄ restores the original sides ({swap})")
+
             # 0054 strip refactor: the COLLAPSED icon strip is derived from the gadget
             # registry, filtered to the gadgets actually mounted-and-visible, in the rail's
             # current order. Collapse the rail and assert the strip maps 1:1 (same ids, same

@@ -49,6 +49,23 @@ def test_rail_is_game_build_gated_and_responsive():
     assert ".gadget-rail-body > #orwell-status { order: 1; }" in css
 
 
+def test_side_swap_is_one_coordinated_path_not_two_desynced_systems():
+    """The ⇄ dock button used to flip ONLY data-gadget-side: the nav sidebar slid over via
+    flex `order` but its hamburger stayed stranded over the relocated dock (the "sideways
+    caret under the hamburger" overlap). The fix makes the nav sidebar side the SINGLE source
+    of truth — the dock is mirrored to the opposite edge in syncRailSide, and ⇄ routes through
+    the sidebar swap. (Live behaviour is exercised in browser_smoke.py.)"""
+    rail = _read("static", "js", "orwellGadgetRail.js")
+    # ⇄ delegates to the ONE sidebar-swap path (no independent data-gadget-side flip as the
+    # primary action — only a fail-soft fallback when the sidebar module is absent)
+    assert "_orwellToggleSidebarSide" in rail
+    sb = _read("static", "js", "sidebar-layout.js")
+    # the sidebar exposes the single swap seam + mirrors the dock to the opposite edge
+    assert "window._orwellToggleSidebarSide" in sb
+    assert "data-gadget-side" in sb                  # the dock is DERIVED from the sidebar side
+    assert "function toggleSidebarSide" in sb
+
+
 def test_controller_persists_state_and_gates_on_content():
     js = _read("static", "js", "orwellGadgetRail.js")
     assert "data-game-build" in js                 # never in the full workspace

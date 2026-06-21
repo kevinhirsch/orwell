@@ -75,7 +75,12 @@
     else document.body.removeAttribute("data-gadget-side");
   }
   applyCollapsed(lsGet(COLLAPSE_KEY) === "1");
-  applySide(lsGet(SIDE_KEY) === "left" ? "left" : "right");
+  // The nav sidebar OWNS the layout side now (its _syncRailSideCore mirrors the dock to the
+  // OPPOSITE edge — one source of truth, so the dock + sidebar can't desync). Defer to it;
+  // fail soft to our own stored side if the sidebar module isn't up yet (it overrides on
+  // its own init sync).
+  if (window.syncRailSide) window.syncRailSide();
+  else applySide(lsGet(SIDE_KEY) === "left" ? "left" : "right");
 
   // ── controls ────────────────────────────────────────────────────────────
   function toggleCollapsed() {
@@ -84,7 +89,13 @@
   }
   function expand() { applyCollapsed(false); lsSet(COLLAPSE_KEY, "0"); }
   function toggleSide() {
-    var left = document.body.getAttribute("data-gadget-side") !== "left";
+    // The dock + nav sidebar are a PAIR on opposite edges. Swap through the SIDEBAR (the
+    // single source of truth); its _syncRailSideCore mirrors the dock to the opposite edge
+    // and moves the hamburger along. (Was: flip data-gadget-side alone → the sidebar slid
+    // over via flex order but its hamburger stayed stranded over the moved dock = the
+    // overlapping "sideways caret under the hamburger".)
+    if (window._orwellToggleSidebarSide) { window._orwellToggleSidebarSide(); return; }
+    var left = document.body.getAttribute("data-gadget-side") !== "left";  // fail-soft
     applySide(left ? "left" : "right"); lsSet(SIDE_KEY, left ? "left" : "right");
   }
   function openDrawer() { rail.classList.add("grail-open"); if (opener) opener.setAttribute("hidden", ""); }
