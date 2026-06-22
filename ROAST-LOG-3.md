@@ -204,6 +204,28 @@ So the next runner (with real egress) knows what remains, NOT inferred-as-fine:
 
 ---
 
+## Loop sweep — multi-seed full-game engine-oracle playthroughs (no model; "keep playing, find new issues")
+
+Played ~10+ full seasons to completion across seeds (`.audit-telemetry/{sweep,sweep2,inv,stall*,retro_gate,finale_scan}.mjs`),
+driving every pending mechanically and asserting the mandate invariants. **No NEW defect surfaced on the
+closed-set / Vault axes** — the results are clean re-verifications worth recording (and the negative space the
+next runner can skip):
+
+- **Vault Wall held — 0 leaks.** Scanned `getGameState`, `npcVoice`, `getVisibleStateFor`, `socialRead` at
+  EVERY decision point across multiple full games for hidden tokens (raw `trust/affinity/threat` numbers,
+  `hiddenElement`, `privateStrategy`, `soul`, `secretGoal`, `weakness`, `aptitudeScore`): **zero hits.**
+- **`seasonRetrospective` unsealing gate CORRECT.** The one player-channel tool that legitimately unseals the
+  Vault returns `null` mid-game (tested at week 2, player active) and only emits `hiddenStory` (NPC↔NPC
+  conflicts, per-voter ballots) **post-finale**. The 0048 gate works — no premature unseal.
+- **`beatSeq` strictly monotonic** across every game (no regressions, no rollback).
+- **Structure holds:** games complete with **jury of 9** + **final 2**; player-juror finales play through to a
+  crowned winner; `finale-answer` carries legal values in `appeals[]` (not `options[]`) and the FE decision card
+  **correctly** renders them (`orwellDecision.js:358-359`) — initially a suspected gap, ruled out.
+- **No engine stall exists.** Every apparent "stall" in the harness traced to a resolver/leftover-state artifact
+  (e.g. a generic resolver sending an illegal `appeal`); with correct resolution `beatSeq` never freezes and
+  games finish (~355 advances / ~446 beatSeq). Flagged here so the next runner does not mis-read a harness loop
+  as an engine bug.
+
 ## Triage summary (this session)
 
 - **[BLOCK — mission]** OPS-1 — live-LLM lane impossible here (OpenRouter not allowlisted; rotate the key).
