@@ -225,6 +225,17 @@ next runner can skip):
   (e.g. a generic resolver sending an illegal `appeal`); with correct resolution `beatSeq` never freezes and
   games finish (~355 advances / ~446 beatSeq). Flagged here so the next runner does not mis-read a harness loop
   as an engine bug.
+- **Cross-user isolation (mandate #1) held.** Two concurrent users (distinct seeds) get fully distinct rosters;
+  neither user's player appears in the other's house; rosters non-identical. Per-`X-Orwell-User` routing isolates.
+- **Presence "one place at a time" held** ("people make sense") — **0** two-rooms-at-once violations over 303
+  presence entries across a week of `whereabouts` reads.
+- **Daily-event invariant held** — 0 empty-content beats; all five weekly phases (hoh-competition → nominations
+  → veto-competition → veto-ceremony → eviction) observed each week.
+
+**Loop verdict:** the closed-set / Vault / structural-mandate axes are **robust** — engine-oracle looping has hit
+diminishing returns. The remaining bug surface this session set out to find (narration fidelity, persona drift,
+the model's actual fabrication/invention behavior) is **gated on the live LLM (OPS-1)** and cannot be advanced
+from this environment. The two NEW issues findable without a model (NARR-7, EVT-1) are logged above.
 
 ## Triage summary (this session)
 
