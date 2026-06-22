@@ -384,6 +384,16 @@ to follow on the juiciest. No theory without a traced mechanism.
 
 > Folded in from the parallel `claude/focused-turing-7d710o` session (was `ROAST-LOG-2.md`). All ~33 findings below are NEW — cross-checked absent from the Wave 1–2 findings above and from `AUDIT-LOG.md`. Lanes: A social mechanics · B distributed consistency · C narration · D UX/a11y · E deterministic-browser telemetry (VIEWED) · F test gates (all green) · G security/ops · H transient/animation · I interaction/cognitive-load.
 
+## Wave-3 remediation status (2026-06-22, on main)
+**FIXED + merged to main** (full FE suite 2260 passed; engine gates green):
+- **F-NEW-1** (`cfe60c1`) — `replacement` + `tie-break` added to `HIGH_STAKES_KINDS` (risk skin now applies).
+- **A11Y-7** (`cfe60c1`) — decision chips `.odec-opt` → 44px floor.
+- **A11Y-8 / UX-10** (`cfe60c1`, test `8f0c95d`) — finale `.ofin-btn` + new-season `.ons-btn` → 44px; `test_j5_finale_buttons_tap_target` re-pinned 36→44.
+- **SEC-1** (`18010f0`) — public-profile boot guard now refuses `ALLOWED_ORIGINS` unset/`*`/non-https under `ORWELL_PUBLIC` (+5 test cases).
+- **SEC-2** (`18010f0`) — opt-in gateway webhook verification: `PlatformAdapter.verify_webhook()` + Telegram `X-Telegram-Bot-Api-Secret-Token` constant-time check + route 403 (default-off = unchanged local use).
+
+**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-1..6/9..11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..13. *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+
 > **Filename is deliberately `ROAST-LOG-2.md`** to avoid a cross-branch write collision with the
 > first auditor's `ROAST-LOG.md` (PR #519, 64 findings, branch `claude/inspiring-archimedes-aq6hsl`;
 > its two `[BLOCK]`s are LIVE-4 staged-comp cascade skips noms+veto ceremonies, LIVE-7 eviction
