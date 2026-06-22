@@ -4786,6 +4786,14 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
     try:
         res = await orwell_engine.advance_game(user=owner)
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: the card survives a reload
+        # 0070: fire-and-forget texture enrichment for any off-screen scenes added this tick.
+        # Best-effort, background, never blocks the game advance.
+        try:
+            from src.orwell_offscreen_texture import kickoff_texture_enrichment_after_advance
+            beat_seq = res.get("beatSeq") if isinstance(res, dict) else None
+            kickoff_texture_enrichment_after_advance(owner, since_beat_seq=beat_seq)
+        except Exception:
+            pass  # fail-soft: enrichment is always optional
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

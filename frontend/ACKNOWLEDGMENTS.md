@@ -39,6 +39,13 @@ The full license texts are kept in [`licenses/`](licenses/).
   Deep Research feature (`services/research/`, `src/research_handler.py`,
   `routes/research_routes.py`, `services/search/`). Full text in
   [`licenses/DeepResearch-Apache-2.0.txt`](licenses/DeepResearch-Apache-2.0.txt).
+- **[hermes-agent](https://github.com/NousResearch/hermes-agent)** by
+  **Nous Research** — the parallel isolated-subagent fan-out orchestration
+  pattern from `tools/delegate_tool.py`. Copyright © 2025 Nous Research.
+  **MIT License.** Pattern only, no code lifted: adapted in
+  `frontend/src/orwell_offscreen_texture.py` (the 0070 off-screen texture
+  enrichment driver's `asyncio.gather` fan-out shape). Full text in
+  [`licenses/hermes-agent-MIT.txt`](licenses/hermes-agent-MIT.txt).
 
 ---
 

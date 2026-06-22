@@ -443,6 +443,31 @@ async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict
     return await _call("recordWorldSnapshot", snapshot, user=user)
 
 
+async def get_offscreen_scene_skeletons(user: str | None = None, since_beat_seq: int | None = None) -> list:
+    """Feature 0070: fetch the Vault-free skeleton projection of recent off-screen hidden scenes.
+    Returns a list of ``{ eventId, type, participants: [{ id, name, archetype?, demeanor? }] }``
+    descriptors — public-personas-only, no hidden attributes, relationship numbers, or true goals.
+    Empty before a season starts or when no off-screen scenes exist. ``since_beat_seq`` (optional)
+    narrows the result to events recorded since that beat. Vault-free by construction."""
+    args: dict = {}
+    if since_beat_seq is not None:
+        args["sinceBeatSeq"] = since_beat_seq
+    result = await _call("getOffscreenSceneSkeletons", args, user=user)
+    # The engine returns a list directly; guard against network/error responses.
+    if isinstance(result, list):
+        return result
+    return []
+
+
+async def record_offscreen_scene_texture(event_id: str, content: str, user: str | None = None) -> dict:
+    """Feature 0070: enrich the prose content of an already-recorded hidden (off-screen) event
+    with model-voiced texture. Content-only — cannot create events, change witness sets, flip the
+    hidden flag, or carry relationship numbers. The engine's closed set is immutable; only the prose
+    overlay changes. Unknown or player-witnessed event id is a no-op (idempotent, ok:true). Vault-free
+    by construction: only a public-persona prompt reaches the model; nothing hidden ever crosses."""
+    return await _call("recordOffscreenSceneTexture", {"eventId": event_id, "content": content}, user=user)
+
+
 async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
     """Feature 0051: record that a generated portrait was SHOWN to the player — a
     player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored

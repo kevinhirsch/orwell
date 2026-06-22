@@ -56,6 +56,10 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "preSeedNextSeason", channel: "player", readsVault: false, description: "FE-driven (0065 advance-warm): pre-warm the NEXT season's cast DURING the current season's finale, off a NEW seed, into a per-user holding store that survives the cutover rotation (preSeedCast is refused mid-season; this is its mid-season counterpart). The ACTIVE season is untouched; the confirmed next-season cutover ADOPTS the held cast. Optionally deep-authors one held houseguest ({ profile }), like recordCastProfile. Returns the Vault-free roster + portrait prompts. Idempotent; durable. Not a model lever." },
   { name: "recordCastProfile", channel: "player", readsVault: false, description: "FE-driven write-back (0058/0065): seal one houseguest's authored §3 profile — the PUBLIC biography + structured physical facet (cross to the player) SPLIT from the HIDDEN secrets/true-goals/weakness/Day-1 read (Vault-sealed). Reports accepted field NAMES only, never a hidden value; refuses a player-mirroring profile. Lands on the pre-warmed cast pre-game, the live house once a season runs. Not a model lever." },
   { name: "recordWorldSnapshot", channel: "player", readsVault: false, description: "FE-driven write-back (0062): freeze the move-in zeitgeist — the PUBLIC, shared real-world flavor the whole cast moved in WITH (an optional subset of public slices: screen/music/sports/news/internet/mood). The FE owns the concrete web-search capture (like the 0051 image port); the engine persists it as the single FROZEN artifact and RECALLS it (never re-searches) all season. Empty slices keep the fallback's value (non-degradation). Public flavor only — no Vault, no game input. Not a model lever." },
+  // 0070: FE-driven prose-texture write-back for already-recorded hidden (off-screen) events.
+  // Content-only; the engine's closed set (pair, nature, fold, gossip, overhear) is immutable.
+  { name: "getOffscreenSceneSkeletons", channel: "player", readsVault: false, description: "FE-driven read (0070): Vault-free skeleton projection of the most-recent off-screen tick's hidden scenes. Returns public-persona-only descriptors (eventId, nature, participants with name/archetype/demeanor) for the FE texture-enrichment driver. No hidden attributes, relationship numbers, true goals, or weaknesses. Empty before a season starts or when no off-screen scenes exist. Not a model lever." },
+  { name: "recordOffscreenSceneTexture", channel: "player", readsVault: false, description: "FE-driven write-back (0070): enrich the prose content of an already-recorded hidden (off-screen) event with model-voiced texture. Content-only — cannot create an event, change a witness set, flip the hidden flag, or carry a relationship number. The engine's closed set (which pair, what nature, the seeded fold, gossip rise, overhear pathways) is immutable; only the prose overlay changes. Unknown or player-witnessed event id is a no-op (idempotent). Not a model lever." },
 ];
 
 export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
@@ -111,7 +115,12 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // (the model narrates the open texture; the engine records it), NOT an always-on base-manifest model
   // lever, like `turnIn`. Excluding it keeps the base prompt untouched (the manifest↔registry drift test
   // stays green).
-  "moveHouseguest"]);
+  "moveHouseguest",
+  // 0070: the off-screen texture read + write-back are FE-driven seams (the FE reads the skeleton
+  // projection and fans out parallel utility-LLM calls to voice the texture and writes it back),
+  // NOT game-driving levers the GM model pulls — so both stay OUT of the base prompt's lever
+  // manifest (the drift test stays green).
+  "getOffscreenSceneSkeletons", "recordOffscreenSceneTexture"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

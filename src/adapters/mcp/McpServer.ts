@@ -160,6 +160,14 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
       }
       return;
+    case "recordOffscreenSceneTexture":
+      // 0070: the FE prose-texture write-back. Both `eventId` and `content` are required strings.
+      if (!isStr(args["eventId"])) refuse("eventId", "a non-empty event id (string)");
+      if (!isStr(args["content"])) refuse("content", "a non-empty string");
+      return;
+    case "getOffscreenSceneSkeletons":
+      // 0070: the FE skeleton read. No required fields — `sinceBeatSeq` is optional.
+      return;
     default:
       return; // read tools and free-text tools take no required structure
   }
@@ -199,6 +207,17 @@ export class McpServer {
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
+      case "recordOffscreenSceneTexture":
+        // 0070: FE-driven prose-texture write-back — enrich an already-hidden event's content. Content-only;
+        // the engine's closed set is immutable. An unknown or player-witnessed event id is a no-op.
+        return this.deps.session.recordOffscreenSceneTexture(
+          args as unknown as { eventId: string; content: string },
+        );
+      case "getOffscreenSceneSkeletons":
+        // 0070: Vault-free skeleton read for the FE texture-enrichment driver. `sinceBeatSeq` is optional.
+        return this.deps.session.getOffscreenSceneSkeletons(
+          typeof args["sinceBeatSeq"] === "number" ? args["sinceBeatSeq"] : undefined,
+        );
       case "getGameState":
         return this.deps.session.getGameState();
       case "gameStatus":

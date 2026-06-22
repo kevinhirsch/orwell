@@ -1052,6 +1052,28 @@ export interface PreSeedNextSeasonReq {
   profile?: RecordCastProfileReq;
 }
 
+/**
+ * 0070 — A Vault-free scene descriptor for the FE texture-enrichment driver. Carries only what
+ * a public-personas-only prompt needs: the engine event id (opaque), the nature label, and the
+ * observable public facets of each participant (name, archetype, demeanor). NO hidden attribute,
+ * true goal, relationship number, or weakness ever appears here.
+ */
+export interface OffscreenSceneSkeleton {
+  /** The opaque event id for the `recordOffscreenSceneTexture` write-back call. */
+  eventId: string;
+  /** The scene nature label (bonding | strategy | conflict | gossip | alliance | showmance | betrayal). */
+  type: string;
+  /** Beat sequence when this event was committed — for `sinceBeatSeq` filtering. */
+  beatSeq?: number;
+  /** Public-persona-only participant descriptors (Vault-free). */
+  participants: Array<{
+    id: string;
+    name: string;
+    archetype?: string;
+    demeanor?: string;
+  }>;
+}
+
 /** The Vault-free held next-season cast (0065 advance-warm) — same roster shape as `PreSeedCastView`. */
 export interface PreSeedNextSeasonView {
   /** True once the next-season cast is warmed into the holding store. */
@@ -1272,4 +1294,33 @@ export interface GameSession {
    * that houseguest (idempotent). The result never echoes a hidden value (it reports field NAMES only).
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
+
+  /**
+   * 0070 — Vault-free skeleton projection for the most-recent off-screen tick's hidden scenes,
+   * surfaced for the FE texture-enrichment driver. Returns public-persona-only scene descriptors:
+   * engine id, nature label, and observable public facets of each participant (name, archetype,
+   * demeanor — the same public facets the roster card already exposes). NO hidden attributes,
+   * relationship numbers, true goals, or weaknesses ever appear here. Returns an empty array when
+   * no game is started or no off-screen scenes have been recorded since `sinceBeatSeq`.
+   *
+   * Vault-free by construction (no VaultStore handle); safe on the player channel.
+   */
+  getOffscreenSceneSkeletons(sinceBeatSeq?: number): OffscreenSceneSkeleton[];
+
+  /**
+   * 0070 — FE-driven write-back: enrich the prose `content` of an already-recorded hidden
+   * (off-screen) event with model-voiced texture. The engine keeps the ENTIRE closed set of the
+   * off-screen scene (which pair, what nature, the seeded relationship fold, gossip rise, and overhear
+   * pathways) — all of that is computed and committed BEFORE the FE is involved. This tool ONLY
+   * replaces the prose content of the already-hidden event.
+   *
+   * Invariants:
+   * - Content-only: cannot create an event, change a witness set, flip the hidden flag, or carry a
+   *   relationship number.
+   * - Hidden-only: a player-witnessed (non-hidden) event's id is a no-op (idempotent, not an error).
+   * - Unknown id: a no-op (idempotent, not an error).
+   * - Fail-soft: no model → deterministic template content simply stands (byte-identical).
+   * - Vault-free by construction: this method has no VaultStore handle; only the public prose changes.
+   */
+  recordOffscreenSceneTexture(req: { eventId: string; content: string }): Promise<{ ok: boolean }>;
 }

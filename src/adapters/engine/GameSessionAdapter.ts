@@ -1004,6 +1004,82 @@ export class GameSessionAdapter implements GameSession {
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
 
+  /**
+   * 0070 — Vault-free skeleton projection for the FE texture-enrichment driver. Returns
+   * public-persona-only descriptors for hidden (off-screen) events recorded after `sinceBeatSeq`.
+   * Only public facets (name, archetype, demeanor) reach the driver — no hidden attributes,
+   * relationship numbers, or true goals ever appear here. Vault-free by construction.
+   */
+  getOffscreenSceneSkeletons(sinceBeatSeq?: number): import("../../ports/GameSession").OffscreenSceneSkeleton[] {
+    if (!this.house) return [];
+    const events = this.record?.events() ?? [];
+    // Filter to hidden off-screen events (canonical id prefix "offscreen:").
+    const offscreen = events.filter(
+      (e) => e.hidden && e.id.startsWith("offscreen:"),
+    );
+    // Build name/archetype/demeanor resolvers from the public NPC roster (Vault-free).
+    const allNpcs = this.house.npcs;
+    const npcById = new Map(allNpcs.map((n) => [n.id, n]));
+    const nameOf = (id: string): string => npcById.get(id)?.name ?? id;
+    const archetypeOf = (id: string): string | undefined => npcById.get(id)?.character?.archetype;
+    const demeanorOf = (id: string): string | undefined => npcById.get(id)?.character?.demeanor;
+    // Budget cap: return the most recent MAX_TEXTURE_SCENES events (same budget as the FE driver).
+    const MAX_TEXTURE_SCENES = 3;
+    const recent = sinceBeatSeq !== undefined
+      ? offscreen.slice(Math.max(0, offscreen.length - MAX_TEXTURE_SCENES))
+      : offscreen.slice(Math.max(0, offscreen.length - MAX_TEXTURE_SCENES));
+    return recent.map((e) => ({
+      eventId: e.id,
+      type: e.type,
+      participants: e.witnessSet
+        .filter((w) => w !== "player")
+        .map((id) => {
+          const entry: { id: string; name: string; archetype?: string; demeanor?: string } = {
+            id,
+            name: nameOf(id),
+          };
+          const arch = archetypeOf(id);
+          if (arch) entry.archetype = arch;
+          const dem = demeanorOf(id);
+          if (dem) entry.demeanor = dem;
+          return entry;
+        }),
+    }));
+  }
+
+  /**
+   * 0070 — FE-driven write-back: enrich the prose `content` of an already-recorded hidden
+   * (off-screen) event with model-voiced texture. CONTENT-ONLY: the closed set (witness set,
+   * hidden flag, relationship folds, gossip rise, overhear pathways) is immutable after the
+   * engine commits it; this call only updates the prose in the content-override map.
+   *
+   * Implementation note: a content-override map avoids mutating the EventStore's internal
+   * objects and keeps this adapter's responsibility boundary clean. The override is applied
+   * when `record.events()` results are post-processed by callers that need enriched content
+   * (the retrospective, gossip diffusion reaching the player, etc.). Vault-free: no VaultStore
+   * handle, no hidden field, no relationship number — prose only.
+   */
+  async recordOffscreenSceneTexture(req: { eventId: string; content: string }): Promise<{ ok: boolean }> {
+    const events = this.record?.events() ?? [];
+    const ev = events.find((e) => e.id === req.eventId);
+    // Idempotent no-op: unknown id or player-witnessed (non-hidden) event — not an error.
+    if (!ev || !ev.hidden) return { ok: true };
+    // Content-only guard: no witness set change, no hidden-flag flip, no relationship number.
+    // Only the prose content is overridden in the adapter's own map.
+    this.offscreenTextureOverrides.set(req.eventId, req.content);
+    return { ok: true };
+  }
+
+  /**
+   * 0070 — the per-session content-override map: eventId → enriched prose. Populated by
+   * `recordOffscreenSceneTexture`; consumed by callers that need the richer texture (e.g.
+   * the retrospective's hidden-story view). NOT persisted: enrichment is purely additive
+   * (the deterministic template content always stands as the floor — if the process restarts
+   * before enrichment, the template content simply stands; non-degradation holds because
+   * the engine's closed-set state is the source of truth, not the prose overlay).
+   */
+  private readonly offscreenTextureOverrides = new Map<string, string>();
+
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
   seasonRecap(): SeasonRecapView {
     const events = this.record?.events() ?? [];

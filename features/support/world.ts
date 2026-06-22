@@ -524,6 +524,24 @@ export class BbWorld extends World {
   wsPairB?: import("../../src/ports/GameSession").HouseguestCard;
   wsWeek?: number;
 
+  // Feature 0070 — off-screen texture enrichment scratch state.
+  txEventId?: string;
+  txServer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  txEvents?: import("../../src/adapters/inmemory/InMemoryEventStore").InMemoryEventStore;
+  txSkeletons?: Array<{ eventId: string; type: string; participants: Array<{ id: string; name: string }> }>;
+  txWriteResult?: unknown;
+  txGossipBelief?: { factId: string; content: string; source: string; confidence: number };
+  txClosedSetServer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  txClosedSetEvents?: import("../../src/adapters/inmemory/InMemoryEventStore").InMemoryEventStore;
+  txClosedSetEventId?: string;
+  txClosedSetCountBefore?: number;
+  txShapeGuardFired?: boolean;
+  txClosedSetResult?: { ok: boolean };
+  txGameA?: { reg: import("../../src/composition/registry").GameSessionRegistry; user: string; orch: import("../../src/composition/orchestrator").Orchestrator; sb: import("../../src/composition/registry").UserSandbox };
+  txGameB?: { reg: import("../../src/composition/registry").GameSessionRegistry; user: string; orch: import("../../src/composition/orchestrator").Orchestrator; sb: import("../../src/composition/registry").UserSandbox };
+  txTextureApplied?: number;
+  txBeforeContent?: string;
+
   constructor(options: IWorldOptions) {
     super(options);
   }
