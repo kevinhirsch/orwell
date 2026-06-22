@@ -5,6 +5,17 @@ perimeter. Governed by **ADR [`0007`](../../docs/decisions/0007-public-internet-
 feature **[`0067`](../../docs/features/0067-public-internet-exposure.md)**. Full runbook:
 `docs/INSTALL.md → Public deployment (any domain)`.
 
+## Just want HTTPS on the LAN? (no domain, no internet)
+
+If your goal is a trusted `https://orwell.lan` / `https://<lan-ip>` for the household — **not** a public
+site — you don't need any of the options below. Use **local HTTPS** (feature
+[`0074`](../../docs/features/0074-local-and-tunable-https.md) / ADR
+[`0014`](../../docs/decisions/0014-local-and-tunable-https.md)): `orwell https --mode local` (or the
+Admin "Local HTTPS" card) stands up a Caddy terminator with a built-in CA, and each device trusts the
+root once (`/orwell-local-ca.crt`) to silence the browser warning. It works with or without any of the
+public options here. Reference config: [`caddy/local.Caddyfile`](caddy/local.Caddyfile). The rest of
+this page is about the **public internet**.
+
 ## The rule that makes this safe
 
 Only the **front-end** is ever exposed. The **engine is engine-only** and stays bound to loopback;

@@ -302,6 +302,10 @@ ownership() {
   # its own live log, tailed by the same viewer. Touched, never `install`ed (keep the run history).
   touch "${DATA_DIR}/ops-public-deployment.log"
   chmod 644 "${DATA_DIR}/ops-public-deployment.log"
+  # The local-HTTPS trigger (admin "Local HTTPS" card, feature 0074) appends to its own live log,
+  # tailed by the same viewer. Touched, never `install`ed (keep the run history).
+  touch "${DATA_DIR}/ops-tls.log"
+  chmod 644 "${DATA_DIR}/ops-tls.log"
 }
 
 systemd_services() {
@@ -331,6 +335,12 @@ systemd_services() {
   # + FE restart + token shred), output appended live to data/ops-public-deployment.log.
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-public-deployment.path"    /etc/systemd/system/orwell-ops-public-deployment.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-public-deployment.service" /etc/systemd/system/orwell-ops-public-deployment.service
+  # Same G19b seam for the admin "Local HTTPS" card (feature 0074 / ADR 0014): the web tier drops the
+  # flag data/ops/tls-requested and this root-side PATH unit runs the one fixed local-HTTPS script
+  # (orwell-ops-tls.sh → orwell-https.sh — .env upsert + caddy install/run + Caddyfile + FE restart +
+  # DNS-token shred), output appended live to data/ops-tls.log.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.path"    /etc/systemd/system/orwell-ops-tls.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.service" /etc/systemd/system/orwell-ops-tls.service
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -377,10 +387,10 @@ EOF
   systemctl daemon-reload
   systemctl enable --now orwell-engine orwell-frontend
   # The ops TRIGGERS are path units (their services are started by the watcher, never enabled).
-  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path
+  systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path orwell-ops-tls.path
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
-  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path
+  systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path orwell-ops-tls.path
 }
 
 login_panel() {

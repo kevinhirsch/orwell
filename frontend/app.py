@@ -205,6 +205,9 @@ if AUTH_ENABLED:
         "/api/orwell/health",
         "/api/version",
         "/login",
+        # The local-HTTPS CA root (feature 0074): a fresh device must fetch + trust this PUBLIC cert
+        # before it can reach the UI over HTTPS without a warning, so it cannot require a session.
+        "/orwell-local-ca.crt",
     }
     AUTH_EXEMPT_PREFIXES = [
         "/static",
@@ -652,6 +655,21 @@ app.include_router(setup_admin_ops_status_routes())
 # consumes (same privilege-safe seam as Update). The token is write-only and NEVER echoed by any GET.
 from routes.admin_public_deployment_routes import setup_admin_public_deployment_routes
 app.include_router(setup_admin_public_deployment_routes())
+
+# Admin Local HTTPS ("Local HTTPS" card, feature 0074 / ADR 0014) — the operator console over the
+# on-box TLS terminator (Caddy). Apply sanitises the proposed host names, then drops the non-secret
+# config + a transient mode-0600 DNS API token + the existence-only flag the root ops watcher consumes
+# (orwell-ops-tls). The token is write-only and NEVER echoed by any GET.
+from routes.admin_tls_routes import setup_admin_tls_routes
+app.include_router(setup_admin_tls_routes())
+
+# The local CA's PUBLIC root certificate, so a fresh device can trust it ONCE and reach
+# https://orwell.lan (and the LAN IP) with no browser warning. UNAUTHENTICATED by design (the path is
+# in AUTH_EXEMPT_EXACT above) — it is a public certificate, not a secret, and a device must fetch +
+# trust it BEFORE it can log in over HTTPS. Served only when the terminator has exported it
+# (data/tls/local-ca.crt); 404 otherwise.
+from routes.local_ca_routes import setup_local_ca_routes
+app.include_router(setup_local_ca_routes())
 
 # Memory / Skills — the front-end's own memory + skills verticals. Dropped under the game
 # build: the engine's soul/Vault (0023/0024) is the only memory; no parallel store. The

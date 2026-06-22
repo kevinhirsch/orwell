@@ -2650,12 +2650,181 @@ function initPublicDeployment() {
   load();  // live posture on open — the card is a status surface, not a form
 }
 
+function initLocalTls() {
+  const card = el('adm-tls-card');
+  if (!card) return;  // not rendered (non-admin DOM) — nothing to wire
+
+  const statusEl = el('adm-tls-status');
+  const caEl = el('adm-tls-ca');
+  const wizardEl = el('adm-tls-wizard');
+  const toggleBtn = el('adm-tls-enable-toggle');
+  const applyBtn = el('adm-tls-apply');
+  const disableBtn = el('adm-tls-disable');
+  const localNamesInput = el('adm-tls-local-names');
+  const domainsInput = el('adm-tls-domains');
+  const dnsProviderInput = el('adm-tls-dns-provider');
+  const dnsTokenInput = el('adm-tls-dns-token');
+  const progressEl = el('adm-tls-progress');
+  const msgEl = el('adm-tls-msg');
+
+  let pollTimer = null;
+
+  const badge = (ok, text) =>
+    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,170,60,.16)'};color:${ok ? '#3cb46e' : '#e0a83c'};">${esc(text)}</span>`;
+
+  const row = (label, valueHtml) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+      <div class="admin-toggle-label">${esc(label)}</div>
+      <div class="admin-toggle-sub" style="text-align:right;">${valueHtml}</div>
+    </div>`;
+
+  function renderStatus(d) {
+    const rows = [];
+    const on = (d.mode === 'local');
+    rows.push(row('Local HTTPS', badge(on, on ? 'ON' : 'OFF')));
+    const names = Array.isArray(d.localNames) ? d.localNames : [];
+    rows.push(row('Local names', names.length ? `<span class="admin-toggle-sub">${esc(names.join(', '))}</span>` : badge(false, 'NONE')));
+    const domains = Array.isArray(d.domains) ? d.domains : [];
+    if (domains.length) rows.push(row('Public domain (trusted)', `<span class="admin-toggle-sub">${esc(domains.join(', '))}</span>`));
+    const c = d.caddy || {};
+    rows.push(row('Terminator (Caddy)', badge(!!c.installed, c.installed ? 'INSTALLED' : 'NOT INSTALLED') + ' ' + badge(!!c.active, c.active ? 'ACTIVE' : 'INACTIVE')));
+    rows.push(row('Secure cookies', badge(!!d.secureCookies, d.secureCookies ? 'OK' : 'OFF')));
+    if (statusEl) statusEl.innerHTML = rows.join('');
+
+    // The CA-root download — the one-time step that kills the browser warning on the local names.
+    const ca = d.rootCa || {};
+    if (caEl) {
+      if (on && ca.available && ca.downloadUrl) {
+        caEl.innerHTML =
+          `<div class="admin-toggle-label">Trust the local certificate (one time per device)</div>` +
+          `<div class="settings-row" style="margin-top:6px;"><a class="admin-btn-add" href="${esc(ca.downloadUrl)}" download>Download CA root</a></div>` +
+          `<div class="admin-toggle-sub" style="margin-top:6px;">Install it as a trusted root: macOS → Keychain ▸ System ▸ Always Trust · Windows → Local Machine ▸ Trusted Root CAs · iOS → install profile, then Settings ▸ General ▸ About ▸ Certificate Trust · Android → Settings ▸ Security ▸ Install certificate.</div>`;
+      } else {
+        caEl.innerHTML = '';
+      }
+    }
+  }
+
+  async function load() {
+    if (msgEl) { msgEl.textContent = 'Checking…'; msgEl.className = ''; }
+    try {
+      const res = await fetch('/api/admin/tls-status', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Failed'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      renderStatus(data);
+      if (data.lastApply) renderProgress(data.lastApply);
+      if (msgEl) { msgEl.textContent = `Checked ${new Date().toLocaleTimeString()}.`; msgEl.className = 'admin-toggle-sub'; }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    }
+  }
+
+  function renderProgress(s) {
+    if (!progressEl) return;
+    if (!s) { progressEl.innerHTML = ''; return; }
+    const step = (s.step != null && s.total) ? `${s.step}/${s.total} · ` : '';
+    let cls = 'admin-toggle-sub';
+    let label = s.message || (s.running ? 'Working…' : (s.ok ? 'Done.' : ''));
+    if (s.error) { cls = 'admin-error'; label = s.error; }
+    progressEl.innerHTML = `<div class="${cls}">${esc(step + (label || ''))}</div>`;
+  }
+
+  // Poll the shared ops-status endpoint for the "tls" action until it settles.
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/admin/ops-status', { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        const s = data && data.actions ? data.actions['tls'] : null;
+        renderProgress(s);
+        if (s && !s.running) {
+          clearInterval(pollTimer); pollTimer = null;
+          load();  // refresh posture once the apply settles
+        }
+      } catch (_) { /* a transient poll error is non-fatal — keep polling */ }
+    }, 2000);
+  }
+
+  async function apply() {
+    const localNames = (localNamesInput && localNamesInput.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const domains = (domainsInput && domainsInput.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const dnsProvider = (dnsProviderInput && dnsProviderInput.value || '').trim() || null;
+    const dnsApiToken = (dnsTokenInput && dnsTokenInput.value || '').trim() || null;
+    if (applyBtn) applyBtn.disabled = true;
+    if (msgEl) { msgEl.textContent = 'Enabling…'; msgEl.className = 'admin-toggle-sub'; }
+    try {
+      const res = await fetch('/api/admin/tls/apply', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ localNames, domains, dnsProvider, dnsApiToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Apply failed.'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      if (dnsTokenInput) dnsTokenInput.value = '';  // never keep the token around in the DOM
+      if (data.started) {
+        if (msgEl) { msgEl.textContent = 'Enabling — this restarts the front-end to take effect.'; msgEl.className = 'admin-toggle-sub'; }
+        startPolling();
+      } else {
+        if (msgEl) { msgEl.textContent = data.error || 'Could not start the apply.'; msgEl.className = 'admin-error'; }
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    } finally {
+      if (applyBtn) applyBtn.disabled = false;
+    }
+  }
+
+  async function disable() {
+    if (disableBtn) disableBtn.disabled = true;
+    if (msgEl) { msgEl.textContent = 'Disabling…'; msgEl.className = 'admin-toggle-sub'; }
+    try {
+      const res = await fetch('/api/admin/tls/disconnect', {
+        method: 'POST', credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msgEl) { msgEl.textContent = data.detail || 'Disable failed.'; msgEl.className = 'admin-error'; }
+        return;
+      }
+      if (data.started) {
+        if (msgEl) { msgEl.textContent = 'Disabling — returning to plain HTTP.'; msgEl.className = 'admin-toggle-sub'; }
+        startPolling();
+      } else {
+        if (msgEl) { msgEl.textContent = data.error || 'Could not start the disable.'; msgEl.className = 'admin-error'; }
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Request failed: ' + e.message; msgEl.className = 'admin-error'; }
+    } finally {
+      if (disableBtn) disableBtn.disabled = false;
+    }
+  }
+
+  if (toggleBtn && wizardEl) {
+    toggleBtn.addEventListener('click', () => {
+      wizardEl.hidden = !wizardEl.hidden;
+      toggleBtn.textContent = wizardEl.hidden ? 'Enable local HTTPS' : 'Hide';
+    });
+  }
+  if (applyBtn) applyBtn.addEventListener('click', apply);
+  if (disableBtn) disableBtn.addEventListener('click', disable);
+  load();  // live posture on open — the card is a status surface, not a form
+}
+
 /* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, initPublicDeployment, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, initPublicDeployment, initLocalTls, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }

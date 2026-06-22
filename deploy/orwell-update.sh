@@ -409,6 +409,20 @@ if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-pu
   chmod 644 "${APP_DIR}/data/ops-public-deployment.log"
   OPS_PUBLIC_DEPLOYMENT_READY=1
 fi
+# Local-HTTPS trigger (admin "Local HTTPS" card, feature 0074 / ADR 0014): reconcile its units too so
+# a box installed before this feature gains the seam on its next update. Same G19b shape — the web tier
+# drops data/ops/tls-requested, the root path unit runs orwell-ops-tls.sh, output appended to
+# data/ops-tls.log.
+OPS_TLS_READY=0
+if [[ "$APP_DIR" == "/opt/orwell" && -f "${APP_DIR}/deploy/systemd/orwell-ops-tls.path" ]]; then
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.path"    /etc/systemd/system/orwell-ops-tls.path
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.service" /etc/systemd/system/orwell-ops-tls.service
+  install -d -m 750 "${APP_DIR}/data/ops"
+  if id -u orwell >/dev/null 2>&1; then chown orwell:orwell "${APP_DIR}/data/ops"; fi
+  touch "${APP_DIR}/data/ops-tls.log"
+  chmod 644 "${APP_DIR}/data/ops-tls.log"
+  OPS_TLS_READY=1
+fi
 systemctl daemon-reload
 if [[ "$OPS_UNITS_READY" -eq 1 ]]; then
   # The ops TRIGGER is the path unit (its service is started by the watcher, never enabled).
@@ -429,6 +443,10 @@ fi
 if [[ "$OPS_PUBLIC_DEPLOYMENT_READY" -eq 1 ]]; then
   systemctl enable --now orwell-ops-public-deployment.path
   systemctl restart orwell-ops-public-deployment.path
+fi
+if [[ "$OPS_TLS_READY" -eq 1 ]]; then
+  systemctl enable --now orwell-ops-tls.path
+  systemctl restart orwell-ops-tls.path
 fi
 
 # ops-progress lane: terminal OK. Clear the trap before the success write so the EXIT trap can't

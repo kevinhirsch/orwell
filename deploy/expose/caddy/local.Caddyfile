@@ -1,0 +1,44 @@
+# Local HTTPS for Orwell — feature 0074 / ADR 0014 (REFERENCE; the real file is GENERATED).
+#
+# This is what `orwell https --mode local` writes to /etc/caddy/Caddyfile. You normally never edit it
+# by hand — change the tunable ORWELL_TLS_* variables in data/.env (or use the control panel / the
+# Admin "Local HTTPS" card) and re-apply. It is shown here so you can see the shape.
+#
+# It terminates TLS on the LAN and reverse-proxies the FRONT-END on loopback. The engine is engine-only
+# and is NEVER named here (port 8765 is absent), so it stays unreachable. The front-end port must match
+# ORWELL_PORT (installer default 8080).
+
+# ── Local names + the LAN IP — the offline INTERNAL CA (no domain, no internet needed). ──
+# Browsers warn until the CA root is trusted once per device: download it (no login) from
+#   https://orwell.lan/orwell-local-ca.crt
+# and install it as a trusted root. After that, these load clean.
+orwell.lan, orwell.local, 192.168.1.50 {
+	tls internal
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8080
+}
+
+# ── (optional) A public domain via a PUBLICLY-TRUSTED cert (DNS-01) — zero per-device install. ──
+# Added when ORWELL_TLS_DOMAINS + ORWELL_TLS_DNS_PROVIDER + ORWELL_TLS_DNS_API_TOKEN are set. Caddy
+# solves the ACME DNS-01 challenge with the provider API token (read from the environment — never
+# written into this file), so it works even when the host isn't publicly reachable. Point the name at
+# the box's LAN IP (split-horizon DNS) for a warning-free local experience with no install.
+# hiorwell.com, www.hiorwell.com {
+# 	tls {
+# 		dns cloudflare {env.ORWELL_TLS_DNS_API_TOKEN}
+# 	}
+# 	encode zstd gzip
+# 	header {
+# 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+# 		X-Content-Type-Options "nosniff"
+# 		Referrer-Policy "strict-origin-when-cross-origin"
+# 		-Server
+# 	}
+# 	reverse_proxy 127.0.0.1:8080
+# }

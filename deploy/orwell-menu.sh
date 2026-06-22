@@ -55,6 +55,7 @@ Non-interactive subcommands:
   orwell restore [FILE]          restore a backup (newest if FILE is omitted)
   orwell ready                   readiness check (engine + front-end + an LLM)
   orwell change-port <port>      change the UI port (handles to/from :80 — the cap drop-in)
+  orwell https [--mode local|--disable] [...]   local HTTPS (trusted on the LAN, no browser warning)
   orwell update-reset --yes      update (pull + rebuild) THEN OOBE reset, KEEP the API-key/LLM config
   orwell reset-game --yes        new season — clears games, keeps accounts + config
   orwell reset-oobe --yes        OOBE reset — back to first-run, KEEP the API-key/LLM config
@@ -174,6 +175,20 @@ do_change_port() {
   run "Change UI port → ${port}" bash "${DEPLOY_DIR}/orwell-change-port.sh" "$port" --yes
 }
 
+do_https() {
+  # Local HTTPS: stand up the Caddy TLS terminator in front of the front-end, driven by the tunable
+  # ORWELL_TLS_* variables in data/.env. Dispatches to orwell-https.sh (the single apply engine);
+  # nothing re-implemented here. Off a TTY it forwards flags straight through.
+  if ! tui_active; then
+    run "Local HTTPS" bash "${DEPLOY_DIR}/orwell-https.sh" "$@"; return $?
+  fi
+  local cur
+  cur="$(sed -n 's/^ORWELL_TLS_MODE=//p' "${APP_DIR}/data/.env" 2>/dev/null | tail -n1)"; cur="${cur:-off}"
+  # The script owns the rich interactive flow (mode, local names, optional domain + DNS token); just
+  # launch it interactively so its whiptail prompts run.
+  run "Local HTTPS" bash "${DEPLOY_DIR}/orwell-https.sh"
+}
+
 do_restore() {
   local dir="${APP_DIR}/backups" sel f; local -a list args
   if ! tui_active; then
@@ -228,6 +243,7 @@ case "${1:-}" in
   restore)       shift; do_restore "$@";       exit $? ;;
   ready)                do_ready;              exit $? ;;
   change-port)   shift; do_change_port "$@";   exit $? ;;
+  https)         shift; do_https "$@";         exit $? ;;
   reset-game)    shift; do_reset_game "$@";    exit $? ;;
   reset-oobe)    shift; do_reset_oobe "$@";    exit $? ;;
   reset-factory) shift; do_reset_factory "$@"; exit $? ;;
@@ -252,6 +268,7 @@ while :; do
     doctor        "Diagnose & repair the services" \
     ready         "Readiness check (engine + FE + LLM)" \
     change-port   "Change the UI port (to/from :80)" \
+    https         "Local HTTPS (trusted on the LAN, no warning)" \
     backup        "Back up game + user data" \
     restore       "Restore from a backup" \
     reset-game    "New season (keeps accounts + config)" \
@@ -265,6 +282,7 @@ while :; do
     doctor)        do_doctor ;;
     ready)         do_ready ;;
     change-port)   do_change_port ;;
+    https)         do_https ;;
     backup)        do_backup ;;
     restore)       do_restore ;;
     reset-game)    do_reset_game ;;

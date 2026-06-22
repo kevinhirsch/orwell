@@ -1,0 +1,23 @@
+[Unit]
+Description=orwell ops trigger — web-requested local HTTPS (0074 "Local HTTPS"; flag watch)
+# The seam that lets the admin "Local HTTPS" card enable/disable the on-box TLS terminator: the
+# front-end runs inside the E85-hardened orwell-frontend.service (User=orwell, empty
+# CapabilityBoundingSet=) and structurally CANNOT edit data/.env, apt-install caddy, write
+# /etc/caddy/Caddyfile, enable a systemd service, or restart the FE. The sanctioned pattern
+# (identical to orwell-ops-public-deployment.path): the web tier writes a FLAG FILE under data/ops/
+# (the one tree it already owns) and this root-side path unit reacts by starting the oneshot runner,
+# which appends its output to data/ops-tls.log — the same data/*.log surface the status page tails.
+
+[Path]
+# EXISTENCE-only trigger: the flag's CONTENT is deliberately ignored — never read, parsed, or
+# executed — so the web tier can request "apply/disable local HTTPS", never "a command". The action
+# + non-secret config + the (optional) DNS API token are SEPARATE side-input files (tls.json,
+# tls-dns-token) the fixed script reads itself; nothing the web tier writes is interpolated into a
+# command. Only the one fixed script wired into orwell-ops-tls.service ever runs. The runner removes
+# the flag FIRST; PathExists= re-evaluates when the service deactivates, so a clean run does not
+# re-trigger, while a request landing DURING a run earns exactly one follow-up run.
+PathExists=/opt/orwell/data/ops/tls-requested
+Unit=orwell-ops-tls.service
+
+[Install]
+WantedBy=multi-user.target

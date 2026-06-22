@@ -197,6 +197,49 @@ Updates never touch either data dir (non-degradation, feature 0007).
 
 ---
 
+## Local HTTPS (trusted on every device, no domain needed)
+
+Serve the game over **HTTPS on your LAN** — `orwell.lan`, `orwell.local`, and the box's IP — with
+**no browser "your connection is not private" warning**. Feature **0074** / ADR **0014**. This works
+**whether or not** the public domain below is configured, and never touches the engine (it stays
+loopback-only). Manage it from the **control panel** or the **in-app Admin "Local HTTPS" card**.
+
+```bash
+orwell https                 # interactive (control-panel TUI)
+orwell https --mode local    # or non-interactive: enable on orwell.lan/orwell.local + the LAN IP
+orwell https --disable       # back to plain HTTP
+```
+
+This stands up a **Caddy** TLS terminator in front of the front-end (the FE stays on loopback; only
+Caddy faces the LAN), sets `SECURE_COOKIES=true`, and writes the tunable knobs to `data/.env`
+(`ORWELL_TLS_MODE`, `ORWELL_TLS_LOCAL_NAMES`, …). The local names use a **built-in certificate
+authority**.
+
+**Killing the warning (one time per device).** Private names can't get a public cert, so each device
+trusts our CA root **once**:
+
+1. Download it (no login needed): **`https://orwell.lan/orwell-local-ca.crt`** (or via the IP).
+2. Install it as a **trusted root**: macOS → Keychain ▸ *System* ▸ *Always Trust* · Windows → *Local
+   Machine* ▸ *Trusted Root Certification Authorities* · iOS → install the profile, then *Settings ▸
+   General ▸ About ▸ Certificate Trust* ▸ enable · Android → *Settings ▸ Security ▸ Install a
+   certificate ▸ CA certificate*.
+
+After that, `https://orwell.lan` (and the IP) load clean on that device. Make sure the names resolve
+on your network — `orwell.local` works out of the box via mDNS; `orwell.lan` needs a router/DNS entry.
+
+**Zero per-device install (optional upgrade).** If you own a domain and a DNS provider API token, add a
+**publicly-trusted** cert via a DNS-01 challenge — then there's no warning *and* no per-device install,
+because the issuer is already trusted everywhere:
+
+```bash
+orwell https --mode local --domains orwell.hiorwell.com \
+             --dns-provider cloudflare --dns-token <DNS_API_TOKEN>
+```
+
+Point that name at the box's LAN IP (split-horizon DNS) and it's trusted on every device with no setup.
+
+---
+
 ## Public deployment (any domain)
 
 Putting the player tier on the open internet — feature **0067** / ADR **0007**. Two halves: a
