@@ -393,8 +393,9 @@ to follow on the juiciest. No theory without a traced mechanism.
 - **SEC-2** (`18010f0`) — opt-in gateway webhook verification: `PlatformAdapter.verify_webhook()` + Telegram `X-Telegram-Bot-Api-Secret-Token` constant-time check + route 403 (default-off = unchanged local use).
 - **A11Y-2 / A11Y-4 / A11Y-5** (`7950672`) — SR live-region batch 1: new-season transition error now announced (assertive); Diary-Room failure announced assertively (success resets polite); status collapse-toggle aria-label/title track state instead of a stale "Collapse". (Full FE suite 2260 passed.)
 - **A11Y-1** (batch 2) — presence + night gadgets converted to the delta-announce pattern (hidden `aria-live` child written only on change) so screen readers no longer re-announce the unchanged room/nightfall every 25s poll. (Full FE suite 2260 passed.)
+- **F-NEW-7 / A11Y-10** (batch 3, `1631829`) — Diary-Room exit button → 44px (fixes the mobile mode-lock where every send routed to the DR); finale statement/answer/vote buttons get a glyph-stripped accessible name ("Vote for X", not "ballot box… Vote for X"). (Full FE suite 2260 passed.)
 
-**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-3/6/9..11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..13 · SET-NEW-1..3 · ENG-NEW-1..3 (owner-flagged). *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-3/6/9/11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..6/8..13 · SET-NEW-1..3 · ENG-NEW-1..3 (owner-flagged). **A11Y-6 deferred** to a visual session (window-kit titlebar geometry, not verifiable here). *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
 
 ## Wave-4 surfacing (loop, 2026-06-22) — settings / persistence
 ### SET-NEW-1 · `[LATENT]` · CONFIRMED · Custom-theme deletion never propagates and silently resurrects — the cross-device theme merge is additive-only
