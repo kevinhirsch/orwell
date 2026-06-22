@@ -17,14 +17,16 @@ deliberately out of the model's way (see
 
 > **Status: built and playable.** The engine (TypeScript/Node 22) and the chat front-end
 > (Python/FastAPI) are implemented BDD/TDD-first and run as two services over a
-> permissioned MCP boundary. Features **0001–0041** are green — the eight priority
-> invariants, the full gameplay loop, per-user sandboxes, durable persistence, the live
-> off-screen watcher, the interactive finale, and the character-evolution linchpin
-> (0022, the rich-UI MVP-2, is the one deliberate deferral). Active work is tracked in
-> [`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md) — currently the
-> remaining feature specs (0042–0044) and two full product audits' worth of wave-ordered
-> fixes. The test gate at last green: **280 unit/property/architecture tests + 240 BDD
-> scenarios.**
+> permissioned MCP boundary. The drafted spec set is built and green **through 0069** — the
+> eight priority invariants, the full gameplay loop, per-user sandboxes, durable persistence,
+> the live off-screen society, the interactive finale, the character-evolution linchpin,
+> deep character profiles, seasons-as-levels, in-game time & the nightly sleep economy,
+> multi-device sync, public-internet exposure, and the metered token economy — with **0022**
+> (the rich-UI MVP-2) the one deliberate deferral. Specs **0070–0073** (the Hermes-integration
+> wave: off-screen texture, defensive hardening, the multi-platform gateway, and the structural
+> game-build CI wall) are **authored and queued**, not yet built. The reconciled per-feature
+> index in [`docs/features/README.md`](docs/features/README.md) is authoritative for
+> built-vs-deferred, and `npm test` is the live gate.
 
 ---
 
@@ -501,7 +503,7 @@ Hard rules for the test suite:
     ├── IMPLEMENTATION_QUEUE.md       # Live work queue — what's next, with prompts
     ├── features/                     # Numbered feature specs (design note + Gherkin)
     ├── decisions/                    # ADRs — incl. 0003 "the conversation is the game"
-    ├── audits/                       # Full product & experience audits (2026-06-09)
+    ├── audits/                       # Product/experience audits + close-out ledger + open-items snapshot
     ├── INSTALL.md                    # Install/operate guide
     └── legacy/BB_GameBible.md        # Legacy chat-prompt version — reference only
 ```
@@ -510,12 +512,16 @@ Hard rules for the test suite:
 
 ## Status & roadmap
 
-The original milestones **M1–M8** and the full feature set **0001–0063** are built — the eight
+The original milestones **M1–M8** and the built spec set **0001–0069** are shipped — the eight
 priority invariants, the MCP seam, the gameplay loop, per-user sandboxes, durable saves, the live
 off-screen society, the endgame and interactive finale, the character-evolution linchpin (souls
 evolve live and bend behavior), the born-deep deep-character profiles, the seasons-as-levels lane,
-and the casting diversity floor. **Two specs remain unbuilt** — **0022** (the rich game UI / MVP-2,
-deferred by design) and **0062** (the move-in zeitgeist snapshot, spec only).
+the casting diversity floor, multi-device sync, the LLM↔engine sync spine, in-game time & the
+nightly sleep economy, public-internet exposure, and the metered token economy. **0022** (the rich
+game UI / MVP-2) is the **one deliberate deferral** (by [ADR 0003](docs/decisions/0003-conversation-is-the-game.md),
+the chat *is* the UI). The newest specs **0070–0073** — the Hermes-integration wave (off-screen
+texture enrichment, defensive hardening, the multi-platform messaging gateway, and a structural
+game-build CI wall) — are **authored and queued**, not yet built.
 
 Live status is deliberately **not** duplicated in prose here (it drifts):
 
@@ -523,11 +529,15 @@ Live status is deliberately **not** duplicated in prose here (it drifts):
   [`docs/features/README.md`](docs/features/README.md) (cross-checked against the code, not the
   prose) + the BDD gate list in `cucumber.cjs`.
 - **The authoritative open-items list:** the close-out ledger at the end of
-  [`docs/audits/2026-06-10-full-product-audit.md`](docs/audits/2026-06-10-full-product-audit.md).
-- **The biggest open game-feel lever:** calibration tuning — the data is gathered
-  ([`docs/audits/2026-06-19-calibration-data.md`](docs/audits/2026-06-19-calibration-data.md)),
-  and the next step lowers `JURY_WEIGHTS.gameRespect` so the finale rewards an *earned*
-  relationship reservoir, not just the comp résumé.
+  [`docs/audits/2026-06-10-full-product-audit.md`](docs/audits/2026-06-10-full-product-audit.md),
+  with a source-verified, tier-organized snapshot (which tracker rows are stale; no
+  launch-blockers remain) in
+  [`docs/audits/2026-06-21-open-items-verification.md`](docs/audits/2026-06-21-open-items-verification.md).
+- **Calibration:** **re-measured 2026-06-21 — primary goal MET.** The
+  `JURY_WEIGHTS.gameRespect` 0.9→0.7 drop + live soul evolution flipped the old inversion (active
+  wins ~20% vs passive ~7%); **do not lower it further** (it would over-correct a solved problem).
+  Only an optional, low-priority reach-side lever remains
+  ([`docs/audits/2026-06-21-session-observations.md`](docs/audits/2026-06-21-session-observations.md)).
 - **The one deliberate deferral:** feature **0022** (the rich game UI / MVP-2) — by design,
   per [ADR 0003](docs/decisions/0003-conversation-is-the-game.md), the chat *is* the UI.
 
@@ -543,6 +553,15 @@ The last item, the **embedding provider** for semantic soul recall
 2026-06-11): **fastembed (local ONNX)** is the runtime `EmbeddingProvider` — warmed at boot and
 served through a worker-thread bridge — with the deterministic fake as the test adapter and the
 whole-process fallback when the model is unavailable.
+
+The decision log has since grown to **[ADRs 0001–0013](docs/decisions/)** — adding split-authority
+by openness (0005), the in-game time/sleep economy (0006), public-internet exposure (0007),
+cross-device chat consistency (0008), location single-source-of-truth (0009), token-economy
+architecture (0010), concurrent engine-drive guardrails (0011), the two-window "Messenger mirror"
+(0012), and model-authored cast photos (0013) — **all accepted and built**. Their residual open
+items are tuning, owed verification runs, and post-launch refactor (`docs/REFACTOR-ROADMAP.md`), not
+unbuilt architecture; the source-verified status is the
+[open-items snapshot](docs/audits/2026-06-21-open-items-verification.md).
 
 ---
 
@@ -560,7 +579,9 @@ whole-process fallback when the model is unavailable.
   [0005 "split authority by openness"](docs/decisions/0005-split-authority-by-openness.md) (the
   engine records the open set of social play, never normalizes it — built in PR #355).
 - **[`docs/IMPLEMENTATION_QUEUE.md`](docs/IMPLEMENTATION_QUEUE.md)** — the live work queue.
-- **[`docs/audits/`](docs/audits/)** — the 2026-06-09 product and experience audits.
+- **[`docs/audits/`](docs/audits/)** — the product and experience audits, the authoritative
+  open-items **close-out ledger** (`2026-06-10-full-product-audit.md`), and the source-verified
+  **open-items snapshot** (`2026-06-21-open-items-verification.md`).
 - **[`docs/INSTALL.md`](docs/INSTALL.md)** — install and operations.
 - **[`docs/legacy/BB_GameBible.md`](docs/legacy/BB_GameBible.md)** — the legacy
   implementation, kept as the canonical-mechanics reference. Its fixed player persona and
