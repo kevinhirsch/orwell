@@ -768,6 +768,15 @@ def _beat_signature(status: dict, state: dict) -> dict:
         str(h.get("name")).strip() for h in out_of_house
         if isinstance(h.get("name"), str) and str(h.get("name")).strip()
     })
+    # 0067: the player's live room + who is in it with them (names), so the next turn can voice NPC
+    # arrivals/departures as beats instead of letting company silently pop in/out. Vault-free — it
+    # reads only the `whereabouts` projection the GAME CONTEXT already carries.
+    wa = state.get("whereabouts") if isinstance(state.get("whereabouts"), dict) else {}
+    room = wa.get("room")
+    present = sorted(
+        p.get("name") for p in (wa.get("present") or [])
+        if isinstance(p, dict) and p.get("name")
+    )
     return {
         "week": status.get("week"),
         "phase": (status.get("phase") or state.get("phase")),
@@ -779,6 +788,8 @@ def _beat_signature(status: dict, state: dict) -> dict:
         "evicted": evicted,
         "evictedNames": evicted_names,
         "finished": bool(state.get("finished")),
+        "room": room,
+        "present": present,
     }
 
 
@@ -1181,6 +1192,56 @@ def _render_delta_line(delta: dict) -> Optional[str]:
     return "Since your last turn: " + "; ".join(parts) + "."
 
 
+def _join_names(names: list) -> str:
+    """Natural 'A', 'A and B', 'A, B and C' joining for a short cue line."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+# 0067 — the NARRATED-DEPARTURES cue. Increment #1 made present company HOLD the player's scene (they
+# leave rarely now, for a reason), but a departure was still SILENT: the houseguest simply stopped
+# appearing in `present`, so the narrator dropped them with no exit beat (the "people pop in and out"
+# complaint). This surfaces the per-turn presence diff — who LEFT and who JOINED the player's room
+# since last turn — as an additive cue so the model voices the coming/going as a real beat. ADDITIVE
+# (the full GAME CONTEXT occupancy stands), Vault-free, fail-open. Mirrors the 0065 "Since your last
+# turn" delta line. Gated on an UNCHANGED player room: if the player walked elsewhere, the cast change
+# is the player moving (the model already knows), not NPC drift — so we say nothing.
+_PRESENCE_MOVE_MAX_NAMES = 4
+
+
+def _render_presence_movement(prev: Optional[dict], cur: Optional[dict]) -> Optional[str]:
+    """A 'someone came/went' cue from two beat signatures, or None when there is nothing to voice
+    (no prior signature, the player changed rooms, or the room's company is unchanged)."""
+    if not isinstance(prev, dict) or not isinstance(cur, dict):
+        return None
+    pr, cr = prev.get("room"), cur.get("room")
+    if not pr or not cr or pr != cr:
+        return None  # player moved (or room unknown) — the cast change isn't NPC drift; stay quiet
+    before = set(prev.get("present") or [])
+    after = set(cur.get("present") or [])
+    departed = sorted(before - after)[:_PRESENCE_MOVE_MAX_NAMES]
+    arrived = sorted(after - before)[:_PRESENCE_MOVE_MAX_NAMES]
+    if not departed and not arrived:
+        return None
+    room_label = str(cr).replace("-", " ")
+    parts: list[str] = []
+    if departed:
+        verb = "has" if len(departed) == 1 else "have"
+        parts.append(f"{_join_names(departed)} {verb} left the {room_label}")
+    if arrived:
+        verb = "has" if len(arrived) == 1 else "have"
+        parts.append(f"{_join_names(arrived)} {verb} come into the {room_label}")
+    return (
+        "MOVEMENT IN THE ROOM (engine truth) — " + "; ".join(parts) + ". Voice it as a natural beat — "
+        "show them heading out or arriving — never let a houseguest simply vanish from or appear in the "
+        "scene without a beat. (The engine moves the houseguests; you only narrate it.)"
+    )
+
+
 async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
     turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
@@ -1409,6 +1470,10 @@ async def apply_game_framing(
     # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
     # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
     _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
+    # 0067: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
+    # checkpoint overwrites `_LAST_BEAT_SIG` — so we can diff the room's company and voice NPC
+    # arrivals/departures as beats. None on a fresh context ⇒ no movement cue (the full block stands).
+    _prev_presence_sig = _LAST_BEAT_SIG.get(user)
 
     # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
@@ -1515,6 +1580,15 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _delta_line
         except Exception as e:
             logger.warning("[orwell] state-delta framing skipped for user=%s: %s", _gkey, e)
+        # 0067: voice NPC arrivals/departures in the player's room since last turn (additive, fail-open).
+        # `_LAST_BEAT_SIG[user]` was just refreshed to THIS turn's signature above, so diff against the
+        # previous one captured at the top of the turn. Only fires on an unchanged player room.
+        try:
+            _move_line = _render_presence_movement(_prev_presence_sig, _LAST_BEAT_SIG.get(user))
+            if _move_line:
+                gm_prompt = gm_prompt + "\n\n" + _move_line
+        except Exception as e:
+            logger.warning("[orwell] presence-movement framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
