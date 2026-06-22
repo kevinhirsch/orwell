@@ -19,6 +19,12 @@ The sources below are under permissive licenses (MIT / Apache-2.0), which permit
 this use as long as their original copyright and license notices are preserved.
 The full license texts are kept in [`licenses/`](licenses/).
 
+- **Nous Research** (`frontend/src/secret_redaction.py`, `frontend/src/url_safety.py`) —
+  adapted from [hermes-agent](https://github.com/NousResearch/hermes-agent) (MIT © 2025 Nous Research).
+  - **Log redaction** (`secret_redaction.py`): adapted from `agent/redact.py`
+  - **URL/path safety guards** (`url_safety.py`): adapted from `gateway/` SSRF and
+    path-traversal guards (V-009 hardening)
+
 - **Odysseus** — Orwell's front-end is a white-labeled build of the Odysseus
   self-hosted AI workspace. Copyright © 2025 Odysseus Contributors.
   **MIT License** — full text retained in [`LICENSE`](LICENSE).

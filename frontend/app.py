@@ -82,6 +82,12 @@ logger = logging.getLogger(__name__)
 from src.log_quiet import quiet_http_loggers as _quiet_http_loggers
 _quiet_http_loggers()
 
+# 0071 — secret redaction on every log record: vendor-prefixed API keys, auth header values,
+# and URL query-param secrets are masked before they reach any log sink. Wire before any
+# logger emits so nothing slips through the startup lines.
+from src.secret_redaction import install_log_redaction as _install_log_redaction
+_install_log_redaction()
+
 # ========= APP =========
 # Lifespan is defined below (after all helpers it references are in scope)
 # and passed to FastAPI so we can use the modern context-manager lifecycle
