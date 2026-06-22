@@ -395,7 +395,22 @@ to follow on the juiciest. No theory without a traced mechanism.
 - **A11Y-1** (batch 2) — presence + night gadgets converted to the delta-announce pattern (hidden `aria-live` child written only on change) so screen readers no longer re-announce the unchanged room/nightfall every 25s poll. (Full FE suite 2260 passed.)
 - **F-NEW-7 / A11Y-10** (batch 3, `1631829`) — Diary-Room exit button → 44px (fixes the mobile mode-lock where every send routed to the DR); finale statement/answer/vote buttons get a glyph-stripped accessible name ("Vote for X", not "ballot box… Vote for X"). (Full FE suite 2260 passed.)
 
-**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-3/6/9/11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..6/8..13 · SET-NEW-1..3 · ENG-NEW-1..3 (owner-flagged). **A11Y-6 deferred** to a visual session (window-kit titlebar geometry, not verifiable here). *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-2..4 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-3/6/9/11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..6/8..13 · SET-NEW-1..3 · ENG-NEW-2/3 · PERS-NEW-1/2. **A11Y-6 deferred** to a visual session (window-kit titlebar geometry, not verifiable here). *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+
+> **✅ REMEDIATED 2026-06-22 (owner-ruled, branch `claude/focused-turing-7d710o`):** the four owner-decision
+> items are fixed and green (full unit 1319 + juryReach + calibration-gradient + UAT-5seed + BDD 390 + arch):
+> - **ADM-NEW-1** (ruling: sanction + fix docstring) — `admin_transcript_routes.py` docstring corrected to
+>   record the sanctioned post-season `seasonRetrospective` unseal exception (a finished game, story-not-
+>   numbers, ruling #14); never a LIVE-game Vault breach.
+> - **IMG-NEW-1** (ruling: enforce in `recordImageBeat`) — per-turn/-week `IMAGE_BUDGET` caps now enforced;
+>   the FIRST image per houseguest (move-in shoot) is exempt, every re-generation is metered + refused past
+>   the cap. Boundary test through `McpServer.callTool` (`tests/unit/imageBudgetBoundary.test.ts`).
+> - **SOC-NEW-1/5** (ruling: dynamic on game numbers/dynamics/relationships) — the eviction-manner jury term
+>   is now graded + precedence-based (betrayal/blindside severity graded off the edge; respect earned by
+>   threat; the goodbye softens-never-launders). Baseline twin mirrored; both calibration bands held.
+> - **ENG-NEW-1** (ruling: keep clock ON, re-tune + new gate) — `night=0` (matches its comment) and the NPC
+>   rest deficit re-keyed off the ACTUAL night (min(bedtime, how-far-the-night-ran)), killing the archetype
+>   tax. New clock-ON `tests/unit/sleepEconomyFairness.test.ts` gate (the clock-ON path no gate measured).
 
 ## Wave-4 surfacing (loop, 2026-06-22) — settings / persistence
 ### SET-NEW-1 · `[LATENT]` · CONFIRMED · Custom-theme deletion never propagates and silently resurrects — the cross-device theme merge is additive-only
@@ -409,7 +424,7 @@ to follow on the juiciest. No theory without a traced mechanism.
 
 ## Wave-4 surfacing (loop, 2026-06-22) — engine domain / competition math
 > **⚠ Owner-decision flagged:** ENG-NEW-1/2/3 touch the **clock-on sleep economy (ADR 0006, owner-pending)** and **calibration-shape constants**. Per the remediation discipline they are **logged, NOT auto-tuned** — changing them shifts seeded outcomes and needs a heavy-sim re-verify + an owner call (ties ENG-1).
-### ENG-NEW-1 · `[POLISH]` (clock-on; `[LATENT]` while default-off) · CONFIRMED · Sleep-deficit table contradicts its own comment AND is miswired against mental/social comp aptitude
+### ENG-NEW-1 · `[POLISH]` (clock-on) · ✅ RESOLVED 2026-06-22 (owner: keep clock ON, re-tune + new gate) · Sleep-deficit table contradicts its own comment AND is miswired against mental/social comp aptitude
 - **Evidence:** `timeOfDay.ts:67-73` `deficitByLatestPhase = {evening:0, night:0.25, "late-night":1}` — but the comments `:56-58` and `:66` say a bed-by-`night` houseguest "carries none" / "only late-night costs real sharpness" (says night ⇒ **0**, table says **0.25**). Bedtime keyed `:103-108` `bedtimeFor = social − physical`. Live fold `competitionOutcome.ts:118` `rest = −restPenalty × 0.15`; band `temperature=0.36`.
 - **Mechanism:** deficit ∝ `social − physical` ⇒ across the 12 shipped archetypes **5 carry the max 1.0** (mastermind, social-butterfly, flirt, loyalist, peacemaker → late-night), **4 carry 0.25**, **3 carry 0** (comp-beast, wildcard, hothead). A `mastermind` (mental 0.85, the puzzle/quiz favorite) eats the full `−0.15` malus (~42% of the ±0.36 band) **in the mental comps it should win**, while the comp-beast pays nothing — the deploy path runs clock-ON but no gate measures it (juryReach runs clock-OFF). **Falsifier:** `restDeficitFor("night")===0` (fails, returns 0.25); `npcRestDeficit({physical:0.4,social:0.85})===1.0` (mental favorite carries max).
 ### ENG-NEW-2 · `[NIT]` · CONFIRMED · `politicalTemperature` median uses the upper-middle element (no even-length average)
@@ -419,7 +434,7 @@ to follow on the juiciest. No theory without a traced mechanism.
 *(Engine agent steelmanned CLEAN: all hard eligibility/legality rules; `resolveCompetition` bounds + NaN-refusal; staged-comp single-roll byte-identity; competition-library stat mapping; jury-of-9 + tie-breaks; self-eviction folds. One watch-item: `runCompetition` peek vs crown read souls at different times — a latent pre-narration desync if peek is ever used to pre-narrate.)*
 
 ## Wave-4 surfacing (loop, 2026-06-22) — casting / OOBE / image (0051)
-### IMG-NEW-1 · `[LATENT·high]` · CONFIRMED · The image budget (`IMAGE_BUDGET.perTurnCap`/`perWeekCap`) is a DEAD constant — generation, "the most expensive lever," is bounded by nothing
+### IMG-NEW-1 · `[LATENT·high]` · ✅ RESOLVED 2026-06-22 · The image budget (`IMAGE_BUDGET.perTurnCap`/`perWeekCap`) is a DEAD constant — generation, "the most expensive lever," is bounded by nothing
 - **Evidence:** `imageConstants.ts:12-19` defines `{perTurnCap:3, perWeekCap:10, moveInPortraitExempt:true}` ("these constants bound it"); repo-wide grep for those names outside the def/registry/tests ⇒ **zero enforcement**. `EngineCommandsAdapter.recordImageBeat:321-336` records + persists with no tally/rejection. The FE `orwell_portraits.py` budget is per-houseguest *retry* backoff, not generation volume — never consults the caps.
 - **Mechanism:** only "generate-once-per-season" + provider availability bound generation today; the in-game re-shoot paths (L17 distinctness, 0065 facet-change re-shoot, manual `kickoff_backfill(force=True)`, the studio's "3 options, regenerate indefinitely") all pay provider cost with NO per-turn/week ceiling. "Typechecks, passes arch, dead at runtime" — on the COST axis. A looping model / button-masher / public-exposure abuser has no engine-side spend ceiling. **Falsifier:** any non-test runtime ref to `perTurnCap`/`perWeekCap` that throttles a generation — none found. **Fix (focused):** wire a per-(turn/week) counter into `recordImageBeat` that rejects past the cap (engine change + boundary test).
 ### CAST-NEW-1 · ~~`[LATENT]`~~ · **REJECTED (lead-traced)** · The prewarm "TOCTOU" does not fire — the check-and-set is synchronous
@@ -433,7 +448,7 @@ to follow on the juiciest. No theory without a traced mechanism.
 *(Casting/image agent steelmanned CLEAN: portrait-prompt Vault Wall holds — private orientation never read by the prompt builder; casting state machine robust against wedge/double-finalize; write-back fail-soft/idempotency careful; ADR-0013 no-photo-without-authoring gate correct.)*
 
 ## Wave-4 surfacing (loop, 2026-06-22) — admin / God-Mode / Vault boundary
-### ADM-NEW-1 · `[LATENT]` · **⚠ OWNER-RULING NEEDED** · CONFIRMED · Admin transcript export forwards `seasonRetrospective` tool output verbatim — the engine's ONE sanctioned Vault unseal — for any user
+### ADM-NEW-1 · `[LATENT]` · ✅ RESOLVED 2026-06-22 (owner: sanction + fix docstring) · Admin transcript export forwards `seasonRetrospective` tool output verbatim — the engine's ONE sanctioned Vault unseal — for any user
 - **Evidence:** `agent_tools.py:65,107` `seasonRetrospective` is in the GM tool set; `orwell_engine.py:681` calls it on the player channel (output = the post-season UNSEALED hidden story — off-screen scheming, confessionals, twists; `registry.ts:35`); `agent_loop.py:4538-4557,1353-1354` persists every tool result verbatim into message `tool_events`; `admin_transcript_routes.py:124-140,246-281` exports stored messages + tool outputs verbatim for any `session_id` with `require_admin` and NO owner check (`:206-217` lists all owners). The route docstring (`:11-14`) asserts "Transcripts hold only player-visible content — NO Vault risk by construction."
 - **Mechanism:** player opens the retrospective → GM calls `seasonRetrospective` → unsealed-story prose lands in `chat_messages` as a tool node → admin `GET /api/admin/transcripts/{sid}` reads another user's unsealed hidden-society narrative. The retrospective is the Vault's contents *made into prose*, routed to the admin through a route whose safety proof assumes the opposite.
 - **Differential (why LATENT + owner-ruling, not BLOCK):** story-not-numbers (S4-VAULT-RETRO: 0 soul/relationship/stat numbers cross); the player already has it for their OWN game; **ruling #14 explicitly accepts the admin reading other users' transcripts incl. Diary Room** — so this is the *intersection* of an accepted operator power and the God-Mode-Vault wall (mandate #2 "the human has never read it"), a genuine tension requiring an owner call, not a clean defect. **Falsifier:** finish a game, drive `seasonRetrospective`, `GET …?format=json` → unsealed off-screen prose under a tool node `output`. **Fix options:** (a) persist only the retrospective's *occurrence*, not its body; (b) scrub retrospective bodies from the export; (c) owner sanctions it + correct the contradictory docstring.
@@ -472,7 +487,7 @@ source) · `VIEWED` (telemetry) · `ROOT-CAUSED`.
 
 ## Lane A — Engine social mechanics (`src/engine`, `src/domain`)
 
-### SOC-NEW-1 · `[POLISH]` · CONFIRMED · A warm goodbye partially CANCELS the jury betrayal penalty — manner signals are summed, not prioritized
+### SOC-NEW-1 · `[POLISH]` · ✅ RESOLVED 2026-06-22 (owner: dynamic on game numbers/relationships) · A warm goodbye partially CANCELS the jury betrayal penalty — manner signals are summed, not prioritized
 - **Evidence:** `liveSeason.ts:1103` `recordEvictionManner(...)` sets `{betrayed:true}` via `mannerToward` (`:770-775`, when evictee trust>0.5); then the goodbye stage `liveSeason.ts:1079-1080` spread-merges `goodbyeMannerFor(tone)` → a warm/respectful tone adds `{respected:true}` (`:1000-1003`) ON TOP. `jury.ts:60-63` sums each flag: `MANNER_LEAN.respected(0.4) + betrayed(-0.6) = -0.2` (`juryConstants.ts:38-43`) instead of -0.6.
 - **Mechanism:** `goodbyeTone` reads the **affinity** edge (`:992-996`); `mannerToward` keys on **trust/threat** (`:770-775`). Every finalist sends every juror a goodbye (`selectGoodbyeSenders` = all remaining, `:1011-1013`), so a high-affinity, high-trust ally who got cut reads `{betrayed, respected}` and the betrayal lean is more than halved. Same additive bug for `blindsided(-0.5)+respected(0.4)=-0.1`. The "a goodbye is the last word" comment (`:1078`) implies *precedence*; the math does *summation*.
 - **Why it matters:** inverts the player's jury-management incentive at the emotional peak — a costless warm-tone goodbye launders ~40% of a betrayal's finale cost. Mandate: jury management is a real mechanic; anti-sycophancy.
@@ -492,7 +507,7 @@ source) · `VIEWED` (telemetry) · `ROOT-CAUSED`.
 - **Evidence:** `liveSeason.ts:1148` `appealMade = f.appeals[finalist]?.[juror] ?? bestAppeal(...)` (argmax-optimal, `jury.ts:124-132`).
 - **Mechanism:** if a player-finalist's `finale-answer` pending is never resolved for a juror, the tally scores that pair as the best possible appeal, not neutral/null — not answering == answering perfectly. Comment calls it a "NEVER-HIT safety guard," but FE escape hatches (decision auto-resolve, ADR-0011 forced advance, resume/skip) could plausibly advance past an unanswered pending. **Falsifier:** drive finale to vote with a player-finalist missing a juror appeal entry → juror `perfFor(player)` returns `bestAppeal`, not 0.5/0.
 
-### SOC-NEW-5 · `[NIT/LATENT]` · CONFIRMED · `mannerToward` `respected` bucket is over-broad — inflates positive jury lean for unremarkable cuts
+### SOC-NEW-5 · `[NIT/LATENT]` · ✅ RESOLVED 2026-06-22 (with SOC-NEW-1: respect now graded by threat) · `mannerToward` `respected` bucket is over-broad — inflates positive jury lean for unremarkable cuts
 - **Evidence:** `liveSeason.ts:770-775` — `betrayed` if trust>0.5; else `blindsided` if threat<0.4; **else `respected`**. No branch for low-trust+high-threat (the classic respected-rival); an ignored floater (low trust, low threat) also falls into `respected` (+0.4 lean).
 - **Mechanism:** cutting people nobody feared nets positive jury equity, and (compounding SOC-NEW-1) a warm goodbye keeps it `respected`. **Falsifier:** evictee trust 0.3/threat 0.5 toward R → currently `respected`(+0.4); faithful read = neutral.
 
@@ -684,3 +699,21 @@ Two same-identity desktop windows on one season: engine truth identical (`phase=
 - **CONT-1** `orwellOnboarding.js:185` "Continue anyway" — OOC system-speak on the first in-fiction holding card a fresh player sees. **CONT-2** `orwellNewSeason.js:149` "Couldn't start the next season" uses meta "season" vocabulary (contrast the in-fiction "The Vault would not open"). **CONT-3** `orwellRetrospective.js:196` hardcodes `color:#fff` instead of `var(--on-accent,#fff)` ⇒ latent contrast fail on custom light `--accent`.
 
 **Lane-D CLEAN (steelman, re-confirmed):** the `#os-announce`/`announceDeltas` delta pattern (`orwellStatusPanel.js:232-250`) is the correct reference impl; decision chips use `aria-pressed` correctly; DR success copy + engine-status banner ("Production is building the house…", "Reconnecting to Big Brother…") are model in-fiction technical-state copy; phase-enum→show-language translation never leaks engine vocab (`:209-215`); emoji `aria-hidden` on night status (`:104`); Escape handling across holding card / DR / window kit. **Note for future copy sweeps:** "feeds are down"/"camera glitched"/"the Vault would not open" are load-bearing *intentional* fiction — do not "standardize" them as customer-service text.
+
+## Wave-5 surfacing (search lane, 2026-06-22) — persistence & consequence-loop integrity spine
+
+*Read-only surfacing pass over `orchestrator.ts` / `registry.ts` / `gameWatcher.ts` / `FileSaveStore` /
+`SoulStore` + the 0023 consequence-fold persistence. **Net: the spine is sound** — no BLOCK-severity Vault
+leak, non-degradation drop, 200-then-rollback, or commit race. Two LATENTs below; 7 candidates steelmanned
+CLEAN (beatSeq restore on a refused commit; atomic soul-fold+beat persist; `recordSceneMemory` includes-dedup;
+the vault-leak fast-path prefix-trust; direct `engine.events.record` hooks vs the rev/events cache key; the
+single-threaded watcher/commit ordering; `FileSaveStore` fsync+rename durability).*
+
+### PERS-NEW-1 · `[LATENT]` · CONFIRMED (engine-clean, FE-only) · A stale-409 drops a scene's only consequence fold (the roadmap A-S3, now traced)
+- **Evidence:** `EngineCommandsAdapter.recordInteraction` calls `guardBeatSeq(expectedBeatSeq)` FIRST → `GameSessionAdapter.guardBeatSeq` throws `StaleBeatError` **before any mutation/fold** (correct fail-closed; at-most-once). The loss is FE-side: `docs/REFACTOR-ROADMAP.md` R1c — the FE reconciles `beatSeq` and **skips** the refused `recordInteraction`/`makeDeal`/`moveTo` rather than re-attempting it against the refreshed board.
+- **Mechanism:** if a player↔NPC scene's `recordInteraction` is the SOLE record of that moment and 409s (a 0064 queued cross-device turn moved the board mid-scene), the fold silently evaporates — mandate #4 / ADR-0005 #4 ("a novel move must never evaporate"). **Extends the roadmap item:** the engine half is provably correct (the throw precedes the write), so a FE re-attempt against the refreshed `beatSeq` is SAFE and cannot double-apply — the fix is purely additive on the FE.
+- **Falsifier:** force a stale `expectedBeatSeq` on a turn's sole `recordInteraction` and assert the fold still lands exactly once after reconcile. Today no such retry path exists in `agent_loop.py`/`chat_helpers.py`. **Confidence:** high.
+
+### PERS-NEW-2 · `[LATENT/NIT]` · CONFIRMED · A future-version (parse-OK) save can be aged out of retention after a rejected resume
+- **Evidence:** `registry.ts` — a resume that throws in `importSnapshot` (incl. a `snapshotVersion` mismatch) falls back to a FRESH sandbox. Unlike a JSON-parse failure, a future-version save parses fine, so `FileSaveStore.loadLatest` does NOT quarantine it (`.corrupt` rename is parse-throw only). The fresh game's saves then write `vN+1…`, and `prune` keeps only `RETAIN_RECENT=5` + periodic checkpoints.
+- **Mechanism:** ~5 fresh saves push the original (recoverable-on-downgrade) save out of retention permanently. Narrow — a schema-downgrade-only edge, bounded by retention; the original is the user's own higher-schema save. **Fix:** a quarantine-on-incompatible-version belt parallel to the corrupt-quarantine, so a rejected resume can never age the original out. **Falsifier:** write a `snapshotVersion:999` save, open a fresh registry, make 6+ mutations, confirm the `v999` file was pruned (`snapshotCompleteness.test.ts:77-94` only asserts "no crash → fresh sandbox", not survival). **Confidence:** medium.
