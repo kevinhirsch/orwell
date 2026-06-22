@@ -111,7 +111,7 @@
         <div class="ons-portrait-h">This season's portrait</div>
         <div class="ons-portrait-studio" id="ons-portrait-studio"></div>
       </div>
-      <div class="ons-msg" id="ons-msg"></div>`;
+      <div class="ons-msg" id="ons-msg" role="status" aria-live="polite"></div>`;
 
     // The per-season portrait: keep / upload / regenerate via the shared studio (G26/G27).
     try {
@@ -124,7 +124,10 @@
     } catch (_) {}
 
     const msg = wrap.querySelector("#ons-msg");
-    const setMsg = (t, err) => { msg.textContent = t || ""; msg.classList.toggle("ons-err", !!err); };
+    // A11Y-2: errors on this irreversible season transition must reach a screen reader. The
+    // message div is a polite live region; an error escalates to assertive so it is not deferred
+    // behind the always-active chat stream (and the player doesn't re-POST a "stuck" action).
+    const setMsg = (t, err) => { msg.setAttribute("aria-live", err ? "assertive" : "polite"); msg.textContent = t || ""; msg.classList.toggle("ons-err", !!err); };
     const buttons = wrap.querySelectorAll(".ons-btn");
     const setBusy = (b) => { _busy = b; buttons.forEach((btn) => { btn.disabled = b; }); };
 
@@ -189,9 +192,12 @@
       </div>
       <div class="ons-hint">Fast-forwards the rest of the season to the finale, then unlocks the recap
         and a fresh start.</div>
-      <div class="ons-msg" id="ons-msg"></div>`;
+      <div class="ons-msg" id="ons-msg" role="status" aria-live="polite"></div>`;
     const msg = wrap.querySelector("#ons-msg");
-    const setMsg = (t, err) => { msg.textContent = t || ""; msg.classList.toggle("ons-err", !!err); };
+    // A11Y-2: errors on this irreversible season transition must reach a screen reader. The
+    // message div is a polite live region; an error escalates to assertive so it is not deferred
+    // behind the always-active chat stream (and the player doesn't re-POST a "stuck" action).
+    const setMsg = (t, err) => { msg.setAttribute("aria-live", err ? "assertive" : "polite"); msg.textContent = t || ""; msg.classList.toggle("ons-err", !!err); };
     const btn = wrap.querySelector("#ons-conclude");
     btn.addEventListener("click", async () => {
       if (_busy) return;

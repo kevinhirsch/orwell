@@ -140,11 +140,17 @@
         box.value = "";
         box.dispatchEvent(new Event("input", { bubbles: true }));
         if (pill) {
+          pill.setAttribute("aria-live", "polite"); // success is non-urgent (reset if a prior error escalated)
           pill.firstElementChild.textContent = "📔 Recorded ✓ — between you and the producers.";
           setTimeout(exitDRMode, 900);
         } else { exitDRMode(); }
       } catch (_) {
-        if (pill) pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
+        // A11Y-4: a failed confessional is actionable — announce assertively so it isn't deferred
+        // behind the chat stream and lost (the player thinks their strategy note was recorded).
+        if (pill) {
+          pill.setAttribute("aria-live", "assertive");
+          pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
+        }
       }
     }, true);
     box.addEventListener("keydown", (e) => {
