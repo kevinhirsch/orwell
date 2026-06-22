@@ -13,6 +13,10 @@ import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const FRONTEND_DIR = path.resolve(__dirname, "../../frontend");
 
@@ -68,7 +72,7 @@ When("front_end_context_sources is called", function () {
 });
 
 Then(
-  "every inherited source key (memory, rag, skills, web) is False",
+  "every inherited source key \\(memory, rag, skills, web) is False",
   function () {
     runPyTest("context_injection_all_false");
   }
@@ -164,12 +168,12 @@ Given("the game-build wall test helpers", function () {
   // Pure-function helpers in settings.py.
 });
 
-Then("they import no Vault type", function () {
+Then("the wall test helpers import no Vault type", function () {
   runPyTest("imports_no_vault");
 });
 
 Then(
-  "they alter no game projection, narration, or engine tool",
+  "the wall test helpers alter no game projection, narration, or engine tool",
   function () {
     // Structural: settings.py has no I/O and no engine tool calls.
     // Proven by the no-Vault-import assertion above and the module structure.
