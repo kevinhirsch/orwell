@@ -53,7 +53,9 @@ def _run(coro):
 def _drive_casting(monkeypatch, *, casting_view, last_user="just chatting", max_rounds=4,
                    model_finalizes=False):
     """Drive the REAL stream_agent_loop in casting mode. Returns (events, force_calls,
-    substance_calls). `casting_view` is the engine's pre-game casting status dict."""
+    substance_calls, narration_rounds). `casting_view` is the engine's pre-game casting status
+    dict; `narration_rounds` counts how many times the model was invoked (= scenes shown to the
+    player this turn) — the no-within-turn-spin guard."""
     monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
     monkeypatch.setattr(al, "get_setting", lambda key, default=None: default)
     import src.tool_index as ti
@@ -66,6 +68,14 @@ def _drive_casting(monkeypatch, *, casting_view, last_user="just chatting", max_
     async def fake_state(user=None):
         return {"started": False, "moment": "character-creation", "casting": casting_view}
     monkeypatch.setattr(oe, "get_game_state", fake_state)
+    # keep the _auto_record_casting belt hermetic + fast: its extraction LLM returns nothing (no
+    # fields), so it no-ops without a network call and the stubbed casting_view stands.
+    async def _empty_extract(*a, **k):
+        return ""
+    monkeypatch.setattr("src.llm_core.llm_call_async", _empty_extract)
+    async def _noop_update(fields, user=None):
+        return {}
+    monkeypatch.setattr(oe, "update_casting", _noop_update)
 
     # spy the forced finalize
     force_calls = []
@@ -84,8 +94,11 @@ def _drive_casting(monkeypatch, *, casting_view, last_user="just chatting", max_
         return _real_sub(next_ask, missing)
     monkeypatch.setattr(al, "_casting_substance_nudge", sub_spy)
 
-    # a model that ONLY narrates (never a createCharacter tool call) — the loop in the trace
+    # a model that ONLY narrates (never a createCharacter tool call) — the loop in the trace.
+    # Count invocations: one per narration scene shown to the player this turn.
+    narration_rounds = []
     async def fake_stream(candidates, messages, **kwargs):
+        narration_rounds.append(1)
         if model_finalizes:
             yield 'data: ' + json.dumps({"type": "tool_calls", "calls": [
                 {"id": "c1", "name": "createCharacter", "arguments": "{}"}]}) + '\n\n'
@@ -113,7 +126,7 @@ def _drive_casting(monkeypatch, *, casting_view, last_user="just chatting", max_
     al._CASTING_STALL_LEVEL.pop("P", None)
     al._CASTING_SUBSTANCE_LEVEL.pop("P", None)
     _run(drive())
-    return events, force_calls, substance_calls
+    return events, force_calls, substance_calls, len(narration_rounds)
 
 
 _FINALIZABLE = {"ready": True, "finalizable": True,
@@ -127,29 +140,39 @@ _NAME_ONLY = {"ready": True, "finalizable": False,
 
 def test_force_finalize_fires_when_finalizable_and_model_never_calls_it(monkeypatch):
     # explicit readiness forces on a finalizable intake without the full rung escalation.
-    _events, force_calls, substance_calls = _drive_casting(
+    _events, force_calls, substance_calls, _rounds = _drive_casting(
         monkeypatch, casting_view=_FINALIZABLE, last_user="I'm ready, put me in the house")
     assert force_calls, ("once casting is engine-finalizable and the player signalled readiness, the "
                          "FE must force createCharacter when the model won't.")
     assert not substance_calls, "a finalizable intake must NOT take the substance ladder"
 
 
-def test_no_force_and_substance_nudge_when_not_finalizable(monkeypatch):
+def test_no_force_and_substance_steer_when_not_finalizable(monkeypatch):
     # The exact prod condition: name-only (ready, NOT finalizable). NEVER force; steer the interview.
-    _events, force_calls, substance_calls = _drive_casting(
+    _events, force_calls, substance_calls, _rounds = _drive_casting(
         monkeypatch, casting_view=_NAME_ONLY, last_user="I'm ready", max_rounds=3)
     assert not force_calls, ("a name-only (ready, NOT finalizable) intake must NEVER force "
                              "createCharacter — that loops on a refusal / mints a floater.")
-    assert substance_calls, "it must steer toward the missing interview substance instead"
-    # the nudge names the engine's missing coverage
+    assert substance_calls, "it must record the truthful 'keep interviewing' steer"
+    # the steer names the engine's missing coverage
     assert any("backstory" in (miss or []) for _next, miss in substance_calls)
 
 
-def test_substance_ladder_is_bounded_by_the_cap(monkeypatch):
-    # Even the truthful nudge must not re-fire forever; the cap stops it. With max_rounds far above
-    # the cap, the number of substance nudges is bounded by _CASTING_MAX_ATTEMPTS (never unbounded).
-    _events, force_calls, substance_calls = _drive_casting(
-        monkeypatch, casting_view=_NAME_ONLY, last_user="ok", max_rounds=al._CASTING_MAX_ATTEMPTS + 5)
-    assert not force_calls
-    assert len(substance_calls) <= al._CASTING_MAX_ATTEMPTS, (
-        "the substance ladder must be bounded by the unconditional attempt cap, never loop forever")
+def test_substance_branch_yields_to_player_no_within_turn_spin(monkeypatch):
+    # THE prod-v5.01 regression: the substance branch must YIELD to the player after the model's
+    # single narration — it must NOT re-prompt (spin) the model within the turn. Drive with
+    # max_rounds far above the cap; a name-only intake that never becomes finalizable must show the
+    # player exactly ONE scene this turn (one model invocation) and at most one steer, NOT spin up to
+    # the cap re-narrating the same beat (that was ~9 near-identical paragraphs in prod).
+    _events, force_calls, substance_calls, narration_rounds = _drive_casting(
+        monkeypatch, casting_view=_NAME_ONLY, last_user="ok",
+        max_rounds=al._CASTING_MAX_ATTEMPTS + 5)
+    assert not force_calls, "never force a non-finalizable intake"
+    assert narration_rounds == 1, (
+        "the substance branch must yield to the player after one narration — never spin a second "
+        f"scene within the turn (got {narration_rounds} model invocations)")
+    assert len(substance_calls) <= 1, (
+        "at most one truthful steer per turn, then yield — never an L0→L8 within-turn ladder")
+    # and no spurious 'another round coming' signal was emitted on the yield
+    assert not any(ev.get("type") == "agent_step" for ev in _events), (
+        "yielding to the player must not emit an agent_step (that signals another round)")

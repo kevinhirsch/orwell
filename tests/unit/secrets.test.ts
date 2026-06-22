@@ -25,8 +25,18 @@ const EXCLUDED_FILES = new Set(["package-lock.json", "frontend/requirements.lock
 const BINARY_EXTENSIONS =
   /\.(png|jpe?g|gif|webp|ico|icns|woff2?|ttf|otf|eot|pdf|zip|gz|tar|mp[34]|wav|onnx|bin|sqlite|db)$/i;
 
+// Redaction/scrubbing test fixtures (0071) EXIST to carry example secrets — they prove the log/secret
+// scrubber catches token SHAPES, so they will always trip the patterns below. Exempt them by EXACT
+// path (never a glob), so the exemption is auditable and a real secret committed ANYWHERE else is
+// still caught. The fixtures use obviously non-functional values (sequential alphabet).
+const REDACTION_TEST_FIXTURES = new Set([
+  "features/step_definitions/defensive_hardening.steps.ts",
+  "frontend/tests/test_secret_redaction.py",
+]);
+
 function inScope(f: string): boolean {
   if (EXCLUDED_FILES.has(f)) return false;
+  if (REDACTION_TEST_FIXTURES.has(f)) return false;
   if (/(^|\/)package-lock\.json$|(^|\/)yarn\.lock$|(^|\/)pnpm-lock\.yaml$/.test(f)) return false;
   if (BINARY_EXTENSIONS.test(f)) return false;
   return true;
