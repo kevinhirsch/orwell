@@ -22,11 +22,20 @@ const SECRET_PATTERNS = [
 // Audit E78: the guard used to scan only deploy/ + root configs — not src/, not the vendored
 // front-end. Now EVERY tracked file is in scope except lockfiles and binary assets.
 const EXCLUDED_FILES = new Set(["package-lock.json", "frontend/requirements.lock.txt"]);
+// Files whose PURPOSE is to carry secret-SHAPED literals so the redaction layer can be tested
+// against them (features 0071/0073). They contain only FAKE/example tokens. Exempt by EXACT path
+// (never a glob), so a real secret pasted into ANY other file is still caught — the fixtures simply
+// can't test redaction without holding the shapes the scanner forbids elsewhere.
+const INTENTIONAL_SECRET_FIXTURES = new Set([
+  "frontend/tests/test_secret_redaction.py",
+  "features/step_definitions/defensive_hardening.steps.ts",
+]);
 const BINARY_EXTENSIONS =
   /\.(png|jpe?g|gif|webp|ico|icns|woff2?|ttf|otf|eot|pdf|zip|gz|tar|mp[34]|wav|onnx|bin|sqlite|db)$/i;
 
 function inScope(f: string): boolean {
   if (EXCLUDED_FILES.has(f)) return false;
+  if (INTENTIONAL_SECRET_FIXTURES.has(f)) return false;
   if (/(^|\/)package-lock\.json$|(^|\/)yarn\.lock$|(^|\/)pnpm-lock\.yaml$/.test(f)) return false;
   if (BINARY_EXTENSIONS.test(f)) return false;
   return true;

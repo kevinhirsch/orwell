@@ -65,6 +65,10 @@ const args = (name: string): Record<string, unknown> => {
     // Vault-free HouseguestMoveResult ({status, whereabouts}); no hidden state may cross.
     case "moveHouseguest": return { id: npc(1), room: "kitchen" };
     case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
+    // 0070: the FE prose write-back — enrich an already-recorded HIDDEN off-screen scene with
+    // model-voiced texture. Content-only ({eventId, content}); the result is a Vault-free ack, so the
+    // canary must never bite it. eventId is a non-empty hidden id; a non-matching id fail-softs.
+    case "recordOffscreenSceneTexture": return { eventId: "offscreen:1", content: "a quiet aside, voiced for color." };
     // 0065: the FE authoring write-back (live house — the season is already running here) + the pre-warm
     // (a no-op refusal once started). Both are Vault-free by construction; the sweep proves the canary
     // never bites their outputs either.

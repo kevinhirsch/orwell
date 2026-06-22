@@ -77,7 +77,14 @@ describe("A4 — the single-PAT credential design is wired", () => {
   it("no PAT literal is committed anywhere in the tree (the E78-scope secrets extension)", () => {
     const tracked = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean);
     const patPatterns = [/github_pat_[A-Za-z0-9_]{30,}/, /\bghp_[A-Za-z0-9]{30,}\b/, /\bgho_[A-Za-z0-9]{30,}\b/];
+    // Redaction-test fixtures (features 0071/0073) carry FAKE secret-shaped tokens by design so the
+    // redaction layer can be tested. Exempt by EXACT path only — every other file is still scanned.
+    const intentionalFixtures = new Set([
+      "frontend/tests/test_secret_redaction.py",
+      "features/step_definitions/defensive_hardening.steps.ts",
+    ]);
     for (const file of tracked) {
+      if (intentionalFixtures.has(file)) continue;
       let text: string;
       try {
         if (statSync(file).size > 5 * 1024 * 1024) continue; // skip big binaries
