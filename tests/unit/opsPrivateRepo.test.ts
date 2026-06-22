@@ -77,7 +77,15 @@ describe("A4 — the single-PAT credential design is wired", () => {
   it("no PAT literal is committed anywhere in the tree (the E78-scope secrets extension)", () => {
     const tracked = execSync("git ls-files", { encoding: "utf8" }).split("\n").filter(Boolean);
     const patPatterns = [/github_pat_[A-Za-z0-9_]{30,}/, /\bghp_[A-Za-z0-9]{30,}\b/, /\bgho_[A-Za-z0-9]{30,}\b/];
+    // Redaction/scrubbing test fixtures (0071) carry example tokens by design — exempt them by EXACT
+    // path (auditable; a real PAT committed anywhere else is still caught). Kept in sync with the same
+    // allowlist in tests/unit/secrets.test.ts.
+    const REDACTION_TEST_FIXTURES = new Set([
+      "features/step_definitions/defensive_hardening.steps.ts",
+      "frontend/tests/test_secret_redaction.py",
+    ]);
     for (const file of tracked) {
+      if (REDACTION_TEST_FIXTURES.has(file)) continue;
       let text: string;
       try {
         if (statSync(file).size > 5 * 1024 * 1024) continue; // skip big binaries

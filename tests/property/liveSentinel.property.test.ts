@@ -40,7 +40,7 @@ function plantLiveSentinels(reg: GameSessionRegistry, user: string, seed: number
   return sentinels;
 }
 
-const args = (name: string): Record<string, unknown> => {
+const args = (name: string, seed: number): Record<string, unknown> => {
   switch (name) {
     case "getMomentPrompt": return { moment: "nominations" };
     case "getVisibleStateFor": return { entity: PLAYER };
@@ -73,6 +73,10 @@ const args = (name: string): Record<string, unknown> => {
     // 0062: the FE zeitgeist write-back — PUBLIC real-world flavor only (no Vault, no game input).
     // The sweep proves the canary never bites its output (an empty subset is a valid capture).
     case "recordWorldSnapshot": return { slices: {} };
+    // 0070: the FE texture write-back addresses a planted HIDDEN off-screen event by id and writes
+    // voiced prose — content-only. Point it at the real sentinel-bearing hidden event so the sweep
+    // exercises the live write path; its result is a bare {ok} status that never echoes hidden content.
+    case "recordOffscreenSceneTexture": return { eventId: `b42:hidden:${seed}`, content: "voiced off-screen prose" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels
@@ -103,7 +107,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
 
       const sweep = async (server: McpServer, name: string): Promise<void> => {
         swept.add(name);
-        const blob = JSON.stringify(await server.callTool(name, args(name)));
+        const blob = JSON.stringify(await server.callTool(name, args(name, seed)));
         for (const s of sentinels) expect(blob.includes(s), `seed ${seed}: tool ${name} leaked ${s}`).toBe(false);
       };
 
@@ -164,7 +168,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         swept.add(name);
         let payload: string;
         try {
-          payload = JSON.stringify(await server.callTool(name, args(name)));
+          payload = JSON.stringify(await server.callTool(name, args(name, seed)));
         } catch (err) {
           payload = String(err instanceof Error ? err.message : err); // the refusal text is the outward surface
         }
