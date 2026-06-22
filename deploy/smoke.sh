@@ -173,6 +173,20 @@ if grep -n 'raw\.githubusercontent\.com' deploy/*.sh | grep -Ev '^[^:]+:[0-9]+:[
 else
   pass "no deploy script fetches branch tips from GitHub (E84 closed)"
 fi
+# ── [A11] the benign-noise stderr filter must never be able to fail the prefetch step ───────────
+# Regression guard for a real prod break: the embedding-model prefetch pipes the worker's stderr
+# through a `grep -v <affinity noise>` filter, and `grep -v` exits 1 when it filters out ALL input —
+# and on an LXC that benign affinity line is often the ONLY stderr a SUCCESSFUL prefetch emits. Under
+# orwell-install.sh's `set -Eeuo pipefail`, errtrace propagated that stray exit-1 into the ERR trap
+# and reported a bogus "INSTALL FAILED during: embedding model prefetch" for a prefetch that in fact
+# succeeded (node exited 0, model cached). The fix is a `|| true` inside the process substitution;
+# assert it stays on every script that runs the filter so a future edit can't silently bring it back.
+if grep -h "grep -vE 'pthread_setaffinity_np" deploy/orwell-install.sh deploy/orwell-update.sh \
+   | grep -v '|| true' | grep -q .; then
+  fail "an embedding-prefetch noise filter lacks the '|| true' guard — its no-match exit can fail the step (A11)"
+else
+  pass "embedding-prefetch noise filter keeps the '|| true' guard (A11; a good prefetch can't fail it)"
+fi
 
 # ── [4/4] the SYSTEM works (B71/ops A7): engine auth ON + the real front-end + a real turn ──────
 # A green engine alone is compatible with a broken FE; this stage boots the actual app against a

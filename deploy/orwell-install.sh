@@ -179,8 +179,16 @@ prefetch_model() {
   # A11: filter onnxruntime's harmless LXC `pthread_setaffinity_np … error code: 22` from the visible
   # output (it can't be silenced via fastembed-js's API; the pool just runs unpinned). Everything
   # else still surfaces.
+  #
+  # The trailing `|| true` inside the process substitution is LOAD-BEARING — do not "clean it up".
+  # `grep -v` exits 1 when it filters out ALL of its input, and on an LXC the affinity warning is
+  # often the ONLY thing the worker writes to stderr — so a SUCCESSFUL prefetch (node exits 0, model
+  # cached) leaves grep matching nothing and exiting 1. Under `set -Eeuo pipefail`, errtrace (-E)
+  # propagates the ERR trap into the process-substitution subshell, so that stray exit-1 fires on_err
+  # and reports a bogus "INSTALL FAILED during: embedding model prefetch" for a prefetch that in fact
+  # succeeded. Swallowing grep's no-match status keeps this step genuinely non-fatal (as intended).
   if ! node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" \
-       2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2); then
+       2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2 || true); then
     echo "WARN: embedding model prefetch failed — the engine will retry at boot and fall back to deterministic recall meanwhile"
   fi
 }

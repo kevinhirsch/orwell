@@ -285,9 +285,13 @@ echo "==> embedding model prefetch (no-op when cached)"
 # A11: onnxruntime logs a harmless `pthread_setaffinity_np … error code: 22` (twice) inside an LXC
 # restricted cpuset — the thread pool just runs unpinned (inference unaffected; fastembed-js doesn't
 # expose ORT's intraOpNumThreads to silence it at the source). Filter that one benign stderr line so
-# the update output doesn't look alarming; every other message still surfaces.
+# the update output doesn't look alarming; every other message still surfaces. The trailing `|| true`
+# is load-bearing: `grep -v` exits 1 when it filters out ALL input (the affinity warning is often the
+# only stderr a successful prefetch emits), so its no-match status must never read as a failure. This
+# script has no ERR trap today, but the guard keeps the pattern safe if one is ever added — see
+# orwell-install.sh's prefetch_model, where errtrace makes the identical stray exit-1 fatal.
 if ! node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/models" \
-     2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2); then
+     2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2 || true); then
   echo "WARN: embedding model prefetch failed — engine will retry at boot"
 fi
 
