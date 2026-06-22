@@ -201,6 +201,9 @@ def assert_public_profile_safe(env=None) -> None:
       - LOCALHOST_BYPASS=true     loopback auth bypass enabled
       - SECURE_COOKIES != true    session cookies would not be marked Secure over HTTPS
       - ALLOWED_HOSTS unset/"*"   the Host header is not pinned to your domain
+      - ALLOWED_ORIGINS unset/"*"/non-https
+                                  CORS runs allow_credentials=True, so a "*" or http
+                                  origin would reflect credentials to an arbitrary site
     """
     env = os.environ if env is None else env
     if not _env_truthy(env.get("ORWELL_PUBLIC")):
@@ -214,12 +217,25 @@ def assert_public_profile_safe(env=None) -> None:
         problems.append("SECURE_COOKIES is not 'true' (session cookies would not be marked Secure)")
     if allowed_hosts_from_env(env) == ["*"]:
         problems.append("ALLOWED_HOSTS is unset (the Host header is not pinned to your domain)")
+    # SEC-1: the app mounts CORSMiddleware with allow_credentials=True. Starlette then reflects
+    # the request Origin (and emits Access-Control-Allow-Credentials: true) for a "*" allow-list,
+    # so a wildcard or plaintext-http origin on a public deployment lets any site issue
+    # credentialed cross-origin reads. Require an explicit https origin allow-list, mirroring the
+    # ALLOWED_HOSTS pin above. (Unset is treated as unsafe here — the operator must name origins,
+    # not inherit the dev localhost default — same posture as ALLOWED_HOSTS.)
+    origins = [o.strip() for o in (env.get("ALLOWED_ORIGINS", "") or "").split(",") if o.strip()]
+    if (not origins) or ("*" in origins) or any(not o.startswith("https://") for o in origins):
+        problems.append(
+            "ALLOWED_ORIGINS is unset/'*'/non-https (credentialed CORS would reflect arbitrary or "
+            "insecure origins — set it to your https domain(s))"
+        )
     if problems:
         raise RuntimeError(
             "Refusing to start an ORWELL_PUBLIC (internet-facing) deployment with an unsafe "
             "security posture:\n  - " + "\n  - ".join(problems) + "\n"
             "Fix these in data/.env (AUTH_ENABLED=true, LOCALHOST_BYPASS=false, SECURE_COOKIES=true, "
-            "ALLOWED_HOSTS=<your-domain>) — or unset ORWELL_PUBLIC for a trusted-LAN deployment. "
+            "ALLOWED_HOSTS=<your-domain>, ALLOWED_ORIGINS=https://<your-domain>) — or unset "
+            "ORWELL_PUBLIC for a trusted-LAN deployment. "
             "See docs/INSTALL.md -> Public deployment."
         )
 

@@ -76,7 +76,7 @@
       "border:1px solid var(--accent, #e06c75);font-size:var(--fs-xs);";
     pill.innerHTML = `<span>📔 Diary Room — private &amp; out-of-character; the house never hears this.</span>
       <button type="button" id="orwell-dr-exit" aria-label="Leave the Diary Room" title="Leave the Diary Room"
-        style="border:none;background:none;color:inherit;cursor:pointer;font-size:1em;padding:0 2px;">×</button>`;
+        style="border:none;background:none;color:inherit;cursor:pointer;font-size:1em;min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:0 2px;">×</button>`;
     form.parentElement.insertBefore(pill, form);
     pill.querySelector("#orwell-dr-exit").addEventListener("click", exitDRMode);
     return pill;
@@ -140,11 +140,17 @@
         box.value = "";
         box.dispatchEvent(new Event("input", { bubbles: true }));
         if (pill) {
+          pill.setAttribute("aria-live", "polite"); // success is non-urgent (reset if a prior error escalated)
           pill.firstElementChild.textContent = "📔 Recorded ✓ — between you and the producers.";
           setTimeout(exitDRMode, 900);
         } else { exitDRMode(); }
       } catch (_) {
-        if (pill) pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
+        // A11Y-4: a failed confessional is actionable — announce assertively so it isn't deferred
+        // behind the chat stream and lost (the player thinks their strategy note was recorded).
+        if (pill) {
+          pill.setAttribute("aria-live", "assertive");
+          pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
+        }
       }
     }, true);
     box.addEventListener("keydown", (e) => {

@@ -90,7 +90,7 @@ import * as modalManager from "./modalManager.js";
         #orwell-finale .ofin-btn {
           /* J5-13: lift to the project tap floor (was ~27px) and bump the label off .74rem so the
              time-pressured finale move buttons are tappable + legible on coarse pointers. */
-          width: 100%; cursor: pointer; border-radius: 8px; padding: .45rem .6rem; margin: .2rem 0; min-height: 36px;
+          width: 100%; cursor: pointer; border-radius: 8px; padding: .45rem .6rem; margin: .2rem 0; min-height: 44px;
           background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
           font-family: inherit; font-size: .82rem; text-align: left;
         }
@@ -201,6 +201,9 @@ import * as modalManager from "./modalManager.js";
     const addBtn = (label, text) => {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "ofin-btn"; btn.textContent = label;
+      // A11Y-10: visible label keeps the emoji/arrow; the accessible name strips leading glyphs so
+      // a screen reader reads "Vote for X", not "ballot box with ballot Vote for X".
+      btn.setAttribute("aria-label", label.replace(/^[^\p{L}\p{N}]+/u, "").trim() || label);
       btn.addEventListener("click", () => prefill(text));
       move.appendChild(btn);
     };

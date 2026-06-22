@@ -183,6 +183,10 @@ import { onNarrowChange } from './platform.js';
     const setCollapsed = (on) => {
       el.classList.toggle("os-collapsed", !!on);
       hdr.setAttribute("aria-expanded", on ? "false" : "true");
+      // A11Y-5: the accessible name must reflect the CURRENT action, not a stale static title —
+      // a collapsed toggle that still reads "Collapse" inverts the affordance for SR/voice users.
+      hdr.setAttribute("aria-label", on ? "Expand game status" : "Collapse game status");
+      hdr.setAttribute("title", on ? "Expand" : "Collapse");
       try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
     };
     const toggle = () => setCollapsed(!el.classList.contains("os-collapsed"));

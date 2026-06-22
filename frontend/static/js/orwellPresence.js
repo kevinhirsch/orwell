@@ -35,6 +35,7 @@
 
   let timer = null;
   let _failures = 0;
+  let _lastAnnounced = null; // A11Y-1: last SR-announced header line, to announce only on change
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
   async function getJSON(url) {
@@ -145,10 +146,12 @@
     }
     el = document.createElement("section");
     el.id = ID;
-    el.setAttribute("role", "status");
-    el.setAttribute("aria-live", "polite");
+    // A11Y-1: do NOT make the root a live region — re-writing head/body every 25s poll would
+    // re-announce the unchanged room to a screen reader 2-3x/min. A dedicated hidden child gets
+    // only the CHANGED header string (the #os-announce delta pattern from orwellStatusPanel).
     el.innerHTML = `<div class="opres-hd" data-role="head"></div>` +
-      `<div class="opres-body" data-role="body"></div>`;
+      `<div class="opres-body" data-role="body"></div>` +
+      `<span data-role="announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></span>`;
     // Mount inside the sidebar, beside the other game gadgets (the status HUD /
     // "Wants a word"). Fall back to the session list, then the sidebar, then body.
     // 0054: prefer the control-room gadget rail (under the other gadgets when present).
@@ -170,7 +173,7 @@
 
   function render(w) {
     const el = ensureEl();
-    if (!w || !w.room) { el.style.display = "none"; return; }
+    if (!w || !w.room) { el.style.display = "none"; _lastAnnounced = null; return; }
     el.dataset.room = w.room;
 
     // One dedup scope across the whole visible view (present + every nearby room).
@@ -180,8 +183,14 @@
     // HEADER: the room you're in + who's with you (first names) — or "alone".
     const present = Array.isArray(w.present) ? w.present : [];
     const here = present.length ? join(present) : "alone";
-    el.querySelector("[data-role='head']").textContent =
-      roomLabel(w.room) + " — " + here;
+    const headLine = roomLabel(w.room) + " — " + here;
+    el.querySelector("[data-role='head']").textContent = headLine;
+    // A11Y-1: announce ONLY when the line actually changed (not on every poll).
+    if (headLine !== _lastAnnounced) {
+      const ann = el.querySelector("[data-role='announce']");
+      if (ann) ann.textContent = headLine;
+      _lastAnnounced = headLine;
+    }
 
     // BODY: the VISIBLE nearby rooms that HAVE people, each with first names.
     const rooms = (Array.isArray(w.nearby) ? w.nearby : [])

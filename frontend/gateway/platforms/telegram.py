@@ -14,6 +14,7 @@ for the conversation — private chats, groups, and channels all have a chat_id)
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from typing import Optional
@@ -28,12 +29,29 @@ logger = logging.getLogger(__name__)
 _TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
 _BOT_TOKEN: Optional[str] = os.environ.get("TELEGRAM_BOT_TOKEN") or None
+# SEC-2 (opt-in): the secret you set at setWebhook time. Telegram echoes it back in the
+# X-Telegram-Bot-Api-Secret-Token header on every update. When set, we require it to match.
+_WEBHOOK_SECRET: Optional[str] = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or None
 
 
 class TelegramAdapter(PlatformAdapter):
     """Thin adapter for the Telegram Bot API."""
 
     platform_id = "telegram"
+
+    def verify_webhook(self, headers) -> bool:
+        """Opt-in webhook auth (SEC-2): when ``TELEGRAM_WEBHOOK_SECRET`` is set, require
+        Telegram's ``X-Telegram-Bot-Api-Secret-Token`` header to match it (constant-time).
+        Unset ⇒ ``True`` (behavior unchanged for an unconfigured/local deployment)."""
+        secret = _WEBHOOK_SECRET or os.environ.get("TELEGRAM_WEBHOOK_SECRET") or None
+        if not secret:
+            return True
+        sent = ""
+        try:
+            sent = headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
+        except Exception:
+            sent = ""
+        return hmac.compare_digest(sent, secret)
 
     async def send(self, identity: str, text: str) -> None:
         """Deliver *text* to the Telegram chat identified by *identity*.

@@ -21,3 +21,6 @@ venv/
 tmp/
 jury-results/
 gradient-results/
+
+# read-only surfacing-agent hypothesis scratch (never committed; excluded from vitest run below)
+tests/scratch/
