@@ -196,7 +196,7 @@ def test_j5_finale_buttons_tap_target():
     btn = re.search(r"\.ofin-btn\s*\{([^}]+)\}", js)
     assert btn, ".ofin-btn rule not found"
     body = btn.group(1)
-    assert "min-height: 36px" in body, ".ofin-btn must meet the 36px project height floor"
+    assert "min-height: 44px" in body, ".ofin-btn must meet the 44px coarse-pointer tap floor (A11Y-8/UX-10)"
     assert "font-size: .82rem" in body, ".ofin-btn font-size must be lifted to .82rem for legibility"
     assert "font-size: .74rem" not in body, ".ofin-btn font-size declaration must not remain .74rem"
 
