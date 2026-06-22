@@ -9,13 +9,17 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 ```
  LXC (Debian)
    ├─ orwell-engine.service     Node:   npm start  -> MCP server on 127.0.0.1:${ORWELL_ENGINE_PORT}
-   └─ orwell-frontend.service   Python: uvicorn app:app on ${ORWELL_BIND_HOST}:${ORWELL_PORT}  (loopback by default)
+   └─ orwell-frontend.service   Python: uvicorn app:app on ${ORWELL_BIND_HOST}:${ORWELL_PORT}  (LAN by default; engine stays loopback)
    data: /opt/orwell/data       .env (secrets) + the save (SQLite + souls); preserved across updates
 ```
 
-> **Putting it on the internet?** The FE binds **loopback by default** (feature 0067 / ADR 0007) — a
-> public deploy puts a TLS-terminating reverse proxy / tunnel in front (Cloudflare Tunnel is the
-> recommended option). See [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (any domain)`.
+> **Reaching it / putting it on the internet?** A fresh install binds the FE to the **LAN**
+> (`ORWELL_BIND_HOST=0.0.0.0`) so you can play from a browser at `http://<host>:<port>`; the **engine
+> stays loopback-only**. To go public, the in-app **Connect to the internet** wizard (feature 0067 /
+> ADR 0007) re-pins the FE to **127.0.0.1** and puts a TLS-terminating reverse proxy / tunnel in front
+> (Cloudflare Tunnel recommended) — the FE **refuses to boot public on a non-loopback bind**. To
+> restrict the UI to loopback yourself, set `ORWELL_BIND_HOST=127.0.0.1` in `data/.env`. See
+> [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (any domain)`.
 
 ## Recommended specs
 

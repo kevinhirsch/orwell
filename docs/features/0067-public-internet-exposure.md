@@ -43,12 +43,17 @@ the player's own game, so whatever terminates TLS can only see narrated gameplay
 ## 3. Scope
 
 **In (built in-repo):**
-- **`ORWELL_BIND_HOST`** for the FE (default **`127.0.0.1`**), replacing the hardcoded `--host 0.0.0.0`
-  in the systemd unit; uvicorn `--proxy-headers --forwarded-allow-ips=<proxy>`.
+- **`ORWELL_BIND_HOST`** for the FE (systemd unit/code default **`127.0.0.1`**), replacing the hardcoded
+  `--host 0.0.0.0`; uvicorn `--proxy-headers --forwarded-allow-ips=<proxy>`.
+  - **Amendment (2026-06-22):** the **installer** provisions `ORWELL_BIND_HOST=0.0.0.0` in `data/.env`
+    so a fresh trusted-LAN install is reachable from a browser out of the box. The unit/code default is
+    unchanged (loopback fallback); the public path re-pins loopback and the boot guard below now
+    enforces it. (Engine stays loopback-only regardless.)
 - A **public-profile fail-closed boot guard** (`core.middleware.assert_public_profile_safe`): when the
   public profile is selected (`ORWELL_PUBLIC=1`), the FE **refuses to start** if `AUTH_ENABLED=false`,
-  `LOCALHOST_BYPASS=true`, `SECURE_COOKIES!=true`, or `ALLOWED_HOSTS` is unpinned — naming every
-  offending knob. Called at `app.py` module load ⇒ unsafe ⇒ the process exits non-zero.
+  `LOCALHOST_BYPASS=true`, `SECURE_COOKIES!=true`, `ALLOWED_HOSTS` is unpinned, **or `ORWELL_BIND_HOST`
+  is a non-loopback address** (added 2026-06-22 — the LAN-reachable install default must not ride onto a
+  public box) — naming every offending knob. Called at `app.py` module load ⇒ unsafe ⇒ the process exits non-zero.
 - **`TrustedHostMiddleware`** with `ALLOWED_HOSTS` (default `["*"]` ⇒ no-op for dev/LAN) — Host-header
   attacks rejected on a public deploy.
 - **Login brute-force fix**: the existing per-IP login/signup/setup throttles are made correct behind a

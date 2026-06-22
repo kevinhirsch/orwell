@@ -184,6 +184,11 @@ def setup_admin_public_deployment_routes() -> APIRouter:
             "ALLOWED_ORIGINS": (str(allowed_origins).strip() if allowed_origins
                                 else (f"https://{domains[0]}" if domains else "")),
             "SECURE_COOKIES": "true",
+            # Re-pin the FE to loopback. The install default binds the LAN (0.0.0.0) so a fresh box is
+            # reachable from a browser; going public must close that — the tunnel/proxy is the ONLY
+            # entrypoint, and raw HTTP on the LAN would bypass the Access wall. assert_public_profile_safe
+            # rejects a non-loopback bind under ORWELL_PUBLIC, so this also keeps the proposed env valid.
+            "ORWELL_BIND_HOST": "127.0.0.1",
         }
 
         # FAIL CLOSED at request time — never persist an unsafe combo. assert_public_profile_safe
@@ -203,6 +208,7 @@ def setup_admin_public_deployment_routes() -> APIRouter:
                 "ALLOWED_HOSTS": proposed["ALLOWED_HOSTS"],
                 "ALLOWED_ORIGINS": proposed["ALLOWED_ORIGINS"],
                 "SECURE_COOKIES": proposed["SECURE_COOKIES"],
+                "ORWELL_BIND_HOST": proposed["ORWELL_BIND_HOST"],
             },
             "domains": domains,
             "hasToken": bool(tunnel_token),

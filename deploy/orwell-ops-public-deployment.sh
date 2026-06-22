@@ -195,6 +195,11 @@ do_apply() {
   # bypass live. Idempotent upserts.
   upsert_env "AUTH_ENABLED" "true"
   upsert_env "LOCALHOST_BYPASS" "false"
+  # Re-pin the FE to loopback. The install default binds the LAN (0.0.0.0) so a fresh box is
+  # reachable from a browser; a public box must close that so the tunnel/proxy is the ONLY
+  # entrypoint — raw HTTP on the LAN would bypass the Access wall. The FE's boot guard
+  # (assert_public_profile_safe) refuses a non-loopback bind under ORWELL_PUBLIC; force it here too.
+  upsert_env "ORWELL_BIND_HOST" "127.0.0.1"
 
   # The connector token (if the wizard pasted one): install + run cloudflared, then SHRED it.
   if [[ -f "$TOKEN_FILE" ]]; then

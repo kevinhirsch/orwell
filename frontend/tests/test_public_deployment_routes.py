@@ -121,6 +121,9 @@ def test_apply_safe_writes_flag_config_and_token_0600(monkeypatch, tmp_path):
     assert config["env"]["ALLOWED_HOSTS"] == "hiorwell.com,www.hiorwell.com"
     assert config["env"]["ALLOWED_ORIGINS"] == "https://hiorwell.com"
     assert config["env"]["SECURE_COOKIES"] == "true"
+    # Going public re-pins the FE to loopback (the install default binds the LAN) so the tunnel is
+    # the only entrypoint — raw HTTP on the LAN must not bypass the Access wall.
+    assert config["env"]["ORWELL_BIND_HOST"] == "127.0.0.1"
     # The token must NOT leak into the non-secret config (any key/value).
     assert "secret-token-xyz" not in json.dumps(config)
 

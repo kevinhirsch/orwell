@@ -201,6 +201,12 @@ def assert_public_profile_safe(env=None) -> None:
       - LOCALHOST_BYPASS=true     loopback auth bypass enabled
       - SECURE_COOKIES != true    session cookies would not be marked Secure over HTTPS
       - ALLOWED_HOSTS unset/"*"   the Host header is not pinned to your domain
+      - ORWELL_BIND_HOST          a non-loopback FE bind (e.g. 0.0.0.0): raw HTTP is reachable on
+                                  the LAN/all interfaces BESIDE the tunnel, bypassing the proxy /
+                                  Access wall. A public deploy must bind loopback. (Unset is fine —
+                                  the systemd unit default is 127.0.0.1; the Connect wizard re-pins
+                                  it. This only fires on an EXPLICIT non-loopback value, which the
+                                  LAN-reachable install default makes common in data/.env.)
     """
     env = os.environ if env is None else env
     if not _env_truthy(env.get("ORWELL_PUBLIC")):
@@ -214,6 +220,15 @@ def assert_public_profile_safe(env=None) -> None:
         problems.append("SECURE_COOKIES is not 'true' (session cookies would not be marked Secure)")
     if allowed_hosts_from_env(env) == ["*"]:
         problems.append("ALLOWED_HOSTS is unset (the Host header is not pinned to your domain)")
+    # The LAN-reachable install default puts ORWELL_BIND_HOST=0.0.0.0 in data/.env; a public deploy
+    # must re-pin loopback so the tunnel/proxy is the ONLY entrypoint. An unset/empty value is the
+    # loopback unit default → safe (don't false-refuse a public box that never set the key).
+    _bind = (env.get("ORWELL_BIND_HOST", "") or "").strip().lower()
+    if _bind and _bind not in ("127.0.0.1", "::1", "localhost"):
+        problems.append(
+            f"ORWELL_BIND_HOST={env.get('ORWELL_BIND_HOST')} (the front-end is bound to a "
+            "non-loopback address; a public deploy must bind loopback so raw HTTP on the LAN "
+            "cannot bypass the tunnel/proxy — set ORWELL_BIND_HOST=127.0.0.1)")
     if problems:
         raise RuntimeError(
             "Refusing to start an ORWELL_PUBLIC (internet-facing) deployment with an unsafe "

@@ -45,6 +45,7 @@ Fine-grained PATs cap at one year: rotate with `bash /opt/orwell/deploy/orwell-u
 | Variable | Meaning | Default |
 |---|---|---|
 | `ORWELL_PORT` | front-end UI port | `8080` |
+| `ORWELL_BIND_HOST` | front-end UI listen address — `0.0.0.0` = reachable on your LAN, `127.0.0.1` = loopback only (the engine is always loopback) | `0.0.0.0` (set by installer) |
 | `ORWELL_ENGINE_PORT` | engine MCP server (loopback) | `8765` |
 | `ORWELL_ENGINE_HOST` | engine bind address | `127.0.0.1` |
 | `ORWELL_ENGINE_MCP_URL` | front-end → engine | `http://127.0.0.1:8765` |
@@ -55,6 +56,13 @@ Fine-grained PATs cap at one year: rotate with `bash /opt/orwell/deploy/orwell-u
 | `OLLAMA_HOST` **or** `ANTHROPIC_API_KEY` | the LLM (set one) | — |
 
 After editing: `systemctl restart orwell-engine orwell-frontend`.
+
+> **Reaching the UI / LAN vs. loopback.** A fresh install binds the front-end to `0.0.0.0`, so it's
+> reachable from any browser on your network at the URL the installer prints. The **engine is always
+> loopback-only**. To restrict the UI to loopback (e.g. you front it with your own proxy), set
+> `ORWELL_BIND_HOST=127.0.0.1` and restart. Going public (below) re-pins loopback automatically — the
+> FE **refuses to boot** with `ORWELL_PUBLIC=1` on a non-loopback bind, so raw HTTP on the LAN can
+> never bypass the tunnel/Access wall.
 
 > **Changing the UI port?** Use `orwell change-port <port>` (below) rather than hand-editing
 > `ORWELL_PORT`. Moving to a privileged port (**<1024, e.g. 80**) needs a systemd
@@ -261,7 +269,7 @@ LOCALHOST_BYPASS=false
 SECURE_COOKIES=true                              # session cookies get the Secure flag (you're behind TLS)
 ALLOWED_HOSTS=your-domain.example,www.your-domain.example      # Host-header pin (TrustedHostMiddleware)
 ALLOWED_ORIGINS=https://your-domain.example             # CORS
-# ORWELL_BIND_HOST stays 127.0.0.1 (the default) — the proxy/connector reaches the FE on loopback.
+ORWELL_BIND_HOST=127.0.0.1                       # re-pin loopback (the install default is the LAN) — the proxy/connector reaches the FE on loopback
 ```
 
 With `ORWELL_PUBLIC=1`, the FE **refuses to start** if auth is off, the localhost bypass is on,

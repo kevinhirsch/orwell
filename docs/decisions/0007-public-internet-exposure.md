@@ -67,6 +67,15 @@ These hold no matter which front in §B is chosen. None of them touch the engine
    **private** address (new `ORWELL_BIND_HOST`, default **`127.0.0.1`**, replacing the hardcoded
    `0.0.0.0`) and is reached only by the local connector/proxy. uvicorn runs with
    `--proxy-headers --forwarded-allow-ips=<proxy>` so client IP/scheme are honest.
+
+   > **Amendment (2026-06-22) — LAN-reachable by default for the home deploy, loopback ENFORCED when
+   > public.** The systemd **unit/code default stays `127.0.0.1`** (this invariant is unchanged). But the
+   > common case is a trusted-LAN home box reached from a browser, so the **installer provisions
+   > `ORWELL_BIND_HOST=0.0.0.0` in `data/.env`** — a fresh install is reachable on the LAN without a
+   > manual step. Going public no longer *relies* on that default: the "Connect" wizard re-pins
+   > `127.0.0.1`, and the boot guard (`assert_public_profile_safe`) now **refuses to start** an
+   > `ORWELL_PUBLIC=1` deploy bound to a non-loopback address — so "never expose uvicorn directly" is
+   > now structurally enforced, not merely the default. The engine (item 1) is untouched: always loopback.
 3. **Auth is forced on for a public profile.** `AUTH_ENABLED=true`, `LOCALHOST_BYPASS=false`,
    `ORWELL_ENGINE_MULTIUSER=1`, `SECURE_COOKIES=true`, distinct strong `ORWELL_ENGINE_TOKEN` /
    `ORWELL_ENGINE_ADMIN_TOKEN`, `ALLOWED_ORIGINS=https://hiorwell.com`. A **public profile refuses to

@@ -51,6 +51,28 @@ def test_refuses_unpinned_host():
     assert "ALLOWED_HOSTS" in str(exc.value)
 
 
+@pytest.mark.parametrize("bind", ["0.0.0.0", "::", "192.168.1.50"])
+def test_refuses_non_loopback_bind_when_public(bind):
+    # The LAN-reachable install default (ORWELL_BIND_HOST=0.0.0.0) must NOT ride along onto a public
+    # box: raw HTTP on the LAN/all interfaces would bypass the tunnel + Access wall. The refusal
+    # names ORWELL_BIND_HOST so the operator knows to re-pin loopback.
+    env = dict(SAFE)
+    env["ORWELL_BIND_HOST"] = bind
+    with pytest.raises(RuntimeError) as exc:
+        assert_public_profile_safe(env)
+    assert "ORWELL_BIND_HOST" in str(exc.value)
+
+
+@pytest.mark.parametrize("bind", ["127.0.0.1", "::1", "localhost", "", None])
+def test_loopback_or_unset_bind_is_safe(bind):
+    # Loopback — or unset, which resolves to the systemd unit default 127.0.0.1 — is the required
+    # public posture, so it must never be the reason a safe profile is refused.
+    env = dict(SAFE)
+    if bind is not None:
+        env["ORWELL_BIND_HOST"] = bind
+    assert_public_profile_safe(env)  # must not raise
+
+
 def test_allowed_hosts_default_is_wildcard():
     # Unset / empty ⇒ ["*"] so dev + trusted-LAN are unaffected.
     assert allowed_hosts_from_env({}) == ["*"]
