@@ -4166,28 +4166,37 @@ async def stream_agent_loop(
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
                     elif _ready:
-                        # READY (name on file) but NOT finalizable yet. The OLD ladder told the model
-                        # casting was COMPLETE and to finalize — the engine refuses, so the model loops
-                        # (the prod casting bug). Tell the TRUTH and steer toward the missing interview
-                        # substance; never finalize, never force a tool — this drives toward
-                        # `finalizable`, after which the force terminal above becomes reachable.
+                        # READY (name on file) but NOT finalizable yet. CRITICAL: to reach here the model
+                        # has ALREADY narrated this turn's interview beat to the player (_emitted_visible
+                        # is the block's gate), so — per the "never narrate a second scene in one turn"
+                        # rule the advance ladder honors above (at `if _emitted_visible:`) — the turn must
+                        # YIELD to the player to ANSWER the next question. It must NOT re-prompt the model:
+                        # re-prompting within the turn only re-generates the same beat, because the only
+                        # thing that advances a NOT-finalizable interview is the PLAYER answering — which
+                        # cannot happen mid-loop. That was the prod bug (v5.01): this branch `continue`d,
+                        # spinning L0→L8 in a SINGLE turn, so one short player answer ("<name>.") drew ~9
+                        # near-identical re-acknowledgment paragraphs and the interview never progressed.
+                        # The interview advances turn-by-turn instead: the engine re-injects the live
+                        # casting status + NEXT STEP every turn (apply_game_framing → get_moment_prompt)
+                        # and the _auto_record_casting belt (above) banks what the player just gave —
+                        # together driving the intake to `finalizable`, after which the force terminal
+                        # above fires. Note the truthful steer into the turn's working context (bounded so
+                        # a long interview can't accrete it forever; the authoritative cross-turn steer is
+                        # the per-turn framing), then BREAK — never spin a second narration.
                         _slv = _CASTING_SUBSTANCE_LEVEL.get(owner, 0)
-                        if _slv >= _CASTING_MAX_ATTEMPTS:
-                            # Unconditional cap: we've nudged enough without the interview completing —
-                            # stop spamming and hand the turn back (never mint a floater). A non-lull /
-                            # progressing turn resets the counter so the model gets fresh chances.
-                            logger.info(f"[orwell] casting substance cap reached (L{_slv}) — yielding "
+                        if _slv < _CASTING_MAX_ATTEMPTS:
+                            _CASTING_SUBSTANCE_LEVEL[owner] = _slv + 1
+                            _gap = _casting.get("next") or ""
+                            _missing = _casting.get("missing") or []
+                            messages.append({"role": "system",
+                                             "content": _casting_substance_nudge(_gap, _missing)})
+                            logger.info(f"[orwell] casting substance steer (turn {_slv + 1}, "
+                                        f"missing={_missing}) — yielding to player, round {round_num} "
+                                        f"user={owner}")
+                        else:
+                            logger.info(f"[orwell] casting substance cap reached (turn {_slv}) — yielding "
                                         f"to player, round {round_num} user={owner}")
-                            break
-                        _CASTING_SUBSTANCE_LEVEL[owner] = _slv + 1
-                        _gap = _casting.get("next") or ""
-                        _missing = _casting.get("missing") or []
-                        messages.append({"role": "system",
-                                         "content": _casting_substance_nudge(_gap, _missing)})
-                        logger.info(f"[orwell] casting substance nudge (L{_slv}, missing={_missing}) "
-                                    f"round {round_num} user={owner}")
-                        yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
-                        continue
+                        break  # yield to the player to answer — never spin a second narration this turn
                     elif owner is not None:
                         _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
                         _CASTING_SUBSTANCE_LEVEL.pop(owner, None)

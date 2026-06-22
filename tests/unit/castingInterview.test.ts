@@ -474,6 +474,29 @@ describe("the finalize floor — name+photo is not finalizable (0050 mobile fix)
     s.updateCasting({ backstory: "a life", motivation: "to win", personaArchetype: "the watcher" });
     expect(s.getGameState().casting!.finalizable).toBe(true);
   });
+
+  it("the pre-game prompt states the finalize gate as engine truth, not the model's judgement", () => {
+    // No name → NOT READY (the season cannot start at all).
+    const fresh = new GameSessionAdapter();
+    fresh.updateCasting({ motivation: "to win" });
+    expect(fresh.getMomentPrompt({}).systemPrompt).toContain("NOT READY: no name on file");
+
+    // Name only → ready but NOT finalizable: the dynamic status line must steer the model to keep
+    // interviewing and NOT finalize (the prod loop was the prompt treating a name-only intake as
+    // "complete" and ordering a createCharacter the engine then refused).
+    const s = new GameSessionAdapter();
+    s.updateCasting({ playerName: "The Interviewee", castPhoto: "uploaded" });
+    const nameOnly = s.getMomentPrompt({}).systemPrompt;
+    expect(nameOnly).toContain("NOT DONE YET: a name is on file");
+    expect(nameOnly).toMatch(/do NOT call createCharacter/i);
+    expect(nameOnly).not.toContain("READY TO START: enough is on file");
+
+    // A genuine interview → finalizable: the line flips to READY TO START.
+    s.updateCasting({ backstory: "a life", motivation: "to win", personaArchetype: "the watcher" });
+    const done = s.getMomentPrompt({}).systemPrompt;
+    expect(done).toContain("READY TO START: enough is on file");
+    expect(done).not.toContain("NOT DONE YET: a name is on file");
+  });
 });
 
 // The engine completeness backstop (the mobile short-circuit fix, 0050): createCharacter("{}") on a

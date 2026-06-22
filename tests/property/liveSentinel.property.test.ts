@@ -40,7 +40,7 @@ function plantLiveSentinels(reg: GameSessionRegistry, user: string, seed: number
   return sentinels;
 }
 
-const args = (name: string): Record<string, unknown> => {
+const args = (name: string, seed: number): Record<string, unknown> => {
   switch (name) {
     case "getMomentPrompt": return { moment: "nominations" };
     case "getVisibleStateFor": return { entity: PLAYER };
@@ -65,10 +65,6 @@ const args = (name: string): Record<string, unknown> => {
     // Vault-free HouseguestMoveResult ({status, whereabouts}); no hidden state may cross.
     case "moveHouseguest": return { id: npc(1), room: "kitchen" };
     case "recordImageBeat": return { houseguestId: npc(1), imageRef: "img-ref" };
-    // 0070: the FE prose write-back — enrich an already-recorded HIDDEN off-screen scene with
-    // model-voiced texture. Content-only ({eventId, content}); the result is a Vault-free ack, so the
-    // canary must never bite it. eventId is a non-empty hidden id; a non-matching id fail-softs.
-    case "recordOffscreenSceneTexture": return { eventId: "offscreen:1", content: "a quiet aside, voiced for color." };
     // 0065: the FE authoring write-back (live house — the season is already running here) + the pre-warm
     // (a no-op refusal once started). Both are Vault-free by construction; the sweep proves the canary
     // never bites their outputs either.
@@ -77,6 +73,10 @@ const args = (name: string): Record<string, unknown> => {
     // 0062: the FE zeitgeist write-back — PUBLIC real-world flavor only (no Vault, no game input).
     // The sweep proves the canary never bites its output (an empty subset is a valid capture).
     case "recordWorldSnapshot": return { slices: {} };
+    // 0070: the FE texture write-back addresses a planted HIDDEN off-screen event by id and writes
+    // voiced prose — content-only. Point it at the real sentinel-bearing hidden event so the sweep
+    // exercises the live write path; its result is a bare {ok} status that never echoes hidden content.
+    case "recordOffscreenSceneTexture": return { eventId: `b42:hidden:${seed}`, content: "voiced off-screen prose" };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels
@@ -107,7 +107,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
 
       const sweep = async (server: McpServer, name: string): Promise<void> => {
         swept.add(name);
-        const blob = JSON.stringify(await server.callTool(name, args(name)));
+        const blob = JSON.stringify(await server.callTool(name, args(name, seed)));
         for (const s of sentinels) expect(blob.includes(s), `seed ${seed}: tool ${name} leaked ${s}`).toBe(false);
       };
 
@@ -168,7 +168,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         swept.add(name);
         let payload: string;
         try {
-          payload = JSON.stringify(await server.callTool(name, args(name)));
+          payload = JSON.stringify(await server.callTool(name, args(name, seed)));
         } catch (err) {
           payload = String(err instanceof Error ? err.message : err); // the refusal text is the outward surface
         }
