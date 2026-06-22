@@ -314,5 +314,54 @@ to follow on the juiciest. No theory without a traced mechanism.
 
 ---
 
-## Live-LLM lane (in progress)
-A dedicated background agent is standing up the real stack + wiring the OpenRouter key per `docs/audits/playtest-harness/README.md`, playing an authentic `-pro` persona season (engine = oracle) then probing `-flash` for tier failures. Findings (LIVE-*) land here on return.
+## Live-LLM lane — COMPLETE (real stack, `-pro` 22 turns + `-flash` 3 turns, 4742 engine calls, $0.95, 28 screenshots)
+
+**Method:** real engine + FE per the harness, authentic in-chat casting → full week-1 (casting→eviction→week-2 roll), engine = oracle. Artifacts: `.audit-telemetry/live-play-roast.md` + `.audit-telemetry/shots/{play,playf}/` (gitignored). **What HELD (keep):** casting finalized promptly (S2-1 did not reproduce), distinct/stable NPC voices, **0 cast inventions / 0 hard machinery leaks / 0 `npc:N` in 55 messages**, anti-sycophancy held (lost both comps "competed", real NPCs won HOH), the staged eviction *reveal* drama, Vault posture clean, `-flash` now DOES `advanceGame` (B5/B6 improved). The conversation really is the game, and it's good. **Three of my static findings were empirically confirmed live** (ENG-1→LIVE-2/3/5, SOC-1→LIVE-10, FEPY-4/A-S3→single-tab repro).
+
+### LIVE-4 · `[BLOCK]` · both tiers · VIEWED · Staged-comp advance-cascade silently skips the nomination + veto ceremonies
+- **Lens:** narration faithfulness (omission) + core-loop integrity (the four weekly ceremonies are the BB spine).
+- **Evidence:** turn-9 FE ledger `beat=35→42 tools=[advanceGame,submitDecision,advanceGame×3]`; turn-13 `beat=49→56` with **6 advanceGame** crossing veto-draw→comp→ceremony; engine recap holds the skipped beats verbatim ("X nominates Y and Z", "X wins the Power of Veto", "X does not use the veto") — **none narrated in real time** (full 23-message scan). **Flash:** skipped the player's OWN nomination, narration ended "who does [HOH] put on the block?" while engine `noms=[…, the player]`.
+- **Mechanism (FE narration, NOT engine):** the engine returns a `BeatEvent` per ceremony (`liveSeason.ts:1288-1294`); the model receives it but keeps advancing to the next decision point, violating the explicit rule `momentPrompts.ts:98-100` ("never narrate past one without advancing it"). The staged comp's many advance-beats invite "just keep advancing"; nothing caps advances at a ceremony boundary.
+- **Differential:** the INVERSE of the excluded S3-CORE/B6 (under-call) — here the model OVER-advances. Pro catches up ~2-3 turns late (with a vote retcon, LIVE-7); flash recovers worse. Recovery is luck, not design.
+- **Tuning rec:** cap `advanceGame` to ONE ceremony-class beat/turn (staged `comp-elimination` sub-rounds excepted as one logical comp); require a returned ceremony `BeatEvent` (noms/veto-ceremony/eviction) be narrated before any further advance (analogous to `_auto_record_scene`); or emit a `pending` pause at the NPC-HOH nomination. **Confidence:** HIGH. **Falsifier:** any chat message showing a ceremony when it occurred — none did.
+
+### LIVE-7 · `[BLOCK-candidate]` · pro · VIEWED · Narration fabricates the eviction result ahead of the engine, which then contradicts it
+- **Evidence:** turn-17 GM narrated "**6 to 4 … [nominee] … is the first to fall … she's gone**" + farewell + walking out; turn-20 the engine returned MORE ballots ("the reveal isn't over"), still `phase=eviction, evicted=[]`, the evictee `active`; true tally was **8-5** (13 voters). The evictee "left" twice; the count retconned.
+- **Mechanism:** the staged eviction reveal drips ballots per `advanceGame`, but nothing stops the model narrating the CONCLUSION (evictee named + departure) before the engine's commit beat. **Faithfulness violation** (narration contradicts engine truth); the persisted truth is correct (engine wins), but the player saw a contradiction at a peak moment. **Tuning rec:** forbid narrating the eviction result/departure until the commit beat returns the eviction event; surface "final ballot"/"reveal complete" so the model can't conclude early. **Confidence:** HIGH.
+
+### LIVE-2 · `[POLISH·high]` (0066 tuning; **confirms+extends ENG-1**) · both · VIEWED · A single staged comp burns a full in-game DAY and sweeps the just-crowned HOH asleep
+- **Evidence:** week-1 HOH comp drove `timeOfDay` morning/day1→late-night/day2 in one turn (~9 clock ticks); engine `asleep` then included the **HOH who just won**; reproduced week-2. The model narrated the HOH awake to dodge the absurdity — contradicting the engine flag.
+- **Mechanism:** `GameSessionAdapter.ts:3299-3302` calls `advanceClock` UNCONDITIONALLY per `advanceBeat`; 0006 staged comps are ~4-8 advance-beats, so one comp consumes >1 day. `awakeSet` (`timeOfDay.ts:120`) has no HOH/ceremony exception. `time_of_day_enabled:True` is the FE default (ENG-1). **Tuning rec:** advance the clock once per LOGICAL comp (skip the tick on inert `comp-elimination` beats); exempt the just-crowned HOH from `awakeSet` for the winning beat. **Confidence:** HIGH.
+
+### LIVE-3 · `[POLISH·high]` (0049/0066 integration) · both · VIEWED · The sleep state is invisible to the narrator; asleep NPCs vanish from rooms with no time cue
+- **Evidence:** at late-night the `whereabouts` result lists only the 7 awake NPCs; the 8 asleep (incl. HOH) are absent from every room with **no `asleep`/`timeOfDay` field**; the moment prompt has no "late-night"/"asleep" cue (grep: 0 hits in `momentPrompts.ts`). The model sees a half-empty house with no reason → invents/contradicts (LIVE-5). **Tuning rec:** add `timeOfDay` + `asleep:[…]` to the `whereabouts` result and a one-line "It's late-night; these have turned in: …" to the moment prompt (all already Vault-free in `/status`). **Confidence:** HIGH.
+
+### LIVE-5 · `[POLISH]` · both · VIEWED · Narration clock decoupled from engine — invents wall-clock times ("06:19 PM") while the engine says morning
+- **Evidence:** engine `timeOfDay=morning`/day3/`asleep=[]`; narration prefixed "**06:19 PM**" (the engine has no clock-time, only 5 phase labels) + NPCs saying "get some sleep". Direct consequence of LIVE-3. **Rec:** anchor the narrator to the engine phase (same fix as LIVE-3). **Confidence:** HIGH.
+
+### LIVE-8 · `[POLISH·high]` (B3 family) · pro · VIEWED · Eviction→next-week transition is a fragile over-long chain; the goodbye double-surfaces
+- **Evidence:** the week-1 eviction needed 13 ballot reveals → a `goodbye-message` pending → a "X leaves the house" commit → week-2 roll; the player authored the goodbye TWICE — free-text (turn 19) AND a structured `[warm/respectful/cold]` tone card (turn 22) for the same goodbye. The model called `advanceGame` repeatedly while the engine sat at `phase=eviction,pending=None` (appeared stuck; an oracle advance found one queued beat that cleanly rolled — engine sound, choreography fragile). **Tuning rec:** request the goodbye ONCE (the structured card owns the binding commit per ADR 0003); make the "leaves the house" commit beat fire exactly once. **Confidence:** HIGH.
+
+### LIVE-1 · `[POLISH]` (grounding/non-degradation) · both · CONFIRMED (lead-verified) · Each NPC carries two contradictory occupations in the prompt; the model voices the placeholder
+- **Evidence (lead-verified):** `characterFactory.ts:575` `background = "a ${rng.pick(OCCUPATIONS)} who plays as a ${archetype}"` (a DIFFERENT pool from `pickVocation()`); `momentPrompts.ts:728` surfaces `h.background` AND `:731` `h.vocation` AND `:737` `h.biography` (which re-embeds the placeholder via `deepProfile.ts:249`) → the placeholder appears 2×, the real vocation 1×; the model weights the placeholder non-deterministically. Live: Lexi seeded "stand-up comedian" voiced "bartender"; flash flipped Tiffany postal-carrier→realtor within one comp. The `:571` comment admits `background` is "RETAINED (byte-stable)" — kept for RNG stability but should not be SURFACED.
+- **Tuning rec:** make `generateBiography()` use the real `vocation`; drop `h.background` from the momentPrompts roster line (keep the rng pick for byte-stability, stop surfacing its value). **Confidence:** HIGH.
+
+### LIVE-6 · `[POLISH]` (rules grounding) · both · VIEWED · The 1st evictee is narrated as a juror
+- **Evidence:** on the 1st eviction (of 15) the GM said "the jury of one … starts tonight" / "She's the first juror now" — but the first ~6 evictees are pre-jury (jury of 9 forms from the final 9); engine `jury:None`. Misleads jury-management strategy. **Rec:** surface a `juryStarted`/`isJuror` flag or the jury-threshold number in the prompt. **Confidence:** HIGH.
+
+### LIVE-10 · `[POLISH]` (social legibility; **confirms SOC-1/SOC-4 LIVE**) · VIEWED · `socialRead` says "Nothing feels out of place" while the player is nominated
+- **Evidence:** after the HOH put the player on the block, `socialRead(HOH)` returned "…you've witnessed 68 moments and know 12 things for certain. **Nothing feels out of place right now.**" `socialInitiatives` DOES model NPC scheming (the layer exists) — it just never surfaces a "you're a target" read. Combined with LIVE-4 (nomination not narrated), the player is **doubly blindsided with no readable warning** — the brief's flagged concern, now empirically confirmed. **Rec:** let the affect line reflect observable danger cues; suspense from readable uncertainty, not the surface asserting all is well. **Confidence:** MED.
+
+### LIVE-9 · `[NIT]` (B1 re-confirmed) · pro · VIEWED · Residual "Let me check…" operator-aside in a visible bubble
+- **Evidence:** 1/55 messages: "…four to go. **Let me check where the stragglers are** before you hunt them down." (about to call `whereabouts`) — not a hard leak, ~1.8% frequency. **Rec:** the FE leading-meta-sentence strip floated for B1.
+
+### A-S3 single-tab repro (strengthens FEPY-4 / R-BND-1) — NOT a new id
+9/4742 tool calls failed `StaleBeatError` (409) in **single-tab** play (no peer): within one multi-round turn the model carries a stale `expectedBeatSeq` after its OWN earlier advance. The FE reconciles (no visible break), but a 409 on a back-fill `recordInteraction`/`moveTo` can drop a scene's consequence fold **without concurrency** — a stronger version of the documented A-S3 risk. **Gate rec:** refresh `expectedBeatSeq` after each of the model's own advances within a turn.
+
+---
+
+## Roast complete — consolidated launch triage
+**[BLOCK] (fix before launch):** LIVE-4 (ceremonies skipped) · LIVE-7 (eviction fabricated ahead of engine, BLOCK-candidate).
+**[POLISH·high] (top quick wins / clusters):** the **0066 time/sleep cluster** ENG-1+LIVE-2/3/5 (ships on, mistuned, invisible to narrator) · TRANS-1 (orphaned 20fps timer, 1 line) · UX-1 (slug in finale composer, 1 line) · LIVE-8 (goodbye double-surface) · LIVE-1 (dual occupation) · FEPY-1 (casting error as GM narration) · SOC-1+LIVE-10 (coalition illegibility) · R-BND-1/FEPY-4/A-S3 (stale-beat drops folds, single-tab).
+**[DOC]:** DOC-1..8 ceiling-freeze drift (CLAUDE.md @0069 vs features @0074; phantom FE port 7000).
+**Everything else:** LATENT/NIT tracked above.
