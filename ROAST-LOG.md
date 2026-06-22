@@ -233,5 +233,24 @@ to follow on the juiciest. No theory without a traced mechanism.
 
 ---
 
+## Wave 2 — Responsive / cross-platform (static)
+
+### RESP-1 · `[POLISH]` · PROPOSED · Minimized-window dock row's only close is a 16px hover-faded `×`; E95 removed the drag-close touch equivalent
+- **Evidence:** `style.css:1137-1143` (`.minimized-dock-x` 16×16, opacity 0.4, `:hover`→1); `modalManager.js:376-380,392-398` (E95 sidebar row: body-click *restores*, "no drag", so the `×` is the sole close); stale CSS comment `style.css:962-964` still advertises the removed drag-to-trash model.
+- **Mechanism:** any minimized kit window (status/cast/retro/presence/finale) docks as a "Windows" sidebar row = the mobile drawer representation; its only close is a 16px glyph failing WCAG 2.5.5 (44) and even 2.5.8 (24), at opacity 0.4 permanently on touch (no hover). **Differential:** not a pointer-affordance-with-touch-equivalent — E95 deleted the drag-close, so the tiny `×` is the literal close on all platforms; not hidden on mobile (grep empty). **Confidence:** high static; falsifier: if the kit forbids minimize ≤768px (then unreachable→LATENT). **Fix:** add `.minimized-dock-x` to the J5-01 `@media (hover:none) and (pointer:coarse)` floor (`style.css:36671`).
+
+### RESP-2 · `[POLISH]` · PROPOSED · Cast-panel `.oc-pin` (28px) + `.oc-backfill` (32px) below the 44px touch floor, excluded from the J5-01 fix
+- **Evidence:** `orwellCast.js:156,164,170-172` (min-height 28/32, mobile block only sets `width:auto`); J5-01 floor `style.css:36671-36682` targets chrome selectors only, not panel-body buttons. **Mechanism:** "Generate cast portraits" (`.oc-backfill`) is a universal action rendered on mobile at 32px — undersized tap. **Differential:** not reflow (fixed sub-floor heights); not hidden on mobile; not covered by J5-01 (selector inspection). **Fix:** add the cast-panel body buttons to the J5-01 coarse-pointer floor.
+
+### RESP-3 · `[NIT]` · PROPOSED · Per-message `.copy-btn` is hover-only with no touch fallback (the code-block buttons have one)
+- **Evidence:** `style.css:3554-3561` (`.copy-btn` opacity 0, revealed only via `.msg:hover`); contrast `style.css:4184-4188` (code-block buttons DO get `@media (hover:none){…opacity:0.7}`). **Mechanism:** on touch the copy control stays invisible (still hit-testable but undiscoverable). NIT (bubble text stays selectable; nothing lost). **Fix:** mirror the code-block `@media (hover:none)` reveal for `.copy-btn`.
+
+### RESP-4 · `[LATENT]` · PROPOSED · The responsive-matrix gate can't see RESP-1/2 — 36px floor (project floor is 44px), narrow selectors, kit windows unmounted
+- **Evidence:** `responsive_matrix.py:312-325` (selectors `button,[role=button],select,.settings-nav-item`; floor `w<36||h<36`); `GAME_SURFACES` `:237-238` doesn't mount panel toolbars; XFAIL empty `:73-76`. **Mechanism:** a 36–43px control passes the gate while violating the project's own 44px CSS floor, and panel-body controls aren't in the scanned DOM ⇒ a whole class of below-44px controls ships CI-green. **This is the guardrail-scope-drift root behind RESP-1/2/3.** **Fix:** align the gate floor to 44px, widen selectors (`a[href]`, interactive `[tabindex]`), mount the kit panels during the coarse-pointer sweep.
+
+**Lane-RESP CLEARED:** the responsive contract is mature — `dvh` w/ `vh` fallbacks across overlays, `env(safe-area-inset-*)` on fixed bottom chrome, a `--composer-clearance` token kept live by Resize/Mutation observers (keyboard-robust), the State-6/J5-01 44px coarse floor genuinely covering titlebars + gadget-rail. The brief's big-ticket warnings (fixed-vh, sheet flush-width, cursor:move-on-touch, sheet/hamburger overlap) are really fixed. **Lane-RESP smell:** the touch floor is enforced + audited at exactly ONE altitude — chrome — while panel bodies and dock rows live just outside both the J5-01 selector list and the gate's DOM, so the guardrail's *scope* drifted behind the surfaces it protects (RESP-4).
+
+---
+
 ## Live-LLM lane (in progress)
 A dedicated background agent is standing up the real stack + wiring the OpenRouter key per `docs/audits/playtest-harness/README.md`, playing an authentic `-pro` persona season (engine = oracle) then probing `-flash` for tier failures. Findings (LIVE-*) land here on return.
