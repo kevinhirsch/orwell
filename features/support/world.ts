@@ -524,6 +524,18 @@ export class BbWorld extends World {
   wsPairB?: import("../../src/ports/GameSession").HouseguestCard;
   wsWeek?: number;
 
+  // Feature 0070 — off-screen scene texture enrichment scratch state.
+  txRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  txUser?: string;
+  txSandbox?: import("../../src/composition/registry").UserSandbox;
+  txOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  txServer?: import("../../src/adapters/mcp/McpServer").McpServer;
+  txSkeletons?: import("../../src/ports/GameSession").OffscreenSceneSkeleton[];
+  txWriteOk?: boolean;
+  txRefusedReason?: string;
+  txSeedA?: string;
+  txSeedB?: string;
+
   constructor(options: IWorldOptions) {
     super(options);
   }

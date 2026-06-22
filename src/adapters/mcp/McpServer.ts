@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -160,6 +160,21 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
       }
       return;
+    case "getOffscreenSceneSkeletons":
+      // 0070: read-only call with no required args — no shape guard needed.
+      return;
+    case "recordOffscreenSceneTexture":
+      // 0070: FE prose write-back. Requires `eventId` (a hidden event id) and `content` (non-empty voiced
+      // prose). Refuses any forbidden fields that would pierce the closed set: `witnessSet`, `hidden`,
+      // and any field starting with "relationship" are not permitted — they must never cross this boundary.
+      if (!isStr(args["eventId"])) refuse("eventId", "a non-empty string (hidden event id)");
+      if (!isStr(args["content"])) refuse("content", "a non-empty string (voiced prose)");
+      if (args["witnessSet"] !== undefined) refuse("witnessSet", "not accepted — texture write-back is content-only");
+      if (args["hidden"] !== undefined) refuse("hidden", "not accepted — texture write-back is content-only");
+      if (Object.keys(args).some((k) => k.startsWith("relationship"))) {
+        refuse("relationship*", "not accepted — texture write-back is content-only");
+      }
+      return;
     default:
       return; // read tools and free-text tools take no required structure
   }
@@ -199,6 +214,12 @@ export class McpServer {
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
+      case "getOffscreenSceneSkeletons":
+        // 0070: return the Vault-free skeletons of the most-recent tick's off-screen scenes (ids + nature; no hidden content).
+        return this.deps.session.getOffscreenSceneSkeletons();
+      case "recordOffscreenSceneTexture":
+        // 0070: enrich an already-recorded hidden off-screen scene with model-voiced prose. Content-only; closed set unchanged.
+        return this.deps.session.recordOffscreenSceneTexture(args as unknown as RecordOffscreenSceneTextureReq);
       case "getGameState":
         return this.deps.session.getGameState();
       case "gameStatus":

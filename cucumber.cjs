@@ -58,6 +58,7 @@ module.exports = {
       "docs/features/0063-casting-diversity-floor.feature",
       "docs/features/0062-world-snapshot-zeitgeist.feature",
       "docs/features/0065-cast-prewarm.feature",
+      "docs/features/0070-offscreen-texture-enrichment.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

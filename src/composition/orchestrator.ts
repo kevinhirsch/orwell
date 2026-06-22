@@ -547,6 +547,9 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       });
     }
   }
+  // 0070 — register this tick's scene ids with the session so `getOffscreenSceneSkeletons` returns
+  // the CURRENT batch (transient; refreshed every tick; the event store is the durable source).
+  sandbox.session.notifyOffscreenTick(scenes.map((s) => s.event.id));
 
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying

@@ -180,6 +180,13 @@ export interface SessionCore {
    * pre-feature save AND once the premiere is over (the tracker is cleared when the first HOH begins).
    */
   premiereIntros?: EntityId[];
+  /**
+   * 0070 — the additive prose texture layer: model-voiced content indexed by event id. Only
+   * applied when the underlying event is already hidden (never creates events, never alters the
+   * closed set). Persisted so enriched scenes survive a restart byte-identical (0030). Absent on
+   * pre-0070 saves (no texture; the deterministic template content simply stands).
+   */
+  textureOverrides?: Record<string, string>;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
