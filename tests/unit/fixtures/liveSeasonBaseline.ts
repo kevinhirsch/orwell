@@ -22,7 +22,7 @@ import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal, gameRespectTerm, JURY_WEIGHTS,
   FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "../../../src/engine/jury";
-import { MANNER_THRESHOLDS } from "../../../src/engine/juryConstants";
+import { MANNER_THRESHOLDS, MANNER_GRADING } from "../../../src/engine/juryConstants";
 import { RELATIONSHIP_CONSTANTS } from "../../../src/engine/relationshipConstants";
 import { maybeFireTwist } from "../../../src/engine/reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "../../../src/engine/reserveTwists";
@@ -501,9 +501,17 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
  */
 function mannerToward(evictee: EntityId, responsible: EntityId, ctx: SeasonCtx): EvictionManner {
   const e = ctx.rel.edge(evictee, responsible);
-  if (e.trust > MANNER_THRESHOLDS.trustBetrayal) return { betrayed: true };   // trusted them, yet they moved against me
-  if (e.threat < MANNER_THRESHOLDS.threatBlindside) return { blindsided: true }; // read them as no threat — never saw it coming
-  return { respected: true }; // a clean, expected move from a known rival — no grievance
+  // SOC-NEW-1/5: mirror the live graded read so the staged/non-staged trajectory twin stays faithful.
+  const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+  const graded = (t: number): number => MANNER_GRADING.grievanceFloor + (1 - MANNER_GRADING.grievanceFloor) * clamp01(t);
+  const { trustBetrayal, threatBlindside } = MANNER_THRESHOLDS;
+  if (e.trust > trustBetrayal) {
+    return { betrayed: true, intensity: graded((e.trust - trustBetrayal) / (1 - trustBetrayal)) };
+  }
+  if (e.threat < threatBlindside) {
+    return { blindsided: true, intensity: graded((threatBlindside - e.threat) / threatBlindside) };
+  }
+  return { respected: true, intensity: clamp01((e.threat - threatBlindside) / (1 - threatBlindside)) };
 }
 
 /**
@@ -676,10 +684,10 @@ function goodbyeTone(sender: EntityId, evictee: EntityId, ctx: SeasonCtx): Goodb
   return "respectful";
 }
 
-/** How a goodbye tone folds into the evictee's read of the sender (feeds jury lean, 0014/0037 §4.2). */
+/** How a goodbye tone folds into the evictee's read of the sender (feeds jury lean, 0014/0037 §4.2).
+ *  SOC-NEW-1: mirror the live model — the tone is a `goodbye` field applied with bounded precedence. */
 export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
-  if (tone === "warm" || tone === "respectful") return { respected: true };
-  return { disrespected: true }; // a cold send-off stings — the evictee weighs it against them
+  return { goodbye: tone };
 }
 
 /**

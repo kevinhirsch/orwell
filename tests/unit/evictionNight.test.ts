@@ -119,9 +119,10 @@ describe("0047 — eviction night live", () => {
     const cold = drive(0.2);  // cold goodbyes
     expect(warm.senders.length).toBeGreaterThan(0);
     expect(warm.senders).toContain(PLAYER); // E34: the surviving player always gets the lever
-    // Every houseguest who left a goodbye now reads the evictee's manner with the tone they sent.
-    for (const sender of warm.senders) expect(warm.s.mannerByEvictee![npc(2)]![sender]!.respected).toBe(true);
-    for (const sender of cold.senders) expect(cold.s.mannerByEvictee![npc(2)]![sender]!.disrespected).toBe(true);
+    // Every houseguest who left a goodbye now reads the evictee's manner with the tone they sent
+    // (SOC-NEW-1: recorded as the `goodbye` field, applied with precedence in juryLean).
+    for (const sender of warm.senders) expect(warm.s.mannerByEvictee![npc(2)]![sender]!.goodbye).toBe("warm");
+    for (const sender of cold.senders) expect(cold.s.mannerByEvictee![npc(2)]![sender]!.goodbye).toBe("cold");
   });
 
   it("a staged eviction survives an engine restart mid-reveal and resumes to the same result", () => {

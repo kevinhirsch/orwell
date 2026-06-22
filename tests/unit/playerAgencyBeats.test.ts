@@ -61,15 +61,16 @@ describe("E34 — the engine never authors the player's goodbye message", () => 
     expect(s.pending?.kind).toBe("goodbye-message");
     // The player chooses COLD anyway: the fold honors the choice, not the edge (agency, E34).
     applyDecision(s, { kind: "goodbye-message", tone: "cold" }, ctx);
-    expect(s.mannerByEvictee![evictee]![PLAYER]!.disrespected).toBe(true);
+    // SOC-NEW-1: the tone is recorded as the `goodbye` field (applied with precedence in juryLean).
+    expect(s.mannerByEvictee![evictee]![PLAYER]!.goodbye).toBe("cold");
   });
 
-  it("folds via goodbyeMannerFor exactly as NPC tones: warm/respectful ⇒ respected; cold ⇒ disrespected", () => {
-    for (const [tone, key] of [["warm", "respected"], ["respectful", "respected"], ["cold", "disrespected"]] as const) {
+  it("folds via goodbyeMannerFor exactly as NPC tones: the chosen tone is recorded as the goodbye field", () => {
+    for (const tone of ["warm", "respectful", "cold"] as const) {
       const { s, ctx, evictee } = stagedEviction();
       driveToPlayerGoodbye(s, ctx, new SeededRandom(7));
       applyDecision(s, { kind: "goodbye-message", tone }, ctx);
-      expect(s.mannerByEvictee![evictee]![PLAYER]![key]).toBe(true);
+      expect(s.mannerByEvictee![evictee]![PLAYER]!.goodbye).toBe(tone);
     }
   });
 

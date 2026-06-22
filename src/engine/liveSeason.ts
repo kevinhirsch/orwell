@@ -22,13 +22,13 @@ import {
   runFinale as buildFinaleScript, castJuryVote, juryLean, appealEffect, bestAppeal, gameRespectTerm, JURY_WEIGHTS,
   FINALE_APPEALS, type EvictionManner, type FinaleAppeal, type FinaleScript, type JuryRel,
 } from "./jury";
-import { MANNER_THRESHOLDS } from "./juryConstants";
+import { MANNER_THRESHOLDS, MANNER_GRADING } from "./juryConstants";
 import { RELATIONSHIP_CONSTANTS } from "./relationshipConstants";
 import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
-import { nextPhase, restDeficitFor, bedtimeFor, DAY_START, type TimeOfDay } from "./timeOfDay";
+import { nextPhase, restDeficitFor, bedtimeFor, phaseIndex, DAY_START, type TimeOfDay } from "./timeOfDay";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -769,9 +769,21 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
  */
 function mannerToward(evictee: EntityId, responsible: EntityId, ctx: SeasonCtx): EvictionManner {
   const e = ctx.rel.edge(evictee, responsible);
-  if (e.trust > MANNER_THRESHOLDS.trustBetrayal) return { betrayed: true };   // trusted them, yet they moved against me
-  if (e.threat < MANNER_THRESHOLDS.threatBlindside) return { blindsided: true }; // read them as no threat — never saw it coming
-  return { respected: true }; // a clean, expected move from a known rival — no grievance
+  const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+  // SOC-NEW-1/5: the read is GRADED off the actual edge — its severity tracks the relationship.
+  const graded = (t: number): number => MANNER_GRADING.grievanceFloor + (1 - MANNER_GRADING.grievanceFloor) * clamp01(t);
+  const { trustBetrayal, threatBlindside } = MANNER_THRESHOLDS;
+  if (e.trust > trustBetrayal) {
+    // Trusted them, yet they moved against me — the deeper the trust, the deeper the betrayal.
+    return { betrayed: true, intensity: graded((e.trust - trustBetrayal) / (1 - trustBetrayal)) };
+  }
+  if (e.threat < threatBlindside) {
+    // Read them as no threat — the more harmless they seemed, the bigger the blindside.
+    return { blindsided: true, intensity: graded((threatBlindside - e.threat) / threatBlindside) };
+  }
+  // A clean, expected move — no grievance. SOC-NEW-5: respect is EARNED by threat (a feared rival
+  // earns it; an ignored floater nets ~neutral, not a flat lift), graded from 0 at the blindside line.
+  return { respected: true, intensity: clamp01((e.threat - threatBlindside) / (1 - threatBlindside)) };
 }
 
 /**
@@ -865,9 +877,24 @@ export function playerRestDeficit(s: LiveSeasonState): number {
   return restDeficitFor(s.lastSleepPhase ?? DAY_START);
 }
 
-/** An NPC's hidden rest deficit (0..1) — their character-driven bedtime habit (the night owls pay). */
-export function npcRestDeficit(stats: { physical: number; social: number }): number {
-  return restDeficitFor(bedtimeFor(stats));
+/**
+ * An NPC's hidden rest deficit (0..1) — ENG-NEW-1: keyed off the ACTUAL night, not static aptitude.
+ *
+ * The old model `restDeficitFor(bedtimeFor(stats))` was a pure function of `social − physical`, so a
+ * mental/social-leaning houseguest (a night-owl bedtime) carried the MAX penalty in EVERY competition
+ * — including the mental comps they should win — regardless of how the night actually went. That is a
+ * structural aptitude tax (anti-sycophancy: the engine must not systematically disadvantage an
+ * archetype). The deficit now reflects the LATEST PHASE THE NPC WAS ACTUALLY AWAKE last night — the
+ * EARLIER of their character bedtime and how far the night actually ran (`lastSleepPhase`, which the
+ * player's OWN bedtime drives). So a night-owl only pays when the night genuinely ran to `late-night`
+ * (the player kept the house up late); on a normal night everyone — owls included — carries none, and
+ * the mental favorite wins their mental comp cleanly. Dynamic on actual play, never a trait penalty.
+ */
+export function npcRestDeficit(s: LiveSeasonState, stats: { physical: number; social: number }): number {
+  const bedtime = bedtimeFor(stats);
+  const nightPeak = s.lastSleepPhase ?? DAY_START;
+  const latestAwake = phaseIndex(bedtime) <= phaseIndex(nightPeak) ? bedtime : nightPeak;
+  return restDeficitFor(latestAwake);
 }
 
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
@@ -996,10 +1023,14 @@ function goodbyeTone(sender: EntityId, evictee: EntityId, ctx: SeasonCtx): Goodb
   return "respectful";
 }
 
-/** How a goodbye tone folds into the evictee's read of the sender (feeds jury lean, 0014/0037 §4.2). */
+/**
+ * How a goodbye tone folds into the evictee's read of the sender (feeds jury lean, 0014/0037 §4.2).
+ * SOC-NEW-1: the tone is recorded as the `goodbye` field, applied with bounded PRECEDENCE in
+ * `mannerLeanOf` — it can soften a grievance toward zero or lift/sting a clean departure, but a warm
+ * tone can no longer be ADDED on top to launder a betrayal (the old `{respected}` merge bug).
+ */
 export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
-  if (tone === "warm" || tone === "respectful") return { respected: true };
-  return { disrespected: true }; // a cold send-off stings — the evictee weighs it against them
+  return { goodbye: tone };
 }
 
 /**

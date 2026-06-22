@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { juryLean, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS, appealEffect, bestAppeal, finalePerformance, FINALE_APPEALS } from "../../src/engine/jury";
+import { juryLean, mannerLeanOf, castJuryVote, tallyJuryVote, runFinale, JURY_WEIGHTS, appealEffect, bestAppeal, finalePerformance, FINALE_APPEALS } from "../../src/engine/jury";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { npc } from "../../src/domain/ids";
 
@@ -193,5 +193,46 @@ describe("gameRespectTerm — the jury weighs who actually played", () => {
     const fullBetrayal = Math.abs(MANNER_LEAN.betrayed) * JURY_WEIGHTS.manner;
     const maxRespectSplit = 0.5 * JURY_WEIGHTS.gameRespect;
     expect(fullBetrayal).toBeGreaterThan(maxRespectSplit);
+  });
+});
+
+describe("SOC-NEW-1/5 — the manner read is dynamic, and a warm goodbye cannot launder a betrayal", () => {
+  // The falsifier from the audit: a juror who TRUSTED a finalist (0.7) and was voted out by them,
+  // then sent a warm goodbye, used to read at the ADDITIVE betrayed(-0.6)+respected(+0.4)=-0.2 — a
+  // costless warm tone laundering ~40% of the betrayal. The dynamic model forbids it.
+  const betrayedTrust07 = mannerLeanOf({ betrayed: true, intensity: 0.73 }); // graded for trust 0.7
+
+  it("a warm goodbye SOFTENS a betrayal toward, but never across, zero (no laundering)", () => {
+    const laundered = mannerLeanOf({ betrayed: true, intensity: 0.73, goodbye: "warm" });
+    expect(laundered).toBeLessThan(0);                 // still a grievance, not flipped positive
+    expect(laundered).toBeGreaterThan(betrayedTrust07); // softened (toward zero), as a goodbye should
+    expect(laundered).toBeLessThan(-0.25);             // and NOT the old additive launder (~-0.2)
+    // The softened lean stays below a respected clean cut — a betrayal+goodbye never reads as respect.
+    expect(laundered).toBeLessThan(mannerLeanOf({ respected: true, intensity: 1 }));
+  });
+
+  it("betrayal severity is DYNAMIC: a deeply-trusted betrayal stings more than a marginal one", () => {
+    const deep = mannerLeanOf({ betrayed: true, intensity: 1 });    // trust ≈ 1.0
+    const marginal = mannerLeanOf({ betrayed: true, intensity: 0.55 }); // just over the threshold
+    expect(deep).toBeLessThan(marginal); // more negative
+    expect(marginal).toBeLessThan(0);    // still a real grievance — never trivialized to neutral
+  });
+
+  it("SOC-NEW-5: cutting a floater nobody feared reads ~neutral; a feared rival earns real respect", () => {
+    const floater = mannerLeanOf({ respected: true, intensity: 0.17 }); // threat ≈ 0.5
+    const rival = mannerLeanOf({ respected: true, intensity: 0.83 });   // threat ≈ 0.9
+    expect(Math.abs(floater)).toBeLessThan(0.1);   // no longer a flat +0.4 lift for an unremarkable cut
+    expect(rival).toBeGreaterThan(floater + 0.15); // a respected threat is genuinely rewarded
+  });
+
+  it("a grievance takes PRECEDENCE: a respected flag co-set with a betrayal is dropped, never summed", () => {
+    // Defends against the legacy additive shape even if both flags somehow co-occur on a manner.
+    expect(mannerLeanOf({ betrayed: true, respected: true })).toBe(mannerLeanOf({ betrayed: true }));
+  });
+
+  it("a cold send-off stings and is itself a mendable grievance", () => {
+    expect(mannerLeanOf({ goodbye: "cold" })).toBeLessThan(0);
+    expect(appealEffect("mend", { trust: 0.5, affinity: 0.4, threat: 0.3 }, { goodbye: "cold" }))
+      .toBeGreaterThan(appealEffect("mend", { trust: 0.5, affinity: 0.4, threat: 0.3 }, {}));
   });
 });

@@ -63,12 +63,13 @@ export interface SleepConstants {
 export const SLEEP: SleepConstants = {
   earlySleeperBelow: -0.08,
   nightOwlAbove: 0.12,
-  // Up through `night` is a healthy night; only pushing into `late-night` costs real sharpness.
+  // Up through `night` is a healthy night (ENG-NEW-1: was 0.25, contradicting this very comment);
+  // only pushing into `late-night` — staying up to the bitter end — costs real sharpness.
   deficitByLatestPhase: {
     morning: 0,
     afternoon: 0,
     evening: 0,
-    night: 0.25,
+    night: 0,
     "late-night": 1,
   },
 };

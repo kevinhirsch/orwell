@@ -1,7 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { tallyJury } from "./season";
-import { JURY_WEIGHTS, MANNER_LEAN, APPEAL, type JuryWeights } from "./juryConstants";
+import { JURY_WEIGHTS, MANNER_LEAN, MANNER_GRADING, APPEAL, type JuryWeights } from "./juryConstants";
 
 // Re-export the tunables so existing importers keep reading them from `jury` (the math lives here).
 export { JURY_WEIGHTS, type JuryWeights };
@@ -37,6 +37,20 @@ export interface EvictionManner {
   blindsided?: boolean;
   betrayed?: boolean;
   disrespected?: boolean;
+  /**
+   * SOC-NEW-1/5: the graded 0..1 SEVERITY of the categorical read above, read off the actual edge
+   * numbers (how deeply they were trusted / how harmless they seemed / how feared a clean cut was).
+   * Absent ⇒ 1 (full strength) — so a boolean-only manner (a broken-deal demerit, an older call site,
+   * a test) reads byte-identically to the pre-grading model.
+   */
+  intensity?: number;
+  /**
+   * SOC-NEW-1: the goodbye tone the responsible houseguest sent, applied with bounded PRECEDENCE in
+   * `mannerLeanOf` — it softens a grievance toward (never across) zero, or gives a small lift/sting on
+   * a clean departure. Replaces the old additive `{respected}/{disrespected}` merge that let a warm
+   * tone launder a betrayal. Absent ⇒ no goodbye folded.
+   */
+  goodbye?: "warm" | "respectful" | "cold";
 }
 
 /**
@@ -56,12 +70,33 @@ export interface EvictionManner {
  */
 export function juryLean(rel: JuryRel, manner: EvictionManner = {}, w: JuryWeights = JURY_WEIGHTS): number {
   const relationship = (rel.trust + rel.affinity) / 2;
-  const manners =
-    (manner.respected ? MANNER_LEAN.respected : 0) +
-    (manner.blindsided ? MANNER_LEAN.blindsided : 0) +
+  return w.relationship * relationship + w.manner * mannerLeanOf(manner) + w.reliability * (rel.reliability ?? 0);
+}
+
+/**
+ * SOC-NEW-1/5 — the signed manner contribution, DYNAMIC and precedence-based (not a flat sum):
+ *  - a grievance (betrayal/blindside/disrespect) and a clean cut's respect are each scaled by the
+ *    graded `intensity` read off the relationship (absent ⇒ full strength);
+ *  - a grievance takes PRECEDENCE: a `respected` flag set ALONGSIDE one (the legacy additive
+ *    laundering shape) is dropped, never summed on top;
+ *  - the `goodbye` tone is then applied with bounded precedence — a warm/respectful send-off softens
+ *    a grievance by at most `goodbyeSoftenMax` (never crossing zero) or gives a small lift on a clean
+ *    departure; a cold one stings. So a costless warm goodbye can no longer launder a betrayal.
+ */
+export function mannerLeanOf(manner: EvictionManner): number {
+  const grievance =
     (manner.betrayed ? MANNER_LEAN.betrayed : 0) +
+    (manner.blindsided ? MANNER_LEAN.blindsided : 0) +
     (manner.disrespected ? MANNER_LEAN.disrespected : 0);
-  return w.relationship * relationship + w.manner * manners + w.reliability * (rel.reliability ?? 0);
+  const respect = grievance < 0 ? 0 : (manner.respected ? MANNER_LEAN.respected : 0); // precedence
+  let lean = (grievance + respect) * (manner.intensity ?? 1);
+  if (manner.goodbye === "cold") {
+    lean -= MANNER_GRADING.goodbyeColdSting; // a cold send-off stings; never itself laundered
+  } else if (manner.goodbye === "warm" || manner.goodbye === "respectful") {
+    if (lean < 0) lean *= 1 - MANNER_GRADING.goodbyeSoftenMax; // soften a grievance toward, never across, 0
+    else lean += MANNER_GRADING.goodbyeWarmLift;               // a small lift on a clean departure
+  }
+  return lean;
 }
 
 /**
@@ -103,7 +138,8 @@ const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
  * finale tips CLOSE jurors and never overturns a clear lead.
  */
 export function appealEffect(appeal: FinaleAppeal, rel: JuryRel, manner: EvictionManner = {}): number {
-  const grievance = !!(manner.blindsided || manner.betrayed || manner.disrespected);
+  // SOC-NEW-1: a cold send-off is itself a (mendable) grievance, like the categorical reads.
+  const grievance = !!(manner.blindsided || manner.betrayed || manner.disrespected || manner.goodbye === "cold");
   switch (appeal) {
     case "mend":
       return grievance ? APPEAL.mendGrievance : APPEAL.mendNoGrievance;

@@ -3020,12 +3020,13 @@ export class GameSessionAdapter implements GameSession {
       // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
       emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
       // The hidden REST deficit (ADR 0006): the player's from how late THEY stayed up last night, an
-      // NPC's from their character-driven bedtime habit (the night owls pay). Feeds the comp fold only;
-      // never crosses the wall. DORMANT unless the clock is actually running (opt-in) ⇒ returns 0, so
-      // the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
+      // NPC's from the latest phase they were ACTUALLY awake last night (ENG-NEW-1 — the earlier of
+      // their character bedtime and how far the night ran, not a static aptitude tax). Feeds the comp
+      // fold only; never crosses the wall. DORMANT unless the clock is actually running (opt-in) ⇒
+      // returns 0, so the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
       restOf: (id) => {
         if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
-        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.statsOf(id));
+        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id));
       },
       // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
       // emergent bloc term. Derived per read; never stored (decision 0002).
