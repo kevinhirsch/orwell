@@ -201,6 +201,9 @@ import * as modalManager from "./modalManager.js";
     const addBtn = (label, text) => {
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "ofin-btn"; btn.textContent = label;
+      // A11Y-10: visible label keeps the emoji/arrow; the accessible name strips leading glyphs so
+      // a screen reader reads "Vote for X", not "ballot box with ballot Vote for X".
+      btn.setAttribute("aria-label", label.replace(/^[^\p{L}\p{N}]+/u, "").trim() || label);
       btn.addEventListener("click", () => prefill(text));
       move.appendChild(btn);
     };
