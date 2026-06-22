@@ -61,6 +61,7 @@ module.exports = {
 
       "docs/features/0070-offscreen-texture-enrichment.feature",
       "docs/features/0071-defensive-hardening-redaction-url-guards.feature",
+      "docs/features/0072-multi-platform-gateway.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
