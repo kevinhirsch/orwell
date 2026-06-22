@@ -450,6 +450,24 @@ async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None
     return await _call("recordImageBeat", {"houseguestId": houseguest_id, "imageRef": image_ref}, user=user)
 
 
+async def get_offscreen_scene_skeletons(user: str | None = None) -> list:
+    """Feature 0070: read the Vault-free SKELETONS of off-screen scenes recorded this tick — public
+    participant ids + nature + the current template/voiced prose only (no hidden attributes, no
+    relationship numbers). The FE driver (``orwell_offscreen_texture``) voices each and writes prose
+    back via :func:`record_offscreen_scene_texture`. Returns ``[]`` on any non-list reply."""
+    result = await _call("getOffscreenSceneSkeletons", {}, user=user)
+    return result if isinstance(result, list) else []
+
+
+async def record_offscreen_scene_texture(event_id: str, content: str, user: str | None = None) -> dict:
+    """Feature 0070: write model-voiced prose BACK onto an already-recorded, already-HIDDEN off-screen
+    event (the FE-driven write-back keeps the ENGINE the source of truth). CONTENT ONLY — the engine
+    refuses any field that would pierce the closed set (witness set, hidden flag, relationship
+    numbers). Returns ``{ ok: bool }``."""
+    return await _call("recordOffscreenSceneTexture",
+                       {"eventId": event_id, "content": content}, user=user)
+
+
 async def get_game_state(user: str | None = None, timeout: float | None = None) -> dict:
     """Current Vault-free game state for this user: phase, the player's card, the house roster.
 

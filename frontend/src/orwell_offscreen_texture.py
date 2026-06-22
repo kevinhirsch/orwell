@@ -118,30 +118,67 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     """Resolve the live deps and enrich the current tick's off-screen scenes. Silent no-op (not
     voiced) when no model resolves — the engine's deterministic template content stands.
 
-    Called from the FE after each off-screen tick (e.g. from the agent loop or a background task).
-    Best-effort + background — never blocks the game advance."""
+    Called from the FE after each off-screen tick (via :func:`kickoff_enrich` from ``do_advance_game``).
+    Best-effort + background — never blocks the game advance. Uses the SAME proven plumbing as the
+    other FE-driven write-backs: the shared utility-LLM resolver (``orwell_cast_authoring``) and the
+    engine player-channel client (``orwell_engine``)."""
     try:
-        from src.tool_implementations import _resolve_llm_fn, _mcp_tool_call
+        from src.orwell_cast_authoring import _resolve_llm_fn  # the shared background-utility completion
+    except Exception:
+        return {"voiced": 0, "total": 0, "reason": "no-model"}
 
-        llm_fn = await _resolve_llm_fn(owner)
-        if llm_fn is None:
-            logger.debug("[offscreen-texture] no model configured — skipping enrichment")
-            return {"voiced": 0, "total": 0, "reason": "no-model"}
+    llm_fn = await _resolve_llm_fn(owner)
+    if llm_fn is None:
+        logger.debug("[offscreen-texture] no utility model — keeping the deterministic templates")
+        return {"voiced": 0, "total": 0, "reason": "no-model"}
 
-        async def get_skeletons() -> list:
-            result = await _mcp_tool_call("getOffscreenSceneSkeletons", {}, owner=owner)
-            return result if isinstance(result, list) else []
+    from src import orwell_engine
 
-        async def write_back(event_id: str, content: str) -> dict:
-            result = await _mcp_tool_call(
-                "recordOffscreenSceneTexture",
-                {"eventId": event_id, "content": content},
-                owner=owner,
-            )
-            return result if isinstance(result, dict) else {"ok": False}
+    async def get_skeletons() -> list:
+        return await orwell_engine.get_offscreen_scene_skeletons(user=owner)
 
+    async def write_back(event_id: str, content: str) -> dict:
+        return await orwell_engine.record_offscreen_scene_texture(event_id, content, user=owner)
+
+    try:
         return await enrich_tick(get_skeletons, llm_fn, write_back)
-
     except Exception as exc:
         logger.warning("[offscreen-texture] run_enrich failed: %s", exc)
         return {"voiced": 0, "total": 0, "error": str(exc)}
+
+
+# Per-user in-flight guard: prevents a second advance from launching an overlapping enrichment run
+# for the same user while one is still voicing. Cleared in `finally`, so the NEXT tick runs normally.
+_IN_FLIGHT: set[str] = set()
+
+
+def _key(owner: Optional[str]) -> str:
+    return owner or "default"
+
+
+def kickoff_enrich(owner: Optional[str] = None) -> None:
+    """Fire-and-forget the off-screen texture enrichment in the background after an advance tick.
+    Never blocks the advance; never raises into the caller. A per-user in-flight guard drops a second
+    overlapping run for the same user (the next tick, after this one finishes, runs normally)."""
+    k = _key(owner)
+    if k in _IN_FLIGHT:
+        return
+    _IN_FLIGHT.add(k)
+
+    async def _runner():
+        try:
+            await run_enrich(owner)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("[offscreen-texture] background enrichment failed: %s", e)
+        finally:
+            _IN_FLIGHT.discard(k)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_runner())
+    except RuntimeError:
+        # No running loop (a sync caller / test) — run to completion synchronously.
+        try:
+            asyncio.run(_runner())
+        except Exception:  # pragma: no cover - defensive
+            _IN_FLIGHT.discard(k)
