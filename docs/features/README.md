@@ -116,13 +116,13 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0048 | [Season retrospective & the Vault unsealing](./0048-season-retrospective-and-unsealing.md) | BDD | ✅ Built |
 | 0049 | [House presence & lingering play](./0049-house-presence-and-lingering.md) | BDD | ✅ Built |
 | 0050 | [The casting interview](./0050-casting-interview.md) | BDD | ✅ Built |
-| 0051 | [In-character images](./0051-in-character-images.md) | unit + FE | 🚧 Built · browser-smoke render owed |
+| 0051 | [In-character images](./0051-in-character-images.md) | unit + FE | ✅ Built · browser-smoke render landed (`browser_smoke.py:1166` asserts a real sized portrait `<img>` + zero placeholders) |
 | 0052 | House themes (five seasons) | FE | ✅ Built · shipped FE-side, no standalone spec file |
 | 0053 | [Admin transcript retrieval](./0053-admin-transcripts.md) | FE | ✅ Built |
 | 0054 | [Control-room gadget rail](./0054-gadget-rail.md) | FE | ✅ Built · Phase 1 (HUD rail) + Phase 2 (dock windows) |
 | 0055 | [Social play moves the weights](./0055-social-play-weights.md) | FE | ✅ Built · the `_auto_record_scene` guarantee |
 | 0056 | [Season-to-season character continuity](./0056-season-character-continuity.md) | unit + FE | ✅ Built |
-| 0057 | [Seasons as levels](./0057-seasons-as-levels.md) | FE | 🚧 Built · FE chunks 1–4; live browser validation owed |
+| 0057 | [Seasons as levels](./0057-seasons-as-levels.md) | FE | ✅ Built · live browser validation landed (`browser_smoke.py:1197` validates the season-progress bar + "Season N" chip + new-season window) |
 | 0058 | [Deep character profiles](./0058-deep-character-profiles.md) | BDD | ✅ Built · Phase 1 + Phase 2 |
 | 0059 | [Hidden seeded relationships](./0059-hidden-seeded-relationships.md) | engine | ✅ Built · orientation-aware via 0063 |
 | 0060 | [Story-thread scheduler (0058 Phase 2)](./0060-story-thread-scheduler.md) | BDD | ✅ Built |

@@ -11,7 +11,7 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Specs now run
-through **0066** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
+through **0069** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
@@ -33,7 +33,8 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0066**; 0052 — the house themes — shipped FE-side from the audit
+`docs/features/` (through **0069** — 0067/0068 public-internet exposure + ADR 0007, 0069 token economy;
+0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
 backfill, the casting headshot studio + player-uploaded/AI account avatar, portrait variety, and
@@ -54,7 +55,7 @@ are authoritative and reference each other as companions.
 |---|---|
 | `docs/CLAUDE_CODE_INSTRUCTIONS.md` | **Build brief & decision log** — start here. Architecture directives, workflow, hard "do-nots", milestones, open decisions (§15). |
 | `docs/bb-sim-spec.md` | **v3 domain spec** — concept, persistence model, Vault Wall, behavioral-fidelity mandate, the BDD invariants (§12), open decisions (§16). |
-| `docs/decisions/` | **Decision records (ADRs)** — accepted refinements to the canonical mechanics (drop Luck → emotional modifier; Character/Soul split; organic relationship model; veto "Houseguest's Choice"). |
+| `docs/decisions/` | **Decision records (ADRs 0001–0013)** — accepted refinements to the canonical mechanics. 0001 competition stats / Character-Soul split / veto "Houseguest's Choice" · 0002 organic relationship model · 0003 the conversation is the game · 0004 embedding provider (fastembed/ONNX) · 0005 split authority by openness · 0006 in-game time/sleep/presence economy · 0007 public-internet exposure · 0008 cross-tab/-device chat consistency · 0009 location/movement single source of truth · 0010 token-economy architecture · 0011 concurrent engine-drive beat-aware guardrails · 0012 two-window lockstep "Messenger mirror" · 0013 cast photos require a model-authored identity. (`README.md` there indexes them.) |
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
 | `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). |
@@ -486,19 +487,21 @@ TS tooling (see `frontend/INTEGRATION.md`).
 
 ## Current status
 
-**Built BDD/TDD-first and feature-complete through the drafted spec set (0001–0066).** The eight
+**Built BDD/TDD-first and feature-complete through the drafted spec set (0001–0069).** The eight
 priority invariants, the MCP seam, the full weekly loop, per-user sandboxes, durable persistence, the
 live off-screen society, the endgame + interactive finale, the character-evolution linchpin (0041),
 deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the LLM↔engine sync spine
-(0065), and in-game time + the sleep economy (0066 / ADR 0006) are all in. The **one deliberate
-deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
+(0065), in-game time + the sleep economy (0066 / ADR 0006), public-internet exposure (0067/0068 / ADR
+0007), and the token economy + usage envelope (0069) are all in. The **one deliberate deferral is
+0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
 
 **Trust the code over this prose — it drifts.** The authoritative sources, in order:
 - `docs/features/README.md` — the per-feature status index, reconciled against the source (built /
   spec-only / deferred, with each feature's verification gate).
 - `cucumber.cjs` `paths` — the live list of BDD-gated features.
 - `docs/audits/2026-06-10-full-product-audit.md` (the close-out ledger) — the authoritative open-items
-  list going forward.
+  list going forward, and `docs/audits/2026-06-21-open-items-verification.md` — the source-verified,
+  tier-organized snapshot of every open item (which tracker rows are stale; no launch-blockers remain).
 - `git log --oneline` for what last merged green; `npm test` for the authoritative pass/fail.
 
 **A few load-bearing invariants worth knowing up front** (enforced in code; easy to violate by accident):
@@ -509,7 +512,9 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
 - Souls evolve live (`src/engine/emotionalArc.ts`) and bend the competition modifier; `CHARACTER` stays
   byte-stable; no number ever crosses to the player.
 
-**Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative):
+**Open forward work** (new work starts as a new spec/queue item; the close-out ledger is authoritative).
+*A source-verified, tier-organized snapshot of every open item — and which tracker rows are stale — is
+`docs/audits/2026-06-21-open-items-verification.md` (no launch-blockers remain):*
 - **Calibration tuning — re-measured 2026-06-21, primary goal MET; no change pending.** The
   `JURY_WEIGHTS.gameRespect` 0.9→0.7 drop (PR #364) + engine evolution flipped the old inversion: on
   current main a 30-seed instrument run shows **active wins 20% vs passive 7%** (F2-blowouts 50% vs 63%) —
@@ -521,7 +526,9 @@ deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the 
 - **ADR 0006 / 0066 Phase-2 — on the PO review list.** Deferred time/sleep extensions: NPC *next-day*
   social fatigue, a compounding multi-night fatigue meter, and per-conversation clock advance (vs. the
   current per-beat) — owner decisions in `docs/features/0066-in-game-time-and-sleep.md` §9.
-- **0022** (MVP-2, deferred) and **0059** (hidden seeded relationships, spec only) — the unbuilt specs.
+- **0022** (MVP-2, deferred) is the **only** unbuilt spec. *(0059 hidden seeded relationships is **built** —
+  `src/engine/seededRelationships.ts` + `seededRelationships.test.ts`, orientation-aware via 0063; this line
+  previously mis-listed it as spec-only. Reconciled 2026-06-21.)*
 - **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
   during the private-repo flip).
 - **Postgres + pgvector** relational tier — MVP-002 post-launch scale-out (SQLite + sqlite-vec shipped
@@ -554,3 +561,15 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    beside the emotional modifier in `src/domain/competitionOutcome.ts`, never shown to the player). Only *tuning*
    is open — the bound's exact feel, and whether sleep cost reaches past competitions — per ADR 0006's
    "Open / to confirm".
+
+6. ✅ **Public exposure, cross-device consistency, location, token economy & the live mirror** — ADRs
+   **0007–0013**, all **accepted and built** (features 0067/0068 public exposure, 0069 token
+   economy/usage envelope, and the 0008/0011/0012 multi-window seams all shipped). Their *residual* open
+   items are **tuning, owed
+   verification runs, and post-launch refactor** — **not** unbuilt architecture: ADR 0010 token-economy
+   follow-ons (per-class `max_tokens` runtime-edit; model-aware reasoning sizing; ledger
+   `appliedMaxTokens`/`finishReason`; `Continue ▸` in chat mode), the ADR 0008/0012 live-LLM two-window
+   re-run + mid-gen-join test pin, and the architecture latents filed in `docs/REFACTOR-ROADMAP.md`
+   (R1–R7, post-launch — the highest-value being **A-S3**, a stale-409 that can drop a scene's only
+   consequence fold). The full source-verified status is
+   `docs/audits/2026-06-21-open-items-verification.md`.
