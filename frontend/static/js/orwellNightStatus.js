@@ -22,6 +22,7 @@
 
   let timer = null;
   let _failures = 0;
+  let _lastAnnounced = null; // A11Y-1: announce nightfall state only when it changes
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
   async function getJSON(url) {
@@ -68,11 +69,12 @@
     }
     el = document.createElement("section");
     el.id = ID;
-    el.setAttribute("role", "status");
-    el.setAttribute("aria-live", "polite");
+    // A11Y-1: aria-label landmark only — NOT a live region on the root (re-rendering every poll
+    // would re-announce the unchanged nightfall state). A hidden child announces only on change.
     el.setAttribute("aria-label", "Nightfall");
     el.innerHTML = `<div class="onight-hd" data-role="head"></div>` +
-      `<div class="onight-body" data-role="body"></div>`;
+      `<div class="onight-body" data-role="body"></div>` +
+      `<span data-role="announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></span>`;
     // 0054: prefer the control-room gadget rail, beside the other ambient house gadgets (presence).
     const rail = document.getElementById("gadget-rail-body");
     const sidebar = document.getElementById("sidebar");
@@ -96,7 +98,7 @@
     const el = ensureEl();
     const tod = state && state.started ? state.timeOfDay : null;
     // Only while the in-game clock is actually running (the feature is on); otherwise the gadget is silent.
-    if (!tod || !TOD[tod]) { el.style.display = "none"; el.removeAttribute("title"); return; }
+    if (!tod || !TOD[tod]) { el.style.display = "none"; el.removeAttribute("title"); _lastAnnounced = null; return; }
     const [emoji, label] = TOD[tod];
 
     // HEADER: the phase indicator (emoji + label).
@@ -116,6 +118,15 @@
         "title",
         asleep.length + (asleep.length === 1 ? " houseguest has" : " houseguests have") + " turned in for the night",
       );
+    }
+    // A11Y-1: announce the nightfall phase + sleep summary ONLY when it changes (not every poll).
+    const announce = asleep.length
+      ? (label + "; turned in: " + asleep.map((p) => firstName(p.name)).filter(Boolean).join(", "))
+      : (label + "; the whole house is still up");
+    if (announce !== _lastAnnounced) {
+      const ann = el.querySelector("[data-role='announce']");
+      if (ann) ann.textContent = announce;
+      _lastAnnounced = announce;
     }
     el.style.display = "block";
   }
