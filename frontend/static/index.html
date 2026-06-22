@@ -2339,6 +2339,46 @@
             <div id="adm-pubdep-progress" style="margin-top:8px;"></div>
             <div id="adm-pubdep-msg" style="margin-top:6px;"></div>
           </div>
+          <div class="admin-card admin-only" id="adm-tls-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Local HTTPS</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Serve the game over HTTPS on your LAN — <code>orwell.lan</code>, <code>orwell.local</code>, and the box's IP — with no browser warning. Works whether or not the public domain above is set. The local names use a built-in certificate authority; trust its root once per device and the warning is gone.</div>
+
+            <!-- STATUS area -->
+            <div id="adm-tls-status" class="settings-gap-top"><div class="admin-empty">Loading…</div></div>
+
+            <!-- CA root download (shown once the terminator has exported it) -->
+            <div id="adm-tls-ca" class="settings-gap-top" style="margin-top:10px;"></div>
+
+            <!-- Controls -->
+            <div class="settings-row settings-row--end settings-gap-top" style="margin-top:10px;">
+              <button class="admin-btn-add" id="adm-tls-enable-toggle">Enable local HTTPS</button>
+              <button class="admin-btn-delete" id="adm-tls-disable" style="white-space:nowrap;">Disable</button>
+            </div>
+
+            <!-- Enable wizard (inline expandable, hidden until the toggle reveals it) -->
+            <div id="adm-tls-wizard" class="settings-gap-top" hidden style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+              <div class="admin-toggle-label">Local names to cover</div>
+              <div class="admin-add-form" style="margin-top:6px;">
+                <input id="adm-tls-local-names" type="text" placeholder="orwell.lan, orwell.local" value="orwell.lan, orwell.local" autocomplete="off">
+              </div>
+              <div class="admin-toggle-sub" style="margin-top:6px;">The box's LAN IP is added automatically. Make sure these names resolve on your network (<code>orwell.local</code> works out of the box via mDNS; <code>orwell.lan</code> needs a router/DNS entry).</div>
+
+              <div class="admin-toggle-label settings-gap-top" style="margin-top:12px;">Optional — also serve a public domain with a publicly-trusted cert</div>
+              <div class="admin-toggle-sub" style="margin-bottom:8px">Zero per-device install. Needs the domain plus a DNS provider API token (a DNS-01 challenge), resolved to this box on your LAN.</div>
+              <div class="admin-add-form" style="margin-top:6px;">
+                <input id="adm-tls-domains" type="text" placeholder="Public domain(s) — e.g. hiorwell.com, www.hiorwell.com" autocomplete="off">
+                <input id="adm-tls-dns-provider" type="text" placeholder="DNS provider (e.g. cloudflare)" autocomplete="off">
+                <input id="adm-tls-dns-token" type="password" placeholder="DNS provider API token (write-only)" autocomplete="off">
+              </div>
+              <div class="admin-toggle-sub" style="margin-top:6px;">The DNS token is write-only — it is consumed on the box and never shown back here.</div>
+              <div class="settings-row" style="margin-top:8px;">
+                <button class="admin-btn-add" id="adm-tls-apply">Enable HTTPS</button>
+              </div>
+            </div>
+
+            <div id="adm-tls-progress" style="margin-top:8px;"></div>
+            <div id="adm-tls-msg" style="margin-top:6px;"></div>
+          </div>
           <div class="admin-card admin-danger-card">
             <h2 style="color:#e55;">Danger Zone</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Irreversible. Each wipe targets one category — pick exactly what you want gone.</div>

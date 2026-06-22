@@ -34,6 +34,7 @@ _OPS_ACTIONS = {
     "factory-reset": "ops-factory-reset.log",
     "update-reset": "ops-update-reset.log",   # the future Update+Reset combo (file may not exist)
     "public-deployment": "ops-public-deployment.log",  # 0068 Connect/Disconnect apply progress
+    "tls": "ops-tls.log",                              # 0074 Local HTTPS apply/disable progress
 }
 
 

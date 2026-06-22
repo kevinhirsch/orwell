@@ -1,0 +1,39 @@
+[Unit]
+Description=orwell ops — web-requested local HTTPS runner (0074)
+# Started by orwell-ops-tls.path when the web tier drops data/ops/tls-requested. No [Install]
+# section: this unit is only ever started by its path unit, never enabled directly.
+#
+# DELIBERATELY ROOT + MINIMAL SANDBOX — the same rationale as orwell-ops-public-deployment.service:
+# applying local HTTPS must edit /opt/orwell/data/.env, apt-install caddy, write /etc/caddy/Caddyfile,
+# `systemctl enable --now caddy`, and restart orwell-frontend. An E85-style sandbox (User=orwell,
+# empty capability set, ProtectSystem=strict) would forbid every one of those steps — which is exactly
+# why the hardened web tier cannot do this itself and hands off through the flag. Containment is by
+# DESIGN instead of by sandbox: only the one FIXED script path below ever runs; the trigger flag is
+# existence-only (its content is never read, parsed, or executed — nothing the web tier writes is
+# interpolated into any command; the action + config + DNS token are separate side-input files the
+# fixed script reads itself); overlapping triggers no-op on the lock. The DNS API token is consumed
+# and SHREDDED by the script and is NEVER echoed to this run log.
+#
+# Boot replay: if the box rebooted with a flag pending, the path unit fires at boot — wait for the
+# network so the caddy install/DNS-01 isn't dead on arrival.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# oneshot, and deliberately WITHOUT RemainAfterExit: the unit must fall back to "inactive" after each
+# run so the path unit can trigger the next one.
+Type=oneshot
+# Live output: stdout+stderr of every Exec line APPENDS to the run log the admin status page tails
+# (the G1b viewer reads any data/*.log). The installer/updater pre-create it readable. The script
+# NEVER echoes the DNS API token, so this log holds no secret.
+StandardOutput=append:/opt/orwell/data/ops-tls.log
+StandardError=append:/opt/orwell/data/ops-tls.log
+# Remove the flag BEFORE the run, never after: with PathExists= a flag that survived a run would
+# re-trigger this service the moment it deactivates — an infinite loop. The flag is dropped unread
+# (the existence-only contract; see the path unit).
+ExecStartPre=/bin/rm -f /opt/orwell/data/ops/tls-requested
+# flock: overlapping triggers NO-OP (exit 0) instead of stacking a second apply on a box that is
+# mid-apply — systemd already serializes starts of this unit; the lock covers every other door. $$ is
+# systemd's escape for a literal $ — the date lands in the log as the timestamped per-run header. Only
+# this one fixed script path runs; the web tier chose WHEN, never WHAT.
+ExecStart=/bin/bash -c 'exec 9>>/run/orwell-ops-tls.lock; flock -n 9 || { echo "ops-tls: another run holds the lock — no-op"; exit 0; }; echo ""; echo "── orwell ops local-HTTPS run: $$(date -Is) (web-triggered) ──"; exec bash /opt/orwell/deploy/orwell-ops-tls.sh'

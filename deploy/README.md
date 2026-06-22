@@ -84,8 +84,17 @@ login health panel advertises it.
 ```bash
 orwell                      # the interactive menu (inside the container)
 orwell doctor --status      # or a direct subcommand (skips the menu — good over SSH / in scripts)
+orwell change-port 80       # move the UI port (handles the privileged-port cap drop-in)
+orwell https --mode local   # local HTTPS — trusted on the LAN, no browser warning (feature 0074)
 orwell reset-game --yes     # destructive subcommands require --yes off the menu
 ```
+
+`orwell https` stands up a Caddy TLS terminator in front of the front-end driven by the tunable
+`ORWELL_TLS_*` variables in `data/.env` (`orwell-https.sh` is the single apply engine, shared with the
+in-app Admin "Local HTTPS" card via the `orwell-ops-tls.*` root seam). It covers `orwell.lan`,
+`orwell.local`, and the LAN IP with an internal CA (download the root from `/orwell-local-ca.crt` and
+trust it once per device), and can additionally serve a public domain with a publicly-trusted DNS-01
+cert. See `docs/INSTALL.md → Local HTTPS` and ADR 0014.
 
 The menu only **dispatches** to the scripts in this directory (the single source of truth for each
 task), collecting input through dialogs — a deploy-token password box, a backup picker, a

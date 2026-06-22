@@ -2,6 +2,7 @@
 # Shared middleware, decorators, and request helpers
 
 import os
+import re
 import secrets
 
 from fastapi import HTTPException, Request
@@ -221,3 +222,64 @@ def assert_public_profile_safe(env=None) -> None:
             "ALLOWED_HOSTS=<your-domain>) — or unset ORWELL_PUBLIC for a trusted-LAN deployment. "
             "See docs/INSTALL.md -> Public deployment."
         )
+
+
+# ========= LOCAL HTTPS (feature 0074 / ADR 0014) =========
+# Pure, self-contained helpers (no app/db imports) for the local TLS terminator — matching the
+# perimeter helpers above. The ORWELL_TLS_* variables are the tunable "backend variables" managed by
+# the control panel + the admin "Local HTTPS" card; these parse + sanitise them so the route and its
+# tests share one definition. Host names become Caddyfile DATA (never a command), but we still reject
+# anything that isn't a plausible hostname/IP — defense in depth against a typo or an injected
+# directive.
+
+# A single hostname (optional leading "*." wildcard) or a dotted IPv4 — letters/digits/dot/hyphen,
+# bounded by an alphanumeric on each end. Deliberately rejects whitespace, slashes, braces, and
+# semicolons (the Caddyfile-injection-relevant characters).
+_TLS_NAME_RE = re.compile(r"^(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
+
+# The local hostnames covered when ORWELL_TLS_LOCAL_NAMES is unset.
+DEFAULT_LOCAL_TLS_NAMES = ["orwell.lan", "orwell.local"]
+
+
+def sanitize_tls_names(names) -> list:
+    """Filter a comma-string or list of host names to the valid ones (strict allow-list).
+
+    Returns a de-duplicated list preserving first-seen order. Anything that is not a plausible
+    hostname/IP (per ``_TLS_NAME_RE``) is dropped — the apply layer must never write an unvetted
+    string into the generated Caddyfile."""
+    if isinstance(names, str):
+        items = names.split(",")
+    elif isinstance(names, (list, tuple)):
+        items = []
+        for n in names:
+            items.extend(str(n).split(","))
+    else:
+        return []
+    out: list = []
+    seen: set = set()
+    for raw in items:
+        tok = str(raw).strip()
+        if not tok or tok in seen:
+            continue
+        if _TLS_NAME_RE.match(tok):
+            out.append(tok)
+            seen.add(tok)
+    return out
+
+
+def local_tls_names_from_env(env=None) -> list:
+    """The local hostnames the terminator covers (``ORWELL_TLS_LOCAL_NAMES``), default
+    ``orwell.lan,orwell.local``. Always sanitised."""
+    env = os.environ if env is None else env
+    raw = (env.get("ORWELL_TLS_LOCAL_NAMES") or "").strip()
+    if not raw:
+        return list(DEFAULT_LOCAL_TLS_NAMES)
+    return sanitize_tls_names(raw) or list(DEFAULT_LOCAL_TLS_NAMES)
+
+
+def tls_mode_from_env(env=None) -> str:
+    """The local TLS mode (``ORWELL_TLS_MODE``): ``off`` (default) or ``local``. Anything else
+    normalises to ``off`` so an unknown value never silently arms the terminator."""
+    env = os.environ if env is None else env
+    mode = (env.get("ORWELL_TLS_MODE") or "off").strip().lower()
+    return mode if mode in ("off", "local") else "off"
