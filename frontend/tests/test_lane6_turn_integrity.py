@@ -40,7 +40,7 @@ def _live_game(monkeypatch, *, moment="social", prompt="GM-PROMPT"):
     chat_helpers._SESSION_GAME_FRAMED.clear()
     captured = {"moments": []}
 
-    async def fake_state(user=None):
+    async def fake_state(user=None, timeout=None):
         return {"started": True, "moment": moment}
 
     async def fake_mp(m=None, user=None):
@@ -88,7 +88,7 @@ def test_the_casting_session_premiere_is_not_a_re_entry(monkeypatch):
     chat_helpers._SESSION_GAME_FRAMED.clear()
     captured = {"moments": []}
 
-    async def pre_state(user=None):
+    async def pre_state(user=None, timeout=None):
         return {"started": False, "moment": "character-creation"}
 
     async def fake_mp(m=None, user=None):
@@ -99,7 +99,7 @@ def test_the_casting_session_premiere_is_not_a_re_entry(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_moment_prompt", fake_mp)
     _run(chat_helpers.apply_game_framing([], "p", session_id="sess-1"))  # the interview turn
 
-    async def live_state(user=None):
+    async def live_state(user=None, timeout=None):
         return {"started": True, "moment": "premiere"}
 
     monkeypatch.setattr(orwell_engine, "get_game_state", live_state)
@@ -189,7 +189,7 @@ def test_casting_turn_drops_the_preset_persona_too(monkeypatch):
     chat_helpers._GAME_WAS_ACTIVE.clear()
     chat_helpers._SESSION_GAME_FRAMED.clear()
 
-    async def pre_state(user=None):
+    async def pre_state(user=None, timeout=None):
         return {"started": False}
 
     async def fake_mp(m=None, user=None):
@@ -211,7 +211,7 @@ def test_non_game_turn_keeps_the_preset_persona(monkeypatch):
     monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
     chat_helpers._GAME_WAS_ACTIVE.clear()
 
-    async def no_game(user=None):
+    async def no_game(user=None, timeout=None):
         return {"started": False}
 
     monkeypatch.setattr(orwell_engine, "get_game_state", no_game)
@@ -485,7 +485,7 @@ def _orwell_client(monkeypatch, overrides, *, token_owner):
 def test_bearer_callers_resolve_to_their_token_owner_not_api(monkeypatch):
     seen = []
 
-    async def fake_state(user=None):
+    async def fake_state(user=None, timeout=None):
         seen.append(user)
         return {"started": False}
 
@@ -501,7 +501,7 @@ def test_bearer_callers_resolve_to_their_token_owner_not_api(monkeypatch):
 def test_cookie_sessions_are_unchanged(monkeypatch):
     seen = []
 
-    async def fake_state(user=None):
+    async def fake_state(user=None, timeout=None):
         seen.append(user)
         return {"started": False}
 

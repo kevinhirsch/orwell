@@ -375,7 +375,12 @@ def setup_orwell_routes() -> APIRouter:
     @router.get("/state")
     async def orwell_state(request: Request):
         try:
-            st = await orwell_engine.get_game_state(user=_current_user(request))
+            # /state is a shared HUD poller (status/presence/night/finale/cast panels), NOT the
+            # chat-blocking frame — so it uses the wider POLL timeout, not the tight framing default.
+            # A generation-busy engine briefly slowed this read enough to ReadTimeout at 3s (prod
+            # bundle 2026-06-22); the poll bound lets the transient resolve instead of 502-ing.
+            st = await orwell_engine.get_game_state(
+                user=_current_user(request), timeout=orwell_engine._POLL_TIMEOUT)
             _clear_warn("state")
             return st
         except Exception as e:
@@ -567,10 +572,10 @@ def setup_orwell_routes() -> APIRouter:
         instead of blanking the panel, and surface the live `generation` progress so the cast shows
         "Generating N of M…" instead of going dark or dropping the connection."""
         user = _current_user(request)
-        # L15: a roster read tolerates a busier engine than a chat-framing read — use a wider
-        # timeout (still bounded) so a generation-busy queue doesn't blank the cast on every poll.
+        # L15: a roster read tolerates a busier engine than a chat-framing read — use the wider
+        # POLL timeout (still bounded) so a generation-busy queue doesn't blank the cast on every poll.
         try:
-            state = await orwell_engine.get_game_state(user=user, timeout=8.0)
+            state = await orwell_engine.get_game_state(user=user, timeout=orwell_engine._POLL_TIMEOUT)
         except Exception as e:
             # Transient read failure (e.g. the per-user queue is busy committing portraits): keep
             # the cast on screen by serving the last roster we built, never an empty one.

@@ -27,6 +27,14 @@ _TIMEOUT = float(
 # the player's turn for the full default timeout.
 _FRAMING_TIMEOUT = float(os.environ.get("ORWELL_ENGINE_FRAMING_TIMEOUT") or "3")
 
+# The HUD POLLERS (the /state read every panel shares, the cast roster) are NOT chat-blocking, so
+# they tolerate a busier engine than the tight frame: a portrait/cast-generation run or a heavy
+# commit can briefly push a state read past 3s. Give the pollers a wider-but-still-bounded timeout
+# so a transient busy queue logs a blip / serves last-good, instead of 502-ing on every poll.
+# (Prod bundle 2026-06-22 showed /state ReadTimeouts at the 3s framing bound during a casting-load
+# spike — the /state route was using the framing default instead of a poller bound.)
+_POLL_TIMEOUT = float(os.environ.get("ORWELL_ENGINE_POLL_TIMEOUT") or "8")
+
 
 def _engine_token() -> str | None:
     """The shared secret the engine enforces when ORWELL_ENGINE_TOKEN is set (B67/ops A1).
