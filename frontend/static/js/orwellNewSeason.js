@@ -85,7 +85,7 @@
         .ons-body .ons-choices { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
         .ons-body .ons-btn { font: inherit; font-size: 12.5px; font-weight: 600;
           padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid transparent;
-          min-height: 36px; }
+          min-height: 44px; }
         .ons-body .ons-btn-primary { background: var(--accent, var(--accent-primary, #6d4aff)); color: var(--on-accent, #fff); }
         .ons-body .ons-btn-ghost { background: transparent; color: var(--fg, #cfd8e3);
           border-color: var(--border, #355a66); }

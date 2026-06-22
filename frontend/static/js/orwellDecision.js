@@ -41,6 +41,11 @@
     "final-eviction",
     "juror-vote",
     "nominations",
+    // A veto replacement nominee is permanent (the named houseguest is on the block for
+    // eviction day with no further appeal) and a HOH tie-break evicts someone outright — both
+    // end a houseguest's game just like the four above, so they get the same risk skin.
+    "replacement",
+    "tie-break",
   ]);
   const isHighStakes = (kind) => HIGH_STAKES_KINDS.has(kind);
 
@@ -117,7 +122,7 @@
       #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       #${CARD_ID} .odec-opt {
-        cursor: pointer; border-radius: 999px; padding: .3rem .8rem; min-height: 36px;
+        cursor: pointer; border-radius: 999px; padding: .5rem .8rem; min-height: 44px;
         /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
            dark panel — below WCAG 1.4.11's 3:1 for a UI-component boundary. Mix toward --fg so
            the chip edge is visible in both themes (the chip is the ONLY way to make the pick). */
