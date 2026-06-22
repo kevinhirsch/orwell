@@ -331,6 +331,17 @@ export class GameSessionAdapter implements GameSession {
   private producerSeed: number | null = null;
   /** Memoized producer for `producerSeed` (rebuilt on restore / when the seed is first set). */
   private producerCache: Producer | null = null;
+  /**
+   * 0070 — the additive prose texture layer: model-voiced content indexed by event id.
+   * Persisted (serialized to/from `SessionCore.textureOverrides`). Absent on pre-0070 saves.
+   */
+  private textureOverrides: Map<string, string> = new Map();
+  /**
+   * 0070 — the event ids of the off-screen scenes recorded in the most recent tick, in order.
+   * Used by `getOffscreenSceneSkeletons` to return a Vault-free summary. TRANSIENT (not persisted —
+   * refreshed on each tick, empty between ticks). The event store remains the source of truth.
+   */
+  private lastTickOffscreenIds: string[] = [];
 
   // ─── PREMIERE meet-everyone tracker (feature #380 follow-on) — NEW BLOCK ─────────────────────────
   /**
@@ -1236,6 +1247,10 @@ export class GameSessionAdapter implements GameSession {
       // snapshot never crosses the wall). The PUBLIC facets ride on the persisted Character (byte-stable).
       ...(Object.keys(this.privateOrientations).length
         ? { privateOrientations: cloneSession(this.privateOrientations) } : {}),
+      // 0070 — the additive prose texture layer: persisted so voiced scenes survive a restart
+      // byte-identical (0030). Absent when no texture has been written back (pre-0070 saves).
+      ...(this.textureOverrides.size > 0
+        ? { textureOverrides: Object.fromEntries(this.textureOverrides) } : {}),
     };
   }
 
@@ -1424,6 +1439,12 @@ export class GameSessionAdapter implements GameSession {
     }
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
+    // 0070 — restore the prose texture layer (persisted so voiced scenes survive a restart byte-identical).
+    // Absent on pre-0070 saves ⇒ empty (the deterministic template content simply stands, no regression).
+    this.textureOverrides = core.textureOverrides ? new Map(Object.entries(core.textureOverrides)) : new Map();
+    // lastTickOffscreenIds is TRANSIENT (never persisted) — starts empty on every restore; the FE
+    // re-fans-out on the next off-screen tick.
+    this.lastTickOffscreenIds = [];
   }
 
   /**
@@ -4083,6 +4104,64 @@ export class GameSessionAdapter implements GameSession {
     };
     this.persist(); // durable (0030): the captured snapshot must survive a restart, frozen
     return { accepted: true, source: "web_search" };
+  }
+
+  /**
+   * 0070 — called by the orchestrator after every off-screen tick to register the ids of the scenes
+   * that were just recorded. TRANSIENT: the registry is replaced on each tick so only the MOST RECENT
+   * batch is addressable via `getOffscreenSceneSkeletons`. The event store is the durable source of
+   * truth; this is a convenience index for the current-tick FE fan-out only.
+   */
+  notifyOffscreenTick(eventIds: string[]): void {
+    this.lastTickOffscreenIds = [...eventIds];
+  }
+
+  /**
+   * 0070 — the Vault-free skeletons of the off-screen scenes recorded in the most recent tick.
+   * Returns only public participant ids, interaction nature, and current prose content (either the
+   * deterministic template or the voiced texture if a write-back has already landed). Never returns
+   * hidden attributes, relationship numbers, or soul data. Returns [] before a game starts or when
+   * no off-screen tick has run yet.
+   */
+  getOffscreenSceneSkeletons(): import("../../ports/GameSession").OffscreenSceneSkeleton[] {
+    if (!this.house || this.lastTickOffscreenIds.length === 0) return [];
+    const events = this.record?.events() ?? [];
+    const byId = new Map(events.map((e) => [e.id, e]));
+    const result: import("../../ports/GameSession").OffscreenSceneSkeleton[] = [];
+    for (const id of this.lastTickOffscreenIds) {
+      const ev = byId.get(id);
+      if (!ev || !ev.hidden) continue; // only hidden events are part of the off-screen texture layer
+      // Apply texture override if one exists; otherwise the deterministic template content stands.
+      const prose = this.textureOverrides.get(id) ?? ev.content;
+      result.push({
+        eventId: ev.id,
+        nature: ev.type,
+        participants: [...ev.witnessSet], // public participant ids (no Vault content)
+        templateContent: prose,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * FE-driven write-back (0070): enrich the prose `content` of an already-recorded hidden off-screen
+   * event with model-voiced texture. CONTENT ONLY — it cannot create an event, alter a witness set,
+   * flip the hidden flag, or carry a relationship number. Idempotent; a no-op for an unknown or
+   * non-hidden event (returns `{ ok: false }`). Fail-soft: a missing driver leaves the deterministic
+   * template content intact.
+   */
+  recordOffscreenSceneTexture(req: import("../../ports/GameSession").RecordOffscreenSceneTextureReq): import("../../ports/GameSession").RecordOffscreenSceneTextureResult {
+    const { eventId, content } = req;
+    if (typeof eventId !== "string" || !eventId.trim()) return { ok: false };
+    const sanitized = sanitizeFlavor(content, 1000);
+    if (!sanitized) return { ok: false };
+    // Verify the event exists, is hidden, and was not witnessed by the player — content-only guard.
+    const events = this.record?.events() ?? [];
+    const ev = events.find((e) => e.id === eventId);
+    if (!ev || !ev.hidden) return { ok: false };
+    this.textureOverrides.set(eventId, sanitized);
+    this.persist(); // durable (0030): voiced texture survives a restart byte-identical
+    return { ok: true };
   }
 
   /** How many recorded witnessed events ground a server-initiated lifecycle beat (B62). */

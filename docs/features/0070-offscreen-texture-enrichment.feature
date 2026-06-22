@@ -12,7 +12,7 @@ Feature: 0070 — off-screen society texture enrichment
     When the off-screen scene skeletons are read over the player channel
     Then the skeletons are Vault-free — public participants, room, and nature only
     When voiced texture is written back over the channel for a recorded off-screen scene
-    Then the write-back is accepted over the channel
+    Then the texture write-back is accepted over the channel
     And the addressed scene now carries the voiced texture as its content
 
   Scenario: an enriched off-screen scene stays hidden until a pathway reaches the player

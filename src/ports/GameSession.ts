@@ -1000,6 +1000,40 @@ export interface RecordCastProfileResult {
   reason?: string;
 }
 
+/** The Vault-free skeleton of one recorded off-screen scene — public participant ids, room, and nature only (0070). */
+export interface OffscreenSceneSkeleton {
+  /** The event id — used by the FE to address the texture write-back. */
+  eventId: string;
+  /** The interaction type (alliance/gossip/conflict/bonding/strategy/showmance/betrayal). */
+  nature: string;
+  /** Public participant entity ids (both participants — no Vault content). */
+  participants: string[];
+  /**
+   * The current prose content of the scene — either the deterministic template or the voiced
+   * texture if the FE has already written one back. Never contains hidden attributes or
+   * relationship numbers.
+   */
+  templateContent: string;
+}
+
+/** The write-back request to enrich an already-recorded hidden off-screen scene (0070). */
+export interface RecordOffscreenSceneTextureReq {
+  /** The id of an already-recorded, already-hidden off-screen event to enrich. */
+  eventId: string;
+  /**
+   * The model-voiced prose to set as the event's content. Must be non-empty.
+   * CONTENT ONLY — the tool cannot change the witness set, hidden flag, type, or any
+   * relationship number. Those stay engine-owned and closed-set.
+   */
+  content: string;
+}
+
+/** The result of a texture write-back (0070). */
+export interface RecordOffscreenSceneTextureResult {
+  /** True iff the event exists, is hidden, and the content was updated. */
+  ok: boolean;
+}
+
 /**
  * 0065 — pre-warm the cast. Generate the player-INDEPENDENT cast (composition + diversity + deep
  * layer) off the season seed BEFORE the player finishes the casting interview, into an engine-side
@@ -1272,4 +1306,21 @@ export interface GameSession {
    * that houseguest (idempotent). The result never echoes a hidden value (it reports field NAMES only).
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
+
+  /**
+   * 0070: the Vault-free skeletons of the off-screen scenes recorded in the most recent tick —
+   * public participant ids and nature only. The FE uses these to voice texture and write it back
+   * (via `recordOffscreenSceneTexture`). Never returns hidden content. Returns [] pre-game or when
+   * no off-screen scenes have been recorded.
+   */
+  getOffscreenSceneSkeletons(): OffscreenSceneSkeleton[];
+
+  /**
+   * FE-driven write-back (0070): enrich the prose `content` of an already-recorded hidden
+   * off-screen event with model-voiced texture. CONTENT ONLY — it cannot create an event,
+   * alter a witness set, flip the hidden flag, or carry a relationship number. Idempotent;
+   * a no-op for an unknown or non-hidden event (returns `{ ok: false }`). Fail-soft: a
+   * missing driver leaves the deterministic template content intact. Not a model lever.
+   */
+  recordOffscreenSceneTexture(req: RecordOffscreenSceneTextureReq): RecordOffscreenSceneTextureResult;
 }
