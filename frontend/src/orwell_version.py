@@ -42,6 +42,7 @@ _PR_REF = re.compile(r"#(\d{1,6})\b")
 
 # Module-level cache — computed once, reused for the process lifetime.
 _cached_version: Optional[str] = None
+_cached_display: Optional[str] = None
 
 
 def highest_pr_number(log_lines: Iterable[str]) -> Optional[int]:
@@ -90,6 +91,21 @@ def _git_log_subjects(root: Path) -> List[str]:
         return []
 
 
+def _short_sha(root: Path) -> str:
+    """The short HEAD commit SHA at ``root`` ("" on any failure)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
 def _compute_version(root: Path = _REPO_ROOT) -> str:
     """Derive the bare version string from git, falling back when unavailable."""
     # Explicit override wins (a deploy whose build system knows the number).
@@ -100,8 +116,32 @@ def _compute_version(root: Path = _REPO_ROOT) -> str:
     return format_version(pr)
 
 
+def _compute_display(root: Path = _REPO_ROOT) -> str:
+    """Derive the fully-formatted build label the UI renders verbatim.
+
+    PR-derived ⇒ ``v{X.XX}``. When NO PR number is derivable — a shallow clone
+    (the deploy fetches ``--depth 1``), an unmerged feature branch whose tip
+    carries no ``#NNN`` marker, or a tarball — fall back to ``build {short-sha}``,
+    a real debuggable identifier, rather than the meaningless ``v0.00``. Only when
+    git is entirely unavailable (no ``.git`` / no ``git`` on PATH) does it land on
+    ``v{FALLBACK_VERSION}``.
+    """
+    override = os.environ.get("ORWELL_FE_VERSION")
+    if override:
+        v = override.strip().lstrip("v")
+        return f"v{v}" if v else f"v{FALLBACK_VERSION}"
+    pr = highest_pr_number(_git_log_subjects(root))
+    if pr and pr > 0:
+        return f"v{format_version(pr)}"
+    sha = _short_sha(root)
+    if sha:
+        return f"build {sha}"
+    return f"v{FALLBACK_VERSION}"
+
+
 def get_version() -> str:
-    """The bare ``X.XX`` build version (cached). UI renders it with a 'v' prefix."""
+    """The bare ``X.XX`` build version (cached). Backward-compatible ``version``
+    field; the UI prefers ``get_display_version()`` for what it actually shows."""
     global _cached_version
     if _cached_version is None:
         _cached_version = _compute_version()
@@ -109,5 +149,9 @@ def get_version() -> str:
 
 
 def get_display_version() -> str:
-    """The build version with the conventional ``v`` prefix, e.g. ``v3.60``."""
-    return f"v{get_version()}"
+    """The fully-formatted build label the UI shows verbatim (cached): ``v{X.XX}``
+    when PR-derived, else ``build {short-sha}``, else ``v{FALLBACK_VERSION}``."""
+    global _cached_display
+    if _cached_display is None:
+        _cached_display = _compute_display()
+    return _cached_display

@@ -75,6 +75,40 @@ def test_format_none_or_nonpositive_falls_back():
     assert ver.format_version(-5) == ver.FALLBACK_VERSION
 
 
+# ── display label: PR -> "vX.XX", else short SHA -> "build <sha>", else fallback ──
+
+def test_display_prefers_pr_version(monkeypatch):
+    # When the log carries a PR marker, the clean vX.XX label wins (SHA ignored).
+    monkeypatch.setattr(ver, "_git_log_subjects", lambda root=None: ["feat: x (#517)"])
+    monkeypatch.setattr(ver, "_short_sha", lambda root=None: "deadbee")
+    assert ver._compute_display() == "v5.17"
+
+
+def test_display_falls_back_to_build_sha_when_no_pr(monkeypatch):
+    # Shallow clone / unmerged branch: the (1-commit) log has no PR marker, so show the
+    # real short SHA as "build <sha>" — never the meaningless v0.00.
+    monkeypatch.setattr(ver, "_git_log_subjects", lambda root=None: ["fix(deploy): set bind host"])
+    monkeypatch.setattr(ver, "_short_sha", lambda root=None: "2612cb3")
+    assert ver._compute_display() == "build 2612cb3"
+
+
+def test_display_falls_back_to_fallback_when_no_git(monkeypatch):
+    # No PR ref AND no SHA (no .git / git not on PATH / tarball) ⇒ the committed fallback,
+    # 'v'-prefixed, so the UI still shows something sane and never errors.
+    monkeypatch.setattr(ver, "_git_log_subjects", lambda root=None: [])
+    monkeypatch.setattr(ver, "_short_sha", lambda root=None: "")
+    assert ver._compute_display() == "v" + ver.FALLBACK_VERSION
+
+
+def test_display_override_env_wins(monkeypatch):
+    # ORWELL_FE_VERSION overrides everything (a build system that knows the number),
+    # always 'v'-prefixed for display.
+    monkeypatch.setenv("ORWELL_FE_VERSION", "v9.99")
+    assert ver._compute_display() == "v9.99"
+    monkeypatch.setenv("ORWELL_FE_VERSION", "7.07")
+    assert ver._compute_display() == "v7.07"
+
+
 # ── end-to-end shape: derived against THIS repo's real history ───────────────
 
 def test_get_version_is_a_dotted_pair_and_display_has_v():

@@ -2139,17 +2139,24 @@ function initAccount() {
       }
     }).catch(() => {});
 
-  // Visible post-login build version (mirrors the login-screen footer). Derived
-  // from the deployed checkout's highest merged PR number, rendered v{PR/100}.
+  // Visible post-login build version (mirrors the login-screen footer). Prefer the
+  // server-formatted `display` label (v{PR/100}, or "build <sha>" on a shallow/branch
+  // build where no PR number is derivable); fall back to the bare version with a 'v'.
   const verEl = el('settings-app-version');
   if (verEl) {
+    const cachedDisplay = window._appVersionDisplay;
     const cached = window._appVersion;
-    if (cached) {
+    if (cachedDisplay) {
+      verEl.textContent = cachedDisplay;
+    } else if (cached) {
       verEl.textContent = 'v' + cached;
     } else {
       fetch('/api/version', { credentials: 'same-origin' })
         .then(r => r.json())
-        .then(d => { if (d && d.version) { window._appVersion = d.version; verEl.textContent = 'v' + d.version; } })
+        .then(d => {
+          if (d && d.display) { window._appVersionDisplay = d.display; verEl.textContent = d.display; }
+          else if (d && d.version) { window._appVersion = d.version; verEl.textContent = 'v' + d.version; }
+        })
         .catch(() => {});
     }
   }

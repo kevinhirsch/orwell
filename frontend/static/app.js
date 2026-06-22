@@ -1542,7 +1542,7 @@ function initializeEventListeners() {
           const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
           if (meta) {
             meta.name = newName;
-            const ver = window._appVersion ? ` v${window._appVersion}` : '';
+            const ver = window._appVersionDisplay ? ` ${window._appVersionDisplay}` : (window._appVersion ? ` v${window._appVersion}` : '');
             el('current-meta').textContent = `Session: ${meta.name}${meta.model ? ' ' + meta.model.split('/').pop() : ''}${meta.rag ? ' [RAG]' : ''}${ver}`;
           }
           // Refresh the sessions list

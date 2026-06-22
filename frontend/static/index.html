@@ -1088,6 +1088,9 @@
       }
       fetch('/api/version').then(function(r){return r.json()}).then(function(d){
         if (d.version) window._appVersion = d.version;
+        // The server-formatted label the UI shows verbatim (vX.XX, or "build <sha>" on a
+        // shallow/branch build where no PR number is derivable).
+        if (d.display) window._appVersionDisplay = d.display;
       }).catch(function(){});
     })();
     </script>

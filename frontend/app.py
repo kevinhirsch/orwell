@@ -934,10 +934,12 @@ async def serve_login(request: Request):
 async def get_version():
     # Version is derived from the deployed checkout's git history — the highest
     # merged PR number, rendered v{PR/100} (e.g. PR #360 -> v3.60). Computed once
-    # and cached; falls back to a committed string when git is unavailable. See
-    # src/orwell_version.py.
-    from src.orwell_version import get_version as _fe_version
-    return {"version": _fe_version()}
+    # and cached. `display` is the label the UI renders verbatim: vX.XX when
+    # PR-derived, else `build <short-sha>` (a shallow clone / unmerged branch has
+    # no PR marker), else vFALLBACK — never the meaningless v0.00. The bare
+    # `version` field is kept for backward compatibility. See src/orwell_version.py.
+    from src.orwell_version import get_version as _fe_version, get_display_version as _fe_display
+    return {"version": _fe_version(), "display": _fe_display()}
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:

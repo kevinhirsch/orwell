@@ -292,7 +292,9 @@
     const vr = await fetch('/api/version');
     if (vr.ok) {
       const vd = await vr.json();
-      document.getElementById('version-label').textContent = 'v' + vd.version;
+      // Prefer the server-formatted label (vX.XX, or "build <sha>" on a shallow/branch build);
+      // fall back to the bare version with a 'v' prefix for older responses.
+      document.getElementById('version-label').textContent = vd.display || ('v' + vd.version);
     }
   } catch(e) {}
 
