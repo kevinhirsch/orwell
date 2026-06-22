@@ -50,12 +50,19 @@ async def platform_webhook(platform_id: str, request: Request):
       4. Route everything else through the gateway turn handler
       5. Return {"ok": True} to acknowledge receipt (the adapter sends the reply)
 
-    Returns 404 for an unknown platform, 400 for a malformed payload.
-    This endpoint is intentionally unauthenticated — platform identity is the credential.
+    Returns 404 for an unknown platform, 400 for a malformed payload, 403 if the platform
+    provides a configured webhook secret that does not match (SEC-2). By default the endpoint
+    is unauthenticated and treats the platform identity as the credential; setting a per-platform
+    webhook secret (e.g. TELEGRAM_WEBHOOK_SECRET) opts into transport-level verification.
     """
     adapter = platform_registry.get(platform_id)
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform_id!r}")
+
+    # SEC-2 (opt-in): if the adapter has a configured webhook secret, verify the platform's
+    # signature header before trusting the body-supplied identity. No secret ⇒ unchanged.
+    if not adapter.verify_webhook(request.headers):
+        raise HTTPException(status_code=403, detail="Webhook verification failed")
 
     try:
         raw = await request.json()

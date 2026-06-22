@@ -32,6 +32,21 @@ class PlatformAdapter(ABC):
         would break the gateway turn handler.
         """
 
+    def verify_webhook(self, headers) -> bool:
+        """Return False to reject an inbound webhook as unauthenticated (SEC-2).
+
+        The webhook trusts the client-supplied platform identity as its credential, so
+        without transport auth anyone who can reach the public URL can forge a turn for a
+        paired user. This hook lets an adapter verify a platform signature/secret header.
+
+        Default: ``True`` — **opt-in** verification, so an adapter (or deployment) with no
+        secret configured behaves exactly as before. A concrete adapter that HAS a secret
+        configured compares it (constant-time) against the platform's signature header and
+        returns ``False`` on mismatch. *headers* is a case-insensitive mapping
+        (e.g. Starlette ``request.headers``).
+        """
+        return True
+
     @abstractmethod
     def parse_inbound(self, raw: dict) -> tuple[str, str]:
         """Parse an inbound webhook payload *raw* into ``(identity, text)``.

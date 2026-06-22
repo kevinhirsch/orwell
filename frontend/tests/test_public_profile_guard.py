@@ -13,6 +13,7 @@ SAFE = {
     "LOCALHOST_BYPASS": "false",
     "SECURE_COOKIES": "true",
     "ALLOWED_HOSTS": "hiorwell.com,www.hiorwell.com",
+    "ALLOWED_ORIGINS": "https://hiorwell.com,https://www.hiorwell.com",
 }
 
 
@@ -49,6 +50,28 @@ def test_refuses_unpinned_host():
     with pytest.raises(RuntimeError) as exc:
         assert_public_profile_safe(env)
     assert "ALLOWED_HOSTS" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        None,                       # unset entirely
+        "*",                        # wildcard ⇒ credentialed reflection
+        "https://ok.com,*",         # wildcard mixed in
+        "http://hiorwell.com",      # plaintext http origin
+        "https://ok.com,http://x",  # one non-https in the list
+    ],
+)
+def test_refuses_unsafe_origins(origins):
+    # SEC-1: with CORS allow_credentials=True, a "*"/http origin reflects credentials.
+    env = dict(SAFE)
+    if origins is None:
+        del env["ALLOWED_ORIGINS"]
+    else:
+        env["ALLOWED_ORIGINS"] = origins
+    with pytest.raises(RuntimeError) as exc:
+        assert_public_profile_safe(env)
+    assert "ALLOWED_ORIGINS" in str(exc.value)  # the refusal NAMES the offending setting
 
 
 def test_allowed_hosts_default_is_wildcard():
