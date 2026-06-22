@@ -128,7 +128,7 @@ class TestOnboardingOverlay:
         assert resp.status_code in (400, 422)
 
     def test_new_game_success(self, monkeypatch):
-        async def fake_state(user=None):
+        async def fake_state(user=None, timeout=None):
             return {"started": False}  # fresh sandbox: no confirm needed (C12 guard)
 
         async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
@@ -142,7 +142,7 @@ class TestOnboardingOverlay:
     def test_new_game_forwards_optional_fields(self, monkeypatch):
         captured = {}
 
-        async def fake_state(user=None):
+        async def fake_state(user=None, timeout=None):
             return {"started": False}
 
         async def fake_create(player_name, *, archetype=None, strategy_style=None, seed=None,
@@ -168,7 +168,7 @@ class TestOnboardingOverlay:
         assert resp.status_code == 502
 
     def test_state_passthrough(self, monkeypatch):
-        async def fake_state(user=None):
+        async def fake_state(user=None, timeout=None):
             return {"started": True, "week": 3}
 
         client = _build_client(monkeypatch, {"get_game_state": fake_state})

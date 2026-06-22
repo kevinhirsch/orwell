@@ -30,7 +30,7 @@ def _app():
 
 
 def _stub_engine(monkeypatch, calls):
-    async def fake_state(user=None):
+    async def fake_state(user=None, timeout=None):
         return {"started": False}
 
     async def fake_create(name, **kwargs):
@@ -82,7 +82,7 @@ def test_other_orwell_routes_stay_player_reachable(monkeypatch):
     """E70 gates ONLY the bypass door — the player-facing reads stay open."""
     monkeypatch.setenv("AUTH_ENABLED", "true")
 
-    async def fake_state(user=None):
+    async def fake_state(user=None, timeout=None):
         return {"started": False}
 
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
