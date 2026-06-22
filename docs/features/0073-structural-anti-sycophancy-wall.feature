@@ -40,5 +40,5 @@ Feature: 0073 — structural anti-sycophancy wall: game-build boundary is a CI g
 
   Scenario: the wall gate touches no mandate surface
     Given the game-build wall test helpers
-    Then they import no Vault type
-    And they alter no game projection, narration, or engine tool
+    Then the wall test helpers import no Vault type
+    And the wall test helpers alter no game projection, narration, or engine tool
