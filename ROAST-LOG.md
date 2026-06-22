@@ -276,5 +276,43 @@ to follow on the juiciest. No theory without a traced mechanism.
 
 ---
 
+## Wave 2 — UX content & accessibility (static)
+
+### UX-1 · `[POLISH·high quick-win]` (agent proposed [BLOCK]) · CONFIRMED (lead-verified) · Raw kebab-slug IDs injected into the player's finale composer prefill
+- **Lens:** content / immersion (machinery-ish leak into the player's own voice).
+- **Evidence (lead-verified):** `orwellFinale.js:25-30` (`APPEALS` ids `own-game`/`mend`/`connect`/`discredit-rival`); `:210` `addBtn("→ " + a.label, \`I answer the jury by making my "${a.id}" case.\`)` — button shows `a.label`, but `prefill()` writes `a.id` to `box.value` (visible textarea).
+- **Mechanism:** at the finale "questions" stage a player-finalist clicking "Question my rival" gets `…making my "discredit-rival" case.` in their composer — a machine identifier in the player's voice at the game's emotional peak. **Differential:** pure content fault (`a.id` where `a.label` belongs); flow is correct. **Severity (lead):** POLISH not BLOCK — gated behind reaching F2 + using the shortcut, editable before send, doesn't block play; but trivial fix + visible fourth-wall break ⇒ high-priority quick win. **Fix:** `a.label` (or a label-derived phrase); if the LLM needs the slug, send it as a scrubbed hidden prefix. **Confidence:** high (string interpolation unambiguous).
+
+### UX-9 · `[POLISH]` · PROPOSED · Decision-card note "Your selection only — never read from prose" is OOC engine-language delivered via `aria-describedby` on every standard binding card
+- **Evidence:** `orwellDecision.js:421` (`multi ? "Select N — only a legal move counts." : "Your selection only — never read from prose."`); the note is the card's `aria-describedby` description (first thing a SR user hears). **Mechanism:** "never read from prose"/"legal move" address the engine boundary, not the houseguest — breaks fiction at nominations/eviction-vote, the most consequential moments. The per-kind overrides (`juror-question`: "Your own words…", `goodbye-message`: "Pick a tone — that's what binds.") prove the fix pattern is understood; the default else-branch just never got it. **Fix:** player-facing reword ("Tap your choice — the house only sees this card, not the chat."). **The lane's biggest smell.**
+
+### UX-2 · `[POLISH]` · PROPOSED · Duplicate `aria-label="The Cast"` on two simultaneous collapsed-gadget-strip buttons (WCAG 4.1.2/2.4.6)
+- **Evidence:** `orwellGadgetRail.js:43,47` (both `orwell-cast-pin` and `orwell-cast` have `title:"The Cast"`); strip builder `:169` `b.setAttribute("aria-label", g.title)`. Icons differ (👥/🎬) but `aria-label` overrides the icon ⇒ a SR/voice-control user hears two indistinguishable "The Cast" buttons. **Fix:** differentiate the two registry titles.
+
+### UX-10 · `[POLISH]` · PROPOSED · Finale `.ofin-btn` `min-height:36px` defeats the coarse-pointer 44px floor via specificity
+- **Evidence:** `orwellFinale.js:93` (`#orwell-finale .ofin-btn{min-height:36px}`, specificity 0,1,1) beats the responsive-tokens `@media (pointer:coarse){button:not(.tap-exempt){min-height:var(--tap-min)}}` (0,0,1) — so the 44px floor never applies on touch. Distinct from the closed J5-13 (which lifted ~27→36 but didn't notice the specificity defeat). **Mechanism:** the finale's four shortcut buttons (the most time-sensitive touch interaction in the game) ship 36px on touch, 8px below the project floor. **Fix:** add `.tap-exempt` + explicit 44px, or `min-height:max(36px,var(--tap-min,44px))`. (Pairs with RESP-2/4 — the touch-floor guardrail keeps getting beaten by panel-level CSS.)
+
+### UX-3 · `[POLISH]` · PROPOSED · Premiere dismiss button Label-in-Name violation (WCAG 2.5.3)
+- **Evidence:** `orwellPremiereTutorial.js:110` visible text "Close guide" but `aria-label="Dismiss the premiere guide"` — visible label absent from the accessible name ⇒ voice-control "click Close guide" fails to match. **Fix:** drop the `aria-label` (let "Close guide" be the name; `title` carries the hint) or prefix it with the visible text.
+
+### UX-5 · `[LATENT]` · PROPOSED · Six static `role="dialog"` elements have no `aria-modal` + unconfirmed focus trap
+- **Evidence:** `index.html:334,533,1237,1405,1431,1442` (Brain/Theme/Prompt/Rename/Cookbook/Settings) — grep `aria-modal` ⇒ 0 matches; the OrwellWindow kit sets `aria-modal` for *dynamic* windows but these legacy static modals are outside it. **Mechanism:** without `aria-modal="true"` a SR virtual cursor can wander outside an open modal (Settings is player-reachable every session). LATENT (game-trim may hide some; JS focus-trap existence unconfirmed from markup). **Fix:** add `aria-modal="true"` + verify a JS focus trap.
+
+### UX-7 · `[LATENT]` · PROPOSED · Diary Room mode-entry is announced **silently** to screen readers (display toggle, not content mutation)
+- **Evidence:** `orwellDiaryRoom.js:72-77` — pill created `display:none` with `role="status"` and content pre-set; `enterDRMode()` toggles `display`. **Mechanism:** `aria-live` fires on content mutation, not a style change ⇒ entering the private OOC channel (a consequential state change — DR vs public house message) gives a SR user no confirmation. **Fix:** mutate the live-region text content on entry (or start empty + inject on first show).
+
+### UX-4 · `[POLISH]` · PROPOSED · Retrospective vault headings/button contain bare emoji without `aria-hidden` (WCAG 1.1.1)
+- **Evidence:** `orwellRetrospective.js:150,171,196` (🔓/🗳/🔐 inline in text nodes; the J3-24 fix wrapped tutorial emoji in `aria-hidden` spans but it wasn't extended here). SR announces "closed lock with key, Open the Producer's Vault" on the key post-season CTA. **Fix:** apply the J3-24 `<span aria-hidden="true">` pattern.
+
+### UX-8 · `[NIT]` · PROPOSED · Finale shortcut buttons' emoji/arrow glyphs unguarded in the accessible name
+- **Evidence:** `orwellFinale.js:203,208,210,212` (`btn.textContent = label` incl. ✍/→/🗳) ⇒ "rightwards arrow, Own my game" / "ballot box…, Vote for X". **Fix:** `innerHTML` with `aria-hidden` spans around the glyphs.
+
+### UX-6 · `[NIT]` · PROPOSED · Season chip accessible name is a static placeholder
+- **Evidence:** `orwellSeasonProgress.js:174` `aria-label="Season number"` set once, never updated to the actual value ⇒ SR hears "Season number" not "Season 2". **Fix:** set `aria-label` to the live label, or drop it and let `textContent` be the name.
+
+**Lane-UX CLEARED:** strong in-fiction copy throughout — Diary Room pill ("private & out-of-character; the house never hears this"), retrospective Vault CTAs, premiere tutorial, self-evict-cancel ("Cancel — stay in the house"), the Vault-safe decline ("The Vault would not open"). Chat `role="log" aria-live="polite"`, presence `role="status"`, decision-card `role="form"` + `role="alert"` error region, finale SR-only announce region — all structurally correct. Reduced-motion gated across the kit + tutorial. **Lane-UX smell (UX-9):** the OOC engine-language decision-card note is the most consistently present fiction-break — on every binding card, first thing a SR user hears — and the per-kind overrides prove the fix is understood but the default branch was skipped.
+
+---
+
 ## Live-LLM lane (in progress)
 A dedicated background agent is standing up the real stack + wiring the OpenRouter key per `docs/audits/playtest-harness/README.md`, playing an authentic `-pro` persona season (engine = oracle) then probing `-flash` for tier failures. Findings (LIVE-*) land here on return.
