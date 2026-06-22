@@ -1,6 +1,14 @@
 # 0067 — Presence grounding & motivated movement (the narrator stops inventing the room)
 
-> **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
+> **Status:** 🟡 **IN PROGRESS** (drafted 2026-06-22; increments shipping). **Shipped so far:**
+> (1) **the churn fix** — engine, `PRESENCE.companionMoveProb`: present company HOLDS the player's
+> scene (was the 0.6/turn reroll), calibration-safe (weighted stream only), `presence.test.ts` +
+> juryReach green; (2) **the occupancy feed** was found to ALREADY ship — `momentPrompts.renderGameContext`
+> pushes the full `present` + adjacent-room occupancy every turn with binding "voice EXACTLY these,
+> never invent" instructions; (3) **narrated departures** — FE, `_render_presence_movement`: NPC
+> arrivals/departures in the player's room are voiced as beats, no more silent pop-outs
+> (`test_0067_presence_movement.py`). **Remaining:** the closed-set presence/identity **desync guard**
+> (the "reconcile" half — see note below) and BDD wiring once it lands. Unit/pytest-gated meanwhile. **Gate (planned):** engine (Vitest +
 > dependency-cruiser + BDD `0067-presence-grounding-and-motivated-movement.feature`) and front-end
 > (pytest — the per-turn occupancy feed + the presence-desync guard, siblings to the 0065 board
 > guard + the `_auto_move_player` belt). **Depends on:** 0049 (house presence & lingering —
@@ -104,6 +112,18 @@ Replace the per-turn stochastic reroll with **reason-driven movement**:
 > stream. This feature's retune/gating MUST stay on the player-facing (weighted) view + its
 > dedicated stream and leave the base draw-count byte-identical — or `tests/property/juryReach`
 > breaks (it has twice). The new tests assert that isolation explicitly.
+
+> **Note on the desync guard (the remaining "reconcile" half) — a deliberate sequencing call.**
+> The 0065 board guard works because closed-set *outcomes* (HOH/noms/veto/eviction) have **crisp
+> textual claim patterns** ("X is evicted", "wins HOH", an "N–M" tally) that a narrow regex catches
+> with near-zero false positives. **Presence claims in prose are diffuse** ("Ana leans against the
+> window") with no such anchor, so a naive scan would either nag the model on clean turns or miss.
+> The safe form is the *post-turn re-ground* mechanism (`record_post_turn_desync_check` →
+> `_DESYNC_REGROUND`, never editing live prose) extended with a **high-precision** trigger — e.g. a
+> houseguest given a *spoken line / scene action* whom the engine places in a **non-adjacent** room
+> or as **evicted** (a hard contradiction). This is being built carefully with the Bedroom-A
+> transcript as its fixture, *after* the lower-risk feed/churn/departure increments above (which
+> already remove the dominant turn-to-turn reshuffle), so the guard is precise rather than rushed.
 
 ### 3. The presence/identity desync guard (closed-set only; owner edit #3 → the principle)
 
