@@ -4786,6 +4786,14 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
     try:
         res = await orwell_engine.advance_game(user=owner)
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: the card survives a reload
+        # 0070: an advance runs the bounded off-screen tick, which may record new HIDDEN NPC-to-NPC
+        # scenes. Fire-and-forget their FE-driven prose enrichment — best-effort, never blocks the
+        # advance, and a silent no-op when no utility model resolves (the deterministic template stands).
+        try:
+            from src import orwell_offscreen_texture
+            orwell_offscreen_texture.kickoff_enrich(owner)
+        except Exception:  # pragma: no cover - defensive: enrichment must never break an advance
+            pass
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
