@@ -45,6 +45,21 @@ The full license texts are kept in [`licenses/`](licenses/).
   Deep Research feature (`services/research/`, `src/research_handler.py`,
   `routes/research_routes.py`, `services/search/`). Full text in
   [`licenses/DeepResearch-Apache-2.0.txt`](licenses/DeepResearch-Apache-2.0.txt).
+- **Identity pairing** (`frontend/gateway/pairing.py`): adopted near-verbatim from
+  `gateway/pairing.py` in hermes-agent (MIT © 2025 Nous Research). The code-approval
+  flow (salted hash, TTL, rate-limit, lockout) binds a platform identity to one orwell
+  account.
+- **Platform adapter contract + registry** (`frontend/gateway/platforms/base.py`,
+  `frontend/gateway/platform_registry.py`): adapted from hermes-agent
+  `gateway/platforms/base.py` and `platform_registry.py` (MIT © 2025 Nous Research).
+  The self-registering adapter pattern and the `PlatformAdapter` ABC are taken from
+  that source; the concrete Telegram implementation and the registry singleton are
+  Orwell-specific.
+- **Server-side reasoning scrub chokepoint** (`frontend/gateway/scrub.py`):
+  pattern-only, modeled on hermes-agent `stream_dispatch.py` (MIT © 2025 Nous
+  Research). The regex patterns and the "eat the events you can't render" philosophy
+  are adapted; the implementation is Orwell-specific (targeting `<think>` blocks,
+  `[OPERATOR: …]` asides, and `npc:<id>` leaks).
 
 ---
 

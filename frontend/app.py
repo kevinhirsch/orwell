@@ -206,7 +206,15 @@ if AUTH_ENABLED:
         "/api/version",
         "/login",
     }
-    AUTH_EXEMPT_PREFIXES = ["/static"]
+    AUTH_EXEMPT_PREFIXES = [
+        "/static",
+        # Gateway webhooks: messaging platforms POST here without a session cookie.
+        # Identity is proven by the pairing store inside the handler — unpaired
+        # identities never reach the engine.  /gateway/pair/verify and /gateway/status
+        # do require auth (handled by their own guards), so only the webhook prefix is
+        # exempted here.
+        "/gateway/webhook/",
+    ]
     # Dynamic paths whose own handler proves identity via a path-embedded
     # secret instead of the session/bearer auth. The route handler at
     # routes/task_routes.py validates the per-task `webhook_token` itself
@@ -573,6 +581,13 @@ app.include_router(setup_workspace_routes())
 # Big Brother game (orwell engine bridge): onboarding + in-character chat.
 from routes.orwell_routes import setup_orwell_routes
 app.include_router(setup_orwell_routes())
+
+# Multi-platform gateway (feature 0072): lets a player reach their game from messaging
+# platforms (Telegram, etc.) over the Vault-free MCP player channel.
+# Mounted unconditionally — the Telegram adapter is a no-op when TELEGRAM_BOT_TOKEN is
+# absent, so the routes register (and tests can exercise them) without a live token.
+from routes.gateway_routes import setup_gateway_routes
+app.include_router(setup_gateway_routes())
 
 # Sessions
 from routes.session_routes import setup_session_routes
