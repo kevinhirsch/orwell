@@ -5,7 +5,7 @@
 # Admin "Local HTTPS" card) and re-apply. It is shown here so you can see the shape.
 #
 # It terminates TLS on the LAN and reverse-proxies the FRONT-END on loopback. The engine is engine-only
-# and is NEVER named here (port 8765 is absent), so it stays unreachable. The front-end port must match
+# and its port is never named here, so it stays unreachable. The front-end port must match
 # ORWELL_PORT (installer default 8080).
 
 # ── Local names + the LAN IP — the offline INTERNAL CA (no domain, no internet needed). ──
