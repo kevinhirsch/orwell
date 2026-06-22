@@ -13,6 +13,21 @@ export interface PresenceConstants {
   overhearProb: number;
   /** Chance a houseguest moves rooms on a tick at all (otherwise they stay put). */
   moveProb: number;
+  /**
+   * Chance an NPC who is CURRENTLY IN THE PLAYER'S ROOM moves on a tick (feature 0067). Far lower
+   * than `moveProb`: present company is mid-scene with the player, so they STAY by default — the
+   * old `moveProb` (tuned for a tick = a chunk of house-time) churned ~60% of the room out from under
+   * a live conversation every turn (the pop-in/pop-out immersion bug). They keep full agency to leave
+   * — when this low roll fires they DO get up and go, and the affinity-weighted destination reads as a
+   * motivated exit (toward a stronger bond) — but the scene no longer reshuffles every message.
+   *
+   * CRITICAL (calibration): this lever is applied ONLY to the personality-WEIGHTED, player-facing pass
+   * (the dedicated movement stream, isolated from calibration). It must NEVER touch the un-weighted BASE
+   * assignment the off-screen society pairs on — that still draws `moveProb` from the SHARED stream with
+   * a byte-identical draw count, or the seeded juryReach spine re-phases (the L21/L24 lesson). So this is
+   * NOT a retune of `moveProb` (which is load-bearing for the base); it is a separate, weighted-only floor.
+   */
+  companionMoveProb: number;
   /** Weight of affinity toward already-placed occupants when choosing a room. */
   affinityPull: number;
   /** How strongly the HOH gravitates to the HOH room. */
@@ -26,6 +41,7 @@ export interface PresenceConstants {
 export const PRESENCE: PresenceConstants = {
   overhearProb: 0.1,
   moveProb: 0.6,
+  companionMoveProb: 0.12,
   affinityPull: 0.8,
   hohRoomPull: 0.5,
   overhearConfidence: 0.4,
