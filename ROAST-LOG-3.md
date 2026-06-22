@@ -237,6 +237,37 @@ diminishing returns. The remaining bug surface this session set out to find (nar
 the model's actual fabrication/invention behavior) is **gated on the live LLM (OPS-1)** and cannot be advanced
 from this environment. The two NEW issues findable without a model (NARR-7, EVT-1) are logged above.
 
+### Loop continuation — further player-channel coverage (all clean)
+
+Pushed deeper across additional surfaces on operator request ("keep playing, find new issues"). **No new defect**:
+
+- **Endgame mechanics correct (F6→F2).** Inspected every pending/ceremony from Final 6 down: HOH→noms→veto
+  (field shrinks via chip draw)→single staged comp→eviction; a **double-eviction twist** fires cleanly at F5
+  (`twist-reveal` beat, fresh HOH cycle same night); **F4 sole-vote** eviction resolves correctly; the veto
+  ceremony names a legal replacement each week. The player (physical/aggressive, competing every comp) **won
+  nothing and was evicted at F4** — anti-sycophancy holding in the live loop.
+- **Anti-sycophancy — re-confirmed.** Over 40 seeds the competing player won the opening HOH **1/40** (≈ the
+  unprotected ~1/16 baseline, low end of noise); intent (`compete` vs `throw`) shifts outcomes via the seeded
+  RNG. The engine never protects the player. (No `EARNED_WINS`-style violation observed.)
+- **Self-eviction (0061) correct.** `requestSelfEviction` raises a `self-evict` pending and leaves the player
+  **active** (anti-accident gate); `cancelSelfEviction` clears it; a **confirmed** `submitDecision({kind:"self-evict",
+  confirmed:true})` emits the `self-eviction` beat and flips status to **`evicted`, NOT `jury`** — the spec's
+  "voluntary walk-out forfeits the juror seat" holds.
+- **OOC / producer channels clean.** `diaryRoom({entry})` records (`{recorded:true}`); the player's
+  `privateStrategy` (a planted sentinel string) **never** surfaced in any NPC-facing projection (`npcVoice`,
+  `getVisibleStateFor`) — the NO_NPC_PATHWAY rule holds. `askProducers` correctly **refuses** Vault content
+  ("I can't confirm or deny what's in the Vault" — flavor, not a leak).
+
+### CI context (PR #520) — repo-wide GitHub Actions incident, not this PR
+
+While auditing, PR #520's `ci-gate` / `changes` jobs failed with 2-second runtimes and **404-ing logs**. Cross-check
+via `actions_list`: **`main` pushes are ALSO failing** in the same window (e.g. `8649f459` @22:34, `079039c2`
+@22:29), and a green run (`27754995` @22:24) immediately preceded the breakage. A docs-only commit cannot break
+the `changes`/`ci-gate` *infrastructure*; the simultaneous main-branch failures + inaccessible logs indicate a
+**GitHub Actions platform incident** (or an unrelated change to `main`'s workflow), not this PR's content. Action
+taken: none beyond one re-trigger; **`ci.yml` not modified** (infra, gated by the HARD STOP). It will clear when
+the platform recovers / `main` is fixed.
+
 ## Triage summary (this session)
 
 - **[BLOCK — mission]** OPS-1 — live-LLM lane impossible here (OpenRouter not allowlisted; rotate the key).
