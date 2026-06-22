@@ -151,6 +151,39 @@ JSON-RPC batch concurrent dispatch (`jsonRpc.ts:163` `Promise.all`) — ruled ou
 
 **Lane-H CLEAN (verified):** presence/night (full rebuild, no anim, `finally` reschedules); retrospective `_lastSig` idempotent skip-render; decision-card `_doneTimer` guarded + 15s backstop + reduced-motion gated; finalizing indicator paired begin/end in the `finally`; sessionSync reconcile debounce idempotent + EventSource reconnect capped; spinner `stop()` clears interval+raf; headshot teardown (R5/R6); gadget-rail `syncStrip` signature-guarded. *(TX-1/TX-2 graded LATENT — pre-armed traps not exercised by current consumers; the four NITs are reduced-motion/repeat-event edges.)*
 
+## Lane I — Interaction / feedback / cognitive-load (static)
+
+### F-NEW-1 · `[POLISH]` · CONFIRMED · `replacement` & `tie-break` decision kinds absent from `HIGH_STAKES_KINDS` — no risk skin despite ending a houseguest's game
+- **Evidence:** `orwellDecision.js:39-44` `HIGH_STAKES_KINDS = {eviction-vote, final-eviction, juror-vote, nominations}` — omits `replacement` (veto replacement nominee, permanent) and `tie-break` (HOH breaks a tied vote, evicts outright). `isHighStakes()` drives the red-wash + "Irreversible" badge, so these render identical to a non-binding `comp-intent` card. **Fix:** add the two kinds (one-line). Error-prevention (Nielsen H5); cost borne by a third party, permanent.
+
+### F-NEW-2 · `[POLISH]` · CONFIRMED · "Recast from scratch" fires the irreversible new-game POST with no confirmation
+- **Evidence:** `orwellNewSeason.js:131-133` click → `startNextSeason(keep=false)` → POST `{keep:false,confirm:true}` immediately; no `styledConfirm` (which IS used for factory-reset in settings.js). Discards the player's entire houseguest identity. The `confirm:true` body key implies a client confirm the client never performs.
+
+### F-NEW-3 · `[POLISH]` · CONFIRMED · "See how it ends" fast-forward commits `conclude-season` on single click, no confirm
+- **Evidence:** `orwellNewSeason.js:196-213` `#ons-conclude` → `fetch(/api/orwell/conclude-season)` immediately; one-way (skips all remaining weeks). Steelman: evicted player has no remaining agency (partly neutralizes) — but the hint is `opacity:.6; 11.5px` below the button.
+
+### F-NEW-6 · `[POLISH]` · CONFIRMED · Decision-card error message conflates network failure with game-rule rejection
+- **Evidence:** `orwellDecision.js:500` one string for `!r.ok` (incl. 409 stale-beat, 400 illegal-move) AND network exceptions. Correct recovery differs (resubmit-after-refresh vs change-selection vs wait); the player can't tell. Error-recovery (Nielsen H9).
+
+### F-NEW-7 · `[POLISH]` · CONFIRMED · DR-mode exit `×` ~12-18px (below touch floor) → mobile MODE-LOCK
+- **Evidence:** `orwellDiaryRoom.js:77-79` `font-size:1em; padding:0 2px` at pill `--fs-xs`(12px). Exit paths = this `×`, Escape (no touch keyboard), or sending an entry. The capture-phase interception (`:131-133`) swallows normal sends in DR mode ⇒ if a mobile player can't hit `×`, EVERY message goes to the Diary Room until reload. The most blocking-adjacent of this lane.
+
+### F-NEW-9 · `[POLISH]` · CONFIRMED · Gadget-rail resize handle `role="separator"` (non-interactive) while keyboard-operated; no `aria-valuenow/min/max`
+- **Evidence:** `orwellGadgetRail.js:509-512,567-584` — arrow keys nudge width but role is structural ⇒ AT announces "separator", no operability/value feedback; should be `role="slider"`. The handle is the only non-pointer resize path (drag needs a pointer).
+
+### F-NEW-11 · `[LATENT]` · CONFIRMED · Season winner not announced via `aria-live` (done-state branch bypasses `announceDeltas`)
+- **Evidence:** `orwellStatusPanel.js:276-291` — done branch resets `_last` + `return`s before `announceDeltas`; winner injected via `.innerHTML` into `#os-done-winner` (no `aria-live`). The highest-stakes info event gives SR users no announcement.
+
+### F-NEW-12 · `[LATENT]` · CONFIRMED · Deals panel distinguishes `open` vs `kept` by border-left-color alone (WCAG 1.4.1)
+- **Evidence:** `orwellDeals.js:89-91` green vs blue border-mix; `.odl-tag` text-label is `.62rem opacity:.65` (sub-readable). `broken` has line-through (accessible); open-vs-kept is color-only — protan/deutan confusion + a real strategic distinction (active commitment vs historical).
+
+### F-NEW-4/5/8/10/13 · `[LATENT/NIT]` · CONFIRMED
+- **F-NEW-4** decision-card 15s backstop uses a blanket module-level `_userDismissed` with no per-sig binding (`orwellDecision.js:573-586`) ⇒ dismissing a low-stakes pending can suppress a later `nominations` card (cross-device/under-call path). **F-NEW-5** post-confirm prefill is identical for all kinds (`:481-485`) — generic cue loses dramatic context. **F-NEW-8** DR submit has no in-flight loading state (`orwellDiaryRoom.js:131-149`) → Doherty >400ms reads as hang, double-submit risk. **F-NEW-10** engine-down banner dismiss below touch floor + fixed-top banner occludes chat with no `padding-top` compensation (`orwellEngineStatus.js:36-50`) — worst exactly when connectivity is degraded. **F-NEW-13** new-season window `closable:false` (`:234`) with no tooltip explaining why / that it auto-dismisses (minimizable is the escape valve).
+
+**Consequential-act safety table (lead summary):** confirmation+risk-skin present for eviction-vote / nominations / juror-vote / factory-reset / progress-reset; MISSING for replacement & tie-break (F-NEW-1), recast (F-NEW-2), conclude-season (F-NEW-3). **Cognitive-load hotspots:** simultaneous panel proliferation at game start (no progressive disclosure); DR-mode has no persistent global indicator beyond the pill; decision card injected mid-stream may scroll past unnoticed on mobile.
+
+**Lane-I CLEAN (steelman):** factory/progress reset use `styledConfirm` with specific consequence text; decision-card done-state self-removal guard (J5-06) correct; live-game ceremony `announceDeltas` correct; presence name-disambiguation sound; DR capture-phase interception architecture correct (the gaps are interaction-layer); `comp-intent`/`comp-round` `binding`-flag differentiation correct.
+
 ---
 
 **Lane-G CLEAN (steelman):** the MCP HTTP edge is solid — constant-time secret compare, separate admin token strictly enforced, multiuser header rejection, anti-spray `knownUser` + tight `SANDBOX_CREATING_TOOLS` allowlist on `/call` AND `/rpc`, body cap + timeout + per-user serialization, sanitized `/health` (no message/arg leak), precise typed-error→status (409 carries only `{code,beatSeq,board}`). `FileSaveStore.userDir` hex-encodes the user id (path-traversal structurally impossible) + 64-char cap. TLS scripts pass the DNS token by env (not argv) + shred + allow-list names; the engine port is never named in a generated site. Auth cookies `HttpOnly`+`SameSite=Lax`+`Secure`-under-flag; `_is_trusted_loopback` excludes proxy/tunnel-forwarded so `LOCALHOST_BYPASS` can't be inherited over cloudflared. 0071 redaction installed before first log emit.
