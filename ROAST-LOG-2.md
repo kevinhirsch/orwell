@@ -1,7 +1,10 @@
-# Orwell — Pre-Launch Roast Ledger (Wave 3 · second-auditor session)
+# Orwell — Pre-Launch Roast Ledger #2 (Wave 3 · second-auditor session)
 
-> **Companion to PR #519's `ROAST-LOG.md`** (Waves 1–2 + the live `-pro`/`-flash` run, branch
-> `claude/inspiring-archimedes-aq6hsl`) and to `AUDIT-LOG.md` (the VERIFIED-FIXED trace ledger).
+> **Filename is deliberately `ROAST-LOG-2.md`** to avoid a cross-branch write collision with the
+> first auditor's `ROAST-LOG.md` (PR #519, 64 findings, branch `claude/inspiring-archimedes-aq6hsl`;
+> its two `[BLOCK]`s are LIVE-4 staged-comp cascade skips noms+veto ceremonies, LIVE-7 eviction
+> fabricated ahead of the engine — both confirmed there, not re-roasted here).
+> **Companion to** that file (Waves 1–2 + the live `-pro`/`-flash` run) and to `AUDIT-LOG.md`.
 > This file is a **parallel second auditor** on branch `claude/focused-turing-7d710o`. Every entry
 > here is **NEW** — re-confirmed in current source (file:line) and cross-checked absent from both
 > prior ledgers. Single writer = the lead; read-only specialists fan out and return findings.
