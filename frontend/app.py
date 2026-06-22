@@ -1077,6 +1077,14 @@ async def _startup_event():
     # ADR 0006: re-apply the persisted in-game-clock setting to the engine on boot (the engine's runtime
     # override resets on restart). Best-effort, fail-soft; never blocks startup.
     async def _apply_time_of_day():
+        # Multiuser: a userless boot apply is REFUSED by the engine (setTimeOfDay is a process-global
+        # flag with no sandbox to route through at boot, and it is not a sandbox-creating tool, so an
+        # unknown/absent user is rejected). Defer to the FE's first-framed-turn lazy apply
+        # (chat_helpers._apply_persisted_time_of_day_once), which runs once a real user's sandbox
+        # exists. Single-tenant: the userless call routes to the "default" sandbox and works here.
+        if os.getenv("ORWELL_ENGINE_MULTIUSER"):
+            logger.info("Time-of-day boot apply deferred to first user turn (multiuser mode)")
+            return
         try:
             from src.settings import load_settings
             from src import orwell_engine

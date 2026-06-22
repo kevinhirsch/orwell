@@ -53,6 +53,32 @@ _GAME_WAS_ACTIVE: set = set()
 # in the SAME session plays as the premiere, not as a return.
 _SESSION_GAME_FRAMED: set = set()
 
+# ADR 0006: time-of-day is a PROCESS-GLOBAL engine flag (setTimeOfDay flips a static). The boot
+# re-apply (app.py) cannot run in multiuser mode — a userless admin call is refused, and setTimeOfDay
+# is not a sandbox-creating tool, so at boot there is no user/sandbox to route it through. Instead we
+# apply the persisted setting LAZILY on the first framed turn: by the time framing completes a real
+# user's sandbox exists (a live game, or casting's get_moment_prompt minted it), so the call routes
+# cleanly. Latched once-per-process; idempotent (sets a flag to its persisted value), so a benign
+# race just re-applies the same value. Best-effort: a hiccup leaves the latch down so a later turn
+# retries — it never blocks or breaks the turn.
+_TIME_OF_DAY_APPLIED = False
+
+
+async def _apply_persisted_time_of_day_once(user) -> None:
+    """Push the persisted `time_of_day_enabled` setting onto the live engine once per process, for a
+    user whose sandbox already exists (so the global setTimeOfDay flag reflects the FE setting even
+    though the boot apply can't run in multiuser). Fail-soft."""
+    global _TIME_OF_DAY_APPLIED
+    if _TIME_OF_DAY_APPLIED or not user:
+        return
+    try:
+        from src.settings import get_setting
+        from src import orwell_engine
+        await orwell_engine.set_time_of_day(bool(get_setting("time_of_day_enabled", True)), user=user)
+        _TIME_OF_DAY_APPLIED = True
+    except Exception as _e:
+        logger.info("[orwell] deferred time-of-day apply not yet applied (will retry next turn): %s", _e)
+
 # P2: the engine moment whose prompt carries THE RECORD for a resuming context.
 RE_ENTRY_MOMENT = "re-entry"
 
@@ -1538,6 +1564,11 @@ async def apply_game_framing(
             _drop_preset_persona(preface, preset_system_prompt)
             _slim_framed_preface(preface)
             preface.insert(0, {"role": "system", "content": pre_prompt})
+    # ADR 0006: now that a real user's sandbox exists (live game OR casting just minted it), push the
+    # persisted time-of-day setting onto the engine once — the multiuser-safe replacement for the
+    # userless boot apply. Best-effort; latched once-per-process.
+    if engine_available:
+        await _apply_persisted_time_of_day_once(user)
     return engine_available, game_active, feed_down
 
 
