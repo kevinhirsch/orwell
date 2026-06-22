@@ -425,9 +425,11 @@ const CASTING_INTERVIEW_PROMPT = [
   "'panel', or claim it reads 'Casting headshot' — the only control is the 'Choose Your Character'",
   "button that appears right below this message, so refer to it by that exact name and nothing else.",
   "",
-  "END THE INTERVIEW — when the status shows ready and the photo is handled, don't drag it out:",
-  "call createCharacter to finalize. It starts the season from everything recorded (you may pass",
-  "fields to fill last gaps or override).",
+  "END THE INTERVIEW — finalize when, and only when, the CASTING STATUS says READY TO START: a name",
+  "PLUS their backstory, their motivation, and a read on how they'll play are all on file. Until then",
+  "the status reads NOT DONE YET — keep interviewing and recording; calling createCharacter early is",
+  "refused. Once it says READY TO START, don't drag it out: call createCharacter to finalize. It starts",
+  "the season from everything recorded (you may pass fields to fill last gaps or override).",
   "",
   "THE CASTING SHEET (canonical — map onto these exact values):",
   `  archetypes: ${ARCHETYPES.map((s) => s.archetype).join(", ")}`,
@@ -687,10 +689,17 @@ export function renderGameContext(view: GameStateView): string {
           : `- CASTING STATUS — already on file (do not re-ask): ${knownEntries.map(([k, v]) => `${k}: ${JSON.stringify(neutralizeForPrompt(String(v)))}`).join("; ")}`,
       );
       if (c.next) lines.push(`- NEXT STEP: ${c.next}`);
+      // The finalize gate, stated as ENGINE truth so the model never has to judge "is the interview
+      // done?" itself (it gets that wrong both ways — re-asking forever, or finalizing early and
+      // eating a `createRefused: casting-incomplete`). `ready` is name-only; `finalizable` is the real
+      // gate (name + backstory + motivation + a persona/strategy read). Vault-free: all the player's
+      // own intake.
       lines.push(
-        c.ready
-          ? "- READY: the required name is on file — createCharacter may finalize whenever the interview has given you the picture."
-          : "- NOT READY: no name on file yet — the season cannot start until updateCasting records playerName.",
+        !c.ready
+          ? "- NOT READY: no name on file yet — the season cannot start until updateCasting records playerName."
+          : c.finalizable
+            ? "- READY TO START: enough is on file to cast a real houseguest. When they signal they're set, call createCharacter to finalize — don't drag it out."
+            : "- NOT DONE YET: a name is on file, but the season can't start until you have ALSO recorded their backstory, their motivation, and at least one read on how they'll play. Ask the NEXT STEP above, record the answer with updateCasting, then keep going — do NOT call createCharacter yet (it will be refused).",
       );
     }
     return lines.join("\n");
