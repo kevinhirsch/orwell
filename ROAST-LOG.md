@@ -391,8 +391,19 @@ to follow on the juiciest. No theory without a traced mechanism.
 - **A11Y-8 / UX-10** (`cfe60c1`, test `8f0c95d`) — finale `.ofin-btn` + new-season `.ons-btn` → 44px; `test_j5_finale_buttons_tap_target` re-pinned 36→44.
 - **SEC-1** (`18010f0`) — public-profile boot guard now refuses `ALLOWED_ORIGINS` unset/`*`/non-https under `ORWELL_PUBLIC` (+5 test cases).
 - **SEC-2** (`18010f0`) — opt-in gateway webhook verification: `PlatformAdapter.verify_webhook()` + Telegram `X-Telegram-Bot-Api-Secret-Token` constant-time check + route 403 (default-off = unchanged local use).
+- **A11Y-2 / A11Y-4 / A11Y-5** (`7950672`) — SR live-region batch 1: new-season transition error now announced (assertive); Diary-Room failure announced assertively (success resets polite); status collapse-toggle aria-label/title track state instead of a stale "Collapse". (Full FE suite 2260 passed.)
 
-**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-1..6/9..11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..13. *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+**Still OPEN** (logged, not yet remediated): NARR-7 (BLOCK-candidate, finale persona) · SOC-NEW-1..5 · SYNC-FOCUS-1/RING-1 · NARR-8..11 · RESP-NEW-1 · A11Y-1/3/6/9..11 · CONT-1..3 · TX-1..6 · SEC-3/4 · F-NEW-2..13 · SET-NEW-1..3 (below). *(LIVE-4/LIVE-7 BLOCKs are PR #519's, for the fresh live-LLM session.)*
+
+## Wave-4 surfacing (loop, 2026-06-22) — settings / persistence
+### SET-NEW-1 · `[LATENT]` · CONFIRMED · Custom-theme deletion never propagates and silently resurrects — the cross-device theme merge is additive-only
+- **Evidence:** `theme.js:147-153` `deleteCustomTheme` removes locally + PUTs the reduced dict; `theme.js:2368-2378` boot merge only ADDS server entries (`if(!local[name]) local[name]=colors`), never removes; `theme.js:125-145` any save re-PUTs the device's full local set.
+- **Mechanism:** device A deletes theme X (A + server lose it); device B still has X locally, and B's next custom-theme save re-PUTs X to the server; A's next boot additively re-adds X. No tombstone/version/LWW — only union ⇒ a deleted theme reappears across devices. **Differential:** not FEJS-1 (that's the one-browser keyspace collapse; this is the server pref's merge semantics). **Falsifier:** delete X on A; save any theme on B (which holds X); reboot A → X returns.
+### SET-NEW-2 · `[NIT]` · CONFIRMED · `text-emojis` in `UI_VIS_DEFAULT_OFF` is dead (the set isn't consulted for it)
+- **Evidence:** `app.js:2559` set includes `text-emojis`, but it's absent from `UI_VIS_MAP` (`:2521-2556`) where `UI_VIS_DEFAULT_OFF.has` is checked (`:2576`); it's applied out-of-band via `applyTextEmojis(state==='true')` (`:2589`). Two sources of truth for one default that could drift. **Falsifier:** removing it from the set changes nothing.
+### SET-NEW-3 · `[NIT]` · CONFIRMED · Keybind default tables disagree on `toggle_sidebar` (F5 drift survived the F1 fix)
+- **Evidence:** `keyboard-shortcuts.js:8` `_defaultKeybinds.toggle_sidebar='ctrl+alt+b'` vs `settings.js:1821` `SHORTCUT_DEFAULTS.toggle_sidebar='ctrl+b'`. On a fresh store the Shortcuts tab shows `Ctrl B` while the live keymap binds `Ctrl+Alt+B`; the server-merged default usually masks it. **Falsifier:** a single shared defaults table / assert the two are equal.
+*(Agent also re-confirmed prior settings audit F1/F2/F3 are FIXED; Token-Economy + time-of-day controls wired/persisted/applied; logout client-wipe thorough.)*
 
 > **Filename is deliberately `ROAST-LOG-2.md`** to avoid a cross-branch write collision with the
 > first auditor's `ROAST-LOG.md` (PR #519, 64 findings, branch `claude/inspiring-archimedes-aq6hsl`;
