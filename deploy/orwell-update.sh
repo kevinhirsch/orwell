@@ -330,6 +330,17 @@ exec bash "${APP_DIR}/deploy/orwell-menu.sh" "\$@"
 LAUNCH
 chmod 0755 /usr/local/bin/orwell
 
+# Front-end LAN bind: reconcile against data/.env (mirrors orwell-install.sh — the install may
+# predate the LAN-reachable-by-default ruling 2026-06-22, so an updated box would otherwise stay
+# loopback-only and refuse LAN connections). Fill it in ONLY when absent, so a box deliberately
+# pinned to loopback (reverse-proxy / public / local-HTTPS — the public boot guard enforces loopback
+# there) is left untouched. The ENGINE always stays loopback-only.
+if ! grep -qs '^ORWELL_BIND_HOST=' "$ENV_FILE"; then
+  touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
+  printf '# front-end listen address (0.0.0.0 = reachable on your LAN; 127.0.0.1 = loopback only)\nORWELL_BIND_HOST=0.0.0.0\n' >> "$ENV_FILE"
+  echo "==> set ORWELL_BIND_HOST=0.0.0.0 (UI reachable on your LAN; set 127.0.0.1 in data/.env to restrict to loopback)"
+fi
+
 # Privileged UI port (<1024): reconcile the CAP_NET_BIND_SERVICE drop-in against the CURRENT
 # ORWELL_PORT in data/.env (mirrors orwell-install.sh — the install may predate this fix, or the
 # operator may have changed the port since). The hardened unit (E85) drops all capabilities, so

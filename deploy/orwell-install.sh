@@ -248,14 +248,6 @@ write_config() {
       # shared "default" sandbox (cross-user isolation, feature 0021).
       echo "# engine multi-user mode: every request must assert its x-orwell-user"
       echo "ORWELL_ENGINE_MULTIUSER=1"
-      # Front-end listen address. Bind the LAN by default (0.0.0.0) so a fresh install is reachable
-      # from your browser at the play URL printed at the end — the common home-LAN case. The ENGINE
-      # always stays loopback-only; only the player UI listens here. To restrict the UI to loopback
-      # (e.g. you reach it via a reverse proxy you run yourself), set ORWELL_BIND_HOST=127.0.0.1.
-      # Going public (the in-app "Connect to the internet" wizard) automatically re-pins this to
-      # 127.0.0.1 so the tunnel/proxy is the only entrypoint (enforced by the FE's boot guard).
-      echo "# front-end listen address (0.0.0.0 = reachable on your LAN; 127.0.0.1 = loopback only)"
-      echo "ORWELL_BIND_HOST=0.0.0.0"
       echo "# behind TLS? also set SECURE_COOKIES=true (front-end session cookies get the Secure flag)"
       # LLM provider (B72/ops A3): write the names the FRONT-END actually consumes — LLM_HOSTS
       # (OpenAI-compatible endpoints, e.g. Ollama's /v1) and OPENAI_API_KEY — so "configured" is
@@ -272,6 +264,21 @@ write_config() {
       fi
     } >> "${DATA_DIR}/.env"
     chmod 600 "${DATA_DIR}/.env"
+  fi
+  # Front-end listen address — LAN-reachable by default (ruling 2026-06-22). Set this EVERY run, not
+  # only on a first-ever config: the block above is skipped wholesale once ORWELL_PORT is present, so
+  # a box configured before this default existed would otherwise never get it and stay loopback-only
+  # ("connection refused" from the LAN, exactly the symptom this fixes). Idempotent — fill it in ONLY
+  # when absent, so a deliberate ORWELL_BIND_HOST=127.0.0.1 (a reverse-proxy / public / local-HTTPS
+  # box pins loopback on purpose; the public boot guard enforces it there) is preserved untouched.
+  # The ENGINE always stays loopback-only; only the player UI listens here.
+  if ! grep -qs '^ORWELL_BIND_HOST=' "${DATA_DIR}/.env"; then
+    {
+      echo "# front-end listen address (0.0.0.0 = reachable on your LAN; 127.0.0.1 = loopback only)"
+      echo "ORWELL_BIND_HOST=0.0.0.0"
+    } >> "${DATA_DIR}/.env"
+    chmod 600 "${DATA_DIR}/.env"
+    echo "==> set ORWELL_BIND_HOST=0.0.0.0 (UI reachable on your LAN; set 127.0.0.1 in data/.env to restrict to loopback)"
   fi
   # From here on, data/.env is the source of truth for the ports — a re-run with a different
   # env-supplied ORWELL_PORT must NOT drift the drop-in/verification away from what the unit
