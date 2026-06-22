@@ -1,0 +1,44 @@
+"""Platform adapter base class for the multi-platform gateway (feature 0072).
+
+Adapted from hermes-agent gateway/platforms/base.py
+(MIT © 2025 Nous Research — see frontend/ACKNOWLEDGMENTS.md).
+
+Each concrete adapter:
+  1. Declares a unique ``platform_id`` (e.g. ``"telegram"``)
+  2. Implements :meth:`send` to deliver a reply to a platform user
+  3. Implements :meth:`parse_inbound` to normalise an inbound webhook payload
+     into a ``(platform_identity, text)`` tuple
+
+Adding a platform is a two-file change: a new adapter module + an import that
+triggers self-registration.  Core routing never changes.
+"""
+
+from abc import ABC, abstractmethod
+
+
+class PlatformAdapter(ABC):
+    """Abstract base for a messaging-platform adapter."""
+
+    #: A unique slug identifying the platform (e.g. ``"telegram"``).
+    platform_id: str
+
+    @abstractmethod
+    async def send(self, identity: str, text: str) -> None:
+        """Deliver *text* to the platform user identified by *identity*.
+
+        *identity* is the fully-qualified platform identity string, e.g.
+        ``"telegram:123456"``.  Implementations must be fail-soft: a delivery
+        failure must log a warning but must NOT propagate as an exception that
+        would break the gateway turn handler.
+        """
+
+    @abstractmethod
+    def parse_inbound(self, raw: dict) -> tuple[str, str]:
+        """Parse an inbound webhook payload *raw* into ``(identity, text)``.
+
+        *identity* must be the fully-qualified platform identity string so it
+        can be looked up in the pairing store.  *text* is the player's message.
+
+        Raise ``ValueError`` if *raw* does not contain the expected fields —
+        the gateway webhook route catches this and returns 400.
+        """
