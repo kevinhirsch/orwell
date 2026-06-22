@@ -266,10 +266,3 @@ Then("pairing is refused", function () {
   );
 });
 
-// ── Vault-boundary structural check (no Vault import in gateway) ──────────────
-// Runs once to confirm the gateway never imports a Vault-side module.
-
-Given(/.*/, function () {
-  // No-op fallback for any unmatched Given — the specific Given steps above handle
-  // scenario setup; this guard exists only so unmatched Givens don't throw.
-});
