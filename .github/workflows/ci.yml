@@ -105,7 +105,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - run: npm ci
+      # The BDD gate (test:bdd) includes the 0072/0073 scenarios whose step defs delegate to the
+      # vendored front-end's pytest (the authoritative game-build-wall / gateway assertions, which
+      # import the FE app). Those wrappers shell out to `python3 -m pytest`, so the engine test job
+      # needs the FE deps too — without them the BDD gate fails with "No module named pytest".
+      - run: pip install -r frontend/requirements.txt
       - run: npm run test:ci
 
   # ── Heavy simulation lane (split + sharded for wall-clock — NOT a reduction in scope) ──────────
