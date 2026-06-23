@@ -93,16 +93,32 @@ function countsQueer(d: Pick<Draft, "orientation" | "genderPresentation">): bool
   return isQueer(d.orientation) || d.genderPresentation === "nonbinary";
 }
 
-/** A capped draw from `pool` honoring a per-key max; relaxes rather than spinning (the L28 discipline). */
-function pickCapped<T>(rng: RandomnessSource, pool: readonly T[], keyOf: (t: T) => string, uses: Map<string, number>, maxEach: number): T {
-  for (let g = 0; g < 400; g++) {
-    const v = pool[rng.int(pool.length)]!;
-    const k = keyOf(v);
-    if ((uses.get(k) ?? 0) < maxEach) { uses.set(k, (uses.get(k) ?? 0) + 1); return v; }
+/**
+ * A WEIGHTED capped draw (owner amendment 2026-06-23): pick from `pool` proportional to `weightOf`,
+ * restricted to entries still under their per-key `maxEach`. This is what makes a cast approximate U.S.
+ * population rates instead of dealing uniformly over a BIPOC-heavy pool (the old ~70% skew). The cap
+ * still flattens the high-weight heritages so no single one dominates. Deterministic off the seeded rng;
+ * relaxes to the full pool (never spins) if every entry has hit its cap.
+ */
+function pickWeightedCapped<T>(
+  rng: RandomnessSource, pool: readonly T[], keyOf: (t: T) => string,
+  uses: Map<string, number>, maxEach: number, weightOf: (t: T) => number,
+): T {
+  const avail = pool.filter((v) => (uses.get(keyOf(v)) ?? 0) < maxEach);
+  const from = avail.length ? avail : pool;
+  const total = from.reduce((s, v) => s + Math.max(0, weightOf(v)), 0);
+  let pick: T = from[from.length - 1]!;
+  if (total > 0) {
+    let r = rng.next() * total;
+    for (const v of from) {
+      r -= Math.max(0, weightOf(v));
+      if (r <= 0) { pick = v; break; }
+    }
+  } else {
+    pick = from[rng.int(from.length)]!; // all-zero weights ⇒ uniform fallback
   }
-  const v = pool[rng.int(pool.length)]!;
-  uses.set(keyOf(v), (uses.get(keyOf(v)) ?? 0) + 1);
-  return v;
+  uses.set(keyOf(pick), (uses.get(keyOf(pick)) ?? 0) + 1);
+  return pick;
 }
 
 /**
@@ -129,8 +145,10 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
       nameGender === "man" ? "man"
       : nameGender === "woman" ? "woman"
       : genRng.next() < 0.5 ? "man" : "woman";
-    // Ethnicity dealt off the whole pool, capped — BIPOC is repaired UP below if the deal falls short.
-    const ethnicity = pickCapped(ethRng, ALL_ETHNICITIES, (e) => e.heritage, ethUses, MAX_PER_ETHNICITY);
+    // Ethnicity dealt off the whole pool, U.S.-population-WEIGHTED + capped (owner 2026-06-23) — so the
+    // cast centers near the real ~40% BIPOC mix rather than the old uniform ~70% skew. BIPOC is still
+    // repaired UP below in the rare tail where a weighted deal falls under the small-cast floor.
+    const ethnicity = pickWeightedCapped(ethRng, ALL_ETHNICITIES, (e) => e.heritage, ethUses, MAX_PER_ETHNICITY, (e) => e.weight);
     const orientation = ORIENTATIONS[orRng.int(ORIENTATIONS.length)]!.orientation;
     return { id: n.id, name: n.name, nameGender, age: n.character.age, ethnicity, genderPresentation, orientation, out: true };
   });
@@ -143,7 +161,7 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
     for (const d of drafts) {
       if (bipocCount() >= MIN_BIPOC) break;
       if (d.ethnicity.bipoc) continue;
-      d.ethnicity = pickCapped(ethRng, BIPOC_ETHNICITIES, (e) => e.heritage, bipocUses, MAX_PER_ETHNICITY);
+      d.ethnicity = pickWeightedCapped(ethRng, BIPOC_ETHNICITIES, (e) => e.heritage, bipocUses, MAX_PER_ETHNICITY, (e) => e.weight);
     }
   }
 

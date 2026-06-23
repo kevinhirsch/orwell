@@ -52,7 +52,9 @@ _SYSTEM = (
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
-    "the portrait and the narration read, so make it concrete and distinctive,\n"
+    "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
+    "with the houseguest's heritage/ethnicity in the skeleton (skin tone, hair, features that fit that "
+    "background) — never a generic default; vary it widely across the cast,\n"
     '  "secrets": an array of 2-3 real secrets that could play out,\n'
     '  "trueGoals": an array of 2 true strategic goals (distinct from any public game),\n'
     '  "weakness": one named blind spot the game can exploit on a delay.\n'
@@ -129,9 +131,13 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     NPC's storyline is authored as if the player does not exist (anti-sycophancy, mandate #3).
     Returns chat messages for the utility model."""
     name = str(npc.get("name") or "this houseguest")
+    # Include `ethnicity` (the engine-guaranteed heritage, 0063) so the authored look COHERES with it —
+    # without it the model invents complexion/features unmoored from the seeded identity and reliably
+    # defaults skin tone to a generic "olive". (The engine RE-GROUNDS skinTone to the heritage on
+    # write-back regardless, so this is for the surrounding facets — hair, features, style.)
     skeleton = {
         k: npc.get(k)
-        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance")
+        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity")
         if npc.get(k) is not None
     }
     user = (
