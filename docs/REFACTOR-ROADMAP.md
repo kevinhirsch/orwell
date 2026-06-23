@@ -17,6 +17,12 @@ and requirement-grounded — *no requirement → not in the list.* The lead owns
 Dependencies/sequencing · Verification.** Severity per the brief: **[LAUNCH-BLOCKING]** (only those that
 *cause* a launch-blocking bug — these route back into the Phase-3 gated remediation) vs **[POST-LAUNCH]**.
 
+> **GitHub issue tracking (added 2026-06-23).** The highest-value post-launch latent, **R1c / A-S3**
+> (a stale-409 dropping a scene's only consequence fold), is tracked as
+> [#591](https://github.com/kevinhirsch/orwell/issues/591). The remaining R-items here stay roadmap-only
+> until scheduled; file them as `type:enhancement` + `post-launch` issues when picked up. This document
+> remains the mechanism-first design record.
+
 ---
 
 ## Executive summary
