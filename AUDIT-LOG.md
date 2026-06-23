@@ -21,6 +21,12 @@ not rendering" report) the entries are reconciled below and labelled with both l
 - **Many readers, one writer:** read-only investigation fans out to the `.claude/agents/` specialists;
   all ledger writes + remediation are the lead's, single-threaded and gated.
 
+> **GitHub issue tracking (added 2026-06-23).** Entries here recorded `VERIFIED-FIXED`/`VERIFIED`
+> need no issue (they are closed by re-capture). Any item still `OPEN`/latent — and the cross-cutting
+> findings referenced here (e.g. **NARR-3/4**, **TRANS-1/2/3**) — is tracked as a GitHub issue; the
+> authoritative finding-code → issue map lives at the top of `ROAST-LOG.md`, and the session-3 live
+> findings at the top of `ROAST-LOG-3.md`. This ledger remains the forensic trace record.
+
 ### Status legend
 `OPEN` · `VIEWED` (visually confirmed in telemetry) · `ROOT-CAUSED` (traced engine→BE→FE→render with evidence)
 · `FIX-PROPOSED` · `FIX-APPLIED` (awaiting gate) · `VERIFIED` (re-captured & re-confirmed) · `WONTFIX/NA`
