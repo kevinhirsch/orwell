@@ -74,3 +74,36 @@ def test_l31_css_is_theme_token_driven():
     assert "var(--fg)" in css
     # no hard-coded hex colors — derive from theme tokens so the house themes stay readable
     assert "#" not in css, "L31 tutorial CSS must be theme-token driven (no hex)"
+
+
+def test_j2_13_offers_an_action_affordance():
+    """J2-13: the tutorial must give a way to DO the first move, not only name the rhythm."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    # a CTA control + the seam that fills the composer and focuses it (the player still authors).
+    assert "opt-go" in js, "premiere tutorial should carry a 'first move' CTA"
+    assert "function firstMove" in js
+    # it seeds the live composer (#message) and never auto-sends — ADR 0003 keeps the player author.
+    assert 'getElementById("message")' in js
+    assert ".focus()" in js
+    # never clobber an in-progress draft
+    assert "input.value.trim()" in js
+
+
+def test_j2_10_entrance_staging_is_reduced_motion_guarded():
+    """J2-10 / J1-20: the premiere card stages its arrival, and reduced-motion strips it."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    assert "orwell-premiere-tutorial-in" in js, "entrance class missing"
+    assert "@keyframes orwellPremiereIn" in js, "entrance keyframes missing"
+    # the reduced-motion block must disable BOTH the dismiss fade and the entrance animation.
+    m = re.search(r"prefers-reduced-motion: reduce.*?animation: none.*?\}", js, re.S)
+    assert m, "reduced-motion media block must strip the entrance animation"
+    assert "orwell-premiere-tutorial-in" in m.group(0), \
+        "the J2-10 entrance must be named in the prefers-reduced-motion block"
+
+
+def test_j2_18_controls_meet_the_tap_floor():
+    """J2-18 / WCAG 2.5.5: the premiere card's controls clear the 44px coarse-pointer floor."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    # the dismiss was 36px (would fail the matrix coarse sweep); both controls are now >= 44px.
+    assert "min-height: 36px" not in js, "premiere control still below the 44px tap floor"
+    assert js.count("min-height: 44px") >= 2, "both the CTA and the dismiss should be >= 44px"

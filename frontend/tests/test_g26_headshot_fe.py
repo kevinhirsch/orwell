@@ -6,6 +6,7 @@ keep it OPTIONAL, PRE-GAME, and Vault-safe.
 """
 
 import os
+import re
 
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -87,3 +88,20 @@ def test_avatar_module_paints_the_circle_from_the_finalized_headshot():
     assert "/api/orwell/avatar" in js
     assert "user-bar-avatar" in js and "settings-account-avatar" in js   # both circles
     assert "orwell:avatarchanged" in js                                  # live update seam
+
+
+def test_j3_15_thumbnails_have_a_token_skeleton_and_broken_fallback():
+    """J3-15: a casting thumbnail that is still loading / fails reads as a skeleton, not a
+    broken-image glyph — token-driven (--panel/--border) and reduced-motion guarded."""
+    js = _read("static/js/orwellHeadshot.js")
+    # the skeleton + broken states + a real keyframe driven by the img's load result
+    assert "hs-loading" in js and "hs-broken" in js
+    assert "@keyframes hsSkeleton" in js
+    assert "function wireThumbStates" in js
+    # both the candidate grid and the saved-headshots strip mount the loading state and are wired
+    assert "hs-cand hs-loading" in js
+    assert "hs-libitem hs-loading" in js
+    # token-driven (no hard-coded shimmer hex), and reduced-motion freezes the sweep
+    assert "var(--panel" in js and "var(--border" in js
+    m = re.search(r"prefers-reduced-motion: reduce.*?hs-loading.*?animation: none", js, re.S)
+    assert m, "the J3-15 skeleton sweep must be disabled under prefers-reduced-motion"
