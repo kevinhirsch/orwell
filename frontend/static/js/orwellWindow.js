@@ -11,8 +11,9 @@
 //   • one z-authority for the window band (modals stay above; banner above all)
 //     + click-to-front + a visible focused state (audit F9)
 //   • minimize-to-dock with the ruling-#19 fly-out toward the dock and a
-//     fly-away on close; open keeps the E97 fade+scale; prefers-reduced-motion
-//     strips ALL of it (audit F4)
+//     fly-away on close; restore mirrors minimize with a fly-IN from the dock,
+//     and open keeps the E97 fade+scale (open↔close and minimize↔restore are
+//     mirror-image motions); prefers-reduced-motion strips ALL of it (audit F4)
 //   • ONE geometry-persistence scheme: the slot offset, clamped at restore
 //     (S11/E91) — kit windows never mint their own position keys (audit F5)
 //   • focus management: focus-return to the opener on close (audit F8),
@@ -155,12 +156,23 @@ function ensureCss() {
       from { opacity: 1; transform: scale(1); }
       to   { opacity: 0; transform: scale(.9); }
     }
+    /* ow-restore is the MIRROR of ow-minimize: the window flies back IN from the
+       dock chip (starts AT the dock — translated + scaled-down + faded) and lands
+       at identity, so minimize↔restore read as one reversible motion (open↔close
+       already mirror via ow-open/ow-close). Same fly-vector contract (--ow-fly-x/-y,
+       set by _afterDockRestore to the dock delta); the keyframe owns the motion. */
+    @keyframes ow-restore {
+      from { opacity: 0; transform: translate(var(--ow-fly-x, 0), var(--ow-fly-y, 0)) scale(.12); }
+      to   { opacity: 1; transform: translate(0, 0) scale(1); }
+    }
     .ow-anim-open { animation: ow-open .18s ease-out; }
     /* pronounced Win7 easing on the minimize fly-out; a quicker fade on close */
     .ow-anim-minimize { animation: ow-minimize .27s cubic-bezier(.5,-0.2,.4,1) forwards; }
     .ow-anim-close { animation: ow-close .18s cubic-bezier(.45,.05,.55,.95) forwards; }
+    /* the restore fly-IN mirrors the minimize fly-OUT (reversed easing/duration) */
+    .ow-anim-restore { animation: ow-restore .27s cubic-bezier(.6,0,.5,1.2); }
     @media (prefers-reduced-motion: reduce) {
-      .ow-anim-open, .ow-anim-minimize, .ow-anim-close, .ow-scrim { animation: none; }
+      .ow-anim-open, .ow-anim-minimize, .ow-anim-close, .ow-anim-restore, .ow-scrim { animation: none; }
     }
     /* ── 0054 Phase 2 — DOCKED kit mode ───────────────────────────────────────
        A docked window mounts its WHOLE element as a child of #gadget-rail-body
@@ -803,6 +815,27 @@ export class OrwellWindow {
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();
+    // A7 [ruling #19] mirror: a restore is the fly-IN that reverses minimize's
+    // fly-OUT — the window flies back from the dock chip to its place. Computed
+    // AFTER restack/raise so the delta targets the FINAL geometry. The keyframe
+    // owns the motion (same --ow-fly-x/-y contract); reduced-motion skips it.
+    if (!REDUCED()) {
+      try {
+        const from = flyTargetRect();                 // the dock chip (the fly-out's target)
+        const to = this.el.getBoundingClientRect();    // where the window lands
+        const dx = (from.left + (from.width || 32) / 2) - (to.left + to.width / 2);
+        const dy = (from.top + (from.height || 24) / 2) - (to.top + to.height / 2);
+        this.el.style.setProperty('--ow-fly-x', dx + 'px');
+        this.el.style.setProperty('--ow-fly-y', dy + 'px');
+        this.el.classList.add('ow-anim-restore');
+        setTimeout(() => {
+          if (!this.el) return;
+          this.el.classList.remove('ow-anim-restore');
+          this.el.style.removeProperty('--ow-fly-x');
+          this.el.style.removeProperty('--ow-fly-y');
+        }, 290);
+      } catch (_) {}
+    }
     try { this.o.onRestore && this.o.onRestore(); } catch (_) {}
   }
 
