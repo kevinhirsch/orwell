@@ -202,10 +202,14 @@ Then("they lean toward targeting their shared enemy", function (this: BbWorld) {
 // --- Scenario: a bloc is only as loyal as its members --------------------------------------
 
 Given("two blocs under the same outside pressure", function (this: BbWorld) {
-  this.blRel = new RelationshipModel(0.5);
-  // Two structurally IDENTICAL trios.
+  // Baseline below the bloc threshold so only the bonds we set form edges (an untouched pair is
+  // not a phantom bloc edge). The trios then differ only in member loyalty and in how tightly the
+  // free agent is tied in.
+  this.blRel = new RelationshipModel(0.3);
+  // The loyal trio is evenly, tightly bonded.
   setBond(this.blRel, npc(1), npc(2), 0.75); setBond(this.blRel, npc(1), npc(3), 0.75); setBond(this.blRel, npc(2), npc(3), 0.75);
-  setBond(this.blRel, npc(4), npc(5), 0.75); setBond(this.blRel, npc(4), npc(6), 0.75); setBond(this.blRel, npc(5), npc(6), 0.75);
+  // The other trio holds together, but its free agent (npc 6) is its most loosely tied member.
+  setBond(this.blRel, npc(4), npc(5), 0.8); setBond(this.blRel, npc(4), npc(6), 0.78); setBond(this.blRel, npc(5), npc(6), 0.6);
   this.blActive = [npc(1), npc(2), npc(3), npc(4), npc(5), npc(6), npc(9)];
 });
 
@@ -231,8 +235,10 @@ Then("the loyal bloc holds together and coordinates measurably longer", function
 });
 
 Then("the low-loyalty bloc's coordination is overridden by individual incentives sooner", function (this: BbWorld) {
-  // Give the free agent a tempting one-way outside bond: THEY peel; the loyalist would not.
-  const e = this.blRel!.edge(npc(6), npc(9)); e.trust = 0.95; e.affinity = 0.95;
+  // Give the free agent a tempting MUTUAL outside bond — stronger than its weakest tie inside the
+  // bloc, but not so strong it seeds a rival bloc first: THEY peel; the loyalist would not. (A
+  // one-way crush could not pull them — defection needs a real, reciprocated bond, #563.)
+  setBond(this.blRel!, npc(6), npc(9), 0.72);
   const low = (id: EntityId): number => (id === npc(6) ? 0.2 : 0.9);
   const blocs = detectBlocs({ rel: this.blRel!, active: this.blActive!, loyaltyOf: low });
   assert.ok(!blocFor(blocs, npc(4))?.members.includes(npc(6)), "the free agent defects to the better offer");
@@ -241,13 +247,20 @@ Then("the low-loyalty bloc's coordination is overridden by individual incentives
 // --- Scenario: defection without betrayal ---------------------------------------------------
 
 Given("a bloc containing a member with low derived loyalty", function (this: BbWorld) {
-  this.blRel = new RelationshipModel(0.5);
-  this.blActive = [...blTrio(this.blRel), npc(8)];
+  // Baseline below the bloc threshold so an untouched pair is not a phantom edge. The trio holds,
+  // but npc 3 is its most loosely tied member (a weak link to npc 2).
+  this.blRel = new RelationshipModel(0.3);
+  setBond(this.blRel, npc(1), npc(2), 0.85);
+  setBond(this.blRel, npc(1), npc(3), 0.8);
+  setBond(this.blRel, npc(2), npc(3), 0.55);
+  this.blActive = [npc(1), npc(2), npc(3), npc(8)];
   this.blLoyaltyOf = (id: EntityId): number => (id === npc(3) ? 0.2 : 0.9);
 });
 
 Given("that member holds a stronger bond outside the bloc", function (this: BbWorld) {
-  const e = this.blRel!.edge(npc(3), npc(8)); e.trust = 0.95; e.affinity = 0.95; // one-way pull
+  // A genuine, reciprocated bond — stronger than npc 3's weakest tie inside the bloc (#563: a
+  // one-way pull cannot peel a member).
+  setBond(this.blRel!, npc(3), npc(8), 0.7);
 });
 
 When("the next decisions are read", function (this: BbWorld) {
