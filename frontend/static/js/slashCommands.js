@@ -4953,15 +4953,16 @@ async function _cmdShortcuts(args, ctx) {
   }).join('+');
 
   // Labels for the canonical rebindable actions (the DEFAULT_KEYBINDS keys).
+  // J1-33: align to the in-app vocabulary ("Chats" / "New Chat" / "Settings").
   const ACTION_LABELS = {
-    search: 'Search conversations',
+    search: 'Search chats',
     toggle_sidebar: 'Toggle sidebar',
-    new_session: 'New session',
-    fav_session: 'Favorite session',
-    delete_session: 'Delete session',
+    new_session: 'New chat',
+    fav_session: 'Favorite chat',
+    delete_session: 'Delete chat',
     cancel: 'Cancel stream / close panel',
     tts: 'Play / stop TTS',
-    settings: 'Toggle window',
+    settings: 'Open Settings',
     focus_input: 'Focus chat input',
     open_theme: 'Open theme',
   };

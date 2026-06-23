@@ -1836,22 +1836,27 @@ const SHORTCUT_ICONS = {
   open_theme:     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg>',
 };
 
+// J1-33: vocabulary drift — these used "conversations / session / Toggle Window"
+// while the live UI calls them "Chats" (sidebar section), "New Chat" / "Search"
+// (sidebar buttons) and "Settings" (the gear / /settings). Align the shortcut
+// labels to the in-app vocabulary so nothing teaches a second name for the same
+// thing.
 const SHORTCUT_LABELS = {
-  search:         'Search conversations',
+  search:         'Search chats',
   toggle_sidebar: 'Toggle sidebar',
-  new_session:    'New session',
-  fav_session:    'Favorite session',
-  delete_session: 'Delete session',
+  new_session:    'New chat',
+  fav_session:    'Favorite chat',
+  delete_session: 'Delete chat',
   cancel:         'Cancel / close',
   tts:            'Play/stop TTS',
-  settings:       'Toggle Window',
+  settings:       'Open Settings',
   focus_input:    'Focus chat input',
   open_theme:     'Open Theme',
 };
 
 const SHORTCUT_CATEGORIES = [
   { name: 'Navigation', keys: ['search', 'toggle_sidebar', 'focus_input', 'settings'] },
-  { name: 'Sessions', keys: ['new_session', 'fav_session', 'delete_session'] },
+  { name: 'Chats', keys: ['new_session', 'fav_session', 'delete_session'] },
   { name: 'Tools', keys: ['tts', 'cancel'] },
   { name: 'Open Tools', keys: ['open_theme'] },
 ];
@@ -2130,6 +2135,20 @@ function initAccount() {
       if (avatarEl) {
         const initial = (d.username || '?')[0].toUpperCase();
         avatarEl.textContent = initial;
+      }
+      // J1-17: auth furniture (Logout / Change Password / 2FA) is enterprise IA
+      // that only makes sense when the operator has auth turned on. On a
+      // single-player, auth-off build those controls are inert, so hide them —
+      // the account card still shows the player's name + profile picture studio.
+      // Default to showing them when the field is absent (older engine / safety).
+      const authOff = d && d.auth_enabled === false;
+      if (authOff) {
+        const logoutBtn = el('settings-logout-btn');
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        const pwCard = el('settings-pw-card');
+        if (pwCard) pwCard.style.display = 'none';
+        const tfaCard = el('settings-2fa-card');
+        if (tfaCard) tfaCard.style.display = 'none';
       }
     }).catch(() => {});
 
