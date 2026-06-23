@@ -794,6 +794,22 @@ def _as_content_blocks(content) -> List[Dict]:
     return []
 
 
+def _is_blank_content(content) -> bool:
+    """True when a message body carries NO usable content: None, an empty or
+    whitespace-only string, or an empty content-block list.
+
+    A non-empty multimodal list (e.g. an image part) is NOT blank, so image-only
+    user turns are preserved. Used to drop dead-weight empty messages before a
+    provider request (see _sanitize_llm_messages)."""
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        return len(content) == 0
+    return False
+
+
 def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
     """Strip Orwell-only metadata before sending messages to providers.
 
@@ -804,6 +820,16 @@ def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
     follow-up message _append_tool_results builds for a no-prose native tool call
     (content=None, since Gemini/Ollama reject tool_calls alongside ""). Dropping
     it leaves the tool result dangling and breaks the next round.
+
+    The mirror gap is BLANK content: a user/system/assistant message whose content
+    is "" / whitespace / None with no tool_calls is dead weight — OpenRouter and
+    DeepSeek confuse it (or 400 on it). It arises when a reasoning model routes its
+    whole turn to the reasoning channel (visible content empty) and that empty turn
+    gets PERSISTED, then replayed to the provider as `{"role":"assistant","content":""}`
+    on every later turn. Drop those here — the one chokepoint every provider request
+    funnels through — so no empty message can reach a provider regardless of source.
+    Tool results are exempt (an empty result is a valid answer to a tool_call, and
+    dropping it would orphan the assistant tool_calls before the adjacency repair).
     """
     allowed = {"role", "content", "name", "tool_call_id", "tool_calls", "function_call"}
     cleaned = []
@@ -820,12 +846,14 @@ def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
             # `content: null`, not an omitted key.
             if "content" not in item and item.get("tool_calls"):
                 item["content"] = None
-            if "content" in item or item.get("tool_calls"):
+            # Keep an assistant turn only if it carries tool calls OR real prose.
+            # A blank-content assistant with no tool_calls is the empty-message leak.
+            if item.get("tool_calls") or not _is_blank_content(item.get("content")):
                 cleaned.append(item)
         elif role == "tool":
             if "content" in item and "tool_call_id" in item:
                 cleaned.append(item)
-        elif "content" in item:
+        elif not _is_blank_content(item.get("content")):
             cleaned.append(item)
 
     # Repair tool-call adjacency before sending to any OpenAI-compatible
